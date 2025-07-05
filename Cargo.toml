@@ -8,7 +8,7 @@ members = [
   "crates/cli",
   "crates/core",
 ]
-exclude = ["crates/runtime"]
+exclude = ["crates/runtime", "next.js"]
 resolver = "2"
 
 [workspace.package]
@@ -57,35 +57,35 @@ parking_lot = "0.12.1"
 
 # Dependencies from nextjs, should keep the same rev!
 ## Dependencies for common cache and task. See https://github.com/umijs/next.js/blob/canary/turbopack/crates/turbopack/architecture.md
-turbo-tasks = { git = "https://github.com/umijs/next.js.git", package = "turbo-tasks" }
-turbo-tasks-fs = { git = "https://github.com/umijs/next.js.git", package = "turbo-tasks-fs" }
-turbo-tasks-env = { git = "https://github.com/umijs/next.js.git", package = "turbo-tasks-env" }
-turbo-tasks-backend = { git = "https://github.com/umijs/next.js.git", package = "turbo-tasks-backend" }
-turbo-tasks-bytes = { git = "https://github.com/umijs/next.js.git", package = "turbo-tasks-bytes" }
-turbo-tasks-fetch = { git = "https://github.com/umijs/next.js.git", package = "turbo-tasks-fetch" }
-turbo-tasks-hash = { git = "https://github.com/umijs/next.js.git", package = "turbo-tasks-hash" }
-turbo-tasks-build = { git = "https://github.com/umijs/next.js.git", package = "turbo-tasks-build" }
-turbo-rcstr = { git = "https://github.com/umijs/next.js.git", package = "turbo-rcstr" }
-turbo-esregex = { git = "https://github.com/umijs/next.js.git", package = "turbo-esregex" }
-turbo-tasks-malloc = { git = "https://github.com/umijs/next.js.git", package = "turbo-tasks-malloc", default-features = false }
-turbopack-trace-utils = { git = "https://github.com/umijs/next.js.git", package = "turbopack-trace-utils" }
-turbopack-trace-server = { git = "https://github.com/umijs/next.js.git", package = "turbopack-trace-server" }
+turbo-tasks = { path = "./next.js/turbopack/crates/turbo-tasks" }
+turbo-tasks-fs = { path = "./next.js/turbopack/crates/turbo-tasks-fs" }
+turbo-tasks-env = { path = "./next.js/turbopack/crates/turbo-tasks-env" }
+turbo-tasks-backend = { path = "./next.js/turbopack/crates/turbo-tasks-backend" }
+turbo-tasks-bytes = { path = "./next.js/turbopack/crates/turbo-tasks-bytes" }
+turbo-tasks-fetch = { path = "./next.js/turbopack/crates/turbo-tasks-fetch" }
+turbo-tasks-hash = { path = "./next.js/turbopack/crates/turbo-tasks-hash" }
+turbo-tasks-build = { path = "./next.js/turbopack/crates/turbo-tasks-build" }
+turbo-rcstr = { path = "./next.js/turbopack/crates/turbo-rcstr" }
+turbo-esregex = { path = "./next.js/turbopack/crates/turbo-esregex" }
+turbo-tasks-malloc = { path = "./next.js/turbopack/crates/turbo-tasks-malloc", default-features = false }
+turbopack-trace-utils = { path = "./next.js/turbopack/crates/turbopack-trace-utils" }
+turbopack-trace-server = { path = "./next.js/turbopack/crates/turbopack-trace-server" }
 
 ### Dependencies for bundler specially.
-turbopack = { git = "https://github.com/umijs/next.js.git", package = "turbopack" }
-turbopack-browser = { git = "https://github.com/umijs/next.js.git", package = "turbopack-browser" }
-turbopack-core = { git = "https://github.com/umijs/next.js.git", package = "turbopack-core" }
-turbopack-resolve = { git = "https://github.com/umijs/next.js.git", package = "turbopack-resolve" }
-turbopack-ecmascript = { git = "https://github.com/umijs/next.js.git", package = "turbopack-ecmascript" }
-turbopack-ecmascript-plugins = { git = "https://github.com/umijs/next.js.git", package = "turbopack-ecmascript-plugins" }
-turbopack-ecmascript-runtime = { git = "https://github.com/umijs/next.js.git", package = "turbopack-ecmascript-runtime" }
-turbopack-ecmascript-hmr-protocol = { git = "https://github.com/umijs/next.js.git", package = "turbopack-ecmascript-hmr-protocol" }
-turbopack-image = { git = "https://github.com/umijs/next.js.git", package = "turbopack-image" }
-turbopack-node = { git = "https://github.com/umijs/next.js.git", package = "turbopack-node" }
-turbopack-nodejs = { git = "https://github.com/umijs/next.js.git", package = "turbopack-nodejs" }
-turbopack-static = { git = "https://github.com/umijs/next.js.git", package = "turbopack-static" }
-turbopack-dev-server = { git = "https://github.com/umijs/next.js.git", package = "turbopack-dev-server" }
-turbopack-cli-utils = { git = "https://github.com/umijs/next.js.git", package = "turbopack-cli-utils" }
+turbopack = { path = "./next.js/turbopack/crates/turbopack" }
+turbopack-browser = { path = "./next.js/turbopack/crates/turbopack-browser" }
+turbopack-core = { path = "./next.js/turbopack/crates/turbopack-core" }
+turbopack-resolve = { path = "./next.js/turbopack/crates/turbopack-resolve" }
+turbopack-ecmascript = { path = "./next.js/turbopack/crates/turbopack-ecmascript" }
+turbopack-ecmascript-plugins = { path = "./next.js/turbopack/crates/turbopack-ecmascript-plugins" }
+turbopack-ecmascript-runtime = { path = "./next.js/turbopack/crates/turbopack-ecmascript-runtime" }
+turbopack-ecmascript-hmr-protocol = { path = "./next.js/turbopack/crates/turbopack-ecmascript-hmr-protocol" }
+turbopack-image = { path = "./next.js/turbopack/crates/turbopack-image" }
+turbopack-node = { path = "./next.js/turbopack/crates/turbopack-node" }
+turbopack-nodejs = { path = "./next.js/turbopack/crates/turbopack-nodejs" }
+turbopack-static = { path = "./next.js/turbopack/crates/turbopack-static" }
+turbopack-dev-server = { path = "./next.js/turbopack/crates/turbopack-dev-server" }
+turbopack-cli-utils = { path = "./next.js/turbopack/crates/turbopack-cli-utils" }
 
 [workspace.lints.clippy]
 too_many_arguments = "allow"
