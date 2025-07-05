@@ -26,7 +26,11 @@ use turbopack_core::{
     environment::Environment,
     ident::AssetIdent,
     module::Module,
-    module_graph::{ModuleGraph, chunk_group_info::ChunkGroup},
+    module_graph::{
+        ModuleGraph,
+        chunk_group_info::ChunkGroup,
+        export_usage::{ExportUsageInfo, ModuleExportUsageInfo},
+    },
     output::{OutputAsset, OutputAssets},
 };
 use turbopack_ecmascript::chunk::{EcmascriptChunk, EcmascriptChunkType};
@@ -107,6 +111,11 @@ impl LibraryChunkingContextBuilder {
         self
     }
 
+    pub fn export_usage(mut self, export_usage: Option<ResolvedVc<ExportUsageInfo>>) -> Self {
+        self.chunking_context.export_usage = export_usage;
+        self
+    }
+
     pub fn filename(mut self, filename: RcStr) -> Self {
         self.chunking_context.filename = Some(filename);
         self
@@ -149,6 +158,8 @@ pub struct LibraryChunkingContext {
     source_maps_type: SourceMapsType,
     /// The module id strategy to use
     module_id_strategy: ResolvedVc<Box<dyn ModuleIdStrategy>>,
+    /// The module export usage info, if available.
+    export_usage: Option<ResolvedVc<ExportUsageInfo>>,
     /// Evaluate chunk filename template
     filename: Option<RcStr>,
 }
@@ -175,6 +186,7 @@ impl LibraryChunkingContext {
                 minify_type: MinifyType::NoMinify,
                 source_maps_type: SourceMapsType::Full,
                 module_id_strategy: ResolvedVc::upcast(DevModuleIdStrategy::new_resolved()),
+                export_usage: None,
                 filename: Default::default(),
                 runtime_root,
                 runtime_export,
@@ -538,6 +550,18 @@ impl ChunkingContext for LibraryChunkingContext {
         _module: Vc<Box<dyn ChunkableModule>>,
     ) -> Result<Vc<ModuleId>> {
         bail!("Library chunking context does not support async loader chunk item id")
+    }
+
+    #[turbo_tasks::function]
+    async fn module_export_usage(
+        self: Vc<Self>,
+        module: ResolvedVc<Box<dyn Module>>,
+    ) -> Result<Vc<ModuleExportUsageInfo>> {
+        if let Some(export_usage) = self.await?.export_usage {
+            Ok(export_usage.await?.used_exports(module))
+        } else {
+            Ok(ModuleExportUsageInfo::all())
+        }
     }
 }
 
