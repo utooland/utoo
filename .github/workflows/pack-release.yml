@@ -74,6 +74,8 @@ jobs:
         if: ${{ !matrix.settings.docker }}
         with:
           node-version: 20
+      - name: Init git submodules
+        run: git submodule update --init --recursive
       - name: Install
         uses: dtolnay/rust-toolchain@stable
         if: ${{ !matrix.settings.docker }}
