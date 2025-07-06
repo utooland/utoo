@@ -1,0 +1,475 @@
+{
+  "statusLegend": [
+    {
+      "symbol": "✅",
+      "description": "Completed"
+    },
+    {
+      "symbol": "🟠",
+      "description": "Work in Progress"
+    },
+    {
+      "symbol": "❓",
+      "description": "To be determined"
+    }
+  ],
+  "featuresStatusList": [
+    {
+      "featureLevel1": "Mode",
+      "children": [
+        {
+          "featureLevel2": "`mode`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `mode` configuration](https://webpack.js.org/configuration/mode/#root)",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Entry",
+      "children": [
+        {
+          "featureLevel2": "`name` & `import`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `entry` context](https://webpack.js.org/configuration/entry-context/#entry)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`filename` template",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `output.filename`](https://webpack.js.org/configuration/output/#outputfilename)",
+          "remarks": "e.g., `[name].[contenthash:8].js`"
+        },
+        {
+          "featureLevel2": "`library`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `output.library`](https://webpack.js.org/configuration/output/#outputlibrary)",
+          "remarks": "Supports UMD (root, export) and `dynamicImportToRequire`"
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Module",
+      "children": [
+        {
+          "featureLevel2": "`rules`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `module.rules`](https://webpack.js.org/configuration/module/#rulerules)",
+          "remarks": "`loader-runner` supports most mainstream webpack loaders"
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Resolve",
+      "children": [
+        {
+          "featureLevel2": "`alias`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `resolve.alias`](https://webpack.js.org/configuration/resolve/#resolvealias)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`extensions`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `resolve.extensions`](https://webpack.js.org/configuration/resolve/#resolveextensions)",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Define",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `DefinePlugin`](https://webpack.js.org/plugins/define-plugin/)",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Externals",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "🟠",
+          "featureDetails": "[Webpack `externals` configuration](https://webpack.js.org/configuration/externals/#root)",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Providers",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `ProvidePlugin`](https://webpack.js.org/plugins/provide-plugin/#root)",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Output",
+      "children": [
+        {
+          "featureLevel2": "`path`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `output.path`](https://webpack.js.org/configuration/output/#outputpath)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`publicPath`",
+          "featureStatus": "🟠",
+          "featureDetails": "[Webpack `output.publicPath`](https://webpack.js.org/configuration/output/#outputpublicpath)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`clean`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `output.clean`](https://webpack.js.org/configuration/output/#outputclean)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`standalone`",
+          "featureStatus": "❓",
+          "featureDetails": "",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Target",
+      "children": [
+        {
+          "featureLevel2": "`browserslist`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `target` string](https://webpack.js.org/configuration/target/#string)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`node`",
+          "featureStatus": "🟠",
+          "featureDetails": "",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Sourcemap",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `devtool` configuration](https://webpack.js.org/configuration/devtool/)",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Optimization",
+      "children": [
+        {
+          "featureLevel2": "`moduleIds`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `optimization.moduleIds`](https://webpack.js.org/configuration/optimization/#optimizationmoduleids)",
+          "remarks": "Supports \"names\" or \"deterministic\""
+        },
+        {
+          "featureLevel2": "`minify`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `optimization.minimize`](https://webpack.js.org/configuration/optimization/#optimizationminimize)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`splitChunks`",
+          "featureStatus": "🟠",
+          "featureDetails": "[Turbopack chunking config](https://github.com/vercel/next.js/blob/c3429682aa910eb2b5ddd1e761c8ec8cfaa4bb04/turbopack/crates/turbopack-core/src/chunk/chunking_context.rs#L114)",
+          "remarks": ""
+        },
+
+        {
+          "featureLevel2": "`treeShaking`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `tree-shaking` guide](https://webpack.js.org/guides/tree-shaking/#root)",
+          "remarks": "Includes `packageImports`"
+        },
+        {
+          "featureLevel2": "`modularizeImports`",
+          "featureStatus": "✅",
+          "featureDetails": "[UmiJS `babel-plugin-import`](https://github.com/umijs/babel-plugin-import)",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Styles",
+      "children": [
+        {
+          "featureLevel2": "`less`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `less-loader`](https://github.com/webpack-contrib/less-loader)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`sass`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `sass-loader`](https://github.com/webpack-contrib/sass-loader)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`inlineCss`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `style-loader`](https://github.com/webpack-contrib/style-loader)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`styledJsx`",
+          "featureStatus": "✅",
+          "featureDetails": "[Vercel `styled-jsx`](https://github.com/vercel/styled-jsx)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`styledComponents`",
+          "featureStatus": "✅",
+          "featureDetails": "[Styled Components](https://github.com/styled-components/styled-components)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`emotion`",
+          "featureStatus": "✅",
+          "featureDetails": "[Emotion.js](https://github.com/emotion-js/emotion)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`css parse, transform, minify`",
+          "featureStatus": "✅",
+          "featureDetails": "",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`css module`",
+          "featureStatus": "✅",
+          "featureDetails": "",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Images",
+      "children": [
+        {
+          "featureLevel2": "`inline`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `url-loader`](https://github.com/webpack-contrib/url-loader)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`blur placeholder`",
+          "featureStatus": "✅",
+          "featureDetails": "[Next.js `Image` component](https://nextjs.org/docs/app/api-reference/components/image#blurdataurl)",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "MDX",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "✅",
+          "featureDetails": "[MDX.js](https://www.mdxjs.cn/)",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Stats",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "🟠",
+          "featureDetails": "[Webpack `stats` configuration](https://webpack.js.org/configuration/stats/#root)",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Analysis",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "🟠",
+          "featureDetails": "[Webpack Bundle Analyzer](https://github.com/webpack-contrib/webpack-bundle-analyzer)",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Magic Comments",
+      "children": [
+        {
+          "featureLevel2": "`webpackChunkName`",
+          "featureStatus": "🟠",
+          "featureDetails": "[Webpack `module` methods](https://webpack.js.org/api/module-methods/#magic-comments)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`webpackIgnore`",
+          "featureStatus": "🟠",
+          "featureDetails": "[Webpack `module` methods](https://webpack.js.org/api/module-methods/#magic-comments)",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "SWC Transform Plugin",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "✅",
+          "featureDetails": "[SWC ECMAScript Plugins](https://swc.rs/docs/plugin/ecmascript/getting-started)",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Module Federation",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "❓",
+          "featureDetails": "",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "CSR",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "🟠",
+          "featureDetails": "",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "SSR",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "❓",
+          "featureDetails": "",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "RSC",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "❓",
+          "featureDetails": "",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "PPR",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "❓",
+          "featureDetails": "",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Server Action",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "❓",
+          "featureDetails": "",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Edge Runtime",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "❓",
+          "featureDetails": "",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "HMR",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "🟠",
+          "featureDetails": "",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Dev Server",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "🟠",
+          "featureDetails": "",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Lazy Compiling",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "🟠",
+          "featureDetails": "",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Persistent Caching",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "🟠",
+          "featureDetails": "",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Bundler Tracing Log",
+      "children": [
+        {
+          "featureLevel2": "`log file`",
+          "featureStatus": "✅",
+          "featureDetails": "",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`log viewer`",
+          "featureStatus": "🟠",
+          "featureDetails": "",
+          "remarks": ""
+        }
+      ]
+    }
+  ]
+}

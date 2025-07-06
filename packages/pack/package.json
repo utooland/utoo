@@ -77,7 +77,8 @@
     "build:binding": "napi build src --platform --release -p pack-napi --cargo-cwd ../../ --cargo-name pack_napi --features plugin --js binding.js --dts binding.d.ts",
     "build:binding:local": "napi build src --platform --profile release-local -p pack-napi --cargo-cwd ../../ --cargo-name pack_napi --features plugin --js binding.js --dts binding.d.ts",
     "prepublishOnly": "npm run build:esm && npm run build:cjs && napi prepublish -t npm --skip-gh-release",
-    "version": "napi version"
+    "version": "napi version",
+    "generate-features-list": "node ./scripts/generate-feature-list.js"
   },
   "repository": "git@github.com:umijs/mako.git"
 }
