@@ -9,6 +9,9 @@ rustflags = [
 incremental = true
 target-dir = "target"
 
+[cache]
+auto-clean-frequency = "1 day"
+
 [profile.dev]
 incremental = true
 debug = true
