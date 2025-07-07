@@ -111,6 +111,11 @@ impl LibraryChunkingContextBuilder {
         self
     }
 
+    pub fn export_usage(mut self, export_usage: Option<ResolvedVc<ExportUsageInfo>>) -> Self {
+        self.chunking_context.export_usage = export_usage;
+        self
+    }
+
     pub fn filename(mut self, filename: RcStr) -> Self {
         self.chunking_context.filename = Some(filename);
         self
@@ -118,11 +123,6 @@ impl LibraryChunkingContextBuilder {
 
     pub fn build(self) -> Vc<LibraryChunkingContext> {
         LibraryChunkingContext::cell(self.chunking_context)
-    }
-
-    pub fn export_usage(mut self, export_usage: Option<ResolvedVc<ExportUsageInfo>>) -> Self {
-        self.chunking_context.export_usage = export_usage;
-        self
     }
 }
 
@@ -158,10 +158,10 @@ pub struct LibraryChunkingContext {
     source_maps_type: SourceMapsType,
     /// The module id strategy to use
     module_id_strategy: ResolvedVc<Box<dyn ModuleIdStrategy>>,
-    /// Evaluate chunk filename template
-    filename: Option<RcStr>,
     /// The module export usage info, if available.
     export_usage: Option<ResolvedVc<ExportUsageInfo>>,
+    /// Evaluate chunk filename template
+    filename: Option<RcStr>,
 }
 
 impl LibraryChunkingContext {
@@ -186,8 +186,8 @@ impl LibraryChunkingContext {
                 minify_type: MinifyType::NoMinify,
                 source_maps_type: SourceMapsType::Full,
                 module_id_strategy: ResolvedVc::upcast(DevModuleIdStrategy::new_resolved()),
-                filename: Default::default(),
                 export_usage: None,
+                filename: Default::default(),
                 runtime_root,
                 runtime_export,
             },
