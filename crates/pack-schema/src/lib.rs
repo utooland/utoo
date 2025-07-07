@@ -393,11 +393,13 @@ pub struct SchemaResolveConfig {
     /// Resolve alias mapping
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Resolve alias mapping")]
+    #[serde(rename = "alias")]
     pub resolve_alias: Option<HashMap<String, serde_json::Value>>,
 
     /// Resolve extensions
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Resolve extensions")]
+    #[serde(rename = "extensions")]
     pub resolve_extensions: Option<Vec<String>>,
 }
 

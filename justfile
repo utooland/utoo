@@ -36,3 +36,6 @@ fmt-check:
 # Clean build artifacts
 clean:
     cargo clean
+
+update-submodule:
+    git submodule update --init

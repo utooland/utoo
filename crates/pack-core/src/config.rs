@@ -242,9 +242,10 @@ pub struct StyleConfig {
     NonLocalValue,
     OperationValue,
 )]
-#[serde(rename_all = "camelCase")]
 pub struct ResolveConfig {
+    #[serde(rename = "alias")]
     resolve_alias: Option<FxIndexMap<RcStr, JsonValue>>,
+    #[serde(rename = "extensions")]
     resolve_extensions: Option<Vec<RcStr>>,
 }
 
