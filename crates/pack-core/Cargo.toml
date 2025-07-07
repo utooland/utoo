@@ -15,14 +15,11 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 base64 = "0.22.1"
 qstring = "0.7.2"
-regex = { workspace = true }
-regress = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 mime_guess = "2.0.4"
 indoc = { workspace = true }
 tracing = { workspace = true }
-futures = { workspace = true }
 rustc-hash = { workspace = true }
 remove_console = "0.45.0"
 urlencoding = { workspace = true }

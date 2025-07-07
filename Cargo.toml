@@ -19,8 +19,6 @@ license = "MIT"
 pack-core = { path = "./crates/pack-core" }
 pack-api = { path = "./crates/pack-api" }
 schemars = "0.8"
-insta = "1.0"
-either = "1.9.0"
 futures = "0.3.31"
 tokio = { version = "1.43.0", features = ["full"] }
 thiserror = "1.0"
@@ -32,13 +30,9 @@ rustc-hash = "2.1.1"
 clap = { version = "4.5.32", features = ["derive"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
-serde_qs = "0.15.0"
 owo-colors = "4.2.0"
 dunce = "1.0.5"
-webbrowser = "1.0.4"
 regex = "1.11.1"
-regress = "0.10.3"
-indexmap = "2.7.1"
 criterion = "0.6.0"
 dirs = "5.0"
 toml = "0.8"

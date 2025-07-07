@@ -15,6 +15,4 @@ serde_json = { workspace = true }
 schemars = { workspace = true }
 pack-core = { path = "../pack-core" }
 
-[dev-dependencies]
-insta = { workspace = true }
 

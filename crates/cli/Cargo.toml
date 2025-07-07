@@ -58,7 +58,6 @@ criterion = { workspace = true }
 utoo-core = { path = "../core/" }
 regex = "1.10"
 anyhow = { workspace = true }
-openssl = { version = "0.10", features = ["vendored"] }
 
 [[bench]]
 name = "install_benchmark"
