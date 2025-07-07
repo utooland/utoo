@@ -1,3 +1,4 @@
 [submodule "next.js"]
 	path = next.js
 	url = https://github.com/umijs/next.js
+	shallow = true
