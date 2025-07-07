@@ -3916,15 +3916,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
 
 [[package]]
-name = "openssl-src"
-version = "300.4.2+3.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "168ce4e058f975fe43e89d9ccf78ca668601887ae736090aacc23ae353c298e2"
-dependencies = [
- "cc",
-]
-
-[[package]]
 name = "openssl-sys"
 version = "0.9.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3932,7 +3923,6 @@ checksum = "8288979acd84749c744a9014b4382d42b8f7b2592847b5afb2ed29e5d16ede07"
 dependencies = [
  "cc",
  "libc",
- "openssl-src",
  "pkg-config",
  "vcpkg",
 ]
@@ -4024,7 +4014,6 @@ dependencies = [
  "turbo-tasks",
  "turbo-tasks-backend",
  "turbo-tasks-build",
- "turbo-tasks-fs",
  "turbo-tasks-malloc",
  "turbopack-cli-utils",
  "turbopack-core",
@@ -4039,13 +4028,10 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
- "futures",
  "indoc",
  "mime_guess",
  "modularize_imports",
  "qstring",
- "regex",
- "regress",
  "remove_console",
  "rustc-hash 2.1.1",
  "serde",
@@ -4117,7 +4103,6 @@ dependencies = [
 name = "pack-schema"
 version = "0.1.0"
 dependencies = [
- "insta",
  "pack-core",
  "schemars",
  "serde",
@@ -9197,7 +9182,6 @@ dependencies = [
  "indicatif",
  "libc",
  "once_cell",
- "openssl",
  "owo-colors 4.2.0",
  "regex",
  "reqwest 0.11.17",

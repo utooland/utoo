@@ -13,7 +13,6 @@ plugin = [
   "swc_core/plugin_transform_host_native_filesystem_cache",
   "swc_core/plugin_transform_host_native_shared_runtime",
   "pack-core/plugin",
-  "turbopack-ecmascript-plugins",
   "turbopack-ecmascript-plugins/swc_ecma_transform_plugin",
 ]
 
