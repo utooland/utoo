@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rustc_hash::FxHashMap;
 use turbo_rcstr::RcStr;
 use turbo_tasks::{FxIndexMap, ResolvedVc, Vc};
