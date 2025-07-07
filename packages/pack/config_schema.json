@@ -276,7 +276,7 @@
       }
     },
     "SchemaExternalAdvanced": {
-      "description": "Advanced external configuration",
+      "description": "Subpath external configuration",
       "type": "object",
       "required": [
         "root"
@@ -325,7 +325,15 @@
           "type": "string"
         },
         {
-          "description": "Complex external configuration",
+          "description": "UMD external configuration",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SchemaExternalUmd"
+            }
+          ]
+        },
+        {
+          "description": "Subpath external configuration (for complex path handling)",
           "allOf": [
             {
               "$ref": "#/definitions/SchemaExternalAdvanced"
@@ -408,6 +416,26 @@
         "esm",
         "global"
       ]
+    },
+    "SchemaExternalUmd": {
+      "description": "UMD external configuration",
+      "type": "object",
+      "properties": {
+        "commonjs": {
+          "description": "CommonJS module reference",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "root": {
+          "description": "Root global variable name",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
     },
     "SchemaImageConfig": {
       "description": "Image configuration",

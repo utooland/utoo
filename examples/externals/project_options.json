@@ -5,7 +5,7 @@
   "config": {
     "entry": [
       {
-        "import": "./index.js"       
+        "import": "./index.js"    
       }
     ],
     "output": {
@@ -44,14 +44,6 @@
             {
               "regex": "/(version|message|notification)$/",
               "target": "$1"
-            },
-            {
-              "regex": "/zh_CN$/",
-              "target": "$empty"
-            },
-            {
-              "regex": "/zh_TW$/",
-              "target": "$empty"
             },
             {
               "regex": "/^\/(?:es|lib)\/([a-z\\-]+)$/",

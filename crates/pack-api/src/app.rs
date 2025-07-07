@@ -206,6 +206,12 @@ impl AppEntrypoint {
             let module_graph = self.module_graph_for_entry(asset_context, runtime_entries);
 
             let query = QString::new(vec![("name", this.name.as_str())]).to_string();
+            let query = if query.is_empty() {
+                // If name is empty, provide a default fallback
+                QString::new(vec![("name", "index")]).to_string()
+            } else {
+                format!("?{query}")
+            };
 
             let app_chunk_group = app_chunking_context.evaluated_chunk_group(
                 AssetIdent::from_path(project.project_root().await?.join(this.import.as_str())?)

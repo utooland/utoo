@@ -116,6 +116,7 @@ pub struct Config {
 #[serde(untagged)]
 pub enum ExternalConfig {
     Basic(RcStr),
+    Umd(ExternalUmd),
     Advanced(ExternalAdvanced),
 }
 
@@ -192,6 +193,17 @@ pub struct ExternalSubPathRule {
 pub struct ExternalSubPath {
     pub exclude: Option<Vec<RcStr>>,
     pub rules: Vec<ExternalSubPathRule>,
+}
+
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TraceRawVcs, NonLocalValue, OperationValue,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalUmd {
+    /// Root global variable name
+    pub root: RcStr,
+    /// CommonJS module reference
+    pub commonjs: RcStr,
 }
 
 #[derive(
@@ -478,25 +490,6 @@ pub enum EsmExternalsValue {
 pub enum EsmExternals {
     Loose(EsmExternalsValue),
     Bool(bool),
-}
-
-// Test for esm externals deserialization.
-#[test]
-fn test_esm_externals_deserialization() {
-    let json = serde_json::json!({
-        "esmExternals": true
-    });
-    let config: ExperimentalConfig = serde_json::from_value(json).unwrap();
-    assert_eq!(config.esm_externals, Some(EsmExternals::Bool(true)));
-
-    let json = serde_json::json!({
-        "esmExternals": "loose"
-    });
-    let config: ExperimentalConfig = serde_json::from_value(json).unwrap();
-    assert_eq!(
-        config.esm_externals,
-        Some(EsmExternals::Loose(EsmExternalsValue::Loose))
-    );
 }
 
 #[derive(
@@ -1143,95 +1136,129 @@ impl Config {
     }
 }
 
-#[test]
-fn test_externals_deserialization() {
-    let json = serde_json::json!({
-        "entry": [{"import": "./index.js"}],
-        "externals": {
-            "foo": "foo",
-            "foo_require": "commonjs foo",
-            "foo_require2": {
-                "root": "foo",
-                "type": "commonjs"
-            },
-            "foo_import": "esm foo",
-            "foo_import2": {
-                "root": "foo",
-                "type": "esm"
-            },
-            "antd": {
-                "root": "antd",
-                "subPath": {
-                    "exclude": ["style"],
-                    "rules": [
-                        {
-                          "regex": "/(version|message|notification)$",
-                          "target": "$1"
-                        },
-                        {
-                          "regex": "/locale/.+$",
-                          "target": "$empty"
-                        },
-                        {
-                          "regex": "/es\\/([^\\/]+)(?:\\/.*)?$/",
-                          "target": "$1",
-                          "targetConverter": "PascalCase"
-                        }
-                    ]
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_esm_externals_deserialization() {
+        let json = serde_json::json!({
+            "esmExternals": true
+        });
+        let config: ExperimentalConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(config.esm_externals, Some(EsmExternals::Bool(true)));
+
+        let json = serde_json::json!({
+            "esmExternals": "loose"
+        });
+        let config: ExperimentalConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            config.esm_externals,
+            Some(EsmExternals::Loose(EsmExternalsValue::Loose))
+        );
+    }
+
+    #[test]
+    fn test_externals_deserialization() {
+        let json = serde_json::json!({
+            "entry": [{"import": "./index.js"}],
+            "externals": {
+                "foo": "foo",
+                "foo_require": "commonjs foo",
+                "foo_require2": {
+                    "root": "foo",
+                    "type": "commonjs"
+                },
+                "foo_import": "esm foo",
+                "foo_import2": {
+                    "root": "foo",
+                    "type": "esm"
+                },
+                "react": {
+                    "root": "React",
+                    "commonjs": "react"
+                },
+                "antd": {
+                    "root": "antd",
+                    "subPath": {
+                        "exclude": ["style"],
+                        "rules": [
+                            {
+                              "regex": "/(version|message|notification)$",
+                              "target": "$1"
+                            },
+                            {
+                              "regex": "/locale/.+$",
+                              "target": "$empty"
+                            },
+                            {
+                              "regex": "/es\\/([^\\/]+)(?:\\/.*)?$/",
+                              "target": "$1",
+                              "targetConverter": "PascalCase"
+                            }
+                        ]
+                    }
                 }
             }
-        }
-    });
+        });
 
-    let config: Config = serde_json::from_value(json).unwrap();
-    let externals = config.externals.unwrap();
+        let config: Config = serde_json::from_value(json).unwrap();
+        let externals = config.externals.unwrap();
 
-    // test basic external config
-    assert!(
-        matches!(externals.get("foo"), Some(ExternalConfig::Basic(name)) if name.as_str() == "foo")
-    );
-    assert!(
-        matches!(externals.get("foo_require"), Some(ExternalConfig::Basic(name)) if name.as_str() == "commonjs foo")
-    );
-    assert!(
-        matches!(externals.get("foo_import"), Some(ExternalConfig::Basic(name)) if name.as_str() == "esm foo")
-    );
-
-    // test advanced external config
-    if let Some(ExternalConfig::Advanced(advanced)) = externals.get("foo_require2") {
-        assert_eq!(advanced.root.as_str(), "foo");
-        assert_eq!(advanced.r#type, Some(ExternalType::CommonJs));
-    } else {
-        panic!("Expected ExternalConfig::Advanced for foo_require2");
-    }
-
-    if let Some(ExternalConfig::Advanced(advanced)) = externals.get("foo_import2") {
-        assert_eq!(advanced.root.as_str(), "foo");
-        assert_eq!(advanced.r#type, Some(ExternalType::ESM));
-    } else {
-        panic!("Expected ExternalConfig::Advanced for foo_import2");
-    }
-
-    if let Some(ExternalConfig::Advanced(advanced)) = externals.get("antd") {
-        assert_eq!(advanced.root.as_str(), "antd");
-        assert_eq!(advanced.sub_path.as_ref().unwrap().rules.len(), 3);
-
-        let rule1 = &advanced.sub_path.as_ref().unwrap().rules[0];
-        assert_eq!(rule1.regex.as_str(), "/(version|message|notification)$");
-        assert_eq!(rule1.target, ExternalSubPathTarget::Tpl("$1".into()));
-
-        let rule2 = &advanced.sub_path.as_ref().unwrap().rules[1];
-        assert_eq!(rule2.regex.as_str(), "/locale/.+$");
-        assert_eq!(rule2.target, ExternalSubPathTarget::Empty);
-
-        let rule3 = &advanced.sub_path.as_ref().unwrap().rules[2];
-        assert_eq!(rule3.regex.as_str(), "/es\\/([^\\/]+)(?:\\/.*)?$/");
-        assert_eq!(rule3.target, ExternalSubPathTarget::Tpl("$1".into()));
-        assert_eq!(
-            rule3.target_converter,
-            Some(ExternalTargetConverter::PascalCase)
+        // test basic external config
+        assert!(
+            matches!(externals.get("foo"), Some(ExternalConfig::Basic(name)) if name.as_str() == "foo")
         );
-    } else {
-        panic!("Expected ExternalConfig::Advanced for antd");
+        assert!(
+            matches!(externals.get("foo_require"), Some(ExternalConfig::Basic(name)) if name.as_str() == "commonjs foo")
+        );
+        assert!(
+            matches!(externals.get("foo_import"), Some(ExternalConfig::Basic(name)) if name.as_str() == "esm foo")
+        );
+
+        // test advanced external config
+        if let Some(ExternalConfig::Advanced(advanced)) = externals.get("foo_require2") {
+            assert_eq!(advanced.root.as_str(), "foo");
+            assert_eq!(advanced.r#type, Some(ExternalType::CommonJs));
+        } else {
+            panic!("Expected ExternalConfig::Advanced for foo_require2");
+        }
+
+        if let Some(ExternalConfig::Advanced(advanced)) = externals.get("foo_import2") {
+            assert_eq!(advanced.root.as_str(), "foo");
+            assert_eq!(advanced.r#type, Some(ExternalType::ESM));
+        } else {
+            panic!("Expected ExternalConfig::Advanced for foo_import2");
+        }
+
+        if let Some(ExternalConfig::Umd(umd_config)) = externals.get("react") {
+            assert_eq!(umd_config.root.as_str(), "React");
+            assert_eq!(umd_config.commonjs.as_str(), "react");
+        } else {
+            panic!("Expected ExternalConfig::Umd for react");
+        }
+
+        if let Some(ExternalConfig::Advanced(advanced)) = externals.get("antd") {
+            assert_eq!(advanced.root.as_str(), "antd");
+            assert_eq!(advanced.sub_path.as_ref().unwrap().rules.len(), 3);
+
+            let rule1 = &advanced.sub_path.as_ref().unwrap().rules[0];
+            assert_eq!(rule1.regex.as_str(), "/(version|message|notification)$");
+            assert_eq!(rule1.target, ExternalSubPathTarget::Tpl("$1".into()));
+
+            let rule2 = &advanced.sub_path.as_ref().unwrap().rules[1];
+            assert_eq!(rule2.regex.as_str(), "/locale/.+$");
+            assert_eq!(rule2.target, ExternalSubPathTarget::Empty);
+
+            let rule3 = &advanced.sub_path.as_ref().unwrap().rules[2];
+            assert_eq!(rule3.regex.as_str(), "/es\\/([^\\/]+)(?:\\/.*)?$/");
+            assert_eq!(rule3.target, ExternalSubPathTarget::Tpl("$1".into()));
+            assert_eq!(
+                rule3.target_converter,
+                Some(ExternalTargetConverter::PascalCase)
+            );
+        } else {
+            panic!("Expected ExternalConfig::Advanced for antd");
+        }
     }
 }
