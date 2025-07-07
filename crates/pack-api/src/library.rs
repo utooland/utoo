@@ -272,6 +272,12 @@ impl LibraryEndpoint {
             let module_graph = self.library_module_graph();
 
             let query = QString::new(vec![("name", this.name.as_str())]).to_string();
+            let query = if query.is_empty() {
+                // If name is empty, provide a default fallback
+                QString::new(vec![("name", "index")]).to_string()
+            } else {
+                format!("?{query}")
+            };
 
             let library_chunk_group = library_chunking_context.evaluated_chunk_group(
                 AssetIdent::from_path(project.project_root().await?.join(this.import.as_str())?)

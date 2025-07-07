@@ -23,7 +23,14 @@
       "minify": false
     },
     "externals": {
-      "lodash": "$"
+      "react": {
+        "root": "React",
+        "commonjs": "react"
+      },
+      "react-dom": {
+        "root": "ReactDOM",
+        "commonjs": "react-dom"
+      }
     }
   }
 }

@@ -43,7 +43,7 @@ criterion = "0.6.0"
 dirs = "5.0"
 toml = "0.8"
 async-trait = "0.1.64"
-swc_core = { version = "30.0.1", features = [
+swc_core = { version = "30.1.1", features = [
   "ecma_loader_lru",
   "ecma_loader_parking_lot",
   "parallel_rayon",

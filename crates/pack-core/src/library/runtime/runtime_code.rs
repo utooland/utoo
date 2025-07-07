@@ -121,8 +121,6 @@ pub async fn get_library_runtime_code(
 
             if (typeof exports === 'object' && typeof module === 'object') {{
                 module.exports = factory();
-            }} else if(typeof define === 'function' && define.amd) {{
-                define([], factory);
             }} else if (typeof exports === 'object') {{
         "#,
     )?;
@@ -160,12 +158,6 @@ pub async fn get_library_runtime_code(
         code,
         r#"
             }}
-        "#,
-    )?;
-
-    writedoc!(
-        code,
-        r#"
             }})();
         "#
     )?;

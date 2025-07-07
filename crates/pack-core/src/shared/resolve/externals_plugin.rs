@@ -212,6 +212,16 @@ impl BeforeResolvePlugin for ExternalsPlugin {
                     };
                     (advanced.root.clone(), external_type)
                 }
+                ExternalConfig::Umd(umd_config) => {
+                    // Handle UMD config
+                    let external_name = format!(
+                        "root {} commonjs {}",
+                        umd_config.root.as_str(),
+                        umd_config.commonjs.as_str()
+                    );
+
+                    (external_name.into(), ExternalType::Umd)
+                }
             };
 
             return Ok(ResolveResultOption::some(*ResolveResult::primary(
@@ -341,7 +351,7 @@ impl AfterResolvePlugin for ExternalsPlugin {
                                 if external_name.is_empty() {
                                     advanced.root.to_string()
                                 } else {
-                                    format!("{}/{}", advanced.root, external_name)
+                                    format!("{} {}", advanced.root, external_name)
                                 }
                             }
                         };

@@ -279,11 +279,13 @@ pub use pack_core::config::{
 pub enum SchemaExternalConfig {
     /// Simple string external (e.g., \"react\" -> \"React\")
     Basic(String),
-    /// Complex external configuration
+    /// UMD external configuration
+    Umd(SchemaExternalUmd),
+    /// Subpath external configuration (for complex path handling)
     Advanced(SchemaExternalAdvanced),
 }
 
-/// Advanced external configuration
+/// Subpath external configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SchemaExternalAdvanced {
@@ -359,6 +361,20 @@ pub enum SchemaExternalTargetConverter {
     CamelCase,
     KebabCase,
     SnakeCase,
+}
+
+/// UMD external configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaExternalUmd {
+    /// Root global variable name
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Root global variable name")]
+    pub root: Option<String>,
+    /// CommonJS module reference
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "CommonJS module reference")]
+    pub commonjs: Option<String>,
 }
 
 /// Module configuration
