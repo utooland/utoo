@@ -7,6 +7,7 @@ use pack_core::{
         get_client_runtime_entries,
     },
     library::contexts::get_library_chunking_context,
+    util::convert_to_relative_import,
 };
 use qstring::QString;
 use tracing::{Instrument, info_span};
@@ -181,11 +182,8 @@ impl LibraryEndpoint {
             .split(MAIN_SEPARATOR)
             .next_back()
             .unwrap_or("");
-        let relative_import = self
-            .project()
-            .convert_to_relative_import(this.import.clone(), project_dir_name.into())
-            .await?
-            .clone_value();
+        let relative_import =
+            convert_to_relative_import(this.import.clone(), project_dir_name.into())?;
 
         let entry_request = Request::relative(
             relative_import.into(),

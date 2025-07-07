@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rustc_hash::FxHashMap;
 use turbo_rcstr::RcStr;
 use turbo_tasks::{FxIndexMap, ResolvedVc, Vc};
@@ -19,7 +19,7 @@ use turbopack_core::{
 };
 use turbopack_node::execution_context::ExecutionContext;
 
-use crate::{config::Config, mode::Mode};
+use crate::{config::Config, mode::Mode, util::convert_to_relative_import};
 
 pub fn mdx_import_source_file() -> RcStr {
     unreachable!()
@@ -136,15 +136,25 @@ fn export_value_to_import_mapping(
         None
     } else {
         Some(if result.len() == 1 {
-            ImportMapping::PrimaryAlternative(result[0].0.into(), Some(project_path.clone()))
+            let relative_import =
+                convert_to_relative_import(result[0].0.into(), project_path.clone().path).ok()?;
+            ImportMapping::PrimaryAlternative(relative_import, Some(project_path.clone()))
                 .resolved_cell()
         } else {
             ImportMapping::Alternatives(
                 result
                     .iter()
-                    .map(|(m, _)| {
-                        ImportMapping::PrimaryAlternative((*m).into(), Some(project_path.clone()))
-                            .resolved_cell()
+                    .filter_map(|(m, _)| {
+                        let relative_import =
+                            convert_to_relative_import((*m).into(), project_path.clone().path)
+                                .ok()?;
+                        Some(
+                            ImportMapping::PrimaryAlternative(
+                                relative_import,
+                                Some(project_path.clone()),
+                            )
+                            .resolved_cell(),
+                        )
                     })
                     .collect(),
             )
