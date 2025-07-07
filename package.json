@@ -27,7 +27,8 @@
     "examples/with-less",
     "examples/with-library",
     "examples/with-sass",
-    "examples/with-style-loader"
+    "examples/with-style-loader",
+    "examples/resolve"
   ],
   "repository": "https://github.com/umijs/mako"
 }

@@ -666,7 +666,7 @@
       "description": "Resolve configuration",
       "type": "object",
       "properties": {
-        "resolveAlias": {
+        "alias": {
           "description": "Resolve alias mapping",
           "type": [
             "object",
@@ -674,7 +674,7 @@
           ],
           "additionalProperties": true
         },
-        "resolveExtensions": {
+        "extensions": {
           "description": "Resolve extensions",
           "type": [
             "array",

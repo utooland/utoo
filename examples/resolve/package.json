@@ -1,0 +1,14 @@
+{
+    "name": "with-resolve",
+    "version": "1.0.0",
+    "description": "Resolver example",
+    "author": "zoomdong",
+    "license": "MIT",
+    "scripts": {
+        "build": "utoo-pack build -p . -r ../..",
+        "dev": "utoo-pack dev -p . -r ../.."
+    },
+    "devDependencies": {
+        "@utoo/pack-cli": "*"
+    }
+}
