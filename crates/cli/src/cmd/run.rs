@@ -360,7 +360,7 @@ mod tests {
         fs::write(_dir.path().join("package.json"), package_json).unwrap();
         std::env::set_current_dir(_dir.path()).unwrap();
 
-        let result = get_topo(_dir.path()).await;
+        let result = WorkspaceService::get_workspace_topology(_dir.path()).await;
         assert!(result.is_ok());
         let topology = result.unwrap();
         // Should return empty topology for non-workspace projects
