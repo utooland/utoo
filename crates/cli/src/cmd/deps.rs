@@ -99,19 +99,12 @@ pub async fn build_workspace(cwd: &Path) -> Result<()> {
 
         for child in ideal_tree.children.read().unwrap().iter() {
             for edge in child.edges_out.read().unwrap().iter() {
-<<<<<<< HEAD
-                if *edge.valid.read().unwrap()
-                    && let Some(to_node) = edge.to.read().unwrap().as_ref()
-                {
-                    edges.push(json!([to_node.name.clone(), edge.from.name.clone()]));
-=======
                 if *edge.valid.read().unwrap() {
                     if let Some(to_node) = edge.to.read().unwrap().as_ref() {
                         // Create Edge struct: format is [to, from] meaning "to depends on from"
                         // So from=edge.from.name (dependency), to=to_node.name (dependent)
                         edges.push(Edge::new(edge.from.name.clone(), to_node.name.clone()));
                     }
->>>>>>> e1bbf65b (feat: toplogical)
                 }
             }
         }
