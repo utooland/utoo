@@ -1,3 +1,4 @@
+use crate::helper::deps::{compute_topological_layers, Node, Edge};
 use crate::helper::lock::{
     serialize_tree_to_packages, validate_deps, write_ideal_tree_to_lock_file,
 };
@@ -75,6 +76,7 @@ pub async fn build_workspace(cwd: &Path) -> Result<()> {
 
     if let Some(ideal_tree) = &ruborist.ideal_tree {
         let mut node_list = Vec::new();
+        let mut node_json_list = Vec::new();
         let mut edges = Vec::new();
         let mut workspace_names = HashSet::new();
 
@@ -84,7 +86,12 @@ pub async fn build_workspace(cwd: &Path) -> Result<()> {
                 continue;
             }
             workspace_names.insert(name.clone());
-            node_list.push(json!({
+
+            // Create Node struct for the helper function
+            node_list.push(Node::new(name.clone()));
+
+            // Create JSON for output file
+            node_json_list.push(json!({
                 "name": name,
                 "path": to_relative_path(&child.path, cwd),
             }));
@@ -92,17 +99,35 @@ pub async fn build_workspace(cwd: &Path) -> Result<()> {
 
         for child in ideal_tree.children.read().unwrap().iter() {
             for edge in child.edges_out.read().unwrap().iter() {
+<<<<<<< HEAD
                 if *edge.valid.read().unwrap()
                     && let Some(to_node) = edge.to.read().unwrap().as_ref()
                 {
                     edges.push(json!([to_node.name.clone(), edge.from.name.clone()]));
+=======
+                if *edge.valid.read().unwrap() {
+                    if let Some(to_node) = edge.to.read().unwrap().as_ref() {
+                        // Create Edge struct: format is [to, from] meaning "to depends on from"
+                        // So from=edge.from.name (dependency), to=to_node.name (dependent)
+                        edges.push(Edge::new(edge.from.name.clone(), to_node.name.clone()));
+                    }
+>>>>>>> e1bbf65b (feat: toplogical)
                 }
             }
         }
 
+        // Compute topological layers using the helper function
+        let topological_layers = compute_topological_layers(&node_list, &edges);
+
+        // Create edges in JSON format for output (format: [to, from] meaning "to depends on from")
+        let edges_json: Vec<serde_json::Value> = edges.iter()
+            .map(|edge| json!([edge.from.clone(), edge.to.clone()]))
+            .collect();
+
         let workspace_file = json!({
-            "nodeList": node_list,
-            "edges": edges,
+            "nodeList": node_json_list,
+            "edges": edges_json,
+            "topology": topological_layers,
         });
 
         let temp_path = cwd.join("workspace.json.tmp");

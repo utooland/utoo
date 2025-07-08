@@ -1,7 +1,7 @@
 [package]
 name = "utoo-cli"
 version = "0.0.0-alpha.33"
-edition = "2024"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -58,6 +58,8 @@ criterion = { workspace = true }
 utoo-core = { path = "../core/" }
 regex = "1.10"
 anyhow = { workspace = true }
+openssl = { version = "0.10", features = ["vendored"] }
+petgraph = "0.6"
 
 [[bench]]
 name = "install_benchmark"

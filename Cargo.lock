@@ -9183,6 +9183,7 @@ dependencies = [
  "libc",
  "once_cell",
  "owo-colors 4.2.0",
+ "petgraph 0.6.5",
  "regex",
  "reqwest 0.11.17",
  "serde",
