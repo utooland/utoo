@@ -152,12 +152,11 @@ async fn get_topo(cwd: &std::path::Path) -> Result<Vec<Vec<String>>> {
         // Collect dependency edges
         for child in ideal_tree.children.read().unwrap().iter() {
             for edge in child.edges_out.read().unwrap().iter() {
-                if *edge.valid.read().unwrap() {
-                    if let Some(to_node) = edge.to.read().unwrap().as_ref() {
+                if *edge.valid.read().unwrap()
+                    && let Some(to_node) = edge.to.read().unwrap().as_ref() {
                         // Create Edge: from=dependency, to=dependent
                         edges.push(Edge::new(edge.from.name.clone(), to_node.name.clone()));
                     }
-                }
             }
         }
 
@@ -178,8 +177,7 @@ async fn need_run(workspace_name: &str, script_name: &str) -> Result<bool> {
         Ok(path) => path,
         Err(_) => {
             log_info(&format!(
-                "Workspace '{}' not found, skipping",
-                workspace_name
+                "Workspace '{workspace_name}' not found, skipping"
             ));
             return Ok(false);
         }
@@ -190,8 +188,7 @@ async fn need_run(workspace_name: &str, script_name: &str) -> Result<bool> {
         Ok(pkg) => pkg,
         Err(_) => {
             log_info(&format!(
-                "No package.json found in workspace '{}', skipping",
-                workspace_name
+                "No package.json found in workspace '{workspace_name}', skipping"
             ));
             return Ok(false);
         }
@@ -202,15 +199,13 @@ async fn need_run(workspace_name: &str, script_name: &str) -> Result<bool> {
         let has_script = scripts.contains_key(script_name);
         if !has_script {
             log_info(&format!(
-                "Script '{}' not found in workspace '{}', skipping",
-                script_name, workspace_name
+                "Script '{script_name}' not found in workspace '{workspace_name}', skipping"
             ));
         }
         Ok(has_script)
     } else {
         log_info(&format!(
-            "No scripts section found in workspace '{}', skipping",
-            workspace_name
+            "No scripts section found in workspace '{workspace_name}', skipping"
         ));
         Ok(false)
     }
@@ -225,8 +220,7 @@ pub async fn run_script_in_all_workspaces(
     let updated_cwd = update_cwd_to_project(&cwd).await?;
 
     log_info(&format!(
-        "Getting workspace topology for script: {}",
-        script_name
+        "Getting workspace topology for script: {script_name}"
     ));
 
     // Get topological ordering of workspaces
@@ -279,8 +273,7 @@ pub async fn run_script_in_all_workspaces(
             // Spawn concurrent task for each workspace in the layer
             join_set.spawn(async move {
                 log_info(&format!(
-                    "Running script '{}' in workspace '{}'",
-                    script_name, workspace_name
+                    "Running script '{script_name}' in workspace '{workspace_name}'"
                 ));
 
                 let script_args_refs = script_args
@@ -289,15 +282,13 @@ pub async fn run_script_in_all_workspaces(
                 match run_script(&script_name, Some(&workspace_name), script_args_refs).await {
                     Ok(()) => {
                         log_info(&format!(
-                            "Successfully completed script '{}' in workspace '{}'",
-                            script_name, workspace_name
+                            "Successfully completed script '{script_name}' in workspace '{workspace_name}'"
                         ));
                         Ok(workspace_name)
                     }
                     Err(e) => {
                         log_info(&format!(
-                            "Failed to run script '{}' in workspace '{}': {}",
-                            script_name, workspace_name, e
+                            "Failed to run script '{script_name}' in workspace '{workspace_name}': {e}"
                         ));
                         Err((workspace_name, e))
                     }
@@ -333,7 +324,7 @@ pub async fn run_script_in_all_workspaces(
         if !failed_workspaces.is_empty() {
             let error_messages: Vec<String> = failed_workspaces
                 .iter()
-                .map(|(name, err)| format!("{}: {}", name, err))
+                .map(|(name, err)| format!("{name}: {err}"))
                 .collect();
 
             return Err(anyhow::anyhow!(
@@ -347,8 +338,7 @@ pub async fn run_script_in_all_workspaces(
     }
 
     log_info(&format!(
-        "Successfully completed script '{}' in all workspaces",
-        script_name
+        "Successfully completed script '{script_name}' in all workspaces"
     ));
     Ok(())
 }

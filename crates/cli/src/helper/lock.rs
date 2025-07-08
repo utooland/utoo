@@ -236,12 +236,11 @@ pub async fn prepare_global_package_json(
     package_obj.remove("devDependencies");
 
     // Remove scripts.prepare if it exists
-    if let Some(scripts) = package_obj.get_mut("scripts") {
-        if let Some(scripts_obj) = scripts.as_object_mut() {
+    if let Some(scripts) = package_obj.get_mut("scripts")
+        && let Some(scripts_obj) = scripts.as_object_mut() {
             scripts_obj.remove("prepare");
             scripts_obj.remove("prepublish");
         }
-    }
 
     // Write back the modified package.json
     fs::write(
@@ -349,15 +348,13 @@ pub async fn validate_deps(
                         let mut current_path = String::from(pkg_path);
 
                         while !current_path.is_empty() {
-                            if let Some(pkg_info) = packages.get(&current_path) {
-                                if let Some(name) = pkg_info.get("name").and_then(|n| n.as_str()) {
-                                    if let Some(version) =
+                            if let Some(pkg_info) = packages.get(&current_path)
+                                && let Some(name) = pkg_info.get("name").and_then(|n| n.as_str())
+                                    && let Some(version) =
                                         pkg_info.get("version").and_then(|v| v.as_str())
                                     {
                                         parent_chain.push((name.to_string(), version.to_string()));
                                     }
-                                }
-                            }
 
                             if let Some(last_modules) = current_path.rfind("/node_modules/") {
                                 current_path = current_path[..last_modules].to_string();
@@ -420,22 +417,19 @@ pub async fn validate_deps(
                         if let Some(dep_info) = dep_info {
                             if let Some(actual_version) =
                                 dep_info.get("version").and_then(|v| v.as_str())
-                            {
-                                if !semver::matches(&effective_req_version, actual_version) {
+                                && !semver::matches(&effective_req_version, actual_version) {
                                     if let Some(resolved_dep) = resolve_dependency(
                                         dep_name,
                                         &effective_req_version,
                                         &EdgeType::Optional,
                                     )
                                     .await?
-                                    {
-                                        if resolved_dep.version == actual_version {
+                                        && resolved_dep.version == actual_version {
                                             log_verbose(&format!(
                                                 "Package {pkg_path} {dep_field} dependency {dep_name} (required version: {req_version_str}, effective version: {effective_req_version}) hit bug-version {current_path}@{actual_version}"
                                             ));
                                             continue;
                                         }
-                                    }
 
                                     log_warning(&format!(
                                         "Package {pkg_path} {dep_field} dependency {dep_name} (required version: {req_version_str}, effective version: {effective_req_version}) does not match actual version {current_path}@{actual_version}"
@@ -445,7 +439,6 @@ pub async fn validate_deps(
                                         dependency_name: dep_name.to_string(),
                                     });
                                 }
-                            }
                         } else if !is_optional {
                             log_verbose(&format!(
                                 "pkg_path {pkg_path} dep_field {dep_field} dep_name {dep_name} not found"
