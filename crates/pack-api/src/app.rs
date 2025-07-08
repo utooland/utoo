@@ -6,6 +6,7 @@ use pack_core::client::context::{
     get_client_module_options_context, get_client_resolve_options_context,
     get_client_runtime_entries,
 };
+use pack_core::util::convert_to_relative_import;
 use qstring::QString;
 use tracing::{Instrument, info_span};
 use turbo_rcstr::{RcStr, rcstr};
@@ -124,11 +125,9 @@ impl AppEntrypoint {
             .split(MAIN_SEPARATOR)
             .next_back()
             .unwrap_or("");
-        let relative_import = self
-            .project()
-            .convert_to_relative_import(this.import.clone(), project_dir_name.into())
-            .await?
-            .clone_value();
+
+        let relative_import =
+            convert_to_relative_import(this.import.clone(), project_dir_name.into())?;
 
         let entry_request = Request::relative(
             relative_import.into(),

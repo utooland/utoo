@@ -1081,41 +1081,6 @@ impl Project {
             }
         }
     }
-
-    #[turbo_tasks::function]
-    pub fn convert_to_relative_import(
-        self: Vc<Self>,
-        import_path: RcStr,
-        project_dir_name: RcStr,
-    ) -> Result<Vc<RcStr>> {
-        // When project is root, the project_dir_name is empty
-        // In this case, the import path is already relative
-        let project_dir_name = if project_dir_name.is_empty() {
-            std::env::current_dir()
-                .ok()
-                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
-                .unwrap_or_default()
-                .into()
-        } else {
-            project_dir_name
-        };
-        if import_path.starts_with(MAIN_SEPARATOR) {
-            let pattern = format!("{MAIN_SEPARATOR}{project_dir_name}{MAIN_SEPARATOR}");
-            if let Some(pos) = import_path.find(&pattern) {
-                let relative_part = &import_path[pos + pattern.len()..];
-                if !relative_part.is_empty() {
-                    let relative_import = format!(".{MAIN_SEPARATOR}{relative_part}");
-                    Ok(Vc::cell(relative_import.into()))
-                } else {
-                    bail!("Invalid import path: {}", import_path)
-                }
-            } else {
-                bail!("Invalid import path: {}", import_path)
-            }
-        } else {
-            Ok(Vc::cell(import_path))
-        }
-    }
 }
 
 // This is a performance optimization. This function is a root aggregation function that
