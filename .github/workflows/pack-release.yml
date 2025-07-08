@@ -34,6 +34,9 @@ jobs:
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
             build: |
               set -e &&
+              rm /etc/apk/repositories &&
+              echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/main" >> /etc/apk/repositories &&
+              echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/community" >> /etc/apk/repositories &&
               apk update &&
               apk add --no-cache libc6-compat pkgconfig dav1d libdav1d dav1d-dev clang-static llvm-dev &&
               rustup target add aarch64-unknown-linux-musl &&
@@ -48,6 +51,9 @@ jobs:
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
             build: |
               set -ex &&
+              rm /etc/apk/repositories &&
+              echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/main" >> /etc/apk/repositories &&
+              echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/community" >> /etc/apk/repositories &&
               apk update &&
               apk add --no-cache libc6-compat pkgconfig dav1d libdav1d dav1d-dev clang-static llvm-dev &&
               rustup target add x86_64-unknown-linux-musl &&
