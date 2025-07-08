@@ -9,7 +9,6 @@ use std::path::Path;
 /// Workspace topology information
 #[derive(Debug, Clone)]
 pub struct WorkspaceTopology {
-    pub node_list: Vec<Node>,
     pub edges: Vec<Edge>,
     pub topology: Vec<Vec<String>>,
     pub node_json_list: Vec<serde_json::Value>,
@@ -65,7 +64,6 @@ impl WorkspaceService {
             let topology = compute_topological_layers(&node_list, &edges);
 
             Ok(WorkspaceTopology {
-                node_list,
                 edges,
                 topology,
                 node_json_list,
@@ -73,7 +71,6 @@ impl WorkspaceService {
         } else {
             // Return empty topology if no workspaces found
             Ok(WorkspaceTopology {
-                node_list: Vec::new(),
                 edges: Vec::new(),
                 topology: Vec::new(),
                 node_json_list: Vec::new(),
