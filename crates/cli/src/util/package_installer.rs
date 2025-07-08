@@ -2,7 +2,7 @@ use crate::cmd::install::install_global_package;
 use crate::util::cache::parse_pattern;
 use crate::util::logger::{log_info, log_verbose};
 use crate::util::registry::resolve;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::path::PathBuf;
 
 /// Get the utoo cache directory (~/.utoo/utx)

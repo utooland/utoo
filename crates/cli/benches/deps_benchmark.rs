@@ -1,6 +1,6 @@
 #![allow(clippy::all)]
 use anyhow::{Context, Result};
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::process::Command;
 use std::{env, fs, path::PathBuf};
 

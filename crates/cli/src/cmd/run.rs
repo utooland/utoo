@@ -1,7 +1,7 @@
+use crate::helper::deps::{compute_topological_layers, Edge, Node};
 use crate::helper::package::parse_package_name;
-use crate::helper::workspace::{find_workspace_path, update_cwd_to_project};
-use crate::helper::deps::{compute_topological_layers, Node, Edge};
 use crate::helper::ruborist::Ruborist;
+use crate::helper::workspace::{find_workspace_path, update_cwd_to_project};
 use crate::model::package::{PackageInfo, Scripts};
 use crate::service::script::ScriptService;
 use crate::util::json::load_package_json_from_path;
@@ -25,9 +25,9 @@ pub async fn run(
         }
         false => {
             // Run script in specific workspace or current workspace
-            let script_args_refs = script_args.as_ref().map(|args| {
-                args.iter().map(|s| s.as_str()).collect::<Vec<&str>>()
-            });
+            let script_args_refs = script_args
+                .as_ref()
+                .map(|args| args.iter().map(|s| s.as_str()).collect::<Vec<&str>>());
             run_script(script_name, workspace, script_args_refs).await
         }
     }
@@ -177,7 +177,10 @@ async fn need_run(workspace_name: &str, script_name: &str) -> Result<bool> {
     let workspace_dir = match find_workspace_path(&cwd, workspace_name).await {
         Ok(path) => path,
         Err(_) => {
-            log_info(&format!("Workspace '{}' not found, skipping", workspace_name));
+            log_info(&format!(
+                "Workspace '{}' not found, skipping",
+                workspace_name
+            ));
             return Ok(false);
         }
     };
@@ -186,7 +189,10 @@ async fn need_run(workspace_name: &str, script_name: &str) -> Result<bool> {
     let pkg = match load_package_json_from_path(&workspace_dir) {
         Ok(pkg) => pkg,
         Err(_) => {
-            log_info(&format!("No package.json found in workspace '{}', skipping", workspace_name));
+            log_info(&format!(
+                "No package.json found in workspace '{}', skipping",
+                workspace_name
+            ));
             return Ok(false);
         }
     };
@@ -195,11 +201,17 @@ async fn need_run(workspace_name: &str, script_name: &str) -> Result<bool> {
     if let Some(Value::Object(scripts)) = pkg.get("scripts") {
         let has_script = scripts.contains_key(script_name);
         if !has_script {
-            log_info(&format!("Script '{}' not found in workspace '{}', skipping", script_name, workspace_name));
+            log_info(&format!(
+                "Script '{}' not found in workspace '{}', skipping",
+                script_name, workspace_name
+            ));
         }
         Ok(has_script)
     } else {
-        log_info(&format!("No scripts section found in workspace '{}', skipping", workspace_name));
+        log_info(&format!(
+            "No scripts section found in workspace '{}', skipping",
+            workspace_name
+        ));
         Ok(false)
     }
 }
@@ -212,7 +224,10 @@ pub async fn run_script_in_all_workspaces(
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
     let updated_cwd = update_cwd_to_project(&cwd).await?;
 
-    log_info(&format!("Getting workspace topology for script: {}", script_name));
+    log_info(&format!(
+        "Getting workspace topology for script: {}",
+        script_name
+    ));
 
     // Get topological ordering of workspaces
     let topology = get_topo(&updated_cwd).await?;
@@ -268,7 +283,9 @@ pub async fn run_script_in_all_workspaces(
                     script_name, workspace_name
                 ));
 
-                let script_args_refs = script_args.as_ref().map(|args| args.iter().map(|s| s.as_str()).collect::<Vec<&str>>());
+                let script_args_refs = script_args
+                    .as_ref()
+                    .map(|args| args.iter().map(|s| s.as_str()).collect::<Vec<&str>>());
                 match run_script(&script_name, Some(&workspace_name), script_args_refs).await {
                     Ok(()) => {
                         log_info(&format!(
@@ -360,12 +377,10 @@ mod tests {
         let result = run_script("nonexistent", None, None).await;
 
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Script 'nonexistent' not found")
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Script 'nonexistent' not found"));
     }
 
     #[tokio::test]

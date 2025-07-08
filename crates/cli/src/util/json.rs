@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::fs::File;

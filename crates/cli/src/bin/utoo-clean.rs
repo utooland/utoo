@@ -2,7 +2,7 @@ use clap::Parser;
 use std::process;
 use utoo_cli::{
     cmd::clean::clean,
-    constants::{APP_VERSION, cmd::CLEAN_ABOUT},
+    constants::{cmd::CLEAN_ABOUT, APP_VERSION},
 };
 
 #[derive(Parser)]

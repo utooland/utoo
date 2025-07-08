@@ -12,7 +12,7 @@ use cmd::{clean::clean, deps::build_workspace};
 use helper::auto_update::init_auto_update;
 use util::config::{set_legacy_peer_deps, set_registry};
 use util::logger::{log_error, log_info, log_warning, set_verbose, write_verbose_logs_to_file};
-use util::save_type::{PackageAction, SaveType, parse_save_type};
+use util::save_type::{parse_save_type, PackageAction, SaveType};
 
 mod cmd;
 mod constants;
@@ -302,14 +302,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 process::exit(1);
             }
         }
-        Some(Commands::Run { script, workspace, workspaces }) => {
+        Some(Commands::Run {
+            script,
+            workspace,
+            workspaces,
+        }) => {
             let args = std::env::args().skip(2).collect::<Vec<String>>();
             let script_args = parse_script_and_args(&args);
             let script_args_owned = script_args.map(|args| {
-                args.into_iter().map(|s| s.to_string()).collect::<Vec<String>>()
+                args.into_iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<String>>()
             });
 
-            if let Err(e) = run(&script, workspace.as_deref(), workspaces, script_args_owned).await {
+            if let Err(e) = run(&script, workspace.as_deref(), workspaces, script_args_owned).await
+            {
                 log_error(&e.to_string());
                 let _ = write_verbose_logs_to_file();
                 process::exit(1);
@@ -321,15 +328,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let args = std::env::args().skip(1).collect::<Vec<String>>();
                 let script_args = parse_script_and_args(&args);
                 let script_args_owned = script_args.map(|args| {
-                    args.into_iter().map(|s| s.to_string()).collect::<Vec<String>>()
+                    args.into_iter()
+                        .map(|s| s.to_string())
+                        .collect::<Vec<String>>()
                 });
 
                 if let Err(e) = run(
                     &script_name,
                     cli.workspace.as_deref(),
                     cli.workspaces,
-                    script_args_owned
-                ).await {
+                    script_args_owned,
+                )
+                .await
+                {
                     log_error(&e.to_string());
                     let _ = write_verbose_logs_to_file();
                     process::exit(1);

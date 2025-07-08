@@ -1,4 +1,4 @@
-use crate::helper::deps::{compute_topological_layers, Node, Edge};
+use crate::helper::deps::{compute_topological_layers, Edge, Node};
 use crate::helper::lock::{
     serialize_tree_to_packages, validate_deps, write_ideal_tree_to_lock_file,
 };
@@ -113,7 +113,8 @@ pub async fn build_workspace(cwd: &Path) -> Result<()> {
         let topological_layers = compute_topological_layers(&node_list, &edges);
 
         // Create edges in JSON format for output (format: [to, from] meaning "to depends on from")
-        let edges_json: Vec<serde_json::Value> = edges.iter()
+        let edges_json: Vec<serde_json::Value> = edges
+            .iter()
             .map(|edge| json!([edge.from.clone(), edge.to.clone()]))
             .collect();
 

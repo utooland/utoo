@@ -3,7 +3,7 @@ use clap::Parser;
 use std::process;
 use utoo_cli::{
     cmd::deps::{build_deps, build_workspace},
-    constants::{APP_VERSION, cmd::DEPS_ABOUT},
+    constants::{cmd::DEPS_ABOUT, APP_VERSION},
     helper::workspace::update_cwd_to_root,
     util::logger::{log_error, write_verbose_logs_to_file},
 };

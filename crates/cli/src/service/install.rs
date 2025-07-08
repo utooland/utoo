@@ -9,13 +9,13 @@ use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::Semaphore;
 
-use crate::helper::lock::{Package, extract_package_name, path_to_pkg_name};
+use crate::helper::lock::{extract_package_name, path_to_pkg_name, Package};
 use crate::helper::workspace;
 use crate::helper::{is_cpu_compatible, is_os_compatible};
 use crate::util::cloner::clone;
 use crate::util::downloader::download;
 use crate::util::linker::link;
-use crate::util::logger::{PROGRESS_BAR, log_progress, log_verbose};
+use crate::util::logger::{log_progress, log_verbose, PROGRESS_BAR};
 
 use super::binary::update_package_binary;
 
