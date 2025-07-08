@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd::deps::build_deps;
 use cmd::execute::execute;
-use cmd::install::{install, install_global_package, update_package};
+use cmd::install::{install, install_global_package, update_packages};
 use cmd::rebuild::rebuild;
 use cmd::run::run;
 use cmd::update::update;
@@ -69,8 +69,8 @@ enum Commands {
     /// Install dependencies
     #[command(name = INSTALL_NAME, alias = "i", about = INSTALL_ABOUT)]
     Install {
-        /// Package specification (e.g. "lodash@4.17.21")
-        spec: Option<String>,
+        /// Package specifications (e.g. "lodash@4.17.21" "react@18.0.0")
+        specs: Vec<String>,
 
         /// Workspace to install in
         #[arg(short, long)]
@@ -81,7 +81,7 @@ enum Commands {
         ignore_scripts: bool,
 
         /// Save as dev dependency
-        #[arg(long)]
+        #[arg(long, short = 'D')]
         save_dev: bool,
 
         /// Save as peer dependency
@@ -89,7 +89,7 @@ enum Commands {
         save_peer: bool,
 
         /// Save as optional dependency
-        #[arg(long)]
+        #[arg(long, short = 'O')]
         save_optional: bool,
 
         /// Install package globally
@@ -102,8 +102,8 @@ enum Commands {
     /// Uninstall dependencies
     #[command(name = UNINSTALL_NAME, alias = "un", about = UNINSTALL_ABOUT)]
     Uninstall {
-        /// Package specification (e.g. "lodash@4.17.21")
-        spec: Option<String>,
+        /// Package specifications (e.g. "lodash@4.17.21" "react@18.0.0")
+        specs: Vec<String>,
 
         /// Workspace to uninstall from
         #[arg(short, long)]
@@ -198,7 +198,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Some(Commands::Install {
-            spec,
+            specs,
             workspace,
             ignore_scripts,
             save_dev,
@@ -207,18 +207,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             global,
             prefix,
         }) => {
-            if let Some(spec) = spec {
+            if !specs.is_empty() {
                 if global {
-                    if let Err(e) = install_global_package(&spec, &prefix).await {
-                        log_error(&e.to_string());
-                        let _ = write_verbose_logs_to_file();
-                        process::exit(1);
+                    // For global installs, process packages one by one
+                    for spec in specs {
+                        if let Err(e) = install_global_package(&spec, &prefix).await {
+                            log_error(&e.to_string());
+                            let _ = write_verbose_logs_to_file();
+                            process::exit(1);
+                        }
                     }
                 } else {
                     let save_type = parse_save_type(save_dev, save_peer, save_optional);
-                    if let Err(e) = update_package(
+                    let spec_refs: Vec<&str> = specs.iter().map(|s| s.as_str()).collect();
+                    if let Err(e) = update_packages(
                         PackageAction::Add,
-                        &spec,
+                        &spec_refs,
                         workspace.clone(),
                         ignore_scripts,
                         save_type,
@@ -241,14 +245,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Some(Commands::Uninstall {
-            spec,
+            specs,
             workspace,
             ignore_scripts,
         }) => {
-            if let Some(spec) = spec {
-                if let Err(e) = update_package(
+            if !specs.is_empty() {
+                let spec_refs: Vec<&str> = specs.iter().map(|s| s.as_str()).collect();
+                if let Err(e) = update_packages(
                     PackageAction::Remove,
-                    &spec,
+                    &spec_refs,
                     workspace.clone(),
                     ignore_scripts,
                     SaveType::Prod,

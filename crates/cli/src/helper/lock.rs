@@ -92,16 +92,18 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<()> {
     }
 }
 
+/// Batch update package.json for multiple package specifications to reduce file I/O operations
 pub async fn update_package_json(
     action: &PackageAction,
-    spec: &str,
+    specs: &[&str],
     workspace: &Option<String>,
     save_type: &SaveType,
 ) -> Result<()> {
-    // 1. Parse package spec
-    let (name, version, version_spec) = parse_package_spec(spec).await?;
+    if specs.is_empty() {
+        return Ok(());
+    }
 
-    // 2. Find target workspace if specified
+    // 1. Find target workspace if specified
     let target_dir = if let Some(ws) = workspace {
         find_workspace_path(&PathBuf::from("."), ws)
             .await
@@ -110,7 +112,14 @@ pub async fn update_package_json(
         PathBuf::from(".")
     };
 
-    // 3. Update package.json
+    // 2. Parse all package specs in parallel
+    let mut package_specs = Vec::new();
+    for spec in specs {
+        let (name, version, version_spec) = parse_package_spec(spec).await?;
+        package_specs.push((name, version, version_spec));
+    }
+
+    // 3. Read package.json once
     let package_json_path = target_dir.join("package.json");
     let mut package_json: Value = serde_json::from_reader(fs::File::open(&package_json_path)?)?;
 
@@ -121,29 +130,34 @@ pub async fn update_package_json(
         SaveType::Prod => "dependencies",
     };
 
-    let version_to_write = match version_spec {
-        spec if spec.is_empty() || spec == "*" || spec == "latest" => format!("^{version}"),
-        spec => spec.to_string(),
-    };
+    // 4. Ensure dependencies field exists if we're adding packages
+    if *action == PackageAction::Add && package_json.get(dep_field).is_none() {
+        package_json[dep_field] = Value::Object(serde_json::Map::new());
+    }
 
-    if let Some(deps) = package_json.get_mut(dep_field) {
-        if let Some(deps_obj) = deps.as_object_mut() {
+    // 5. Update all packages in memory
+    if let Some(deps) = package_json.get_mut(dep_field)
+        && let Some(deps_obj) = deps.as_object_mut()
+    {
+        for (name, version, version_spec) in package_specs {
             match action {
                 PackageAction::Add => {
-                    deps_obj.insert(name.clone(), Value::String(version_to_write.clone()));
+                    let version_to_write = match version_spec {
+                        spec if spec.is_empty() || spec == "*" || spec == "latest" => {
+                            format!("^{version}")
+                        }
+                        spec => spec.to_string(),
+                    };
+                    deps_obj.insert(name, Value::String(version_to_write));
                 }
                 PackageAction::Remove => {
                     deps_obj.remove(&name);
                 }
             }
         }
-    } else if PackageAction::Add == *action {
-        let mut deps = serde_json::Map::new();
-        deps.insert(name.clone(), Value::String(version_to_write));
-        package_json[dep_field] = Value::Object(deps);
     }
 
-    // Write back to package.json
+    // 6. Write back to package.json once
     fs::write(
         &package_json_path,
         serde_json::to_string_pretty(&package_json)?,

@@ -23,21 +23,26 @@ use crate::util::save_type::SaveType;
 
 use super::deps::build_deps;
 
-pub async fn update_package(
+pub async fn update_packages(
     action: PackageAction,
-    spec: &str,
+    specs: &[&str],
     workspace: Option<String>,
     ignore_scripts: bool,
     save_type: SaveType,
 ) -> Result<()> {
     log_verbose(&format!(
-        "update package: {:?} {:?} {:?} {:?}",
-        action, spec, &workspace, ignore_scripts
+        "update packages: {:?} {:?} {:?} {:?}",
+        action, specs, &workspace, ignore_scripts
     ));
+
+    if specs.is_empty() {
+        return Err(anyhow::anyhow!("No package specifications provided"));
+    }
+
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
 
-    // 1. Update package.json and package-lock.json
-    update_package_json(&action, spec, &workspace, &save_type)
+    // 1. Update package.json and package-lock.json for all packages in batch
+    update_package_json(&action, specs, &workspace, &save_type)
         .await
         .context("Failed to update package.json")?;
 
