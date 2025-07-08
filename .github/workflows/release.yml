@@ -86,6 +86,9 @@ jobs:
           override: true
           target: ${{ matrix.target }}
 
+      - name: Init git submodules
+        run: git submodule update --init --recursive
+
       - name: Build
         uses: actions-rs/cargo@v1
         with:
