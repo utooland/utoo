@@ -1,14 +1,12 @@
-use crate::helper::deps::{Edge, Node, compute_topological_layers};
 use crate::helper::package::parse_package_name;
-use crate::helper::ruborist::Ruborist;
 use crate::helper::workspace::{find_workspace_path, update_cwd_to_project};
 use crate::model::package::{PackageInfo, Scripts};
 use crate::service::script::ScriptService;
+use crate::service::workspace::WorkspaceService;
 use crate::util::json::load_package_json_from_path;
 use crate::util::logger::log_info;
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::collections::HashSet;
 use tokio::task::JoinSet;
 
 /// Unified run function that handles both single workspace and multi-workspace script execution
@@ -129,46 +127,6 @@ pub async fn run_script(
     Ok(())
 }
 
-/// Get topological ordering of workspaces without writing to file
-async fn get_topo(cwd: &std::path::Path) -> Result<Vec<Vec<String>>> {
-    let mut ruborist = Ruborist::new(cwd);
-    ruborist.build_workspace_tree().await?;
-
-    if let Some(ideal_tree) = &ruborist.ideal_tree {
-        let mut node_list = Vec::new();
-        let mut edges = Vec::new();
-        let mut workspace_names = HashSet::new();
-
-        // Collect workspace nodes
-        for child in ideal_tree.children.read().unwrap().iter() {
-            let name = child.name.clone();
-            if child.is_link {
-                continue;
-            }
-            workspace_names.insert(name.clone());
-            node_list.push(Node::new(name.clone()));
-        }
-
-        // Collect dependency edges
-        for child in ideal_tree.children.read().unwrap().iter() {
-            for edge in child.edges_out.read().unwrap().iter() {
-                if *edge.valid.read().unwrap()
-                    && let Some(to_node) = edge.to.read().unwrap().as_ref()
-                {
-                    // Create Edge: from=dependency, to=dependent
-                    edges.push(Edge::new(edge.from.name.clone(), to_node.name.clone()));
-                }
-            }
-        }
-
-        // Compute topological layers
-        let topological_layers = compute_topological_layers(&node_list, &edges);
-        Ok(topological_layers)
-    } else {
-        Ok(vec![])
-    }
-}
-
 /// Check if a workspace has the specified script configured
 async fn need_run(workspace_name: &str, script_name: &str) -> Result<bool> {
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
@@ -223,7 +181,7 @@ pub async fn run_script_in_all_workspaces(
     ));
 
     // Get topological ordering of workspaces
-    let topology = get_topo(&updated_cwd).await?;
+    let topology = WorkspaceService::get_workspace_topology(&updated_cwd).await?;
 
     if topology.is_empty() {
         log_info("No workspaces found or no valid topology");
