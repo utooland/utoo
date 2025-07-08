@@ -117,7 +117,7 @@ function compatEntry(webpackEntry: WebpackConfig["entry"]) {
                 }
               } else {
                 if (v.length === 0) {
-                  throw "multi entry items is empty";
+                  throw "entry value items is empty";
                 } else if (v.length === 1) {
                   entry.push({ name: k, import: v[0] });
                 } else {

@@ -83,16 +83,17 @@ pub async fn get_client_import_map(
 // Make sure to not add any external requests here.
 async fn insert_shared_aliases(
     import_map: &mut ImportMap,
-    project_path: FileSystemPath,
+    _project_path: FileSystemPath,
     _execution_context: Vc<ExecutionContext>,
     _config: Vc<Config>,
 ) -> Result<()> {
-    let pack_package = get_pack_package(project_path.clone()).await?.clone_value();
-    import_map.insert_singleton_alias("@swc/helpers", pack_package.clone());
-    import_map.insert_singleton_alias("styled-jsx", pack_package.clone());
-    import_map.insert_singleton_alias("react", project_path.clone());
-    import_map.insert_singleton_alias("react-dom", project_path.clone());
-
+    // FIXME: maybe we don't need this
+    // let pack_package = get_pack_package(project_path.clone()).await?.clone_value();
+    // import_map.insert_singleton_alias("@swc/helpers", pack_package.clone());
+    // import_map.insert_singleton_alias("styled-jsx", pack_package.clone());
+    // import_map.insert_singleton_alias("react", project_path.clone());
+    // import_map.insert_singleton_alias("react-dom", project_path.clone());
+    //
     insert_package_alias(
         import_map,
         "@vercel/turbopack-ecmascript-runtime/",
