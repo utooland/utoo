@@ -86,6 +86,11 @@ jobs:
           override: true
           target: ${{ matrix.target }}
 
+      - name: Add SSH private keys for submodule repositories
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: |
+            ${{ secrets.CI_SUBMODULE }}
       - name: Init git submodules
         run: git submodule update --init --recursive
 
