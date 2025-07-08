@@ -167,7 +167,7 @@ export interface ConfigComplete {
         };
     inlineCss?: {
       insert?: string;
-      injectType: string;
+      injectType?: string;
     };
     styledComponents?: boolean | StyledComponentsConfig;
     emotion?: boolean | EmotionConfig;
