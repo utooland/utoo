@@ -78,7 +78,7 @@ jobs:
         with:
           submoduls: false
       - name: Add SSH private keys for submodule repositories
-        uses: webfactory/ssh-agent@v0.8.0
+        uses: webfactory/ssh-agent@v0.7.0
         with:
           ssh-private-key: |
             ${{ secrets.CI_SUBMODULE }}
