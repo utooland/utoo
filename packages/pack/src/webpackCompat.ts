@@ -116,7 +116,13 @@ function compatEntry(webpackEntry: WebpackConfig["entry"]) {
                     break;
                 }
               } else {
-                throw "multi entry items for one entry not supported yet";
+                if (v.length === 0) {
+                  throw "multi entry items is empty";
+                } else if (v.length === 1) {
+                  entry.push({ name: k, import: v[0] });
+                } else {
+                  throw "multi entry items for one entry not supported yet";
+                }
               }
               break;
             default:
