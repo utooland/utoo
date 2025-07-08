@@ -11,44 +11,44 @@ jobs:
     outputs:
       changed-crates: ${{ steps.detect.outputs.changed-crates }}
     steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Init git submodules
-      run: git submodule update --init --recursive
+      - name: Init git submodules
+        run: git submodule update --init --recursive
 
-    - name: Detect changes
-      id: detect
-      shell: bash
-      run: |
-        CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
-        echo "Changed files:"
-        echo "$CHANGED_FILES"
+      - name: Detect changes
+        id: detect
+        shell: bash
+        run: |
+          CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
 
-        CHANGED_CRATES=""
-        while IFS= read -r file; do
-          echo "Processing file: $file"
-          if [[ $file =~ ^crates/([^/]+)/ ]]; then
-            CRATE_DIR="${BASH_REMATCH[1]}"
-            echo "Found crate directory: $CRATE_DIR"
-            if [ -f "crates/$CRATE_DIR/Cargo.toml" ]; then
-              echo "Found Cargo.toml for $CRATE_DIR"
-              PACKAGE_NAME=$(grep -m 1 '^name = ' "crates/$CRATE_DIR/Cargo.toml" | sed 's/name = "\(.*\)"/\1/')
-              echo "Package name: $PACKAGE_NAME"
-              if [ -n "$PACKAGE_NAME" ]; then
-                CHANGED_CRATES="$CHANGED_CRATES $PACKAGE_NAME"
-                echo "Added to changed crates: $PACKAGE_NAME"
+          CHANGED_CRATES=""
+          while IFS= read -r file; do
+            echo "Processing file: $file"
+            if [[ $file =~ ^crates/([^/]+)/ ]]; then
+              CRATE_DIR="${BASH_REMATCH[1]}"
+              echo "Found crate directory: $CRATE_DIR"
+              if [ -f "crates/$CRATE_DIR/Cargo.toml" ]; then
+                echo "Found Cargo.toml for $CRATE_DIR"
+                PACKAGE_NAME=$(grep -m 1 '^name = ' "crates/$CRATE_DIR/Cargo.toml" | sed 's/name = "\(.*\)"/\1/')
+                echo "Package name: $PACKAGE_NAME"
+                if [ -n "$PACKAGE_NAME" ]; then
+                  CHANGED_CRATES="$CHANGED_CRATES $PACKAGE_NAME"
+                  echo "Added to changed crates: $PACKAGE_NAME"
+                fi
+              else
+                echo "No Cargo.toml found for $CRATE_DIR"
               fi
-            else
-              echo "No Cargo.toml found for $CRATE_DIR"
             fi
-          fi
-        done <<< "$CHANGED_FILES"
+          done <<< "$CHANGED_FILES"
 
-        CHANGED_CRATES=$(echo $CHANGED_CRATES | tr ' ' '\n' | sort -u | tr '\n' ' ')
-        echo "Final changed crates: $CHANGED_CRATES"
-        echo "changed-crates=$CHANGED_CRATES" >> $GITHUB_OUTPUT
+          CHANGED_CRATES=$(echo $CHANGED_CRATES | tr ' ' '\n' | sort -u | tr '\n' ' ')
+          echo "Final changed crates: $CHANGED_CRATES"
+          echo "changed-crates=$CHANGED_CRATES" >> $GITHUB_OUTPUT
 
   build:
     needs: detect-changes
@@ -56,75 +56,74 @@ jobs:
     runs-on: macos-latest
 
     steps:
-    - uses: actions/checkout@v4
-      with:
-        submoduls: false
-    
-    - name: Add SSH private keys for submodule repositories
-      uses: webfactory/ssh-agent@v0.8.0
-      with:
-        ssh-private-key: |
-          ${{ secrets.CI_SUBMODULE }}
+      - uses: actions/checkout@v4
+        with:
+          submoduls: false
 
-    - name: Init git submodules
-      run: git submodule update --init --recursive
+      - name: Add SSH private keys for submodule repositories
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: |
+            ${{ secrets.CI_SUBMODULE }}
 
-    - name: Cache Cargo dependencies
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Init git submodules
+        run: git submodule update --init --recursive
 
-    - name: Install Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: nightly-2025-06-05
-        override: true
-        components: rustfmt, clippy
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-    - name: Check formatting
-      uses: actions-rs/cargo@v1
-      with:
-        command: fmt
-        toolchain: nightly-2025-06-05
-        args: --all -- --check
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly-2025-06-05
+          override: true
+          components: rustfmt, clippy
 
-    - name: Lint changed Rust Code
-      run: |
-        for crate in ${{ needs.detect-changes.outputs.changed-crates }}; do
-          echo "Building crate: $crate"
-          if [ "$crate" == "utoo_runtime" ]; then
-            cd crates/runtime && cargo build
-          else
-            cargo clippy -p $crate
-          fi
-        done
-      
+      - name: Check formatting
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          toolchain: nightly-2025-06-05
+          args: --all -- --check
 
-    - name: Build changed crates
-      run: |
-        for crate in ${{ needs.detect-changes.outputs.changed-crates }}; do
-          echo "Building crate: $crate"
-          if [ "$crate" == "utoo_runtime" ]; then
-            cd crates/runtime && cargo build
-          else
-            cargo build -p $crate
-          fi
-        done
+      - name: Lint changed Rust Code
+        run: |
+          for crate in ${{ needs.detect-changes.outputs.changed-crates }}; do
+            echo "Building crate: $crate"
+            if [ "$crate" == "utoo_runtime" ]; then
+              cd crates/runtime && cargo build
+            else
+              cargo clippy -p $crate
+            fi
+          done
 
-    - name: Test changed crates
-      run: |
-        for crate in ${{ needs.detect-changes.outputs.changed-crates }}; do
-          echo "Testing crate: $crate"
-          if [ "$crate" == "utoo_runtime" ]; then
-            cd crates/runtime && cargo test
-          else
-            cargo test -p $crate
-          fi
-        done
+      - name: Build changed crates
+        run: |
+          for crate in ${{ needs.detect-changes.outputs.changed-crates }}; do
+            echo "Building crate: $crate"
+            if [ "$crate" == "utoo_runtime" ]; then
+              cd crates/runtime && cargo build
+            else
+              cargo build -p $crate
+            fi
+          done
+
+      - name: Test changed crates
+        run: |
+          for crate in ${{ needs.detect-changes.outputs.changed-crates }}; do
+            echo "Testing crate: $crate"
+            if [ "$crate" == "utoo_runtime" ]; then
+              cd crates/runtime && cargo test
+            else
+              cargo test -p $crate
+            fi
+          done
