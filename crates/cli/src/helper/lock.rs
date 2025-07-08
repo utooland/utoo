@@ -438,8 +438,8 @@ pub async fn validate_deps(
                                     "Package {pkg_path} {dep_field} dependency {dep_name} (required version: {req_version_str}, effective version: {effective_req_version}) does not match actual version {current_path}@{actual_version}"
                                 ));
                                 invalid_deps.push(InvalidDependency {
-                                    package_path: pkg_path.clone(),
-                                    dependency_name: dep_name.clone(),
+                                    package_path: pkg_path.to_string(),
+                                    dependency_name: dep_name.to_string(),
                                 });
                             }
                         } else if !is_optional {
@@ -447,8 +447,8 @@ pub async fn validate_deps(
                                 "pkg_path {pkg_path} dep_field {dep_field} dep_name {dep_name} not found"
                             ));
                             invalid_deps.push(InvalidDependency {
-                                package_path: pkg_path.clone(),
-                                dependency_name: dep_name.clone(),
+                                package_path: pkg_path.to_string(),
+                                dependency_name: dep_name.to_string(),
                             });
                         }
                     }

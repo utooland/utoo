@@ -6,6 +6,7 @@ use cmd::deps::build_deps;
 use cmd::execute::execute;
 use cmd::install::{install, install_global_package, update_package};
 use cmd::rebuild::rebuild;
+use cmd::run::run;
 use cmd::update::update;
 use cmd::{clean::clean, deps::build_workspace};
 use helper::auto_update::init_auto_update;
@@ -55,6 +56,10 @@ struct Cli {
     /// Workspace to operate in
     #[arg(short, long, global = true, hide = true)]
     workspace: Option<String>,
+
+    /// Workspace to operate in
+    #[arg(short, long, global = true, hide = true, default_value = "false")]
+    workspaces: bool,
 
     script_name: Option<String>,
 }
@@ -136,6 +141,10 @@ enum Commands {
         /// Workspace to run script in
         #[arg(short, long)]
         workspace: Option<String>,
+
+        /// Run script in all workspaces with topological ordering
+        #[arg(long)]
+        workspaces: bool,
     },
 
     /// Execute packages similar to npx
@@ -293,11 +302,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 process::exit(1);
             }
         }
-        Some(Commands::Run { script, workspace }) => {
+        Some(Commands::Run {
+            script,
+            workspace,
+            workspaces,
+        }) => {
             let args = std::env::args().skip(2).collect::<Vec<String>>();
             let script_args = parse_script_and_args(&args);
-            let workspace = workspace.as_deref();
-            if let Err(e) = cmd::run::run_script(&script, workspace, script_args).await {
+            let script_args_owned = script_args.map(|args| {
+                args.into_iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<String>>()
+            });
+
+            if let Err(e) = run(&script, workspace.as_deref(), workspaces, script_args_owned).await
+            {
                 log_error(&e.to_string());
                 let _ = write_verbose_logs_to_file();
                 process::exit(1);
@@ -308,8 +327,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(script_name) = std::env::args().nth(1) {
                 let args = std::env::args().skip(1).collect::<Vec<String>>();
                 let script_args = parse_script_and_args(&args);
-                let workspace = cli.workspace.as_deref();
-                if let Err(e) = cmd::run::run_script(&script_name, workspace, script_args).await {
+                let script_args_owned = script_args.map(|args| {
+                    args.into_iter()
+                        .map(|s| s.to_string())
+                        .collect::<Vec<String>>()
+                });
+
+                if let Err(e) = run(
+                    &script_name,
+                    cli.workspace.as_deref(),
+                    cli.workspaces,
+                    script_args_owned,
+                )
+                .await
+                {
                     log_error(&e.to_string());
                     let _ = write_verbose_logs_to_file();
                     process::exit(1);

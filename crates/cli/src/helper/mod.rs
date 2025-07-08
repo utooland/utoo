@@ -1,6 +1,7 @@
 pub mod auto_update;
 pub mod cli;
 pub mod compatibility;
+pub mod deps;
 pub mod install_runtime;
 pub mod lock;
 pub mod package;
