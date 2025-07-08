@@ -1,7 +1,7 @@
 use crate::util::binary_resolver;
 use crate::util::logger::{log_error, log_info, log_verbose};
 use crate::util::package_installer;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::path::Path;
 use std::process::{Command, Stdio};
 

@@ -3,7 +3,7 @@ use crate::helper::package::parse_package_name;
 use crate::model::package::{PackageInfo, Scripts};
 use crate::util::json::{load_package_json_from_path, load_package_lock_json_from_path};
 use crate::util::logger::{
-    finish_progress_bar, log_info, log_progress, log_verbose, start_progress_bar, PROGRESS_BAR,
+    PROGRESS_BAR, finish_progress_bar, log_info, log_progress, log_verbose, start_progress_bar,
 };
 use anyhow::{Context, Result};
 use serde_json::Value;

@@ -2,7 +2,7 @@ use clap::Parser;
 use std::process;
 use utoo_cli::{
     cmd::rebuild::rebuild,
-    constants::{cmd::REBUILD_ABOUT, APP_VERSION},
+    constants::{APP_VERSION, cmd::REBUILD_ABOUT},
     util::logger::{log_error, log_info, write_verbose_logs_to_file},
 };
 

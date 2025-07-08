@@ -1,4 +1,4 @@
-use crate::helper::deps::{compute_topological_layers, Edge, Node};
+use crate::helper::deps::{Edge, Node, compute_topological_layers};
 use crate::helper::package::parse_package_name;
 use crate::helper::ruborist::Ruborist;
 use crate::helper::workspace::{find_workspace_path, update_cwd_to_project};
@@ -153,10 +153,11 @@ async fn get_topo(cwd: &std::path::Path) -> Result<Vec<Vec<String>>> {
         for child in ideal_tree.children.read().unwrap().iter() {
             for edge in child.edges_out.read().unwrap().iter() {
                 if *edge.valid.read().unwrap()
-                    && let Some(to_node) = edge.to.read().unwrap().as_ref() {
-                        // Create Edge: from=dependency, to=dependent
-                        edges.push(Edge::new(edge.from.name.clone(), to_node.name.clone()));
-                    }
+                    && let Some(to_node) = edge.to.read().unwrap().as_ref()
+                {
+                    // Create Edge: from=dependency, to=dependent
+                    edges.push(Edge::new(edge.from.name.clone(), to_node.name.clone()));
+                }
             }
         }
 
@@ -176,9 +177,7 @@ async fn need_run(workspace_name: &str, script_name: &str) -> Result<bool> {
     let workspace_dir = match find_workspace_path(&cwd, workspace_name).await {
         Ok(path) => path,
         Err(_) => {
-            log_info(&format!(
-                "Workspace '{workspace_name}' not found, skipping"
-            ));
+            log_info(&format!("Workspace '{workspace_name}' not found, skipping"));
             return Ok(false);
         }
     };
@@ -367,10 +366,12 @@ mod tests {
         let result = run_script("nonexistent", None, None).await;
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Script 'nonexistent' not found"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Script 'nonexistent' not found")
+        );
     }
 
     #[tokio::test]

@@ -1,6 +1,6 @@
+use petgraph::Graph;
 use petgraph::algo::{is_cyclic_directed, toposort};
 use petgraph::prelude::*;
-use petgraph::Graph;
 use std::collections::HashMap;
 
 use crate::util::logger::log_warning;

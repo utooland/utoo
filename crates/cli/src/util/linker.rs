@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::{env, fs};

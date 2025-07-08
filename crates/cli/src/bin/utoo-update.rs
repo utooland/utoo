@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Parser;
 use utoo_cli::{
     cmd::update::update,
-    constants::{cmd::UPDATE_ABOUT, APP_VERSION},
+    constants::{APP_VERSION, cmd::UPDATE_ABOUT},
     util::logger::{log_error, write_verbose_logs_to_file},
 };
 

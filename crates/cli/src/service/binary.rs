@@ -321,10 +321,12 @@ mod tests {
         assert_eq!(pkg["binary"]["existing"].as_str(), Some("value"));
         assert_eq!(pkg["binary"]["host"].as_str(), Some("https://example.com"));
         assert_eq!(pkg["binary"]["newKey"].as_str(), Some("newValue"));
-        assert!(!pkg["binary"]
-            .as_object()
-            .unwrap()
-            .contains_key("replaceHostFiles"));
+        assert!(
+            !pkg["binary"]
+                .as_object()
+                .unwrap()
+                .contains_key("replaceHostFiles")
+        );
     }
 
     #[tokio::test]

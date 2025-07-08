@@ -8,7 +8,7 @@ use tokio::sync::Semaphore;
 use crate::cmd::rebuild::rebuild;
 use crate::helper::lock::update_package_json;
 use crate::helper::lock::{
-    ensure_package_lock, group_by_depth, prepare_global_package_json, PackageLock,
+    PackageLock, ensure_package_lock, group_by_depth, prepare_global_package_json,
 };
 use crate::helper::workspace::update_cwd_to_root;
 use crate::model::package::PackageInfo;
@@ -17,7 +17,7 @@ use crate::util::cache::get_cache_dir;
 use crate::util::logger::finish_progress_bar;
 use crate::util::logger::log_verbose;
 use crate::util::logger::start_progress_bar;
-use crate::util::logger::{log_info, PROGRESS_BAR};
+use crate::util::logger::{PROGRESS_BAR, log_info};
 use crate::util::save_type::PackageAction;
 use crate::util::save_type::SaveType;
 

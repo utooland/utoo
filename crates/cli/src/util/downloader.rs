@@ -5,7 +5,7 @@ use reqwest::StatusCode;
 use std::{fs::Permissions, os::unix::fs::PermissionsExt, path::Path};
 use tar::Archive as TarArchive;
 use tokio::{
-    fs::{set_permissions, File},
+    fs::{File, set_permissions},
     io::BufReader,
 };
 use tokio_retry::RetryIf;
