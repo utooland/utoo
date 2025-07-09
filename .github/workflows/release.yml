@@ -77,6 +77,8 @@ jobs:
           VERSION=${{ steps.get_version.outputs.VERSION }}
           sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" crates/cli/Cargo.toml
           rm crates/cli/Cargo.toml.bak
+          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" crates/core/Cargo.toml
+          rm crates/core/Cargo.toml.bak
 
       - name: Install Rust
         uses: actions-rs/toolchain@v1
