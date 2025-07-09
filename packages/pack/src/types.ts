@@ -122,6 +122,7 @@ export interface ConfigComplete {
   };
   target?: string;
   sourceMaps?: boolean;
+  define?: Record<string, string>;
   optimization?: {
     moduleIds?: "named" | "deterministic";
     minify?: boolean;
@@ -150,25 +151,25 @@ export interface ConfigComplete {
           exclude?: string[];
         };
   };
-  define?: Record<string, string>;
   styles?: {
+    less?: {
+      implementation?: string;
+      [key: string]: any;
+    };
     sass?: {
       implementation?: string;
       [key: string]: any;
     };
-    less?: {
-      implementation?: string;
-      [key: string]: any;
+    inlineCss?: {
+      insert?: string;
+      injectType?: string;
     };
     styledJsx?:
       | boolean
       | {
           useLightningcss?: boolean;
         };
-    inlineCss?: {
-      insert?: string;
-      injectType?: string;
-    };
+
     styledComponents?: boolean | StyledComponentsConfig;
     emotion?: boolean | EmotionConfig;
   };

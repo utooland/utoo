@@ -15,17 +15,6 @@
   ],
   "featuresStatusList": [
     {
-      "featureLevel1": "Mode",
-      "children": [
-        {
-          "featureLevel2": "`mode`",
-          "featureStatus": "✅",
-          "featureDetails": "[Webpack `mode` configuration](https://webpack.js.org/configuration/mode/#root)",
-          "remarks": ""
-        }
-      ]
-    },
-    {
       "featureLevel1": "Entry",
       "children": [
         {
@@ -45,6 +34,17 @@
           "featureStatus": "✅",
           "featureDetails": "[Webpack `output.library`](https://webpack.js.org/configuration/output/#outputlibrary)",
           "remarks": "Supports UMD (root, export) and `dynamicImportToRequire`"
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Mode",
+      "children": [
+        {
+          "featureLevel2": "`mode`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `mode` configuration](https://webpack.js.org/configuration/mode/#root)",
+          "remarks": ""
         }
       ]
     },
@@ -77,34 +77,12 @@
       ]
     },
     {
-      "featureLevel1": "Define",
-      "children": [
-        {
-          "featureLevel2": "",
-          "featureStatus": "✅",
-          "featureDetails": "[Webpack `DefinePlugin`](https://webpack.js.org/plugins/define-plugin/)",
-          "remarks": ""
-        }
-      ]
-    },
-    {
       "featureLevel1": "Externals",
       "children": [
         {
           "featureLevel2": "",
-          "featureStatus": "🟠",
-          "featureDetails": "[Webpack `externals` configuration](https://webpack.js.org/configuration/externals/#root)",
-          "remarks": ""
-        }
-      ]
-    },
-    {
-      "featureLevel1": "Providers",
-      "children": [
-        {
-          "featureLevel2": "",
           "featureStatus": "✅",
-          "featureDetails": "[Webpack `ProvidePlugin`](https://webpack.js.org/plugins/provide-plugin/#root)",
+          "featureDetails": "[Webpack `externals` configuration](https://webpack.js.org/configuration/externals/#root)",
           "remarks": ""
         }
       ]
@@ -128,6 +106,18 @@
           "featureLevel2": "`clean`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `output.clean`](https://webpack.js.org/configuration/output/#outputclean)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`filename`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `output.filename`](https://webpack.js.org/configuration/output/#outputfilename)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`chunkFilename`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `output.filename`](https://webpack.js.org/configuration/output/#outputchunkfilename)",
           "remarks": ""
         },
         {
@@ -167,6 +157,30 @@
       ]
     },
     {
+      "featureLevel1": "Define",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `DefinePlugin`](https://webpack.js.org/plugins/define-plugin/)",
+          "remarks": ""
+        }
+      ]
+    },
+
+    {
+      "featureLevel1": "Providers",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "🟠",
+          "featureDetails": "[Webpack `ProvidePlugin`](https://webpack.js.org/plugins/provide-plugin/#root)",
+          "remarks": ""
+        }
+      ]
+    },
+
+    {
       "featureLevel1": "Optimization",
       "children": [
         {
@@ -182,6 +196,12 @@
           "remarks": ""
         },
         {
+          "featureLevel2": "`treeShaking`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `tree-shaking` guide](https://webpack.js.org/guides/tree-shaking/#root)",
+          "remarks": "Includes `packageImports`"
+        },
+        {
           "featureLevel2": "`splitChunks`",
           "featureStatus": "🟠",
           "featureDetails": "[Turbopack chunking config](https://github.com/vercel/next.js/blob/c3429682aa910eb2b5ddd1e761c8ec8cfaa4bb04/turbopack/crates/turbopack-core/src/chunk/chunking_context.rs#L114)",
@@ -189,15 +209,27 @@
         },
 
         {
-          "featureLevel2": "`treeShaking`",
-          "featureStatus": "✅",
-          "featureDetails": "[Webpack `tree-shaking` guide](https://webpack.js.org/guides/tree-shaking/#root)",
-          "remarks": "Includes `packageImports`"
-        },
-        {
           "featureLevel2": "`modularizeImports`",
           "featureStatus": "✅",
           "featureDetails": "[UmiJS `babel-plugin-import`](https://github.com/umijs/babel-plugin-import)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`packageImports`",
+          "featureStatus": "✅",
+          "featureDetails": "[Next.js `optimizePackageImports`](https://nextjs.org/docs/app/api-reference/config/next-config-js/optimizePackageImports)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`transpilePackages`",
+          "featureStatus": "✅",
+          "featureDetails": "[Next.js `transpilePackages`](https://nextjs.org/docs/app/api-reference/config/next-config-js/transpilePackages)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`removeConsole`",
+          "featureStatus": "✅",
+          "featureDetails": "[terser `drop_console`](https://github.com/terser/terser/blob/da1e6fb2acd90e62bac69967718b89d6f00aab79/README.md?plain=1#L734)",
           "remarks": ""
         }
       ]
@@ -244,7 +276,7 @@
         {
           "featureLevel2": "`css parse, transform, minify`",
           "featureStatus": "✅",
-          "featureDetails": "",
+          "featureDetails": "[With lightningcss](https://lightningcss.dev/)",
           "remarks": ""
         },
         {
@@ -277,7 +309,7 @@
       "children": [
         {
           "featureLevel2": "",
-          "featureStatus": "✅",
+          "featureStatus": "❓",
           "featureDetails": "[MDX.js](https://www.mdxjs.cn/)",
           "remarks": ""
         }
@@ -345,6 +377,50 @@
       ]
     },
     {
+      "featureLevel1": "HMR",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "✅",
+          "featureDetails": "",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Dev Server",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "✅",
+          "featureDetails": "",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Lazy Compiling",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "🟠",
+          "featureDetails": "",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Webpack partitially compatible mode",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack compat example](https://github.com/umijs/mako/tree/next/examples/webpack-compat)",
+          "remarks": "Made it easy to migrate from webpack-based projects"
+        }
+      ]
+    },
+    {
       "featureLevel1": "CSR",
       "children": [
         {
@@ -377,17 +453,7 @@
         }
       ]
     },
-    {
-      "featureLevel1": "PPR",
-      "children": [
-        {
-          "featureLevel2": "",
-          "featureStatus": "❓",
-          "featureDetails": "",
-          "remarks": ""
-        }
-      ]
-    },
+
     {
       "featureLevel1": "Server Action",
       "children": [
@@ -410,39 +476,7 @@
         }
       ]
     },
-    {
-      "featureLevel1": "HMR",
-      "children": [
-        {
-          "featureLevel2": "",
-          "featureStatus": "🟠",
-          "featureDetails": "",
-          "remarks": ""
-        }
-      ]
-    },
-    {
-      "featureLevel1": "Dev Server",
-      "children": [
-        {
-          "featureLevel2": "",
-          "featureStatus": "🟠",
-          "featureDetails": "",
-          "remarks": ""
-        }
-      ]
-    },
-    {
-      "featureLevel1": "Lazy Compiling",
-      "children": [
-        {
-          "featureLevel2": "",
-          "featureStatus": "🟠",
-          "featureDetails": "",
-          "remarks": ""
-        }
-      ]
-    },
+
     {
       "featureLevel1": "Persistent Caching",
       "children": [
