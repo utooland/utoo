@@ -1,8 +1,0 @@
-{
-  "entry": {
-    "index": "index.js"
-  },
-  "moduleIdStrategy": "named",
-  "chunkLoadingGlobal": "require-context",
-  "platform":"node"
-}

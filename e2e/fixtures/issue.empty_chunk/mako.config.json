@@ -1,8 +1,0 @@
-{
-  "minify": true,
-  "mode": "production",
-  "targets": {
-    "ie": 11
-  },
-  "devtool":false
-}

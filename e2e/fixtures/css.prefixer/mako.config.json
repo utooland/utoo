@@ -1,6 +1,0 @@
-{
-  "minify": false,
-  "targets": {
-    "ie": "10"
-  }
-}

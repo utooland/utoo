@@ -1,9 +1,0 @@
-/* support non ./ prefix relative dep */
-@import "bar.css";
-@import "./foo.css";
-@import "http://should-keep";
-@import "https://should-keep";
-@import "//should-keep";
-
-.foo-image { background: url("foo.png"); }
-.bar-image { background: url("./bar.png"); }

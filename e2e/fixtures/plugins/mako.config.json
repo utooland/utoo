@@ -1,7 +1,0 @@
-{
-  "plugins": [
-    "./plugin",
-    "plugin"
-  ],
-  "minify": false
-}

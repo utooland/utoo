@@ -1,5 +1,0 @@
-{
-  "minify": false,
-  "platform": "node",
-  "cjs": true
-}

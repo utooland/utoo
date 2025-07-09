@@ -1,8 +1,0 @@
-@import url(//a.com/a.css);
-@import url(http://b.com/b.css);
-@import url(https://c.com/c.css);
-@import url(HTTPS://d.com/d.css);
-
-.foo {
-  color: red;
-}

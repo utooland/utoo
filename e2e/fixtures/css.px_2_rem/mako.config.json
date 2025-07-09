@@ -1,7 +1,0 @@
-{
-  "minify": false,
-  "px2rem": {
-    "mediaQuery": false
-  },
-  "devtool": false
-}

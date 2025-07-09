@@ -1,8 +1,0 @@
-{
-  "minify": false,
-  "experimental": {
-    "webpackSyntaxValidate": [
-      "foo"
-    ]
-  }
-}

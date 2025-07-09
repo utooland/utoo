@@ -1,6 +1,0 @@
-{
-  "inlineLimit": 10000,
-  "optimization": {
-    "concatenateModules": false
-  }
-}

@@ -1,9 +1,0 @@
-{
-  "dependencies": {
-    "react": "18.2.0",
-    "react-dom": "18.2.0"
-  },
-  "devDependencies": {
-    "postcss-px-to-viewport-8-plugin": "^1.2.5"
-  }
-}

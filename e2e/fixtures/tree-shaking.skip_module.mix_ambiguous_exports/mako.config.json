@@ -1,6 +1,0 @@
-{
-  "optimizePackageImports": false,
-  "optimization": {
-    "skipModules": true
-  }
-}

@@ -1,8 +1,0 @@
-{
-  "codeSplitting": {
-    "strategy": "auto"
-  },
-  "experimental": {
-    "magicComment": true
-  }
-}

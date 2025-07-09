@@ -1,9 +1,0 @@
-{
-  "analyze": {},
-  "externals": {},
-  "_treeShaking": "basic",
-  "minify": true,
-  "moduleIdStrategy": "named",
-  "optimizePackageImports": false,
-  "optimization": { "skipModules": true, "concatenateModules": true }
-}

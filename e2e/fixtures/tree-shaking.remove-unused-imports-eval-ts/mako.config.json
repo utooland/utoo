@@ -1,9 +1,0 @@
-{
-  "minify": false,
-  "externals": {
-    "a": "a",
-    "b": "b",
-    "c": "c",
-    "d": "d"
-  }
-}

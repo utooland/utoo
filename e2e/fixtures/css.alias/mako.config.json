@@ -1,7 +1,0 @@
-{
-  "resolve": {
-    "alias": [
-      ["@css", "./src/css"]
-    ]
-  }
-}

@@ -1,4 +1,0 @@
-{
-  "mdx": true,
-  "optimization": { "skipModules": false, "concatenateModules": false }
-}

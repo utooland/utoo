@@ -1,6 +1,0 @@
-<root>
-    <foo a="b">value1</foo>
-    <bar>
-        <baz>value2</baz>
-    </bar>
-</root>

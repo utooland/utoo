@@ -1,9 +1,0 @@
-{
-  "copy": [
-    "src/assets",
-    {
-      "from": "src/assets",
-      "to": "assets-from-to"
-    }
-  ]
-}

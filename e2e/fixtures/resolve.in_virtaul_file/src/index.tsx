@@ -1,2 +1,0 @@
-
-import "virtual:entry"

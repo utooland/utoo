@@ -1,9 +1,0 @@
-{
-  "minify": false,
-  "externals": {
-    "react": "React"
-  },
-  "react": {
-    "runtime": "classic"
-  }
-}

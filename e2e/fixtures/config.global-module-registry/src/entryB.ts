@@ -1,2 +1,0 @@
-export { common } from "./common";
-

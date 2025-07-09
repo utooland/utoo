@@ -1,8 +1,0 @@
-{
-  "resolve": {
-    "alias": [
-      ["@", "./src"]
-    ]
-  },
-  "progress":false
-}

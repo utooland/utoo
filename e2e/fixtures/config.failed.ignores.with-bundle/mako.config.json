@@ -1,4 +1,0 @@
-{
-  "ignores": ["^antd$"],
-  "minify": false
-}

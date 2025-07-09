@@ -1,6 +1,0 @@
-{
-  "publicPath": "/foooooo/",
-  "mode": "production",
-  "minify": false,
-  "hmr": false
-}

@@ -1,8 +1,0 @@
-@import "./foo.css";
-/* @import url("https://fonts.googleapis.com/css?family=Open+Sans"); */
-
-h1 {
-    background: url('./assets/person.svg') 200px no-repeat;
-    background-size: 20px 20px;
-    font-family: 'Open Sans';
-}

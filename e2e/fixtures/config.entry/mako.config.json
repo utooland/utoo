@@ -1,9 +1,0 @@
-{
-  "minify": false,
-  "entry": {
-    "foo": "src/foo.ts",
-    "hoo/hoo": "src/hoo.ts",
-    "soo": "src/soo",
-    "yoo": "src/yoo"
-  }
-}

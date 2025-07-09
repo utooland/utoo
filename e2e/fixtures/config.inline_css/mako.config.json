@@ -1,8 +1,0 @@
-{
-  "minify": false,
-  "inlineCSS": {},
-  "umd": "fooo",
-  "optimization": {
-    "concatenateModules": false
-  }
-}

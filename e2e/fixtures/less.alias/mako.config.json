@@ -1,8 +1,0 @@
-{
-  "resolve": {
-    "alias": [
-      ["aliased-bar", "./src/bar"],
-      ["aliased-foo", "./src/foo.less"]
-    ]
-  }
-}
