@@ -1,3 +1,7 @@
+> ⚠️ Notice: we are working on making a better bundler on top of Turbopack, see <https://github.com/umijs/mako/issues/1872>.
+>
+> If you encountered some critical problems when using current Mako, you can report issues at [Mako 0.x Feedback in discussions](https://github.com/umijs/mako/discussions/categories/mako-0-x-feedback).
+
 <div align="center">
 <img src="https://mdn.alipayobjects.com/huamei_botco4/afts/img/357RTIva8S8AAAAAAAAAAAAADnNMAQFr/original" alt="Utoo Logo" width="200"/>
 <h4> 🌖 /juːtuː/ Unified Toolchain </h4>
@@ -7,7 +11,7 @@ Utoo is a modern frontend toolchain that provides a unified command-line interfa
 
 - `ut`: The core toolchain entry point, providing command mounting and configuration management
 - `utoo`: Built-in package manager for dependency resolution and installation
-- `@utoo/pack`: Optional high-performance bundler (requires separate installation)
+- `@utoo/pack`: High-performance bundler (requires separate installation)
 
 ## 🚀 Installation
 
@@ -19,13 +23,15 @@ Install the core tools (`ut` and `utoo`) globally:
 npm install -g utoo
 ```
 
-### 🛠️ Bundler (Optional)
+### 🛠️ Bundler
 
 Install the bundler globally if you need build capabilities:
 
 ```bash
 npm install -g @utoo/pack
 ```
+
+You can track features progress at [`@utoo/pack features list`](https://github.com/umijs/mako/blob/next/packages/pack/data/features-list.md)
 
 ## ✨ Features
 
@@ -66,6 +72,7 @@ When you run a command through `ut`, it follows this resolution order:
 3. If no wildcard is configured, default to `utoo`
 
 For example:
+
 ```bash
 # These commands are equivalent if configured as shown above
 ut install
@@ -88,6 +95,7 @@ Command configurations are stored in:
 - Local config: `.utoo.toml` (project root)
 
 Example configuration:
+
 ```toml
 [values]
 "install.cmd" = "utoo install"
@@ -176,6 +184,7 @@ Utoo supports various command hooks that can be used to extend command behavior:
 ### 📦 Package Management Commands
 
 #### 📥 Install Dependencies
+
 ```bash
 # Install project dependencies
 ut install
@@ -201,6 +210,7 @@ ut install <package-name> -g
 ```
 
 #### 🗑️ Uninstall Dependencies
+
 ```bash
 # Uninstall specific package
 ut uninstall <package-name>
@@ -209,6 +219,7 @@ ut un <package-name>
 ```
 
 #### 🔄 Update Dependencies
+
 ```bash
 # Update all dependencies
 ut update
@@ -219,6 +230,7 @@ ut u
 ### 🏗️ Build Commands
 
 #### 🔨 Rebuild Dependencies
+
 ```bash
 # Rebuild all dependencies
 ut rebuild
@@ -227,6 +239,7 @@ ut rb
 ```
 
 #### 🧹 Clean Cache
+
 ```bash
 # Clean all cache
 ut clean
@@ -238,6 +251,7 @@ ut clean "react*"
 ```
 
 #### 📊 Dependency Analysis
+
 ```bash
 # Analyze project dependencies
 ut deps
@@ -253,6 +267,7 @@ ut deps --workspace-only
 Utoo includes a high-performance bundler that supports various build scenarios:
 
 #### 🚀 Basic Usage
+
 ```bash
 # Start development server
 ut dev
@@ -338,7 +353,7 @@ cargo run --bin pack-cli -- --mode build  --project-dir examples/with-antd --roo
 ├── crates/          # Rust core libraries
 │   ├── cli/         # Command line tools
 │   ├── core/        # Core functionality
-│   ├── pack-*       # Build related modules
+│   ├── pack-*       # Bundler related modules
 ├── packages/        # Package management code
 ├── examples/        # Example projects
 └── vendor/          # Third-party dependencies
