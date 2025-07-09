@@ -2,6 +2,8 @@
 >
 > If you encountered some critical problems when using current Mako, you can report issues at [Mako 0.x Feedback in discussions](https://github.com/umijs/mako/discussions/categories/mako-0-x-feedback).
 
+---
+
 <div align="center">
 <img src="https://mdn.alipayobjects.com/huamei_botco4/afts/img/357RTIva8S8AAAAAAAAAAAAADnNMAQFr/original" alt="Utoo Logo" width="200"/>
 <h4> 🌖 /juːtuː/ Unified Toolchain </h4>
