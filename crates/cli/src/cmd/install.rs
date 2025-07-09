@@ -114,7 +114,7 @@ pub async fn install_global_package(npm_spec: &str, prefix: &Option<String>) -> 
     // Prepare global package directory and package.json
     let package_path = prepare_global_package_json(npm_spec, prefix)
         .await
-        .context("Failed to prepare global package.json")?;
+        .map_err(|e| anyhow::anyhow!("Failed to prepare global package.json: {}", e))?;
 
     log_verbose(&format!("Installing global package: {npm_spec}"));
 
