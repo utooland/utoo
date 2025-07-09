@@ -332,19 +332,24 @@ impl AfterResolvePlugin for ExternalsPlugin {
 
                                 // Replace $1, $2, etc. with capture groups
                                 if let Some(captures) = rule_regex.captures(sub_path_str) {
-                                    for (i, capture) in captures.iter().enumerate().skip(1) {
-                                        let placeholder = format!("${i}");
-                                        let capture_value = capture.as_str();
+                                    let mut result = template.to_string();
 
-                                        // Apply target converter to the capture group
-                                        let converted_value = apply_target_converter(
-                                            capture_value,
-                                            rule.target_converter.as_ref(),
-                                        );
+                                    // Iterate directly over captures without collecting into Vec
+                                    for (i, capture) in captures.enumerate().skip(1) {
+                                        if let Some(capture_value) = capture {
+                                            // Apply target converter to the capture group
+                                            let converted_value = apply_target_converter(
+                                                capture_value,
+                                                rule.target_converter.as_ref(),
+                                            );
 
-                                        external_name =
-                                            external_name.replace(&placeholder, &converted_value);
+                                            // Replace placeholder with converted value
+                                            let placeholder = format!("${i}");
+                                            result = result.replace(&placeholder, &converted_value);
+                                        }
                                     }
+
+                                    external_name = result;
                                 }
 
                                 // Build the final external name with package root and transformed sub path
