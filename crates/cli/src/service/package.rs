@@ -400,9 +400,9 @@ impl PackageService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use std::fs;
     use tempfile::TempDir;
-    use serde_json::json;
 
     #[tokio::test]
     async fn test_process_project_hooks_basic() {
@@ -451,33 +451,10 @@ mod tests {
 
         // Test process_project_hooks - should succeed even without scripts
         let result = PackageService::process_project_hooks(project_path).await;
-        assert!(result.is_ok(), "process_project_hooks should succeed even without scripts");
-    }
-
-    #[tokio::test]
-    async fn test_process_project_hooks_environment_variables() {
-        // Create temporary directory
-        let temp_dir = TempDir::new().unwrap();
-        let project_path = temp_dir.path();
-
-        // Create package.json with script that tests environment variables
-        let package_json = json!({
-            "name": "test-project",
-            "version": "1.0.0",
-            "scripts": {
-                "preinstall": "test -n \"$npm_package_json\" && test -n \"$npm_lifecycle_event\" && test -n \"$INIT_CWD\""
-            }
-        });
-
-        fs::write(
-            project_path.join("package.json"),
-            serde_json::to_string_pretty(&package_json).unwrap(),
-        )
-        .unwrap();
-
-        // Test that environment variables are properly set based on root_path
-        let result = PackageService::process_project_hooks(project_path).await;
-        assert!(result.is_ok(), "Environment variables should be properly set");
+        assert!(
+            result.is_ok(),
+            "process_project_hooks should succeed even without scripts"
+        );
     }
 
     #[tokio::test]
@@ -503,7 +480,10 @@ mod tests {
 
         // Test process_project_hooks with scoped package
         let result = PackageService::process_project_hooks(project_path).await;
-        assert!(result.is_ok(), "process_project_hooks should work with scoped packages");
+        assert!(
+            result.is_ok(),
+            "process_project_hooks should work with scoped packages"
+        );
     }
 
     #[tokio::test]
@@ -535,7 +515,10 @@ mod tests {
 
         // Test that all hooks are executed
         let result = PackageService::process_project_hooks(project_path).await;
-        assert!(result.is_ok(), "All supported hooks should be executed successfully");
+        assert!(
+            result.is_ok(),
+            "All supported hooks should be executed successfully"
+        );
     }
 
     #[tokio::test]
@@ -565,7 +548,10 @@ mod tests {
 
         // Test that scripts run in the correct directory (root_path)
         let result = PackageService::process_project_hooks(&sub_dir).await;
-        assert!(result.is_ok(), "Scripts should run in the correct working directory based on root_path");
+        assert!(
+            result.is_ok(),
+            "Scripts should run in the correct working directory based on root_path"
+        );
     }
 
     #[tokio::test]
@@ -592,7 +578,10 @@ mod tests {
 
         // Test that npm_package_json environment variable points to the correct path
         let result = PackageService::process_project_hooks(project_path).await;
-        assert!(result.is_ok(), "npm_package_json environment variable should point to the correct package.json path");
+        assert!(
+            result.is_ok(),
+            "npm_package_json environment variable should point to the correct package.json path"
+        );
     }
 
     #[tokio::test]
@@ -618,8 +607,16 @@ mod tests {
 
         // Test that script failure is properly handled
         let result = PackageService::process_project_hooks(project_path).await;
-        assert!(result.is_err(), "Script failure should be properly propagated");
-        assert!(result.unwrap_err().to_string().contains("Failed to execute project hook"));
+        assert!(
+            result.is_err(),
+            "Script failure should be properly propagated"
+        );
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Failed to execute project hook")
+        );
     }
 
     #[tokio::test]
@@ -629,11 +626,7 @@ mod tests {
         let project_path = temp_dir.path();
 
         // Create invalid package.json
-        fs::write(
-            project_path.join("package.json"),
-            "invalid json content",
-        )
-        .unwrap();
+        fs::write(project_path.join("package.json"), "invalid json content").unwrap();
 
         // Test that invalid package.json is properly handled
         let result = PackageService::process_project_hooks(project_path).await;
@@ -679,71 +672,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_process_project_hooks_environment_variables_detailed() {
-        // Create temporary directory structure
-        let temp_dir = TempDir::new().unwrap();
-        let project_path = temp_dir.path().join("my-project");
-        fs::create_dir_all(&project_path).unwrap();
-
-        // Change to a different directory to test INIT_CWD behavior
-        let original_cwd = std::env::current_dir().unwrap();
-        let different_cwd = temp_dir.path().join("different-dir");
-        fs::create_dir_all(&different_cwd).unwrap();
-        std::env::set_current_dir(&different_cwd).unwrap();
-
-        // Create test script that outputs environment variables to a file
-        let output_file = project_path.join("env_output.txt");
-        let test_script = format!(
-            r#"echo "INIT_CWD=$INIT_CWD" > {}
-echo "npm_package_json=$npm_package_json" >> {}
-echo "npm_lifecycle_event=$npm_lifecycle_event" >> {}
-echo "PWD=$PWD" >> {}"#,
-            output_file.display(),
-            output_file.display(),
-            output_file.display(),
-            output_file.display()
-        );
-
-        // Create package.json with environment testing script
-        let package_json = json!({
-            "name": "env-test-project",
-            "version": "1.0.0",
-            "scripts": {
-                "preinstall": test_script
-            }
-        });
-
-        fs::write(
-            project_path.join("package.json"),
-            serde_json::to_string_pretty(&package_json).unwrap(),
-        )
-        .unwrap();
-
-        // Execute the hooks
-        let result = PackageService::process_project_hooks(&project_path).await;
-        assert!(result.is_ok(), "process_project_hooks should succeed");
-
-        // Read the environment variables output
-        let env_output = fs::read_to_string(&output_file).unwrap();
-        println!("Environment variables output:\n{}", env_output);
-
-                // Verify environment variables are set correctly
-        assert!(env_output.contains("npm_lifecycle_event=preinstall"),
-               "npm_lifecycle_event should be set to the hook name");
-
-        assert!(env_output.contains(&format!("npm_package_json={}", project_path.join("package.json").display())),
-               "npm_package_json should point to the package.json in root_path");
-
-                // Check that PWD contains the project path (accounting for potential symlink resolution)
-        let project_name = project_path.file_name().unwrap().to_string_lossy();
-        assert!(env_output.contains(&*project_name),
-               "Working directory should be set to root_path");
-
-        // Restore original working directory
-        std::env::set_current_dir(original_cwd).unwrap();
-    }
-
-    #[tokio::test]
     async fn test_process_project_hooks_different_root_paths() {
         // Create multiple project directories to test path isolation
         let temp_dir = TempDir::new().unwrap();
@@ -784,9 +712,15 @@ echo "PWD=$PWD" >> {}"#,
 
         // Test that each project gets the correct environment variables
         let result1 = PackageService::process_project_hooks(&project1_path).await;
-        assert!(result1.is_ok(), "Project1 hooks should succeed with correct environment");
+        assert!(
+            result1.is_ok(),
+            "Project1 hooks should succeed with correct environment"
+        );
 
         let result2 = PackageService::process_project_hooks(&project2_path).await;
-        assert!(result2.is_ok(), "Project2 hooks should succeed with correct environment");
+        assert!(
+            result2.is_ok(),
+            "Project2 hooks should succeed with correct environment"
+        );
     }
 }

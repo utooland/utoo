@@ -49,7 +49,6 @@ pub async fn update_packages(
         .await
         .context("Failed to update package.json")?;
 
-
     // 3. Rebuild Deps
     build_deps(&root_path)
         .await
