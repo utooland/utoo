@@ -41,7 +41,7 @@ impl PackageService {
         ));
 
         let package_info = PackageInfo {
-            path: PathBuf::from("."),
+            path: root_path.to_path_buf(),
             bin_files: Vec::new(),
             scripts: Scripts {
                 preinstall: scripts
@@ -394,5 +394,333 @@ impl PackageService {
 
         finish_progress_bar("Executing dependency hook scripts successfully");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn test_process_project_hooks_basic() {
+        // Create temporary directory
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path();
+
+        // Create package.json with basic project hooks
+        let package_json = json!({
+            "name": "test-project",
+            "version": "1.0.0",
+            "scripts": {
+                "preinstall": "echo 'Running preinstall hook'",
+                "postinstall": "echo 'Running postinstall hook'"
+            }
+        });
+
+        fs::write(
+            project_path.join("package.json"),
+            serde_json::to_string_pretty(&package_json).unwrap(),
+        )
+        .unwrap();
+
+        // Test process_project_hooks
+        let result = PackageService::process_project_hooks(project_path).await;
+        assert!(result.is_ok(), "process_project_hooks should succeed");
+    }
+
+    #[tokio::test]
+    async fn test_process_project_hooks_no_scripts() {
+        // Create temporary directory
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path();
+
+        // Create package.json without scripts
+        let package_json = json!({
+            "name": "test-project",
+            "version": "1.0.0"
+        });
+
+        fs::write(
+            project_path.join("package.json"),
+            serde_json::to_string_pretty(&package_json).unwrap(),
+        )
+        .unwrap();
+
+        // Test process_project_hooks - should succeed even without scripts
+        let result = PackageService::process_project_hooks(project_path).await;
+        assert!(
+            result.is_ok(),
+            "process_project_hooks should succeed even without scripts"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_project_hooks_with_scoped_package() {
+        // Create temporary directory
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path();
+
+        // Create package.json with scoped package name
+        let package_json = json!({
+            "name": "@scope/test-project",
+            "version": "1.0.0",
+            "scripts": {
+                "prepare": "echo 'Running prepare hook for scoped package'"
+            }
+        });
+
+        fs::write(
+            project_path.join("package.json"),
+            serde_json::to_string_pretty(&package_json).unwrap(),
+        )
+        .unwrap();
+
+        // Test process_project_hooks with scoped package
+        let result = PackageService::process_project_hooks(project_path).await;
+        assert!(
+            result.is_ok(),
+            "process_project_hooks should work with scoped packages"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_project_hooks_all_supported_hooks() {
+        // Create temporary directory
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path();
+
+        // Create package.json with all supported hooks
+        let package_json = json!({
+            "name": "test-project",
+            "version": "1.0.0",
+            "scripts": {
+                "preinstall": "echo 'preinstall'",
+                "install": "echo 'install'",
+                "postinstall": "echo 'postinstall'",
+                "prepublish": "echo 'prepublish'",
+                "preprepare": "echo 'preprepare'",
+                "prepare": "echo 'prepare'",
+                "postprepare": "echo 'postprepare'"
+            }
+        });
+
+        fs::write(
+            project_path.join("package.json"),
+            serde_json::to_string_pretty(&package_json).unwrap(),
+        )
+        .unwrap();
+
+        // Test that all hooks are executed
+        let result = PackageService::process_project_hooks(project_path).await;
+        assert!(
+            result.is_ok(),
+            "All supported hooks should be executed successfully"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_project_hooks_working_directory() {
+        // Create temporary directory
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path();
+
+        // Create a subdirectory structure
+        let sub_dir = project_path.join("subproject");
+        fs::create_dir_all(&sub_dir).unwrap();
+
+        // Create package.json in subdirectory with script that checks working directory
+        let package_json = json!({
+            "name": "test-subproject",
+            "version": "1.0.0",
+            "scripts": {
+                "preinstall": "pwd | grep subproject"
+            }
+        });
+
+        fs::write(
+            sub_dir.join("package.json"),
+            serde_json::to_string_pretty(&package_json).unwrap(),
+        )
+        .unwrap();
+
+        // Test that scripts run in the correct directory (root_path)
+        let result = PackageService::process_project_hooks(&sub_dir).await;
+        assert!(
+            result.is_ok(),
+            "Scripts should run in the correct working directory based on root_path"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_project_hooks_npm_package_json_env() {
+        // Create temporary directory
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path();
+
+        // Create package.json with script that checks npm_package_json environment variable
+        let expected_package_json_path = project_path.join("package.json");
+        let package_json = json!({
+            "name": "test-project",
+            "version": "1.0.0",
+            "scripts": {
+                "preinstall": format!("test \"$npm_package_json\" = \"{}\"", expected_package_json_path.display())
+            }
+        });
+
+        fs::write(
+            &expected_package_json_path,
+            serde_json::to_string_pretty(&package_json).unwrap(),
+        )
+        .unwrap();
+
+        // Test that npm_package_json environment variable points to the correct path
+        let result = PackageService::process_project_hooks(project_path).await;
+        assert!(
+            result.is_ok(),
+            "npm_package_json environment variable should point to the correct package.json path"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_project_hooks_script_failure() {
+        // Create temporary directory
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path();
+
+        // Create package.json with failing script
+        let package_json = json!({
+            "name": "test-project",
+            "version": "1.0.0",
+            "scripts": {
+                "preinstall": "exit 1"
+            }
+        });
+
+        fs::write(
+            project_path.join("package.json"),
+            serde_json::to_string_pretty(&package_json).unwrap(),
+        )
+        .unwrap();
+
+        // Test that script failure is properly handled
+        let result = PackageService::process_project_hooks(project_path).await;
+        assert!(
+            result.is_err(),
+            "Script failure should be properly propagated"
+        );
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Failed to execute project hook")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_project_hooks_invalid_package_json() {
+        // Create temporary directory
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path();
+
+        // Create invalid package.json
+        fs::write(project_path.join("package.json"), "invalid json content").unwrap();
+
+        // Test that invalid package.json is properly handled
+        let result = PackageService::process_project_hooks(project_path).await;
+        assert!(result.is_err(), "Invalid package.json should cause error");
+    }
+
+    #[tokio::test]
+    async fn test_process_project_hooks_missing_package_json() {
+        // Create temporary directory without package.json
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path();
+
+        // Test that missing package.json is properly handled
+        let result = PackageService::process_project_hooks(project_path).await;
+        assert!(result.is_err(), "Missing package.json should cause error");
+    }
+
+    #[tokio::test]
+    async fn test_process_project_hooks_partial_scripts() {
+        // Create temporary directory
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path();
+
+        // Create package.json with only some hooks
+        let package_json = json!({
+            "name": "test-project",
+            "version": "1.0.0",
+            "scripts": {
+                "install": "echo 'install only'",
+                "prepare": "echo 'prepare only'"
+            }
+        });
+
+        fs::write(
+            project_path.join("package.json"),
+            serde_json::to_string_pretty(&package_json).unwrap(),
+        )
+        .unwrap();
+
+        // Test that only existing hooks are executed
+        let result = PackageService::process_project_hooks(project_path).await;
+        assert!(result.is_ok(), "Only existing hooks should be executed");
+    }
+
+    #[tokio::test]
+    async fn test_process_project_hooks_different_root_paths() {
+        // Create multiple project directories to test path isolation
+        let temp_dir = TempDir::new().unwrap();
+        let project1_path = temp_dir.path().join("project1");
+        let project2_path = temp_dir.path().join("project2");
+
+        fs::create_dir_all(&project1_path).unwrap();
+        fs::create_dir_all(&project2_path).unwrap();
+
+        // Create different package.json files
+        let package_json1 = json!({
+            "name": "project1",
+            "version": "1.0.0",
+            "scripts": {
+                "preinstall": format!("test \"$npm_package_json\" = \"{}\"", project1_path.join("package.json").display())
+            }
+        });
+
+        let package_json2 = json!({
+            "name": "project2",
+            "version": "2.0.0",
+            "scripts": {
+                "preinstall": format!("test \"$npm_package_json\" = \"{}\"", project2_path.join("package.json").display())
+            }
+        });
+
+        fs::write(
+            project1_path.join("package.json"),
+            serde_json::to_string_pretty(&package_json1).unwrap(),
+        )
+        .unwrap();
+
+        fs::write(
+            project2_path.join("package.json"),
+            serde_json::to_string_pretty(&package_json2).unwrap(),
+        )
+        .unwrap();
+
+        // Test that each project gets the correct environment variables
+        let result1 = PackageService::process_project_hooks(&project1_path).await;
+        assert!(
+            result1.is_ok(),
+            "Project1 hooks should succeed with correct environment"
+        );
+
+        let result2 = PackageService::process_project_hooks(&project2_path).await;
+        assert!(
+            result2.is_ok(),
+            "Project2 hooks should succeed with correct environment"
+        );
     }
 }

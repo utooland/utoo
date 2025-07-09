@@ -41,13 +41,13 @@ pub async fn update_packages(
 
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
 
-    // 1. Update package.json and package-lock.json for all packages in batch
-    update_package_json(&action, specs, &workspace, &save_type)
+    // 1. Update working directory to project root (if in workspace)
+    let root_path = update_cwd_to_root(&cwd).await?;
+
+    // 2. Update package.json and package-lock.json for all packages in batch
+    update_package_json(&root_path, &action, specs, &workspace, &save_type)
         .await
         .context("Failed to update package.json")?;
-
-    // 2. Update working directory to project root (if in workspace)
-    let root_path = update_cwd_to_root(&cwd).await?;
 
     // 3. Rebuild Deps
     build_deps(&root_path)
@@ -114,7 +114,7 @@ pub async fn install_global_package(npm_spec: &str, prefix: &Option<String>) -> 
     // Prepare global package directory and package.json
     let package_path = prepare_global_package_json(npm_spec, prefix)
         .await
-        .context("Failed to prepare global package.json")?;
+        .map_err(|e| anyhow::anyhow!("Failed to prepare global package.json: {}", e))?;
 
     log_verbose(&format!("Installing global package: {npm_spec}"));
 

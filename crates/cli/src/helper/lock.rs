@@ -94,6 +94,7 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<()> {
 
 /// Batch update package.json for multiple package specifications to reduce file I/O operations
 pub async fn update_package_json(
+    cwd: &Path,
     action: &PackageAction,
     specs: &[&str],
     workspace: &Option<String>,
@@ -105,11 +106,11 @@ pub async fn update_package_json(
 
     // 1. Find target workspace if specified
     let target_dir = if let Some(ws) = workspace {
-        find_workspace_path(&PathBuf::from("."), ws)
+        find_workspace_path(cwd, ws)
             .await
             .map_err(|e| anyhow!("Failed to find workspace path: {}", e))?
     } else {
-        PathBuf::from(".")
+        cwd.to_path_buf()
     };
 
     // 2. Parse all package specs in parallel
