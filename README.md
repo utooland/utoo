@@ -33,7 +33,7 @@ Install the bundler globally if you need build capabilities:
 npm install -g @utoo/pack
 ```
 
-You can track features progress at [`@utoo/pack features list`](https://github.com/umijs/mako/blob/next/packages/pack/data/features-list.md)
+You can track features progress at [`@utoo/pack features list`](https://github.com/umijs/mako/blob/next/packages/pack/docs/features-list.md)
 
 ## ✨ Features
 
