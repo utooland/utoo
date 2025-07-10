@@ -125,7 +125,7 @@ try {
 
 // 2. Generate Markdown
 const generatedMarkdown = generateMarkdownFromData(featuresData);
-const outputFileName = path.resolve(__dirname, '../data/features-list.md'); // Define the output file name
+const outputFileName = path.resolve(__dirname, '../docs/features-list.md'); // Define the output file name
 
 // 3. Print the Markdown to the console and write to a file
 console.log("--- Generated Markdown for User Features List ---");

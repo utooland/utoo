@@ -7,7 +7,12 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": ["**/packages/**/*.ts", "!**/packages/**/binding.d.ts"]
+    "includes": [
+      "**/package.json",
+      "**/packages/**/*.ts",
+      "./packages/pack/docs/features-list.json",
+      "!**/packages/**/binding.d.ts"
+    ]
   },
   "formatter": {
     "enabled": true,
@@ -23,6 +28,13 @@
   "javascript": {
     "formatter": {
       "quoteStyle": "double"
+    }
+  },
+  "json": {
+    "formatter": {
+      "bracketSpacing": true,
+      "expand": "always",
+      "trailingCommas": "none"
     }
   },
   "assist": {
