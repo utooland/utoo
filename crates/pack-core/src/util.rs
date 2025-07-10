@@ -95,14 +95,14 @@ pub async fn internal_assets_conditions() -> Result<ContextCondition> {
 pub fn convert_to_relative_import(import_path: RcStr, project_path: RcStr) -> Result<RcStr> {
     // When project is root, the project_path is empty
     // In this case, the import path is already relative
-    let project_path = if project_path.is_empty() {
+    let project_path = if project_path.starts_with(MAIN_SEPARATOR) {
+        project_path
+    } else {
         std::env::current_dir()
             .ok()
             .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
             .unwrap_or_default()
             .into()
-    } else {
-        project_path
     };
     if import_path.starts_with(MAIN_SEPARATOR) {
         let pattern = format!("{MAIN_SEPARATOR}{project_path}{MAIN_SEPARATOR}");

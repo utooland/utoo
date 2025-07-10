@@ -5,12 +5,12 @@ use pack_core::{
     config::{Config, ModuleIds as ModuleIdStrategyConfig},
     emit_assets,
     mode::Mode,
-    util::Runtime,
+    util::{Runtime, convert_to_relative_import},
 };
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    path::{MAIN_SEPARATOR, Path, PathBuf},
+    path::{Component, MAIN_SEPARATOR, Path, PathBuf},
     time::Duration,
 };
 use tracing::Instrument;
@@ -597,16 +597,25 @@ impl Project {
     }
 
     #[turbo_tasks::function]
-    pub async fn dist_dir(&self) -> Result<Vc<RcStr>> {
+    pub async fn dist_dir(self: Vc<Self>) -> Result<Vc<RcStr>> {
         let dist_path = self
-            .config
+            .config()
             .output()
             .await?
             .path
             .as_ref()
             .map_or("dist".into(), normalize_chunk_base_path);
 
-        Ok(Vc::cell(dist_path))
+        let project_path = self.project_path().await?;
+        let project_dir_name = project_path
+            .path
+            .split(MAIN_SEPARATOR)
+            .next_back()
+            .unwrap_or("");
+
+        let relative_dist_path = convert_to_relative_import(dist_path, project_dir_name.into())?;
+
+        Ok(Vc::cell(relative_dist_path))
     }
 
     #[turbo_tasks::function]
@@ -1180,8 +1189,10 @@ fn normalize_chunk_base_path(path: &RcStr) -> RcStr {
     let path_buff = PathBuf::from(path);
 
     let path = path_buff.components().fold(String::new(), |mut path, c| {
-        if let Some(str) = c.as_os_str().to_str() {
-            path.push_str(str);
+        if let Component::Normal(p) = c
+            && let Some(ps) = p.to_str()
+        {
+            path.push_str(ps);
             path.push('/');
         }
         path
