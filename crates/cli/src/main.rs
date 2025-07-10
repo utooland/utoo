@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 use cmd::deps::build_deps;
 use cmd::execute::execute;
 use cmd::install::{install, install_global_package, update_packages};
+use cmd::list::list_dependencies;
 use cmd::rebuild::rebuild;
 use cmd::run::run;
 use cmd::update::update;
@@ -131,6 +132,14 @@ enum Commands {
 
     #[command(name = "update", alias = "u", about = UPDATE_ABOUT)]
     Update,
+
+    /// List dependencies like npm list
+    #[command(name = "list", alias = "ls")]
+    List {
+        /// Package name to show dependencies for
+        #[arg(value_name = "PACKAGE")]
+        package: String,
+    },
 
     /// Run scripts defined in package.json
     #[command(name = "run", alias = "r")]
@@ -291,6 +300,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Commands::Update) => {
             if let Err(e) = update(false).await {
+                log_error(&e.to_string());
+                let _ = write_verbose_logs_to_file();
+                process::exit(1);
+            }
+        }
+        Some(Commands::List { package }) => {
+            let cwd = std::env::current_dir()?;
+
+            if let Err(e) = list_dependencies(&cwd, &package).await {
                 log_error(&e.to_string());
                 let _ = write_verbose_logs_to_file();
                 process::exit(1);
