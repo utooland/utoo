@@ -1,12 +1,10 @@
-use std::path::MAIN_SEPARATOR;
-
 use anyhow::{Result, bail};
 use futures::stream::{self, StreamExt};
 use pack_core::client::context::{
     get_client_module_options_context, get_client_resolve_options_context,
     get_client_runtime_entries,
 };
-use pack_core::util::convert_to_relative_import;
+use pack_core::util::convert_to_project_relative;
 use qstring::QString;
 use tracing::{Instrument, info_span};
 use turbo_rcstr::{RcStr, rcstr};
@@ -119,15 +117,8 @@ impl AppEntrypoint {
         let this = self.await?;
 
         // Handle import path: convert absolute path to relative, keep relative path as-is
-        let project_path = self.project().project_path().await?;
-        let project_dir_name = project_path
-            .path
-            .split(MAIN_SEPARATOR)
-            .next_back()
-            .unwrap_or("");
-
         let relative_import =
-            convert_to_relative_import(this.import.clone(), project_dir_name.into())?;
+            convert_to_project_relative(&this.import, &self.project().project_path().await?.path)?;
 
         let entry_request = Request::relative(
             relative_import.into(),
