@@ -19,7 +19,7 @@ use turbopack_core::{
 };
 use turbopack_node::execution_context::ExecutionContext;
 
-use crate::{config::Config, mode::Mode, util::convert_to_relative_import};
+use crate::{config::Config, mode::Mode, util::convert_to_project_relative};
 
 pub fn mdx_import_source_file() -> RcStr {
     unreachable!()
@@ -138,7 +138,7 @@ fn export_value_to_import_mapping(
     } else {
         Some(if result.len() == 1 {
             let relative_import =
-                convert_to_relative_import(result[0].0.into(), project_path.clone().path).ok()?;
+                convert_to_project_relative(result[0].0, &project_path.path).ok()?;
             ImportMapping::PrimaryAlternative(relative_import, Some(project_path.clone()))
                 .resolved_cell()
         } else {
@@ -147,8 +147,7 @@ fn export_value_to_import_mapping(
                     .iter()
                     .filter_map(|(m, _)| {
                         let relative_import =
-                            convert_to_relative_import((*m).into(), project_path.clone().path)
-                                .ok()?;
+                            convert_to_project_relative(m, &project_path.path).ok()?;
                         Some(
                             ImportMapping::PrimaryAlternative(
                                 relative_import,

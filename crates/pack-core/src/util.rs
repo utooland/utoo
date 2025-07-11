@@ -1,6 +1,7 @@
-use std::path::MAIN_SEPARATOR;
+use std::path::{MAIN_SEPARATOR, Path};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result};
+use dunce::{canonicalize, simplified};
 use serde::{Deserialize, Serialize};
 use turbo_rcstr::RcStr;
 use turbo_tasks::{NonLocalValue, TaskInput, Vc, trace::TraceRawVcs};
@@ -92,32 +93,39 @@ pub async fn internal_assets_conditions() -> Result<ContextCondition> {
     ]))
 }
 
-pub fn convert_to_relative_import(import_path: RcStr, project_path: RcStr) -> Result<RcStr> {
-    // When project is root, the project_path is empty
-    // In this case, the import path is already relative
-    let project_path = if project_path.starts_with(MAIN_SEPARATOR) {
-        project_path
-    } else {
-        std::env::current_dir()
-            .ok()
-            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
-            .unwrap_or_default()
-            .into()
-    };
-    if import_path.starts_with(MAIN_SEPARATOR) {
-        let pattern = format!("{MAIN_SEPARATOR}{project_path}{MAIN_SEPARATOR}");
-        if let Some(pos) = import_path.find(&pattern) {
-            let relative_part = &import_path[pos + pattern.len()..];
-            if !relative_part.is_empty() {
-                let relative_import = format!(".{MAIN_SEPARATOR}{relative_part}");
-                Ok(relative_import.into())
+pub fn convert_to_project_relative(project_inside_path: &str, project_path: &str) -> Result<RcStr> {
+    if project_inside_path.starts_with(MAIN_SEPARATOR) {
+        pathdiff::diff_paths(
+            simplified(Path::new(project_inside_path)),
+            canonicalize(if project_path.starts_with(MAIN_SEPARATOR) {
+                project_path.into()
             } else {
-                bail!("Invalid import path: {}", import_path)
-            }
-        } else {
-            bail!("Invalid import path: {}", import_path)
-        }
+                let current_dir = std::env::current_dir().unwrap();
+                let project_path = simplified(Path::new(project_path))
+                    .to_string_lossy()
+                    .to_string();
+                if current_dir
+                    .to_str()
+                    .is_some_and(|c| c.rfind(&project_path).is_some_and(|index| index > 0))
+                {
+                    current_dir
+                } else {
+                    current_dir.join(project_path)
+                }
+            })
+            .context(format!(
+                r#"failed to canonicalize project path of "{project_path}"#
+            ))?
+            .to_string_lossy()
+            .to_string(),
+        )
+        .map_or(
+            Err(anyhow::Error::msg(
+                r#"path: "{project_inside_path}" is out of project: "{project_path}"#,
+            )),
+            |p| Ok(p.to_string_lossy().to_string().into()),
+        )
     } else {
-        Ok(import_path)
+        Ok(project_inside_path.into())
     }
 }

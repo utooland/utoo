@@ -5,12 +5,12 @@ use pack_core::{
     config::{Config, ModuleIds as ModuleIdStrategyConfig},
     emit_assets,
     mode::Mode,
-    util::{Runtime, convert_to_relative_import},
+    util::{Runtime, convert_to_project_relative},
 };
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    path::{Component, MAIN_SEPARATOR, Path, PathBuf},
+    path::{MAIN_SEPARATOR, Path, PathBuf},
     time::Duration,
 };
 use tracing::Instrument;
@@ -603,17 +603,11 @@ impl Project {
             .output()
             .await?
             .path
-            .as_ref()
-            .map_or("dist".into(), normalize_chunk_base_path);
+            .clone()
+            .unwrap_or("dist".into());
 
-        let project_path = self.project_path().await?;
-        let project_dir_name = project_path
-            .path
-            .split(MAIN_SEPARATOR)
-            .next_back()
-            .unwrap_or("");
-
-        let relative_dist_path = convert_to_relative_import(dist_path, project_dir_name.into())?;
+        let relative_dist_path =
+            convert_to_project_relative(&dist_path, &self.project_path().await?.path)?;
 
         Ok(Vc::cell(relative_dist_path))
     }
@@ -1183,22 +1177,6 @@ pub struct ProjectInstance {
     pub turbo_tasks: BundlerTurboTasks,
     pub container: ResolvedVc<ProjectContainer>,
     pub exit_receiver: tokio::sync::Mutex<Option<ExitReceiver>>,
-}
-
-fn normalize_chunk_base_path(path: &RcStr) -> RcStr {
-    let path_buff = PathBuf::from(path);
-
-    let path = path_buff.components().fold(String::new(), |mut path, c| {
-        if let Component::Normal(p) = c
-            && let Some(ps) = p.to_str()
-        {
-            path.push_str(ps);
-            path.push('/');
-        }
-        path
-    });
-
-    path.into()
 }
 
 fn clean_directory(dist_path: &Path) -> Result<()> {

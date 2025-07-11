@@ -1,5 +1,3 @@
-use std::path::MAIN_SEPARATOR;
-
 use anyhow::{Result, bail};
 use pack_core::{
     client::context::{
@@ -7,7 +5,7 @@ use pack_core::{
         get_client_runtime_entries,
     },
     library::contexts::get_library_chunking_context,
-    util::convert_to_relative_import,
+    util::convert_to_project_relative,
 };
 use qstring::QString;
 use tracing::{Instrument, info_span};
@@ -176,14 +174,8 @@ impl LibraryEndpoint {
         let this = self.await?;
 
         // Handle import path: convert absolute path to relative, keep relative path as-is
-        let project_path = self.project().project_path().await?;
-        let project_dir_name = project_path
-            .path
-            .split(MAIN_SEPARATOR)
-            .next_back()
-            .unwrap_or("");
         let relative_import =
-            convert_to_relative_import(this.import.clone(), project_dir_name.into())?;
+            convert_to_project_relative(&this.import, &self.project().project_path().await?.path)?;
 
         let entry_request = Request::relative(
             relative_import.into(),
