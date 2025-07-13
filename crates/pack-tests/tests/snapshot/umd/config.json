@@ -1,0 +1,24 @@
+{
+  "entry": [
+    {
+      "import": "input/index.tsx",
+      "name": "main",
+      "library": {
+        "name": "MyLibrary"
+      }
+    }
+  ],
+  "externals": {
+    "react": {
+      "root": "React",
+      "commonjs": "react"
+    },
+    "react-dom": {
+      "root": "ReactDOM",
+      "commonjs": "react-dom"
+    }
+  },
+  "optimization": {
+    "minify": false
+  }
+}

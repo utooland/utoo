@@ -257,7 +257,7 @@ impl LibraryChunkingContext {
             bail!("Failed to get name for entry")
         };
         let this = self.await?;
-        let root = &this.output_root;
+        let root = &this.root_path;
         if let Some(filename) = self.await?.filename.as_ref() {
             let mut filename = filename.to_string();
             if match_name_placeholder(&filename) {

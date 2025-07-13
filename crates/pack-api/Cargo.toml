@@ -26,7 +26,7 @@ turbopack = { workspace = true }
 turbopack-browser = { workspace = true }
 turbopack-core = { workspace = true }
 turbopack-node = { workspace = true }
-turbopack-nodejs = { workspace = true }
+turbopack-nodejs = { workspace = true, features = ["test"] }
 turbopack-trace-utils = { workspace = true }
 
 [build-dependencies]

@@ -1,0 +1,8 @@
+{
+  "entry": [
+    {
+      "import": "input/index.js",
+      "name": "main"
+    }
+  ]
+}

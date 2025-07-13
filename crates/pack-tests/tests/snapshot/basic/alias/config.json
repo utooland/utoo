@@ -1,0 +1,16 @@
+{
+    "entry": [
+        {
+            "import": "input/index.ts",
+            "name": "main"
+        }
+    ],
+    "resolve": {
+        "alias": {
+            "hello-a": "./input/a.ts"
+        }
+    },
+    "optimization": {
+        "minify": false
+    }
+}

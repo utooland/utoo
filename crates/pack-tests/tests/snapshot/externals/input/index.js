@@ -1,0 +1,23 @@
+import foo from "foo";
+import foo_require from "foo_require";
+import foo_require2 from "foo_require2";
+import foo_import from "foo_import";
+import foo_import2 from "foo_import2";
+import foo_script from "foo_script";
+import foo_script2 from "foo_script2";
+import antd from "antd";
+import Button from "antd/es/button";
+import DatePicker from "antd/es/date-picker";
+import InputGroup from "antd/es/input/Group";
+import version from "antd/es/version";
+// import zh_CN from "antd/es/locale/zh_CN";
+// import zh_TW from "antd/es/locale/zh_TW";
+// import Style from 'antd/es/button/style';
+
+console.log(foo, foo_require, foo_require2, foo_import, foo_import2);
+console.log(foo_script, foo_script2);
+console.log(antd);
+console.log(Button, DatePicker);
+console.log(InputGroup);
+console.log(version, zh_CN, zh_TW);
+// console.log(Style);
