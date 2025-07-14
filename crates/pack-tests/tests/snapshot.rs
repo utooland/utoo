@@ -287,6 +287,8 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
             ))?;
     }
 
+    dbg!(&expected_paths, &seen);
+
     // Verify that actual assets match expected assets
     matches_expected(expected_paths, seen)
         .await
