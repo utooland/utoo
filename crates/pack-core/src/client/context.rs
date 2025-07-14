@@ -28,7 +28,6 @@ use turbopack_core::{
     free_var_references,
 };
 use turbopack_ecmascript::chunk::EcmascriptChunkType;
-use turbopack_ecmascript_runtime::RuntimeType;
 use turbopack_node::{
     execution_context::ExecutionContext,
     transforms::postcss::{PostCssConfigLocation, PostCssTransformOptions},
@@ -452,11 +451,10 @@ pub async fn get_client_chunking_context(
     let minify = config.minify(mode);
     let mode = mode.await?;
 
-    // 在测试环境中使用 RuntimeType::Dummy
     let runtime_type = {
         #[cfg(feature = "test")]
         {
-            RuntimeType::Dummy
+            turbopack_ecmascript_runtime::RuntimeType::Dummy
         }
         #[cfg(not(feature = "test"))]
         {

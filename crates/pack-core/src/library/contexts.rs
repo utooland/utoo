@@ -9,7 +9,6 @@ use turbopack_core::{
     },
     environment::Environment,
 };
-use turbopack_ecmascript_runtime::RuntimeType;
 
 use crate::{config::Config, mode::Mode};
 
@@ -31,11 +30,10 @@ pub async fn get_library_chunking_context(
     let minify = config.minify(mode);
     let mode = mode.await?;
 
-    // 在测试环境中使用 RuntimeType::Dummy
     let runtime_type = {
         #[cfg(feature = "test")]
         {
-            RuntimeType::Dummy
+            turbopack_ecmascript_runtime::RuntimeType::Dummy
         }
         #[cfg(not(feature = "test"))]
         {
