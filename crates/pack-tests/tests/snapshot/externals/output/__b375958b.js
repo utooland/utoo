@@ -1,3 +1,169 @@
-(globalThis.TURBOPACK=globalThis.TURBOPACK||[]).push(["object"==typeof document?document.currentScript:void 0,{263:t=>{"use strict";let a=globalThis.bar;t.n(a)},902:t=>{var{m:a,e:r}=t;a.exports=t.x("bar",()=>require("bar"))},163:t=>{var{m:a,e:r}=t;a.exports=t.x("bar_require2",()=>require("bar_require2"))},337:t=>{"use strict";var{a:a}=t;a(async(a,r)=>{try{let a=await t.y("bar");t.n(a),r()}catch(t){r(t)}},!0)},449:t=>{"use strict";var{a:a}=t;a(async(a,r)=>{try{let a=await t.y("bar_import2");t.n(a),r()}catch(t){r(t)}},!0)},813:t=>{"use strict";var{a:a}=t;a(async(a,r)=>{try{let a;try{if(await t.L("https://example.com/lib/script.js"),void 0===global.bar_script1)throw Error('Variable "bar_script1" is not available on global object after loading "https://example.com/lib/script.js"');a=global.bar_script1}catch(t){throw Error('Failed to load external URL module "bar_script1@https://example.com/lib/script.js": '+(t.message||t))}t.n(a),r()}catch(t){r(t)}},!0)},481:t=>{"use strict";var{a:a}=t;a(async(a,r)=>{try{let a;try{if(await t.L("https://example.com/lib/script2.js"),void 0===global.bar_script2)throw Error('Variable "bar_script2" is not available on global object after loading "https://example.com/lib/script2.js"');a=global.bar_script2}catch(t){throw Error('Failed to load external URL module "bar_script2@https://example.com/lib/script2.js": '+(t.message||t))}t.n(a),r()}catch(t){r(t)}},!0)},729:t=>{"use strict";let a=globalThis.antd;t.n(a)},506:t=>{"use strict";let a=globalThis.antd.Button;t.n(a)},563:t=>{"use strict";let a=globalThis.antd.DatePicker;t.n(a)},521:t=>{"use strict";let a=globalThis.antd["Input/Group"];t.n(a)},291:t=>{"use strict";let a=globalThis.antd.version;t.n(a)},948:t=>{"use strict";var{a:a}=t;a(async(a,r)=>{try{t.s({});var e=t.i(263),l=t.i(902),i=t.i(163),s=t.i(337),o=t.i(449),c=t.i(813),b=t.i(481),n=t.i(729),u=t.i(506),p=t.i(563),d=t.i(521),h=t.i(291),g=a([s,o,c,b]);[s,o,c,b]=g.then?(await g)():g,console.log(e.default,l.default,i.default,s.default,o.default),console.log(c.default,b.default),console.log(n.default),console.log(u.default,p.default),console.log(d.default),console.log(h.default,zh_CN,zh_TW),r()}catch(t){r(t)}},!1)}}]);
+(globalThis.TURBOPACK = globalThis.TURBOPACK || []).push([typeof document === "object" ? document.currentScript : undefined, {
+
+263: ((__turbopack_context__) => {
+"use strict";
+
+const mod = globalThis["bar"];
+
+__turbopack_context__.n(mod);
+}),
+902: ((__turbopack_context__) => {
+
+var { m: module, e: exports } = __turbopack_context__;
+{
+const mod = __turbopack_context__.x("bar", () => require("bar"));
+
+module.exports = mod;
+}}),
+163: ((__turbopack_context__) => {
+
+var { m: module, e: exports } = __turbopack_context__;
+{
+const mod = __turbopack_context__.x("bar_require2", () => require("bar_require2"));
+
+module.exports = mod;
+}}),
+337: ((__turbopack_context__) => {
+"use strict";
+
+var { a: __turbopack_async_module__ } = __turbopack_context__;
+__turbopack_async_module__(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
+const mod = await __turbopack_context__.y("bar");
+
+__turbopack_context__.n(mod);
+__turbopack_async_result__();
+} catch(e) { __turbopack_async_result__(e); } }, true);}),
+449: ((__turbopack_context__) => {
+"use strict";
+
+var { a: __turbopack_async_module__ } = __turbopack_context__;
+__turbopack_async_module__(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
+const mod = await __turbopack_context__.y("bar_import2");
+
+__turbopack_context__.n(mod);
+__turbopack_async_result__();
+} catch(e) { __turbopack_async_result__(e); } }, true);}),
+813: ((__turbopack_context__) => {
+"use strict";
+
+var { a: __turbopack_async_module__ } = __turbopack_context__;
+__turbopack_async_module__(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
+let mod;
+try {
+  await __turbopack_context__.L("https://example.com/lib/script.js");
+  if (typeof global["bar_script1"] === 'undefined') {
+    throw new Error('Variable "bar_script1" is not available on global object after loading "https://example.com/lib/script.js"');
+  }
+  mod = global["bar_script1"];
+} catch (error) {
+  throw new Error('Failed to load external URL module "bar_script1@https://example.com/lib/script.js": ' + (error.message || error));
+}
+
+__turbopack_context__.n(mod);
+__turbopack_async_result__();
+} catch(e) { __turbopack_async_result__(e); } }, true);}),
+481: ((__turbopack_context__) => {
+"use strict";
+
+var { a: __turbopack_async_module__ } = __turbopack_context__;
+__turbopack_async_module__(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
+let mod;
+try {
+  await __turbopack_context__.L("https://example.com/lib/script2.js");
+  if (typeof global["bar_script2"] === 'undefined') {
+    throw new Error('Variable "bar_script2" is not available on global object after loading "https://example.com/lib/script2.js"');
+  }
+  mod = global["bar_script2"];
+} catch (error) {
+  throw new Error('Failed to load external URL module "bar_script2@https://example.com/lib/script2.js": ' + (error.message || error));
+}
+
+__turbopack_context__.n(mod);
+__turbopack_async_result__();
+} catch(e) { __turbopack_async_result__(e); } }, true);}),
+729: ((__turbopack_context__) => {
+"use strict";
+
+const mod = globalThis["antd"];
+
+__turbopack_context__.n(mod);
+}),
+506: ((__turbopack_context__) => {
+"use strict";
+
+const mod = globalThis["antd"]["Button"];
+
+__turbopack_context__.n(mod);
+}),
+563: ((__turbopack_context__) => {
+"use strict";
+
+const mod = globalThis["antd"]["DatePicker"];
+
+__turbopack_context__.n(mod);
+}),
+521: ((__turbopack_context__) => {
+"use strict";
+
+const mod = globalThis["antd"]["Input/Group"];
+
+__turbopack_context__.n(mod);
+}),
+291: ((__turbopack_context__) => {
+"use strict";
+
+const mod = globalThis["antd"]["version"];
+
+__turbopack_context__.n(mod);
+}),
+948: ((__turbopack_context__) => {
+"use strict";
+
+var { a: __turbopack_async_module__ } = __turbopack_context__;
+__turbopack_async_module__(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
+__turbopack_context__.s({});
+var __TURBOPACK__imported__module__263__ = __turbopack_context__.i(263);
+var __TURBOPACK__imported__module__902__ = __turbopack_context__.i(902);
+var __TURBOPACK__imported__module__163__ = __turbopack_context__.i(163);
+var __TURBOPACK__imported__module__337__ = __turbopack_context__.i(337);
+var __TURBOPACK__imported__module__449__ = __turbopack_context__.i(449);
+var __TURBOPACK__imported__module__813__ = __turbopack_context__.i(813);
+var __TURBOPACK__imported__module__481__ = __turbopack_context__.i(481);
+var __TURBOPACK__imported__module__729__ = __turbopack_context__.i(729);
+var __TURBOPACK__imported__module__506__ = __turbopack_context__.i(506);
+var __TURBOPACK__imported__module__563__ = __turbopack_context__.i(563);
+var __TURBOPACK__imported__module__521__ = __turbopack_context__.i(521);
+var __TURBOPACK__imported__module__291__ = __turbopack_context__.i(291);
+var __turbopack_async_dependencies__ = __turbopack_handle_async_dependencies__([
+    __TURBOPACK__imported__module__337__,
+    __TURBOPACK__imported__module__449__,
+    __TURBOPACK__imported__module__813__,
+    __TURBOPACK__imported__module__481__
+]);
+[__TURBOPACK__imported__module__337__, __TURBOPACK__imported__module__449__, __TURBOPACK__imported__module__813__, __TURBOPACK__imported__module__481__] = __turbopack_async_dependencies__.then ? (await __turbopack_async_dependencies__)() : __turbopack_async_dependencies__;
+;
+;
+;
+;
+;
+;
+;
+;
+;
+;
+;
+;
+// import zh_CN from "antd/es/locale/zh_CN";
+// import zh_TW from "antd/es/locale/zh_TW";
+// import Style from 'antd/es/button/style';
+console.log(__TURBOPACK__imported__module__263__["default"], __TURBOPACK__imported__module__902__["default"], __TURBOPACK__imported__module__163__["default"], __TURBOPACK__imported__module__337__["default"], __TURBOPACK__imported__module__449__["default"]);
+console.log(__TURBOPACK__imported__module__813__["default"], __TURBOPACK__imported__module__481__["default"]);
+console.log(__TURBOPACK__imported__module__729__["default"]);
+console.log(__TURBOPACK__imported__module__506__["default"], __TURBOPACK__imported__module__563__["default"]);
+console.log(__TURBOPACK__imported__module__521__["default"]);
+console.log(__TURBOPACK__imported__module__291__["default"], zh_CN, zh_TW); // console.log(Style);
+__turbopack_async_result__();
+} catch(e) { __turbopack_async_result__(e); } }, false);}),
+}]);
 
 //# sourceMappingURL=__b375958b.js.map

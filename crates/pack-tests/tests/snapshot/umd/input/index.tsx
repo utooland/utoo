@@ -5,6 +5,9 @@ import React from 'react';
 // @ts-ignore
 import ReactDOM from 'react-dom';
 
+/** @jsxImportSource @emotion/react */
+import { jsx } from '@emotion/react'
+
 import { a } from './a.ts';
 
 console.log(a);

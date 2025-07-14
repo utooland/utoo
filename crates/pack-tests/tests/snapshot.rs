@@ -193,7 +193,7 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
         // Ensure minify is default to true
         if !user_config.get("optimization").is_some() {
             let default_optimization = serde_json::json!({
-                "minify": true,
+                "minify": false,
             });
             user_config["optimization"] = default_optimization;
         }

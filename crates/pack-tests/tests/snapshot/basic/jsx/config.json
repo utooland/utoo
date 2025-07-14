@@ -1,7 +1,7 @@
 {
   "entry": [
     {
-      "import": "input/index.js",
+      "import": "input/index.tsx",
       "name": "main"
     }
   ]

@@ -28,6 +28,7 @@ use turbopack_core::{
     free_var_references,
 };
 use turbopack_ecmascript::chunk::EcmascriptChunkType;
+use turbopack_ecmascript_runtime::RuntimeType;
 use turbopack_node::{
     execution_context::ExecutionContext,
     transforms::postcss::{PostCssConfigLocation, PostCssTransformOptions},
@@ -450,6 +451,19 @@ pub async fn get_client_chunking_context(
 ) -> Result<Vc<Box<dyn ChunkingContext>>> {
     let minify = config.minify(mode);
     let mode = mode.await?;
+
+    // 在测试环境中使用 RuntimeType::Dummy
+    let runtime_type = {
+        #[cfg(feature = "test")]
+        {
+            RuntimeType::Dummy
+        }
+        #[cfg(not(feature = "test"))]
+        {
+            mode.runtime_type()
+        }
+    };
+
     let mut builder = BrowserChunkingContext::builder(
         root_path,
         output_root.clone(),
@@ -458,7 +472,7 @@ pub async fn get_client_chunking_context(
         output_root.clone(),
         output_root,
         environment,
-        mode.runtime_type(),
+        runtime_type,
     )
     .minify_type(if mode.is_production() && *minify.await? {
         MinifyType::Minify {

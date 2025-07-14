@@ -9,6 +9,7 @@ use turbopack_core::{
     },
     environment::Environment,
 };
+use turbopack_ecmascript_runtime::RuntimeType;
 
 use crate::{config::Config, mode::Mode};
 
@@ -29,12 +30,25 @@ pub async fn get_library_chunking_context(
 ) -> Result<Vc<Box<dyn ChunkingContext>>> {
     let minify = config.minify(mode);
     let mode = mode.await?;
+
+    // 在测试环境中使用 RuntimeType::Dummy
+    let runtime_type = {
+        #[cfg(feature = "test")]
+        {
+            RuntimeType::Dummy
+        }
+        #[cfg(not(feature = "test"))]
+        {
+            mode.runtime_type()
+        }
+    };
+
     let mut builder = LibraryChunkingContext::builder(
         root_path,
         output_root,
         output_root_to_root_path,
         environment,
-        mode.runtime_type(),
+        runtime_type,
         (*runtime_root.await?).clone(),
         (*runtime_export.await?).clone(),
     )
