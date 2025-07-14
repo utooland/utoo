@@ -4,6 +4,8 @@ on: [pull_request]
 
 env:
   CARGO_INCREMENTAL: 1
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: short
 
 jobs:
   detect-changes:
@@ -100,28 +102,17 @@ jobs:
         toolchain: nightly-2025-06-04
         args: --all -- --check
 
-    - name: Lint changed Rust Code
+    - name: Check and lint changed crates
       run: |
         for crate in ${{ needs.detect-changes.outputs.changed-crates }}; do
-          echo "Building crate: $crate"
+          echo "Checking and linting crate: $crate"
           if [ "$crate" == "utoo_runtime" ]; then
-            cd crates/runtime && cargo build
+            cd crates/runtime && cargo check && cargo clippy
           else
-            cargo clippy -p $crate
+            cargo check -p $crate && cargo clippy -p $crate
           fi
         done
-      
 
-    - name: Build changed crates
-      run: |
-        for crate in ${{ needs.detect-changes.outputs.changed-crates }}; do
-          echo "Building crate: $crate"
-          if [ "$crate" == "utoo_runtime" ]; then
-            cd crates/runtime && cargo build
-          else
-            cargo build -p $crate
-          fi
-        done
 
     - name: Test changed crates
       run: |
