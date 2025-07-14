@@ -24,6 +24,17 @@ use turbopack_test_utils::snapshot::{UPDATE, diff, expected, matches_expected, s
 use crate::util::REPO_ROOT;
 
 fn register() {
+    turbo_tasks::register();
+    turbo_tasks_env::register();
+    turbo_tasks_fs::register();
+    turbopack::register();
+    turbopack_nodejs::register();
+    turbopack_browser::register();
+    turbopack_ecmascript_plugins::register();
+    turbopack_ecmascript_runtime::register();
+    turbopack_resolve::register();
+    turbopack_core::register();
+    pack_core::register();
     include!(concat!(env!("OUT_DIR"), "/register_test_snapshot.rs"));
 }
 

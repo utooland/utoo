@@ -9,20 +9,15 @@ autobenches = false
 # don't publish this crate
 publish = false
 
-[features]
-test = ["pack-core/test"]
-
 [lints]
 workspace = true
-
-[dependencies]
-pack-core = { workspace = true, features = ["test"] }
-pack-api = { workspace = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }
 dunce = { workspace = true }
 once_cell = { workspace = true }
+pack-api = { workspace = true }
+pack-core = { workspace = true, features = ["test"] }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

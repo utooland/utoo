@@ -6,7 +6,7 @@ license.workspace = true
 
 [dependencies]
 anyhow = { workspace = true, features = ["backtrace"] }
-pack-core = { workspace = true, features = ["test"] }
+pack-core = { workspace = true }
 qstring = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
@@ -23,10 +23,10 @@ turbo-tasks-env = { workspace = true }
 turbo-tasks-fs = { workspace = true }
 turbo-tasks-backend = { workspace = true }
 turbopack = { workspace = true }
-turbopack-browser = { workspace = true, features = ["test"] }
+turbopack-browser = { workspace = true }
 turbopack-core = { workspace = true }
 turbopack-node = { workspace = true }
-turbopack-nodejs = { workspace = true, features = ["test"] }
+turbopack-nodejs = { workspace = true }
 turbopack-trace-utils = { workspace = true }
 
 [build-dependencies]

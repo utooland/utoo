@@ -81,42 +81,7 @@ try {
 __turbopack_context__.n(mod);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, true);}),
-729: ((__turbopack_context__) => {
-"use strict";
-
-const mod = globalThis["antd"];
-
-__turbopack_context__.n(mod);
-}),
-506: ((__turbopack_context__) => {
-"use strict";
-
-const mod = globalThis["antd"]["Button"];
-
-__turbopack_context__.n(mod);
-}),
-563: ((__turbopack_context__) => {
-"use strict";
-
-const mod = globalThis["antd"]["DatePicker"];
-
-__turbopack_context__.n(mod);
-}),
-521: ((__turbopack_context__) => {
-"use strict";
-
-const mod = globalThis["antd"]["Input/Group"];
-
-__turbopack_context__.n(mod);
-}),
-291: ((__turbopack_context__) => {
-"use strict";
-
-const mod = globalThis["antd"]["version"];
-
-__turbopack_context__.n(mod);
-}),
-140: ((__turbopack_context__) => {
+202: ((__turbopack_context__) => {
 "use strict";
 
 var { a: __turbopack_async_module__ } = __turbopack_context__;
@@ -129,11 +94,6 @@ var __TURBOPACK__imported__module__337__ = __turbopack_context__.i(337);
 var __TURBOPACK__imported__module__449__ = __turbopack_context__.i(449);
 var __TURBOPACK__imported__module__813__ = __turbopack_context__.i(813);
 var __TURBOPACK__imported__module__481__ = __turbopack_context__.i(481);
-var __TURBOPACK__imported__module__729__ = __turbopack_context__.i(729);
-var __TURBOPACK__imported__module__506__ = __turbopack_context__.i(506);
-var __TURBOPACK__imported__module__563__ = __turbopack_context__.i(563);
-var __TURBOPACK__imported__module__521__ = __turbopack_context__.i(521);
-var __TURBOPACK__imported__module__291__ = __turbopack_context__.i(291);
 var __turbopack_async_dependencies__ = __turbopack_handle_async_dependencies__([
     __TURBOPACK__imported__module__337__,
     __TURBOPACK__imported__module__449__,
@@ -148,22 +108,10 @@ var __turbopack_async_dependencies__ = __turbopack_handle_async_dependencies__([
 ;
 ;
 ;
-;
-;
-;
-;
-;
-// import zh_CN from "antd/es/locale/zh_CN";
-// import zh_TW from "antd/es/locale/zh_TW";
-// import Style from 'antd/es/button/style';
 console.log(__TURBOPACK__imported__module__263__["default"], __TURBOPACK__imported__module__902__["default"], __TURBOPACK__imported__module__163__["default"], __TURBOPACK__imported__module__337__["default"], __TURBOPACK__imported__module__449__["default"]);
 console.log(__TURBOPACK__imported__module__813__["default"], __TURBOPACK__imported__module__481__["default"]);
-console.log(__TURBOPACK__imported__module__729__["default"]);
-console.log(__TURBOPACK__imported__module__506__["default"], __TURBOPACK__imported__module__563__["default"]);
-console.log(__TURBOPACK__imported__module__521__["default"]);
-console.log(__TURBOPACK__imported__module__291__["default"], zh_CN, zh_TW); // console.log(Style);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, false);}),
 }]);
 
-//# sourceMappingURL=__5bc833c2.js.map
+//# sourceMappingURL=__3d790e66.js.map
