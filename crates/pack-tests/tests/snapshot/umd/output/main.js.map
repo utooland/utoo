@@ -1,8 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 5, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/node_modules/react/jsx-runtime.js"],"sourcesContent":["export function jsx() {\n  return 'purposefully empty stub for react/jsx-runtime.js'\n}\nexport function jsxs() {\n  return 'purposefully empty stub for react/jsx-runtime.js'\n}\n"],"names":[],"mappings":";;;;AAAO,SAAS;IACd,OAAO;AACT;AACO,SAAS;IACd,OAAO;AACT","ignoreList":[0]}},
-    {"offset": {"line": 26, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/umd/input/a.ts"],"sourcesContent":["export const a = \"aaa\";"],"names":[],"mappings":";;;AAAO,MAAM,IAAI"}},
-    {"offset": {"line": 34, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/umd/input/index.tsx"],"sourcesContent":["console.log('hello here');\n\n// @ts-ignore\nimport React from 'react';\n// @ts-ignore\nimport ReactDOM from 'react-dom';\n\n/** @jsxImportSource @emotion/react */\nimport { jsx } from '@emotion/react'\n\nimport { a } from './a.ts';\n\nconsole.log(a);\n\nfunction App({content}:{content:string}) {\n  // @ts-ignore\n  return <div>{content}</div>;\n}\n\n// @ts-ignore\nconst root = ReactDOM.createRoot(document.getElementById('root'));\nroot.render(<App content={'hello'}/>);"],"names":[],"mappings":";;AAIA,aAAa;AACb;AAKA;;AAVA,QAAQ,GAAG,CAAC;;;AAYZ,QAAQ,GAAG,CAAC,mCAAA,CAAA,IAAC;AAEb,SAAS,IAAI,EAAC,OAAO,EAAkB;IACrC,aAAa;IACb,qBAAO,gDAAC;kBAAK;;AACf;AAEA,aAAa;AACb,MAAM,OAAO,mCAAA,CAAA,UAAQ,CAAC,UAAU,CAAC,SAAS,cAAc,CAAC;AACzD,KAAK,MAAM,eAAC,gDAAC;IAAI,SAAS"}}]
-}

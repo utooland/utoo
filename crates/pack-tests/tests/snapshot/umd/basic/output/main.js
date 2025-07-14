@@ -21,7 +21,7 @@ let mod; if (typeof exports === 'object' && typeof module === 'object') { mod = 
 
 __turbopack_context__.n(mod);
 }),
-49: ((__turbopack_context__) => {
+30: ((__turbopack_context__) => {
 "use strict";
 
 __turbopack_context__.s({
@@ -29,19 +29,19 @@ __turbopack_context__.s({
 });
 const a = "aaa";
 }),
-11: ((__turbopack_context__) => {
+67: ((__turbopack_context__) => {
 "use strict";
 
 __turbopack_context__.s({});
 var __TURBOPACK__imported__module__52__ = __turbopack_context__.i(52);
 // @ts-ignore
 var __TURBOPACK__imported__module__15__ = __turbopack_context__.i(15);
-var __TURBOPACK__imported__module__49__ = __turbopack_context__.i(49);
+var __TURBOPACK__imported__module__30__ = __turbopack_context__.i(30);
 ;
 console.log('hello here');
 ;
 ;
-console.log(__TURBOPACK__imported__module__49__["a"]);
+console.log(__TURBOPACK__imported__module__30__["a"]);
 function App({ content }) {
     // @ts-ignore
     return /*#__PURE__*/ (0, __TURBOPACK__imported__module__52__["jsx"])("div", {
@@ -55,7 +55,7 @@ root.render(/*#__PURE__*/ (0, __TURBOPACK__imported__module__52__["jsx"])(App, {
 }));
 }),
 },
-{"otherChunks":[],"runtimeModuleIds":[11]},
+{"otherChunks":[],"runtimeModuleIds":[67]},
 ]);
 // Dummy runtime
 
