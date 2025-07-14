@@ -122,7 +122,7 @@ jobs:
           echo "Testing crate: $crate"
           if [ "$crate" == "utoo_runtime" ]; then
             cd crates/runtime && cargo test
-          elif ["$crate" == "utoopack-tests"]; then
+          elif [ "$crate" == "utoopack-tests" ]; then
             cd crates/pack-tests && cargo nextest run
           else
             cargo test -p $crate
