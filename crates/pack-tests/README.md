@@ -1,4 +1,4 @@
-# utoopack-tests
+# pack-tests
 
 An extracted create to perform snapshot tests on utoopack.
 

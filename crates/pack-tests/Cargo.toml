@@ -1,5 +1,5 @@
 [package]
-name = "utoopack-tests"
+name = "pack-tests"
 version = "0.1.0"
 description = "TBD"
 license = "MIT"
