@@ -92,7 +92,7 @@ pub async fn create_web_entry_source(
         None => vec![],
     };
 
-    let client_root = project.client_root().await?.clone_value();
+    let client_root = project.client_root().owned().await?;
 
     let entry_asset = Vc::upcast(DevHtmlAsset::new_with_body(
         client_root.join("index.html")?,

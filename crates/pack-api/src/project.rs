@@ -692,14 +692,14 @@ impl Project {
 
     #[turbo_tasks::function]
     pub(super) async fn execution_context(self: Vc<Self>) -> Result<Vc<ExecutionContext>> {
-        let node_root = self.node_root().await?.clone_value();
+        let node_root = self.node_root().owned().await?;
         let mode = self.mode().await?;
 
         let node_execution_chunking_context = Vc::upcast(
             NodeJsChunkingContext::builder(
-                self.project_root().await?.clone_value(),
+                self.project_root().owned().await?,
                 node_root.clone(),
-                self.node_root_to_root_path().await?.clone_value(),
+                self.node_root_to_root_path().owned().await?,
                 node_root.clone(),
                 node_root.clone(),
                 node_root.clone(),
@@ -715,7 +715,7 @@ impl Project {
         );
 
         Ok(ExecutionContext::new(
-            self.project_path().await?.clone_value(),
+            self.project_path().owned().await?,
             node_execution_chunking_context,
             self.env(),
         ))
@@ -833,10 +833,10 @@ impl Project {
     #[turbo_tasks::function]
     pub async fn client_chunking_context(self: Vc<Self>) -> Result<Vc<Box<dyn ChunkingContext>>> {
         Ok(get_client_chunking_context(
-            self.project_root().await?.clone_value(),
-            self.client_root().await?.clone_value(),
+            self.project_root().owned().await?,
+            self.client_root().owned().await?,
             rcstr!("/ROOT"),
-            Some(self.dist_dir().await?.clone_value()),
+            Some(self.dist_dir().owned().await?),
             self.client_compile_time_info().environment(),
             self.mode(),
             self.module_ids(),
@@ -929,8 +929,8 @@ impl Project {
 
             let all_output_assets = all_assets_from_entries_operation(output_assets);
 
-            let client_root = self.client_root().await?.clone_value();
-            let dist_root = self.dist_root().await?.clone_value();
+            let client_root = self.client_root().owned().await?;
+            let dist_root = self.dist_root().owned().await?;
 
             if let Some(map) = self.await?.versioned_content_map {
                 let _ = map
@@ -1031,7 +1031,7 @@ impl Project {
     #[turbo_tasks::function]
     pub async fn hmr_identifiers(self: Vc<Self>) -> Result<Vc<Vec<RcStr>>> {
         if let Some(map) = self.await?.versioned_content_map {
-            Ok(map.keys_in_path(self.dist_root().await?.clone_value()))
+            Ok(map.keys_in_path(self.dist_root().owned().await?))
         } else {
             bail!("must be in dev mode to hmr")
         }

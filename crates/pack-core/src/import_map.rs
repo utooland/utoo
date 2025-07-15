@@ -88,7 +88,7 @@ async fn insert_shared_aliases(
     _config: Vc<Config>,
 ) -> Result<()> {
     // FIXME: maybe we don't need this
-    // let pack_package = get_pack_package(project_path.clone()).await?.clone_value();
+    // let pack_package = get_pack_package(project_path.clone()).owned().await?;
     // import_map.insert_singleton_alias("@swc/helpers", pack_package.clone());
     // import_map.insert_singleton_alias("styled-jsx", pack_package.clone());
     // import_map.insert_singleton_alias("react", project_path.clone());
@@ -99,8 +99,8 @@ async fn insert_shared_aliases(
         "@vercel/turbopack-ecmascript-runtime/",
         turbopack_ecmascript_runtime::embed_fs()
             .root()
-            .await?
-            .clone_value(),
+            .owned()
+            .await?,
     );
 
     Ok(())
@@ -219,7 +219,7 @@ pub async fn get_pack_package(context_directory: FileSystemPath) -> Result<Vc<Fi
         context_directory.clone(),
         ReferenceType::CommonJs(CommonJsReferenceSubType::Undefined),
         Request::parse(Pattern::Constant("@utoo/pack/package.json".into())),
-        node_cjs_resolve_options(context_directory.root().await?.clone_value()),
+        node_cjs_resolve_options(context_directory.root().owned().await?),
     );
     let source = result
         .first_source()

@@ -872,12 +872,8 @@ pub async fn project_trace_source_operation(
         }
     };
 
-    let project_root_uri = uri_from_file(
-        container.project().project_root().await?.clone_value(),
-        None,
-    )
-    .await?
-        + "/";
+    let project_root_uri =
+        uri_from_file(container.project().project_root().owned().await?, None).await? + "/";
     let (file, original_file, is_internal) =
         if let Some(source_file) = original_file.strip_prefix(&project_root_uri) {
             // Client code uses file://

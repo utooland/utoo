@@ -181,13 +181,9 @@ pub async fn get_client_runtime_entries(
         if watch {
             runtime_entries.push(
                 RuntimeEntry::Source(ResolvedVc::upcast(
-                    FileSource::new(
-                        embed_file_path(rcstr!("hmr/bootstrap.ts"))
-                            .await?
-                            .clone_value(),
-                    )
-                    .to_resolved()
-                    .await?,
+                    FileSource::new(embed_file_path(rcstr!("hmr/bootstrap.ts")).owned().await?)
+                        .to_resolved()
+                        .await?,
                 ))
                 .resolved_cell(),
             );
@@ -204,7 +200,6 @@ pub async fn get_client_module_options_context(
     env: ResolvedVc<Environment>,
     mode: Vc<Mode>,
     config: Vc<Config>,
-    no_mangling: Vc<bool>,
     dynamic_import_to_require: Vc<bool>,
     watch: Vc<bool>,
 ) -> Result<Vc<ModuleOptionsContext>> {
@@ -355,16 +350,6 @@ pub async fn get_client_module_options_context(
         },
         enable_webpack_loaders,
         enable_mdx_rs,
-        css: CssOptionsContext {
-            minify_type: if *config.minify(mode).await? {
-                MinifyType::Minify {
-                    mangle: (!*no_mangling.await?).then_some(MangleType::OptimalSize),
-                }
-            } else {
-                MinifyType::NoMinify
-            },
-            ..module_options_context.css
-        },
         rules: vec![
             (
                 foreign_code_context_condition(config).await?,
@@ -403,7 +388,7 @@ pub async fn get_client_resolve_options_context(
 
     let externals_plugin = ExternalsPlugin::new(
         project_path.clone(),
-        project_path.root().await?.clone_value(),
+        project_path.root().owned().await?,
         external_config,
     )
     .to_resolved()
@@ -411,7 +396,7 @@ pub async fn get_client_resolve_options_context(
 
     let custom_conditions = vec![mode.await?.condition().into()];
     let resolve_options_context = ResolveOptionsContext {
-        enable_node_modules: Some(project_path.root().await?.clone_value()),
+        enable_node_modules: Some(project_path.root().owned().await?),
         custom_conditions,
         import_map: Some(client_import_map),
         fallback_import_map: Some(client_fallback_import_map),

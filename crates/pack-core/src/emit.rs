@@ -65,7 +65,7 @@ pub async fn emit_assets(
 async fn emit(asset: Vc<Box<dyn OutputAsset>>) -> Result<()> {
     let _ = asset
         .content()
-        .write(asset.path().await?.clone_value())
+        .write(asset.path().owned().await?)
         .resolve()
         .await?;
     Ok(())
@@ -77,12 +77,12 @@ async fn emit_rebase(
     from: FileSystemPath,
     to: FileSystemPath,
 ) -> Result<()> {
-    let path = rebase(asset.path().await?.clone_value(), from, to);
+    let path = rebase(asset.path().owned().await?, from, to);
     let content = asset.content();
     let _ = content
         .resolve()
         .await?
-        .write(path.await?.clone_value())
+        .write(path.owned().await?)
         .resolve()
         .await?;
     Ok(())
