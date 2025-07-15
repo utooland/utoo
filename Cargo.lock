@@ -4122,6 +4122,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "pack-tests"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dunce",
+ "once_cell",
+ "pack-api",
+ "pack-core",
+ "rustc-hash 2.1.1",
+ "serde",
+ "serde_json",
+ "testing",
+ "tokio",
+ "tracing-subscriber",
+ "turbo-rcstr",
+ "turbo-tasks",
+ "turbo-tasks-backend",
+ "turbo-tasks-build",
+ "turbo-tasks-bytes",
+ "turbo-tasks-env",
+ "turbo-tasks-fs",
+ "turbopack",
+ "turbopack-browser",
+ "turbopack-core",
+ "turbopack-ecmascript-plugins",
+ "turbopack-ecmascript-runtime",
+ "turbopack-node",
+ "turbopack-nodejs",
+ "turbopack-resolve",
+ "turbopack-test-utils",
+]
+
+[[package]]
 name = "par-core"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9253,39 +9286,6 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "toml 0.8.20",
-]
-
-[[package]]
-name = "utoopack-tests"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dunce",
- "once_cell",
- "pack-api",
- "pack-core",
- "rustc-hash 2.1.1",
- "serde",
- "serde_json",
- "testing",
- "tokio",
- "tracing-subscriber",
- "turbo-rcstr",
- "turbo-tasks",
- "turbo-tasks-backend",
- "turbo-tasks-build",
- "turbo-tasks-bytes",
- "turbo-tasks-env",
- "turbo-tasks-fs",
- "turbopack",
- "turbopack-browser",
- "turbopack-core",
- "turbopack-ecmascript-plugins",
- "turbopack-ecmascript-runtime",
- "turbopack-node",
- "turbopack-nodejs",
- "turbopack-resolve",
- "turbopack-test-utils",
 ]
 
 [[package]]

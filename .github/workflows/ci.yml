@@ -6,6 +6,7 @@ env:
   CARGO_INCREMENTAL: 1
   CARGO_NET_RETRY: 10
   RUST_BACKTRACE: short
+  CARGO_BUILD_JOBS: 0
 
 jobs:
   detect-changes:
@@ -65,7 +66,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        submoduls: false
+        submodules: false
     
     - name: Add SSH private keys for submodule repositories
       uses: webfactory/ssh-agent@v0.7.0
@@ -83,9 +84,12 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          ~/.cargo/.crates.toml
+          ~/.cargo/.crates2.json
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/Cargo.toml') }}
         restore-keys: |
           ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          ${{ runner.os }}-cargo-
 
     - name: Install Rust
       uses: actions-rs/toolchain@v1
@@ -105,26 +109,71 @@ jobs:
         toolchain: nightly-2025-06-04
         args: --all -- --check
 
-    - name: Check and lint changed crates
+    - name: Lint changed crates
       run: |
-        for crate in ${{ needs.detect-changes.outputs.changed-crates }}; do
-          echo "Checking and linting crate: $crate"
+        CHANGED_CRATES="${{ needs.detect-changes.outputs.changed-crates }}"
+        echo "Running clippy for changed crates: $CHANGED_CRATES"
+        
+        SPECIAL_CRATES=""
+        REGULAR_CRATES=""
+        
+        for crate in $CHANGED_CRATES; do
           if [ "$crate" == "utoo_runtime" ]; then
-            cd crates/runtime && cargo check && cargo clippy
+            SPECIAL_CRATES="$SPECIAL_CRATES $crate"
           else
-            cargo check -p $crate && cargo clippy -p $crate
+            REGULAR_CRATES="$REGULAR_CRATES $crate"
           fi
         done
+        
+        if [[ $SPECIAL_CRATES == *"utoo_runtime"* ]]; then
+          echo "Running clippy for utoo_runtime..."
+          cd crates/runtime && cargo clippy
+          cd ../..
+        fi
+        
+        if [ -n "$(echo $REGULAR_CRATES | xargs)" ]; then
+          echo "Running clippy for regular crates: $REGULAR_CRATES"
+          PACKAGE_ARGS=""
+          for crate in $REGULAR_CRATES; do
+            PACKAGE_ARGS="$PACKAGE_ARGS -p $crate"
+          done
+          cargo clippy $PACKAGE_ARGS
+        fi
 
     - name: Test changed crates
       run: |
-        for crate in ${{ needs.detect-changes.outputs.changed-crates }}; do
-          echo "Testing crate: $crate"
-          if [ "$crate" == "utoo_runtime" ]; then
-            cd crates/runtime && cargo test
-          elif [ "$crate" == "utoopack-tests" ]; then
-            cd crates/pack-tests && cargo nextest run --no-capture
+        CHANGED_CRATES="${{ needs.detect-changes.outputs.changed-crates }}"
+        echo "Running tests for changed crates: $CHANGED_CRATES"
+        
+        SPECIAL_CRATES=""
+        REGULAR_CRATES=""
+        
+        for crate in $CHANGED_CRATES; do
+          if [ "$crate" == "utoo_runtime" ] || [ "$crate" == "pack-tests" ]; then
+            SPECIAL_CRATES="$SPECIAL_CRATES $crate"
           else
-            cargo test -p $crate
+            REGULAR_CRATES="$REGULAR_CRATES $crate"
           fi
         done
+        
+        for crate in $SPECIAL_CRATES; do
+          if [ "$crate" == "utoo_runtime" ]; then
+            echo "Testing utoo_runtime..."
+            cd crates/runtime && cargo test
+            cd ../..
+          elif [ "$crate" == "pack-tests" ]; then
+            echo "Testing pack-tests..."
+            cd crates/pack-tests && cargo nextest run --no-capture
+            cd ../..
+          fi
+        done
+        
+        if [ -n "$(echo $REGULAR_CRATES | xargs)" ]; then
+          echo "Testing regular crates: $REGULAR_CRATES"
+          PACKAGE_ARGS=""
+          for crate in $REGULAR_CRATES; do
+            PACKAGE_ARGS="$PACKAGE_ARGS -p $crate"
+          done
+          cargo test $PACKAGE_ARGS
+        fi
+
