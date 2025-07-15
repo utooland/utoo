@@ -105,27 +105,26 @@ jobs:
         toolchain: nightly-2025-06-04
         args: --all -- --check
 
-    # - name: Check and lint changed crates
-    #   run: |
-    #     for crate in ${{ needs.detect-changes.outputs.changed-crates }}; do
-    #       echo "Checking and linting crate: $crate"
-    #       if [ "$crate" == "utoo_runtime" ]; then
-    #         cd crates/runtime && cargo check && cargo clippy
-    #       else
-    #         cargo check -p $crate && cargo clippy -p $crate
-    #       fi
-    #     done
+    - name: Check and lint changed crates
+      run: |
+        for crate in ${{ needs.detect-changes.outputs.changed-crates }}; do
+          echo "Checking and linting crate: $crate"
+          if [ "$crate" == "utoo_runtime" ]; then
+            cd crates/runtime && cargo check && cargo clippy
+          else
+            cargo check -p $crate && cargo clippy -p $crate
+          fi
+        done
 
     - name: Test changed crates
       run: |
-        cd crates/pack-tests && cargo nextest run --no-capture
-        # for crate in ${{ needs.detect-changes.outputs.changed-crates }}; do
-        #   echo "Testing crate: $crate"
-        #   if [ "$crate" == "utoo_runtime" ]; then
-        #     cd crates/runtime && cargo test
-        #   elif [ "$crate" == "utoopack-tests" ]; then
-        #     cd crates/pack-tests && cargo nextest run
-        #   else
-        #     cargo test -p $crate
-        #   fi
-        # done
+        for crate in ${{ needs.detect-changes.outputs.changed-crates }}; do
+          echo "Testing crate: $crate"
+          if [ "$crate" == "utoo_runtime" ]; then
+            cd crates/runtime && cargo test
+          elif [ "$crate" == "utoopack-tests" ]; then
+            cd crates/pack-tests && cargo nextest run --no-capture
+          else
+            cargo test -p $crate
+          fi
+        done
