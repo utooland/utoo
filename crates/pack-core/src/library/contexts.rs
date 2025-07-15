@@ -29,12 +29,24 @@ pub async fn get_library_chunking_context(
 ) -> Result<Vc<Box<dyn ChunkingContext>>> {
     let minify = config.minify(mode);
     let mode = mode.await?;
+
+    let runtime_type = {
+        #[cfg(feature = "test")]
+        {
+            turbopack_ecmascript_runtime::RuntimeType::Dummy
+        }
+        #[cfg(not(feature = "test"))]
+        {
+            mode.runtime_type()
+        }
+    };
+
     let mut builder = LibraryChunkingContext::builder(
         root_path,
         output_root,
         output_root_to_root_path,
         environment,
-        mode.runtime_type(),
+        runtime_type,
         (*runtime_root.await?).clone(),
         (*runtime_export.await?).clone(),
     )

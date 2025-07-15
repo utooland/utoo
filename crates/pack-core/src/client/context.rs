@@ -450,6 +450,18 @@ pub async fn get_client_chunking_context(
 ) -> Result<Vc<Box<dyn ChunkingContext>>> {
     let minify = config.minify(mode);
     let mode = mode.await?;
+
+    let runtime_type = {
+        #[cfg(feature = "test")]
+        {
+            turbopack_ecmascript_runtime::RuntimeType::Dummy
+        }
+        #[cfg(not(feature = "test"))]
+        {
+            mode.runtime_type()
+        }
+    };
+
     let mut builder = BrowserChunkingContext::builder(
         root_path,
         output_root.clone(),
@@ -458,7 +470,7 @@ pub async fn get_client_chunking_context(
         output_root.clone(),
         output_root,
         environment,
-        mode.runtime_type(),
+        runtime_type,
     )
     .minify_type(if mode.is_production() && *minify.await? {
         MinifyType::Minify {

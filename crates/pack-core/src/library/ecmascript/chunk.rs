@@ -135,23 +135,34 @@ impl EcmascriptLibraryEvaluateChunk {
         write!(code, "\n{},", StringifyJs(&params))?;
         writeln!(code, "\n]);")?;
 
-        let runtime_code = get_library_runtime_code(
-            Environment::new(ExecutionEnvironment::EdgeWorker(
-                EdgeWorkerEnvironment {
-                    // FIXME
-                    node_version: NodeJsVersion::default().resolved_cell(),
-                }
-                .resolved_cell(),
-            )),
-            Vc::cell(None),
-            Vc::cell(None),
-            RuntimeType::Production,
-            output_root_to_root_path,
-            source_maps,
-            this.chunking_context.runtime_root(),
-            this.chunking_context.runtime_export(),
-        );
-        code.push_code(&*runtime_code.await?);
+        let runtime_type = this.chunking_context.await?.runtime_type();
+
+        match runtime_type {
+            RuntimeType::Development | RuntimeType::Production => {
+                let runtime_code = get_library_runtime_code(
+                    Environment::new(ExecutionEnvironment::EdgeWorker(
+                        EdgeWorkerEnvironment {
+                            // FIXME
+                            node_version: NodeJsVersion::default().resolved_cell(),
+                        }
+                        .resolved_cell(),
+                    )),
+                    Vc::cell(None),
+                    Vc::cell(None),
+                    runtime_type,
+                    output_root_to_root_path,
+                    source_maps,
+                    this.chunking_context.runtime_root(),
+                    this.chunking_context.runtime_export(),
+                );
+                code.push_code(&*runtime_code.await?);
+            }
+            #[cfg(feature = "test")]
+            RuntimeType::Dummy => {
+                let runtime_code = turbopack_ecmascript_runtime::get_dummy_runtime_code();
+                code.push_code(&runtime_code);
+            }
+        }
 
         let mut code = code.build();
 

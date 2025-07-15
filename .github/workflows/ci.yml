@@ -95,6 +95,9 @@ jobs:
         override: true
         components: rustfmt, clippy
 
+    - name: Install nextest
+      uses: taiki-e/install-action@nextest
+
     - name: Check formatting
       uses: actions-rs/cargo@v1
       with:
@@ -113,13 +116,14 @@ jobs:
           fi
         done
 
-
     - name: Test changed crates
       run: |
         for crate in ${{ needs.detect-changes.outputs.changed-crates }}; do
           echo "Testing crate: $crate"
           if [ "$crate" == "utoo_runtime" ]; then
             cd crates/runtime && cargo test
+          elif [ "$crate" == "utoopack-tests" ]; then
+            cd crates/pack-tests && cargo nextest run --no-capture
           else
             cargo test -p $crate
           fi

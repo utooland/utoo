@@ -1,0 +1,46 @@
+[package]
+name = "utoopack-tests"
+version = "0.1.0"
+description = "TBD"
+license = "MIT"
+edition = "2024"
+autobenches = false
+
+# don't publish this crate
+publish = false
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+anyhow = { workspace = true }
+dunce = { workspace = true }
+once_cell = { workspace = true }
+pack-api = { workspace = true }
+pack-core = { workspace = true, features = ["test"] }
+rustc-hash = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+testing = { workspace = true }
+tokio = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["json"] }
+turbo-rcstr = { workspace = true }
+turbo-tasks = { workspace = true }
+turbo-tasks-bytes = { workspace = true }
+turbo-tasks-env = { workspace = true }
+turbo-tasks-fs = { workspace = true }
+turbo-tasks-backend = { workspace = true }
+turbopack = { workspace = true }
+turbopack-browser = { workspace = true, features = ["test"] }
+turbopack-core = { workspace = true, features = ["issue_path"] }
+turbopack-ecmascript-plugins = { workspace = true, features = [
+  "transform_emotion",
+] }
+turbopack-ecmascript-runtime = { workspace = true }
+turbopack-node = { workspace = true }
+turbopack-nodejs = { workspace = true, features = ["test"] }
+turbopack-resolve = { workspace = true }
+turbopack-test-utils = { workspace = true }
+
+[build-dependencies]
+turbo-tasks-build = { workspace = true }

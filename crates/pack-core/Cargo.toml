@@ -9,6 +9,7 @@ plugin = [
   "swc_core/plugin_transform_host_native",
   "turbopack-ecmascript-plugins/swc_ecma_transform_plugin",
 ]
+test = ["turbopack-ecmascript-runtime/test", "turbopack-browser/test"]
 
 [dependencies]
 anyhow = { workspace = true }
