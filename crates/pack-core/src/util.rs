@@ -81,14 +81,14 @@ pub async fn internal_assets_conditions() -> Result<ContextCondition> {
         ContextCondition::InPath(
             turbopack_ecmascript_runtime::embed_fs()
                 .root()
-                .await?
-                .clone_value(),
+                .owned()
+                .await?,
         ),
         ContextCondition::InPath(
             turbopack_node::embed_js::embed_fs()
                 .root()
-                .await?
-                .clone_value(),
+                .owned()
+                .await?,
         ),
     ]))
 }

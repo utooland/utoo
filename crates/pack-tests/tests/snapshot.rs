@@ -136,8 +136,8 @@ async fn run_inner_options(resource: RcStr) -> Result<()> {
     let out_vc = output_op
         .resolve_strongly_consistent()
         .await?
-        .await?
-        .clone_value();
+        .owned()
+        .await?;
     let captured_issues = output_op.peek_issues_with_path().await?;
 
     let plain_issues = captured_issues.get_plain_issues().await?;
@@ -270,7 +270,7 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
 
     // Get output assets and walk through them
     let project = project_container_vc.project();
-    let output_path = project.dist_root().await?.clone_value();
+    let output_path = project.dist_root().owned().await?;
 
     // Get expected output files from the output directory
     let expected_paths = expected(output_path.clone()).await?;
@@ -306,7 +306,7 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
         .context("Actual assets don't match with expected assets")?;
 
     // Return the project path for further processing
-    Ok(project.project_path().await?.clone_value().cell())
+    Ok(project.project_path().owned().await?.cell())
 }
 
 async fn walk_asset(
@@ -315,7 +315,7 @@ async fn walk_asset(
     seen: &mut FxHashSet<FileSystemPath>,
     queue: &mut VecDeque<ResolvedVc<Box<dyn OutputAsset>>>,
 ) -> Result<()> {
-    let path = asset.path().await?.clone_value();
+    let path = asset.path().owned().await?;
 
     // Check if the path is already relative to output_path
     let full_path = if let Some(_relative_path) = output_path.get_path_to(&path) {

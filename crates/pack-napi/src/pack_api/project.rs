@@ -873,7 +873,7 @@ pub async fn project_trace_source_operation(
     };
 
     let project_root_uri = uri_from_file(
-        container.project().project_root().await?.clone_value(),
+        container.project().project_root().owned().await?,
         None,
     )
     .await?

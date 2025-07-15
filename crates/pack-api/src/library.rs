@@ -135,12 +135,11 @@ impl LibraryEndpoint {
     #[turbo_tasks::function]
     async fn library_module_options_context(self: Vc<Self>) -> Result<Vc<ModuleOptionsContext>> {
         Ok(get_client_module_options_context(
-            self.project().project_path().await?.clone_value(),
+            self.project().project_path().owned().await?,
             self.project().execution_context(),
             self.project().client_compile_time_info().environment(),
             self.project().mode(),
             self.project().config(),
-            self.project().no_mangling(),
             Vc::cell(true),
             Vc::cell(false),
         ))
@@ -149,7 +148,7 @@ impl LibraryEndpoint {
     #[turbo_tasks::function]
     async fn library_resolve_options_context(self: Vc<Self>) -> Result<Vc<ResolveOptionsContext>> {
         Ok(get_client_resolve_options_context(
-            self.project().project_path().await?.clone_value(),
+            self.project().project_path().owned().await?,
             self.project().mode(),
             self.project().config(),
             self.project().execution_context(),
@@ -159,7 +158,7 @@ impl LibraryEndpoint {
     #[turbo_tasks::function]
     async fn library_runtime_entries(self: Vc<Self>) -> Result<Vc<EvaluatableAssets>> {
         Ok(get_client_runtime_entries(
-            self.project().project_path().await?.clone_value(),
+            self.project().project_path().owned().await?,
             self.project().mode(),
             self.project().config(),
             self.project().execution_context(),
@@ -234,8 +233,8 @@ impl LibraryEndpoint {
     ) -> Result<Vc<Box<dyn ChunkingContext>>> {
         let project = self.project();
         Ok(get_library_chunking_context(
-            project.project_root().await?.clone_value(),
-            project.dist_root().await?.clone_value(),
+            project.project_root().owned().await?,
+            project.dist_root().owned().await?,
             rcstr!("/ROOT"),
             project.client_compile_time_info().environment(),
             project.mode(),

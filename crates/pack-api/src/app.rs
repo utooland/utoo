@@ -253,7 +253,7 @@ impl AppEndpoint {
     #[turbo_tasks::function]
     pub async fn app_runtime_entries(self: Vc<Self>) -> Result<Vc<EvaluatableAssets>> {
         Ok(get_client_runtime_entries(
-            self.project().project_path().await?.clone_value(),
+            self.project().project_path().owned().await?,
             self.project().mode(),
             self.project().config(),
             self.project().execution_context(),
@@ -281,12 +281,11 @@ impl AppEndpoint {
     #[turbo_tasks::function]
     async fn app_module_options_context(self: Vc<Self>) -> Result<Vc<ModuleOptionsContext>> {
         Ok(get_client_module_options_context(
-            self.project().project_path().await?.clone_value(),
+            self.project().project_path().owned().await?,
             self.project().execution_context(),
             self.project().client_compile_time_info().environment(),
             self.project().mode(),
             self.project().config(),
-            self.project().no_mangling(),
             Vc::cell(true),
             Vc::cell(self.project().await?.watch.enable),
         ))
@@ -295,7 +294,7 @@ impl AppEndpoint {
     #[turbo_tasks::function]
     async fn app_resolve_options_context(self: Vc<Self>) -> Result<Vc<ResolveOptionsContext>> {
         Ok(get_client_resolve_options_context(
-            self.project().project_path().await?.clone_value(),
+            self.project().project_path().owned().await?,
             self.project().mode(),
             self.project().config(),
             self.project().execution_context(),
