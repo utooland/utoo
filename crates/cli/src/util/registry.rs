@@ -1,3 +1,4 @@
+use super::retry::build_dns_cached_client;
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
 use reqwest;
@@ -8,11 +9,13 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
+use tokio_retry::RetryIf;
 
 use crate::util::node::EdgeType;
 
 use super::config::get_registry;
 use super::logger::log_verbose;
+use super::retry::{RetryableError, create_retry_strategy};
 
 pub static PACKAGE_CACHE: Lazy<PackageCache> = Lazy::new(PackageCache::new);
 
@@ -118,9 +121,14 @@ impl Default for Registry {
 impl Registry {
     pub fn new() -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: build_dns_cached_client(),
             base_url: get_registry().to_string(),
         }
+    }
+
+    #[cfg(test)]
+    pub fn new_with(client: reqwest::Client, base_url: String) -> Self {
+        Self { client, base_url }
     }
 
     fn build_url(&self, name: &str, spec: &str) -> String {
@@ -151,33 +159,47 @@ impl Registry {
         // Record start time
         let start_time = Instant::now();
 
-        // Send request
-        let response = self
-            .client
-            .get(&url)
-            .header("Accept", "application/vnd.npm.install-v1+json") // Request simplified manifest
-            .send()
-            .await
-            .context("Failed to send HTTP request")?;
+        // Retry HTTP request with custom strategy
+        let manifest: Value = RetryIf::spawn(
+            create_retry_strategy(),
+            || async {
+                let response = self
+                    .client
+                    .get(&url)
+                    .header("Accept", "application/vnd.npm.install-v1+json")
+                    .send()
+                    .await
+                    .map_err(|e| RetryableError::Temporary(format!("Network error: {e}")))?;
+
+                if response.status().is_success() {
+                    let manifest = response.json().await.map_err(|e| {
+                        RetryableError::Temporary(format!("Failed to parse JSON response: {e}"))
+                    })?;
+                    Ok(manifest)
+                } else if response.status().as_u16() == 404 {
+                    log_verbose(&format!("URL not found {url}"));
+                    Err(RetryableError::Permanent(format!(
+                        "Fetch Error: {}, status: {}",
+                        url,
+                        response.status()
+                    )))
+                } else {
+                    log_verbose(&format!("HTTP error: {}, retrying", response.status()));
+                    Err(RetryableError::Temporary(format!(
+                        "HTTP error: {}, url: {}",
+                        response.status(),
+                        url
+                    )))
+                }
+            },
+            |e: &RetryableError| matches!(e, RetryableError::Temporary(_)),
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to fetch manifest after retries: {e}"))?;
 
         // Calculate and log request duration
         let duration = start_time.elapsed();
         log_verbose(&format!("HTTP request for {name}@{spec} took {duration:?}"));
-
-        // Check response status
-        if !response.status().is_success() {
-            return Err(anyhow::anyhow!(
-                "Fetch Error: {}, status: {}",
-                url,
-                response.status()
-            ));
-        }
-
-        // Parse response
-        let manifest: Value = response
-            .json()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to parse JSON response: {}", e))?;
 
         // Extract version
         let version = match manifest.get("version").and_then(|v| v.as_str()) {
@@ -295,6 +317,7 @@ pub async fn resolve_dependency(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mockito::Server;
 
     #[tokio::test]
     async fn test_resolve_package() -> Result<()> {
@@ -343,13 +366,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_package_manifest_not_found() {
-        let registry = Registry::new();
-
-        // Test non-existent package
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("GET", "/not-exist-package-12345/1.0.0")
+            .with_status(404)
+            .create_async()
+            .await;
+        let registry = Registry::new_with(reqwest::Client::new(), server.url());
         let result = registry
             .get_package_manifest("not-exist-package-12345", "1.0.0")
             .await;
-
         assert!(result.is_err());
         if let Err(e) = result {
             assert!(e.to_string().contains("Fetch Error"));
@@ -358,11 +384,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_package_manifest_invalid_version() {
-        let registry = Registry::new();
-
-        // Test invalid version spec
+        let mut server = Server::new_async().await;
+        // Return 404 for this version
+        let _m = server
+            .mock("GET", "/lodash/999.999.999")
+            .with_status(404)
+            .create_async()
+            .await;
+        let registry = Registry::new_with(reqwest::Client::new(), server.url());
         let result = registry.get_package_manifest("lodash", "999.999.999").await;
-
         assert!(result.is_err());
     }
 
@@ -398,5 +428,46 @@ mod tests {
         // Should return Err for invalid version
         let result = resolve_dependency("lodash", "999.999.999", &EdgeType::Prod).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_package_manifest_404_no_retry() {
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("GET", "/lodash/1.0.0")
+            .with_status(404)
+            .expect(1)
+            .create_async()
+            .await;
+        let registry = Registry::new_with(reqwest::Client::new(), server.url());
+        let result = registry.get_package_manifest("lodash", "1.0.0").await;
+        assert!(result.is_err());
+        let err_str = format!("{}", result.unwrap_err());
+        assert!(err_str.contains("Fetch Error"));
+    }
+
+    #[tokio::test]
+    async fn test_get_package_manifest_5xx_retry_then_success() {
+        let mut server = Server::new_async().await;
+        let _m1 = server
+            .mock("GET", "/lodash/2.0.0")
+            .with_status(500)
+            .expect(1)
+            .create_async()
+            .await;
+        let _m2 = server
+            .mock("GET", "/lodash/2.0.0")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"name":"lodash","version":"2.0.0"}"#)
+            .expect(1)
+            .create_async()
+            .await;
+        let registry = Registry::new_with(reqwest::Client::new(), server.url());
+        let result = registry.get_package_manifest("lodash", "2.0.0").await;
+        assert!(result.is_ok());
+        let (version, manifest) = result.unwrap();
+        assert_eq!(version, "2.0.0");
+        assert_eq!(manifest["name"], "lodash");
     }
 }

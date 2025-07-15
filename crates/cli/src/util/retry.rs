@@ -1,5 +1,39 @@
+use reqwest;
+use std::fmt;
 use tokio::time::Duration;
 use tokio_retry::strategy::ExponentialBackoff;
+
+/// A generic error type for retryable operations
+#[derive(Debug)]
+pub enum RetryableError {
+    Permanent(String), // Non-retryable error
+    Temporary(String), // Retryable error
+}
+
+impl fmt::Display for RetryableError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RetryableError::Permanent(e) => write!(f, "{e}"),
+            RetryableError::Temporary(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for RetryableError {}
+
+/// Build a reqwest::Client with timeout and connection pool config.
+/// Note: reqwest will automatically use trust-dns as resolver if the feature is enabled.
+pub fn build_dns_cached_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        // Set connect timeout (10 seconds)
+        .connect_timeout(std::time::Duration::from_secs(10))
+        // Set total request timeout (30 seconds)
+        .timeout(std::time::Duration::from_secs(30))
+        // Set max idle connections per host
+        .pool_max_idle_per_host(16)
+        .build()
+        .expect("Failed to build reqwest client with DNS cache and retry config")
+}
 
 pub fn create_retry_strategy() -> impl Iterator<Item = Duration> {
     let delays = vec![

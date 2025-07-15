@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use async_compression::tokio::bufread::GzipDecoder;
 use flate2::read::GzDecoder;
+use once_cell::sync::Lazy;
+use reqwest::Client;
 use reqwest::StatusCode;
 use std::{fs::Permissions, os::unix::fs::PermissionsExt, path::Path};
 use tar::Archive as TarArchive;
@@ -13,56 +15,48 @@ use tokio_tar::Archive;
 
 use std::fs;
 
-use super::{logger::log_verbose, retry::create_retry_strategy};
+use super::retry::build_dns_cached_client;
+use super::{
+    logger::log_verbose,
+    retry::{RetryableError, create_retry_strategy},
+};
 
-// defined a custom error type to differentiate between retryable and non-retryable errors
-#[derive(Debug)]
-enum DownloadError {
-    Permanent(String), // Cannot retry 404
-    Temporary(String), // Can retry 500
-}
-
-impl std::error::Error for DownloadError {}
-impl std::fmt::Display for DownloadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DownloadError::Permanent(e) => write!(f, "{e}"),
-            DownloadError::Temporary(e) => write!(f, "{e}"),
-        }
-    }
-}
+// Global downloader client with DNS cache
+static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
 
 pub async fn download(url: &str, dest: &Path) -> Result<()> {
     let start = std::time::Instant::now();
     RetryIf::spawn(
         create_retry_strategy(),
         || async {
-            let response = reqwest::get(url)
+            let response = DOWNLOADER_CLIENT
+                .get(url)
+                .send()
                 .await
-                .map_err(|e| DownloadError::Temporary(format!("Network error: {e}")))?;
+                .map_err(|e| RetryableError::Temporary(format!("Network error: {e}")))?;
 
             match response.status() {
                 StatusCode::OK => {
                     let bytes = response.bytes().await.map_err(|e| {
-                        DownloadError::Temporary(format!("Failed to read response: {e}"))
+                        RetryableError::Temporary(format!("Failed to read response: {e}"))
                     })?;
                     if let Err(e) = try_unpack(&bytes, dest).await {
                         log_verbose(&format!("Unpacking failed {}: {}", dest.display(), e));
-                        return Err(DownloadError::Temporary(e.to_string()));
+                        return Err(RetryableError::Temporary(e.to_string()));
                     }
                     Ok(())
                 }
                 StatusCode::NOT_FOUND => {
                     log_verbose(&format!("URL not found {url}"));
-                    Err(DownloadError::Permanent(format!("URL not found {url}")))
+                    Err(RetryableError::Permanent(format!("URL not found {url}")))
                 }
                 status => {
                     log_verbose(&format!("Error: {status}, retrying"));
-                    Err(DownloadError::Temporary(format!("HTTP error: {status}")))
+                    Err(RetryableError::Temporary(format!("HTTP error: {status}")))
                 }
             }
         },
-        |e: &DownloadError| matches!(e, DownloadError::Temporary(_)),
+        |e: &RetryableError| matches!(e, RetryableError::Temporary(_)),
     )
     .await
     .context("Download failed after retries")?;

@@ -39,7 +39,7 @@ tokio = { workspace = true }
 owo-colors = { workspace = true }
 serde = { workspace = true }
 serde_json = "1.0"
-reqwest = { version = "0.11", features = ["json", "gzip"] }
+reqwest = { version = "0.11", features = ["json", "gzip", "trust-dns"] }
 flate2 = "1.0"
 tar = "0.4"
 dirs = "4.0"
@@ -65,3 +65,6 @@ petgraph = "0.6"
 name = "install_benchmark"
 harness = false
 path = "benches/deps_benchmark.rs"
+
+[dev-dependencies]
+mockito = "1.7.0"
