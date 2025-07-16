@@ -1,8 +1,6 @@
 use std::path::PathBuf;
 use tokio::fs;
 
-use crate::util::logger::log_verbose;
-
 pub fn parse_pattern(pattern: &str) -> (String, String) {
     // for @scope/pkg@version
     if pattern.starts_with('@') {

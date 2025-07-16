@@ -449,7 +449,7 @@ pub async fn validate_deps(
                                     continue;
                                 }
 
-                                log_warning(&format!(
+                                log_verbose(&format!(
                                     "Package {pkg_path} {dep_field} dependency {dep_name} (required version: {req_version_str}, effective version: {effective_req_version}) does not match actual version {current_path}@{actual_version}"
                                 ));
                                 invalid_deps.push(InvalidDependency {
