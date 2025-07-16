@@ -348,7 +348,9 @@ impl AfterResolvePlugin for ExternalsPlugin {
 
                                             // Replace placeholder with converted value
                                             let placeholder = format!("${i}");
-                                            result = result.replace(&placeholder, &converted_value);
+                                            result = result
+                                                .replace(&placeholder, &converted_value)
+                                                .replace(".", " ");
                                         }
                                     }
 
