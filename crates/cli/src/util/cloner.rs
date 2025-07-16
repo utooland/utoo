@@ -316,10 +316,14 @@ pub async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
         src.to_path_buf()
     };
 
-    let is_valid = validate_directory(&real_src, dst).await.unwrap_or_else(|e| {
-        log_warning(&format!("validate_directory error: {e}, will override target directory"));
-        false
-    });
+    let is_valid = validate_directory(&real_src, dst)
+        .await
+        .unwrap_or_else(|e| {
+            log_warning(&format!(
+                "validate_directory error: {e}, will override target directory"
+            ));
+            false
+        });
 
     if is_valid {
         log_verbose(&format!(
@@ -329,7 +333,7 @@ pub async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
         return Ok(());
     }
 
-    log_verbose(&format!("{:?} --> {:?} overrides", real_src, dst));
+    log_verbose(&format!("{real_src:?} --> {dst:?} overrides"));
     if let Err(e) = fs::remove_dir_all(dst).await {
         log_warning(&format!(
             "Failed to clean target directory {}: {}",
@@ -587,13 +591,13 @@ mod tests {
         );
 
         // Update source content
-        create_test_structure(&src_dir, &[("file.txt", Some(b"new content"))]).await?;
+        create_test_structure(&src_dir, &[("file.txt", Some(b"content changed"))]).await?;
 
         // Clone should update the destination
         clone(&src_dir, &dst_dir, false).await?;
         assert_eq!(
             fs::read_to_string(dst_dir.join("file.txt")).await?,
-            "new content"
+            "content changed"
         );
 
         Ok(())
