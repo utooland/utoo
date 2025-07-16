@@ -161,10 +161,6 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    unsafe {
-        libc::umask(0o00);
-    }
-
     let cli = Cli::parse();
 
     // global verbose

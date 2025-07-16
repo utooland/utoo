@@ -1,6 +1,6 @@
 use crate::util::config::get_registry;
 use crate::util::json::load_package_json_from_path;
-use crate::util::logger::log_info;
+use crate::util::logger::log_verbose;
 use crate::util::semver::matches;
 use anyhow::{Context, Result};
 use regex::Regex;
@@ -64,7 +64,7 @@ fn update_binary_config(pkg: &mut Value, binary_mirror: &Map<String, Value>) {
         .and_then(|v| v.as_str())
         .unwrap_or("unknown");
 
-    log_info(&format!(
+    log_verbose(&format!(
         "{name}@{version} download from binary mirror: {new_binary:?}"
     ));
 }

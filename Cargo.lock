@@ -9393,6 +9393,7 @@ dependencies = [
  "async-compression",
  "clap",
  "criterion",
+ "dashmap 6.1.0",
  "deno_semver",
  "dirs 4.0.0",
  "flate2",
