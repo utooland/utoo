@@ -28,10 +28,8 @@ pub async fn clean(pattern: &str) -> Result<()> {
                 let pkg_name = pkg_entry.file_name();
                 let full_pkg_name = format!("{}/{}", name_str, pkg_name.to_string_lossy());
 
-                log_verbose(&format!(
-                    "full pkg name {full_pkg_name}, pkg_pattern {pkg_pattern}"
-                ));
                 if matches_pattern(&full_pkg_name, &pkg_pattern) {
+                    log_verbose(&format!("full pkg name {full_pkg_name}, pkg_pattern {pkg_pattern}"));
                     collect_matching_versions(
                         &pkg_entry.path(),
                         full_pkg_name,

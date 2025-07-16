@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use tokio::fs;
 
+use crate::util::logger::log_verbose;
+
 pub fn parse_pattern(pattern: &str) -> (String, String) {
     // for @scope/pkg@version
     if pattern.starts_with('@') {
@@ -13,15 +15,15 @@ pub fn parse_pattern(pattern: &str) -> (String, String) {
             return (pkg.to_string(), version[1..].to_string());
         }
         // @scope/name or @scope*
-        return (pattern.to_string(), "latest".to_string());
+        return (pattern.to_string(), "*".to_string());
     }
 
     // no scope pkg
     let parts: Vec<&str> = pattern.rsplitn(2, '@').collect();
     match parts.as_slice() {
         [version, pkg] => (pkg.to_string(), version.to_string()),
-        [pkg] => (pkg.to_string(), "latest".to_string()),
-        _ => ("*".to_string(), "latest".to_string()),
+        [pkg] => (pkg.to_string(), "*".to_string()),
+        _ => ("*".to_string(), "*".to_string()),
     }
 }
 
@@ -97,7 +99,7 @@ mod tests {
         // normal pkg
         assert_eq!(
             parse_pattern("express"),
-            ("express".to_string(), "latest".to_string())
+            ("express".to_string(), "*".to_string())
         );
 
         // normal pkg with version
@@ -112,7 +114,7 @@ mod tests {
         // scoped pkg
         assert_eq!(
             parse_pattern("@types/node"),
-            ("@types/node".to_string(), "latest".to_string())
+            ("@types/node".to_string(), "*".to_string())
         );
 
         // scoped pkg with version
@@ -124,7 +126,7 @@ mod tests {
         // special case: @types/*
         assert_eq!(
             parse_pattern("@types/*"),
-            ("@types/*".to_string(), "latest".to_string())
+            ("@types/*".to_string(), "*".to_string())
         );
     }
 

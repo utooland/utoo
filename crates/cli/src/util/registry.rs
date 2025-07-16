@@ -141,6 +141,10 @@ impl Registry {
             }
         }
 
+        if spec.eq("*") {
+            return format!("{}/{}/latest", self.base_url, name);
+        }
+
         format!("{}/{}/{}", self.base_url, name, spec)
     }
 
