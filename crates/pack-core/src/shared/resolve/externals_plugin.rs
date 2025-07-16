@@ -319,11 +319,14 @@ impl AfterResolvePlugin for ExternalsPlugin {
                             ExternalSubPathTarget::Empty => {
                                 // Return empty external to skip this module
                                 return Ok(ResolveResultOption::some(*ResolveResult::primary(
-                                    ResolveResultItem::External {
-                                        name: "".into(),
-                                        ty: ExternalType::Global,
-                                        traced: ExternalTraced::Traced,
-                                    },
+                                    // TODO: this is a plan b for empty target.
+                                    // ResolveResultItem::External {
+                                    //     name: "{}".into(),
+                                    //     ty: ExternalType::Global,
+                                    //     traced: ExternalTraced::Traced,
+                                    // },
+                                    // ignore will just skip this module and the code which import the moudle will be undefined.
+                                    ResolveResultItem::Ignore,
                                 )));
                             }
                             ExternalSubPathTarget::Tpl(template) => {
@@ -345,7 +348,9 @@ impl AfterResolvePlugin for ExternalsPlugin {
 
                                             // Replace placeholder with converted value
                                             let placeholder = format!("${i}");
-                                            result = result.replace(&placeholder, &converted_value);
+                                            result = result
+                                                .replace(&placeholder, &converted_value)
+                                                .replace(".", " ");
                                         }
                                     }
 

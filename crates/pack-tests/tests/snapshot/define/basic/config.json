@@ -1,0 +1,13 @@
+{
+    "entry": [
+        {
+            "import": "input/index.ts",
+            "name": "main"
+        }
+    ],
+    "define": {
+        "AAA": "\"aaa\"",
+        "BBB": "\"bbb\"",
+        "CCC": "1"
+    }
+}

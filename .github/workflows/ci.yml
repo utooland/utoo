@@ -148,7 +148,7 @@ jobs:
         REGULAR_CRATES=""
         
         for crate in $CHANGED_CRATES; do
-          if [ "$crate" == "utoo_runtime" ] || [ "$crate" == "pack-tests" ]; then
+          if [ "$crate" == "utoo_runtime" ]; then
             SPECIAL_CRATES="$SPECIAL_CRATES $crate"
           else
             REGULAR_CRATES="$REGULAR_CRATES $crate"
@@ -160,10 +160,6 @@ jobs:
             echo "Testing utoo_runtime..."
             cd crates/runtime && cargo test
             cd ../..
-          elif [ "$crate" == "pack-tests" ]; then
-            echo "Testing pack-tests..."
-            cd crates/pack-tests && cargo nextest run --no-capture
-            cd ../..
           fi
         done
         
@@ -173,6 +169,6 @@ jobs:
           for crate in $REGULAR_CRATES; do
             PACKAGE_ARGS="$PACKAGE_ARGS -p $crate"
           done
-          cargo test $PACKAGE_ARGS
+          cargo test $PACKAGE_ARGS -- --no-capture
         fi
 
