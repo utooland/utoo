@@ -289,16 +289,15 @@ impl PackageService {
     }
 
     pub async fn execute_queues(queues: Vec<Vec<PackageInfo>>) -> Result<()> {
-        start_progress_bar();
         let total_scripts = queues[1].len() + queues[3].len() + queues[4].len();
-        PROGRESS_BAR.set_length(total_scripts as u64);
+        if total_scripts > 0 {
+            start_progress_bar();
+            PROGRESS_BAR.set_length(total_scripts as u64);
+        }
         // Execute preinstall scripts
         for package in &queues[1] {
             if let Some(script) = &package.scripts.preinstall {
-                log_progress(&format!(
-                    "{} preinstall",
-                    package.fullname
-                ));
+                log_progress(&format!("{} preinstall", package.fullname));
                 ScriptService::execute_script(package, "preinstall", false)
                     .await
                     .map_err(|e| {
@@ -353,10 +352,7 @@ impl PackageService {
         // Execute install scripts
         for package in &queues[3] {
             if let Some(script) = &package.scripts.install {
-                log_progress(&format!(
-                    "{} install",
-                    package.fullname
-                ));
+                log_progress(&format!("{} install", package.fullname));
                 ScriptService::execute_script(package, "install", false)
                     .await
                     .map_err(|e| {
@@ -374,10 +370,7 @@ impl PackageService {
         // Execute postinstall scripts
         for package in &queues[4] {
             if let Some(script) = &package.scripts.postinstall {
-                log_progress(&format!(
-                    "{} postinstall",
-                    package.fullname
-                ));
+                log_progress(&format!("{} postinstall", package.fullname));
                 ScriptService::execute_script(package, "postinstall", false)
                     .await
                     .map_err(|e| {

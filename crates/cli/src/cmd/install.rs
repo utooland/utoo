@@ -78,8 +78,10 @@ pub async fn install(ignore_scripts: bool, root_path: &Path) -> Result<()> {
 
     let mut depths: Vec<_> = groups.keys().cloned().collect();
     depths.sort_unstable();
-    start_progress_bar();
-    PROGRESS_BAR.set_length(package_lock.packages.len() as u64);
+    if !package_lock.packages.is_empty() {
+        start_progress_bar();
+        PROGRESS_BAR.set_length(package_lock.packages.len() as u64);
+    }
 
     // Get the number of logical CPU cores of the system and set it to twice the number of CPU cores
     let concurrent_limit = thread::available_parallelism()
