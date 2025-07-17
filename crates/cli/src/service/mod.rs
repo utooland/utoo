@@ -1,4 +1,5 @@
 pub mod binary;
+pub mod dependency_graph;
 pub mod execute;
 pub mod install;
 pub mod package;

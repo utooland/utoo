@@ -197,6 +197,10 @@ mod linux_clone {
 }
 
 pub async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
+    if !dst.exists() {
+        return Ok(false);
+    }
+
     if !fs::metadata(src).await?.is_dir() || !fs::metadata(dst).await?.is_dir() {
         log_verbose("validating failed, since it's not a directory");
         return Ok(false);
@@ -211,7 +215,9 @@ pub async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
 
     async fn collect_entries(dir: &Path, ignore: Option<&[&str]>) -> Result<Vec<EntryInfo>> {
         let mut entries = Vec::new();
-        let mut read_dir = fs::read_dir(dir).await?;
+        let mut read_dir = fs::read_dir(dir)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to read directory {}: {}", dir.display(), e))?;
 
         while let Some(entry) = read_dir.next_entry().await? {
             if let Some(ignore_list) = ignore
@@ -221,7 +227,13 @@ pub async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
                 continue;
             }
 
-            let metadata = entry.metadata().await?;
+            let metadata = entry.metadata().await.map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to get metadata for {}: {}",
+                    entry.path().display(),
+                    e
+                )
+            })?;
             entries.push(EntryInfo {
                 path: entry.path(),
                 is_dir: metadata.is_dir(),
@@ -235,8 +247,12 @@ pub async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
         Ok(entries)
     }
 
-    let mut src_entries = collect_entries(src, Some(&["node_modules"])).await?;
-    let mut dst_entries = collect_entries(dst, Some(&["node_modules"])).await?;
+    let mut src_entries = collect_entries(src, Some(&["node_modules"]))
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to collect entries for {}: {}", src.display(), e))?;
+    let mut dst_entries = collect_entries(dst, Some(&["node_modules"]))
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to collect entries for {}: {}", dst.display(), e))?;
 
     src_entries.sort_by_key(|e| e.path.clone());
     dst_entries.sort_by_key(|e| e.path.clone());
@@ -316,30 +332,32 @@ pub async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
         src.to_path_buf()
     };
 
-    let is_valid = validate_directory(&real_src, dst)
-        .await
-        .unwrap_or_else(|e| {
-            log_warning(&format!(
-                "validate_directory error: {e}, will override target directory"
+    if dst.exists() {
+        let is_valid = validate_directory(&real_src, dst)
+            .await
+            .unwrap_or_else(|e| {
+                log_warning(&format!(
+                    "validate_directory error: {e}, will override target directory"
+                ));
+                false
+            });
+
+        if is_valid {
+            log_verbose(&format!(
+                "Target directory {} already exists and validation passed, skipping clone",
+                dst.display()
             ));
-            false
-        });
+            return Ok(());
+        }
 
-    if is_valid {
-        log_verbose(&format!(
-            "Target directory {} already exists and validation passed, skipping clone",
-            dst.display()
-        ));
-        return Ok(());
-    }
-
-    log_verbose(&format!("{real_src:?} --> {dst:?} overrides"));
-    if let Err(e) = fs::remove_dir_all(dst).await {
-        log_warning(&format!(
-            "Failed to clean target directory {}: {}",
-            dst.display(),
-            e
-        ));
+        log_verbose(&format!("{real_src:?} --> {dst:?} overrides"));
+        if let Err(e) = fs::remove_dir_all(dst).await {
+            log_warning(&format!(
+                "Failed to clean target directory {}: {}",
+                dst.display(),
+                e
+            ));
+        }
     }
 
     if let Some(parent) = dst.parent() {
