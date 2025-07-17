@@ -296,7 +296,7 @@ impl PackageService {
         for package in &queues[1] {
             if let Some(script) = &package.scripts.preinstall {
                 log_progress(&format!(
-                    "Executing preinstall script for {}",
+                    "{} preinstall",
                     package.fullname
                 ));
                 ScriptService::execute_script(package, "preinstall", false)
@@ -354,7 +354,7 @@ impl PackageService {
         for package in &queues[3] {
             if let Some(script) = &package.scripts.install {
                 log_progress(&format!(
-                    "Executing install script for {}",
+                    "{} install",
                     package.fullname
                 ));
                 ScriptService::execute_script(package, "install", false)
@@ -375,7 +375,7 @@ impl PackageService {
         for package in &queues[4] {
             if let Some(script) = &package.scripts.postinstall {
                 log_progress(&format!(
-                    "Executing postinstall script for {}",
+                    "{} postinstall",
                     package.fullname
                 ));
                 ScriptService::execute_script(package, "postinstall", false)
@@ -392,7 +392,7 @@ impl PackageService {
             }
         }
 
-        finish_progress_bar("Executing dependency hook scripts successfully");
+        finish_progress_bar("scripts executed");
         Ok(())
     }
 }

@@ -93,7 +93,7 @@ pub async fn install(ignore_scripts: bool, root_path: &Path) -> Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("Failed to install packages: {}", e))?;
 
-    finish_progress_bar("node_modules cloned finished");
+    finish_progress_bar("node_modules cloned");
 
     if !ignore_scripts {
         log_info(

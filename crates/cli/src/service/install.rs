@@ -228,7 +228,6 @@ pub async fn install_packages(
                         if link_name.is_empty() {
                             PROGRESS_BAR.inc(1);
                             log_verbose(&format!("Link skipped due to empty package name: {path}"));
-                            log_progress("empty package name link skipped");
                             continue;
                         }
                         log_verbose(&format!("Attempting to link from {resolved} to {path}"));
@@ -239,7 +238,6 @@ pub async fn install_packages(
                             return Err(format!("Link failed: {e}").into());
                         }
                         PROGRESS_BAR.inc(1);
-                        log_progress("resolved link skipped");
                         continue;
                     }
 
@@ -247,14 +245,12 @@ pub async fn install_packages(
                     if package.cpu.is_some() && !is_cpu_compatible(&package.cpu.unwrap()) {
                         PROGRESS_BAR.inc(1);
                         log_verbose(&format!("cpu skipped: {}", &path));
-                        log_progress("uncompatibel cpu skipped");
                         continue;
                     }
 
                     if package.os.is_some() && !is_os_compatible(&package.os.unwrap()) {
                         PROGRESS_BAR.inc(1);
                         log_verbose(&format!("os skipped: {}", &path));
-                        log_progress("uncompatibel os skipped");
                         continue;
                     }
 
@@ -269,7 +265,6 @@ pub async fn install_packages(
                     let task = tokio::spawn(async move {
                         let _permit = semaphore.acquire().await.unwrap();
                         if should_resolve {
-                            log_progress(&format!("Downloading {path} to {name}"));
                             log_verbose(&format!("Downloading {path} to {name}"));
                             match download(&resolved, &cache_path).await {
                                 Ok(_) => {
@@ -317,7 +312,7 @@ pub async fn install_packages(
                     tasks.push(task);
                 } else {
                     PROGRESS_BAR.inc(1);
-                    log_progress(&format!("{path} no resolved info skipped"));
+                    log_verbose(&format!("{path} no resolved info skipped"));
                 }
             }
 

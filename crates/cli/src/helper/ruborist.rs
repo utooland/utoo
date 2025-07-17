@@ -46,7 +46,7 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
             let edges = node.edges_out.read().unwrap();
             let total_deps = edges.len();
             PROGRESS_BAR.inc_length(total_deps as u64);
-            log_progress(&format!("Resolving dependencies for {}", node.name));
+            log_progress(&format!("resolving {}", node.name));
 
             let mut tasks = Vec::new();
 
@@ -107,10 +107,6 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                                 None => return Ok(()),
                             };
                             PROGRESS_BAR.inc(1);
-                            log_progress(&format!(
-                                "resolved deps {}@{} => {} (conflict), need to fork, conflict_node: {}",
-                                edge.name, &edge.spec, resolved.version, conflict_node
-                            ));
                             log_verbose(&format!(
                                 "resolved deps {}@{} => {} (conflict), need to fork, conflict_node: {}",
                                 edge.name, &edge.spec, resolved.version, conflict_node
@@ -173,10 +169,6 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                                 None => return Ok(()),
                             };
                             PROGRESS_BAR.inc(1);
-                            log_progress(&format!(
-                                "resolved deps {}@{} => {} (new)",
-                                edge.name, &edge.spec, resolved.version
-                            ));
                             log_verbose(&format!(
                                 "resolved deps {}@{} => {} (new)",
                                 edge.name, &edge.spec, resolved.version
@@ -493,7 +485,7 @@ impl Ruborist {
         store_cache(&cache_path)
             .await
             .context("Failed to store cache")?;
-        finish_progress_bar("Building dependency tree complete.");
+        finish_progress_bar("package-lock.json resolved");
         self.ideal_tree = Some(root);
         Ok(())
     }
@@ -538,7 +530,7 @@ impl Ruborist {
             PROGRESS_BAR.inc(1);
         }
 
-        finish_progress_bar("Building workspace dependency tree complete.");
+        finish_progress_bar("workspace resolved");
         self.ideal_tree = Some(root.clone());
         Ok(())
     }

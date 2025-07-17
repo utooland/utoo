@@ -23,7 +23,7 @@ pub static PROGRESS_BAR: Lazy<ProgressBar> = Lazy::new(|| {
 
 pub fn finish_progress_bar(msg: &str) {
     PROGRESS_BAR.set_style(
-        ProgressStyle::with_template("✓ +{pos:.green} ~{len:.magenta} {wide_msg}").unwrap(),
+        ProgressStyle::with_template("✓ {pos:.green}/{len:.magenta} {wide_msg}").unwrap(),
     );
     PROGRESS_BAR.finish_with_message(msg.to_string());
     PROGRESS_BAR.set_draw_target(indicatif::ProgressDrawTarget::hidden());
@@ -40,7 +40,7 @@ pub fn abort_progress_bar() {
 pub fn start_progress_bar() {
     PROGRESS_BAR.reset();
     PROGRESS_BAR.set_style(
-        ProgressStyle::with_template("{spinner:.blue} +{pos:.green} ~{len:.magenta} {wide_msg}")
+        ProgressStyle::with_template("{spinner:.blue} {pos:.green}/{len:.magenta} {wide_msg}")
             .unwrap()
             .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
     );
@@ -102,8 +102,6 @@ pub fn log_error(text: &str) {
 pub fn log_info(text: &str) {
     if VERBOSE.load(Ordering::Relaxed) {
         PROGRESS_BAR.suspend(|| println!("[INFO] {text}"));
-    } else {
-        PROGRESS_BAR.suspend(|| println!("{} {}", " INFO ".on_cyan(), text));
     }
     if let Ok(mut logs) = VERBOSE_LOGS.lock() {
         logs.push(format!("[{}][INFO] {}", Timer::format_datetime(), text));
