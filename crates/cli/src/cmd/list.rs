@@ -122,7 +122,6 @@ mod tests {
         DependencyEdge, DependencyGraphService, DependencyType, PackageNode,
     };
     use petgraph::graph::NodeIndex;
-    use std::collections::HashMap;
 
     fn mock_graph() -> DependencyGraphService {
         let mut graph = DependencyGraphService::new();
@@ -160,7 +159,6 @@ mod tests {
 
     #[test]
     fn test_build_dep_tree() {
-        let graph = mock_graph();
         let paths = vec![vec![
             NodeIndex::new(3),
             NodeIndex::new(2),

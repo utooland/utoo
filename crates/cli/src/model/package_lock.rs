@@ -257,30 +257,4 @@ mod tests {
         assert_eq!(package_lock.lockfile_version, 3);
         assert_eq!(package_lock.packages.len(), 3);
     }
-
-    #[test]
-    fn test_dependency_graph_building() {
-        let lock_json = r#"
-        {
-            "name": "test-project",
-            "version": "1.0.0",
-            "lockfileVersion": 3,
-            "requires": true,
-            "packages": {
-                "": {
-                    "name": "test-project",
-                    "version": "1.0.0",
-                    "dependencies": {
-                        "lodash": "^4.17.21"
-                    }
-                },
-                "node_modules/lodash": {
-                    "version": "4.17.21",
-                    "license": "MIT"
-                }
-            }
-        }"#;
-
-        let package_lock: PackageLock = serde_json::from_str(lock_json).unwrap();
-    }
 }
