@@ -332,30 +332,32 @@ pub async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
         src.to_path_buf()
     };
 
-    let is_valid = validate_directory(&real_src, dst)
-        .await
-        .unwrap_or_else(|e| {
-            log_warning(&format!(
-                "validate_directory error: {e}, will override target directory"
+    if dst.exists() {
+        let is_valid = validate_directory(&real_src, dst)
+            .await
+            .unwrap_or_else(|e| {
+                log_warning(&format!(
+                    "validate_directory error: {e}, will override target directory"
+                ));
+                false
+            });
+
+        if is_valid {
+            log_verbose(&format!(
+                "Target directory {} already exists and validation passed, skipping clone",
+                dst.display()
             ));
-            false
-        });
+            return Ok(());
+        }
 
-    if is_valid {
-        log_verbose(&format!(
-            "Target directory {} already exists and validation passed, skipping clone",
-            dst.display()
-        ));
-        return Ok(());
-    }
-
-    log_verbose(&format!("{real_src:?} --> {dst:?} overrides"));
-    if let Err(e) = fs::remove_dir_all(dst).await {
-        log_warning(&format!(
-            "Failed to clean target directory {}: {}",
-            dst.display(),
-            e
-        ));
+        log_verbose(&format!("{real_src:?} --> {dst:?} overrides"));
+        if let Err(e) = fs::remove_dir_all(dst).await {
+            log_warning(&format!(
+                "Failed to clean target directory {}: {}",
+                dst.display(),
+                e
+            ));
+        }
     }
 
     if let Some(parent) = dst.parent() {
