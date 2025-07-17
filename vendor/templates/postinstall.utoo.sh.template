@@ -10,22 +10,57 @@ elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
     ARCH="arm64"
 fi
 
+# Function to find node_modules directory recursively
+find_node_modules() {
+    local current_dir="$1"
+    local target_package="$2"
+
+    # Check if we've reached the root directory
+    if [ "$current_dir" = "/" ]; then
+        return 1
+    fi
+
+    # Check if node_modules exists in current directory
+    if [ -d "$current_dir/node_modules" ]; then
+        if [ -d "$current_dir/node_modules/$target_package" ]; then
+            echo "$current_dir/node_modules"
+            return 0
+        fi
+    fi
+
+    # Recursively check parent directory
+    find_node_modules "$(dirname "$current_dir")" "$target_package"
+}
+
 # Function to install binary
 install_binary() {
     local name=$1
     local package_name="@utoo/${name}-${OS}-${ARCH}"
 
-    # Check if the binary node_modules exist
-    if [ ! -d "node_modules/${package_name}" ]; then
-        echo "Binary package ${package_name} not found"
-        exit 1
+    # Find the node_modules directory containing our package
+    NODE_MODULES_DIR=$(find_node_modules "$(pwd)" "$package_name")
+
+    if [ -z "$NODE_MODULES_DIR" ]; then
+        echo "Binary package ${package_name} not found in any parent node_modules directory"
+        echo "Attempting to install globally as fallback..."
+
+        # Fallback: install globally
+        npm i -g "${package_name}" --force
+
+        if [ $? -ne 0 ]; then
+            echo "Failed to install ${package_name} globally"
+            exit 1
+        fi
+
+        echo "Successfully installed ${package_name} globally"
+        return 0
     fi
 
     # Create binary config
     mkdir -p bin
 
     # Copy file
-    cp -f "node_modules/${package_name}/bin/${name}" "bin/${name}"
+    cp -f "${NODE_MODULES_DIR}/${package_name}/bin/${name}" "bin/${name}"
     chmod +x "bin/${name}"
 }
 

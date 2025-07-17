@@ -40,7 +40,18 @@ NODE_MODULES_DIR=$(find_node_modules "$(pwd)" "$PACKAGE_NAME")
 
 if [ -z "$NODE_MODULES_DIR" ]; then
     echo "Binary package ${PACKAGE_NAME} not found in any parent node_modules directory"
-    exit 1
+    echo "Attempting to install globally as fallback..."
+
+    # Fallback: install globally
+    npm i -g "${PACKAGE_NAME}" --force
+
+    if [ $? -ne 0 ]; then
+        echo "Failed to install ${PACKAGE_NAME} globally"
+        exit 1
+    fi
+
+    echo "Successfully installed ${PACKAGE_NAME} globally"
+    exit 0
 fi
 
 # create binary config

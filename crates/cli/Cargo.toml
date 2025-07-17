@@ -10,29 +10,8 @@ name = "utoo_cli"
 path = "src/lib.rs"
 
 [[bin]]
-name = "utoo-clean"
-path = "src/bin/utoo-clean.rs"
-
-[[bin]]
-name = "utoo-install"
-path = "src/bin/utoo-install.rs"
-
-[[bin]]
-name = "utoo-rebuild"
-path = "src/bin/utoo-rebuild.rs"
-
-[[bin]]
-name = "utoo-deps"
-path = "src/bin/utoo-deps.rs"
-
-[[bin]]
-name = "utoo-update"
-path = "src/bin/utoo-update.rs"
-
-[[bin]]
 name = "utoo"
 path = "src/main.rs"
-
 
 [dependencies]
 tokio = { workspace = true }
