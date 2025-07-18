@@ -14,7 +14,7 @@ struct VersionCache {
 }
 
 pub async fn init_auto_update() -> Result<()> {
-    // if process::env CI=1 or CI=true ignore auto update
+    // if process::env CI=1 or CI=true, ignore auto update
     let ci_env = std::env::var("CI").unwrap_or_default();
     if ci_env == "1" || ci_env.to_lowercase() == "true" {
         return Ok(());

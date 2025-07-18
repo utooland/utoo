@@ -1,38 +1,32 @@
-name: utoopack-release
+name: utoopack-ci
 
-env:
-  DEBUG: napi:*
-  APP_NAME: "@utoo/pack"
-
-on:
-  push:
-    tags: ["@utoo/pack-v**"]
+on: [pull_request]
 
 jobs:
-  build:
+  test:
     strategy:
       fail-fast: false
       matrix:
         settings:
           - host: macos-latest
             target: aarch64-apple-darwin
-            build: |
-              npm run build:binding --workspace=@utoo/pack -- --target aarch64-apple-darwin
+            test: |
+              cargo test -p pack-tests --target aarch64-apple-darwin
           - host: macos-latest
             target: x86_64-apple-darwin
-            build: |
+            test: |
               rustup target add x86_64-apple-darwin &&
-              npm run build:binding --workspace=@utoo/pack -- --target x86_64-apple-darwin
+              cargo test -p pack-tests --target x86_64-apple-darwin
           - host: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
-            build: |
+            test: |
               rustup target add aarch64-unknown-linux-gnu &&
-              npm run build:binding --workspace=@utoo/pack -- --target aarch64-unknown-linux-gnu
+              cargo test -p pack-tests --target aarch64-unknown-linux-gnu
           - host: ubuntu-latest
             target: aarch64-unknown-linux-musl
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
-            build: |
+            test: |
               set -e &&
               rm /etc/apk/repositories &&
               echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/main" >> /etc/apk/repositories &&
@@ -41,15 +35,16 @@ jobs:
               apk add --no-cache libc6-compat pkgconfig dav1d libdav1d dav1d-dev clang-static llvm-dev &&
               rustup target add aarch64-unknown-linux-musl &&
               export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Zunstable-options -Csymbol-mangling-version=v0 -Clinker-flavor=gnu-lld-cc -Clink-self-contained=+linker' &&
-              npm run build:binding --workspace=@utoo/pack -- --target aarch64-unknown-linux-musl
+              cargo test -p pack-tests --target aarch64-unknown-linux-musl
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
-            build: npm run build:binding --workspace=@utoo/pack -- --target x86_64-unknown-linux-gnu
+            test: |
+              cargo test -p pack-tests --target x86_64-unknown-linux-gnu
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
-            build: |
+            test: |
               set -ex &&
               rm /etc/apk/repositories &&
               echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/main" >> /etc/apk/repositories &&
@@ -58,18 +53,18 @@ jobs:
               apk add --no-cache libc6-compat pkgconfig dav1d libdav1d dav1d-dev clang-static llvm-dev &&
               rustup target add x86_64-unknown-linux-musl &&
               export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Csymbol-mangling-version=v0 -Ctarget-feature=-crt-static' &&
-              npm run build:binding --workspace=@utoo/pack -- --target x86_64-unknown-linux-musl
+              cargo test -p pack-tests --target x86_64-unknown-linux-musl
           # swc_plugin_runner not supported on aarch64 windows now
           # - host: windows-latest
           #   target: aarch64-pc-windows-msvc
-          #   build: |
+          #   test: |
           #     git config --system core.longpaths true &&
           #     rustup target add aarch64-pc-windows-msvc &&
-          #     npm run build:binding --workspace=@utoo/pack -- --target aarch64-pc-windows-msvc
+          #     cargo test -p pack-tests
           - host: windows-latest
-            build: |
+            test: |
               git config --system core.longpaths true &&
-              npm run build:binding --workspace=@utoo/pack -- --target x86_64-pc-windows-msvc
+              cargo test -p pack-tests --target x86_64-pc-windows-msvc
             target: x86_64-pc-windows-msvc
     name: stable - ${{ matrix.settings.target }} - node@20
     runs-on: ${{ matrix.settings.host }}
@@ -105,59 +100,14 @@ jobs:
         run: npm install
       - name: Setup node x86
         uses: actions/setup-node@v4
-      - name: Build in docker
+      - name: Test in docker
         uses: addnab/docker-run-action@v3
         if: ${{ matrix.settings.docker }}
         with:
           image: ${{ matrix.settings.docker }}
           options: "-v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}:/build -w /build"
-          run: ${{ matrix.settings.build }}
-      - name: Build
-        run: ${{ matrix.settings.build }}
+          run: ${{ matrix.settings.test }}
+      - name: Test
+        run: ${{ matrix.settings.test }}
         if: ${{ !matrix.settings.docker }}
         shell: bash
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: pack-${{ matrix.settings.target }}
-          path: ./packages/pack/src/pack.*.node
-          if-no-files-found: error
-  publish:
-    name: Publish
-    runs-on: ubuntu-latest
-    needs:
-      - build
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Install dependencies
-        run: npm install
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: ./packages/pack/src
-      - name: Move artifacts
-        run: cd packages/pack && npm run artifacts
-      - name: List packages
-        run: cd packages/pack && ls -R ./npm
-        shell: bash
-      - name: Get version from release or use alpha version
-        id: get_version
-        run: |
-          echo "VERSION=${GITHUB_REF#refs/tags/@utoo/pack-v}" >> $GITHUB_OUTPUT
-      - name: NPM Publish
-        run: |
-          # npm config set provenance true
-          echo "${VERSION}" &&
-          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc &&
-          npm version --workspace=@utoo/pack "${VERSION}" &&
-          npm version --workspace=@utoo/pack-cli "${VERSION}" &&
-          npm install --workspace=@utoo/pack-cli @utoo/pack --save-exact &&
-          npm publish --workspace=@utoo/pack --access public &&
-          npm publish --workspace=@utoo/pack-cli --access public
-        env:
-          VERSION: ${{ steps.get_version.outputs.VERSION }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
