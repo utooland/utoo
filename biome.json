@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.0.5/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.1.2/schema.json",
   "vcs": {
     "enabled": false,
     "clientKind": "git",
@@ -11,7 +11,8 @@
       "**/package.json",
       "**/packages/**/*.ts",
       "./packages/pack/docs/features-list.json",
-      "!**/packages/**/binding.d.ts"
+      "!**/packages/**/binding.d.ts",
+      "!next.js/**"
     ]
   },
   "formatter": {
