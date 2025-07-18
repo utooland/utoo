@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use anyhow::{Context, Result};
 use rustc_hash::FxHashMap;
-use turbo_rcstr::RcStr;
+use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{FxIndexMap, ResolvedVc, Vc};
 use turbo_tasks_fs::{FileSystem, FileSystemPath};
 use turbopack_core::{
@@ -83,13 +83,13 @@ pub async fn get_client_import_map(
 // Make sure to not add any external requests here.
 async fn insert_shared_aliases(
     import_map: &mut ImportMap,
-    _project_path: FileSystemPath,
+    project_path: FileSystemPath,
     _execution_context: Vc<ExecutionContext>,
     _config: Vc<Config>,
 ) -> Result<()> {
+    let pack_package = get_utoopack_path(project_path.clone()).owned().await?;
+    import_map.insert_singleton_alias("@swc/helpers", pack_package.clone());
     // FIXME: maybe we don't need this
-    // let pack_package = get_pack_package(project_path.clone()).owned().await?;
-    // import_map.insert_singleton_alias("@swc/helpers", pack_package.clone());
     // import_map.insert_singleton_alias("styled-jsx", pack_package.clone());
     // import_map.insert_singleton_alias("react", project_path.clone());
     // import_map.insert_singleton_alias("react-dom", project_path.clone());
@@ -214,18 +214,47 @@ fn insert_package_alias(import_map: &mut ImportMap, prefix: &str, package_root: 
 }
 
 #[turbo_tasks::function]
-pub async fn get_pack_package(context_directory: FileSystemPath) -> Result<Vc<FileSystemPath>> {
+pub async fn get_utoopack_path(project_path: FileSystemPath) -> Result<Vc<FileSystemPath>> {
     let result = resolve(
-        context_directory.clone(),
+        project_path.clone(),
         ReferenceType::CommonJs(CommonJsReferenceSubType::Undefined),
-        Request::parse(Pattern::Constant("@utoo/pack/package.json".into())),
-        node_cjs_resolve_options(context_directory.root().owned().await?),
+        Request::parse(Pattern::Constant(rcstr!("@utoo/pack/package.json"))),
+        node_cjs_resolve_options(project_path.root().owned().await?),
     );
     let source = result
         .first_source()
         .await?
         .context("@utoo/pack package not found")?;
     Ok(source.ident().path().await?.parent().cell())
+}
+
+#[turbo_tasks::function]
+pub async fn get_utoopack_dependency_package(
+    project_path: FileSystemPath,
+    dependency: RcStr,
+) -> Result<Vc<RcStr>> {
+    let utoopack_path = get_utoopack_path(project_path.clone()).owned().await?;
+
+    let result = resolve(
+        utoopack_path.clone(),
+        ReferenceType::CommonJs(CommonJsReferenceSubType::Undefined),
+        Request::parse(Pattern::Constant(dependency.clone())),
+        node_cjs_resolve_options(project_path.root().owned().await?),
+    );
+
+    let source = result
+        .first_source()
+        .await?
+        .context(format!("package {dependency} not found"))?;
+
+    let dependency_path_to_root = &source.ident().path().owned().await?;
+
+    let dependency_relative_path_node_root = project_path
+        .join(".turbopack")?
+        .get_relative_path_to(dependency_path_to_root)
+        .context(format!("failed to resolve {dependency}"))?;
+
+    Ok(Vc::cell(dependency_relative_path_node_root))
 }
 
 pub fn get_client_resolved_map(

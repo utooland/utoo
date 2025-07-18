@@ -15,7 +15,6 @@
   "workspaces": [
     "packages/pack",
     "packages/pack-cli",
-    "packages/loader-runner",
     "packages/style-loader",
     "crates/pack-core/js",
     "crates/pack/js",
