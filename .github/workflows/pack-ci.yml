@@ -17,13 +17,13 @@ jobs:
             test: |
               rustup target add x86_64-apple-darwin &&
               cargo test -p pack-tests --target x86_64-apple-darwin
-          - host: ubuntu-latest
+          - host: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
             test: |
               rustup target add aarch64-unknown-linux-gnu &&
               cargo test -p pack-tests --target aarch64-unknown-linux-gnu
-          - host: ubuntu-latest
+          - host: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
             test: |
@@ -66,7 +66,7 @@ jobs:
               git config --system core.longpaths true &&
               cargo test -p pack-tests --target x86_64-pc-windows-msvc
             target: x86_64-pc-windows-msvc
-    name: stable - ${{ matrix.settings.target }} - node@20
+    name: stable - ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
