@@ -8,6 +8,7 @@ on:
 
 jobs:
   build-and-publish-binary:
+    if: startsWith(github.event.release.tag_name, 'utoo-')
     strategy:
       matrix:
         include:
@@ -94,7 +95,7 @@ jobs:
           ssh-private-key: |
             ${{ secrets.CI_SUBMODULE }}
       - name: Init git submodules
-        run: git submodule update --init 
+        run: git submodule update --init
 
       - name: Build
         uses: actions-rs/cargo@v1
@@ -121,8 +122,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '18.x'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "18.x"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Publish Binary Packages
         env:
@@ -140,6 +141,7 @@ jobs:
           done
 
   publish-main:
+    if: startsWith(github.event.release.tag_name, 'utoo-')
     needs: build-and-publish-binary
     runs-on: ubuntu-latest
     permissions:
@@ -161,8 +163,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '18.x'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "18.x"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Publish Main Packages
         env:

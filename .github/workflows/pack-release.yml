@@ -5,13 +5,14 @@ env:
   APP_NAME: "@utoo/pack"
 
 on:
-  push:
-    tags: ["@utoo/pack-v**"]
+  release:
+    types: [published]
 
 jobs:
   build:
+    if: startsWith(github.event.release.tag_name, 'utoopack-v')
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         settings:
           - host: macos-latest
@@ -123,6 +124,7 @@ jobs:
           path: ./packages/pack/src/pack.*.node
           if-no-files-found: error
   publish:
+    if: startsWith(github.event.release.tag_name, 'utoopack-v')
     name: Publish
     runs-on: ubuntu-latest
     needs:
@@ -147,7 +149,7 @@ jobs:
       - name: Get version from release or use alpha version
         id: get_version
         run: |
-          echo "VERSION=${GITHUB_REF#refs/tags/@utoo/pack-v}" >> $GITHUB_OUTPUT
+          echo "VERSION=${GITHUB_REF#refs/tags/utoopack-v}" >> $GITHUB_OUTPUT
       - name: NPM Publish
         run: |
           # npm config set provenance true
