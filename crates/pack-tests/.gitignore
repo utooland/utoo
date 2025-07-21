@@ -1,1 +1,3 @@
 !tests/snapshot/**/*/node_modules
+!tests/snapshot/**/*/.turbopack
+
