@@ -1,0 +1,42 @@
+{
+    "entry": [
+        {
+            "import": "input/index.ts",
+            "name": "main"
+        }
+    ],
+    "externals": {
+        "antd": {
+            "root": "antd",
+            "subPath": {
+                "exclude": [
+                    "style"
+                ],
+                "rules": [
+                    {
+                        "regex": "/(version|message|notification)$/",
+                        "target": "$1"
+                    },
+                    {
+                        "regex": "/^\/(?:es|lib)\/([a-z\\-]+)$/",
+                        "target": "$1",
+                        "targetConverter": "PascalCase"
+                    },
+                    {
+                        "regex": "/^\/(?:es|lib)\/([a-z-]+)\/([A-Z][a-zA-Z-]+)$/",
+                        "target": "$1.$2",
+                        "targetConverter": "PascalCase"
+                    },
+                    {
+                        "regex": "/zh_CN$/",
+                        "target": "$empty"
+                    },
+                    {
+                        "regex": "/zh_TW$/",
+                        "target": "$empty"
+                    }
+                ]
+            }
+        }
+    }
+}

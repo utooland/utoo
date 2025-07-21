@@ -5,13 +5,16 @@ use clap::{Parser, Subcommand};
 use cmd::deps::build_deps;
 use cmd::execute::execute;
 use cmd::install::{install, install_global_package, update_packages};
+use cmd::list::list_dependencies;
 use cmd::rebuild::rebuild;
 use cmd::run::run;
 use cmd::update::update;
 use cmd::{clean::clean, deps::build_workspace};
 use helper::auto_update::init_auto_update;
 use util::config::{set_legacy_peer_deps, set_registry};
-use util::logger::{log_error, log_info, log_warning, set_verbose, write_verbose_logs_to_file};
+use util::logger::{
+    log_error, log_time, log_time_end, log_warning, set_verbose, write_verbose_logs_to_file,
+};
 use util::save_type::{PackageAction, SaveType, parse_save_type};
 
 mod cmd;
@@ -132,6 +135,14 @@ enum Commands {
     #[command(name = "update", alias = "u", about = UPDATE_ABOUT)]
     Update,
 
+    /// List dependencies like npm list
+    #[command(name = "list", alias = "ls")]
+    List {
+        /// Package name to show dependencies for
+        #[arg(value_name = "PACKAGE")]
+        package: String,
+    },
+
     /// Run scripts defined in package.json
     #[command(name = "run", alias = "r")]
     Run {
@@ -161,10 +172,7 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    unsafe {
-        libc::umask(0o00);
-    }
-
+    log_time(); // Start global timer
     let cli = Cli::parse();
 
     // global verbose
@@ -195,6 +203,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 log_error(&e.to_string());
                 let _ = write_verbose_logs_to_file();
                 process::exit(1);
+            } else {
+                log_time_end(&format!("{pattern} cleaned"));
             }
         }
         Some(Commands::Install {
@@ -210,13 +220,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !specs.is_empty() {
                 if global {
                     // For global installs, process packages one by one
-                    for spec in specs {
-                        if let Err(e) = install_global_package(&spec, &prefix).await {
+                    for spec in specs.iter() {
+                        if let Err(e) = install_global_package(spec, &prefix).await {
                             log_error(&e.to_string());
                             let _ = write_verbose_logs_to_file();
                             process::exit(1);
                         }
                     }
+                    log_time_end(&format!(
+                        "{} package{} installed",
+                        specs.len(),
+                        if specs.len() == 1 { "" } else { "s" }
+                    ));
                 } else {
                     let save_type = parse_save_type(save_dev, save_peer, save_optional);
                     let spec_refs: Vec<&str> = specs.iter().map(|s| s.as_str()).collect();
@@ -233,6 +248,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let _ = write_verbose_logs_to_file();
                         process::exit(1);
                     }
+                    // Log install result with correct singular/plural form in one line
+                    log_time_end(&format!(
+                        "{} package{} installed",
+                        specs.len(),
+                        if specs.len() == 1 { "" } else { "s" }
+                    ));
                 }
             } else {
                 let cwd = std::env::current_dir()?;
@@ -242,6 +263,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let _ = write_verbose_logs_to_file();
                     process::exit(1);
                 }
+                log_time_end("All packages installed");
             }
         }
         Some(Commands::Uninstall {
@@ -264,19 +286,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let _ = write_verbose_logs_to_file();
                     process::exit(1);
                 }
+                log_time_end(&format!(
+                    "{} package{} uninstalled",
+                    specs.len(),
+                    if specs.len() == 1 { "" } else { "s" }
+                ));
             } else {
                 return Err("Package specification is required for uninstall".into());
             }
         }
         Some(Commands::Rebuild) => {
-            log_info("Executing dependency hook scripts and creating node_modules/.bin links");
             let cwd = std::env::current_dir()?;
             if let Err(e) = rebuild(&cwd).await {
                 log_error(&e.to_string());
                 let _ = write_verbose_logs_to_file();
                 process::exit(1);
             }
-            log_info("💫 All dependencies rebuild completed");
+            log_time_end("All packages rebuilded");
         }
         Some(Commands::Deps { workspace_only }) => {
             let cwd = std::env::current_dir()?;
@@ -291,10 +317,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 log_error(&e.to_string());
                 let _ = write_verbose_logs_to_file();
                 process::exit(1);
+            } else {
+                log_time_end("deps resolved");
             }
         }
         Some(Commands::Update) => {
             if let Err(e) = update(false).await {
+                log_error(&e.to_string());
+                let _ = write_verbose_logs_to_file();
+                process::exit(1);
+            }
+            log_time_end("All packages updated");
+        }
+        Some(Commands::List { package }) => {
+            let cwd = std::env::current_dir()?;
+
+            if let Err(e) = list_dependencies(&cwd, &package).await {
                 log_error(&e.to_string());
                 let _ = write_verbose_logs_to_file();
                 process::exit(1);
@@ -359,6 +397,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let _ = write_verbose_logs_to_file();
                     process::exit(1);
                 }
+                log_time_end("All packages installed");
             }
         }
     }

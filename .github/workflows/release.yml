@@ -8,6 +8,7 @@ on:
 
 jobs:
   build-and-publish-binary:
+    if: startsWith(github.event.release.tag_name, 'utoo-')
     strategy:
       matrix:
         include:
@@ -94,19 +95,19 @@ jobs:
           ssh-private-key: |
             ${{ secrets.CI_SUBMODULE }}
       - name: Init git submodules
-        run: git submodule update --init --recursive
+        run: git submodule update --init
 
       - name: Build
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --bin utoo --bin utoo-install --bin utoo-rebuild --bin utoo-deps --bin utoo-clean --bin ut --bin utoo-update
+          args: --release --bin utoo --bin ut
 
       - name: Package Binaries
         run: |
           cd target/release
           tar -czf ../../utoo-${{ matrix.platform_os }}-${{ matrix.platform_cpu }}.tar.gz \
-            utoo utoo-install utoo-rebuild utoo-deps utoo-clean utoo-update ut
+            utoo ut
 
       - name: Upload Release Asset
         if: ${{ matrix.platform_os == 'linux' }}
@@ -121,8 +122,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '18.x'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "18.x"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Publish Binary Packages
         env:
@@ -131,7 +132,7 @@ jobs:
         run: |
           set -e
           cd vendor/scripts
-          BINS=("utoo" "utoo-install" "utoo-rebuild" "utoo-deps" "utoo-clean" "ut" "utoo-update")
+          BINS=("utoo" "ut")
           for BIN in "${BINS[@]}"; do
             PACKAGE_NAME=$(echo "$BIN")
             ./npm-binary.sh "$PACKAGE_NAME" "$VERSION" \
@@ -140,6 +141,7 @@ jobs:
           done
 
   publish-main:
+    if: startsWith(github.event.release.tag_name, 'utoo-')
     needs: build-and-publish-binary
     runs-on: ubuntu-latest
     permissions:
@@ -161,8 +163,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '18.x'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "18.x"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Publish Main Packages
         env:
@@ -171,7 +173,7 @@ jobs:
         run: |
           set -e
           cd vendor/scripts
-          BINS=("utoo" "utoo-install" "utoo-rebuild" "utoo-deps" "utoo-clean" "ut" "utoo-update")
+          BINS=("utoo" "ut")
           for BIN in "${BINS[@]}"; do
             PACKAGE_NAME=$(echo "$BIN")
             ./npm-main.sh "$PACKAGE_NAME" "$VERSION"

@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use async_compression::tokio::bufread::GzipDecoder;
 use flate2::read::GzDecoder;
+use once_cell::sync::Lazy;
+use reqwest::Client;
 use reqwest::StatusCode;
 use std::{fs::Permissions, os::unix::fs::PermissionsExt, path::Path};
 use tar::Archive as TarArchive;
@@ -13,56 +15,79 @@ use tokio_tar::Archive;
 
 use std::fs;
 
-use super::{logger::log_verbose, retry::create_retry_strategy};
+use super::retry::build_dns_cached_client;
+use super::{
+    logger::log_verbose,
+    retry::{RetryableError, create_retry_strategy},
+};
 
-// defined a custom error type to differentiate between retryable and non-retryable errors
-#[derive(Debug)]
-enum DownloadError {
-    Permanent(String), // Cannot retry 404
-    Temporary(String), // Can retry 500
-}
+use dashmap::DashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
-impl std::error::Error for DownloadError {}
-impl std::fmt::Display for DownloadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DownloadError::Permanent(e) => write!(f, "{e}"),
-            DownloadError::Temporary(e) => write!(f, "{e}"),
-        }
-    }
+// Global downloader client with DNS cache
+static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
+
+static DOWNLOAD_LOCKS: Lazy<DashMap<u64, Arc<Mutex<()>>>> = Lazy::new(DashMap::new);
+
+fn lock_key(url: &str, dest: &Path) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    url.hash(&mut hasher);
+    dest.to_string_lossy().hash(&mut hasher);
+    hasher.finish()
 }
 
 pub async fn download(url: &str, dest: &Path) -> Result<()> {
     let start = std::time::Instant::now();
+    let key = lock_key(url, dest);
+    let lock = DOWNLOAD_LOCKS
+        .entry(key)
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone();
+    let _guard = lock.lock().await;
+
+    let resolved_path = dest.join("_resolved");
+    if resolved_path.exists() {
+        log_verbose(&format!(
+            "Download skipped, already resolved: {}",
+            dest.display()
+        ));
+        return Ok(());
+    }
+
     RetryIf::spawn(
         create_retry_strategy(),
         || async {
-            let response = reqwest::get(url)
+            let response = DOWNLOADER_CLIENT
+                .get(url)
+                .send()
                 .await
-                .map_err(|e| DownloadError::Temporary(format!("Network error: {e}")))?;
+                .map_err(|e| RetryableError::Temporary(format!("Network error: {e}")))?;
 
             match response.status() {
                 StatusCode::OK => {
                     let bytes = response.bytes().await.map_err(|e| {
-                        DownloadError::Temporary(format!("Failed to read response: {e}"))
+                        RetryableError::Temporary(format!("Failed to read response: {e}"))
                     })?;
                     if let Err(e) = try_unpack(&bytes, dest).await {
                         log_verbose(&format!("Unpacking failed {}: {}", dest.display(), e));
-                        return Err(DownloadError::Temporary(e.to_string()));
+                        return Err(RetryableError::Temporary(e.to_string()));
                     }
                     Ok(())
                 }
                 StatusCode::NOT_FOUND => {
                     log_verbose(&format!("URL not found {url}"));
-                    Err(DownloadError::Permanent(format!("URL not found {url}")))
+                    Err(RetryableError::Permanent(format!("URL not found {url}")))
                 }
                 status => {
                     log_verbose(&format!("Error: {status}, retrying"));
-                    Err(DownloadError::Temporary(format!("HTTP error: {status}")))
+                    Err(RetryableError::Temporary(format!("HTTP error: {status}")))
                 }
             }
         },
-        |e: &DownloadError| matches!(e, DownloadError::Temporary(_)),
+        |e: &RetryableError| matches!(e, RetryableError::Temporary(_)),
     )
     .await
     .context("Download failed after retries")?;
@@ -109,4 +134,73 @@ async fn try_unpack(bytes: &[u8], dest: &Path) -> Result<(), Box<dyn std::error:
     set_permissions(&dest, Permissions::from_mode(0o755)).await?;
     File::create(&dest.join("_resolved")).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+    use mockito::Server;
+    use std::fs;
+    use std::io::Write;
+    use tar::Builder;
+    use tempfile::TempDir;
+    use tokio::task;
+
+    // Helper to create a simple tar.gz archive in memory
+    fn create_tar_gz() -> Vec<u8> {
+        let mut tar_data = Vec::new();
+        {
+            let mut tar = Builder::new(&mut tar_data);
+            let mut header = tar::Header::new_gnu();
+            let content = b"hello world";
+            header.set_path("file.txt").unwrap();
+            header.set_size(content.len() as u64);
+            header.set_cksum();
+            tar.append(&header, &content[..]).unwrap();
+            tar.finish().unwrap();
+        }
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&tar_data).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_download_idempotent() {
+        let tar_gz = create_tar_gz();
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("GET", "/pkg.tgz")
+            .with_status(200)
+            .with_header("content-type", "application/gzip")
+            .with_body(tar_gz.clone())
+            .expect(1)
+            .create_async()
+            .await;
+
+        let url = format!("{}/pkg.tgz", server.url());
+        let temp_dir = TempDir::new().unwrap();
+        let dest = temp_dir.path().join("pkg");
+        let n = 8;
+        let mut handles = Vec::new();
+        for _ in 0..n {
+            let url = url.clone();
+            let dest = dest.clone();
+            handles.push(task::spawn(async move {
+                download(&url, &dest).await.unwrap();
+            }));
+        }
+        for h in handles {
+            h.await.unwrap();
+        }
+        // _resolved file should exist
+        assert!(dest.join("_resolved").exists());
+        // Extracted file should exist
+        assert!(dest.join("file.txt").exists());
+        // All concurrent calls should succeed and not corrupt the output
+        let content = fs::read_to_string(dest.join("file.txt")).unwrap();
+        assert_eq!(content, "hello world");
+        _m.assert();
+    }
 }
