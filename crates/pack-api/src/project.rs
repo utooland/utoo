@@ -43,11 +43,11 @@ use turbopack_core::{
         chunk_group_info::ChunkGroupEntry,
     },
     output::{OutputAsset, OutputAssets},
+    raw_output::RawOutput,
     source_map::OptionStringifiedSourceMap,
     version::{
         NotFoundVersion, OptionVersionedContent, Update, Version, VersionState, VersionedContent,
     },
-    raw_output::RawOutput
 };
 use turbopack_node::execution_context::ExecutionContext;
 use turbopack_nodejs::NodeJsChunkingContext;
@@ -931,7 +931,7 @@ impl Project {
             let dist_root = self.dist_root().owned().await?;
 
             let all_output_assets_op = all_assets_from_entries_operation(output_assets);
-            
+
             if let Some(map) = self.await?.versioned_content_map {
                 // Insert the main output assets
                 let _ = map
@@ -943,7 +943,7 @@ impl Project {
                     )
                     .resolve()
                     .await?;
-                
+
                 // Also insert copy assets into the versioned content map
                 let copy_assets_op = copy_output_assets_operation(self.to_resolved().await?);
                 let _ = map
@@ -961,7 +961,7 @@ impl Project {
                 let all_output_assets = all_output_assets_op.connect();
                 let copy_assets = self.copy_output_assets();
                 let all_assets_combined = all_output_assets.concatenate(copy_assets);
-                
+
                 let _ = emit_assets(
                     all_assets_combined,
                     dist_root.clone(),
@@ -1106,7 +1106,7 @@ impl Project {
     pub async fn copy_output_assets(self: Vc<Self>) -> Result<Vc<OutputAssets>> {
         let project_path = self.project_path().owned().await?;
         let dist_root = self.dist_root().owned().await?;
-        
+
         let output_config = self.config().output().await?;
         let copy_config = output_config.copy.as_ref();
 
@@ -1116,7 +1116,7 @@ impl Project {
                 // Resolve from_path relative to project_path, not project_root
                 let from_path = project_path.join(&pattern.from)?;
                 let to_path = dist_root.join(&pattern.to)?;
-                
+
                 let source = turbopack_core::file_source::FileSource::new(from_path);
                 let asset = RawOutput::new(to_path, Vc::upcast(source));
                 assets.push(Vc::upcast(asset));
@@ -1214,9 +1214,7 @@ async fn all_assets_from_entries_operation(
 }
 
 #[turbo_tasks::function(operation)]
-async fn copy_output_assets_operation(
-    project: ResolvedVc<Project>,
-) -> Result<Vc<OutputAssets>> {
+async fn copy_output_assets_operation(project: ResolvedVc<Project>) -> Result<Vc<OutputAssets>> {
     let project_path = project.project_path().owned().await?;
     let dist_root = project.dist_root().owned().await?;
     let output_config = project.config().output().await?;
