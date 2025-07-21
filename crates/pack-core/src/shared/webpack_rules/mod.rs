@@ -5,11 +5,12 @@ use turbo_tasks::{ResolvedVc, Vc};
 use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::WebpackLoadersOptions;
 use turbopack_core::resolve::{ExternalTraced, ExternalType, options::ImportMapping};
+use turbopack_core::resolve::{ResolveResult, ResolveResultItem};
 
 use self::less::maybe_add_less_loader;
 use self::sass::maybe_add_sass_loader;
 use crate::config::Config;
-use crate::import_map::get_utoopack_path;
+use crate::import_map::get_utoopack_dependency_package;
 
 pub(crate) mod less;
 pub(crate) mod sass;
@@ -58,11 +59,14 @@ pub async fn webpack_loader_options(
 
 #[turbo_tasks::function]
 async fn loader_runner_package_mapping(project_path: FileSystemPath) -> Result<Vc<ImportMapping>> {
-    Ok(ImportMapping::PrimaryAlternativeExternal {
-        name: Some(rcstr!("loader-runner")),
-        ty: ExternalType::CommonJs,
-        traced: ExternalTraced::Untraced,
-        lookup_dir: get_utoopack_path(project_path).owned().await?,
-    }
-    .cell())
+    Ok(
+        ImportMapping::Direct(ResolveResult::primary(ResolveResultItem::External {
+            name: get_utoopack_dependency_package(project_path, rcstr!("loader-runner"))
+                .owned()
+                .await?,
+            ty: ExternalType::CommonJs,
+            traced: ExternalTraced::Untraced,
+        }))
+        .cell(),
+    )
 }

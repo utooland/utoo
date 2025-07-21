@@ -249,12 +249,15 @@ pub async fn get_utoopack_dependency_package(
 
     let dependency_path_to_root = &source.ident().path().owned().await?;
 
-    let dependency_relative_path_node_root = project_path
-        .join(".turbopack")?
-        .get_relative_path_to(dependency_path_to_root)
-        .context(format!("failed to resolve {dependency}"))?;
-
-    Ok(Vc::cell(dependency_relative_path_node_root))
+    Ok(Vc::cell(
+        dependency_path_to_root
+            .path
+            // This is a hack for special node_modules hosting like pnpm
+            // for example: require("node_modules/.pnpm/loader-runner@4.3.0/node_modules/loader-runner/lib/LoaderRunner.js") can't be resolve,
+            // but require(".pnpm/loader-runner@4.3.0/node_modules/loader-runner/lib/LoaderRunner.js)" can be
+            .replacen("node_modules/", "", 1)
+            .into(),
+    ))
 }
 
 pub fn get_client_resolved_map(
