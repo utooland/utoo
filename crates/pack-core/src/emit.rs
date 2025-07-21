@@ -5,7 +5,7 @@ use turbo_tasks::{
     ResolvedVc, TryFlatJoinIterExt, ValueToString, Vc,
     graph::{AdjacencyMap, GraphTraversal},
 };
-use turbo_tasks_fs::{FileSystemPath, rebase};
+use turbo_tasks_fs::{FileSystem, FileSystemPath, rebase};
 use turbopack_core::{
     asset::Asset,
     output::{OutputAsset, OutputAssets},

@@ -289,6 +289,15 @@ pub struct OptimizationConfig {
     pub split_chunks: FxIndexMap<RcStr, SplitChunkConfig>,
 }
 
+#[derive(
+    Clone, Debug, PartialEq, Serialize, Deserialize, TraceRawVcs, NonLocalValue, OperationValue,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyItem {
+    pub from: RcStr,
+    pub to: RcStr,
+}
+
 #[turbo_tasks::value(eq = "manual")]
 #[derive(Clone, Debug, PartialEq, Default, OperationValue)]
 #[serde(rename_all = "camelCase")]
@@ -299,6 +308,7 @@ pub struct OutputConfig {
     // TODO: make sure this is needed
     pub r#type: Option<OutputType>,
     pub clean: Option<bool>,
+    pub copy: Option<Vec<CopyItem>>,
 }
 
 #[derive(
