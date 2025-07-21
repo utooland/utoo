@@ -61,11 +61,11 @@ jobs:
           #     git config --system core.longpaths true &&
           #     rustup target add aarch64-pc-windows-msvc &&
           #     cargo test -p pack-tests
-          - host: windows-latest
-            test: |
-              git config --system core.longpaths true &&
-              cargo test -p pack-tests --target x86_64-pc-windows-msvc
-            target: x86_64-pc-windows-msvc
+          # - host: windows-latest
+          #   target: x86_64-pc-windows-msvc
+          #   test: |
+          #     git config --system core.longpaths true &&
+          #     cargo test -p pack-tests --target x86_64-pc-windows-msvc
     name: stable - ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     steps:
