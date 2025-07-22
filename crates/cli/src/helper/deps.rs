@@ -4,7 +4,7 @@ use petgraph::prelude::*;
 use std::collections::HashMap;
 
 use crate::util::logger::log_warning;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 /// Represents a node in the dependency graph
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,7 +73,11 @@ pub fn compute_topological_layers(node_list: &[Node], edges: &[Edge]) -> Result<
             // A cycle is a SCC with more than 1 node, or a self-loop
             if scc.len() > 1 {
                 // Collect node names in this cycle
-                let names: Vec<_> = scc.iter().filter_map(|&idx| graph.node_weight(idx)).cloned().collect();
+                let names: Vec<_> = scc
+                    .iter()
+                    .filter_map(|&idx| graph.node_weight(idx))
+                    .cloned()
+                    .collect();
                 cycles.push(names);
             } else if scc.len() == 1 {
                 let idx = scc[0];
