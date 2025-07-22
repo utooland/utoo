@@ -267,7 +267,7 @@ mod tests {
         let node_list = vec![];
         let edges = vec![];
         let result = compute_topological_layers(&node_list, &edges).unwrap();
-        assert_eq!(result, vec![]);
+        assert_eq!(result, Vec::<Vec<String>>::new());
     }
 
     #[test]
