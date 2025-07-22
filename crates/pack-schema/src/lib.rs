@@ -137,6 +137,19 @@ pub struct SchemaLibraryOptions {
     pub export: Option<Vec<String>>,
 }
 
+/// Copy item configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaCopyItem {
+    /// Source path to copy from
+    #[schemars(description = "Source path to copy from")]
+    pub from: String,
+
+    /// Destination path to copy to
+    #[schemars(description = "Destination path to copy to")]
+    pub to: String,
+}
+
 /// Output configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -165,6 +178,11 @@ pub struct SchemaOutputConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Whether to clean output directory before build")]
     pub clean: Option<bool>,
+
+    /// Copy files configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Copy files configuration")]
+    pub copy: Option<Vec<SchemaCopyItem>>,
 }
 
 /// Output type

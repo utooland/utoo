@@ -177,6 +177,24 @@
         }
       }
     },
+    "SchemaCopyItem": {
+      "description": "Copy item configuration",
+      "type": "object",
+      "required": [
+        "from",
+        "to"
+      ],
+      "properties": {
+        "from": {
+          "description": "Source path to copy from",
+          "type": "string"
+        },
+        "to": {
+          "description": "Destination path to copy to",
+          "type": "string"
+        }
+      }
+    },
     "SchemaEntryOptions": {
       "description": "Entry point configuration",
       "type": "object",
@@ -601,6 +619,16 @@
             "boolean",
             "null"
           ]
+        },
+        "copy": {
+          "description": "Copy files configuration",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/SchemaCopyItem"
+          }
         },
         "filename": {
           "description": "Filename pattern for main files",
