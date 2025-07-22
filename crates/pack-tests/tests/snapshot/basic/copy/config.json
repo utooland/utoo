@@ -9,7 +9,7 @@
         "path": "./output",
         "copy": [
             {
-                "from": "input/reset.css",
+                "from": "./input/reset.css",
                 "to": "./reset.css"
             }
         ]
