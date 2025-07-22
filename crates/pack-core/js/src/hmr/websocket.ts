@@ -9,26 +9,31 @@ type WebSocketMessage =
       data: Record<string, any>;
     };
 
-let source: WebSocket;
-const eventCallbacks: ((msg: WebSocketMessage) => void)[] = [];
+let source: WebSocket | null = null;
+let eventCallbacks: Array<(event: WebSocketMessage) => void> = [];
 
-function getSocketProtocol(): string {
-  let protocol = location.protocol;
-  return protocol === "http:" ? "ws" : "wss";
-}
-
-export function addMessageListener(cb: (msg: WebSocketMessage) => void) {
-  eventCallbacks.push(cb);
+export function addMessageListener(
+  callback: (event: WebSocketMessage) => void,
+) {
+  eventCallbacks.push(callback);
 }
 
 export function sendMessage(data: any) {
-  if (!source || source.readyState !== source.OPEN) return;
-  return source.send(data);
+  if (source && source.readyState === source.OPEN) {
+    const message = typeof data === 'string' ? data : JSON.stringify(data);
+    source.send(message);
+  }
 }
 
-export type HMROptions = {
+function getSocketProtocol() {
+  return typeof location !== "undefined" && location.protocol === "https:"
+    ? "wss"
+    : "ws";
+}
+
+export interface HMROptions {
   path: string;
-};
+}
 
 let reconnections = 0;
 let reloading = false;
@@ -44,6 +49,12 @@ export function connectHMR(options: HMROptions) {
     function handleOnline() {
       reconnections = 0;
       window.console.log("[HMR] connected");
+      
+      // Send the turbopack-connected message to trigger handleSocketConnected
+      const connected: WebSocketMessage = { type: 'turbopack-connected' };
+      for (const eventCallback of eventCallbacks) {
+        eventCallback(connected);
+      }
     }
 
     function handleMessage(event: MessageEvent<string>) {
@@ -51,34 +62,63 @@ export function connectHMR(options: HMROptions) {
         return;
       }
 
-      const msg = JSON.parse(event.data);
+      try {
+        const msg = JSON.parse(event.data);
 
-      if (msg.action === "turbopack-connected") {
-        if (
-          serverSessionId !== null &&
-          serverSessionId !== msg.data.sessionId
-        ) {
+        // Handle the different message formats from different servers
+        if (msg.action === "turbopack-connected") {
+          if (
+            serverSessionId !== null &&
+            serverSessionId !== msg.data.sessionId
+          ) {
+            window.location.reload();
+            reloading = true;
+            return;
+          }
+
+          serverSessionId = msg.data.sessionId;
+          
+          // Convert to turbopack format and trigger handleSocketConnected
+          const connected: WebSocketMessage = { type: 'turbopack-connected' };
+          for (const eventCallback of eventCallbacks) {
+            eventCallback(connected);
+          }
+          return;
+        }
+
+        if (msg.action === "reload") {
           window.location.reload();
           reloading = true;
           return;
         }
 
-        serverSessionId = msg.data.sessionId;
-      }
-
-      if (msg.action === "reload") {
-        window.location.reload();
-        reloading = true;
-        return;
-      }
-
-      if (["turbopack-connected", "turbopack-message"].includes(msg.action)) {
-        for (const eventCallback of eventCallbacks) {
-          eventCallback({ type: msg.action, data: msg.data });
+        if (msg.action === "turbopack-message") {
+          const turbopackMessage: WebSocketMessage = { 
+            type: 'turbopack-message', 
+            data: msg.data 
+          };
+          for (const eventCallback of eventCallbacks) {
+            eventCallback(turbopackMessage);
+          }
+          return;
         }
-      }
 
-      // TODO: handle rest msg.actions
+        // Handle direct turbopack-dev-server messages
+        if (msg.type && ["partial", "restart", "notFound", "issues"].includes(msg.type)) {
+          const turbopackMessage: WebSocketMessage = { 
+            type: 'turbopack-message', 
+            data: msg 
+          };
+          for (const eventCallback of eventCallbacks) {
+            eventCallback(turbopackMessage);
+          }
+          return;
+        }
+
+        // TODO: handle rest msg.actions
+      } catch (e) {
+        console.error("[HMR] Failed to parse message:", e);
+      }
     }
 
     let timer: ReturnType<typeof setTimeout>;
