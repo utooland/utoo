@@ -519,6 +519,13 @@
       "description": "Optimization configuration",
       "type": "object",
       "properties": {
+        "concatenateModules": {
+          "description": "Whether to concatenate modules when possible to reduce the number of chunks. This can improve performance by reducing the number of requests and improving caching.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "minify": {
           "description": "Whether to minify the output",
           "type": [

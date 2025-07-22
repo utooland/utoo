@@ -241,6 +241,13 @@ pub struct SchemaOptimizationConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Modularize imports configuration")]
     pub modularize_imports: Option<HashMap<String, serde_json::Value>>,
+
+    /// Whether to concatenate modules when possible to reduce the number of chunks
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Whether to concatenate modules when possible to reduce the number of chunks. This can improve performance by reducing the number of requests and improving caching."
+    )]
+    pub concatenate_modules: Option<bool>,
 }
 
 /// Module ID generation strategy
@@ -558,6 +565,7 @@ mod tests {
         assert!(schema_str.contains("entry"));
         assert!(schema_str.contains("externals"));
         assert!(schema_str.contains("optimization"));
+        assert!(schema_str.contains("concatenateModules"));
     }
 
     #[test]
@@ -629,7 +637,8 @@ mod tests {
             },
             "optimization": {
               "moduleIds": "named",
-              "minify": false
+              "minify": false,
+              "concatenateModules": true
             },
             "externals": {
               "foo": "bar"
@@ -645,5 +654,54 @@ mod tests {
         assert!(config.config.output.is_some());
         assert!(config.config.optimization.is_some());
         assert!(config.config.externals.is_some());
+
+        // Test concatenateModules configuration
+        let optimization = config.config.optimization.as_ref().unwrap();
+        assert_eq!(optimization.concatenate_modules, Some(true));
+    }
+
+    #[test]
+    fn test_concatenate_modules_configuration() {
+        // Test with concatenateModules: true
+        let json_true = r#"
+        {
+          "config": {
+            "optimization": {
+              "concatenateModules": true
+            }
+          }
+        }
+        "#;
+        let config: ProjectOptions = serde_json::from_str(json_true).unwrap();
+        let optimization = config.config.optimization.as_ref().unwrap();
+        assert_eq!(optimization.concatenate_modules, Some(true));
+
+        // Test with concatenateModules: false
+        let json_false = r#"
+        {
+          "config": {
+            "optimization": {
+              "concatenateModules": false
+            }
+          }
+        }
+        "#;
+        let config: ProjectOptions = serde_json::from_str(json_false).unwrap();
+        let optimization = config.config.optimization.as_ref().unwrap();
+        assert_eq!(optimization.concatenate_modules, Some(false));
+
+        // Test without concatenateModules (should be None)
+        let json_none = r#"
+        {
+          "config": {
+            "optimization": {
+              "minify": true
+            }
+          }
+        }
+        "#;
+        let config: ProjectOptions = serde_json::from_str(json_none).unwrap();
+        let optimization = config.config.optimization.as_ref().unwrap();
+        assert_eq!(optimization.concatenate_modules, None);
     }
 }
