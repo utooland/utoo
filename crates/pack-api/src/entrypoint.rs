@@ -57,7 +57,7 @@ pub async fn all_output_assets_operation(
     container: ResolvedVc<ProjectContainer>,
 ) -> Result<Vc<OutputAssets>> {
     let project = container.project();
-    
+
     // Get assets from all endpoints
     let endpoint_assets = project
         .get_all_endpoints()
