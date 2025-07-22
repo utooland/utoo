@@ -28,6 +28,7 @@ pub async fn get_library_chunking_context(
     config: ResolvedVc<Config>,
 ) -> Result<Vc<Box<dyn ChunkingContext>>> {
     let minify = config.minify(mode);
+    let concatenate_modules = config.concatenate_modules();
     let mode = mode.await?;
 
     let runtime_type = {
@@ -72,6 +73,8 @@ pub async fn get_library_chunking_context(
 
     if mode.is_development() {
         builder = builder.use_file_source_map_uris();
+    } else {
+        builder = builder.module_merging(*concatenate_modules.await?)
     }
 
     Ok(Vc::upcast(builder.build()))

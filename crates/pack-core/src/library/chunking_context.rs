@@ -88,6 +88,11 @@ impl LibraryChunkingContextBuilder {
         self
     }
 
+    pub fn module_merging(mut self, enable_module_merging: bool) -> Self {
+        self.chunking_context.enable_module_merging = enable_module_merging;
+        self
+    }
+
     pub fn minify_type(mut self, minify_type: MinifyType) -> Self {
         self.chunking_context.minify_type = minify_type;
         self
@@ -150,6 +155,8 @@ pub struct LibraryChunkingContext {
     output_root_to_root_path: RcStr,
     /// The environment chunks will be evaluated in.
     environment: ResolvedVc<Environment>,
+    /// Enable module merging
+    enable_module_merging: bool,
     /// The kind of runtime to include in the output.
     runtime_type: RuntimeType,
     /// Whether to minify resulting chunks
@@ -190,6 +197,7 @@ impl LibraryChunkingContext {
                 filename: Default::default(),
                 runtime_root,
                 runtime_export,
+                enable_module_merging: false,
             },
         }
     }
@@ -562,6 +570,11 @@ impl ChunkingContext for LibraryChunkingContext {
         } else {
             Ok(ModuleExportUsageInfo::all())
         }
+    }
+
+    #[turbo_tasks::function]
+    fn is_module_merging_enabled(&self) -> Vc<bool> {
+        Vc::cell(self.enable_module_merging)
     }
 }
 
