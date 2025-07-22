@@ -82,10 +82,10 @@ pub fn compute_topological_layers(node_list: &[Node], edges: &[Edge]) -> Result<
             } else if scc.len() == 1 {
                 let idx = scc[0];
                 // Check for self-loop
-                if graph.find_edge(idx, idx).is_some() {
-                    if let Some(name) = graph.node_weight(idx) {
-                        cycles.push(vec![name.clone()]);
-                    }
+                if graph.find_edge(idx, idx).is_some()
+                    && let Some(name) = graph.node_weight(idx)
+                {
+                    cycles.push(vec![name.clone()]);
                 }
             }
         }
