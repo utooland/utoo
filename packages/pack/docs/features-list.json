@@ -121,6 +121,12 @@
           "remarks": ""
         },
         {
+          "featureLevel2": "`copy`",
+          "featureStatus": "✅",
+          "featureDetails": "[Mako `config.copy`](https://makojs.dev/docs/config#copy)",
+          "remarks": ""
+        },
+        {
           "featureLevel2": "`standalone`",
           "featureStatus": "❓",
           "featureDetails": "",
@@ -183,6 +189,12 @@
     {
       "featureLevel1": "Optimization",
       "children": [
+        {
+          "featureLevel2": "`concatenateModules`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `optimization.concatenateModules`](https://webpack.js.org/configuration/optimization/#optimizationconcatenatemodules)",
+          "remarks": ""
+        },
         {
           "featureLevel2": "`moduleIds`",
           "featureStatus": "✅",
