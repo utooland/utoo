@@ -4,6 +4,7 @@ use petgraph::prelude::*;
 use std::collections::HashMap;
 
 use crate::util::logger::log_warning;
+use anyhow::{anyhow, Result};
 
 /// Represents a node in the dependency graph
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,8 +42,8 @@ impl Edge {
 /// - `edges`: List of dependency edges where each edge represents "to depends on from"
 ///
 /// # Returns
-/// Vector of layers where each layer contains nodes that can be processed in parallel
-pub fn compute_topological_layers(node_list: &[Node], edges: &[Edge]) -> Vec<Vec<String>> {
+/// Returns Result of layers where each layer contains nodes that can be processed in parallel
+pub fn compute_topological_layers(node_list: &[Node], edges: &[Edge]) -> Result<Vec<Vec<String>>> {
     let mut graph = Graph::<String, ()>::new();
     let mut node_indices = HashMap::<String, NodeIndex>::new();
 
@@ -64,21 +65,46 @@ pub fn compute_topological_layers(node_list: &[Node], edges: &[Edge]) -> Vec<Vec
 
     // Check for cycles first
     if is_cyclic_directed(&graph) {
-        log_warning("Cycle detected in dependency graph");
-        return vec![];
+        // Find all strongly connected components (SCCs)
+        use petgraph::algo::kosaraju_scc;
+        let sccs = kosaraju_scc(&graph);
+        let mut cycles = Vec::new();
+        for scc in &sccs {
+            // A cycle is a SCC with more than 1 node, or a self-loop
+            if scc.len() > 1 {
+                // Collect node names in this cycle
+                let names: Vec<_> = scc.iter().filter_map(|&idx| graph.node_weight(idx)).cloned().collect();
+                cycles.push(names);
+            } else if scc.len() == 1 {
+                let idx = scc[0];
+                // Check for self-loop
+                if graph.find_edge(idx, idx).is_some() {
+                    if let Some(name) = graph.node_weight(idx) {
+                        cycles.push(vec![name.clone()]);
+                    }
+                }
+            }
+        }
+        // Print all cycles
+        let mut cycle_msgs = Vec::new();
+        for cycle in cycles {
+            let msg = format!("Cycle detected: {}", cycle.join(" <- "));
+            cycle_msgs.push(msg);
+        }
+        return Err(anyhow!(cycle_msgs.join("; ")));
     }
 
     // Get topological ordering
     let topo_sort = match toposort(&graph, None) {
         Ok(sorted) => sorted,
-        Err(_) => {
+        Err(e) => {
             log_warning("Failed to perform topological sort");
-            return vec![];
+            return Err(anyhow!("Topological sort failed: {:?}", e));
         }
     };
 
     // Convert topological order to layers
-    compute_layers_from_topo_order(&graph, &topo_sort)
+    Ok(compute_layers_from_topo_order(&graph, &topo_sort))
 }
 
 /// Compute layers from topological ordering - simplified approach
@@ -130,7 +156,7 @@ mod tests {
             Edge::new("A", "B"), // B depends on A
         ];
 
-        let result = compute_topological_layers(&node_list, &edges);
+        let result = compute_topological_layers(&node_list, &edges).unwrap();
         assert_eq!(result, vec![vec!["A"], vec!["B"]]);
     }
 
@@ -142,7 +168,7 @@ mod tests {
             Edge::new("B", "C"), // C depends on B
         ];
 
-        let result = compute_topological_layers(&node_list, &edges);
+        let result = compute_topological_layers(&node_list, &edges).unwrap();
         assert_eq!(result, vec![vec!["A"], vec!["B"], vec!["C"]]);
     }
 
@@ -159,7 +185,7 @@ mod tests {
             Edge::new("C", "D"), // D depends on C
         ];
 
-        let result = compute_topological_layers(&node_list, &edges);
+        let result = compute_topological_layers(&node_list, &edges).unwrap();
         assert_eq!(result.len(), 2);
 
         // First layer should contain A and C (in any order)
@@ -178,7 +204,7 @@ mod tests {
         let node_list = vec![Node::new("A"), Node::new("B"), Node::new("C")];
         let edges = vec![Edge::new("A", "B"), Edge::new("B", "C")];
 
-        let result = compute_topological_layers(&node_list, &edges);
+        let result = compute_topological_layers(&node_list, &edges).unwrap();
         // Should successfully compute layers if no cycle
         assert_eq!(result, vec![vec!["A"], vec!["B"], vec!["C"]]);
     }
@@ -193,8 +219,8 @@ mod tests {
         ];
 
         let result = compute_topological_layers(&node_list, &edges);
-        // Should return empty result when cycle is detected
-        assert!(result.is_empty());
+        // Should return Err when cycle is detected
+        assert!(result.is_err());
     }
 
     #[test]
@@ -217,7 +243,7 @@ mod tests {
             Edge::new("C", "F"), // F depends on C
         ];
 
-        let result = compute_topological_layers(&node_list, &edges);
+        let result = compute_topological_layers(&node_list, &edges).unwrap();
 
         // Layer 0: A (no dependencies)
         assert_eq!(result[0], vec!["A"]);
@@ -240,8 +266,8 @@ mod tests {
     fn test_empty_graph() {
         let node_list = vec![];
         let edges = vec![];
-        let result = compute_topological_layers(&node_list, &edges);
-        assert!(result.is_empty());
+        let result = compute_topological_layers(&node_list, &edges).unwrap();
+        assert_eq!(result, vec![]);
     }
 
     #[test]
@@ -253,8 +279,8 @@ mod tests {
         ];
 
         let result = compute_topological_layers(&node_list, &edges);
-        // Should detect cycle and return empty
-        assert!(result.is_empty());
+        // Should detect cycle and return Err
+        assert!(result.is_err());
     }
 
     #[test]
@@ -267,7 +293,7 @@ mod tests {
             Edge::new("B", "C"),
         ];
 
-        let result = compute_topological_layers(&node_list, &edges);
+        let result = compute_topological_layers(&node_list, &edges).unwrap();
         assert_eq!(result, vec![vec!["A"], vec!["B"], vec!["C"]]);
     }
 
@@ -286,7 +312,7 @@ mod tests {
                                  // D has no edges
         ];
 
-        let result = compute_topological_layers(&node_list, &edges);
+        let result = compute_topological_layers(&node_list, &edges).unwrap();
 
         // Layer 0: A and D (no dependencies)
         let mut layer0 = result[0].clone();
@@ -308,7 +334,27 @@ mod tests {
             Edge::new("B", "C"), // C depends on B
         ];
 
-        let result = compute_topological_layers(&node_list, &edges);
+        let result = compute_topological_layers(&node_list, &edges).unwrap();
         assert_eq!(result, vec![vec!["A"], vec!["B"], vec!["C"]]);
+    }
+
+    #[test]
+    fn test_cycle_error_message_contains_cycle_nodes() {
+        // Create a simple cycle: A -> B -> C -> A
+        let node_list = vec![Node::new("A"), Node::new("B"), Node::new("C")];
+        let edges = vec![
+            Edge::new("A", "B"),
+            Edge::new("B", "C"),
+            Edge::new("C", "A"),
+        ];
+
+        let result = compute_topological_layers(&node_list, &edges);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        // The error message should contain all nodes in the cycle
+        assert!(err_msg.contains("A"));
+        assert!(err_msg.contains("B"));
+        assert!(err_msg.contains("C"));
+        assert!(err_msg.contains("Cycle detected"));
     }
 }
