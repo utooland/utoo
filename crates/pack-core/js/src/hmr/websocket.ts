@@ -12,6 +12,13 @@ type WebSocketMessage =
 let source: WebSocket | null = null;
 let eventCallbacks: Array<(event: WebSocketMessage) => void> = [];
 
+// Helper function to dispatch messages to all event callbacks
+function dispatchMessage(message: WebSocketMessage) {
+  for (const eventCallback of eventCallbacks) {
+    eventCallback(message);
+  }
+}
+
 export function addMessageListener(
   callback: (event: WebSocketMessage) => void,
 ) {
@@ -52,9 +59,7 @@ export function connectHMR(options: HMROptions) {
       
       // Send the turbopack-connected message to trigger handleSocketConnected
       const connected: WebSocketMessage = { type: 'turbopack-connected' };
-      for (const eventCallback of eventCallbacks) {
-        eventCallback(connected);
-      }
+      dispatchMessage(connected);
     }
 
     function handleMessage(event: MessageEvent<string>) {
@@ -80,9 +85,7 @@ export function connectHMR(options: HMROptions) {
           
           // Convert to turbopack format and trigger handleSocketConnected
           const connected: WebSocketMessage = { type: 'turbopack-connected' };
-          for (const eventCallback of eventCallbacks) {
-            eventCallback(connected);
-          }
+          dispatchMessage(connected);
           return;
         }
 
@@ -97,9 +100,7 @@ export function connectHMR(options: HMROptions) {
             type: 'turbopack-message', 
             data: msg.data 
           };
-          for (const eventCallback of eventCallbacks) {
-            eventCallback(turbopackMessage);
-          }
+          dispatchMessage(turbopackMessage);
           return;
         }
 
@@ -109,9 +110,7 @@ export function connectHMR(options: HMROptions) {
             type: 'turbopack-message', 
             data: msg 
           };
-          for (const eventCallback of eventCallbacks) {
-            eventCallback(turbopackMessage);
-          }
+          dispatchMessage(turbopackMessage);
           return;
         }
 
