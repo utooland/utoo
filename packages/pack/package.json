@@ -62,7 +62,8 @@
     "typescript": "^5.8.3",
     "@types/ws": "^8.18.1",
     "@types/send": "0.14.4",
-    "@types/mime-types": "3.0.1"
+    "@types/mime-types": "3.0.1",
+    "@types/mime": "^3.0.4"
   },
   "peerDependencies": {
     "@types/webpack": "^5.28.5"
