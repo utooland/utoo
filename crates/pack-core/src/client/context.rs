@@ -178,16 +178,14 @@ pub async fn get_client_runtime_entries(
             )
         };
 
-        if watch {
-            runtime_entries.push(
-                RuntimeEntry::Source(ResolvedVc::upcast(
-                    FileSource::new(embed_file_path(rcstr!("hmr/bootstrap.ts")).owned().await?)
-                        .to_resolved()
-                        .await?,
-                ))
-                .resolved_cell(),
-            );
-        }
+        runtime_entries.push(
+            RuntimeEntry::Source(ResolvedVc::upcast(
+                FileSource::new(embed_file_path(rcstr!("hmr/bootstrap.ts")).owned().await?)
+                    .to_resolved()
+                    .await?,
+            ))
+            .resolved_cell(),
+        );
     }
 
     Ok(Vc::cell(runtime_entries))
