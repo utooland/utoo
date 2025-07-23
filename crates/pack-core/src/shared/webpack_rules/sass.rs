@@ -2,12 +2,17 @@ use std::mem::take;
 
 use anyhow::{Result, bail};
 use serde_json::Value as JsonValue;
+use turbo_rcstr::rcstr;
 use turbo_tasks::{ResolvedVc, Vc};
+use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::{LoaderRuleItem, OptionWebpackRules, WebpackRules};
 use turbopack_node::transforms::webpack::WebpackLoaderItem;
 
+use crate::import_map::get_utoopack_dependency_package;
+
 #[turbo_tasks::function]
 pub async fn maybe_add_sass_loader(
+    project_path: FileSystemPath,
     sass_options: Vc<JsonValue>,
     webpack_rules: Option<Vc<WebpackRules>>,
 ) -> Result<Vc<OptionWebpackRules>> {
@@ -42,7 +47,9 @@ pub async fn maybe_add_sass_loader(
             .or(Some(&empty_additional_data)));
         let rule = rules.get_mut(pattern);
         let sass_loader = WebpackLoaderItem {
-            loader: "sass-loader".into(),
+            loader: get_utoopack_dependency_package(project_path.clone(), rcstr!("sass-loader"))
+                .owned()
+                .await?,
             options: take(
                 serde_json::json!({
                     "implementation": sass_options.get("implementation"),
@@ -55,7 +62,12 @@ pub async fn maybe_add_sass_loader(
             ),
         };
         let resolve_url_loader = WebpackLoaderItem {
-            loader: "resolve-url-loader".into(),
+            loader: get_utoopack_dependency_package(
+                project_path.clone(),
+                rcstr!("resolve-url-loader"),
+            )
+            .owned()
+            .await?,
             options: take(
                 serde_json::json!({
                     //https://github.com/vercel/turbo/blob/d527eb54be384a4658243304cecd547d09c05c6b/crates/turbopack-node/src/transforms/webpack.rs#L191

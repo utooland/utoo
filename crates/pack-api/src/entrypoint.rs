@@ -56,8 +56,10 @@ pub async fn all_entrypoints_write_to_disk_operation(
 pub async fn all_output_assets_operation(
     container: ResolvedVc<ProjectContainer>,
 ) -> Result<Vc<OutputAssets>> {
-    let endpoint_assets = container
-        .project()
+    let project = container.project();
+
+    // Get assets from all endpoints
+    let endpoint_assets = project
         .get_all_endpoints()
         .await?
         .iter()
@@ -65,10 +67,14 @@ pub async fn all_output_assets_operation(
         .try_join()
         .await?;
 
-    let output_assets: FxIndexSet<ResolvedVc<Box<dyn OutputAsset>>> = endpoint_assets
+    let mut output_assets: FxIndexSet<ResolvedVc<Box<dyn OutputAsset>>> = endpoint_assets
         .iter()
         .flat_map(|assets| assets.iter().copied())
         .collect();
+
+    // Also include copy assets
+    let copy_assets = project.copy_output_assets().await?;
+    output_assets.extend(copy_assets.iter().copied());
 
     Ok(Vc::cell(output_assets.into_iter().collect()))
 }

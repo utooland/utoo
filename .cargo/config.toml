@@ -10,7 +10,6 @@ rustflags = [
   "-Csymbol-mangling-version=v0",
 ]
 incremental = true
-target-dir = "target"
 
 [cache]
 auto-clean-frequency = "1 day"

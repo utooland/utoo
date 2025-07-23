@@ -21,13 +21,15 @@
 |  | `clean` | ✅ | [Webpack `output.clean`](https://webpack.js.org/configuration/output/#outputclean) |  |
 |  | `filename` | ✅ | [Webpack `output.filename`](https://webpack.js.org/configuration/output/#outputfilename) |  |
 |  | `chunkFilename` | ✅ | [Webpack `output.filename`](https://webpack.js.org/configuration/output/#outputchunkfilename) |  |
+|  | `copy` | ✅ | [Mako `config.copy`](https://makojs.dev/docs/config#copy) |  |
 |  | `standalone` | ❓ |  |  |
 | Target | `browserslist` | ✅ | [Webpack `target` string](https://webpack.js.org/configuration/target/#string) |  |
 |  | `node` | 🟠 |  |  |
 | Sourcemap |  | ✅ | [Webpack `devtool` configuration](https://webpack.js.org/configuration/devtool/) |  |
 | Define |  | ✅ | [Webpack `DefinePlugin`](https://webpack.js.org/plugins/define-plugin/) |  |
 | Providers |  | 🟠 | [Webpack `ProvidePlugin`](https://webpack.js.org/plugins/provide-plugin/#root) |  |
-| Optimization | `moduleIds` | ✅ | [Webpack `optimization.moduleIds`](https://webpack.js.org/configuration/optimization/#optimizationmoduleids) | Supports "names" or "deterministic" |
+| Optimization | `concatenateModules` | ✅ | [Webpack `optimization.concatenateModules`](https://webpack.js.org/configuration/optimization/#optimizationconcatenatemodules) |  |
+|  | `moduleIds` | ✅ | [Webpack `optimization.moduleIds`](https://webpack.js.org/configuration/optimization/#optimizationmoduleids) | Supports "names" or "deterministic" |
 |  | `minify` | ✅ | [Webpack `optimization.minimize`](https://webpack.js.org/configuration/optimization/#optimizationminimize) |  |
 |  | `treeShaking` | ✅ | [Webpack `tree-shaking` guide](https://webpack.js.org/guides/tree-shaking/#root) | Includes `packageImports` |
 |  | `splitChunks` | 🟠 | [Turbopack chunking config](https://github.com/vercel/next.js/blob/c3429682aa910eb2b5ddd1e761c8ec8cfaa4bb04/turbopack/crates/turbopack-core/src/chunk/chunking_context.rs#L114) |  |

@@ -287,6 +287,20 @@ pub struct OptimizationConfig {
     pub remove_console: Option<RemoveConsoleConfig>,
     #[serde(default)]
     pub split_chunks: FxIndexMap<RcStr, SplitChunkConfig>,
+    /// Concatenate modules when possible to reduce the number of chunks.
+    /// This can improve performance by reducing the number of requests and
+    /// improving caching.
+    #[serde(default)]
+    pub concatenate_modules: Option<bool>,
+}
+
+#[derive(
+    Clone, Debug, PartialEq, Serialize, Deserialize, TraceRawVcs, NonLocalValue, OperationValue,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyItem {
+    pub from: RcStr,
+    pub to: RcStr,
 }
 
 #[turbo_tasks::value(eq = "manual")]
@@ -299,6 +313,7 @@ pub struct OutputConfig {
     // TODO: make sure this is needed
     pub r#type: Option<OutputType>,
     pub clean: Option<bool>,
+    pub copy: Option<Vec<CopyItem>>,
 }
 
 #[derive(
@@ -1122,6 +1137,16 @@ impl Config {
             self.optimization
                 .as_ref()
                 .map(|op| op.no_mangling.is_some_and(|no_mangling| no_mangling))
+                .unwrap_or(false),
+        )
+    }
+
+    #[turbo_tasks::function]
+    pub fn concatenate_modules(&self) -> Vc<bool> {
+        Vc::cell(
+            self.optimization
+                .as_ref()
+                .map(|op| op.concatenate_modules.unwrap_or(false))
                 .unwrap_or(false),
         )
     }

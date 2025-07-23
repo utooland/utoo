@@ -178,16 +178,14 @@ pub async fn get_client_runtime_entries(
             )
         };
 
-        if watch {
-            runtime_entries.push(
-                RuntimeEntry::Source(ResolvedVc::upcast(
-                    FileSource::new(embed_file_path(rcstr!("hmr/bootstrap.ts")).owned().await?)
-                        .to_resolved()
-                        .await?,
-                ))
-                .resolved_cell(),
-            );
-        }
+        runtime_entries.push(
+            RuntimeEntry::Source(ResolvedVc::upcast(
+                FileSource::new(embed_file_path(rcstr!("hmr/bootstrap.ts")).owned().await?)
+                    .to_resolved()
+                    .await?,
+            ))
+            .resolved_cell(),
+        );
     }
 
     Ok(Vc::cell(runtime_entries))
@@ -434,6 +432,7 @@ pub async fn get_client_chunking_context(
     config: ResolvedVc<Config>,
 ) -> Result<Vc<Box<dyn ChunkingContext>>> {
     let minify = config.minify(mode);
+    let concatenate_modules = config.concatenate_modules();
     let mode = mode.await?;
 
     let runtime_type = {
@@ -509,14 +508,16 @@ pub async fn get_client_chunking_context(
             ),
         );
 
-        builder = builder.chunking_config(
-            Vc::<EcmascriptChunkType>::default().to_resolved().await?,
-            ecmascript_chunking_config,
-        );
-        builder = builder.chunking_config(
-            Vc::<CssChunkType>::default().to_resolved().await?,
-            css_chunking_config,
-        );
+        builder = builder
+            .chunking_config(
+                Vc::<EcmascriptChunkType>::default().to_resolved().await?,
+                ecmascript_chunking_config,
+            )
+            .chunking_config(
+                Vc::<CssChunkType>::default().to_resolved().await?,
+                css_chunking_config,
+            )
+            .module_merging(*concatenate_modules.await?);
     }
 
     let chunking_context = builder.build();

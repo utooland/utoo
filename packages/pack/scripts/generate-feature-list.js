@@ -111,7 +111,7 @@ let featuresData = {}; // Initialize as an empty object
 
 try {
     // Construct the path to the JSON file
-    const dataFilePath = path.resolve(__dirname, '../data/features-list.json');
+    const dataFilePath = path.resolve(__dirname, '../docs/features-list.json');
     // Read the JSON file synchronously
     const jsonData = fs.readFileSync(dataFilePath, 'utf8');
     // Parse the JSON data

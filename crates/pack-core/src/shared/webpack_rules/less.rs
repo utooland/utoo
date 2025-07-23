@@ -2,12 +2,17 @@ use std::mem::take;
 
 use anyhow::{Result, bail};
 use serde_json::Value as JsonValue;
+use turbo_rcstr::rcstr;
 use turbo_tasks::{ResolvedVc, Vc};
+use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::{LoaderRuleItem, OptionWebpackRules, WebpackRules};
 use turbopack_node::transforms::webpack::WebpackLoaderItem;
 
+use crate::import_map::get_utoopack_dependency_package;
+
 #[turbo_tasks::function]
 pub async fn maybe_add_less_loader(
+    project_path: FileSystemPath,
     less_options: Vc<JsonValue>,
     webpack_rules: Option<Vc<WebpackRules>>,
 ) -> Result<Vc<OptionWebpackRules>> {
@@ -30,7 +35,9 @@ pub async fn maybe_add_less_loader(
             .or(Some(&empty_additional_data)));
         let rule = rules.get_mut(pattern);
         let less_loader = WebpackLoaderItem {
-            loader: "less-loader".into(),
+            loader: get_utoopack_dependency_package(project_path.clone(), rcstr!("less-loader"))
+                .owned()
+                .await?,
             options: take(
                 serde_json::json!({
                     "implementation": less_options.get("implementation"),

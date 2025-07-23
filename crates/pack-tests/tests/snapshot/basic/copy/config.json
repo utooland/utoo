@@ -1,0 +1,17 @@
+{
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "output": {
+        "path": "./output",
+        "copy": [
+            {
+                "from": "./input/reset.css",
+                "to": "./reset.css"
+            }
+        ]
+    }
+  }

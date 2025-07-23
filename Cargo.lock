@@ -4082,6 +4082,7 @@ dependencies = [
  "turbopack-core",
  "turbopack-node",
  "turbopack-nodejs",
+ "turbopack-static",
  "turbopack-trace-utils",
  "url",
  "urlencoding",
