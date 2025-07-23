@@ -1142,13 +1142,16 @@ impl Config {
     }
 
     #[turbo_tasks::function]
-    pub fn concatenate_modules(&self) -> Vc<bool> {
-        Vc::cell(
-            self.optimization
+    pub async fn concatenate_modules(&self, mode: Vc<Mode>) -> Result<Vc<bool>> {
+        Ok(Vc::cell(match *mode.await? {
+            // Ignore configuration in development mode to not break HMR
+            Mode::Development => false,
+            Mode::Production => self
+                .optimization
                 .as_ref()
                 .map(|op| op.concatenate_modules.unwrap_or(false))
                 .unwrap_or(false),
-        )
+        }))
     }
 
     #[turbo_tasks::function]
