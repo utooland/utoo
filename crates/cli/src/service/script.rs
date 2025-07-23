@@ -12,6 +12,44 @@ use super::binary::get_envs;
 pub struct ScriptService;
 
 impl ScriptService {
+    /// Check if node-gyp exists in PATH by searching directories
+    fn has_node_gyp_in_path() -> bool {
+        if let Ok(paths) = env::var("PATH")
+            && let Some(dir) = paths.split(':').next()
+        {
+            let node_gyp_path = Path::new(dir).join("node-gyp");
+            return node_gyp_path.exists();
+        }
+        false
+    }
+
+    /// Ensure node-gyp is available in PATH, install globally if not
+    pub async fn ensure_node_gyp() -> Result<bool> {
+        // Check if node-gyp exists in PATH
+        let has_node_gyp = Self::has_node_gyp_in_path();
+
+        if !has_node_gyp {
+            log_verbose("node-gyp not found in PATH, installing globally");
+            // Install node-gyp globally, ignore stdout but keep stderr
+            let status = Command::new("ut")
+                .args(["i", "-g", "node-gyp"])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .context("Failed to install node-gyp globally")?;
+            if !status.success() {
+                anyhow::bail!("Failed to install node-gyp globally");
+            }
+            return Ok(true);
+        }
+        Ok(true)
+    }
+
+    pub fn is_node_gyp_pkg(package: &PackageInfo) -> bool {
+        // https://hitu.antgroup-inc.cn/packages/@npmcli/node-gyp/files/lib/index.js#L6:L6
+        package.path.join("binding.gyp").exists()
+    }
+
     pub async fn execute_script(
         package: &PackageInfo,
         script_type: &str,
@@ -26,6 +64,10 @@ impl ScriptService {
                 package.path.display(),
                 script
             ));
+
+            if Self::is_node_gyp_pkg(package) {
+                Self::ensure_node_gyp().await?;
+            }
 
             let bin_paths = Self::collect_bin_paths(package);
             let env_path = Self::build_path_env(&bin_paths);
@@ -359,5 +401,105 @@ mod tests {
         // Test with non-existent file
         let result = ScriptService::ensure_executable(Path::new("nonexistent-file")).await;
         assert!(result.is_err(), "Should fail with non-existent file");
+    }
+
+    #[test]
+    fn test_has_node_gyp_in_path_found() {
+        use std::env;
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        use tempfile::tempdir;
+
+        // Create a temporary directory
+        let temp_dir = tempdir().unwrap();
+        let node_gyp_path = temp_dir.path().join("node-gyp");
+        // Create a dummy node-gyp executable
+        fs::write(&node_gyp_path, "#!/bin/sh\necho node-gyp").unwrap();
+        fs::set_permissions(&node_gyp_path, fs::Permissions::from_mode(0o755)).unwrap();
+
+        // Save original PATH
+        let original_path = env::var("PATH").unwrap_or_default();
+        // Set PATH to only include our temp dir
+        unsafe {
+            env::set_var("PATH", temp_dir.path());
+        }
+
+        // Should find node-gyp
+        assert!(ScriptService::has_node_gyp_in_path());
+
+        // Restore original PATH
+        unsafe {
+            env::set_var("PATH", original_path);
+        }
+    }
+
+    #[test]
+    fn test_has_node_gyp_in_path_not_found() {
+        use std::env;
+        // Save original PATH
+        let original_path = env::var("PATH").unwrap_or_default();
+        // Set PATH to a temp dir without node-gyp
+        let temp_dir = tempfile::tempdir().unwrap();
+        unsafe {
+            env::set_var("PATH", temp_dir.path());
+        }
+        // Should not find node-gyp
+        assert!(!ScriptService::has_node_gyp_in_path());
+        // Restore original PATH
+        unsafe {
+            env::set_var("PATH", original_path);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ensure_node_gyp_found() {
+        use std::env;
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        // Create a temporary directory
+        let temp_dir = tempfile::tempdir().unwrap();
+        let node_gyp_path = temp_dir.path().join("node-gyp");
+        // Create a dummy node-gyp executable
+        fs::write(&node_gyp_path, "#!/bin/sh\necho node-gyp").unwrap();
+        fs::set_permissions(&node_gyp_path, fs::Permissions::from_mode(0o755)).unwrap();
+
+        // Save original PATH
+        let original_path = env::var("PATH").unwrap_or_default();
+        // Set PATH to only include our temp dir
+        unsafe {
+            env::set_var("PATH", temp_dir.path());
+        }
+        // Should return Ok(true) because node-gyp exists
+        let result = ScriptService::ensure_node_gyp().await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), true);
+        // Restore original PATH
+        unsafe {
+            env::set_var("PATH", original_path);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_is_node_gyp_pkg_true_and_false() {
+        use std::fs;
+        // Create a temporary directory
+        let temp_dir = tempfile::tempdir().unwrap();
+        let package_path = temp_dir.path();
+        // Case 1: binding.gyp exists
+        let binding_gyp = package_path.join("binding.gyp");
+        fs::write(&binding_gyp, "{}").unwrap();
+        let package = PackageInfo {
+            path: package_path.to_path_buf(),
+            bin_files: Default::default(),
+            scripts: Scripts::default(),
+            scope: None,
+            fullname: "test-package".to_string(),
+            name: "test-package".to_string(),
+            version: "1.0.0".to_string(),
+        };
+        assert!(ScriptService::is_node_gyp_pkg(&package));
+        // Case 2: binding.gyp does not exist
+        fs::remove_file(&binding_gyp).unwrap();
+        assert!(!ScriptService::is_node_gyp_pkg(&package));
     }
 }
