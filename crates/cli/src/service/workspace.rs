@@ -61,7 +61,7 @@ impl WorkspaceService {
             }
 
             // Compute topological layers using the helper function
-            let topology = compute_topological_layers(&node_list, &edges);
+            let topology = compute_topological_layers(&node_list, &edges)?;
 
             Ok(WorkspaceTopology {
                 edges,
