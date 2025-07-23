@@ -91,7 +91,14 @@ pub fn compute_topological_layers(node_list: &[Node], edges: &[Edge]) -> Result<
         }
         // Print all cycles
         let mut cycle_msgs = Vec::new();
-        for cycle in cycles {
+        for mut cycle in cycles {
+            if !cycle.is_empty() {
+                // Sort the cycle nodes for consistent output
+                cycle.sort();
+                // Ensure the cycle is closed by appending the first node to the end
+                let first = cycle[0].clone();
+                cycle.push(first);
+            }
             let msg = format!("Cycle detected: {}", cycle.join(" <- "));
             cycle_msgs.push(msg);
         }
@@ -355,10 +362,35 @@ mod tests {
         let result = compute_topological_layers(&node_list, &edges);
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
-        // The error message should contain all nodes in the cycle
-        assert!(err_msg.contains("A"));
-        assert!(err_msg.contains("B"));
-        assert!(err_msg.contains("C"));
-        assert!(err_msg.contains("Cycle detected"));
+        assert_eq!(err_msg, "Cycle detected: A <- B <- C <- A");
+    }
+
+    #[test]
+    fn test_multiple_cycles() {
+        // Create two cycles: A -> B -> C -> A and D -> E -> D
+        let node_list = vec![
+            Node::new("A"),
+            Node::new("B"),
+            Node::new("C"),
+            Node::new("D"),
+            Node::new("E"),
+            Node::new("F"), // F is acyclic
+        ];
+        let edges = vec![
+            Edge::new("A", "B"),
+            Edge::new("B", "C"),
+            Edge::new("C", "A"), // Cycle 1: A -> B -> C -> A
+            Edge::new("D", "E"),
+            Edge::new("E", "D"), // Cycle 2: D <-> E
+            Edge::new("F", "C"), // F is not in any cycle
+        ];
+
+        let result = compute_topological_layers(&node_list, &edges);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert_eq!(
+            err_msg,
+            "Cycle detected: D <- E <- D; Cycle detected: A <- B <- C <- A"
+        );
     }
 }
