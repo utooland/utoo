@@ -318,6 +318,14 @@ impl PackageService {
                 log_verbose(&format!("Linking binary files for {}", package.fullname));
                 for (bin_name, relative_path) in &package.bin_files {
                     let target_path = package.path.join(relative_path);
+                    if !target_path.exists() {
+                        log_verbose(&format!(
+                            "Binary file {} does not exist, skipping",
+                            target_path.display()
+                        ));
+                        continue;
+                    }
+
                     let bin_dir = package.get_bin_dir().context(format!(
                         "Failed to get bin directory for {}",
                         package.fullname
@@ -715,5 +723,56 @@ mod tests {
             result2.is_ok(),
             "Project2 hooks should succeed with correct environment"
         );
+    }
+
+    #[tokio::test]
+    async fn test_execute_queues_skips_missing_bin_file() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        // Create a temporary directory for the fake package
+        let temp_dir = TempDir::new().unwrap();
+        let package_path = temp_dir.path();
+
+        // Create a package.json with a bin entry pointing to a non-existent file
+        let package_json = serde_json::json!({
+            "name": "test-bin-missing",
+            "version": "1.0.0",
+            "bin": {
+                "testbin": "not-exist.js"
+            }
+        });
+        fs::write(
+            package_path.join("package.json"),
+            serde_json::to_string_pretty(&package_json).unwrap(),
+        )
+        .unwrap();
+
+        // Construct PackageInfo manually
+        let package_info = PackageInfo {
+            path: package_path.to_path_buf(),
+            bin_files: vec![("testbin".to_string(), "not-exist.js".to_string())],
+            scripts: Scripts {
+                preinstall: None,
+                install: None,
+                postinstall: None,
+                prepare: None,
+                preprepare: None,
+                postprepare: None,
+                prepublish: None,
+            },
+            name: "test-bin-missing".to_string(),
+            fullname: "test-bin-missing".to_string(),
+            version: "1.0.0".to_string(),
+            scope: None,
+        };
+
+        // Prepare queues: only bin linking queue (index 2) has this package
+        let mut queues = vec![vec![], vec![], vec![], vec![], vec![]];
+        queues[2].push(package_info);
+
+        // Should not panic or error, even though the bin file does not exist
+        let result = PackageService::execute_queues(queues).await;
+        assert!(result.is_ok());
     }
 }
