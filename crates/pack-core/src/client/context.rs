@@ -432,7 +432,7 @@ pub async fn get_client_chunking_context(
     config: ResolvedVc<Config>,
 ) -> Result<Vc<Box<dyn ChunkingContext>>> {
     let minify = config.minify(mode);
-    let concatenate_modules = config.concatenate_modules();
+    let concatenate_modules = config.concatenate_modules(mode);
     let mode = mode.await?;
 
     let runtime_type = {
