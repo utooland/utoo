@@ -278,29 +278,6 @@ ut dev
 ut build
 ```
 
-#### 📋 Supported Build Scenarios
-
-1. **Basic Application Build**
-   - TypeScript/JavaScript support
-   - CSS/SCSS/Less support
-   - Asset file processing
-
-2. **Library Mode Build**
-   - Multi-entry build support
-   - Tree Shaking
-   - External dependency configuration
-
-3. **Style Processing**
-   - CSS Modules
-   - Sass/SCSS
-   - Less
-   - PostCSS
-
-4. **Development Features**
-   - Hot Module Replacement (HMR)
-   - Source Maps
-   - Fast Refresh
-
 #### 📚 Example Projects
 
 We provide several example projects to demonstrate different usage scenarios:
@@ -310,6 +287,7 @@ We provide several example projects to demonstrate different usage scenarios:
 - `examples/with-less`: Less style processing
 - `examples/with-style-loader`: CSS Modules usage
 - `examples/with-library`: Library mode build
+- `more to come ...`
 
 ### ⚙️ Common Options
 
@@ -346,6 +324,15 @@ ut build:local
 
 # Build by native
 cargo run --bin pack-cli -- --mode build  --project-dir examples/with-antd --root-dir .
+cargo run --bin pack-cli -- --mode dev --watch true --project-dir examples/with-antd --root-dir .
+
+# Build the napi package
+cd packages/pack
+npm run build:local
+
+cd ../../examples/with-antd
+npm run build
+npm run dev
 ```
 
 ## 📁 Project Structure
