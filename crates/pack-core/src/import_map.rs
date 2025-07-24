@@ -26,9 +26,12 @@ pub fn mdx_import_source_file() -> RcStr {
 }
 
 #[turbo_tasks::function]
-pub async fn get_postcss_package_mapping(project_path: FileSystemPath) -> Result<Vc<ImportMapping>> {
+pub async fn get_postcss_package_mapping(
+    project_path: FileSystemPath,
+) -> Result<Vc<ImportMapping>> {
     Ok(ImportMapping::Alternatives(vec![
-        ImportMapping::PrimaryAlternative("postcss".into(), Some(project_path.clone())).resolved_cell(),
+        ImportMapping::PrimaryAlternative("postcss".into(), Some(project_path.clone()))
+            .resolved_cell(),
     ])
     .cell())
 }
