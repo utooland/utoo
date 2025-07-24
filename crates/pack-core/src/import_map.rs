@@ -8,7 +8,8 @@ use turbo_tasks_fs::{FileSystem, FileSystemPath};
 use turbopack_core::{
     reference_type::{CommonJsReferenceSubType, ReferenceType},
     resolve::{
-        ExternalTraced, ExternalType, ResolveAliasMap, SubpathValue,
+        ExternalTraced, ExternalType, ResolveAliasMap, ResolveResult, ResolveResultItem,
+        SubpathValue,
         node::node_cjs_resolve_options,
         options::{ConditionValue, ImportMap, ImportMapping, ResolvedMap},
         parse::Request,
@@ -29,19 +30,16 @@ pub fn mdx_import_source_file() -> RcStr {
 pub async fn get_postcss_package_mapping(
     project_path: FileSystemPath,
 ) -> Result<Vc<ImportMapping>> {
-    Ok(ImportMapping::Alternatives(vec![
-        // Use utoopack's own postcss version package.
-        // ImportMapping::PrimaryAlternative("postcss".into(), Some(project_path.clone()))
-        //     .resolved_cell(),
-        ImportMapping::PrimaryAlternative(
-            get_utoopack_dependency_package(project_path.clone(), rcstr!("postcss"))
+    Ok(
+        ImportMapping::Direct(ResolveResult::primary(ResolveResultItem::External {
+            name: get_utoopack_dependency_package(project_path.clone(), rcstr!("postcss"))
                 .owned()
                 .await?,
-            None,
-        )
-        .resolved_cell(),
-    ])
-    .cell())
+            ty: ExternalType::CommonJs,
+            traced: ExternalTraced::Untraced,
+        }))
+        .cell(),
+    )
 }
 
 /// Computes the  client fallback import map, which provides
@@ -249,7 +247,9 @@ pub async fn get_utoopack_dependency_package(
     let result = resolve(
         utoopack_path.clone(),
         ReferenceType::CommonJs(CommonJsReferenceSubType::Undefined),
-        Request::parse(Pattern::Constant(dependency.clone())),
+        Request::parse(Pattern::Constant(
+            format!("{dependency}/package.json").into(),
+        )),
         node_cjs_resolve_options(project_path.root().owned().await?),
     );
 
@@ -267,6 +267,7 @@ pub async fn get_utoopack_dependency_package(
             // for example: require("node_modules/.pnpm/loader-runner@4.3.0/node_modules/loader-runner/lib/LoaderRunner.js") can't be resolve,
             // but require(".pnpm/loader-runner@4.3.0/node_modules/loader-runner/lib/LoaderRunner.js)" can be
             .replacen("node_modules/", "", 1)
+            .replace("/package.json", "")
             .into(),
     ))
 }
