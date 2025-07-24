@@ -42,12 +42,14 @@ toml = "0.8"
 async-trait = "0.1.64"
 
 # SWC crates
-swc_core = { version = "30.1.1", features = [
+swc_core = { version = "34", features = [
   "ecma_loader_lru",
   "ecma_loader_parking_lot",
   "parallel_rayon",
 ] }
-testing = { version = "14.0.0" }
+testing = "15.0.0"
+remove_console = "0.48.0"
+modularize_imports = "0.93.0"
 
 rand = "0.9.0"
 url = "2.2.2"
