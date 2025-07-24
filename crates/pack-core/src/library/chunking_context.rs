@@ -361,6 +361,7 @@ impl ChunkingContext for LibraryChunkingContext {
         &self,
         _asset: Option<Vc<Box<dyn Asset>>>,
         ident: Vc<AssetIdent>,
+        _prefix: Option<RcStr>,
         extension: RcStr,
     ) -> Result<Vc<FileSystemPath>> {
         let evaluate = ident

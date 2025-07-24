@@ -24,9 +24,9 @@ tracing = { workspace = true }
 dunce = { workspace = true }
 pathdiff = { workspace = true }
 rustc-hash = { workspace = true }
-remove_console = "0.45.0"
+remove_console = { workspace = true }
 urlencoding = { workspace = true }
-modularize_imports = { version = "0.90.0" }
+modularize_imports = { workspace = true }
 swc_core = { workspace = true, features = [
   "base",
   "common_concurrent",

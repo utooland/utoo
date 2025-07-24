@@ -209,7 +209,7 @@ impl OutputAsset for EcmascriptLibraryEvaluateChunk {
         let ident = self.ident_for_path();
         Ok(this
             .chunking_context
-            .chunk_path(Some(Vc::upcast(self)), ident, ".js".into()))
+            .chunk_path(Some(Vc::upcast(self)), ident, None, ".js".into()))
     }
 
     #[turbo_tasks::function]
