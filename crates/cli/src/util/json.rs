@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
 use serde::de::DeserializeOwned;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::fs::File;
 use std::path::Path;
 
@@ -25,6 +25,25 @@ pub fn load_package_json_from_path(path: &Path) -> Result<Value> {
 
 pub fn load_package_lock_json_from_path(path: &Path) -> Result<Value> {
     read_json_value(&path.join("package-lock.json"))
+}
+
+/// Merge two Option<&Map<String, Value>> into a new Map, left has higher priority
+pub fn merge_json_objects(
+    left: Option<&Map<String, Value>>,
+    right: Option<&Map<String, Value>>,
+) -> Map<String, Value> {
+    let mut merged = Map::new();
+    if let Some(r) = right {
+        for (k, v) in r {
+            merged.insert(k.clone(), v.clone());
+        }
+    }
+    if let Some(l) = left {
+        for (k, v) in l {
+            merged.insert(k.clone(), v.clone());
+        }
+    }
+    merged
 }
 
 #[cfg(test)]
@@ -116,5 +135,48 @@ mod tests {
 
         let result: Result<Value> = read_json_file(&invalid_json_path);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_merge_json_objects() {
+        use serde_json::Map;
+        use serde_json::json;
+
+        // Both None
+        let merged = merge_json_objects(None, None);
+        assert!(merged.is_empty());
+
+        // Only left
+        let mut left_map = Map::new();
+        left_map.insert("a".to_string(), json!(1));
+        let merged = merge_json_objects(Some(&left_map), None);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged["a"], json!(1));
+
+        // Only right
+        let mut right_map = Map::new();
+        right_map.insert("b".to_string(), json!(2));
+        let merged = merge_json_objects(None, Some(&right_map));
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged["b"], json!(2));
+
+        // Both, left has priority
+        let mut left_map = Map::new();
+        left_map.insert("k".to_string(), json!(100));
+        let mut right_map = Map::new();
+        right_map.insert("k".to_string(), json!(200));
+        let merged = merge_json_objects(Some(&left_map), Some(&right_map));
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged["k"], json!(100));
+
+        // Both, different keys
+        let mut left_map = Map::new();
+        left_map.insert("x".to_string(), json!(1));
+        let mut right_map = Map::new();
+        right_map.insert("y".to_string(), json!(2));
+        let merged = merge_json_objects(Some(&left_map), Some(&right_map));
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged["x"], json!(1));
+        assert_eq!(merged["y"], json!(2));
     }
 }

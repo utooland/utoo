@@ -70,7 +70,13 @@ static LEGACY_PEER_DEPS: LazyLock<ConfigValue<bool>> =
     LazyLock::new(|| ConfigValue::new("legacy-peer-deps", true));
 
 pub fn set_registry(registry: Option<String>) {
-    REGISTRY.set(registry);
+    // Priority: CLI argument > UTOO_REGISTRY env > config
+    let final_registry = registry.or_else(|| {
+        std::env::var("UTOO_REGISTRY")
+            .ok()
+            .filter(|s| !s.is_empty())
+    });
+    REGISTRY.set(final_registry);
 }
 
 pub fn get_registry() -> String {

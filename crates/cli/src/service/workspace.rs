@@ -55,7 +55,7 @@ impl WorkspaceService {
                     {
                         // Create Edge struct: format is [to, from] meaning "to depends on from"
                         // So from=edge.from.name (dependency), to=to_node.name (dependent)
-                        edges.push(Edge::new(edge.from.name.clone(), to_node.name.clone()));
+                        edges.push(Edge::new(to_node.name.clone(), edge.from.name.clone()));
                     }
                 }
             }
@@ -100,5 +100,54 @@ impl WorkspaceService {
             "edges": edges_json,
             "topology": topology.topology,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::fs;
+    use tempfile::tempdir;
+
+    // Helper to create a mock workspace structure with root package.json
+    fn create_mock_workspace(dir: &Path) {
+        // Create workspace A and B, B depends on A
+        let a_dir = dir.join("A");
+        let b_dir = dir.join("B");
+        fs::create_dir_all(&a_dir).unwrap();
+        fs::create_dir_all(&b_dir).unwrap();
+        // Write root package.json with workspaces field
+        fs::write(
+            dir.join("package.json"),
+            r#"{
+                "name": "root",
+                "private": true,
+                "workspaces": ["A", "B"]
+            }"#,
+        )
+        .unwrap();
+        // Write package.json for A
+        fs::write(a_dir.join("package.json"), r#"{"name":"A"}"#).unwrap();
+        // Write package.json for B, depends on A
+        fs::write(
+            b_dir.join("package.json"),
+            r#"{"name":"B","dependencies":{"A":"*"}}"#,
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_build_workspace_json_edges_order() {
+        let temp = tempdir().unwrap();
+        create_mock_workspace(temp.path());
+        let result = WorkspaceService::build_workspace_json(temp.path()).await;
+        println!("{:?}", result);
+        assert!(result.is_ok(), "build_workspace_json should succeed");
+        let json = result.unwrap();
+        let edges = json.get("edges").unwrap().as_array().unwrap();
+        // Edges should be [["A", "B"]], meaning B depends on A
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0], json!(["A", "B"]));
     }
 }

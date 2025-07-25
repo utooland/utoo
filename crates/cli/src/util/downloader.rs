@@ -82,8 +82,10 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
                     Err(RetryableError::Permanent(format!("URL not found {url}")))
                 }
                 status => {
-                    log_verbose(&format!("Error: {status}, retrying"));
-                    Err(RetryableError::Temporary(format!("HTTP error: {status}")))
+                    log_verbose(&format!("Error: {status}, url: {url}, retrying"));
+                    Err(RetryableError::Temporary(format!(
+                        "HTTP error: {status}, url: {url}"
+                    )))
                 }
             }
         },

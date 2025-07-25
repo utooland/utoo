@@ -141,6 +141,11 @@ impl Registry {
             }
         }
 
+        if spec.starts_with("workspace:") {
+            let workspace_spec = spec.strip_prefix("workspace:").unwrap();
+            return format!("{}/{}/{}", self.base_url, name, workspace_spec);
+        }
+
         if spec.eq("*") {
             return format!("{}/{}/latest", self.base_url, name);
         }
@@ -188,7 +193,11 @@ impl Registry {
                         response.status()
                     )))
                 } else {
-                    log_verbose(&format!("HTTP error: {}, retrying", response.status()));
+                    log_verbose(&format!(
+                        "HTTP error: url: {}, status: {}, retrying",
+                        url,
+                        response.status()
+                    ));
                     Err(RetryableError::Temporary(format!(
                         "HTTP error: {}, url: {}",
                         response.status(),
@@ -473,5 +482,18 @@ mod tests {
         let (version, manifest) = result.unwrap();
         assert_eq!(version, "2.0.0");
         assert_eq!(manifest["name"], "lodash");
+    }
+
+    #[test]
+    fn test_build_url_workspace_protocol() {
+        // Use a dummy base_url for testing
+        let base_url = "http://registry.example.com".to_string();
+        let client = reqwest::Client::new();
+        let registry = Registry::new_with(client, base_url.clone());
+        let name = "my-pkg";
+        let spec = "workspace:1.2.3";
+        let url = registry.build_url(name, spec);
+        // Should produce: http://localhost:4873/my-pkg/1.2.3
+        assert_eq!(url, format!("{}/{}/{}", base_url, name, "1.2.3"));
     }
 }
