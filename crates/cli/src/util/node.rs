@@ -7,6 +7,7 @@ use super::logger::log_verbose;
 use super::registry::resolve;
 use super::semver::is_valid_version;
 use crate::helper::package::parse_package_spec;
+use crate::util::json::merge_json_objects;
 use crate::util::semver::matches;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -362,9 +363,20 @@ impl Overrides {
     }
 
     pub fn parse(&self, pkg: Value) -> Option<Self> {
-        let overrides = pkg.get("overrides")?;
+        let overrides = pkg.get("overrides").and_then(|v| v.as_object());
+        let resolutions = pkg.get("resolutions").and_then(|v| v.as_object());
+        let merged = merge_json_objects(overrides, resolutions);
+
+        if merged.is_empty() {
+            // If overrides/resolutions exist but are not objects, return empty rules instead of None
+            return Some(Self {
+                package: pkg,
+                rules: vec![],
+            });
+        }
+        let merged_value = Value::Object(merged);
         let mut rules = Vec::new();
-        self.parse_rules(overrides, None, &mut rules);
+        self.parse_rules(&merged_value, None, &mut rules);
         Some(Self {
             package: pkg,
             rules,
@@ -617,7 +629,7 @@ mod tests {
         });
 
         let overrides = Overrides::new(pkg.clone()).parse(pkg.clone());
-        assert!(overrides.is_none());
+        assert!(overrides.unwrap().rules.is_empty());
     }
 
     #[tokio::test]
@@ -757,6 +769,73 @@ mod tests {
         let rule = &overrides.rules[2];
         assert!(overrides.matches_rule(rule, "c", "3.1.0", &[]).await);
         assert!(!overrides.matches_rule(rule, "c", "2.9.0", &[]).await);
+    }
+
+    #[tokio::test]
+    async fn test_parse_overrides_and_resolutions_merge() {
+        use serde_json::json;
+        // Only overrides
+        let pkg = json!({
+            "name": "test-pkg",
+            "version": "1.0.0",
+            "overrides": {
+                "a": "1.0.0"
+            }
+        });
+        let overrides = Overrides::new(pkg.clone()).parse(pkg.clone()).unwrap();
+        assert_eq!(overrides.rules.len(), 1);
+        assert_eq!(overrides.rules[0].name, "a");
+        assert_eq!(overrides.rules[0].target_spec, "1.0.0");
+
+        // Only resolutions
+        let pkg = json!({
+            "name": "test-pkg",
+            "version": "1.0.0",
+            "resolutions": {
+                "b": "2.0.0"
+            }
+        });
+        let overrides = Overrides::new(pkg.clone()).parse(pkg.clone()).unwrap();
+        assert_eq!(overrides.rules.len(), 1);
+        assert_eq!(overrides.rules[0].name, "b");
+        assert_eq!(overrides.rules[0].target_spec, "2.0.0");
+
+        // Both overrides and resolutions, overrides has priority
+        let pkg = json!({
+            "name": "test-pkg",
+            "version": "1.0.0",
+            "overrides": {
+                "a": "1.0.0"
+            },
+            "resolutions": {
+                "a": "should-not-use",
+                "b": "2.0.0"
+            }
+        });
+        let overrides = Overrides::new(pkg.clone()).parse(pkg.clone()).unwrap();
+        // Should have both a and b
+        assert_eq!(overrides.rules.len(), 2);
+        let a_rule = overrides.rules.iter().find(|r| r.name == "a").unwrap();
+        let b_rule = overrides.rules.iter().find(|r| r.name == "b").unwrap();
+        assert_eq!(a_rule.target_spec, "1.0.0");
+        assert_eq!(b_rule.target_spec, "2.0.0");
+
+        // Neither overrides nor resolutions
+        let pkg = json!({
+            "name": "test-pkg",
+            "version": "1.0.0"
+        });
+        let overrides = Overrides::new(pkg.clone()).parse(pkg.clone());
+        assert!(overrides.unwrap().rules.is_empty());
+
+        // resolutions is not an object
+        let pkg = json!({
+            "name": "test-pkg",
+            "version": "1.0.0",
+            "resolutions": "not-an-object"
+        });
+        let overrides = Overrides::new(pkg.clone()).parse(pkg.clone());
+        assert!(overrides.unwrap().rules.is_empty());
     }
 
     #[tokio::test]
