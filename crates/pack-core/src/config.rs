@@ -21,7 +21,7 @@ use turbopack_node::transforms::webpack::{WebpackLoaderItem, WebpackLoaderItems}
 
 use crate::{
     import_map::mdx_import_source_file, mode::Mode,
-    shared::transforms::ModularizeImportPackageConfig,
+    shared::transforms::ModularizeImportPackageConfig, util::resolve_loader_path,
 };
 
 #[turbo_tasks::value(transparent)]
@@ -783,7 +783,6 @@ impl Config {
         active_conditions: Vec<RcStr>,
         project_dir: FileSystemPath,
     ) -> Vc<OptionWebpackRules> {
-        dbg!(&project_dir);
         let Some(turbo_rules) = self.module.as_ref().and_then(|t| t.rules.as_ref()) else {
             return Vc::cell(None);
         };
@@ -797,31 +796,6 @@ impl Config {
                 loaders: &[LoaderItem],
                 project_dir: &FileSystemPath,
             ) -> ResolvedVc<WebpackLoaderItems> {
-                // issue: https://github.com/umijs/mako/issues/2081
-                // issue: https://github.com/vercel/next.js/issues/82106
-                fn resolve_loader_path(loader_name: &str, project_dir: &FileSystemPath) -> RcStr {
-                    if loader_name.starts_with("./") || loader_name.starts_with("../") {
-                        // This is a relative path with explicit prefix, convert to absolute path
-                        let cwd = std::env::current_dir().unwrap_or_default();
-                        let project_path = std::path::Path::new(project_dir.path.as_str());
-                        let loader_path = std::path::Path::new(loader_name);
-
-                        // Join cwd, project_path, and loader_path
-                        let full_path = cwd.join(project_path).join(loader_path);
-
-                        // Check if the path exists
-                        if full_path.exists() {
-                            full_path.to_string_lossy().into()
-                        } else {
-                            // If path doesn't exist, return the original loader name
-                            loader_name.into()
-                        }
-                    } else {
-                        // This is not a relative path (could be a package name or absolute path), keep as is
-                        loader_name.into()
-                    }
-                }
-
                 ResolvedVc::cell(
                     loaders
                         .iter()
