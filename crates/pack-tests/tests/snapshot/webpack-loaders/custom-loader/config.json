@@ -1,0 +1,18 @@
+{
+  "entry": [
+    {
+      "import": "./input/index.tsx",
+      "name": "index"
+    }
+  ],
+  "module": {
+    "rules": {
+      "*.txt": {
+        "loaders": [
+          "./test-file-loader.js"
+        ],
+        "as": "*.js"
+      }
+    }
+  }
+}

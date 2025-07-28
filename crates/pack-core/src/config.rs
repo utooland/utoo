@@ -8,6 +8,7 @@ use turbo_tasks::{
     trace::TraceRawVcs,
 };
 use turbo_tasks_env::EnvMap;
+use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::{
     LoaderRuleItem, OptionWebpackRules, module_options_context::MdxTransformOptions,
 };
@@ -777,7 +778,12 @@ impl Config {
     }
 
     #[turbo_tasks::function]
-    pub fn webpack_rules(&self, active_conditions: Vec<RcStr>) -> Vc<OptionWebpackRules> {
+    pub fn webpack_rules(
+        &self,
+        active_conditions: Vec<RcStr>,
+        project_dir: FileSystemPath,
+    ) -> Vc<OptionWebpackRules> {
+        dbg!(&project_dir);
         let Some(turbo_rules) = self.module.as_ref().and_then(|t| t.rules.as_ref()) else {
             return Vc::cell(None);
         };
@@ -787,16 +793,47 @@ impl Config {
         let active_conditions = active_conditions.into_iter().collect::<FxHashSet<_>>();
         let mut rules = FxIndexMap::default();
         for (ext, rule) in turbo_rules.iter() {
-            fn transform_loaders(loaders: &[LoaderItem]) -> ResolvedVc<WebpackLoaderItems> {
+            fn transform_loaders(
+                loaders: &[LoaderItem],
+                project_dir: &FileSystemPath,
+            ) -> ResolvedVc<WebpackLoaderItems> {
+                // issue: https://github.com/umijs/mako/issues/2081
+                // issue: https://github.com/vercel/next.js/issues/82106
+                fn resolve_loader_path(loader_name: &str, project_dir: &FileSystemPath) -> RcStr {
+                    if loader_name.starts_with("./") || loader_name.starts_with("../") {
+                        // This is a relative path with explicit prefix, convert to absolute path
+                        let cwd = std::env::current_dir().unwrap_or_default();
+                        let project_path = std::path::Path::new(project_dir.path.as_str());
+                        let loader_path = std::path::Path::new(loader_name);
+
+                        // Join cwd, project_path, and loader_path
+                        let full_path = cwd.join(project_path).join(loader_path);
+
+                        // Check if the path exists
+                        if full_path.exists() {
+                            full_path.to_string_lossy().into()
+                        } else {
+                            // If path doesn't exist, return the original loader name
+                            loader_name.into()
+                        }
+                    } else {
+                        // This is not a relative path (could be a package name or absolute path), keep as is
+                        loader_name.into()
+                    }
+                }
+
                 ResolvedVc::cell(
                     loaders
                         .iter()
                         .map(|item| match item {
                             LoaderItem::LoaderName(name) => WebpackLoaderItem {
-                                loader: name.clone(),
+                                loader: resolve_loader_path(name, project_dir),
                                 options: Default::default(),
                             },
-                            LoaderItem::LoaderOptions(options) => options.clone(),
+                            LoaderItem::LoaderOptions(options) => WebpackLoaderItem {
+                                loader: resolve_loader_path(&options.loader, project_dir),
+                                options: options.options.clone(),
+                            },
                         })
                         .collect(),
                 )
@@ -836,7 +873,7 @@ impl Config {
                     rules.insert(
                         ext.clone(),
                         LoaderRuleItem {
-                            loaders: transform_loaders(loaders),
+                            loaders: transform_loaders(loaders, &project_dir),
                             rename_as: None,
                         },
                     );
@@ -848,7 +885,7 @@ impl Config {
                         rules.insert(
                             ext.clone(),
                             LoaderRuleItem {
-                                loaders: transform_loaders(loaders),
+                                loaders: transform_loaders(loaders, &project_dir),
                                 rename_as: rename_as.clone(),
                             },
                         );

@@ -21,7 +21,9 @@ pub async fn webpack_loader_options(
     config: Vc<Config>,
     conditions: Vec<RcStr>,
 ) -> Result<Option<ResolvedVc<WebpackLoadersOptions>>> {
-    let rules = *config.webpack_rules(conditions).await?;
+    let rules = *config
+        .webpack_rules(conditions, project_path.clone())
+        .await?;
     let rules =
         *maybe_add_style_loader(project_path.clone(), config.inline_css(), rules.map(|v| *v))
             .await?;
