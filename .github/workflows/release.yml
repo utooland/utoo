@@ -154,8 +154,8 @@ jobs:
       - name: Get version from release or use alpha version
         id: get_version
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          if [[ "$GITHUB_REF" == refs/tags/utoo-v* ]]; then
+            echo "VERSION=${GITHUB_REF#refs/tags/utoo-v}" >> $GITHUB_OUTPUT
           else
             echo "VERSION=0.0.0" >> $GITHUB_OUTPUT
           fi
