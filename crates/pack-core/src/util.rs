@@ -1,4 +1,4 @@
-use std::path::{MAIN_SEPARATOR, Path};
+use std::path::{MAIN_SEPARATOR, MAIN_SEPARATOR_STR, Path};
 
 use anyhow::{Context, Result};
 use dunce::{canonicalize, simplified};
@@ -164,7 +164,7 @@ pub fn resolve_loader_path(loader_name: &str, project_dir: &FileSystemPath) -> R
                 // Remove the common part from project_path
                 let remaining_components = &project_components[common_length..];
                 if !remaining_components.is_empty() {
-                    cwd.join(remaining_components.join(&MAIN_SEPARATOR.to_string()))
+                    cwd.join(remaining_components.join(MAIN_SEPARATOR_STR))
                 } else {
                     cwd
                 }
