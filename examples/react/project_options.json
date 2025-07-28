@@ -18,6 +18,19 @@
                     "to": "./index.css"
                 }
             ]
+        },
+        "optimization": {
+            "minify": false
+        },
+        "module": {
+            "rules": {
+                "*.txt": {
+                    "loaders": [
+                        "./test-file-loader.js"
+                    ],
+                    "as": "*.js"
+                }
+            }
         }
     }
 }

@@ -3,8 +3,5 @@
     {
       "import": "input/index.ts"
     }
-  ],
-  "optimization": {
-    "minify": false
-  }
+  ]
 }

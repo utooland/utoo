@@ -8,6 +8,7 @@ use turbo_tasks::{
     trace::TraceRawVcs,
 };
 use turbo_tasks_env::EnvMap;
+use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::{
     LoaderRuleItem, OptionWebpackRules, module_options_context::MdxTransformOptions,
 };
@@ -20,7 +21,7 @@ use turbopack_node::transforms::webpack::{WebpackLoaderItem, WebpackLoaderItems}
 
 use crate::{
     import_map::mdx_import_source_file, mode::Mode,
-    shared::transforms::ModularizeImportPackageConfig,
+    shared::transforms::ModularizeImportPackageConfig, util::resolve_loader_path,
 };
 
 #[turbo_tasks::value(transparent)]
@@ -777,7 +778,11 @@ impl Config {
     }
 
     #[turbo_tasks::function]
-    pub fn webpack_rules(&self, active_conditions: Vec<RcStr>) -> Vc<OptionWebpackRules> {
+    pub fn webpack_rules(
+        &self,
+        active_conditions: Vec<RcStr>,
+        project_dir: FileSystemPath,
+    ) -> Vc<OptionWebpackRules> {
         let Some(turbo_rules) = self.module.as_ref().and_then(|t| t.rules.as_ref()) else {
             return Vc::cell(None);
         };
@@ -787,16 +792,22 @@ impl Config {
         let active_conditions = active_conditions.into_iter().collect::<FxHashSet<_>>();
         let mut rules = FxIndexMap::default();
         for (ext, rule) in turbo_rules.iter() {
-            fn transform_loaders(loaders: &[LoaderItem]) -> ResolvedVc<WebpackLoaderItems> {
+            fn transform_loaders(
+                loaders: &[LoaderItem],
+                project_dir: &FileSystemPath,
+            ) -> ResolvedVc<WebpackLoaderItems> {
                 ResolvedVc::cell(
                     loaders
                         .iter()
                         .map(|item| match item {
                             LoaderItem::LoaderName(name) => WebpackLoaderItem {
-                                loader: name.clone(),
+                                loader: resolve_loader_path(name, project_dir),
                                 options: Default::default(),
                             },
-                            LoaderItem::LoaderOptions(options) => options.clone(),
+                            LoaderItem::LoaderOptions(options) => WebpackLoaderItem {
+                                loader: resolve_loader_path(&options.loader, project_dir),
+                                options: options.options.clone(),
+                            },
                         })
                         .collect(),
                 )
@@ -836,7 +847,7 @@ impl Config {
                     rules.insert(
                         ext.clone(),
                         LoaderRuleItem {
-                            loaders: transform_loaders(loaders),
+                            loaders: transform_loaders(loaders, &project_dir),
                             rename_as: None,
                         },
                     );
@@ -848,7 +859,7 @@ impl Config {
                         rules.insert(
                             ext.clone(),
                             LoaderRuleItem {
-                                loaders: transform_loaders(loaders),
+                                loaders: transform_loaders(loaders, &project_dir),
                                 rename_as: rename_as.clone(),
                             },
                         );
