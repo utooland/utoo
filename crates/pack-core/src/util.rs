@@ -141,9 +141,14 @@ pub fn resolve_loader_path(loader_name: &str, project_dir: &FileSystemPath) -> R
             let project_str = project_path.to_string_lossy();
 
             // Check if the last components of cwd match the beginning of project_path
-            let cwd_components: Vec<&str> = cwd_str.split('/').filter(|s| !s.is_empty()).collect();
-            let project_components: Vec<&str> =
-                project_str.split('/').filter(|s| !s.is_empty()).collect();
+            let cwd_components: Vec<&str> = cwd_str
+                .split(MAIN_SEPARATOR)
+                .filter(|s| !s.is_empty())
+                .collect();
+            let project_components: Vec<&str> = project_str
+                .split(MAIN_SEPARATOR)
+                .filter(|s| !s.is_empty())
+                .collect();
 
             // Find the longest common suffix of cwd that matches the beginning of project_path
             let mut common_length = 0;
@@ -159,7 +164,7 @@ pub fn resolve_loader_path(loader_name: &str, project_dir: &FileSystemPath) -> R
                 // Remove the common part from project_path
                 let remaining_components = &project_components[common_length..];
                 if !remaining_components.is_empty() {
-                    cwd.join(remaining_components.join("/"))
+                    cwd.join(remaining_components.join(&MAIN_SEPARATOR.to_string()))
                 } else {
                     cwd
                 }
