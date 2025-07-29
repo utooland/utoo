@@ -9,6 +9,7 @@ use image::{StructuredImageModuleType, module::BlurPlaceholderMode};
 
 pub mod dynamic_import_to_require;
 pub mod emotion;
+pub mod extract_comments;
 pub mod image;
 pub mod modularize_imports;
 pub mod remove_console;

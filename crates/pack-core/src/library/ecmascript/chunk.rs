@@ -166,8 +166,21 @@ impl EcmascriptLibraryEvaluateChunk {
 
         let mut code = code.build();
 
-        if let MinifyType::Minify { mangle } = this.chunking_context.await?.minify_type() {
-            code = minify(code, source_maps, mangle)?;
+        if let MinifyType::Minify { mangle, extract_comments } = this.chunking_context.await?.minify_type() {
+            let result = turbopack_ecmascript::minify::minify_with_options(
+                code, 
+                source_maps, 
+                mangle,
+                extract_comments
+            )?;
+            
+            code = result.code;
+            
+            // TODO: Handle extracted comments by creating a license file
+            // For now, we'll just ignore the extracted comments
+            if let Some(_extracted_comments) = result.extracted_comments {
+                // Future implementation: create a LicenseAsset and add it to output
+            }
         }
 
         Ok(code.cell())

@@ -10,7 +10,11 @@ use turbopack_core::{
     environment::Environment,
 };
 
-use crate::{config::Config, mode::Mode};
+use crate::{
+    config::Config, 
+    mode::Mode,
+    shared::transforms::extract_comments::get_extract_comments_transform_rule,
+};
 
 use super::LibraryChunkingContext;
 
@@ -52,8 +56,10 @@ pub async fn get_library_chunking_context(
         (*runtime_export.await?).clone(),
     )
     .minify_type(if mode.is_production() && *minify.await? {
+        let minify_config = config.minify_config().await?;
         MinifyType::Minify {
             mangle: (!*no_mangling.await?).then_some(MangleType::OptimalSize),
+            extract_comments: minify_config.extract_comments(),
         }
     } else {
         MinifyType::NoMinify

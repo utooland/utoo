@@ -49,7 +49,8 @@ use crate::{
         resolve::externals_plugin::ExternalsPlugin,
         transforms::{
             dynamic_import_to_require::get_dynamic_import_to_require_rule,
-            emotion::get_emotion_transform_rule, remove_console::get_remove_console_transform_rule,
+            emotion::get_emotion_transform_rule, 
+            remove_console::get_remove_console_transform_rule,
             styled_components::get_styled_components_transform_rule,
             styled_jsx::get_styled_jsx_transform_rule,
             swc_ecma_transform_plugins::get_swc_ecma_transform_plugin_rule,
@@ -461,8 +462,10 @@ pub async fn get_client_chunking_context(
         runtime_type,
     )
     .minify_type(if mode.is_production() && *minify.await? {
+        let minify_config = config.minify_config().await?;
         MinifyType::Minify {
             mangle: (!*no_mangling.await?).then_some(MangleType::OptimalSize),
+            extract_comments: minify_config.extract_comments(),
         }
     } else {
         MinifyType::NoMinify

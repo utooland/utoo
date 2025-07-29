@@ -193,6 +193,21 @@ pub enum SchemaOutputType {
     Export,
 }
 
+/// Minify configuration that can be either boolean or advanced options
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SchemaMinifyConfig {
+    /// Simple boolean to enable/disable minification
+    Boolean(bool),
+    /// Advanced minification configuration
+    Config {
+        /// Comment extraction configuration
+        #[serde(default)]
+        #[schemars(description = "Whether to extract comments to separate files")]
+        extract_comments: bool,
+    },
+}
+
 /// Optimization configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -209,8 +224,8 @@ pub struct SchemaOptimizationConfig {
 
     /// Whether to minify the output
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Whether to minify the output")]
-    pub minify: Option<bool>,
+    #[schemars(description = "Minify configuration - can be boolean or advanced options with extractComments")]
+    pub minify: Option<SchemaMinifyConfig>,
 
     /// Whether to enable tree shaking
     #[serde(skip_serializing_if = "Option::is_none")]

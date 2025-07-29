@@ -493,6 +493,26 @@
         }
       }
     },
+    "SchemaMinifyConfig": {
+      "description": "Minify configuration that can be either boolean or advanced options",
+      "anyOf": [
+        {
+          "description": "Simple boolean to enable/disable minification",
+          "type": "boolean"
+        },
+        {
+          "description": "Advanced minification configuration",
+          "type": "object",
+          "properties": {
+            "extract_comments": {
+              "description": "Whether to extract comments to separate files",
+              "default": false,
+              "type": "boolean"
+            }
+          }
+        }
+      ]
+    },
     "SchemaModuleConfig": {
       "description": "Module configuration",
       "type": "object",
@@ -527,10 +547,14 @@
           ]
         },
         "minify": {
-          "description": "Whether to minify the output",
-          "type": [
-            "boolean",
-            "null"
+          "description": "Minify configuration - can be boolean or advanced options with extractComments",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaMinifyConfig"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "modularizeImports": {

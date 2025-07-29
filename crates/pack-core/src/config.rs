@@ -280,7 +280,7 @@ pub struct OptimizationConfig {
     /// local names for variables, functions etc., which can be useful for
     /// debugging/profiling purposes.
     pub no_mangling: Option<bool>,
-    pub minify: Option<bool>,
+    pub minify: Option<MinifyConfig>,
     pub tree_shaking: Option<bool>,
     pub package_imports: Option<Vec<RcStr>>,
     pub modularize_imports: Option<FxIndexMap<String, ModularizeImportPackageConfig>>,
@@ -690,6 +690,43 @@ pub struct OptionServerActions(Option<ServerActions>);
 
 #[turbo_tasks::value(transparent)]
 pub struct ExternalsConfig(FxIndexMap<RcStr, ExternalConfig>);
+
+#[turbo_tasks::value(transparent)]
+pub struct MinifyConfigValue(MinifyConfig);
+
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TraceRawVcs, NonLocalValue, OperationValue,
+)]
+#[serde(untagged)]
+pub enum MinifyConfig {
+    Boolean(bool),
+    Config {
+        #[serde(default)]
+        extract_comments: bool,
+    },
+}
+
+impl Default for MinifyConfig {
+    fn default() -> Self {
+        MinifyConfig::Boolean(false)
+    }
+}
+
+impl MinifyConfig {
+    pub fn is_enabled(&self) -> bool {
+        match self {
+            Self::Boolean(enabled) => *enabled,
+            Self::Config { .. } => true,
+        }
+    }
+
+    pub fn extract_comments(&self) -> bool {
+        match self {
+            Self::Boolean(_) => false,
+            Self::Config { extract_comments } => *extract_comments,
+        }
+    }
+}
 
 #[turbo_tasks::value_impl]
 impl Config {
@@ -1135,11 +1172,24 @@ impl Config {
         let minify = self
             .optimization
             .as_ref()
-            .map(|op| op.minify.is_none_or(|minify| minify));
+            .and_then(|op| op.minify.as_ref())
+            .map(|minify| minify.is_enabled());
 
         Ok(Vc::cell(
             minify.unwrap_or(matches!(*mode.await?, Mode::Production)),
         ))
+    }
+
+    #[turbo_tasks::function]
+    pub fn minify_config(&self) -> Vc<MinifyConfigValue> {
+        let minify_config = self
+            .optimization
+            .as_ref()
+            .and_then(|op| op.minify.as_ref())
+            .cloned()
+            .unwrap_or_default();
+
+        MinifyConfigValue(minify_config).cell()
     }
 
     #[turbo_tasks::function]
