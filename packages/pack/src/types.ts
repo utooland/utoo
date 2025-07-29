@@ -84,12 +84,17 @@ export type TurbopackLoaderItem =
     };
 
 export type TurbopackRuleConfigItemOptions = {
-  loaders: TurbopackLoaderItem[];
+  loaders: TurbopackRuleConfigItem[];
   as?: string;
 };
 
+export type TurbopackRuleCondition = {
+  path: string | RegExp;
+}
+
 export interface ModuleOptions {
   rules?: Record<string, TurbopackRuleConfigItem>;
+  conditions?: Record<string, TurbopackRuleCondition>
 }
 
 export interface ResolveOptions {

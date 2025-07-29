@@ -187,9 +187,10 @@ pub struct SchemaOutputConfig {
 
 /// Output type
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
 pub enum SchemaOutputType {
+    #[serde(rename = "standalone")]
     Standalone,
+    #[serde(rename = "export")]
     Export,
 }
 
@@ -409,6 +410,44 @@ pub struct SchemaModuleConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Module rules configuration")]
     pub rules: Option<HashMap<String, serde_json::Value>>,
+
+    /// Module conditions configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Module conditions configuration")]
+    pub conditions: Option<HashMap<String, SchemaConfigConditionItem>>,
+}
+
+/// Configuration condition item
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaConfigConditionItem {
+    /// Condition path configuration
+    #[schemars(description = "Condition path configuration")]
+    pub path: SchemaConfigConditionPath,
+}
+
+/// Configuration condition path
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", content = "value", rename_all = "camelCase")]
+pub enum SchemaConfigConditionPath {
+    /// Glob pattern for path matching
+    #[schemars(description = "Glob pattern for path matching")]
+    Glob(String),
+    /// Regular expression for path matching
+    #[schemars(description = "Regular expression for path matching")]
+    Regex(SchemaRegexComponents),
+}
+
+/// Regular expression components
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaRegexComponents {
+    /// Regular expression source
+    #[schemars(description = "Regular expression source")]
+    pub source: String,
+    /// Regular expression flags
+    #[schemars(description = "Regular expression flags")]
+    pub flags: String,
 }
 
 /// Resolve configuration

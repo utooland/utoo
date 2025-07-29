@@ -19,10 +19,10 @@ pub(crate) mod style_loader;
 pub async fn webpack_loader_options(
     project_path: FileSystemPath,
     config: Vc<Config>,
-    conditions: Vec<RcStr>,
+    conditions_strs: Vec<RcStr>,
 ) -> Result<Option<ResolvedVc<WebpackLoadersOptions>>> {
     let rules = *config
-        .webpack_rules(conditions, project_path.clone())
+        .webpack_rules(conditions_strs, project_path.clone())
         .await?;
     let rules =
         *maybe_add_style_loader(project_path.clone(), config.inline_css(), rules.map(|v| *v))
@@ -40,12 +40,13 @@ pub async fn webpack_loader_options(
     )
     .await?;
 
+    let conditions = config.webpack_conditions().to_resolved().await?;
+
     Ok(if let Some(rules) = rules {
         Some(
             WebpackLoadersOptions {
                 rules,
-                // TODO: https://github.com/vercel/next.js/pull/78733
-                conditions: ResolvedVc::cell(None),
+                conditions,
                 loader_runner_package: Some(
                     loader_runner_package_mapping(project_path)
                         .to_resolved()

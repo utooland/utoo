@@ -10,6 +10,9 @@
         "react-dom": "^18.2.0"
     },
     "devDependencies": {
-        "@utoo/pack-cli": "*"
+        "@utoo/pack-cli": "*",
+        "@svgr/webpack": "6.5.1",
+        "@types/react": "^18.0.25",
+        "@types/react-dom": "^18.0.9"
     }
 }
