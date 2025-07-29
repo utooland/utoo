@@ -4214,6 +4214,7 @@ dependencies = [
  "rustc-hash 2.1.1",
  "serde",
  "serde_json",
+ "serde_path_to_error",
  "swc_core 34.0.1",
  "tracing",
  "turbo-esregex",
