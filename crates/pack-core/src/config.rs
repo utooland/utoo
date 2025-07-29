@@ -430,8 +430,9 @@ pub struct OptionalReactCompilerOptions(Option<ResolvedVc<ReactCompilerOptions>>
 #[serde(rename_all = "camelCase")]
 pub struct ModuleConfig {
     pub rules: Option<FxIndexMap<RcStr, RuleConfigItemOrShortcut>>,
+    // #[turbo_tasks(trace_ignore)]
+    // pub conditions: Option<FxIndexMap<RcStr, ConfigConditionItem>>,
 }
-
 #[derive(
     Clone,
     Debug,
@@ -696,8 +697,9 @@ impl Config {
     #[turbo_tasks::function]
     pub async fn from_string(string: Vc<RcStr>) -> Result<Vc<Self>> {
         let string = string.await?;
-        let config: Config = serde_json::from_str(&string)
-            .with_context(|| format!("failed to parse config.js: {string}"))?;
+        let mut jdeserializer = serde_json::Deserializer::from_str(&string);
+        let config: Config = serde_path_to_error::deserialize(&mut jdeserializer)
+            .with_context(|| format!("failed to parse utoopack config: {string}"))?;
         Ok(config.cell())
     }
 
