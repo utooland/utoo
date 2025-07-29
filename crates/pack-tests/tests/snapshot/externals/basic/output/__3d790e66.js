@@ -26,8 +26,8 @@ module.exports = mod;
 337: ((__turbopack_context__) => {
 "use strict";
 
-var { a: __turbopack_async_module__ } = __turbopack_context__;
-__turbopack_async_module__(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
+return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
+
 const mod = await __turbopack_context__.y("bar");
 
 __turbopack_context__.n(mod);
@@ -36,8 +36,8 @@ __turbopack_async_result__();
 449: ((__turbopack_context__) => {
 "use strict";
 
-var { a: __turbopack_async_module__ } = __turbopack_context__;
-__turbopack_async_module__(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
+return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
+
 const mod = await __turbopack_context__.y("bar_import2");
 
 __turbopack_context__.n(mod);
@@ -46,8 +46,8 @@ __turbopack_async_result__();
 813: ((__turbopack_context__) => {
 "use strict";
 
-var { a: __turbopack_async_module__ } = __turbopack_context__;
-__turbopack_async_module__(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
+return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
+
 let mod;
 try {
   await __turbopack_context__.L("https://example.com/lib/script.js");
@@ -65,8 +65,8 @@ __turbopack_async_result__();
 481: ((__turbopack_context__) => {
 "use strict";
 
-var { a: __turbopack_async_module__ } = __turbopack_context__;
-__turbopack_async_module__(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
+return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
+
 let mod;
 try {
   await __turbopack_context__.L("https://example.com/lib/script2.js");
@@ -84,8 +84,8 @@ __turbopack_async_result__();
 202: ((__turbopack_context__) => {
 "use strict";
 
-var { a: __turbopack_async_module__ } = __turbopack_context__;
-__turbopack_async_module__(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
+return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
+
 __turbopack_context__.s({});
 var __TURBOPACK__imported__module__263__ = __turbopack_context__.i(263);
 var __TURBOPACK__imported__module__902__ = __turbopack_context__.i(902);
