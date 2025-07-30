@@ -28,7 +28,8 @@
     "examples/with-sass",
     "examples/with-style-loader",
     "examples/with-tailwind",
-    "examples/resolve"
+    "examples/resolve",
+    "examples/react"
   ],
   "repository": "https://github.com/umijs/mako"
 }

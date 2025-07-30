@@ -177,6 +177,66 @@
         }
       }
     },
+    "SchemaConfigConditionItem": {
+      "description": "Configuration condition item",
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "description": "Condition path configuration",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SchemaConfigConditionPath"
+            }
+          ]
+        }
+      }
+    },
+    "SchemaConfigConditionPath": {
+      "description": "Configuration condition path",
+      "oneOf": [
+        {
+          "description": "Glob pattern for path matching",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "glob"
+              ]
+            },
+            "value": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "description": "Regular expression for path matching",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "regex"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/SchemaRegexComponents"
+            }
+          }
+        }
+      ]
+    },
     "SchemaCopyItem": {
       "description": "Copy item configuration",
       "type": "object",
@@ -497,6 +557,16 @@
       "description": "Module configuration",
       "type": "object",
       "properties": {
+        "conditions": {
+          "description": "Module conditions configuration",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/SchemaConfigConditionItem"
+          }
+        },
         "rules": {
           "description": "Module rules configuration",
           "type": [
@@ -671,6 +741,24 @@
         "standalone",
         "export"
       ]
+    },
+    "SchemaRegexComponents": {
+      "description": "Regular expression components",
+      "type": "object",
+      "required": [
+        "flags",
+        "source"
+      ],
+      "properties": {
+        "flags": {
+          "description": "Regular expression flags",
+          "type": "string"
+        },
+        "source": {
+          "description": "Regular expression source",
+          "type": "string"
+        }
+      }
     },
     "SchemaRemoveConsoleConfig": {
       "description": "Console removal configuration",
