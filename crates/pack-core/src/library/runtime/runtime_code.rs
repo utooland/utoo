@@ -73,6 +73,15 @@ pub async fn get_library_runtime_code(
     code.push_code(
         &*embed_static_code(
             asset_context,
+            "umd/base-externals-utils.ts".into(),
+            generate_source_map,
+        )
+        .await?,
+    );
+
+    code.push_code(
+        &*embed_static_code(
+            asset_context,
             "umd/runtime-backend-dom.ts".into(),
             generate_source_map,
         )
