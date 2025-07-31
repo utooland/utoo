@@ -23,13 +23,13 @@ declare var CHUNK_SUFFIX_PATH: string;
 
 function normalizeChunkPath(path: string) {
   if (path.startsWith("/")) {
-      path = path.substring(1);
+    path = path.substring(1);
   } else if (path.startsWith("./")) {
-      path = path.substring(2);
+    path = path.substring(2);
   }
 
   if (path.endsWith("/")) {
-      path = path.slice(0,-1);
+    path = path.slice(0, -1);
   }
   return path;
 }
@@ -47,7 +47,7 @@ type RuntimeParams = {
 type ChunkRegistration = [
   chunkPath: ChunkScript,
   chunkModules: ModuleFactories,
-  params: RuntimeParams | undefined
+  params: RuntimeParams | undefined,
 ];
 
 type ChunkList = {
@@ -133,12 +133,11 @@ const availableModules: Map<ModuleId, Promise<any> | true> = new Map();
 
 const availableModuleChunks: Map<ChunkPath, Promise<any> | true> = new Map();
 
-
 /**
  * Returns an absolute url to an asset.
  */
 function createResolvePathFromModule(
-  resolver: (moduleId: string) => Exports
+  resolver: (moduleId: string) => Exports,
 ): (moduleId: string) => string {
   return function resolvePathFromModule(moduleId: string): string {
     const exported = resolver(moduleId);
@@ -194,7 +193,7 @@ function getFirstModuleChunk(moduleId: ModuleId) {
  */
 function instantiateRuntimeModule(
   moduleId: ModuleId,
-  chunkPath: ChunkPath
+  chunkPath: ChunkPath,
 ): Module {
   return instantiateModule(moduleId, { type: SourceType.Runtime, chunkPath });
 }
@@ -212,22 +211,28 @@ function getChunkRelativeUrl(chunkPath: ChunkPath | ChunkListPath): ChunkUrl {
  * Return the ChunkPath from a ChunkScript.
  */
 function getPathFromScript(chunkScript: ChunkPath | ChunkScript): ChunkPath;
-function getPathFromScript(chunkScript: ChunkListPath | ChunkListScript): ChunkListPath;
-function getPathFromScript(chunkScript: ChunkPath | ChunkListPath | ChunkScript | ChunkListScript): ChunkPath | ChunkListPath {
+function getPathFromScript(
+  chunkScript: ChunkListPath | ChunkListScript,
+): ChunkListPath;
+function getPathFromScript(
+  chunkScript: ChunkPath | ChunkListPath | ChunkScript | ChunkListScript,
+): ChunkPath | ChunkListPath {
   if (typeof chunkScript === "string") {
     return chunkScript as ChunkPath | ChunkListPath;
   }
-  let chunkUrl = typeof TURBOPACK_NEXT_CHUNK_URLS !== "undefined"
-    ? TURBOPACK_NEXT_CHUNK_URLS.pop()!
-    : chunkScript.getAttribute("src")!;
+  let chunkUrl =
+    typeof TURBOPACK_NEXT_CHUNK_URLS !== "undefined"
+      ? TURBOPACK_NEXT_CHUNK_URLS.pop()!
+      : chunkScript.getAttribute("src")!;
   if (chunkUrl.startsWith("/")) {
     chunkUrl = chunkUrl.substring(1);
   } else if (chunkUrl.startsWith("./")) {
     chunkUrl = chunkUrl.substring(2);
-
   }
   const src = decodeURIComponent(chunkUrl.replace(/[?#].*$/, ""));
-  const path = src.startsWith(NORMALIZED_CHUNK_BASE_PATH) ? src.slice(NORMALIZED_CHUNK_BASE_PATH.length) : src;
+  const path = src.startsWith(NORMALIZED_CHUNK_BASE_PATH)
+    ? src.slice(NORMALIZED_CHUNK_BASE_PATH.length)
+    : src;
   return path as ChunkPath | ChunkListPath;
 }
 
@@ -254,10 +259,10 @@ function registerChunk([
   }
 
   if (runtimeParams.runtimeModuleIds.length > 0) {
-    for (const moduleId of runtimeParams.runtimeModuleIds){
-        getOrInstantiateRuntimeModule(moduleId, chunkPath);
+    for (const moduleId of runtimeParams.runtimeModuleIds) {
+      getOrInstantiateRuntimeModule(moduleId, chunkPath);
     }
-}
+  }
 }
 
 const regexJsUrl = /\.js(?:\?[^#]*)?(?:#.*)?$/;

@@ -14,7 +14,7 @@ type EsmNamespaceObject = Record<string, any>;
 // @ts-ignore Defined in `dev-base.ts`
 declare function getOrInstantiateModuleFromParent<M>(
   id: ModuleId,
-  sourceModule: M
+  sourceModule: M,
 ): M;
 
 const REEXPORTED_OBJECTS = Symbol("reexported objects");
@@ -40,10 +40,13 @@ interface ModuleContext {
 
 type GetOrInstantiateModuleFromParent<M> = (
   moduleId: ModuleId,
-  parentModule: M
+  parentModule: M,
 ) => M;
 
-declare function getOrInstantiateRuntimeModule(moduleId: ModuleId, chunkPath: ChunkPath): Module;
+declare function getOrInstantiateRuntimeModule(
+  moduleId: ModuleId,
+  chunkPath: ChunkPath,
+): Module;
 
 const hasOwnProperty = Object.prototype.hasOwnProperty;
 const toStringTag = typeof Symbol !== "undefined" && Symbol.toStringTag;
@@ -51,7 +54,7 @@ const toStringTag = typeof Symbol !== "undefined" && Symbol.toStringTag;
 function defineProp(
   obj: any,
   name: PropertyKey,
-  options: PropertyDescriptor & ThisType<any>
+  options: PropertyDescriptor & ThisType<any>,
 ) {
   if (!hasOwnProperty.call(obj, name))
     Object.defineProperty(obj, name, options);
@@ -62,7 +65,7 @@ function defineProp(
  */
 function esm(
   exports: Exports,
-  getters: Record<string, (() => any) | [() => any, (v: any) => void]>
+  getters: Record<string, (() => any) | [() => any, (v: any) => void]>,
 ) {
   defineProp(exports, "__esModule", { value: true });
   if (toStringTag) defineProp(exports, toStringTag, { value: "Module" });
@@ -87,7 +90,7 @@ function esm(
 function esmExport(
   module: Module,
   exports: Exports,
-  getters: Record<string, () => any>
+  getters: Record<string, () => any>,
 ) {
   module.namespaceObject = module.exports;
   esm(exports, getters);
@@ -132,7 +135,7 @@ function ensureDynamicExports(module: Module, exports: Exports) {
 function dynamicExport(
   module: Module,
   exports: Exports,
-  object: Record<string, any>
+  object: Record<string, any>,
 ) {
   ensureDynamicExports(module, exports);
 
@@ -173,7 +176,7 @@ const LEAF_PROTOTYPES = [null, getProto({}), getProto([]), getProto(getProto)];
 function interopEsm(
   raw: Exports,
   ns: EsmNamespaceObject,
-  allowExportDefault?: boolean
+  allowExportDefault?: boolean,
 ) {
   const getters: { [s: string]: () => any } = Object.create(null);
   for (
@@ -209,7 +212,7 @@ function createNS(raw: Module["exports"]): EsmNamespaceObject {
 
 function esmImport(
   sourceModule: Module,
-  id: ModuleId
+  id: ModuleId,
 ): Exclude<Module["namespaceObject"], undefined> {
   const module = getOrInstantiateModuleFromParent(id, sourceModule);
   if (module.error) throw module.error;
@@ -222,7 +225,7 @@ function esmImport(
   return (module.namespaceObject = interopEsm(
     raw,
     createNS(raw),
-    raw && (raw as any).__esModule
+    raw && (raw as any).__esModule,
   ));
 }
 
@@ -231,8 +234,8 @@ function esmImport(
 const runtimeRequire =
   // @ts-ignore
   typeof require === "function"
-    // @ts-ignore
-    ? require
+    ? // @ts-ignore
+      require
     : function require() {
         throw new Error("Unexpected use of runtime require");
       };
@@ -372,7 +375,7 @@ function wrapDeps(deps: Dep[]): AsyncModuleExt[] {
           (err) => {
             obj[turbopackError] = err;
             resolveQueue(queue);
-          }
+          },
         );
 
         return obj;
@@ -390,11 +393,11 @@ function asyncModule(
   module: Module,
   body: (
     handleAsyncDependencies: (
-      deps: Dep[]
+      deps: Dep[],
     ) => Exports[] | Promise<() => Exports[]>,
-    asyncResult: (err?: any) => void
+    asyncResult: (err?: any) => void,
   ) => void,
-  hasAwait: boolean
+  hasAwait: boolean,
 ) {
   const queue: AsyncQueue | undefined = hasAwait
     ? Object.assign([], { status: QueueStatus.Unknown })

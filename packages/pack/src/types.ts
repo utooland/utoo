@@ -90,11 +90,11 @@ export type TurbopackRuleConfigItemOptions = {
 
 export type TurbopackRuleCondition = {
   path: string | RegExp;
-}
+};
 
 export interface ModuleOptions {
   rules?: Record<string, TurbopackRuleConfigItem>;
-  conditions?: Record<string, TurbopackRuleCondition>
+  conditions?: Record<string, TurbopackRuleCondition>;
 }
 
 export interface ResolveOptions {
@@ -159,6 +159,7 @@ export interface ConfigComplete {
       | {
           exclude?: string[];
         };
+    concatenateModules?: boolean;
   };
   styles?: {
     less?: {

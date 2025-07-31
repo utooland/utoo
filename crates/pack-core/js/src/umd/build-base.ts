@@ -1,6 +1,6 @@
 /// <reference path="./runtime-base.ts" />
 
-declare var augmentContext: ((context: unknown) => unknown);
+declare var augmentContext: (context: unknown) => unknown;
 
 const moduleCache: ModuleCache<Module> = {};
 
@@ -30,10 +30,9 @@ function getOrInstantiateRuntimeModule(
 // Used by the backend
 // @ts-ignore
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const getOrInstantiateModuleFromParent: GetOrInstantiateModuleFromParent<Module> = (
-  id,
-  sourceModule
-) => {
+const getOrInstantiateModuleFromParent: GetOrInstantiateModuleFromParent<
+  Module
+> = (id, sourceModule) => {
   const module = moduleCache[id];
 
   if (module) {
@@ -67,7 +66,7 @@ function instantiateModule(id: ModuleId, source: SourceInfo): Module {
         invariant(source, (source) => `Unknown source type: ${source?.type}`);
     }
     throw new Error(
-      `Module ${id} was instantiated ${instantiationReason}, but the module factory is not available. It might have been deleted in an HMR update.`
+      `Module ${id} was instantiated ${instantiationReason}, but the module factory is not available. It might have been deleted in an HMR update.`,
     );
   }
 
@@ -80,7 +79,7 @@ function instantiateModule(id: ModuleId, source: SourceInfo): Module {
       // has already been taken care of in `getOrInstantiateModuleFromParent`.
       break;
     case SourceType.Update:
-      throw new Error('Unexpected')
+      throw new Error("Unexpected");
     default:
       invariant(source, (source) => `Unknown source type: ${source?.type}`);
   }
@@ -97,7 +96,6 @@ function instantiateModule(id: ModuleId, source: SourceInfo): Module {
 
   // NOTE(alexkirsz) This can fail when the module encounters a runtime error.
   try {
-
     const r = commonJsRequire.bind(null, module);
     moduleFactory.call(
       module.exports,
@@ -119,8 +117,11 @@ function instantiateModule(id: ModuleId, source: SourceInfo): Module {
         P: resolveAbsolutePath,
         U: relativeURL,
         R: createResolvePathFromModule(r),
-        d: typeof module.id === "string" ? module.id.replace(/(^|\/)\/+$/, "") : module.id
-      })
+        d:
+          typeof module.id === "string"
+            ? module.id.replace(/(^|\/)\/+$/, "")
+            : module.id,
+      }),
     );
   } catch (error) {
     module.error = error as any;
@@ -135,4 +136,3 @@ function instantiateModule(id: ModuleId, source: SourceInfo): Module {
 
   return module;
 }
-
