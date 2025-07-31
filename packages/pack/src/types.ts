@@ -84,7 +84,7 @@ export type TurbopackLoaderItem =
     };
 
 export type TurbopackRuleConfigItemOptions = {
-  loaders: TurbopackRuleConfigItem[];
+  loaders: TurbopackLoaderItem[];
   as?: string;
 };
 

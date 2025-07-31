@@ -14,6 +14,8 @@ type ChunkPath = string & { readonly brand: unique symbol };
 type ChunkScript = CurrentScript & { readonly brand: unique symbol };
 type ChunkUrl = string & { readonly brand: unique symbol };
 type ModuleId = string;
+// The dependency specifier when importing externals
+type DependencySpecifier = string
 
 interface Exports {
   __esModule?: boolean;
@@ -24,11 +26,11 @@ interface Exports {
 type ChunkData =
   | ChunkPath
   | {
-      path: ChunkPath;
-      included: ModuleId[];
-      excluded: ModuleId[];
-      moduleChunks: ChunkPath[];
-    };
+    path: ChunkPath;
+    included: ModuleId[];
+    excluded: ModuleId[];
+    moduleChunks: ChunkPath[];
+  };
 
 type CommonJsRequire = (moduleId: ModuleId) => Exports;
 type ModuleContextFactory = (map: ModuleContextMap) => ModuleContext;
@@ -66,9 +68,9 @@ interface Module {
   loaded: boolean;
   id: ModuleId;
   namespaceObject?:
-    | EsmNamespaceObject
-    | Promise<EsmNamespaceObject>
-    | AsyncModulePromise<EsmNamespaceObject>;
+  | EsmNamespaceObject
+  | Promise<EsmNamespaceObject>
+  | AsyncModulePromise<EsmNamespaceObject>;
   [REEXPORTED_OBJECTS]?: any[];
 }
 
@@ -77,7 +79,14 @@ interface ModuleWithDirection extends Module {
   parents: ModuleId[];
 }
 
-
+type ExternalRequire = (
+  id: DependencySpecifier,
+  thunk: () => any,
+  esm?: boolean
+) => Exports | EsmNamespaceObject
+type ExternalImport = (
+  id: DependencySpecifier
+) => Promise<Exports | EsmNamespaceObject>
 interface TurbopackBaseContext<M> {
   a: AsyncModule;
   e: Module["exports"];
@@ -95,6 +104,8 @@ interface TurbopackBaseContext<M> {
   g: typeof globalThis;
   P: ResolveAbsolutePath;
   U: RelativeURL;
+  x: ExternalRequire
+  y: ExternalImport
   z: CommonJsRequire
   d: string;
 }
