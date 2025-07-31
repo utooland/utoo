@@ -10,8 +10,10 @@
 /// <reference path="./runtime-base.ts" />
 /// <reference path="./runtime-types.d.ts" />
 /// <reference path="./base-externals-utils.ts" />
-  
-function augmentContext(context: TurbopackBaseContext<Module>): TurbopackBaseContext<Module> {
+
+function augmentContext(
+  context: TurbopackBaseContext<Module>,
+): TurbopackBaseContext<Module> {
   context.x = externalRequire;
   context.y = externalImport;
   return context;

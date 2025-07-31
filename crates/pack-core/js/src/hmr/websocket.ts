@@ -27,7 +27,7 @@ export function addMessageListener(
 
 export function sendMessage(data: any) {
   if (source && source.readyState === source.OPEN) {
-    const message = typeof data === 'string' ? data : JSON.stringify(data);
+    const message = typeof data === "string" ? data : JSON.stringify(data);
     source.send(message);
   }
 }
@@ -56,9 +56,9 @@ export function connectHMR(options: HMROptions) {
     function handleOnline() {
       reconnections = 0;
       window.console.log("[HMR] connected");
-      
+
       // Send the turbopack-connected message to trigger handleSocketConnected
-      const connected: WebSocketMessage = { type: 'turbopack-connected' };
+      const connected: WebSocketMessage = { type: "turbopack-connected" };
       dispatchMessage(connected);
     }
 
@@ -82,9 +82,9 @@ export function connectHMR(options: HMROptions) {
           }
 
           serverSessionId = msg.data.sessionId;
-          
+
           // Convert to turbopack format and trigger handleSocketConnected
-          const connected: WebSocketMessage = { type: 'turbopack-connected' };
+          const connected: WebSocketMessage = { type: "turbopack-connected" };
           dispatchMessage(connected);
           return;
         }
@@ -96,19 +96,22 @@ export function connectHMR(options: HMROptions) {
         }
 
         if (msg.action === "turbopack-message") {
-          const turbopackMessage: WebSocketMessage = { 
-            type: 'turbopack-message', 
-            data: msg.data 
+          const turbopackMessage: WebSocketMessage = {
+            type: "turbopack-message",
+            data: msg.data,
           };
           dispatchMessage(turbopackMessage);
           return;
         }
 
         // Handle direct turbopack-dev-server messages
-        if (msg.type && ["partial", "restart", "notFound", "issues"].includes(msg.type)) {
-          const turbopackMessage: WebSocketMessage = { 
-            type: 'turbopack-message', 
-            data: msg 
+        if (
+          msg.type &&
+          ["partial", "restart", "notFound", "issues"].includes(msg.type)
+        ) {
+          const turbopackMessage: WebSocketMessage = {
+            type: "turbopack-message",
+            data: msg,
           };
           dispatchMessage(turbopackMessage);
           return;
