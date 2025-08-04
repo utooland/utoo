@@ -108,9 +108,11 @@ strip = "none"
 incremental = true
 codegen-units = 256
 
-# cargo build --profile release-instruments --bin pack-cli
-# xcrun xctrace record --template "Time Profiler" --launch -- ./target/release/pack-cli --mode build --project-dir ./examples/multiple-entries-heavy --root-dir .
-[profile.release-instruments]
+# cargo build --profile instruments --bin pack-cli
+# xcrun xctrace record --template "Time Profiler" --launch -- ./target/instruments/pack-cli --mode build --project-dir ./examples/--root-dir .
+# xcrun xctrace record --template "System Trace" --launch -- ./target/instruments/pack-cli --mode build --project-dir ./examples/--root-dir .
+# open Lauch_pack-cli_xxx.trace
+[profile.instruments]
 inherits = "release"
 opt-level = 1
 lto = false
