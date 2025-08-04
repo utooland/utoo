@@ -109,8 +109,8 @@ incremental = true
 codegen-units = 256
 
 # cargo build --profile instruments --bin pack-cli
-# xcrun xctrace record --template "Time Profiler" --launch -- ./target/instruments/pack-cli --mode build --project-dir ./examples/--root-dir .
-# xcrun xctrace record --template "System Trace" --launch -- ./target/instruments/pack-cli --mode build --project-dir ./examples/--root-dir .
+# xcrun xctrace record --template "Time Profiler" --launch -- ./target/instruments/pack-cli --mode build --project-dir ./examples/with-antd --root-dir .
+# xcrun xctrace record --template "System Trace" --launch -- ./target/instruments/pack-cli --mode build --project-dir ./examples/with-antd --root-dir .
 # open Lauch_pack-cli_xxx.trace
 [profile.instruments]
 inherits = "release"
