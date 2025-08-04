@@ -5,7 +5,7 @@
 
 const mod = globalThis["bar"];
 
-__turbopack_context__.n(mod);
+__turbopack_context__.v(mod);
 }),
 902: ((__turbopack_context__) => {
 
@@ -59,7 +59,7 @@ try {
   throw new Error('Failed to load external URL module "bar_script1@https://example.com/lib/script.js": ' + (error.message || error));
 }
 
-__turbopack_context__.n(mod);
+__turbopack_context__.v(mod);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, true);}),
 481: ((__turbopack_context__) => {
@@ -78,7 +78,7 @@ try {
   throw new Error('Failed to load external URL module "bar_script2@https://example.com/lib/script2.js": ' + (error.message || error));
 }
 
-__turbopack_context__.n(mod);
+__turbopack_context__.v(mod);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, true);}),
 202: ((__turbopack_context__) => {
