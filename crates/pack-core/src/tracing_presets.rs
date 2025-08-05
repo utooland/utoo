@@ -1,22 +1,37 @@
 use std::sync::LazyLock;
-use turbopack_trace_utils::tracing_presets::{
-    TRACING_OVERVIEW_TARGETS as _TRACING_OVERVIEW_TARGETS,
-    TRACING_TURBO_TASKS_TARGETS as _TRACING_TURBO_TASKS_TARGETS,
-    TRACING_TURBOPACK_TARGETS as _TRACING_TURBOPACK_TARGETS,
-};
 
 pub static TRACING_OVERVIEW_TARGETS: LazyLock<Vec<&str>> = LazyLock::new(|| {
-    [
-        &_TRACING_OVERVIEW_TARGETS[..],
-        &[
-            "pack_napi=info",
-            "pack=info",
-            "pack_api=info",
-            "pack_core=info",
-            "turbopack_node=info",
-        ],
+    vec![
+        "turbo_tasks=info",
+        "turbo_tasks_fs=info",
+        "turbo_tasks_fetch=info",
+        "turbopack=info",
+        "turbopack_binding=info",
+        "turbopack_browser=info",
+        "turbopack_nodejs=info",
+        "turbopack_cli=info",
+        "turbopack_cli_utils=info",
+        "turbopack_core=info",
+        "turbopack_css=info",
+        "turbopack_dev_server=info",
+        "turbopack_ecmascript=info",
+        "turbopack_ecmascript_hmr_protocol=info",
+        "turbopack_ecmascript_plugins=info",
+        "turbopack_ecmascript_runtime=info",
+        "turbopack_env=info",
+        "turbopack_image=info",
+        "turbopack_json=info",
+        "turbopack_mdx=info",
+        "turbopack_node=info",
+        "turbopack_static=info",
+        "turbopack_swc_utils=info",
+        "turbopack_wasm=info",
+        "turbopack_node=info",
+        "pack_core=info",
+        "pack_api=info",
+        "pack_napi=info",
+        "pack=info",
     ]
-    .concat()
 });
 
 pub static TRACING_TARGETS: LazyLock<Vec<&str>> = LazyLock::new(|| {
@@ -31,12 +46,51 @@ pub static TRACING_TARGETS: LazyLock<Vec<&str>> = LazyLock::new(|| {
     ]
     .concat()
 });
-pub static TRACING_TURBOPACK_TARGETS: LazyLock<Vec<&str>> =
-    LazyLock::new(|| [&TRACING_TARGETS[..], &_TRACING_TURBOPACK_TARGETS[..]].concat());
+pub static TRACING_TURBOPACK_TARGETS: LazyLock<Vec<&str>> = LazyLock::new(|| {
+    [
+        &TRACING_TARGETS[..],
+        &[
+            "turbopack=trace",
+            "turbopack_binding=trace",
+            "turbopack_nodejs=trace",
+            "turbopack_cli=trace",
+            "turbopack_cli_utils=trace",
+            "turbopack_core=trace",
+            "turbopack_css=trace",
+            "turbopack_browser=trace",
+            "turbopack_dev_server=trace",
+            "turbopack_ecmascript=trace",
+            "turbopack_ecmascript_hmr_protocol=trace",
+            "turbopack_ecmascript_plugins=trace",
+            "turbopack_ecmascript_runtime=trace",
+            "turbopack_env=trace",
+            "turbopack_image=trace",
+            "turbopack_json=trace",
+            "turbopack_mdx=trace",
+            "turbopack_node=trace",
+            "turbopack_static=trace",
+            "turbopack_swc_utils=trace",
+            "turbopack_wasm=trace",
+            "swc_ecma_minifier=trace",
+        ],
+    ]
+    .concat()
+});
 pub static TRACING_TURBO_TASKS_TARGETS: LazyLock<Vec<&str>> = LazyLock::new(|| {
     [
         &TRACING_TURBOPACK_TARGETS[..],
-        &_TRACING_TURBO_TASKS_TARGETS[..],
+        &[
+            "turbo_tasks=trace",
+            "turbo_tasks_auto_hash_map=trace",
+            "turbo_tasks_build=trace",
+            "turbo_tasks_bytes=trace",
+            "turbo_tasks_env=trace",
+            "turbo_tasks_fetch=trace",
+            "turbo_tasks_fs=trace",
+            "turbo_tasks_hash=trace",
+            "turbo_tasks_backend=trace",
+            "turbo_persistence=trace",
+        ],
     ]
     .concat()
 });

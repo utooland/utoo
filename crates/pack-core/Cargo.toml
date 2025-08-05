@@ -58,15 +58,22 @@ turbopack = { workspace = true }
 turbopack-browser = { workspace = true }
 turbopack-core = { workspace = true }
 turbopack-ecmascript = { workspace = true }
-turbopack-ecmascript-plugins = { workspace = true, features = [
-  "transform_emotion",
-] }
 turbopack-ecmascript-runtime = { workspace = true }
 turbopack-node = { workspace = true }
 turbopack-static = { workspace = true }
 turbopack-image = { workspace = true }
 turbopack-resolve = { workspace = true }
-turbopack-trace-utils = { workspace = true }
+
+[target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]
+turbopack-ecmascript-plugins = { workspace = true, default-features = true, features = [
+  "transform_emotion",
+] }
+
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+turbopack-ecmascript-plugins = { workspace = true, default-features = false, features = [
+  "transform_emotion",
+] }
 
 [build-dependencies]
 turbo-tasks-build = { workspace = true }
