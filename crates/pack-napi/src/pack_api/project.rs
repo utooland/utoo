@@ -23,10 +23,7 @@ use pack_api::{
         hmr_update_with_issues_operation,
     },
     operation::EntrypointsOperation,
-    project::{
-        DefineEnv, PartialProjectOptions, ProjectContainer, ProjectInstance, ProjectOptions,
-        WatchOptions,
-    },
+    project::{DefineEnv, PartialProjectOptions, ProjectContainer, ProjectOptions, WatchOptions},
     source_map::get_source_map_rope,
     tasks::{BundlerTurboTasks, RootTask},
 };
@@ -53,7 +50,9 @@ use turbopack_core::{
 };
 use turbopack_ecmascript_hmr_protocol::{ClientUpdateInstruction, ResourceIdentifier};
 use turbopack_trace_utils::{
-    exit::ExitHandler, filter_layer::FilterLayer, raw_trace::RawTraceLayer,
+    exit::{ExitHandler, ExitReceiver},
+    filter_layer::FilterLayer,
+    raw_trace::RawTraceLayer,
     trace_writer::TraceWriter,
 };
 
@@ -237,6 +236,12 @@ impl From<NapiDefineEnv> for DefineEnv {
                 .collect(),
         }
     }
+}
+
+pub struct ProjectInstance {
+    pub turbo_tasks: BundlerTurboTasks,
+    pub container: ResolvedVc<ProjectContainer>,
+    pub exit_receiver: tokio::sync::Mutex<Option<ExitReceiver>>,
 }
 
 #[napi(ts_return_type = "Promise<{ __napiType: \"Project\" }>")]

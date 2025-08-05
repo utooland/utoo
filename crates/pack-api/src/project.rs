@@ -51,14 +51,12 @@ use turbopack_core::{
 };
 use turbopack_node::execution_context::ExecutionContext;
 use turbopack_nodejs::NodeJsChunkingContext;
-use turbopack_trace_utils::exit::ExitReceiver;
 
 use crate::{
     app::{AppEntrypoint, AppProject, OptionAppProject},
     endpoint::{Endpoint, Endpoints},
     entrypoint::Entrypoints,
     library::{Library, LibraryProject, OptionLibraryProject},
-    tasks::BundlerTurboTasks,
     versioned_content_map::VersionedContentMap,
 };
 
@@ -1232,12 +1230,6 @@ async fn copy_output_assets_operation(project: ResolvedVc<Project>) -> Result<Vc
         }
     }
     Ok(OutputAssets::new(assets))
-}
-
-pub struct ProjectInstance {
-    pub turbo_tasks: BundlerTurboTasks,
-    pub container: ResolvedVc<ProjectContainer>,
-    pub exit_receiver: tokio::sync::Mutex<Option<ExitReceiver>>,
 }
 
 fn clean_directory(dist_path: &Path) -> Result<()> {
