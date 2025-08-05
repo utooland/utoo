@@ -86,7 +86,6 @@ pack-core = { workspace = true }
 turbo-tasks-malloc = { workspace = true, default-features = false, features = [
   "custom_allocator",
 ] }
-
 turbopack = { workspace = true }
 turbopack-core = { workspace = true }
 turbopack-ecmascript-hmr-protocol = { workspace = true }

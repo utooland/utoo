@@ -87,6 +87,16 @@ rustflags = [
 [target.armv7-unknown-linux-gnueabihf]
 linker = "arm-linux-gnueabihf-gcc"
 
+[target.wasm32-unknown-unknown]
+rustflags = [
+  "--cfg",
+  "tokio_unstable",
+  "--cfg",
+  'getrandom_backend="wasm_js"',
+  "-Zshare-generics=y",
+  "-Aunused",
+]
+
 [unstable.git]
 shallow_index = true
 shallow_deps = true

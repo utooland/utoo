@@ -12,7 +12,7 @@ rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true, features = ["sync"] }
 url = { workspace = true }
 futures = { workspace = true }
 urlencoding = { workspace = true }
@@ -28,7 +28,6 @@ turbopack-core = { workspace = true }
 turbopack-node = { workspace = true }
 turbopack-nodejs = { workspace = true }
 turbopack-static = { workspace = true }
-turbopack-trace-utils = { workspace = true }
 
 [build-dependencies]
 anyhow = { workspace = true }

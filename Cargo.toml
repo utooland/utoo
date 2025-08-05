@@ -21,7 +21,7 @@ pack-core = { path = "./crates/pack-core" }
 pack-api = { path = "./crates/pack-api" }
 schemars = "0.8"
 futures = "0.3.31"
-tokio = { version = "1.43.0", features = ["full"] }
+tokio = { version = "1.43.0" }
 thiserror = "1.0"
 anyhow = "1.0.96"
 tracing = "0.1.41"
@@ -81,7 +81,7 @@ turbopack-browser = { path = "./next.js/turbopack/crates/turbopack-browser" }
 turbopack-core = { path = "./next.js/turbopack/crates/turbopack-core" }
 turbopack-resolve = { path = "./next.js/turbopack/crates/turbopack-resolve" }
 turbopack-ecmascript = { path = "./next.js/turbopack/crates/turbopack-ecmascript" }
-turbopack-ecmascript-plugins = { path = "./next.js/turbopack/crates/turbopack-ecmascript-plugins" }
+turbopack-ecmascript-plugins = { path = "./next.js/turbopack/crates/turbopack-ecmascript-plugins", default-features = false }
 turbopack-ecmascript-runtime = { path = "./next.js/turbopack/crates/turbopack-ecmascript-runtime" }
 turbopack-ecmascript-hmr-protocol = { path = "./next.js/turbopack/crates/turbopack-ecmascript-hmr-protocol" }
 turbopack-image = { path = "./next.js/turbopack/crates/turbopack-image" }
