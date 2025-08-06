@@ -94,12 +94,14 @@ rustflags = [
   "--cfg",
   'getrandom_backend="wasm_js"',
   "-Zshare-generics=y",
+  "-Ctarget-feature=+atomics,+bulk-memory,+mutable-globals",
   "-Aunused",
 ]
 
 [unstable.git]
 shallow_index = true
 shallow_deps = true
+
 [unstable.gitoxide]
 fetch = true
 checkout = true
