@@ -110,17 +110,13 @@ pub mod opfs_fs {
 pub mod cwd {
     use super::*;
 
-    // FIXME: This is not thread-safe, we need to use a thread-local variable instead
     /// Set current working directory
     pub async fn set_cwd(path: &str) -> Result<()> {
         if let Some(cwd) = CWD.get() {
             let mut guard = cwd.lock().unwrap();
             *guard = path.to_string();
         } else {
-            CWD.get_or_init(|| {
-                // FXIME: cwd should be set by the caller
-                Mutex::new("/utoo-wasm-demo".to_string())
-            });
+            CWD.get_or_init(|| Mutex::new(path.to_string()));
         }
         Ok(())
     }
@@ -131,10 +127,7 @@ pub mod cwd {
             let current_cwd = cwd.lock().unwrap().clone();
             Ok(current_cwd)
         } else {
-            let cwd = CWD.get_or_init(|| {
-                // FXIME: cwd should be set by the caller
-                Mutex::new(String::from("/utoo-wasm-demo"))
-            });
+            let cwd = CWD.get_or_init(|| Mutex::new(String::from("/")));
             let current_cwd = cwd.lock().unwrap().clone();
             Ok(current_cwd)
         }

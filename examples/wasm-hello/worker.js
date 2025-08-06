@@ -2,7 +2,7 @@
 // This worker handles WASM initialization and OPFS-related operations.
 // All file system and WASM operations are delegated to this worker.
 
-import init, { install_deps, Opfs } from './pkg/utoo_wasm.js';
+import init, { install_deps, Opfs, Cwd } from './pkg/utoo_wasm.js';
 
 let wasmReady = false;
 let rootDir = null; // OPFS root directory handle
@@ -154,6 +154,7 @@ self.onmessage = async (event) => {
     try {
       console.time('install_deps');
       const result = await install_deps(lockContent, pkg);
+      await Cwd.set(`/${pkg}`);
       console.log('install_deps result', result);
       console.timeEnd('install_deps');
       self.postMessage({ type: 'install_deps_result', result });
@@ -202,6 +203,16 @@ self.onmessage = async (event) => {
       await copyDirSync(rootDir, srcPath, dstPath);
       console.timeEnd('copyDirSync');
       self.postMessage({ type: 'fs_copy_dir_result', result: 'success' });
+    } catch (e) {
+      self.postMessage({ type: 'error', error: e.message || e.toString() });
+    }
+  }
+
+  else if (type === 'cwd_set') {
+    const { path } = payload;
+    try {
+      await Cwd.set(path);
+      self.postMessage({ type: 'cwd_set_result', result: 'success' });
     } catch (e) {
       self.postMessage({ type: 'error', error: e.message || e.toString() });
     }

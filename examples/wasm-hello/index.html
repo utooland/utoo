@@ -1377,9 +1377,8 @@
       document.getElementById('install-btn').onclick = () => {
         const lockContent = document.getElementById('input-lock').value;
         const { name } = JSON.parse(lockContent);
-        cwd.set(`/${name}`);
         document.getElementById('install-btn').disabled = true;
-        worker.postMessage({ type: 'install_deps', payload: { lockContent, pkg: ''} });
+        worker.postMessage({ type: 'install_deps', payload: { lockContent, pkg: name} });
 
       };
 
