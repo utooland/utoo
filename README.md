@@ -5,7 +5,7 @@
 ----
 
 <div align="center">
-<img src="https://mdn.alipayobjects.com/huamei_botco4/afts/img/357RTIva8S8AAAAAAAAAAAAADnNMAQFr/original" alt="Utoo Logo" width="200"/>
+<img src="https://mdn.alipayobjects.com/huamei_botco4/afts/img/357RTIva8S8AAAAAAAAAAAAADnNMAQFr/original" alt="Utoo Logo" width="60"/>
 <h4> 🌖 /juːtuː/ Unified Toolchain </h4>
 </div>
 
