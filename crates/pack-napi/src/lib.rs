@@ -51,15 +51,39 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[napi::module_init]
-
 fn init() {
+    use std::{
+        cell::RefCell,
+        panic::{set_hook, take_hook},
+        time::{Duration, Instant},
+    };
+
     use tokio::runtime::Builder;
+    use turbo_tasks::panic_hooks::handle_panic;
     use turbo_tasks_malloc::TurboMalloc;
+
+    let prev_hook = take_hook();
+    set_hook(Box::new(move |info| {
+        handle_panic(info);
+        prev_hook(info);
+    }));
+
+    thread_local! {
+        static LAST_SWC_ATOM_GC_TIME: RefCell<Option<Instant>> = const { RefCell::new(None) };
+    }
 
     let rt = Builder::new_multi_thread()
         .enable_all()
         .on_thread_stop(|| {
             TurboMalloc::thread_stop();
+        })
+        .on_thread_park(|| {
+            LAST_SWC_ATOM_GC_TIME.with_borrow_mut(|cell| {
+                if cell.is_none_or(|t| t.elapsed() > Duration::from_secs(2)) {
+                    swc_core::ecma::atoms::hstr::global_atom_store_gc();
+                    *cell = Some(Instant::now());
+                }
+            });
         })
         .disable_lifo_slot()
         .build()
