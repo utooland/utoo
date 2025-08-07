@@ -3,7 +3,6 @@ use std::collections::HashMap;
 
 /// Represents package information in package-lock.json
 #[derive(Debug, Clone, Serialize, Deserialize)]
-
 pub struct LockPackage {
     pub name: Option<String>,
     pub version: Option<String>,
