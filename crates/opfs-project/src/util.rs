@@ -11,9 +11,7 @@ pub fn get_package_name(path: &str) -> Option<String> {
 
         // Split by '/' and take only the first two components
         let mut components = after_node_modules.split('/').take(2);
-        let first = components.next();
-
-        first?;
+        let first = components.next()?;
 
         // Check if first component starts with @ (scoped package)
         let package_name = if first.unwrap().starts_with('@') {
