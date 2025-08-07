@@ -8,6 +8,8 @@ members = [
   "crates/pack-tests",
   "crates/cli",
   "crates/core",
+  "crates/utoo-wasm",
+  "crates/opfs-project",
 ]
 exclude = ["crates/runtime", "next.js"]
 resolver = "2"
@@ -41,6 +43,7 @@ criterion = "0.6.0"
 dirs = "5.0"
 toml = "0.8"
 async-trait = "0.1.64"
+tokio-fs-ext = "0.3.2"
 
 # SWC crates
 swc_core = { version = "34", features = [
