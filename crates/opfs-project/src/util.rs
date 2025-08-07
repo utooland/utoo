@@ -14,16 +14,16 @@ pub fn get_package_name(path: &str) -> Option<String> {
         let first = components.next()?;
 
         // Check if first component starts with @ (scoped package)
-        let package_name = if first.unwrap().starts_with('@') {
+        let package_name = if first.starts_with('@') {
             // For scoped packages, we need two components: @scope/package
             if let Some(second) = components.next() {
-                format!("{}/{}", first.unwrap(), second)
+                format!("{}/{}", first, second)
             } else {
                 return None;
             }
         } else {
             // For regular packages, just use the first component
-            first.unwrap().to_string()
+            first.to_string()
         };
 
         if !package_name.is_empty() {
