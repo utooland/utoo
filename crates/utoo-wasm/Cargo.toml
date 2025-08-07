@@ -17,7 +17,7 @@ serde_json = "1.0"
 opfs = "0.1"
 js-sys = "0.3"
 petgraph = "0.6"
-opfs-project = { path = "../opfs-project" }
+opfs-project = { workspace = true }
 flate2 = "1.1.2"
 tar = "0.4.44"
 futures-util = "0.3.31"
