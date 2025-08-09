@@ -133,8 +133,8 @@ pub async fn get_client_compile_time_info(
         Environment::new(ExecutionEnvironment::Browser(
             BrowserEnvironment {
                 dom: true,
-                web_worker: false,
-                service_worker: false,
+                web_worker: true,
+                service_worker: true,
                 browserslist_query: browserslist_query.to_owned(),
             }
             .resolved_cell(),

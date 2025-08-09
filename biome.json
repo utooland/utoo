@@ -10,6 +10,7 @@
     "includes": [
       "**/package.json",
       "**/packages/**/*.ts",
+      "**/examples/**/*.ts",
       "./packages/pack/docs/features-list.json",
       "crates/pack-core/js/**/*.ts",
       "!**/packages/**/binding.d.ts",

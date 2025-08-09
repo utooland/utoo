@@ -1,0 +1,27 @@
+{
+  "name": "@utoo/web",
+  "version": "0.0.1",
+  "module": "esm/index.js",
+  "types": "esm/index.d.ts",
+  "files": [
+    "esm/*"
+  ],
+  "scripts": {
+    "wasmpack": "wasm-pack build ../../crates/utoo-wasm --out-dir ../../packages/utoo-web/src/utoo --out-name index --no-pack --target web",
+    "tsx": "rm -rf esm && tsc -p ./tsconfig.json",
+    "dev": "npm run wasmpack -- --dev && npm run tsx && cp ./src/utoo/*.wasm ./esm/utoo",
+    "build": "npm run wasmpack -- --release && npm run tsx && cp ./src/utoo/*.wasm ./esm/utoo",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "comlink": "^4.4.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">= 20"
+  },
+  "author": "xusd320",
+  "license": "MIT"
+}

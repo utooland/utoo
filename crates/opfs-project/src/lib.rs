@@ -1,34 +1,46 @@
+#![cfg(all(target_family = "wasm", target_os = "unknown"))]
+
 use anyhow::Result;
 use serde::Serialize;
 use std::sync::Mutex;
 use std::sync::OnceLock;
+use wasm_bindgen::prelude::wasm_bindgen;
 
 // Global CWD static variable accessible to all modules
+// Maybe should not global in the future
 static CWD: OnceLock<Mutex<String>> = OnceLock::new();
 
 /// Directory entry with name and type information
-#[derive(Debug, Clone, Serialize)]
+#[wasm_bindgen]
+#[derive(Debug, Clone)]
 pub struct DirEntry {
+    #[wasm_bindgen(getter_with_clone)]
     pub name: String,
-    pub is_file: bool,
-    pub is_dir: bool,
+    pub r#type: DirEntryType,
 }
 
-pub mod fuse;
-pub mod model;
-pub mod package_manager;
-pub mod util;
+#[wasm_bindgen]
+#[derive(Debug, Copy, Clone)]
+pub enum DirEntryType {
+    File = "file",
+    Directory = "directory",
+}
 
-pub mod opfs_fs {
+mod fuse;
+mod package_lock;
+pub mod package_manager;
+mod util;
+
+pub mod opfs {
     use super::*;
 
     /// Read file content with fuse.link support
-    pub async fn read(path: &str) -> Result<Vec<u8>> {
+    pub async fn read_with_fuse_link(path: &str) -> Result<Vec<u8>> {
         fuse::read(path).await
     }
 
     /// Read file content as bytes (without fuse.link support)
-    pub async fn read_bytes(path: &str) -> Result<Vec<u8>> {
+    pub(crate) async fn read_without_fuse_link(path: &str) -> Result<Vec<u8>> {
         let prepared_path = crate::util::prepare_path(path).await?;
         let content = tokio_fs_ext::read(&prepared_path).await?;
         Ok(content)
@@ -57,6 +69,11 @@ pub mod opfs_fs {
         Ok(())
     }
 
+    pub async fn create_dir(path: &str) -> Result<()> {
+        tokio_fs_ext::create_dir(path).await?;
+        Ok(())
+    }
+
     pub async fn create_dir_all(path: &str) -> Result<()> {
         tokio_fs_ext::create_dir_all(path)
             .await
@@ -67,12 +84,6 @@ pub mod opfs_fs {
     /// Remove a file
     pub async fn remove(path: &str) -> Result<()> {
         tokio_fs_ext::remove_file(path).await?;
-        Ok(())
-    }
-
-    /// Create directory (including parent directories)
-    pub async fn write_dir(path: &str) -> Result<()> {
-        tokio_fs_ext::create_dir_all(path).await?;
         Ok(())
     }
 
@@ -111,25 +122,22 @@ pub mod cwd {
     use super::*;
 
     /// Set current working directory
-    pub async fn set_cwd(path: &str) -> Result<()> {
+    pub fn set_cwd(path: String) {
         if let Some(cwd) = CWD.get() {
             let mut guard = cwd.lock().unwrap();
             *guard = path.to_string();
         } else {
-            CWD.get_or_init(|| Mutex::new(path.to_string()));
+            CWD.get_or_init(|| Mutex::new(path));
         }
-        Ok(())
     }
 
     /// Read current working directory
-    pub async fn get_cwd() -> Result<String> {
+    pub fn get_cwd() -> String {
         if let Some(cwd) = CWD.get() {
-            let current_cwd = cwd.lock().unwrap().clone();
-            Ok(current_cwd)
+            cwd.lock().unwrap().clone()
         } else {
             let cwd = CWD.get_or_init(|| Mutex::new(String::from("/")));
-            let current_cwd = cwd.lock().unwrap().clone();
-            Ok(current_cwd)
+            cwd.lock().unwrap().clone()
         }
     }
 }

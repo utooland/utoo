@@ -1,17 +1,16 @@
 use anyhow::Result;
 use flate2::read::GzDecoder;
 use futures::future::join_all;
-use serde_json;
 use std::io::Read;
 use tar::Archive;
 
 use super::fuse;
-use super::opfs_fs as fs;
-use crate::model::package_lock::PackageLock;
+use super::opfs;
+use crate::package_lock::PackageLock;
 
 /// Download all tgz packages to OPFS
-pub async fn install_deps(lock_content: &str, _pkg: &str) -> Result<Vec<String>> {
-    let lock = PackageLock::from_json(lock_content)?;
+pub async fn install_deps(package_lock: &str) -> Result<Vec<String>> {
+    let lock = PackageLock::from_json(package_lock)?;
     let project_name = lock.name.clone();
 
     // Write package.json to root
@@ -39,14 +38,14 @@ pub async fn install_deps(lock_content: &str, _pkg: &str) -> Result<Vec<String>>
 
 /// Write root package.json to the project directory
 async fn ensure_package_json(project_name: &str, lock: &PackageLock) -> Result<()> {
-    if fs::exists(&format!("{project_name}/package.json")).await? {
+    if opfs::exists(&format!("{project_name}/package.json")).await? {
         return Ok(());
     }
 
     if let Some(root_pkg) = lock.packages.get("") {
         let pkg_json = serde_json::to_string_pretty(root_pkg).unwrap_or("{}".to_string());
-        fs::create_dir_all(&format!("{project_name}/node_modules")).await?;
-        fs::write(&format!("{project_name}/package.json"), &pkg_json).await?;
+        opfs::create_dir_all(&format!("{project_name}/node_modules")).await?;
+        opfs::write(&format!("{project_name}/package.json"), &pkg_json).await?;
     }
     Ok(())
 }
@@ -77,7 +76,7 @@ async fn install_package(
     let paths = PackagePaths::new(name, tgz_url, project_name);
 
     // Check if already unpacked
-    if fs::exists(&paths.unpacked_dir).await.unwrap_or(false) {
+    if opfs::exists(&paths.unpacked_dir).await.unwrap_or(false) {
         fuse::fuse_link(&paths.unpacked_dir, &paths.unpack_dir).await?;
         return Ok(());
     }
@@ -94,8 +93,8 @@ async fn install_package(
 
 /// Get or download tgz file
 async fn get_or_download_tgz(tgz_url: &str, tgz_store_path: &str) -> Result<Vec<u8>> {
-    if fs::exists(tgz_store_path).await.unwrap_or(false) {
-        fs::read_bytes(tgz_store_path)
+    if opfs::exists(tgz_store_path).await.unwrap_or(false) {
+        opfs::read_without_fuse_link(tgz_store_path)
             .await
             .map_err(|e| anyhow::anyhow!("read cache error: {e:?}"))
     } else {
@@ -168,9 +167,9 @@ async fn save_tgz(path: &str, bytes: &[u8]) -> Result<()> {
     if let Some(parent_dir) = std::path::Path::new(path).parent()
         && let Some(parent_str) = parent_dir.to_str()
     {
-        fs::create_dir_all(parent_str).await?;
+        opfs::create_dir_all(parent_str).await?;
     }
-    fs::write_bytes(path, bytes).await
+    opfs::write_bytes(path, bytes).await
 }
 
 /// Download bytes from URL
@@ -392,7 +391,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify existing package.json was not overwritten
-        let content = fs::read(&format!("{}/package.json", project_name))
+        let content = fs::read_with_fuse_link(&format!("{}/package.json", project_name))
             .await
             .unwrap();
         let content_str = String::from_utf8(content).unwrap();

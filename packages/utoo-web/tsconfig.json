@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./esm",
+    "target": "ES2018",
+    "allowJs": true,
+    "esModuleInterop": true,
+    "moduleResolution": "bundler",
+    "module": "esnext",
+    "declaration": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "noImplicitReturns": true
+  },
+  "include": ["src"],
+  "exclude": ["dist"]
+}
+

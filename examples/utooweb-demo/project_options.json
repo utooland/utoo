@@ -1,0 +1,27 @@
+{
+  "rootPath": "../../",
+  "projectPath": "./",
+  "config": {
+    "entry": [
+      {
+        "import": "./src/index.tsx"
+      }
+    ],
+    "output": {
+      "path": "./dist",
+      "clean": true
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named",
+      "splitChunks": {
+        "js": {
+          "minChunkSize": 50000,
+          "maxChunkCountPerGroup": 40,
+          "maxMergeChunkSize": 200000
+        }
+      }
+    },
+    "stats": true
+  }
+}
