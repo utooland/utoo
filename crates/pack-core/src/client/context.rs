@@ -442,7 +442,12 @@ pub async fn get_client_chunking_context(
     let runtime_type = {
         #[cfg(feature = "test")]
         {
-            turbopack_ecmascript_runtime::RuntimeType::Dummy
+            use turbopack_ecmascript_runtime::RuntimeType;
+            match config.runtime_type_str().await?.as_deref() {
+                Some(rt) if rt.eq_ignore_ascii_case("Development") => RuntimeType::Development,
+                Some(rt) if rt.eq_ignore_ascii_case("Production") => RuntimeType::Production,
+                _ => RuntimeType::Dummy,
+            }
         }
         #[cfg(not(feature = "test"))]
         {

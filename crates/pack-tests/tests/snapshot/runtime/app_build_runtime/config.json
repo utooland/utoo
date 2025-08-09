@@ -2,17 +2,13 @@
   "config": {
     "entry": [
       {
-        "import": "input/index.ts",
+        "import": "input/index.js",
         "name": "main"
       }
     ],
-    "resolve": {
-      "alias": {
-        "hello-a": "./input/a.ts"
-      }
-    },
     "optimization": {
       "minify": false
     }
-  }
-}
+  },
+  "runtimeType": "Production"
+} 

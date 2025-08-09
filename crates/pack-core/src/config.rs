@@ -111,6 +111,9 @@ pub struct Config {
     experimental: ExperimentalConfig,
     persistent_caching: Option<bool>,
     cache_handler: Option<RcStr>,
+    #[cfg(feature = "test")]
+    #[serde(rename = "runtimeType")]
+    runtime_type: Option<RcStr>,
 }
 
 #[derive(
@@ -816,6 +819,18 @@ impl Config {
             .collect();
 
         Vc::cell(define_env)
+    }
+
+    #[turbo_tasks::function]
+    pub fn runtime_type_str(&self) -> Vc<Option<RcStr>> {
+        #[cfg(feature = "test")]
+        {
+            Vc::cell(self.runtime_type.clone())
+        }
+        #[cfg(not(feature = "test"))]
+        {
+            Vc::cell(None)
+        }
     }
 
     #[turbo_tasks::function]

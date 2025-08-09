@@ -1,7 +1,9 @@
 {
-  "entry": [
-    {
-      "import": "input/index.ts"
-    }
-  ]
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.ts"
+      }
+    ]
+  }
 }

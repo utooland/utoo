@@ -1,8 +1,10 @@
 {
-  "entry": [
-    {
-      "import": "input/index.tsx",
-      "name": "main"
-    }
-  ]
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.tsx",
+        "name": "main"
+      }
+    ]
+  }
 }
