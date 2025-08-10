@@ -83,6 +83,10 @@ export type TurbopackLoaderItem =
       options: Record<string, JSONValue>;
     };
 
+export type TurbopackRuleConfigItemOrShortcut =
+  | TurbopackLoaderItem[]
+  | TurbopackRuleConfigItem;
+
 export type TurbopackRuleConfigItemOptions = {
   loaders: TurbopackLoaderItem[];
   as?: string;
