@@ -32,7 +32,7 @@ impl Project {
 
     #[wasm_bindgen]
     pub async fn build(&self) -> Result<(), JsValue> {
-        // TODO: 
+        // TODO:
         todo!()
     }
 
@@ -72,7 +72,7 @@ impl Project {
     pub async fn create_dir_all(&self, path: String) -> Result<(), JsValue> {
         opfs::create_dir_all(&path)
             .await
-            .map_err(|e| JsValue::from_str(&format!("read_dir error: {e}")))?;
+            .map_err(|e| JsValue::from_str(&format!("create_dir_all error: {e}")))?;
         Ok(())
     }
 
