@@ -31,8 +31,8 @@ jobs:
       - name: Install dependencies
         run: |
           npm install
-          npm install binaryen@123.0.0
-          npm install wasm-pack@0.13.1
+          npm install binaryen@123.0.0 --global
+          npm install wasm-pack@0.13.1 --global
       - name: Install rust
         uses: dtolnay/rust-toolchain@stable
         with:
