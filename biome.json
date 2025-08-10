@@ -9,11 +9,12 @@
     "ignoreUnknown": false,
     "includes": [
       "**/package.json",
-      "**/packages/**/*.ts",
-      "**/examples/**/*.ts",
+      "**/packages/**/src/*",
+      "**/examples/**/src/*",
       "./packages/pack/docs/features-list.json",
       "crates/pack-core/js/**/*.ts",
-      "!**/packages/**/binding.d.ts",
+      "!**/examples/multi-entries-heavy/*",
+      "!**/packages/**/binding.*",
       "!next.js/**"
     ]
   },

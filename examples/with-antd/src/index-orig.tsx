@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { RouterProvider, createHashRouter } from "react-router-dom";
+import { createHashRouter, RouterProvider } from "react-router-dom";
 import { Layout } from "./layout";
 import { AntDesignIcons } from "./pages/ant-design-icons";
 import { Home } from "./pages/home";
