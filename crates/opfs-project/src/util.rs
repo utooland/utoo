@@ -57,7 +57,6 @@ pub async fn read_dir_direct(path: &str) -> Result<Vec<DirEntry>> {
             && let Some(name_str) = name.to_str()
         {
             let meta = tokio_fs_ext::metadata(&entry_path).await?;
-         
 
             let dir_entry = DirEntry {
                 name: name_str.to_string(),
