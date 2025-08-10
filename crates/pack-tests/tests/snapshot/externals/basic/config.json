@@ -1,27 +1,29 @@
 {
+  "config": {
     "entry": [
-        {
-            "import": "input/index.js",
-            "name": "main"
-        }
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
     ],
     "externals": {
-        "foo": "bar",
-        "foo_require": "commonjs bar",
-        "foo_require2": {
-            "root": "bar_require2",
-            "type": "commonjs"
-        },
-        "foo_import": "esm bar",
-        "foo_import2": {
-            "root": "bar_import2",
-            "type": "esm"
-        },
-        "foo_script": "script bar_script1@https://example.com/lib/script.js",
-        "foo_script2": {
-            "root": "bar_script2",
-            "type": "script",
-            "script": "https://example.com/lib/script2.js"
-        }
+      "foo": "bar",
+      "foo_require": "commonjs bar",
+      "foo_require2": {
+        "root": "bar_require2",
+        "type": "commonjs"
+      },
+      "foo_import": "esm bar",
+      "foo_import2": {
+        "root": "bar_import2",
+        "type": "esm"
+      },
+      "foo_script": "script bar_script1@https://example.com/lib/script.js",
+      "foo_script2": {
+        "root": "bar_script2",
+        "type": "script",
+        "script": "https://example.com/lib/script2.js"
+      }
     }
+  }
 }

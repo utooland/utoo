@@ -1,12 +1,14 @@
 {
+  "config": {
     "entry": [
-        {
-            "import": "input/index.js",
-            "name": "main"
-        }
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
     ],
     "optimization": {
-        "concatenateModules": true,
-        "minify": false
+      "concatenateModules": true,
+      "minify": false
     }
+  }
 }

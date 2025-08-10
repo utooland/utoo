@@ -8,10 +8,7 @@
           "name": "MyLibrary"
         }
       }
-    ],
-    "optimization": {
-      "minify": false,
-      "concatenateModules": true
-    }
-  }
-}
+    ]
+  },
+  "runtimeType": "Production"
+} 

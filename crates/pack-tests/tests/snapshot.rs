@@ -31,7 +31,6 @@ fn register() {
     turbopack_nodejs::register();
     turbopack_browser::register();
     turbopack_ecmascript_plugins::register();
-    turbopack_ecmascript_runtime::register();
     turbopack_resolve::register();
     turbopack_core::register();
     pack_core::register();
@@ -40,16 +39,22 @@ fn register() {
 
 fn default_config() -> String {
     r#"{
-        "entry": [
-            {
-                "import": "input/index.js",
-                "name": "main"
+        "config": {
+            "entry": [
+                {
+                    "import": "input/index.js",
+                    "name": "main"
+                }
+            ],
+            "output": {
+                "path": "output"
+            },
+            "mode": "production",
+            "optimization": {
+                "minify": false
             }
-        ],
-        "output": {
-            "path": "output"
         },
-        "mode": "production"
+        "runtimeType": "dummy"
     }"#
     .to_string()
 }
@@ -183,43 +188,56 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
     };
 
     // Parse config content and determine if it's in development or production mode
-    let config_json: serde_json::Value = if config_content.trim().is_empty() {
-        serde_json::from_str(&default_config())?
-    } else {
-        let mut user_config: serde_json::Value = serde_json::from_str(&config_content)?;
+    let (mut user_config, runtime_type_override): (serde_json::Value, Option<String>) =
+        if config_content.trim().is_empty() {
+            (serde_json::from_str(&default_config())?, None)
+        } else {
+            let raw_root: serde_json::Value = serde_json::from_str(&config_content)?;
+            let runtime_type_from_root = raw_root
+                .get("runtimeType")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let user_cfg = raw_root
+                .get("config")
+                .cloned()
+                .expect("config.json must contain a top-level `config` object");
+            (user_cfg, runtime_type_from_root)
+        };
 
-        // Ensure default output configuration is present
-        if !user_config.get("output").is_some() {
-            let default_output = serde_json::json!({
-                "path": "output"
-            });
-            user_config["output"] = default_output;
-        }
+    // Ensure default output configuration is present
+    if !user_config.get("output").is_some() {
+        let default_output = serde_json::json!({
+            "path": "output"
+        });
+        user_config["output"] = default_output;
+    }
 
-        // Ensure default mode is present
-        if !user_config.get("mode").is_some() {
-            user_config["mode"] = serde_json::Value::String("production".to_string());
-        }
+    // Ensure default mode is present
+    if !user_config.get("mode").is_some() {
+        user_config["mode"] = serde_json::Value::String("production".to_string());
+    }
 
-        // Ensure minify is default to true
-        if !user_config.get("optimization").is_some() {
-            let default_optimization = serde_json::json!({
-                "minify": false,
-            });
-            user_config["optimization"] = default_optimization;
-        }
+    // Ensure optimization is present (minify default to false for snapshots)
+    if !user_config.get("optimization").is_some() {
+        let default_optimization = serde_json::json!({
+            "minify": false,
+        });
+        user_config["optimization"] = default_optimization;
+    }
 
-        user_config
-    };
+    // Propagate runtimeType into inner bundler config so downstream can read it
+    if let Some(rt) = &runtime_type_override {
+        user_config["runtimeType"] = serde_json::Value::String(rt.clone());
+    }
 
-    let is_production = config_json
+    let is_production = user_config
         .get("mode")
         .and_then(|m| m.as_str())
         .map(|m| m == "production")
         .unwrap_or(true);
 
-    // Convert the merged config back to string for ProjectOptions
-    let final_config_content = serde_json::to_string_pretty(&config_json)?;
+    // Convert the merged inner bundler config back to string for ProjectOptions
+    let final_config_content = serde_json::to_string_pretty(&user_config)?;
 
     let project_options = ProjectOptions {
         root_path: REPO_ROOT.to_string().into(),
@@ -297,8 +315,6 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
                 asset.path().to_string().await.context("to_string failed")?
             ))?;
     }
-
-    // dbg!(&expected_paths, &seen);
 
     // Verify that actual assets match expected assets
     matches_expected(expected_paths, seen)

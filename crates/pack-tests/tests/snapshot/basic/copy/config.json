@@ -1,4 +1,5 @@
 {
+  "config": {
     "entry": [
       {
         "import": "input/index.js",
@@ -6,12 +7,13 @@
       }
     ],
     "output": {
-        "path": "./output",
-        "copy": [
-            {
-                "from": "./input/reset.css",
-                "to": "./reset.css"
-            }
-        ]
+      "path": "./output",
+      "copy": [
+        {
+          "from": "./input/reset.css",
+          "to": "./reset.css"
+        }
+      ]
     }
   }
+}
