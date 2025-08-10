@@ -33,6 +33,7 @@ jobs:
           npm install
           npm install binaryen@123.0.0 --global
           npm install wasm-pack@0.13.1 --global
+          rustup component add rust-src --toolchain nightly-2025-06-04-x86_64-unknown-linux-gnu
       - name: Install rust
         uses: dtolnay/rust-toolchain@stable
         with:
