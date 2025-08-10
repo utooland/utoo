@@ -1,9 +1,11 @@
 import * as comlink from "comlink";
-import { HandShake } from "./message";
+import { Fork, HandShake } from "./message";
 import { ProjectEndpoint } from "./type";
 import type { DirEntry } from "./utoo";
 
 let ProjectWorker: Worker;
+
+const ConnectedPorts = new Set<MessagePort>();
 
 export class Project implements ProjectEndpoint {
   private cwd: string;
@@ -17,13 +19,22 @@ export class Project implements ProjectEndpoint {
   constructor(cwd: string) {
     this.cwd = cwd;
 
-    ProjectWorker ??= new Worker(new URL("./worker", import.meta.url));
-
     const { port1, port2 } = new MessageChannel();
 
-    ProjectWorker.postMessage(HandShake, [port2]);
-
     this.remote ??= comlink.wrap(port1);
+
+    if (!ProjectWorker) {
+      ProjectWorker = new Worker(new URL("./worker", import.meta.url));
+
+      self.addEventListener("message", (e) => {
+        const port = e.ports[0];
+        if (e.data === Fork && !ConnectedPorts.has(port)) {
+          ProjectWorker.postMessage(HandShake, [port]);
+        }
+      });
+    }
+
+    ProjectWorker.postMessage(HandShake, [port2]);
 
     this.#tunnel ??= this.remote.mount(this.cwd);
   }
@@ -68,16 +79,15 @@ export class Project implements ProjectEndpoint {
     return await this.remote.createDirAll(path);
   }
 
-  public fork(): ProjectEndpoint {
-    const { port1, port2 } = new MessageChannel();
-
-    ProjectWorker.postMessage(HandShake, [port2]);
+  // This should be called from different worker
+  public static fork(port1: MessagePort, port2: MessagePort): ProjectEndpoint {
+    (self as any as MessagePort).postMessage(Fork, [port2]);
 
     return new ForkedProject(port1);
   }
 }
 
-export class ForkedProject implements ProjectEndpoint {
+class ForkedProject implements ProjectEndpoint {
   private endpoint: comlink.Remote<ProjectEndpoint>;
 
   constructor(port: MessagePort) {

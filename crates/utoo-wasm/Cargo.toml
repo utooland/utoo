@@ -44,8 +44,8 @@ features = [
 wasm-opt = [
   "-Oz",
   "--enable-bulk-memory",
-  "--enable-nontrapping-float-to-int",
   "--enable-threads",
+  "--enable-nontrapping-float-to-int",
 ]
 
 [package.metadata.wasm-pack.profile.dev]
