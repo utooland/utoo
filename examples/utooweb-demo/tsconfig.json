@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "rootDir": "./src",
+    "jsx": "react",
+    "target": "ES2018",
+    "allowJs": true,
+    "esModuleInterop": true,
+    "module": "ES2020",
+    "moduleResolution": "node",
+    "noImplicitAny": false,
+    "lib": ["dom", "dom.iterable", "esnext"]
+  },
+  "exclude": ["genHtml.js", "dist/**"]
+}

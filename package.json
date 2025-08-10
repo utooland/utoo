@@ -16,6 +16,7 @@
     "packages/pack",
     "packages/pack-cli",
     "packages/style-loader",
+    "packages/utoo-web",
     "crates/pack-core/js",
     "crates/pack/js",
     "examples/define",
@@ -30,7 +31,7 @@
     "examples/with-tailwind",
     "examples/resolve",
     "examples/react",
-    "examples/wasm-hello"
+    "examples/utooweb-demo"
   ],
   "repository": "https://github.com/umijs/mako"
 }

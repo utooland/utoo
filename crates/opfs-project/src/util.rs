@@ -1,4 +1,4 @@
-use crate::DirEntry;
+use crate::{DirEntry, DirEntryType};
 use anyhow::Result;
 
 /// Extract package name from a path that contains node_modules
@@ -17,7 +17,7 @@ pub fn get_package_name(path: &str) -> Option<String> {
         let package_name = if first.starts_with('@') {
             // For scoped packages, we need two components: @scope/package
             if let Some(second) = components.next() {
-                format!("{}/{}", first, second)
+                format!("{first}/{second}")
             } else {
                 return None;
             }
@@ -38,7 +38,7 @@ pub async fn prepare_path(path: &str) -> Result<String> {
     if path.starts_with('/') {
         Ok(path.to_string())
     } else {
-        let cwd = crate::cwd::get_cwd().await?;
+        let cwd = crate::cwd::get_cwd();
         Ok(format!("{cwd}/{path}"))
     }
 }
@@ -57,13 +57,14 @@ pub async fn read_dir_direct(path: &str) -> Result<Vec<DirEntry>> {
             && let Some(name_str) = name.to_str()
         {
             let meta = tokio_fs_ext::metadata(&entry_path).await?;
-            let is_file = meta.is_file();
-            let is_dir = meta.is_dir();
 
             let dir_entry = DirEntry {
                 name: name_str.to_string(),
-                is_file,
-                is_dir,
+                r#type: if meta.is_dir() {
+                    DirEntryType::Directory
+                } else {
+                    DirEntryType::File
+                },
             };
             entries.push(dir_entry);
         }

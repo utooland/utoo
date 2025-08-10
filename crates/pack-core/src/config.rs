@@ -903,6 +903,7 @@ impl Config {
                     RuleConfigItem::Boolean(_) => FindRuleResult::Break,
                 }
             }
+            #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
             match rule {
                 RuleConfigItemOrShortcut::Loaders(loaders) => {
                     rules.insert(
