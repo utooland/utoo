@@ -4237,7 +4237,7 @@ dependencies = [
  "rustc-hash 2.1.1",
  "serde",
  "serde_json",
- "swc_core 34.0.1",
+ "swc_core 34.0.3",
  "tokio",
  "tracing",
  "tracing-subscriber",

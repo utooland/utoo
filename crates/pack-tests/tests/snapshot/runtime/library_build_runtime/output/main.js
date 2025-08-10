@@ -1,13 +1,13 @@
 (globalThis.TURBOPACK = globalThis.TURBOPACK || []).push(["main.js", {
 
-9: ((__turbopack_context__) => {
+25: ((__turbopack_context__) => {
 
 var { m: module, e: exports } = __turbopack_context__;
 {
 console.log('Hello, world!');
 }}),
 },
-{"otherChunks":[],"runtimeModuleIds":[9]},
+{"otherChunks":[],"runtimeModuleIds":[25]},
 ]);
 (() => {
 if (!Array.isArray(globalThis.TURBOPACK)) {

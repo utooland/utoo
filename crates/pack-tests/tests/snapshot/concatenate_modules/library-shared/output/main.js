@@ -1,13 +1,13 @@
 (globalThis.TURBOPACK = globalThis.TURBOPACK || []).push(["main.js", {
 
-10: ((__turbopack_context__) => {
+2: ((__turbopack_context__) => {
 "use strict";
 
 // MERGED MODULE: [project]/crates/pack-tests/tests/snapshot/concatenate_modules/library-shared/input/big/index.js [library] (ecmascript)
 ;
 __turbopack_context__.s({
     "default": ()=>__TURBOPACK__default__export__1
-}, 10);
+}, 2);
 // MERGED MODULE: [project]/crates/pack-tests/tests/snapshot/concatenate_modules/library-shared/input/big/other.js [library] (ecmascript)
 ;
 const __TURBOPACK__default__export__ = `
@@ -67,50 +67,50 @@ FG6adF1kPdxcnQ9rUk0b1jaemDjUwXJRycSSrmUPKiA6MTt8YVMx3Xf4NTZvmTugEE9pXSLyFeQQzEx3
 ;
 const __TURBOPACK__default__export__1 = __TURBOPACK__default__export__.length;
 }),
-897: ((__turbopack_context__) => {
+345: ((__turbopack_context__) => {
 "use strict";
 
 __turbopack_context__.s({});
-var __TURBOPACK__imported__module__10__ = __turbopack_context__.i(10);
+var __TURBOPACK__imported__module__2__ = __turbopack_context__.i(2);
 ;
-console.log('x', __TURBOPACK__imported__module__10__["default"]);
+console.log('x', __TURBOPACK__imported__module__2__["default"]);
 }),
-963: ((__turbopack_context__) => {
+523: ((__turbopack_context__) => {
 
 var { m: module, e: exports } = __turbopack_context__;
 {
-setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.r(897)), 500);
+setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.r(345)), 500);
 }}),
-951: ((__turbopack_context__) => {
+999: ((__turbopack_context__) => {
 "use strict";
 
 // MERGED MODULE: [project]/crates/pack-tests/tests/snapshot/concatenate_modules/library-shared/input/y/middle.js [library] (ecmascript)
 ;
-__turbopack_context__.s({}, 951);
+__turbopack_context__.s({}, 999);
 // MERGED MODULE: [project]/crates/pack-tests/tests/snapshot/concatenate_modules/library-shared/input/y/inner.js [library] (ecmascript)
 ;
-var __TURBOPACK__imported__module__10__ = __turbopack_context__.i(10);
+var __TURBOPACK__imported__module__2__ = __turbopack_context__.i(2);
 ;
-console.log('y', __TURBOPACK__imported__module__10__["default"]);
+console.log('y', __TURBOPACK__imported__module__2__["default"]);
 ;
 }),
-518: ((__turbopack_context__) => {
+798: ((__turbopack_context__) => {
 
 var { m: module, e: exports } = __turbopack_context__;
 {
-setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.r(951)), 1000);
+setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.r(999)), 1000);
 }}),
-940: ((__turbopack_context__) => {
+324: ((__turbopack_context__) => {
 "use strict";
 
 __turbopack_context__.s({});
-var __TURBOPACK__imported__module__963__ = __turbopack_context__.i(963);
-var __TURBOPACK__imported__module__518__ = __turbopack_context__.i(518);
+var __TURBOPACK__imported__module__523__ = __turbopack_context__.i(523);
+var __TURBOPACK__imported__module__798__ = __turbopack_context__.i(798);
 ;
 ;
 }),
 },
-{"otherChunks":[],"runtimeModuleIds":[940]},
+{"otherChunks":[],"runtimeModuleIds":[324]},
 ]);
 // Dummy runtime
 

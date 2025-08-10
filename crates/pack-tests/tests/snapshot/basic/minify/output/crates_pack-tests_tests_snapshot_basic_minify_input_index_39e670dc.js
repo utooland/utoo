@@ -1,6 +1,6 @@
 (globalThis.TURBOPACK = globalThis.TURBOPACK || []).push([typeof document === "object" ? document.currentScript : undefined, {
 
-2: ((__turbopack_context__) => {
+90: ((__turbopack_context__) => {
 
 var { m: module, e: exports } = __turbopack_context__;
 {
@@ -14,4 +14,4 @@ function getMessage() {
 }}),
 }]);
 
-//# sourceMappingURL=crates_pack-tests_tests_snapshot_basic_minify_input_index_d867a993.js.map
+//# sourceMappingURL=crates_pack-tests_tests_snapshot_basic_minify_input_index_39e670dc.js.map
