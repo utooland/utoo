@@ -94,7 +94,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         if: ${{ !matrix.settings.docker }}
         with:
-          toolchain: stable
+          toolchain: nightly-2025-06-04
           targets: ${{ matrix.settings.target }}
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -160,7 +160,6 @@ jobs:
           npm install --workspace=@utoo/pack-cli @utoo/pack --save-exact &&
           npm publish --workspace=@utoo/pack --access public &&
           npm publish --workspace=@utoo/pack-cli --access public
-          npm publish --workspace=@utoo/web --access public
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
