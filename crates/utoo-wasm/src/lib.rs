@@ -64,7 +64,7 @@ impl Project {
     pub async fn create_dir(&self, path: String) -> Result<(), JsValue> {
         opfs::create_dir(&path)
             .await
-            .map_err(|e| JsValue::from_str(&format!("read_dir error: {e}")))?;
+            .map_err(|e| JsValue::from_str(&format!("create_dir error: {e}")))?;
         Ok(())
     }
 
