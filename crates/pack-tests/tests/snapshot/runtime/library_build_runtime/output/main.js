@@ -799,9 +799,18 @@ const chunksToRegister = globalThis.TURBOPACK;
 globalThis.TURBOPACK = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
 function factory () {
-    let moduleIds = Object.keys(moduleCache);
-    return esmImport(moduleIds[moduleIds.length - 1]);
-};
+    for (const [,, runtimeParams] of chunksToRegister) {
+        if (runtimeParams?.runtimeModuleIds?.length > 0) {
+            const module = moduleCache[runtimeParams.runtimeModuleIds[0]];
+            if (module.error) throw module.error;
+            // any ES module has to have `module.namespaceObject` defined.
+            if (module.namespaceObject) return module.namespaceObject;
+            // only ESM can be an async module, so we don't need to worry about exports being a promise here.
+            const raw = module.exports;
+            return module.namespaceObject = interopEsm(raw, createNS(raw), raw && raw.__esModule);
+        }
+    }
+}
 
 if (typeof exports === 'object' && typeof module === 'object') {
     module.exports = factory();
@@ -810,6 +819,7 @@ if (typeof exports === 'object' && typeof module === 'object') {
 } else {
     globalThis["MyLibrary"] = factory();
 }
+globalThis.TURBOPACK = [];
 })();
 
 
