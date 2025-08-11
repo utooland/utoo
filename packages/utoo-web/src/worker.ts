@@ -1,7 +1,7 @@
 import * as comlink from "comlink";
 import { HandShake } from "./message";
-import { ProjectEndpoint } from "./type";
-import initWasm, { DirEntry, Project as ProjectInternal } from "./utoo";
+import { DirEntry, ProjectEndpoint } from "./type";
+import initWasm, { Project as ProjectInternal } from "./utoo";
 
 const projectEndpoint: ProjectEndpoint & {
   projectInternal?: ProjectInternal;
@@ -35,7 +35,9 @@ const projectEndpoint: ProjectEndpoint & {
   },
 
   async readDir(path: string): Promise<DirEntry[]> {
-    return await this.projectInternal!.readDir(path);
+    return (await this.projectInternal!.readDir(path)).map(
+      (e) => e.toJSON() as DirEntry,
+    );
   },
 
   async createDir(path: string): Promise<void> {

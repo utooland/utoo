@@ -3,7 +3,7 @@ use anyhow::Result;
 
 /// Read file content with fuse.link support
 pub async fn read(path: &str) -> Result<Vec<u8>> {
-    let prepared_path = crate::util::prepare_path(path).await?;
+    let prepared_path = crate::util::prepare_path(path);
 
     // Try to read through node_modules fuse link logic first
     if let Some(content) = try_read_through_fuse_link(&prepared_path).await? {
@@ -17,7 +17,7 @@ pub async fn read(path: &str) -> Result<Vec<u8>> {
 
 /// Read directory contents with file type information and fuse.link support
 pub async fn read_dir(path: &str) -> Result<Vec<crate::DirEntry>> {
-    let prepared_path = crate::util::prepare_path(path).await?;
+    let prepared_path = crate::util::prepare_path(path);
 
     // Handle node_modules fuse.link logic
     if let Some(entries) = try_read_dir_through_fuse_link(&prepared_path).await? {
@@ -457,8 +457,7 @@ mod tests {
         // Create mock entries
         let entries = vec![DirEntry {
             name: "fuse.link".to_string(),
-            is_file: true,
-            is_dir: false,
+            r#type: DirEntryType::File
         }];
 
         let result = try_read_dir_through_single_fuse_link(&test_path, &entries)
@@ -483,13 +482,11 @@ mod tests {
         let entries = vec![
             DirEntry {
                 name: "fuse.link".to_string(),
-                is_file: true,
-                is_dir: false,
+                r#type: DirEntryType::File
             },
             DirEntry {
                 name: "other.txt".to_string(),
-                is_file: true,
-                is_dir: false,
+                r#type: DirEntryType::File
             },
         ];
 

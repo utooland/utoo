@@ -34,12 +34,12 @@ pub fn get_package_name(path: &str) -> Option<String> {
 }
 
 /// Prepare path by resolving relative paths against current working directory
-pub async fn prepare_path(path: &str) -> Result<String> {
+pub fn prepare_path(path: &str) -> String {
     if path.starts_with('/') {
-        Ok(path.to_string())
+        path.to_string()
     } else {
         let cwd = crate::cwd::get_cwd();
-        Ok(format!("{cwd}/{path}"))
+        format!("{cwd}/{path}")
     }
 }
 
