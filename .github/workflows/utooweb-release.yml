@@ -47,6 +47,8 @@ jobs:
           # npm config set provenance true
           echo "${VERSION}" &&
           echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc &&
+
+          npm version --workspace=@utoo/web "${VERSION}" &&
           npm publish --workspace=@utoo/web --access public
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}

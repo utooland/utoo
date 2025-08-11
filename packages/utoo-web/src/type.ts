@@ -1,4 +1,9 @@
-import type { DirEntry } from "./utoo";
+import type { DirEntryType } from "./utoo";
+
+export interface DirEntry {
+  name: string;
+  type: DirEntryType;
+}
 
 export interface ProjectEndpoint {
   install: (packageLock: string) => Promise<void>;

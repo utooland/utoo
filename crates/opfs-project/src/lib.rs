@@ -11,11 +11,12 @@ use wasm_bindgen::prelude::wasm_bindgen;
 static CWD: OnceLock<Mutex<String>> = OnceLock::new();
 
 /// Directory entry with name and type information
-#[wasm_bindgen]
+#[wasm_bindgen(inspectable)]
 #[derive(Debug, Clone)]
 pub struct DirEntry {
     #[wasm_bindgen(getter_with_clone)]
     pub name: String,
+    #[wasm_bindgen]
     pub r#type: DirEntryType,
 }
 
@@ -41,7 +42,7 @@ pub mod opfs {
 
     /// Read file content as bytes (without fuse.link support)
     pub(crate) async fn read_without_fuse_link(path: &str) -> Result<Vec<u8>> {
-        let prepared_path = crate::util::prepare_path(path).await?;
+        let prepared_path = crate::util::prepare_path(path);
         let content = tokio_fs_ext::read(&prepared_path).await?;
         Ok(content)
     }

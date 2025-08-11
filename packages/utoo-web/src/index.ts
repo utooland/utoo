@@ -1,7 +1,6 @@
 import * as comlink from "comlink";
 import { Fork, HandShake } from "./message";
-import { ProjectEndpoint } from "./type";
-import type { DirEntry } from "./utoo";
+import { ProjectEndpoint, DirEntry } from "./type";
 
 let ProjectWorker: Worker;
 

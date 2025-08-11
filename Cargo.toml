@@ -45,7 +45,7 @@ criterion = "0.6.0"
 dirs = "5.0"
 toml = "0.8"
 async-trait = "0.1.64"
-tokio-fs-ext = "0.3.2"
+tokio-fs-ext = "0.3.4"
 
 # SWC crates
 swc_core = { version = "34", features = [
