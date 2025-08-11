@@ -457,7 +457,7 @@ mod tests {
         // Create mock entries
         let entries = vec![DirEntry {
             name: "fuse.link".to_string(),
-            r#type: DirEntryType::File
+            r#type: DirEntryType::File,
         }];
 
         let result = try_read_dir_through_single_fuse_link(&test_path, &entries)
@@ -482,11 +482,11 @@ mod tests {
         let entries = vec![
             DirEntry {
                 name: "fuse.link".to_string(),
-                r#type: DirEntryType::File
+                r#type: DirEntryType::File,
             },
             DirEntry {
                 name: "other.txt".to_string(),
-                r#type: DirEntryType::File
+                r#type: DirEntryType::File,
             },
         ];
 
