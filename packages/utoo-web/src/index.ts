@@ -1,6 +1,6 @@
 import * as comlink from "comlink";
 import { Fork, HandShake } from "./message";
-import { ProjectEndpoint, DirEntry } from "./type";
+import { DirEntry, ProjectEndpoint } from "./type";
 
 let ProjectWorker: Worker;
 
@@ -78,11 +78,13 @@ export class Project implements ProjectEndpoint {
     return await this.remote.createDirAll(path);
   }
 
-  // This should be called from different worker
-  public static fork(port1: MessagePort, port2: MessagePort): ProjectEndpoint {
-    (self as any as MessagePort).postMessage(Fork, [port2]);
+  public static fork(channel: MessageChannel): ProjectEndpoint {
+    self.postMessage(Fork, {
+      targetOrigin: "*",
+      transfer: [channel.port2],
+    });
 
-    return new ForkedProject(port1);
+    return new ForkedProject(channel.port1);
   }
 }
 

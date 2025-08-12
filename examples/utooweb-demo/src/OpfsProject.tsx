@@ -5,71 +5,73 @@ import { packageLock } from "./packageLock";
 import "./styles.css";
 
 // Extract FileTreeItem as a separate component to prevent recreation
-const FileTreeItem = React.memo(({
-  item,
-  onFileClick,
-  onDirectoryExpand
-}: {
-  item: any;
-  onFileClick: (filePath: string) => Promise<void>;
-  onDirectoryExpand: (parentItem: any) => Promise<void>;
-}) => {
-  const [isCollapsed, setIsCollapsed] = useState(true);
+const FileTreeItem = React.memo(
+  ({
+    item,
+    onFileClick,
+    onDirectoryExpand,
+  }: {
+    item: any;
+    onFileClick: (filePath: string) => Promise<void>;
+    onDirectoryExpand: (parentItem: any) => Promise<void>;
+  }) => {
+    const [isCollapsed, setIsCollapsed] = useState(true);
 
-  const toggleCollapse = useCallback(async () => {
-    if (item.type === "directory") {
-      if (isCollapsed) {
-        if (item.children && item.children.length === 0) {
-          await onDirectoryExpand(item);
+    const toggleCollapse = useCallback(async () => {
+      if (item.type === "directory") {
+        if (isCollapsed) {
+          if (item.children && item.children.length === 0) {
+            await onDirectoryExpand(item);
+          }
         }
+        setIsCollapsed(!isCollapsed);
+      } else {
+        onFileClick(item.fullName);
       }
-      setIsCollapsed(!isCollapsed);
-    } else {
-      onFileClick(item.fullName);
-    }
-  }, [item, isCollapsed, onFileClick, onDirectoryExpand]);
+    }, [item, isCollapsed, onFileClick, onDirectoryExpand]);
 
-  return (
-    <li style={{ listStyleType: "none" }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "0.5rem",
-          padding: "0.25rem 0.5rem",
-          borderRadius: "0.5rem",
-          cursor: "pointer",
-          transition: "background-color 0.2s ease-in-out",
-        }}
-        onClick={toggleCollapse}
-      >
-        <span style={{ width: "1rem", textAlign: "center" }}>
-          {item.type === "directory" ? (isCollapsed ? "▶" : "▼") : "📄"}
-        </span>
-        <span>{item.name}</span>
-      </div>
-      {item.type === "directory" && !isCollapsed && (
-        <ul
+    return (
+      <li style={{ listStyleType: "none" }}>
+        <div
           style={{
-            paddingLeft: "1rem",
-            borderLeft: "1px solid #d1d5db",
-            marginLeft: "0.5rem",
-            marginTop: "0.25rem",
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            padding: "0.25rem 0.5rem",
+            borderRadius: "0.5rem",
+            cursor: "pointer",
+            transition: "background-color 0.2s ease-in-out",
           }}
+          onClick={toggleCollapse}
         >
-          {item.children.map((child) => (
-            <FileTreeItem
-              key={child.fullName}
-              item={child}
-              onFileClick={onFileClick}
-              onDirectoryExpand={onDirectoryExpand}
-            />
-          ))}
-        </ul>
-      )}
-    </li>
-  );
-});
+          <span style={{ width: "1rem", textAlign: "center" }}>
+            {item.type === "directory" ? (isCollapsed ? "▶" : "▼") : "📄"}
+          </span>
+          <span>{item.name}</span>
+        </div>
+        {item.type === "directory" && !isCollapsed && (
+          <ul
+            style={{
+              paddingLeft: "1rem",
+              borderLeft: "1px solid #d1d5db",
+              marginLeft: "0.5rem",
+              marginTop: "0.25rem",
+            }}
+          >
+            {item.children.map((child) => (
+              <FileTreeItem
+                key={child.fullName}
+                item={child}
+                onFileClick={onFileClick}
+                onDirectoryExpand={onDirectoryExpand}
+              />
+            ))}
+          </ul>
+        )}
+      </li>
+    );
+  },
+);
 
 const OpfsProject = () => {
   const [project, setProject] = useState(null);
@@ -79,66 +81,75 @@ const OpfsProject = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const updateTreeWithChildren = useCallback((tree, targetPath, newChildren) => {
-    return tree.map((node) => {
-      if (node.name === targetPath) {
-        // Found the node, return a new object with the updated children
-        return { ...node, children: newChildren };
+  const updateTreeWithChildren = useCallback(
+    (tree, targetPath, newChildren) => {
+      return tree.map((node) => {
+        if (node.name === targetPath) {
+          // Found the node, return a new object with the updated children
+          return { ...node, children: newChildren };
+        }
+        if (
+          node.type === "directory" &&
+          node.children &&
+          node.children.length > 0
+        ) {
+          return {
+            ...node,
+            children: updateTreeWithChildren(
+              node.children,
+              targetPath,
+              newChildren,
+            ),
+          };
+        }
+        return node;
+      });
+    },
+    [],
+  );
+
+  const handleDirectoryExpand = useCallback(
+    async (parentItem) => {
+      try {
+        if (!project) throw new Error("Project not initialized.");
+
+        const children = await project.readDir(parentItem.fullName);
+
+        const newChildren = children.map((item) => ({
+          ...item,
+          fullName: [parentItem.fullName, item.name].filter(Boolean).join("/"),
+          children: item.type === "directory" ? [] : null,
+        }));
+
+        setFileTree((prevTree) =>
+          updateTreeWithChildren(prevTree, parentItem.name, newChildren),
+        );
+      } catch (e) {
+        console.error(
+          `Error expanding directory at path ${parentItem.fullName}:`,
+          e,
+        );
+        setError(`Error expanding directory: ${e.message}`);
       }
-      if (
-        node.type === "directory" &&
-        node.children &&
-        node.children.length > 0
-      ) {
-        return {
-          ...node,
-          children: updateTreeWithChildren(
-            node.children,
-            targetPath,
-            newChildren,
-          ),
-        };
+    },
+    [project, updateTreeWithChildren],
+  );
+
+  const fetchFileContent = useCallback(
+    async (filePath) => {
+      setSelectedFilePath(filePath);
+      setSelectedFileContent("");
+      try {
+        if (!project) throw new Error("Project not initialized.");
+
+        const content = await project.readFile(filePath);
+        setSelectedFileContent(content);
+      } catch (e) {
+        setError(`Error reading file: ${e.message}`);
       }
-      return node;
-    });
-  }, []);
-
-  const handleDirectoryExpand = useCallback(async (parentItem) => {
-    try {
-      if (!project) throw new Error("Project not initialized.");
-
-      const children = await project.readDir(parentItem.fullName);
-
-      const newChildren = children.map((item) => ({
-        ...item,
-        fullName: [parentItem.fullName, item.name].filter(Boolean).join("/"),
-        children: item.type === "directory" ? [] : null,
-      }));
-
-      setFileTree((prevTree) =>
-        updateTreeWithChildren(prevTree, parentItem.name, newChildren),
-      );
-    } catch (e) {
-      console.error(
-        `Error expanding directory at path ${parentItem.fullName}:`,
-        e,
-      );
-      setError(`Error expanding directory: ${e.message}`);
-    }
-  }, [project, updateTreeWithChildren]);
-
-  const fetchFileContent = useCallback(async (filePath) => {
-    setSelectedFilePath(filePath);
-    setSelectedFileContent("");
-    try {
-      if (!project) throw new Error("Project not initialized.");
-
-      const content = await project.readFile(filePath);
-      setSelectedFileContent(content);
-    } catch (e) {
-      setError(`Error reading file: ${e.message}`);
-    }
-  }, [project]);
+    },
+    [project],
+  );
 
   // Memoize the file tree to prevent unnecessary re-renders
   const memoizedFileTree = useMemo(() => fileTree, [fileTree]);
@@ -210,6 +221,8 @@ const OpfsProject = () => {
           "color: blue;",
           "color: green;",
         );
+
+        new Worker(new URL("./worker", import.meta.url));
 
         // Read only the top-level directory without recursion
         const rootItems = await project.readDir(".");
