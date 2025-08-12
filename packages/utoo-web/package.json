@@ -9,7 +9,7 @@
   "scripts": {
     "wasmpack": "wasm-pack build ../../crates/utoo-wasm --out-dir ../../packages/utoo-web/src/utoo --out-name index --no-pack --target web",
     "tsx": "rm -rf esm && tsc -p ./tsconfig.json",
-    "dev": "npm run wasmpack -- --dev && npm run tsx && cp ./src/utoo/*.wasm ./esm/utoo",
+    "dev": "npm run wasmpack -- --profiling && npm run tsx && cp ./src/utoo/*.wasm ./esm/utoo",
     "build": "npm run wasmpack -- --release && npm run tsx && cp ./src/utoo/*.wasm ./esm/utoo",
     "prepublishOnly": "npm run build"
   },

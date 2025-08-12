@@ -57,10 +57,10 @@ wasm-opt = [
   "--enable-nontrapping-float-to-int",
 ]
 
-[package.metadata.wasm-pack.profile.dev]
+[package.metadata.wasm-pack.profile.profiling]
 wasm-opt = false
 
-[package.metadata.wasm-pack.profile.dev.wasm-bindgen]
+[package.metadata.wasm-pack.profile.profiling.wasm-bindgen]
 dwarf-debug-info = true
 
 # cargo +nightly  build -p utoo-wasm  --target wasm32-unknown-unknown -Z build-std=panic_abort,std
