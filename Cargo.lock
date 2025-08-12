@@ -4141,6 +4141,8 @@ dependencies = [
 [[package]]
 name = "opfs-project"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a23412cc20a848cb4a699dc2d95aeb6e907843fee9308955087be338526dba83"
 dependencies = [
  "anyhow",
  "flate2",
@@ -4150,8 +4152,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tar",
- "tempfile",
- "tokio",
  "tokio-fs-ext",
  "wasm-bindgen",
  "web-sys",
