@@ -1,6 +1,2 @@
 {
-  "rust-analyzer.linkedProjects": [
-    "./Cargo.toml",
-    "./next.js/Cargo.toml"
-  ]
 }
