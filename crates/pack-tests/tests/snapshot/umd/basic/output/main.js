@@ -19,7 +19,7 @@ function jsxs() {
 
 let mod; if (typeof exports === 'object' && typeof module === 'object') { mod = __turbopack_context__.x("react-dom", () => require("react-dom")); } else { mod = globalThis["ReactDOM"] }
 
-__turbopack_context__.n(mod);
+__turbopack_context__.v(mod);
 }),
 30: ((__turbopack_context__) => {
 "use strict";

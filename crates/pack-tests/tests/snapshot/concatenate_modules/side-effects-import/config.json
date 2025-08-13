@@ -1,16 +1,18 @@
 {
+  "config": {
     "entry": [
-        {
-            "import": "input/a.js",
-            "name": "a"
-        },
-        {
-            "import": "input/b.js",
-            "name": "b"
-        }
+      {
+        "import": "input/a.js",
+        "name": "a"
+      },
+      {
+        "import": "input/b.js",
+        "name": "b"
+      }
     ],
     "optimization": {
-        "concatenateModules": true,
-        "minify": false
+      "concatenateModules": true,
+      "minify": false
     }
+  }
 }
