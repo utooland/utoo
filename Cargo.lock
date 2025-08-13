@@ -2604,7 +2604,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.9",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -3360,7 +3360,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -8227,15 +8227,16 @@ dependencies = [
 
 [[package]]
 name = "tokio-fs-ext"
-version = "0.3.4"
+version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "592e5dba9338e21c759226806cf7df4e83f7e76d2686fb6b46f448c87aab1d6d"
+checksum = "6a5cd41c6a4a768c8cc00d6d5097203f23ec121703543f5a6295664108aca589"
 dependencies = [
  "bitflags 2.9.1",
  "cfg-if",
  "futures",
  "js-sys",
  "pin-project-lite",
+ "rustc-hash 2.1.1",
  "send_wrapper",
  "tokio",
  "wasm-bindgen",

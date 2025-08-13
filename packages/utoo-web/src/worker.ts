@@ -1,7 +1,7 @@
 import * as comlink from "comlink";
 import { HandShake } from "./message";
-import { DirEntry, ProjectEndpoint } from "./type";
-import initWasm, { Project as ProjectInternal } from "./utoo";
+import { ProjectEndpoint, RawDirent } from "./type";
+import initWasm, { DirEntryType, Project as ProjectInternal } from "./utoo";
 
 const projectEndpoint: ProjectEndpoint & {
   projectInternal?: ProjectInternal;
@@ -9,43 +9,72 @@ const projectEndpoint: ProjectEndpoint & {
 } = {
   projectInternal: undefined,
 
-  async mount(cwd: string): Promise<void> {
+  async mount(cwd: string) {
     await initWasm();
     this.projectInternal = new ProjectInternal(cwd);
+    return;
   },
 
-  async install(packageLock: string): Promise<void> {
+  async install(packageLock: string) {
     await this.projectInternal!.install(packageLock);
+    return;
   },
 
-  async build(): Promise<void> {
-    await this.projectInternal!.build();
+  async build() {
+    return await this.projectInternal!.build();
   },
 
-  async readFile(path: string): Promise<string> {
-    return await this.projectInternal!.readFile(path);
+  async readFile(path: string, encoding?: "utf8") {
+    let ret;
+    if (encoding === "utf8") {
+      ret = await this.projectInternal!.readToString(path);
+    } else {
+      ret = await this.projectInternal!.read(path);
+    }
+    return ret as any;
   },
 
-  async writeFile(path: string, content: string): Promise<void> {
-    return await this.projectInternal!.writeFile(path, content);
+  async writeFile(
+    path: string,
+    content: string | Uint8Array,
+    encoding?: "utf8",
+  ) {
+    if (typeof content === "string") {
+      if (encoding !== "utf8") {
+        throw new Error("Invalid encoding");
+      }
+      return await this.projectInternal!.writeString(path, content);
+    } else {
+      return await this.projectInternal!.write(path, content);
+    }
   },
 
-  async copyFile(src: string, dst: string): Promise<void> {
+  async copyFile(src: string, dst: string) {
     return await this.projectInternal!.copyFile(src, dst);
   },
 
-  async readDir(path: string): Promise<DirEntry[]> {
-    return (await this.projectInternal!.readDir(path)).map(
-      (e) => e.toJSON() as DirEntry,
-    );
+  async readdir(path: string, options?: { recursive?: boolean }) {
+    const dirEntries = options?.recursive
+      ? await this.projectInternal!.readDir(path)
+      : // TODO: support recursive readDirAll
+        await this.projectInternal!.readDir(path);
+    const newLocal: RawDirent[] = dirEntries.map((e) => {
+      const dir = e.toJSON() as any;
+      return {
+        name: dir.name as string,
+        type: dir.type as DirEntryType,
+      };
+    });
+    // WARN: This is a hack, functions can not be structurally cloned
+    return newLocal as any;
   },
 
-  async createDir(path: string): Promise<void> {
-    return await this.projectInternal!.createDir(path);
-  },
-
-  async createDirAll(path: string): Promise<void> {
-    return await this.projectInternal!.createDirAll(path);
+  async mkdir(path: string, options?: { recursive?: boolean }) {
+    if (options?.recursive) {
+      return await this.projectInternal!.createDirAll(path);
+    } else {
+      return await this.projectInternal!.createDir(path);
+    }
   },
 };
 

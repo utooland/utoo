@@ -32,7 +32,12 @@ impl Project {
 
     #[wasm_bindgen]
     pub async fn build(&self) -> Result<(), JsValue> {
-        let config = self.read_file("./project_options.json").await.ok();
+        let config = self
+            .read("./project_options.json")
+            .await
+            .ok()
+            .map(|c| unsafe { String::from_utf8_unchecked(c) });
+
         let partial_options = PartialProjectOptions {
             project_path: ".".to_string(),
             config,
@@ -40,16 +45,31 @@ impl Project {
         build(partial_options).await
     }
 
-    #[wasm_bindgen(js_name = readFile)]
-    pub async fn read_file(&self, path: &str) -> Result<String, JsValue> {
-        let content = opfs::read_with_fuse_link(path)
+    #[wasm_bindgen]
+    pub async fn read(&self, path: &str) -> Result<Vec<u8>, JsValue> {
+        opfs::read_with_fuse_link(path)
             .await
-            .map_err(|e| JsValue::from_str(&format!("read error: {e}")))?;
-        Ok(unsafe { String::from_utf8_unchecked(content) })
+            .map_err(|e| JsValue::from_str(&format!("read error: {e}")))
     }
 
-    #[wasm_bindgen(js_name = writeFile)]
-    pub async fn write_file(&self, path: &str, content: &str) -> Result<(), JsValue> {
+    #[wasm_bindgen(js_name = readToString)]
+    pub async fn read_to_string(&self, path: &str) -> Result<String, JsValue> {
+        let buf = opfs::read_with_fuse_link(path)
+            .await
+            .map_err(|e| JsValue::from_str(&format!("read error: {e}")))?;
+        Ok(unsafe { String::from_utf8_unchecked(buf) })
+    }
+
+    #[wasm_bindgen]
+    pub async fn write(&self, path: &str, content: &[u8]) -> Result<(), JsValue> {
+        opfs::write_bytes(path, content)
+            .await
+            .map_err(|e| JsValue::from_str(&format!("write error: {e}")))?;
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = "writeString")]
+    pub async fn write_string(&self, path: &str, content: &str) -> Result<(), JsValue> {
         opfs::write(path, content)
             .await
             .map_err(|e| JsValue::from_str(&format!("write error: {e}")))?;

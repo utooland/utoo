@@ -1,6 +1,6 @@
 import * as comlink from "comlink";
 import { Fork, HandShake } from "./message";
-import { DirEntry, ProjectEndpoint } from "./type";
+import { Dirent, ProjectEndpoint, RawDirent } from "./type";
 
 let ProjectWorker: Worker;
 
@@ -48,34 +48,39 @@ export class Project implements ProjectEndpoint {
     return await this.remote.build();
   }
 
-  public async readFile(path: string): Promise<string> {
+  public async readFile(path: string, encoding?: "utf8") {
     await this.#tunnel;
-    return await this.remote.readFile(path);
+    return (await this.remote.readFile(path, encoding)) as any;
   }
 
-  public async writeFile(path: string, content: string): Promise<void> {
+  public async writeFile(path: string, content: Uint8Array, encoding?: "utf8") {
     await this.#tunnel;
-    return await this.remote.writeFile(path, content);
+    return await this.remote.writeFile(path, content, encoding);
   }
 
-  public async copyFile(src: string, dst: string): Promise<void> {
+  public async copyFile(src: string, dst: string) {
     await this.#tunnel;
     return await this.remote.copyFile(src, dst);
   }
 
-  public async readDir(path: string): Promise<DirEntry[]> {
+  public async readdir(
+    path: string,
+    options?: { recursive?: boolean },
+  ): Promise<Dirent[]> {
     await this.#tunnel;
-    return await this.remote.readDir(path);
+    const dirEntry = (await this.remote.readdir(
+      path,
+      options,
+    )) as any as RawDirent[];
+    return dirEntry.map((e) => new Dirent(e));
   }
 
-  public async createDir(path: string): Promise<void> {
+  public async mkdir(
+    path: string,
+    options?: { recursive?: boolean },
+  ): Promise<void> {
     await this.#tunnel;
-    return await this.remote.createDir(path);
-  }
-
-  public async createDirAll(path: string): Promise<void> {
-    await this.#tunnel;
-    return await this.remote.createDirAll(path);
+    return await this.remote.mkdir(path, options);
   }
 
   public static fork(channel: MessageChannel): ProjectEndpoint {
@@ -103,28 +108,24 @@ class ForkedProject implements ProjectEndpoint {
     return await this.endpoint.build();
   }
 
-  public async readFile(path: string): Promise<string> {
-    return await this.endpoint.readFile(path);
+  public async readFile(path: string, encoding?: "utf8") {
+    return (await this.endpoint.readFile(path, encoding)) as any;
   }
 
-  public async writeFile(path: string, content: string): Promise<void> {
-    return await this.endpoint.writeFile(path, content);
+  public async writeFile(path: string, content: string, encoding?: "utf8") {
+    return await this.endpoint.writeFile(path, content, encoding);
   }
 
   public async copyFile(src: string, dst: string): Promise<void> {
     return await this.endpoint.copyFile(src, dst);
   }
 
-  public async readDir(path: string): Promise<DirEntry[]> {
-    return await this.endpoint.readDir(path);
+  public async readdir(path: string, options?: { recursive?: boolean }) {
+    return await this.endpoint.readdir(path, options);
   }
 
-  public async createDir(path: string): Promise<void> {
-    return await this.endpoint.createDir(path);
-  }
-
-  public async createDirAll(path: string): Promise<void> {
-    return await this.endpoint.createDirAll(path);
+  public async mkdir(path: string, options?: { recursive?: boolean }) {
+    return await this.endpoint.mkdir(path, options);
   }
 }
 
