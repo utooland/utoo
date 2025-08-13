@@ -254,9 +254,6 @@ pub async fn install_packages(
                         continue;
                     }
 
-                    let name = match package.name {
-                        Some(name) => name,
-                        None => extract_package_name(&path),
                     let name = package.name.unwrap_or_else(|| extract_package_name(&path));
                     let version = package.version.as_ref().unwrap();
                     let cache_path = cache_dir.join(format!("{name}/{version}"));
