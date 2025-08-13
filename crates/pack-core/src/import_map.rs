@@ -70,13 +70,7 @@ pub async fn get_client_import_map(
 ) -> Result<Vc<ImportMap>> {
     let mut import_map = ImportMap::empty();
 
-    insert_shared_aliases(
-        &mut import_map,
-        project_path.clone(),
-        execution_context,
-        config,
-    )
-    .await?;
+    insert_shared_aliases(&mut import_map, &project_path, execution_context, config).await?;
 
     insert_alias_option(
         &mut import_map,
@@ -92,7 +86,7 @@ pub async fn get_client_import_map(
 // Make sure to not add any external requests here.
 async fn insert_shared_aliases(
     import_map: &mut ImportMap,
-    project_path: FileSystemPath,
+    project_path: &FileSystemPath,
     _execution_context: Vc<ExecutionContext>,
     _config: Vc<Config>,
 ) -> Result<()> {
