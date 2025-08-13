@@ -9248,6 +9248,7 @@ dependencies = [
  "futures",
  "futures-retry",
  "indoc",
+ "js-sys",
  "once_cell",
  "owo-colors 3.5.0",
  "parking_lot",
@@ -9270,6 +9271,9 @@ dependencies = [
  "turbopack-dev-server",
  "turbopack-ecmascript",
  "turbopack-resolve",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
