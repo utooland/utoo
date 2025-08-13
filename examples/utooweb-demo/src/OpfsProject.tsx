@@ -1,5 +1,5 @@
 import { Project } from "@utoo/web";
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { packageLock } from "./packageLock";
 
 import "./styles.css";
@@ -74,7 +74,7 @@ const FileTreeItem = React.memo(
 );
 
 const OpfsProject = () => {
-  const [project, setProject] = useState(null);
+  const [project, setProject] = useState<Project>(null);
   const [fileTree, setFileTree] = useState([]);
   const [selectedFilePath, setSelectedFilePath] = useState("");
   const [selectedFileContent, setSelectedFileContent] = useState("");
@@ -113,12 +113,13 @@ const OpfsProject = () => {
       try {
         if (!project) throw new Error("Project not initialized.");
 
-        const children = await project.readDir(parentItem.fullName);
+        const children = await project.readdir(parentItem.fullName);
 
         const newChildren = children.map((item) => ({
           ...item,
           fullName: [parentItem.fullName, item.name].filter(Boolean).join("/"),
-          children: item.type === "directory" ? [] : null,
+          type: item.isDirectory() ? "directory" : "file",
+          children: item.isDirectory() ? [] : null,
         }));
 
         setFileTree((prevTree) =>
@@ -142,7 +143,7 @@ const OpfsProject = () => {
       try {
         if (!project) throw new Error("Project not initialized.");
 
-        const content = await project.readFile(filePath);
+        const content = await project.readFile(filePath, "utf8");
         setSelectedFileContent(content);
       } catch (e) {
         setError(`Error reading file: ${e.message}`);
@@ -225,11 +226,12 @@ const OpfsProject = () => {
         new Worker(new URL("./worker", import.meta.url));
 
         // Read only the top-level directory without recursion
-        const rootItems = await project.readDir(".");
+        const rootItems = await project.readdir(".");
         const initialTree = rootItems.map((item) => ({
           ...item,
           fullName: `./${item.name}`,
-          children: item.type === "directory" ? [] : null,
+          type: item.isDirectory() ? "directory" : "file",
+          children: item.isDirectory() ? [] : null,
         }));
         setFileTree(initialTree);
       } catch (e) {
