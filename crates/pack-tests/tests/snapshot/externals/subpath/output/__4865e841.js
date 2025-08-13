@@ -5,35 +5,35 @@
 
 const mod = globalThis["antd"];
 
-__turbopack_context__.n(mod);
+__turbopack_context__.v(mod);
 }),
 506: ((__turbopack_context__) => {
 "use strict";
 
 const mod = globalThis["antd"]["Button"];
 
-__turbopack_context__.n(mod);
+__turbopack_context__.v(mod);
 }),
 563: ((__turbopack_context__) => {
 "use strict";
 
 const mod = globalThis["antd"]["DatePicker"];
 
-__turbopack_context__.n(mod);
+__turbopack_context__.v(mod);
 }),
 818: ((__turbopack_context__) => {
 "use strict";
 
 const mod = globalThis["antd"]["Input"]["Group"];
 
-__turbopack_context__.n(mod);
+__turbopack_context__.v(mod);
 }),
 291: ((__turbopack_context__) => {
 "use strict";
 
 const mod = globalThis["antd"]["version"];
 
-__turbopack_context__.n(mod);
+__turbopack_context__.v(mod);
 }),
 616: ((__turbopack_context__) => {
 "use strict";

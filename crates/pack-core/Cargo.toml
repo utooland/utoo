@@ -27,6 +27,7 @@ rustc-hash = { workspace = true }
 remove_console = { workspace = true }
 urlencoding = { workspace = true }
 modularize_imports = { workspace = true }
+serde_path_to_error = { workspace = true }
 swc_core = { workspace = true, features = [
   "base",
   "common_concurrent",

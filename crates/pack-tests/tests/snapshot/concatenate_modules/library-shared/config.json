@@ -1,15 +1,17 @@
 {
+  "config": {
     "entry": [
-        {
-            "import": "input/index.js",
-            "name": "main",
-            "library": {
-                "name": "MyLibrary"
-            }
+      {
+        "import": "input/index.js",
+        "name": "main",
+        "library": {
+          "name": "MyLibrary"
         }
+      }
     ],
     "optimization": {
-        "minify": false,
-        "concatenateModules": true
+      "minify": false,
+      "concatenateModules": true
     }
+  }
 }

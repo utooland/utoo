@@ -13,7 +13,10 @@ type ChunkListScript = CurrentScript & { readonly brand: unique symbol };
 type ChunkPath = string & { readonly brand: unique symbol };
 type ChunkScript = CurrentScript & { readonly brand: unique symbol };
 type ChunkUrl = string & { readonly brand: unique symbol };
-type ModuleId = string;
+// The dependency specifier when importing externals
+type DependencySpecifier = string;
+// This is a string in development and a number in production (both arbitrary, implementation defined)
+type ModuleId = string | number;
 
 interface Exports {
   __esModule?: boolean;
@@ -31,18 +34,34 @@ type ChunkData =
     };
 
 type CommonJsRequire = (moduleId: ModuleId) => Exports;
+type RuntimeRequire = (request: string) => Exports;
 type ModuleContextFactory = (map: ModuleContextMap) => ModuleContext;
 type EsmImport = (
   moduleId: ModuleId,
-  allowExportDefault: boolean
+  allowExportDefault: boolean,
 ) => EsmNamespaceObject | Promise<EsmNamespaceObject>;
-type EsmExport = (exportGetters: Record<string, () => any>) => void;
-type ExportValue = (value: any) => void;
-type ExportNamespace = (namespace: any) => void;
-type DynamicExport = (object: Record<string, any>) => void;
+type InvokeAsyncLoader = (moduleId: ModuleId) => Promise<Exports>;
+type EsmExport = (
+  exportGetters: Record<string, () => any>,
+  id: ModuleId | undefined,
+) => void;
+type ExportValue = (value: any, id: ModuleId | undefined) => void;
+type ExportNamespace = (namespace: any, id: ModuleId | undefined) => void;
+type DynamicExport = (
+  object: Record<string, any>,
+  id: ModuleId | undefined,
+) => void;
+
+type LoadChunkByUrl = (chunkUrl: ChunkUrl) => Promise<any> | undefined;
 
 type ModuleCache<M> = Record<ModuleId, M>;
-type ModuleFactories = Record<ModuleId, unknown>;
+// TODO properly type values here
+type ModuleFactories = Record<ModuleId, Function>;
+// The value is an array with scope hoisting
+type CompressedModuleFactories = Record<
+  ModuleId,
+  Function | [Function, ModuleId[]]
+>;
 
 type RelativeURL = (inputUrl: string) => void;
 type ResolvePathFromModule = (moduleId: string) => string;
@@ -50,15 +69,24 @@ type ResolvePathFromModule = (moduleId: string) => string;
 type AsyncModule = (
   body: (
     handleAsyncDependencies: (
-      deps: Dep[]
+      deps: Dep[],
     ) => Exports[] | Promise<() => Exports[]>,
-    asyncResult: (err?: any) => void
+    asyncResult: (err?: any) => void,
   ) => void,
-  hasAwait: boolean
+  hasAwait: boolean,
 ) => void;
 
 type ResolveAbsolutePath = (modulePath?: string) => string;
 type GetWorkerBlobURL = (chunks: ChunkPath[]) => string;
+
+type ExternalRequire = (
+  id: DependencySpecifier,
+  thunk: () => any,
+  esm?: boolean,
+) => Exports | EsmNamespaceObject;
+type ExternalImport = (
+  id: DependencySpecifier,
+) => Promise<Exports | EsmNamespaceObject>;
 
 interface Module {
   exports: Function | Exports | Promise<Exports> | AsyncModulePromise;
@@ -77,24 +105,26 @@ interface ModuleWithDirection extends Module {
   parents: ModuleId[];
 }
 
-
 interface TurbopackBaseContext<M> {
   a: AsyncModule;
   e: Module["exports"];
   r: CommonJsRequire;
-  t: CommonJsRequire;
+  t: RuntimeRequire;
   f: ModuleContextFactory;
   i: EsmImport;
+  A: InvokeAsyncLoader;
   s: EsmExport;
   j: DynamicExport;
   v: ExportValue;
   n: ExportNamespace;
   m: Module;
+  L: LoadChunkByUrl;
   c: ModuleCache<M>;
   M: ModuleFactories;
   g: typeof globalThis;
   P: ResolveAbsolutePath;
   U: RelativeURL;
-  z: CommonJsRequire
-  d: string;
+  x: ExternalRequire;
+  y: ExternalImport;
+  z: CommonJsRequire;
 }

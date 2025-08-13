@@ -83,13 +83,22 @@ export type TurbopackLoaderItem =
       options: Record<string, JSONValue>;
     };
 
+export type TurbopackRuleConfigItemOrShortcut =
+  | TurbopackLoaderItem[]
+  | TurbopackRuleConfigItem;
+
 export type TurbopackRuleConfigItemOptions = {
   loaders: TurbopackLoaderItem[];
   as?: string;
 };
 
+export type TurbopackRuleCondition = {
+  path: string | RegExp;
+};
+
 export interface ModuleOptions {
   rules?: Record<string, TurbopackRuleConfigItem>;
+  conditions?: Record<string, TurbopackRuleCondition>;
 }
 
 export interface ResolveOptions {
@@ -154,6 +163,7 @@ export interface ConfigComplete {
       | {
           exclude?: string[];
         };
+    concatenateModules?: boolean;
   };
   styles?: {
     less?: {

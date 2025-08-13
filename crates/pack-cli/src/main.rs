@@ -5,7 +5,7 @@ use clap::Parser;
 use dunce::canonicalize;
 use pack_api::project::{ProjectOptions, WatchOptions};
 use serde_json::{Value, json};
-use std::{fs::File, path::PathBuf};
+use std::{cell::RefCell, fs::File, path::PathBuf, time::Instant};
 use turbo_rcstr::RcStr;
 
 use pack_core::tracing_presets::{
@@ -40,10 +40,24 @@ fn main() {
 
     let root_dir = args.root_dir.map(RcStr::from);
 
+    thread_local! {
+        static LAST_SWC_ATOM_GC_TIME: RefCell<Option<Instant>> = const { RefCell::new(None) };
+    }
+
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .on_thread_stop(|| {
             TurboMalloc::thread_stop();
+        })
+        .on_thread_park(|| {
+            LAST_SWC_ATOM_GC_TIME.with_borrow_mut(|cell| {
+                use std::time::Duration;
+
+                if cell.is_none_or(|t| t.elapsed() > Duration::from_secs(2)) {
+                    swc_core::ecma::atoms::hstr::global_atom_store_gc();
+                    *cell = Some(Instant::now());
+                }
+            });
         })
         .disable_lifo_slot()
         .build()

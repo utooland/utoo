@@ -19,7 +19,7 @@ pub async fn get_library_runtime_code(
     environment: Vc<Environment>,
     chunk_base_path: Vc<Option<RcStr>>,
     chunk_suffix_path: Vc<Option<RcStr>>,
-    runtime_type: RuntimeType,
+    _runtime_type: RuntimeType,
     output_root_to_root_path: Vc<RcStr>,
     generate_source_map: bool,
     runtime_root: Vc<Option<RcStr>>,
@@ -73,6 +73,15 @@ pub async fn get_library_runtime_code(
     code.push_code(
         &*embed_static_code(
             asset_context,
+            "umd/base-externals-utils.ts".into(),
+            generate_source_map,
+        )
+        .await?,
+    );
+
+    code.push_code(
+        &*embed_static_code(
+            asset_context,
             "umd/runtime-backend-dom.ts".into(),
             generate_source_map,
         )
@@ -89,16 +98,6 @@ pub async fn get_library_runtime_code(
             chunksToRegister.forEach(registerChunk);
         "#
     )?;
-    if matches!(runtime_type, RuntimeType::Development) {
-        writedoc!(
-            code,
-            r#"
-            const chunkListsToRegister = globalThis.TURBOPACK_CHUNK_LISTS || [];
-            chunkListsToRegister.forEach(registerChunkList);
-            globalThis.TURBOPACK_CHUNK_LISTS = {{ push: registerChunkList }};
-        "#
-        )?;
-    }
 
     let runtime_root = &*runtime_root.await?;
     let runtime_export = &*runtime_export.await?;
@@ -116,8 +115,18 @@ pub async fn get_library_runtime_code(
         code,
         r#"
             function factory () {{
-                return esmImport(null, Array.from(runtimeModules));
-            }};
+                for (const [,, runtimeParams] of chunksToRegister) {{
+                    if (runtimeParams?.runtimeModuleIds?.length > 0) {{
+                        const module = moduleCache[runtimeParams.runtimeModuleIds[0]];
+                        if (module.error) throw module.error;
+                        // any ES module has to have `module.namespaceObject` defined.
+                        if (module.namespaceObject) return module.namespaceObject;
+                        // only ESM can be an async module, so we don't need to worry about exports being a promise here.
+                        const raw = module.exports;
+                        return module.namespaceObject = interopEsm(raw, createNS(raw), raw && raw.__esModule);
+                    }}
+                }}
+            }}
 
             if (typeof exports === 'object' && typeof module === 'object') {{
                 module.exports = factory();
@@ -158,6 +167,7 @@ pub async fn get_library_runtime_code(
         code,
         r#"
             }}
+            globalThis.TURBOPACK = [];
             }})();
         "#
     )?;

@@ -27,6 +27,7 @@ pub struct PackageLock {
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub struct Package {
+    pub name: Option<String>,
     pub version: Option<String>,
     pub resolved: Option<String>,
     pub link: Option<bool>,
@@ -1355,6 +1356,45 @@ mod tests {
         let invalid_deps = validate_deps(&pkg_file, &pkgs_in_pkg_lock).await.unwrap();
         // All dependencies are valid
         assert_eq!(invalid_deps.len(), 0);
+    }
+
+    #[test]
+    fn test_package_struct_with_name_field() {
+        // Test that Package struct can be deserialized with name field
+        let package_json = json!({
+            "name": "test-package",
+            "version": "1.0.0",
+            "resolved": "https://registry.npmjs.org/test-package/-/test-package-1.0.0.tgz",
+            "link": false
+        });
+
+        let package: Package = serde_json::from_value(package_json).unwrap();
+        assert_eq!(package.name, Some("test-package".to_string()));
+        assert_eq!(package.version, Some("1.0.0".to_string()));
+        assert_eq!(
+            package.resolved,
+            Some("https://registry.npmjs.org/test-package/-/test-package-1.0.0.tgz".to_string())
+        );
+        assert_eq!(package.link, Some(false));
+    }
+
+    #[test]
+    fn test_package_struct_without_name_field() {
+        // Test that Package struct can be deserialized without name field (backward compatibility)
+        let package_json = json!({
+            "version": "1.0.0",
+            "resolved": "https://registry.npmjs.org/test-package/-/test-package-1.0.0.tgz",
+            "link": false
+        });
+
+        let package: Package = serde_json::from_value(package_json).unwrap();
+        assert_eq!(package.name, None);
+        assert_eq!(package.version, Some("1.0.0".to_string()));
+        assert_eq!(
+            package.resolved,
+            Some("https://registry.npmjs.org/test-package/-/test-package-1.0.0.tgz".to_string())
+        );
+        assert_eq!(package.link, Some(false));
     }
 
     #[test]

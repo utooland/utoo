@@ -18,6 +18,7 @@ import {
   TurbopackLoaderItem,
   TurbopackRuleConfigItem,
   TurbopackRuleConfigItemOptions,
+  TurbopackRuleConfigItemOrShortcut,
   Update,
 } from "./types";
 import { rustifyEnv } from "./util";
@@ -40,7 +41,7 @@ async function withErrorCause<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 function ensureLoadersHaveSerializableOptions(
-  turbopackRules: Record<string, TurbopackRuleConfigItem>,
+  turbopackRules: Record<string, TurbopackRuleConfigItemOrShortcut>,
 ) {
   for (const [glob, rule] of Object.entries(turbopackRules)) {
     if (Array.isArray(rule)) {

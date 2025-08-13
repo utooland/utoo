@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use turbo_esregex::EsRegex;
 use turbo_rcstr::RcStr;
 use turbo_tasks::{
     FxIndexMap, NonLocalValue, OperationValue, ResolvedVc, Vc, debug::ValueDebugFormat,
@@ -10,7 +11,8 @@ use turbo_tasks::{
 use turbo_tasks_env::EnvMap;
 use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::{
-    LoaderRuleItem, OptionWebpackRules, module_options_context::MdxTransformOptions,
+    ConditionItem, ConditionPath, LoaderRuleItem, OptionWebpackRules,
+    module_options_context::{MdxTransformOptions, OptionWebpackConditions},
 };
 use turbopack_core::{chunk::ChunkingConfig, resolve::ResolveAliasMap};
 use turbopack_ecmascript::{OptionTreeShaking, TreeShakingMode};
@@ -109,6 +111,9 @@ pub struct Config {
     experimental: ExperimentalConfig,
     persistent_caching: Option<bool>,
     cache_handler: Option<RcStr>,
+    #[cfg(feature = "test")]
+    #[serde(rename = "runtimeType")]
+    runtime_type: Option<RcStr>,
 }
 
 #[derive(
@@ -430,6 +435,49 @@ pub struct OptionalReactCompilerOptions(Option<ResolvedVc<ReactCompilerOptions>>
 #[serde(rename_all = "camelCase")]
 pub struct ModuleConfig {
     pub rules: Option<FxIndexMap<RcStr, RuleConfigItemOrShortcut>>,
+    #[turbo_tasks(trace_ignore)]
+    pub conditions: Option<FxIndexMap<RcStr, ConfigConditionItem>>,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct RegexComponents {
+    source: RcStr,
+    flags: RcStr,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value", rename_all = "camelCase")]
+pub enum ConfigConditionPath {
+    Glob(RcStr),
+    Regex(RegexComponents),
+}
+
+impl TryInto<ConditionPath> for ConfigConditionPath {
+    fn try_into(self) -> Result<ConditionPath> {
+        Ok(match self {
+            ConfigConditionPath::Glob(path) => ConditionPath::Glob(path),
+            ConfigConditionPath::Regex(path) => {
+                ConditionPath::Regex(EsRegex::new(&path.source, &path.flags)?.resolved_cell())
+            }
+        })
+    }
+
+    type Error = anyhow::Error;
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ConfigConditionItem {
+    pub path: ConfigConditionPath,
+}
+
+impl TryInto<ConditionItem> for ConfigConditionItem {
+    fn try_into(self) -> Result<ConditionItem> {
+        Ok(ConditionItem {
+            path: self.path.try_into()?,
+        })
+    }
+
+    type Error = anyhow::Error;
 }
 
 #[derive(
@@ -696,8 +744,9 @@ impl Config {
     #[turbo_tasks::function]
     pub async fn from_string(string: Vc<RcStr>) -> Result<Vc<Self>> {
         let string = string.await?;
-        let config: Config = serde_json::from_str(&string)
-            .with_context(|| format!("failed to parse config.js: {string}"))?;
+        let mut jdeserializer = serde_json::Deserializer::from_str(&string);
+        let config: Config = serde_path_to_error::deserialize(&mut jdeserializer)
+            .with_context(|| format!("failed to parse utoopack config: {string}"))?;
         Ok(config.cell())
     }
 
@@ -770,6 +819,18 @@ impl Config {
             .collect();
 
         Vc::cell(define_env)
+    }
+
+    #[turbo_tasks::function]
+    pub fn runtime_type_str(&self) -> Vc<Option<RcStr>> {
+        #[cfg(feature = "test")]
+        {
+            Vc::cell(self.runtime_type.clone())
+        }
+        #[cfg(not(feature = "test"))]
+        {
+            Vc::cell(None)
+        }
     }
 
     #[turbo_tasks::function]
@@ -868,6 +929,24 @@ impl Config {
             }
         }
         Vc::cell(Some(ResolvedVc::cell(rules)))
+    }
+
+    #[turbo_tasks::function]
+    pub fn webpack_conditions(&self) -> Result<Vc<OptionWebpackConditions>> {
+        let Some(config_conditions) = self.module.as_ref().and_then(|t| t.conditions.as_ref())
+        else {
+            return Ok(Vc::cell(None));
+        };
+
+        let conditions = config_conditions
+            .iter()
+            .map(|(k, v)| {
+                let item: Result<ConditionItem> = TryInto::<ConditionItem>::try_into((*v).clone());
+                item.map(|item| (k.clone(), item))
+            })
+            .collect::<Result<FxIndexMap<RcStr, ConditionItem>>>()?;
+
+        Ok(Vc::cell(Some(ResolvedVc::cell(conditions))))
     }
 
     #[turbo_tasks::function]

@@ -1,16 +1,18 @@
 {
+  "config": {
     "entry": [
-        {
-            "import": "input/index.ts",
-            "name": "main"
-        }
+      {
+        "import": "input/index.ts",
+        "name": "main"
+      }
     ],
     "resolve": {
-        "alias": {
-            "hello-a": "./input/a.ts"
-        }
+      "alias": {
+        "hello-a": "./input/a.ts"
+      }
     },
     "optimization": {
-        "minify": false
+      "minify": false
     }
+  }
 }

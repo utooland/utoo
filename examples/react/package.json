@@ -1,15 +1,18 @@
 {
-    "name": "react-example",
-    "version": "0.0.1",
-    "scripts": {
-        "build": "utoo-pack build -p . -r ../../",
-        "dev": "utoo-pack dev -p . -r ../../"
-    },
-    "dependencies": {
-        "react": "^18.2.0",
-        "react-dom": "^18.2.0"
-    },
-    "devDependencies": {
-        "@utoo/pack-cli": "*"
-    }
+  "name": "react-example",
+  "version": "0.0.1",
+  "scripts": {
+    "build": "utoo-pack build -p . -r ../../",
+    "dev": "utoo-pack dev -p . -r ../../"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@utoo/pack-cli": "*",
+    "@svgr/webpack": "6.5.1",
+    "@types/react": "^18.0.25",
+    "@types/react-dom": "^18.0.9"
+  }
 }

@@ -36,7 +36,6 @@ turbopack-core = { workspace = true, features = ["issue_path"] }
 turbopack-ecmascript-plugins = { workspace = true, features = [
   "transform_emotion",
 ] }
-turbopack-ecmascript-runtime = { workspace = true }
 turbopack-node = { workspace = true }
 turbopack-nodejs = { workspace = true, features = ["test"] }
 turbopack-resolve = { workspace = true }
