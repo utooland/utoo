@@ -12,7 +12,7 @@ const projectInWorker = {
     return await projectInWorker.project.writeFile(path, content);
   },
   async createDirAll(path: string) {
-    return await projectInWorker.project.createDir(path);
+    return await projectInWorker.project.mkdir(path);
   },
 };
 

@@ -37,12 +37,9 @@ const projectEndpoint: ProjectEndpoint & {
   async writeFile(
     path: string,
     content: string | Uint8Array,
-    encoding?: "utf8",
+    _encoding?: "utf8",
   ) {
     if (typeof content === "string") {
-      if (encoding !== "utf8") {
-        throw new Error("Invalid encoding");
-      }
       return await this.projectInternal!.writeString(path, content);
     } else {
       return await this.projectInternal!.write(path, content);
