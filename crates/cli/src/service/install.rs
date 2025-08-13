@@ -254,7 +254,10 @@ pub async fn install_packages(
                         continue;
                     }
 
-                    let name = extract_package_name(&path);
+                    let name = match package.name {
+                        Some(name) => name,
+                        None => extract_package_name(&path),
+                    };
                     let version = package.version.as_ref().unwrap();
                     let cache_path = cache_dir.join(format!("{name}/{version}"));
                     let cache_flag_path = cache_dir.join(format!("{name}/{version}/_resolved"));
@@ -405,5 +408,23 @@ mod tests {
         assert!(!legacy_dir.exists());
 
         Ok(())
+    }
+
+    #[test]
+    fn test_extract_package_name_from_path() {
+        // Test extracting package name from a standard path
+        assert_eq!(extract_package_name("node_modules/lodash"), "lodash");
+
+        // Test extracting package name from a nested path
+        assert_eq!(
+            extract_package_name("node_modules/parent/node_modules/child"),
+            "child"
+        );
+
+        // Test extracting package name from a scoped package path
+        assert_eq!(
+            extract_package_name("node_modules/@scope/package"),
+            "@scope/package"
+        );
     }
 }
