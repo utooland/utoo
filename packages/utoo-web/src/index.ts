@@ -53,7 +53,11 @@ export class Project implements ProjectEndpoint {
     return (await this.remote.readFile(path, encoding)) as any;
   }
 
-  public async writeFile(path: string, content: Uint8Array, encoding?: "utf8") {
+  public async writeFile(
+    path: string,
+    content: string | Uint8Array,
+    encoding?: "utf8",
+  ) {
     await this.#tunnel;
     return await this.remote.writeFile(path, content, encoding);
   }
@@ -112,7 +116,11 @@ class ForkedProject implements ProjectEndpoint {
     return (await this.endpoint.readFile(path, encoding)) as any;
   }
 
-  public async writeFile(path: string, content: string, encoding?: "utf8") {
+  public async writeFile(
+    path: string,
+    content: string | Uint8Array,
+    encoding?: "utf8",
+  ) {
     return await this.endpoint.writeFile(path, content, encoding);
   }
 
