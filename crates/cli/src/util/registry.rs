@@ -231,6 +231,62 @@ impl Registry {
         Ok((version, manifest))
     }
 
+    /// Get complete package information (like npm view)
+    pub async fn get_package_info(&self, name: &str) -> Result<Value> {
+        // Build request URL for complete package info
+        let url = format!("{}/{}", self.base_url, name);
+
+        // Record start time
+        let start_time = Instant::now();
+
+        // Retry HTTP request with custom strategy
+        let package_info: Value = RetryIf::spawn(
+            create_retry_strategy(),
+            || async {
+                let response = self
+                    .client
+                    .get(&url)
+                    .send()
+                    .await
+                    .map_err(|e| RetryableError::Temporary(format!("Network error: {e}")))?;
+
+                if response.status().is_success() {
+                    let package_info = response.json().await.map_err(|e| {
+                        RetryableError::Temporary(format!("Failed to parse JSON response: {e}"))
+                    })?;
+                    Ok(package_info)
+                } else if response.status().as_u16() == 404 {
+                    log_verbose(&format!("URL not found {url}"));
+                    Err(RetryableError::Permanent(format!(
+                        "Fetch Error: {}, status: {}",
+                        url,
+                        response.status()
+                    )))
+                } else {
+                    log_verbose(&format!(
+                        "HTTP error: url: {}, status: {}, retrying",
+                        url,
+                        response.status()
+                    ));
+                    Err(RetryableError::Temporary(format!(
+                        "HTTP error: {}, url: {}",
+                        response.status(),
+                        url
+                    )))
+                }
+            },
+            |e: &RetryableError| matches!(e, RetryableError::Temporary(_)),
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to fetch package info after retries: {e}"))?;
+
+        // Calculate and log request duration
+        let duration = start_time.elapsed();
+        log_verbose(&format!("HTTP request for package info {name} took {duration:?}"));
+
+        Ok(package_info)
+    }
+
     async fn resolve_package(&self, name: &str, spec: &str) -> Result<ResolvedPackage> {
         let (version, mut manifest) = self.get_package_manifest(name, spec).await?;
         log_verbose(&format!("Resolved {name}@{spec} => {version}"));
@@ -266,6 +322,11 @@ impl Registry {
 // Global resolve function
 pub async fn resolve(name: &str, spec: &str) -> Result<ResolvedPackage> {
     REGISTRY.resolve_package(name, spec).await
+}
+
+// Global package info function
+pub async fn get_package_info(name: &str) -> Result<Value> {
+    REGISTRY.get_package_info(name).await
 }
 
 // Public cache operations

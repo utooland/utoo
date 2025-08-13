@@ -16,4 +16,6 @@ pub mod cmd {
     pub const UNINSTALL_ABOUT: &str = "Uninstall spec dependencies";
     pub const EXECUTE_NAME: &str = "execute";
     pub const EXECUTE_ABOUT: &str = "Run a command from a local or remote npm package";
+    pub const VIEW_NAME: &str = "view";
+    pub const VIEW_ABOUT: &str = "View package information";
 }

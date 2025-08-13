@@ -6,3 +6,4 @@ pub mod list;
 pub mod rebuild;
 pub mod run;
 pub mod update;
+pub mod view;
