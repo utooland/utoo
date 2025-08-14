@@ -63,7 +63,7 @@ const projectEndpoint: ProjectEndpoint & {
       ? await this.projectInternal!.readDir(path)
       : // TODO: support recursive readDirAll
         await this.projectInternal!.readDir(path);
-    const newLocal: RawDirent[] = dirEntries.map((e) => {
+    const rawDirents: RawDirent[] = dirEntries.map((e) => {
       const dir = e.toJSON() as any;
       return {
         name: dir.name as string,
@@ -71,7 +71,7 @@ const projectEndpoint: ProjectEndpoint & {
       };
     });
     // WARN: This is a hack, functions can not be structurally cloned
-    return newLocal as any;
+    return rawDirents as any;
   },
 
   async mkdir(path: string, options?: { recursive?: boolean }) {

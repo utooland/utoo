@@ -1008,6 +1008,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "console_error_panic_hook"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
+dependencies = [
+ "cfg-if",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "const-str"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2604,7 +2614,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.4.10",
+ "socket2 0.5.9",
  "tokio",
  "tower-service",
  "tracing",
@@ -3360,7 +3370,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -8559,6 +8569,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-web"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9e6a141feebd51f8d91ebfd785af50fca223c570b86852166caa3b141defe7c"
+dependencies = [
+ "js-sys",
+ "tracing-core",
+ "tracing-subscriber",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "triomphe"
 version = "0.1.12"
 source = "git+https://github.com/sokra/triomphe?branch=sokra%2Funstable#9c591aba443d01a9f525fe9b4a671359d1b455d2"
@@ -8718,6 +8741,7 @@ dependencies = [
  "turbo-tasks-macros",
  "turbo-tasks-malloc",
  "unsize",
+ "wasmtimer",
 ]
 
 [[package]]
@@ -8752,6 +8776,7 @@ dependencies = [
  "turbo-tasks",
  "turbo-tasks-build",
  "turbo-tasks-testing",
+ "wasmtimer",
 ]
 
 [[package]]
@@ -9614,6 +9639,7 @@ name = "utoo-wasm"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "console_error_panic_hook",
  "flate2",
  "futures",
  "futures-util",
@@ -9626,7 +9652,10 @@ dependencies = [
  "serde",
  "serde_json",
  "tar",
+ "tokio",
  "tracing",
+ "tracing-subscriber",
+ "tracing-web",
  "turbo-rcstr",
  "turbo-tasks",
  "turbo-tasks-backend",
@@ -9634,6 +9663,7 @@ dependencies = [
  "turbo-tasks-malloc",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasmtimer",
 ]
 
 [[package]]
@@ -10343,6 +10373,20 @@ dependencies = [
  "indexmap 2.9.0",
  "semver",
  "serde",
+]
+
+[[package]]
+name = "wasmtimer"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8d49b5d6c64e8558d9b1b065014426f35c18de636895d24893dbbd329743446"
+dependencies = [
+ "futures",
+ "js-sys",
+ "parking_lot",
+ "pin-utils",
+ "slab",
+ "wasm-bindgen",
 ]
 
 [[package]]
