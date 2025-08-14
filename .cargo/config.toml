@@ -14,16 +14,6 @@ incremental = true
 [cache]
 auto-clean-frequency = "1 day"
 
-[profile.dev]
-incremental = true
-debug = true
-
-[profile.release]
-incremental = true
-lto = "thin"
-codegen-units = 1
-strip = true
-
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld"
 rustflags = [

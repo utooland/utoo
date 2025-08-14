@@ -5,7 +5,7 @@
   "scripts": {
     "build": "utoo-pack build -p . -r ../..",
     "dev": "utoo-pack dev -p . -r ../..",
-    "serve": "rm -rf ./dist && npm run build && node ./genHtml.js && serve ./dist"
+    "serve": "npm run build && node ./genHtml.js && serve ./dist"
   },
   "dependencies": {
     "react": "^19.1.0",
