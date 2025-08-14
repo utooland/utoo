@@ -76,7 +76,7 @@ const OpfsProject = () => {
   const [selectedFileContent, setSelectedFileContent] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
-  const [previewUrl, setPreviewUrl] = useState<string>(''); // 页面预览用
+  const [previewUrl, setPreviewUrl] = useState<string>(''); // For page preview
   const [isBuilding, setIsBuilding] = useState(false);
 
   type UpdateTreeWithChildrenFn = (
@@ -138,7 +138,7 @@ const OpfsProject = () => {
         const content: string = await project.readFile(filePath, 'utf8');
         setSelectedFileContent(content);
 
-        // 如果是 index.html，则生成预览 URL
+        // If index.html, generate preview URL
         if (filePath.endsWith('index.html')) {
           const blob = new Blob([content], { type: 'text/html' });
           setPreviewUrl(URL.createObjectURL(blob));
@@ -215,7 +215,7 @@ const OpfsProject = () => {
           throw new Error('Your browser does not support the Origin Private File System.');
         }
 
-        setIsLoading(true); // 开始 install 前设置 loading
+        setIsLoading(true); // Set loading before install
 
         const project = new Project('/utooweb-demo');
         setProject(project);
@@ -246,14 +246,14 @@ const OpfsProject = () => {
         const errorMessage = e instanceof Error ? e.message : String(e);
         setError(`Initialization failed: ${errorMessage}`);
       } finally {
-        setIsLoading(false); // install 完成后恢复 loading
+        setIsLoading(false); // Reset loading after install
       }
     };
 
     initialize();
   }, []);
 
-  // 代码编辑器区域
+  // Code editor area
   const monacoDisplay = useMemo(
     () => (
       <div style={{ height: '100%', width: '100%' }}>
@@ -297,7 +297,7 @@ const OpfsProject = () => {
     [selectedFilePath, selectedFileContent]
   );
 
-  // 页面预览区域
+  // Page preview area
   const previewDisplay = useMemo(
     () => (
       <div style={{ width: '100%', height: '100%', position: 'relative' }}>
@@ -330,14 +330,14 @@ const OpfsProject = () => {
     [previewUrl]
   );
 
-  // 构建按钮处理函数
+  // Build button handler
   const handleBuild = useCallback(async () => {
     if (!project) return;
     setIsBuilding(true);
     try {
       await project.build();
     } catch (e: any) {
-      setError(`构建失败: ${e.message}`);
+      setError(`Build failed: ${e.message}`);
     } finally {
       setIsBuilding(false);
     }
@@ -355,7 +355,7 @@ const OpfsProject = () => {
         fontFamily: 'sans-serif',
       }}
     >
-      {/* 左侧文件树 */}
+      {/* Left file tree */}
       <div
         style={{
           width: '20%',
@@ -425,7 +425,7 @@ const OpfsProject = () => {
         )}
       </div>
 
-      {/* 中间代码编辑器 */}
+      {/* Middle code editor */}
       <div
         style={{
           width: '40%',
@@ -441,7 +441,7 @@ const OpfsProject = () => {
         {monacoDisplay}
       </div>
 
-      {/* 右侧页面预览 */}
+      {/* Right page preview */}
       <div
         style={{
           width: '40%',
@@ -466,7 +466,6 @@ interface FileTreeNode {
   fullName: string;
   type: 'directory' | 'file';
   children: FileTreeNode[] | null;
-  [key: string]: any;
 }
 
 interface FileTreeItemProps {
@@ -480,11 +479,9 @@ interface DirectoryExpandParams {
   name: string;
   type: 'directory' | 'file';
   children: FileTreeNode[] | null;
-  [key: string]: any;
 }
 
 interface ProjectFileItem {
   name: string;
   isDirectory: () => boolean;
-  [key: string]: any;
 }

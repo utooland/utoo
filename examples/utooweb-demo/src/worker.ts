@@ -20,7 +20,7 @@ setTimeout(async () => {
   await projectInWorker.init();
   console.log(
     "read ./package.json",
-    await projectInWorker.readFile("./package.json", 'utf8'),
+    await projectInWorker.readFile("./package.json", "utf8"),
   );
   console.log(
     "createDirAll ./dist",
