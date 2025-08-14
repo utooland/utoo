@@ -8,7 +8,7 @@ members = [
   "crates/pack-tests",
   "crates/cli",
   "crates/core",
-  "crates/utoo-wasm"
+  "crates/utoo-wasm",
 ]
 exclude = ["crates/runtime", "next.js"]
 resolver = "2"
@@ -123,4 +123,13 @@ lto = false
 strip = "none"
 incremental = true
 codegen-units = 256
-debug = 2
+debug = 1
+
+[profile.wasm-dev]
+inherits = "release"
+opt-level = 1
+lto = false
+strip = "none"
+incremental = true
+codegen-units = 256
+debug = 1

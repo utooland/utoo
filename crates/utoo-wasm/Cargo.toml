@@ -14,30 +14,17 @@ wasm-bindgen-futures = "0.4"
 reqwest = { version = "0.12.22" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { workspace = true }
-opfs = "0.1"
 js-sys = "0.3"
 petgraph = "0.6"
-opfs-project = { workspace = true }
 flate2 = "1.1.2"
 tar = "0.4.44"
 futures-util = "0.3.31"
 futures = { workspace = true }
 anyhow = { workspace = true, features = ["backtrace"] }
 tracing = { workspace = true }
-web-sys = { version = "0.3", features = [
-  "Navigator",
-  "StorageManager",
-  "FileSystemDirectoryHandle",
-  "FileSystemFileHandle",
-  "FileSystemHandle",
-  "FileSystemWritableFileStream",
-  "FileSystemGetFileOptions",
-  "FileSystemGetDirectoryOptions",
-  "File",
-  "console",
-] }
+opfs-project = { workspace = true }
 
-# For utoopack
+## turbpack specific
 turbo-rcstr = { workspace = true }
 turbo-tasks = { workspace = true }
 turbo-tasks-malloc = { workspace = true }
@@ -48,19 +35,3 @@ pack-api = { workspace = true }
 [build-dependencies]
 anyhow = { workspace = true }
 turbo-tasks-build = { workspace = true }
-
-[package.metadata.wasm-pack.profile.release]
-wasm-opt = [
-  "-Oz",
-  "--enable-bulk-memory",
-  "--enable-threads",
-  "--enable-nontrapping-float-to-int",
-]
-
-[package.metadata.wasm-pack.profile.profiling]
-wasm-opt = false
-
-[package.metadata.wasm-pack.profile.profiling.wasm-bindgen]
-dwarf-debug-info = true
-
-# cargo +nightly  build -p utoo-wasm  --target wasm32-unknown-unknown -Z build-std=panic_abort,std

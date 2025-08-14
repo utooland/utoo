@@ -18,16 +18,16 @@ base64 = "0.22.1"
 qstring = "0.7.2"
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_path_to_error = { workspace = true }
 mime_guess = "2.0.4"
 indoc = { workspace = true }
 tracing = { workspace = true }
 dunce = { workspace = true }
 pathdiff = { workspace = true }
 rustc-hash = { workspace = true }
-remove_console = { workspace = true }
 urlencoding = { workspace = true }
-modularize_imports = { workspace = true }
-serde_path_to_error = { workspace = true }
+
+## turbpack specific
 swc_core = { workspace = true, features = [
   "base",
   "common_concurrent",
@@ -45,6 +45,8 @@ swc_core = { workspace = true, features = [
   "ecma_utils",
   "ecma_visit",
 ] }
+modularize_imports = { workspace = true }
+remove_console = { workspace = true }
 
 turbo-esregex = { workspace = true }
 turbo-rcstr = { workspace = true }

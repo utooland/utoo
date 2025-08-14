@@ -7,10 +7,13 @@
     "esm/*"
   ],
   "scripts": {
-    "wasmpack": "wasm-pack build ../../crates/utoo-wasm --out-dir ../../packages/utoo-web/src/utoo --out-name index --no-pack --target web",
+    "install-toolchain": "cargo install wasm-bindgen-cli && brew install binaryen",
+    "build-wasm": "cargo build -p utoo-wasm --target wasm32-unknown-unknown",
+    "bindgen-dev": "wasm-bindgen ../../target/wasm32-unknown-unknown/wasm-dev/utoo_wasm.wasm --out-dir src/utoo --out-name index --target web --debug --keep-debug --no-demangle",
+    "bindgen-build": "wasm-bindgen ../../target/wasm32-unknown-unknown/release/utoo_wasm.wasm --out-dir src/utoo --out-name index --target web",
     "tsx": "rm -rf esm && tsc -p ./tsconfig.json",
-    "dev": "npm run wasmpack -- --profiling && npm run tsx && cp ./src/utoo/*.wasm ./esm/utoo",
-    "build": "npm run wasmpack -- --release && npm run tsx && cp ./src/utoo/*.wasm ./esm/utoo",
+    "dev": "npm run build-wasm -- --profile wasm-dev && npm run bindgen-dev && npm run tsx && cp src/utoo/index_bg.wasm esm/utoo",
+    "build": "npm run build-wasm -- --release && npm run bindgen-build && npm run tsx && wasm-opt src/utoo/index_bg.wasm -o esm/utoo/index_bg.wasm -O4 --enable-bulk-memory --enable-nontrapping-float-to-int",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

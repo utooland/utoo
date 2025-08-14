@@ -4122,23 +4122,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "opfs"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec212a8f5bcc976d9b2227161f4737caf77e9f9c71e5954607ba4cda4b41dd97"
-dependencies = [
- "dirs 5.0.1",
- "futures",
- "js-sys",
- "serde",
- "serde_json",
- "tokio",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
 name = "opfs-project"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9635,7 +9618,6 @@ dependencies = [
  "futures",
  "futures-util",
  "js-sys",
- "opfs",
  "opfs-project",
  "pack-api",
  "pack-core",
@@ -9652,7 +9634,6 @@ dependencies = [
  "turbo-tasks-malloc",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "web-sys",
 ]
 
 [[package]]
