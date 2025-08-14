@@ -1,4 +1,5 @@
-use std::{sync::Arc, time::Instant};
+use std::sync::Arc;
+use wasmtimer::std::Instant;
 
 use anyhow::Result;
 use pack_api::{
@@ -46,9 +47,19 @@ pub async fn build(partial_options: PartialProjectOptions) -> std::result::Resul
         dev: false,
         build_id: project_path.clone(),
     };
-    build_internal(options)
+
+    tracing::info!("Bundle with options: {options:#?}");
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+
+    rt.spawn(async move { build_internal(options).await })
         .await
-        .map_err(|e| JsValue::from_str(&e.to_string()))
+        .map_err(|e| JsValue::from_str(&e.to_string()))?
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    Ok(())
 }
 
 async fn build_internal(options: ProjectOptions) -> Result<()> {
