@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2018",
-    "jsx": "react-jsx",
+    "jsx": "react",
     "allowJs": true,
     "esModuleInterop": true,
     "moduleResolution": "node",

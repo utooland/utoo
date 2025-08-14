@@ -1,31 +1,21 @@
 import { Project } from '@utoo/web';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { packageLock } from './packageLock';
+import MonacoEditor from '@monaco-editor/react';
 
 import './styles.css';
 
-interface FileTreeNode {
-  name: string;
-  fullName: string;
-  type: 'directory' | 'file';
-  children: FileTreeNode[] | null;
-  [key: string]: any;
-}
-
-interface FileTreeItemProps {
-  item: FileTreeNode;
-  onFileClick: (filePath: string) => Promise<void>;
-  onDirectoryExpand: (parentItem: FileTreeNode) => Promise<void>;
-}
-
 const FileTreeItem = React.memo(({ item, onFileClick, onDirectoryExpand }: FileTreeItemProps) => {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(true);
+  const [isNodeLoading, setIsNodeLoading] = useState<boolean>(false);
 
   const toggleCollapse = useCallback(async () => {
     if (item.type === 'directory') {
       if (isCollapsed) {
         if (item.children && item.children.length === 0) {
+          setIsNodeLoading(true);
           await onDirectoryExpand(item);
+          setIsNodeLoading(false);
         }
       }
       setIsCollapsed(!isCollapsed);
@@ -51,6 +41,9 @@ const FileTreeItem = React.memo(({ item, onFileClick, onDirectoryExpand }: FileT
         <span style={{ width: '1rem', textAlign: 'center' }}></span>
         {item.type === 'directory' ? (isCollapsed ? '▶' : '▼') : '📄'}
         <span>{item.name}</span>
+        {isNodeLoading && (
+          <span style={{ marginLeft: '0.5rem', color: '#22c55e', fontSize: '0.85em' }}>Loading...</span>
+        )}
       </div>
       {item.type === 'directory' && !isCollapsed && (
         <ul
@@ -77,20 +70,14 @@ const FileTreeItem = React.memo(({ item, onFileClick, onDirectoryExpand }: FileT
 });
 
 const OpfsProject = () => {
-  const [project, setProject] = useState<Project>(null);
+  const [project, setProject] = useState<Project | null>(null);
   const [fileTree, setFileTree] = useState<FileTreeNode[]>([]);
   const [selectedFilePath, setSelectedFilePath] = useState('');
   const [selectedFileContent, setSelectedFileContent] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
-
-  interface FileTreeNode {
-    name: string;
-    fullName: string;
-    type: 'directory' | 'file';
-    children: FileTreeNode[] | null;
-    [key: string]: any;
-  }
+  const [previewUrl, setPreviewUrl] = useState<string>(''); // For page preview
+  const [isBuilding, setIsBuilding] = useState(false);
 
   type UpdateTreeWithChildrenFn = (
     tree: FileTreeNode[],
@@ -113,20 +100,6 @@ const OpfsProject = () => {
       return node;
     });
   }, []);
-
-  interface DirectoryExpandParams {
-    fullName: string;
-    name: string;
-    type: 'directory' | 'file';
-    children: FileTreeNode[] | null;
-    [key: string]: any;
-  }
-
-  interface ProjectFileItem {
-    name: string;
-    isDirectory: () => boolean;
-    [key: string]: any;
-  }
 
   const handleDirectoryExpand = useCallback(
     async (parentItem: DirectoryExpandParams): Promise<void> => {
@@ -164,12 +137,32 @@ const OpfsProject = () => {
 
         const content: string = await project.readFile(filePath, 'utf8');
         setSelectedFileContent(content);
+
+        // If index.html, generate preview URL
+        if (filePath.endsWith('index.html')) {
+          const blob = new Blob([content], { type: 'text/html' });
+          setPreviewUrl(URL.createObjectURL(blob));
+        }
       } catch (e: any) {
         setError(`Error reading file: ${e.message}`);
       }
     },
     [project]
   );
+
+  useEffect(() => {
+    const tryPreviewIndex = async () => {
+      if (!project) return;
+      try {
+        const content = await project.readFile('./index.html', 'utf8');
+        const blob = new Blob([content], { type: 'text/html' });
+        setPreviewUrl(URL.createObjectURL(blob));
+      } catch {
+        setPreviewUrl('');
+      }
+    };
+    tryPreviewIndex();
+  }, [project]);
 
   // Memoize the file tree to prevent unnecessary re-renders
   const memoizedFileTree = useMemo(() => fileTree, [fileTree]);
@@ -222,6 +215,8 @@ const OpfsProject = () => {
           throw new Error('Your browser does not support the Origin Private File System.');
         }
 
+        setIsLoading(true); // Set loading before install
+
         const project = new Project('/utooweb-demo');
         setProject(project);
 
@@ -251,48 +246,163 @@ const OpfsProject = () => {
         const errorMessage = e instanceof Error ? e.message : String(e);
         setError(`Initialization failed: ${errorMessage}`);
       } finally {
-        setIsLoading(false);
+        setIsLoading(false); // Reset loading after install
       }
     };
 
     initialize();
   }, []);
 
+  // Code editor area
+  const monacoDisplay = useMemo(
+    () => (
+      <div style={{ height: '100%', width: '100%' }}>
+        <h3
+          style={{
+            fontSize: '1rem',
+            fontWeight: '700',
+            marginBottom: '0.5rem',
+          }}
+        >
+          {selectedFilePath ? selectedFilePath : 'Select a file'}
+        </h3>
+        <div style={{ height: 'calc(100% - 2rem)' }}>
+          <MonacoEditor
+            height='100%'
+            width='100%'
+            language={
+              selectedFilePath.endsWith('.js')
+                ? 'javascript'
+                : selectedFilePath.endsWith('.ts')
+                ? 'typescript'
+                : selectedFilePath.endsWith('.json')
+                ? 'json'
+                : selectedFilePath.endsWith('.css')
+                ? 'css'
+                : selectedFilePath.endsWith('.html')
+                ? 'html'
+                : 'plaintext'
+            }
+            value={selectedFileContent}
+            options={{
+              readOnly: true,
+              fontSize: 14,
+              minimap: { enabled: false },
+              scrollBeyondLastLine: false,
+            }}
+          />
+        </div>
+      </div>
+    ),
+    [selectedFilePath, selectedFileContent]
+  );
+
+  // Page preview area
+  const previewDisplay = useMemo(
+    () => (
+      <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+        <h3
+          style={{
+            fontSize: '1rem',
+            fontWeight: '700',
+            marginBottom: '0.5rem',
+          }}
+        >
+          Preview
+        </h3>
+        {previewUrl ? (
+          <iframe
+            src={previewUrl}
+            title='preview'
+            style={{
+              width: '100%',
+              height: 'calc(100% - 2rem)',
+              border: '1px solid #e5e7eb',
+              borderRadius: '0.5rem',
+              background: '#fff',
+            }}
+          />
+        ) : (
+          <div style={{ color: '#9ca3af', textAlign: 'center', marginTop: '2rem' }}>No index.html to preview</div>
+        )}
+      </div>
+    ),
+    [previewUrl]
+  );
+
+  // Build button handler
+  const handleBuild = useCallback(async () => {
+    if (!project) return;
+    setIsBuilding(true);
+    try {
+      await project.build();
+    } catch (e: any) {
+      setError(`Build failed: ${e.message}`);
+    } finally {
+      setIsBuilding(false);
+    }
+  }, [project]);
+
   return (
     <div
       style={{
         height: '100vh',
-        padding: '1rem',
+        padding: '0',
         display: 'flex',
         flexDirection: 'row',
-        gap: '1rem',
+        gap: '0',
         backgroundColor: '#f3f4f6',
         fontFamily: 'sans-serif',
       }}
     >
+      {/* Left file tree */}
       <div
         style={{
-          width: '40%',
-          padding: '1.5rem',
+          width: '20%',
+          minWidth: '220px',
+          maxWidth: '320px',
+          padding: '1rem',
           backgroundColor: '#ffffff',
-          borderRadius: '0.75rem',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+          borderRight: '1px solid #e5e7eb',
           overflowY: 'auto',
         }}
       >
-        <h2
-          style={{
-            fontSize: '1.5rem',
-            fontWeight: '700',
-            marginBottom: '1rem',
-            paddingBottom: '0.5rem',
-            borderBottom: '2px solid #e5e7eb',
-            color: '#374151',
-          }}
-        >
-          OPFS Project Explorer
-        </h2>
-        {isLoading && <p style={{ textAlign: 'center', color: '#6b7280' }}>Loading file system...</p>}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+          <h2
+            style={{
+              fontSize: '1.2rem',
+              fontWeight: '700',
+              paddingBottom: '0.5rem',
+              borderBottom: '2px solid #e5e7eb',
+              color: '#374151',
+              margin: 0,
+            }}
+          >
+            Files
+          </h2>
+          <button
+            onClick={handleBuild}
+            disabled={isBuilding || !project}
+            style={{
+              marginLeft: '1rem',
+              padding: '0.3rem 1rem',
+              borderRadius: '0.5rem',
+              border: 'none',
+              background: isBuilding ? '#d1d5db' : '#2563eb',
+              color: '#fff',
+              fontWeight: 600,
+              cursor: isBuilding ? 'not-allowed' : 'pointer',
+              transition: 'background 0.2s',
+            }}
+          >
+            {isBuilding ? 'Building...' : 'Build'}
+          </button>
+        </div>
+        {isLoading && (
+          <p style={{ textAlign: 'center', color: '#22c55e', fontWeight: 500 }}>
+            Installing dependencies...
+          </p>
+        )}
         {error && <p style={{ textAlign: 'center', color: '#ef4444' }}>{error}</p>}
         {!isLoading && !error && (
           <ul
@@ -315,24 +425,63 @@ const OpfsProject = () => {
         )}
       </div>
 
+      {/* Middle code editor */}
       <div
         style={{
-          width: '60%',
-          padding: '1.5rem',
+          width: '40%',
+          minWidth: '320px',
+          padding: '1rem',
           backgroundColor: '#ffffff',
-          borderRadius: '0.75rem',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+          borderRight: '1px solid #e5e7eb',
           overflowY: 'auto',
           display: 'flex',
           flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
         }}
       >
-        {fileContentDisplay}
+        {monacoDisplay}
+      </div>
+
+      {/* Right page preview */}
+      <div
+        style={{
+          width: '40%',
+          minWidth: '320px',
+          padding: '1rem',
+          backgroundColor: '#ffffff',
+          overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        {previewDisplay}
       </div>
     </div>
   );
 };
 
 export default OpfsProject;
+
+interface FileTreeNode {
+  name: string;
+  fullName: string;
+  type: 'directory' | 'file';
+  children: FileTreeNode[] | null;
+}
+
+interface FileTreeItemProps {
+  item: FileTreeNode;
+  onFileClick: (filePath: string) => Promise<void>;
+  onDirectoryExpand: (parentItem: FileTreeNode) => Promise<void>;
+}
+
+interface DirectoryExpandParams {
+  fullName: string;
+  name: string;
+  type: 'directory' | 'file';
+  children: FileTreeNode[] | null;
+}
+
+interface ProjectFileItem {
+  name: string;
+  isDirectory: () => boolean;
+}

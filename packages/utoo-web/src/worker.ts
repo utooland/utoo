@@ -3,6 +3,8 @@ import { HandShake } from "./message";
 import { ProjectEndpoint, RawDirent } from "./type";
 import initWasm, { DirEntryType, Project as ProjectInternal } from "./utoo";
 
+const WasmInit = initWasm();
+
 const projectEndpoint: ProjectEndpoint & {
   projectInternal?: ProjectInternal;
   mount: (cwd: string) => Promise<void>;
@@ -10,21 +12,24 @@ const projectEndpoint: ProjectEndpoint & {
   projectInternal: undefined,
 
   async mount(cwd: string) {
-    await initWasm();
+    await WasmInit;
     this.projectInternal = new ProjectInternal(cwd);
     return;
   },
 
   async install(packageLock: string) {
+    await WasmInit;
     await this.projectInternal!.install(packageLock);
     return;
   },
 
   async build() {
+    await WasmInit;
     return await this.projectInternal!.build();
   },
 
   async readFile(path: string, encoding?: "utf8") {
+    await WasmInit;
     let ret;
     if (encoding === "utf8") {
       ret = await this.projectInternal!.readToString(path);
@@ -39,6 +44,7 @@ const projectEndpoint: ProjectEndpoint & {
     content: string | Uint8Array,
     _encoding?: "utf8",
   ) {
+    await WasmInit;
     if (typeof content === "string") {
       return await this.projectInternal!.writeString(path, content);
     } else {
@@ -47,10 +53,12 @@ const projectEndpoint: ProjectEndpoint & {
   },
 
   async copyFile(src: string, dst: string) {
+    await WasmInit;
     return await this.projectInternal!.copyFile(src, dst);
   },
 
   async readdir(path: string, options?: { recursive?: boolean }) {
+    await WasmInit;
     const dirEntries = options?.recursive
       ? await this.projectInternal!.readDir(path)
       : // TODO: support recursive readDirAll
@@ -67,6 +75,7 @@ const projectEndpoint: ProjectEndpoint & {
   },
 
   async mkdir(path: string, options?: { recursive?: boolean }) {
+    await WasmInit;
     if (options?.recursive) {
       return await this.projectInternal!.createDirAll(path);
     } else {

@@ -10,7 +10,8 @@
   "dependencies": {
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "@utoo/web": "*"
+    "@utoo/web": "*",
+    "@monaco-editor/react": "^4.4.6"
   },
   "devDependencies": {
     "@utoo/pack-cli": "*",
