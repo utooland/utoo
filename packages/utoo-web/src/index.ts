@@ -15,7 +15,7 @@ export class Project implements ProjectEndpoint {
     ProjectEndpoint & { mount: (cwd: string) => Promise<void> }
   >;
 
-  constructor(cwd: string) {
+  constructor(cwd: string, worker?: Worker) {
     this.cwd = cwd;
 
     const { port1, port2 } = new MessageChannel();
@@ -23,7 +23,8 @@ export class Project implements ProjectEndpoint {
     this.remote ??= comlink.wrap(port1);
 
     if (!ProjectWorker) {
-      ProjectWorker = new Worker(new URL("./worker", import.meta.url));
+      ProjectWorker =
+        worker || new Worker(new URL("./worker", import.meta.url));
 
       self.addEventListener("message", (e) => {
         const port = e.ports[0];
