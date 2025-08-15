@@ -1,4 +1,4 @@
-use opfs_project::cwd::{self, get_cwd};
+use opfs_project::cwd::{get_cwd, set_cwd};
 use opfs_project::package_manager;
 use opfs_project::{opfs, DirEntry};
 use wasm_bindgen::prelude::*;
@@ -13,13 +13,13 @@ pub struct Project {}
 impl Project {
     #[wasm_bindgen(constructor)]
     pub fn new(cwd: String) -> Project {
-        cwd::set_cwd(cwd.clone());
+        set_cwd(cwd.into());
         Project {}
     }
 
     #[wasm_bindgen(getter)]
     pub fn cwd(&self) -> String {
-        cwd::get_cwd()
+        get_cwd().to_string_lossy().to_string()
     }
 
     #[wasm_bindgen]
@@ -32,14 +32,10 @@ impl Project {
 
     #[wasm_bindgen]
     pub async fn build(&self) -> Result<(), JsValue> {
-        let config = self
-            .read("./project_options.json")
-            .await
-            .ok()
-            .map(|c| unsafe { String::from_utf8_unchecked(c) });
+        let config = self.read_to_string("./utoopack.json").await.ok();
 
         let partial_options = PartialProjectOptions {
-            project_path: ".".to_string(),
+            project_path: ".".into(),
             config,
         };
         build(partial_options).await

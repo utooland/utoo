@@ -131,16 +131,22 @@ const OpfsProject = () => {
           parentItem.fullName,
         );
 
-        const newChildren: FileTreeNode[] = children.map(
-          (item: ProjectFileItem) => ({
+        const newChildren: FileTreeNode[] = children
+          .map((item: ProjectFileItem) => ({
             ...item,
             fullName: [parentItem.fullName, item.name]
               .filter(Boolean)
               .join("/"),
-            type: item.isDirectory() ? "directory" : "file",
+            type: item.isDirectory()
+              ? ("directory" as const)
+              : ("file" as const),
             children: item.isDirectory() ? [] : null,
-          }),
-        );
+          }))
+          .sort((a, b) =>
+            a.type === b.type
+              ? a.name.localeCompare(b.name)
+              : a.type.localeCompare(b.type),
+          );
 
         setFileTree((prevTree: FileTreeNode[]) =>
           updateTreeWithChildren(prevTree, parentItem.name, newChildren),
@@ -150,7 +156,7 @@ const OpfsProject = () => {
           `Error expanding directory at path ${parentItem.fullName}:`,
           e,
         );
-        setError(`Error expanding directory: ${e.message}`);
+        setError(`Error expanding directory: ${e.toString()}`);
       }
     },
     [project, updateTreeWithChildren],
@@ -263,11 +269,11 @@ const OpfsProject = () => {
         const start = performance.now();
         await project.install(JSON.stringify(packageLock));
         await project.mkdir("src");
-        await project.writeFile("index.tsx", "console.log('1')");
+        await project.writeFile("src/index.tsx", "console.log('1')");
         await project.writeFile(
-          "project_options.json",
-          JSON.stringify({
-            config: {
+          "utoopack.json",
+          JSON.stringify(
+            {
               entry: [
                 {
                   import: "./src/index.tsx",
@@ -275,7 +281,9 @@ const OpfsProject = () => {
                 },
               ],
             },
-          }),
+            null,
+            2,
+          ),
         );
 
         console.log(
@@ -288,14 +296,20 @@ const OpfsProject = () => {
 
         // Read only the top-level directory without recursion
         const rootItems = await project.readdir(".");
-        const initialTree = rootItems.map((item) => ({
-          ...item,
-          fullName: `./${item.name}`,
-          type: item.isDirectory()
-            ? ("directory" as "directory")
-            : ("file" as "file"),
-          children: item.isDirectory() ? [] : null,
-        }));
+        const initialTree = rootItems
+          .map((item) => ({
+            ...item,
+            fullName: `./${item.name}`,
+            type: item.isDirectory()
+              ? ("directory" as "directory")
+              : ("file" as "file"),
+            children: item.isDirectory() ? [] : null,
+          }))
+          .sort((a, b) =>
+            a.type === b.type
+              ? a.name.localeCompare(b.name)
+              : a.type.localeCompare(b.type),
+          );
         setFileTree(initialTree);
       } catch (e) {
         const errorMessage = e instanceof Error ? e.message : String(e);
@@ -326,17 +340,17 @@ const OpfsProject = () => {
             height="100%"
             width="100%"
             language={
-              selectedFilePath.endsWith(".js")
-                ? "javascript"
-                : selectedFilePath.endsWith(".ts")
-                  ? "typescript"
-                  : selectedFilePath.endsWith(".json")
-                    ? "json"
-                    : selectedFilePath.endsWith(".css")
-                      ? "css"
-                      : selectedFilePath.endsWith(".html")
-                        ? "html"
-                        : "plaintext"
+              ["tsx", "ts", "jsx", "js"].some((ext) =>
+                selectedFilePath.endsWith(ext),
+              )
+                ? "typescript"
+                : selectedFilePath.endsWith(".json")
+                  ? "json"
+                  : selectedFilePath.endsWith(".css")
+                    ? "css"
+                    : selectedFilePath.endsWith(".html")
+                      ? "html"
+                      : "plaintext"
             }
             value={selectedFileContent}
             options={{
@@ -396,6 +410,7 @@ const OpfsProject = () => {
     try {
       await project.build();
     } catch (e: any) {
+      console.error("Build failed: ", e);
       setError(`Build failed: ${e.message}`);
     } finally {
       setIsBuilding(false);
@@ -417,7 +432,7 @@ const OpfsProject = () => {
       {/* Left file tree */}
       <div
         style={{
-          width: "20%",
+          width: "25%",
           minWidth: "220px",
           maxWidth: "320px",
           padding: "1rem",
@@ -444,7 +459,7 @@ const OpfsProject = () => {
               margin: 0,
             }}
           >
-            Files
+            Utoo Web Demo
           </h2>
           <button
             onClick={handleBuild}
@@ -479,6 +494,7 @@ const OpfsProject = () => {
               flexDirection: "column",
               gap: "0.25rem",
               padding: 0,
+              alignItems: "flex-start",
             }}
           >
             {memoizedFileTree.map((item, index) => (
@@ -496,7 +512,7 @@ const OpfsProject = () => {
       {/* Middle code editor */}
       <div
         style={{
-          width: "40%",
+          width: "35%",
           minWidth: "320px",
           padding: "1rem",
           backgroundColor: "#ffffff",

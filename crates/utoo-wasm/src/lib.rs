@@ -4,9 +4,12 @@ extern crate console_error_panic_hook;
 
 use std::panic;
 
-use pack_core::tracing_presets::TRACING_TURBO_TASKS_TARGETS;
+use pack_core::tracing_presets::TRACING_OVERVIEW_TARGETS;
 use tracing_subscriber::{
-    fmt::{self, format::Pretty},
+    fmt::{
+        self,
+        format::{FmtSpan, Pretty},
+    },
     layer::SubscriberExt,
     registry,
     util::SubscriberInitExt,
@@ -27,21 +30,19 @@ fn init_pack() {
 
     let fmt_layer = fmt::layer()
         .without_time()
+        .with_span_events(FmtSpan::CLOSE)
         .with_writer(MakeWebConsoleWriter::new())
         .with_filter(EnvFilter::new({
-            let mut trace = TRACING_TURBO_TASKS_TARGETS
+            let mut trace = TRACING_OVERVIEW_TARGETS
                 .iter()
                 // .filter(|_| true)
                 .cloned()
                 .collect::<Vec<&str>>();
-            trace.push("utoo_wasm");
+            trace.extend(["utoo_wasm=info"]);
             trace.join(",")
         }));
 
-    registry()
-        .with(fmt_layer)
-        // .with(performance_layer().with_details_from_fields(Pretty::default()))
-        .init();
+    registry().with(fmt_layer).init();
 
     pack::register();
 }
