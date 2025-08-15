@@ -1,12 +1,13 @@
-use std::sync::Arc;
+use serde_json::{json, Value};
+use std::{str::FromStr, sync::Arc};
 use wasmtimer::std::Instant;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use pack_api::{
     entrypoint::{get_all_written_entrypoints_with_issues_operation, EntrypointsWithIssues},
     project::{ProjectContainer, ProjectOptions, WatchOptions},
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use turbo_rcstr::RcStr;
 use turbo_tasks::{ResolvedVc, TurboTasks};
 use turbo_tasks_backend::{
@@ -21,42 +22,42 @@ pub fn register() {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq)]
-#[wasm_bindgen]
 pub struct PartialProjectOptions {
-    #[wasm_bindgen(getter_with_clone)]
     pub project_path: String,
 
-    #[wasm_bindgen(getter_with_clone)]
     pub config: Option<String>,
 }
 
-#[wasm_bindgen]
 pub async fn build(partial_options: PartialProjectOptions) -> std::result::Result<(), JsValue> {
     let project_path: RcStr = partial_options.project_path.into();
-    let config: RcStr = partial_options.config.unwrap_or("{}".to_string()).into();
+    let mode = "production";
+
+    let config = partial_options.config.map_or(
+        std::result::Result::<RcStr, JsValue>::Ok(format!(r#"{{ "mode": {mode}}}"#).into()),
+        |config| {
+            let mut val = serde_json::value::Value::from_str(&config)
+                .map_err(|e| JsValue::from_str("Failed to parse pack config"))?;
+            if let Value::Object(map) = &mut val {
+                map.insert("mode".to_string(), mode.into());
+            }
+            Ok(val.to_string().into())
+        },
+    )?;
     let options = ProjectOptions {
         root_path: project_path.clone(),
         project_path: project_path.clone(),
         config,
-        process_env: Default::default(),
-        define_env: Default::default(),
-        watch: WatchOptions {
-            enable: false,
-            ..Default::default()
-        },
-        dev: false,
         build_id: project_path.clone(),
+        ..Default::default()
     };
 
-    tracing::info!("Bundle with options: {options:#?}");
+    tracing::info!("Bundle with options: {options:?}");
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .build()
         .unwrap();
 
-    rt.spawn(async move { build_internal(options).await })
-        .await
-        .map_err(|e| JsValue::from_str(&e.to_string()))?
+    rt.block_on(async move { build_internal(options).await })
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     Ok(())

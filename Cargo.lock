@@ -4133,9 +4133,9 @@ dependencies = [
 
 [[package]]
 name = "opfs-project"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a23412cc20a848cb4a699dc2d95aeb6e907843fee9308955087be338526dba83"
+checksum = "66dec7106d36912434201daaefd9cae660409446ff7093d1137525759d6fde0f"
 dependencies = [
  "anyhow",
  "flate2",
@@ -8220,9 +8220,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-fs-ext"
-version = "0.3.8"
+version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a5cd41c6a4a768c8cc00d6d5097203f23ec121703543f5a6295664108aca589"
+checksum = "6a6fc632b256d3ac6054a8b46e1027924ce3efde269c27986b061c495df572de"
 dependencies = [
  "bitflags 2.9.1",
  "cfg-if",

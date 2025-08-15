@@ -19,15 +19,15 @@ petgraph = "0.6"
 flate2 = "1.1.2"
 tar = "0.4.44"
 futures-util = "0.3.31"
-console_error_panic_hook = "0.1.7"
 futures = { workspace = true }
 anyhow = { workspace = true, features = ["backtrace"] }
 tracing = { workspace = true }
-opfs-project = { workspace = true }
-tokio = { workspace = true }
+opfs-project = "0.1.1"
+tokio = { workspace = true, features = ["rt"] }
 wasmtimer = "0.4.2"
-tracing-web = "0.1.3"
 tracing-subscriber = { workspace = true }
+tracing-web = "0.1.3"
+console_error_panic_hook = "0.1.7"
 
 ## turbpack specific
 turbo-rcstr = { workspace = true }
