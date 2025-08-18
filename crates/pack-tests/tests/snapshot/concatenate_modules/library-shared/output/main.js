@@ -1,4 +1,6 @@
-(globalThis.TURBOPACK = globalThis.TURBOPACK || []).push(["main.js", {
+((__TURBOPACK__) => {
+// Dummy runtime
+})([["main.js", {
 
 10: ((__turbopack_context__) => {
 "use strict";
@@ -111,8 +113,7 @@ var __TURBOPACK__imported__module__518__ = __turbopack_context__.i(518);
 }),
 },
 {"otherChunks":[],"runtimeModuleIds":[940]},
-]);
-// Dummy runtime
+]]);
 
 
 //# sourceMappingURL=main.js.map
