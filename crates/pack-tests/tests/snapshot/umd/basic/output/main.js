@@ -1,4 +1,6 @@
-(globalThis.TURBOPACK = globalThis.TURBOPACK || []).push(["main.js", {
+((__TURBOPACK__) => {
+// Dummy runtime
+})([["main.js", {
 
 52: ((__turbopack_context__) => {
 "use strict";
@@ -56,8 +58,7 @@ root.render(/*#__PURE__*/ (0, __TURBOPACK__imported__module__52__["jsx"])(App, {
 }),
 },
 {"otherChunks":[],"runtimeModuleIds":[67]},
-]);
-// Dummy runtime
+]]);
 
 
 //# sourceMappingURL=main.js.map

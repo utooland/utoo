@@ -1,16 +1,6 @@
-(globalThis.TURBOPACK = globalThis.TURBOPACK || []).push(["main.js", {
-
-9: ((__turbopack_context__) => {
-
-var { m: module, e: exports } = __turbopack_context__;
-{
-console.log('Hello, world!');
-}}),
-},
-{"otherChunks":[],"runtimeModuleIds":[9]},
-]);
-(() => {
-if (!Array.isArray(globalThis.TURBOPACK)) {
+((__TURBOPACK__) => {
+            
+if (!Array.isArray(__TURBOPACK__)) {
     return;
 }
 
@@ -795,20 +785,19 @@ let BACKEND;
         return resolver.promise;
     }
 })();
-const chunksToRegister = globalThis.TURBOPACK;
-globalThis.TURBOPACK = { push: registerChunk };
+const chunksToRegister = __TURBOPACK__;
+__TURBOPACK__ = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
 function factory () {
-    for (const [,, runtimeParams] of chunksToRegister) {
-        if (runtimeParams?.runtimeModuleIds?.length > 0) {
-            const module = moduleCache[runtimeParams.runtimeModuleIds[0]];
-            if (module.error) throw module.error;
-            // any ES module has to have `module.namespaceObject` defined.
-            if (module.namespaceObject) return module.namespaceObject;
-            // only ESM can be an async module, so we don't need to worry about exports being a promise here.
-            const raw = module.exports;
-            return module.namespaceObject = interopEsm(raw, createNS(raw), raw && raw.__esModule);
-        }
+    const runtimeModuleIds = ["9"];
+    if (runtimeModuleIds.length > 0) {
+        const module = moduleCache[runtimeModuleIds[0]];
+        if (module.error) throw module.error;
+        // any ES module has to have `module.namespaceObject` defined.
+        if (module.namespaceObject) return module.namespaceObject;
+        // only ESM can be an async module, so we don't need to worry about exports being a promise here.
+        const raw = module.exports;
+        return module.namespaceObject = interopEsm(raw, createNS(raw), raw && raw.__esModule);
     }
 }
 
@@ -819,8 +808,17 @@ if (typeof exports === 'object' && typeof module === 'object') {
 } else {
     globalThis["MyLibrary"] = factory();
 }
-globalThis.TURBOPACK = [];
-})();
+})([["main.js", {
+
+9: ((__turbopack_context__) => {
+
+var { m: module, e: exports } = __turbopack_context__;
+{
+console.log('Hello, world!');
+}}),
+},
+{"otherChunks":[],"runtimeModuleIds":[9]},
+]]);
 
 
 //# sourceMappingURL=main.js.map
