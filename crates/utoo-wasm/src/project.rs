@@ -4,6 +4,7 @@ use opfs_project::{opfs, DirEntry};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
 
+#[cfg(feature = "utoo-pack")]
 use crate::pack::{build, PartialProjectOptions};
 
 #[wasm_bindgen]
@@ -30,6 +31,7 @@ impl Project {
         Ok(())
     }
 
+    #[cfg(feature = "utoo-pack")]
     #[wasm_bindgen]
     pub async fn build(&self) -> Result<(), JsValue> {
         let config = self.read_to_string("./utoopack.json").await.ok();
@@ -39,6 +41,14 @@ impl Project {
             config,
         };
         build(partial_options).await
+    }
+
+    #[cfg(not(feature = "utoo-pack"))]
+    #[wasm_bindgen]
+    pub async fn build(&self) -> Result<(), JsValue> {
+        Err(JsValue::from_str(
+            "Build functionality requires the 'utoo-pack' feature to be enabled",
+        ))
     }
 
     #[wasm_bindgen]
