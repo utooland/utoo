@@ -789,8 +789,9 @@ const chunksToRegister = __TURBOPACK__;
 __TURBOPACK__ = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
 function factory () {
-    if (["9"].length > 0) {
-        const module = moduleCache[["9"][0]];
+    const runtimeModuleIds = ["9"];
+    if (runtimeModuleIds.length > 0) {
+        const module = moduleCache[runtimeModuleIds[0]];
         if (module.error) throw module.error;
         // any ES module has to have `module.namespaceObject` defined.
         if (module.namespaceObject) return module.namespaceObject;

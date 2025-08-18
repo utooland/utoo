@@ -117,8 +117,9 @@ pub async fn get_library_runtime_code(
         code,
         r#"
             function factory () {{
-                if ({}.length > 0) {{
-                    const module = moduleCache[{}[0]];
+                const runtimeModuleIds = {};
+                if (runtimeModuleIds.length > 0) {{
+                    const module = moduleCache[runtimeModuleIds[0]];
                     if (module.error) throw module.error;
                     // any ES module has to have `module.namespaceObject` defined.
                     if (module.namespaceObject) return module.namespaceObject;
@@ -132,7 +133,6 @@ pub async fn get_library_runtime_code(
                 module.exports = factory();
             }} else if (typeof exports === 'object') {{
         "#,
-        StringifyJs(runtime_module_ids),
         StringifyJs(runtime_module_ids),
     )?;
 
