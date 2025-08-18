@@ -137,13 +137,11 @@ impl EcmascriptLibraryEvaluateChunk {
                 )
                 .await?;
 
-                // Add the runtime code inside the IIFE
                 code.push_code(&runtime_code);
             }
             #[cfg(feature = "test")]
             RuntimeType::Dummy => {
                 let runtime_code = turbopack_ecmascript_runtime::get_dummy_runtime_code();
-                // Add the runtime code inside the IIFE
                 code.push_code(&runtime_code);
             }
         }
