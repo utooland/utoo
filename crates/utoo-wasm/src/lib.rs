@@ -1,13 +1,10 @@
 #![cfg(all(target_family = "wasm", target_os = "unknown"))]
 
-#[cfg(feature = "utoo-pack")]
 extern crate console_error_panic_hook;
 
 use std::panic;
 
-#[cfg(feature = "utoo-pack")]
 use pack_core::tracing_presets::TRACING_OVERVIEW_TARGETS;
-#[cfg(feature = "utoo-pack")]
 use tracing_subscriber::{
     fmt::{
         self,
@@ -24,8 +21,8 @@ use wasm_bindgen::prelude::wasm_bindgen;
 
 #[cfg(feature = "utoo-pack")]
 pub(crate) mod pack;
-mod project;
 
+mod project;
 pub use project::Project;
 
 #[wasm_bindgen(start)]
@@ -43,12 +40,13 @@ fn init_pack() {
                 // .filter(|_| true)
                 .cloned()
                 .collect::<Vec<&str>>();
-            let mut trace = Vec::<&str>::new();
+
             trace.extend(["utoo_wasm=info"]);
             trace.join(",")
         }));
 
     registry().with(fmt_layer).init();
 
+    #[cfg(feature = "utoo-pack")]
     pack::register();
 }
