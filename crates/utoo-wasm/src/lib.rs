@@ -19,12 +19,14 @@ use tracing_subscriber::{
 use tracing_web::{performance_layer, MakeWebConsoleWriter};
 use wasm_bindgen::prelude::wasm_bindgen;
 
+#[cfg(feature = "utoo-pack")]
 pub(crate) mod pack;
-mod project;
 
+mod project;
 pub use project::Project;
 
 #[wasm_bindgen(start)]
+#[cfg(feature = "utoo-pack")]
 fn init_pack() {
     panic::set_hook(Box::new(console_error_panic_hook::hook));
 
@@ -38,11 +40,13 @@ fn init_pack() {
                 // .filter(|_| true)
                 .cloned()
                 .collect::<Vec<&str>>();
+
             trace.extend(["utoo_wasm=info"]);
             trace.join(",")
         }));
 
     registry().with(fmt_layer).init();
 
+    #[cfg(feature = "utoo-pack")]
     pack::register();
 }
