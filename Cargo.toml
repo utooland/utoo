@@ -99,7 +99,7 @@ too_many_arguments = "allow"
 
 [profile.release]
 opt-level = 3
-lto = "thin"
+lto = "fat"
 strip = "symbols"
 
 [profile.release-local]
@@ -131,3 +131,7 @@ strip = "none"
 incremental = true
 codegen-units = 256
 debug = 1
+
+[profile.wasm-release]
+inherits = "release"
+lto = "thin"
