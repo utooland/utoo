@@ -1,17 +1,14 @@
-name: utooweb-release
+name: utooweb-ci
 
 env:
   APP_NAME: "@utoo/web"
 
-on:
-  release:
-    types: [published]
+on: [pull_request]
 
 jobs:
   publish:
-    if: startsWith(github.event.release.tag_name, 'utooweb-v')
     name: Publish
-    runs-on: ubuntu-latest-8-cores
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,18 +36,13 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: nightly-2025-06-04
-      - name: Get version from release or use alpha version
-        id: get_version
-        run: |
-          echo "VERSION=${GITHUB_REF#refs/tags/utooweb-v}" >> $GITHUB_OUTPUT
       - name: NPM Publish
         run: |
           # npm config set provenance true
           echo "${VERSION}" &&
           echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc &&
 
-          npm version --workspace=@utoo/web "${VERSION}" &&
-          npm publish --workspace=@utoo/web --access public
+          npm publish --workspace=@utoo/web --access public --dry-run
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
