@@ -131,3 +131,7 @@ strip = "none"
 incremental = true
 codegen-units = 256
 debug = 1
+
+[profile.wasm-release]
+inherits = "release"
+lto = "thin"
