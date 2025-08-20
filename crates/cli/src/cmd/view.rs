@@ -3,7 +3,7 @@ use serde_json::Value;
 use crate::util::registry::{resolve, get_package_info};
 use crate::util::logger::log_verbose;
 use crate::helper::package::parse_package_spec;
-use chrono;
+use chrono::{TimeZone, Utc};
 use owo_colors::OwoColorize;
 
 /// View package information from registry, similar to npm view
@@ -28,13 +28,13 @@ pub async fn view(package_name: &str) -> Result<()> {
     };
 
     // Print package information in npm view format
-    print_package_info_npm_style(&package_info, name, version_manifest.as_ref())?;
+    print_package_info(&package_info, name, version_manifest.as_ref())?;
 
     Ok(())
 }
 
 /// Print package information in npm view style format
-fn print_package_info_npm_style(package_info: &Value, name: &str, version_manifest: Option<&Value>) -> Result<()> {
+fn print_package_info(package_info: &Value, name: &str, version_manifest: Option<&Value>) -> Result<()> {
     // Get the latest version from package info
     let latest_version = package_info.get("dist-tags")
         .and_then(|tags| tags.get("latest"))
@@ -124,7 +124,7 @@ fn print_package_info_npm_style(package_info: &Value, name: &str, version_manife
         }
         if let Some(unpacked_size) = dist.get("unpackedSize").and_then(|v| v.as_u64()) {
             let size_mb = unpacked_size as f64 / 1024.0 / 1024.0;
-            println!("{} {:.1} MB", ".unpackedSize:".cyan(), size_mb.to_string().yellow());
+            println!("{} {} MB", ".unpackedSize:".cyan(), format!("{:.1}", size_mb).yellow());
         }
     }
     
@@ -220,8 +220,8 @@ fn print_package_info_npm_style(package_info: &Value, name: &str, version_manife
     
     if let Some(publish_time) = publish_time {
         // Convert timestamp to datetime
-        if let Some(published_time) = chrono::DateTime::from_timestamp(publish_time as i64 / 1000, 0) {
-            let now = chrono::Utc::now();
+        if let Some(published_time) = Utc.timestamp_opt(publish_time as i64 / 1000, 0).single() {
+            let now = Utc::now();
             let duration = now.signed_duration_since(&published_time);
             
             let time_str = if duration.num_days() > 365 {
@@ -260,161 +260,6 @@ fn print_package_info_npm_style(package_info: &Value, name: &str, version_manife
                 }
             } else {
                 println!("\n{} {}", "published".bright_green(), time_str.white());
-            }
-        }
-    }
-    
-    Ok(())
-}
-
-/// Print package information in a readable format (legacy function)
-fn print_package_info(manifest: &Value, name: &str, version: &str) -> Result<()> {
-    println!("{}@{}", name, version);
-    
-    // Print basic information
-    if let Some(description) = manifest.get("description").and_then(|v| v.as_str()) {
-        println!("description: {}", description);
-    }
-    
-    if let Some(homepage) = manifest.get("homepage").and_then(|v| v.as_str()) {
-        println!("homepage: {}", homepage);
-    }
-    
-    if let Some(repository) = manifest.get("repository") {
-        if let Some(url) = repository.get("url").and_then(|v| v.as_str()) {
-            println!("repository: {}", url);
-        }
-    }
-    
-    if let Some(author) = manifest.get("author") {
-        if let Some(author_str) = author.as_str() {
-            println!("author: {}", author_str);
-        } else if let Some(author_obj) = author.as_object() {
-            if let Some(name) = author_obj.get("name").and_then(|v| v.as_str()) {
-                println!("author: {}", name);
-            }
-        }
-    }
-    
-    if let Some(license) = manifest.get("license").and_then(|v| v.as_str()) {
-        println!("license: {}", license);
-    }
-    
-    // Print dependencies
-    if let Some(dependencies) = manifest.get("dependencies").and_then(|v| v.as_object()) {
-        if !dependencies.is_empty() {
-            println!("dependencies:");
-            for (dep_name, dep_version) in dependencies {
-                println!("  {} {}", dep_name, dep_version);
-            }
-        }
-    }
-    
-    if let Some(dev_dependencies) = manifest.get("devDependencies").and_then(|v| v.as_object()) {
-        if !dev_dependencies.is_empty() {
-            println!("devDependencies:");
-            for (dep_name, dep_version) in dev_dependencies {
-                println!("  {} {}", dep_name, dep_version);
-            }
-        }
-    }
-    
-    if let Some(peer_dependencies) = manifest.get("peerDependencies").and_then(|v| v.as_object()) {
-        if !peer_dependencies.is_empty() {
-            println!("peerDependencies:");
-            for (dep_name, dep_version) in peer_dependencies {
-                println!("  {} {}", dep_name, dep_version);
-            }
-        }
-    }
-    
-    if let Some(optional_dependencies) = manifest.get("optionalDependencies").and_then(|v| v.as_object()) {
-        if !optional_dependencies.is_empty() {
-            println!("optionalDependencies:");
-            for (dep_name, dep_version) in optional_dependencies {
-                println!("  {} {}", dep_name, dep_version);
-            }
-        }
-    }
-    
-    // Print scripts
-    if let Some(scripts) = manifest.get("scripts").and_then(|v| v.as_object()) {
-        if !scripts.is_empty() {
-            println!("scripts:");
-            for (script_name, script_command) in scripts {
-                println!("  {}: {}", script_name, script_command);
-            }
-        }
-    }
-    
-    // Print engines
-    if let Some(engines) = manifest.get("engines").and_then(|v| v.as_object()) {
-        if !engines.is_empty() {
-            println!("engines:");
-            for (engine_name, engine_version) in engines {
-                println!("  {} {}", engine_name, engine_version);
-            }
-        }
-    }
-    
-    // Print keywords
-    if let Some(keywords) = manifest.get("keywords").and_then(|v| v.as_array()) {
-        if !keywords.is_empty() {
-            let keyword_str = keywords
-                .iter()
-                .filter_map(|k| k.as_str())
-                .collect::<Vec<_>>()
-                .join(" ");
-            println!("keywords: {}", keyword_str);
-        }
-    }
-    
-    // Print dist information
-    if let Some(dist) = manifest.get("dist") {
-        if let Some(tarball) = dist.get("tarball").and_then(|v| v.as_str()) {
-            println!("dist-tarball: {}", tarball);
-        }
-        if let Some(integrity) = dist.get("integrity").and_then(|v| v.as_str()) {
-            println!("dist-integrity: {}", integrity);
-        }
-        if let Some(shasum) = dist.get("shasum").and_then(|v| v.as_str()) {
-            println!("dist-shasum: {}", shasum);
-        }
-    }
-    
-    // Print time information
-    if let Some(time) = manifest.get("time") {
-        if let Some(published) = time.get("published").and_then(|v| v.as_str()) {
-            println!("published: {}", published);
-        }
-        if let Some(created) = time.get("created").and_then(|v| v.as_str()) {
-            println!("created: {}", created);
-        }
-        if let Some(modified) = time.get("modified").and_then(|v| v.as_str()) {
-            println!("modified: {}", modified);
-        }
-    }
-    
-    // Print maintainers
-    if let Some(maintainers) = manifest.get("maintainers").and_then(|v| v.as_array()) {
-        if !maintainers.is_empty() {
-            println!("maintainers:");
-            for maintainer in maintainers {
-                if let Some(name) = maintainer.get("name").and_then(|v| v.as_str()) {
-                    println!("  {}", name);
-                }
-            }
-        }
-    }
-    
-    // Print contributors
-    if let Some(contributors) = manifest.get("contributors").and_then(|v| v.as_array()) {
-        if !contributors.is_empty() {
-            println!("contributors:");
-            for contributor in contributors {
-                if let Some(name) = contributor.get("name").and_then(|v| v.as_str()) {
-                    println!("  {}", name);
-                }
             }
         }
     }
