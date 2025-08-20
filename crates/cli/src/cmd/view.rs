@@ -1,23 +1,25 @@
-use anyhow::{Context, Result};
-use serde_json::Value;
-use crate::util::registry::{resolve, get_package_info};
-use crate::util::logger::log_verbose;
 use crate::helper::package::parse_package_spec;
+use crate::util::logger::log_verbose;
+use crate::util::registry::{get_package_info, resolve};
+use anyhow::{anyhow, Result};
 use chrono::{TimeZone, Utc};
 use owo_colors::OwoColorize;
+use serde_json::Value;
+use term_size;
 
 /// View package information from registry, similar to npm view
-pub async fn view(package_name: &str) -> Result<()> {
-    log_verbose(&format!("Viewing package: {}", package_name));
+pub async fn view(package_spec: &str) -> Result<()> {
+    log_verbose(&format!("Viewing package: {}", package_spec));
 
     // Parse package specification
-    let (name, version_spec) = parse_package_spec(package_name);
+    let (name, version_spec) = parse_package_spec(package_spec);
     
     log_verbose(&format!("Resolved package: {} (spec: {})", name, version_spec));
 
     // Get complete package information (like npm view)
-    let package_info = get_package_info(name).await
-        .context(format!("Failed to fetch package information for {}", package_name))?;
+    let package_info = get_package_info(name)
+        .await
+        .map_err(|e| anyhow!("Failed to fetch package info for {}, reason: {}", package_spec, e))?;
 
     // Get the specific version manifest if a version was specified
     let version_manifest = if version_spec != "*" {
@@ -31,6 +33,44 @@ pub async fn view(package_name: &str) -> Result<()> {
     print_package_info(&package_info, name, version_manifest.as_ref())?;
 
     Ok(())
+}
+
+fn print_grid(items: Vec<String>) {
+    let terminal_width = term_size::dimensions()
+        .map(|(w, _)| w)
+        .unwrap_or(80); // 默认80字符宽度
+    log_verbose(&format!("Terminal size: {}", terminal_width));
+
+    let max_len = items.iter()
+        .map(|s| s.len())
+        .max()
+        .unwrap_or(1);
+    log_verbose(&format!("Max item length: {}", max_len));
+
+    for cols in [12, 6, 4, 3, 2, 1] {
+        if (terminal_width / max_len) >= cols {
+            let rows = (items.len() + cols - 1) / cols; // 向上取整
+            let col_len = terminal_width / cols;
+            log_verbose(&format!("Using {} columns, {} rows, column length {}", cols, rows, col_len));
+
+            for row in 0..rows {
+                let mut line = String::new();
+                for col in 0..cols {
+                    let index = col + row * cols;
+                    if index < items.len() {
+                        let item = items.get(index).unwrap();
+                        line.push_str(&item);
+                        if col < cols {
+                            let spaces = " ".repeat(col_len - item.len());
+                            line.push_str(&spaces);
+                        }
+                    }
+                }
+                println!("{}", line);
+            }
+            return;
+        }
+    }
 }
 
 /// Print package information in npm view style format
@@ -177,6 +217,27 @@ fn print_package_info(package_info: &Value, name: &str, version_manifest: Option
             println!("{} {}", "bugs:".bright_magenta(), bugs_url.blue().underline());
         }
     }
+
+    // Print dependencies
+    if let Some(dependencies) = target_manifest.get("dependencies").and_then(|v|
+        v.as_object()) {
+        if !dependencies.is_empty() {
+            println!("\n{} {}", "dependencies:".bright_yellow().bold(), dependencies.len().white());
+            let show_count = 24;
+            let show_deps = dependencies.iter()
+                .take(show_count)
+                .map(|(dep_name, dep_version)| if let Some(version_str) = dep_version.as_str() {
+                    format!("{}: {}", dep_name.cyan(), version_str.bright_green())
+                } else {
+                    format!("{}: {}", dep_name.cyan(), dep_version)
+                })
+                .collect::<Vec<_>>();
+            print_grid(show_deps);
+            if dependencies.len() > show_count {
+                println!("(... and {} more.)", (dependencies.len() - show_count).to_string().white());
+            }
+        }
+    }
     
     // Print maintainers
     if let Some(maintainers) = package_info.get("maintainers").and_then(|v| v.as_array()) {
@@ -198,11 +259,14 @@ fn print_package_info(package_info: &Value, name: &str, version_manifest: Option
     if let Some(dist_tags) = package_info.get("dist-tags").and_then(|v| v.as_object()) {
         if !dist_tags.is_empty() {
             println!("\n{}", "dist-tags:".bright_yellow().bold());
-            for (tag, version) in dist_tags {
+            let tags = dist_tags.iter().map(|(tag, version)| {
                 if let Some(version_str) = version.as_str() {
-                    println!("{}: {}", tag.cyan(), version_str.bright_green());
+                    format!("{}: {}", tag.cyan(), version_str.bright_green())
+                } else {
+                    format!("{}: {}", tag.cyan(), version)
                 }
-            }
+            }).collect::<Vec<_>>();
+            print_grid(tags);
         }
     }
     
@@ -271,6 +335,7 @@ fn print_package_info(package_info: &Value, name: &str, version_manifest: Option
 mod tests {
     use super::*;
     use serde_json::json;
+    use serde_json::Value::String;
 
     #[test]
     fn test_print_package_info() {
@@ -289,7 +354,7 @@ mod tests {
         });
 
         // This test just ensures the function doesn't panic
-        let result = print_package_info(&manifest, "test-package", "1.0.0");
+        let result = print_package_info(&manifest, "test-package", None);
         assert!(result.is_ok());
     }
 }
