@@ -1,7 +1,5 @@
 {
   "$schema": "../../packages/pack/config_schema.json",
-  "rootPath": "../../",
-  "projectPath": "./",
   "config": {
     "entry": [
       {

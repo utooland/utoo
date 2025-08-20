@@ -1,4 +1,5 @@
 import { nanoid } from "nanoid";
+import { findRootDir } from "./find-root";
 import { projectFactory } from "./project";
 import { BundleOptions } from "./types";
 import {
@@ -30,6 +31,10 @@ export function build(
   const bundleOptions = (<WebpackConfig>options).compatMode
     ? compatOptionsFromWebpack(<WebpackConfig>options)
     : <BundleOptions>options;
+  if (!rootPath) {
+    // help user to find the rootDir automatically.
+    rootPath = findRootDir(projectPath || process.cwd());
+  }
   return buildInternal(bundleOptions, projectPath, rootPath);
 }
 
