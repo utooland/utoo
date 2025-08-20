@@ -81,7 +81,7 @@ async function buildInternal(
 
   if (topLevelWarnings.length > 0) {
     console.warn(
-      `Turbopack build encountered ${
+      `Utoopack build encountered ${
         topLevelWarnings.length
       } warnings:\n${topLevelWarnings.join("\n")}`,
     );
@@ -89,7 +89,7 @@ async function buildInternal(
 
   if (topLevelErrors.length > 0) {
     throw new Error(
-      `Turbopack build failed with ${
+      `Utoopack build failed with ${
         topLevelErrors.length
       } errors:\n${topLevelErrors.join("\n")}`,
     );
