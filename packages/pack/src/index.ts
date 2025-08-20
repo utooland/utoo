@@ -7,6 +7,8 @@ export { serve };
 
 const utoopack = { build, serve };
 export default utoopack;
+export * from "./webpackCompat";
+export * from './types';
 export type WebpackConfig = webpackCompat.WebpackConfig;
 namespace utoopack {
   export type WebpackConfig = webpackCompat.WebpackConfig;
