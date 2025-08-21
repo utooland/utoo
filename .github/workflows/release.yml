@@ -89,6 +89,10 @@ jobs:
           override: true
           target: ${{ matrix.target }}
 
+      - name: Add cross-compilation target for x86_64 on macOS
+        if: ${{ matrix.target == 'x86_64-apple-darwin' }}
+        run: rustup target add x86_64-apple-darwin
+
       - name: Add SSH private keys for submodule repositories
         uses: webfactory/ssh-agent@v0.7.0
         with:
@@ -101,16 +105,15 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --bin utoo --bin ut
+          args: --release --bin utoo --bin ut --target ${{ matrix.target }}
 
       - name: Package Binaries
         run: |
-          cd target/release
-          tar -czf ../../utoo-${{ matrix.platform_os }}-${{ matrix.platform_cpu }}.tar.gz \
+          cd target/${{ matrix.target }}/release
+          tar -czf ../../../utoo-${{ matrix.platform_os }}-${{ matrix.platform_cpu }}.tar.gz \
             utoo ut
 
       - name: Upload Release Asset
-        if: ${{ matrix.platform_os == 'linux' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -136,7 +139,7 @@ jobs:
           for BIN in "${BINS[@]}"; do
             PACKAGE_NAME=$(echo "$BIN")
             ./npm-binary.sh "$PACKAGE_NAME" "$VERSION" \
-              "../../target/release/$BIN" \
+              "../../target/${{ matrix.target }}/release/$BIN" \
               "${{ matrix.platform_os }}" "${{ matrix.platform_cpu }}"
           done
 
