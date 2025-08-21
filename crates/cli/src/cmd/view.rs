@@ -22,15 +22,11 @@ pub async fn view(package_spec: &str) -> Result<()> {
         .map_err(|e| anyhow!("Failed to fetch package info for {}, reason: {}", package_spec, e))?;
 
     // Get the specific version manifest if a version was specified
-    let version_manifest = if version_spec != "*" {
-        let resolved = resolve(name, version_spec).await?;
-        Some(resolved.manifest)
-    } else {
-        None
-    };
+    let resolved_package = resolve(name, version_spec).await?;
+    let version_manifest = resolved_package.manifest;
 
     // Print package information in npm view format
-    print_package_info(&package_info, name, version_manifest.as_ref())?;
+    print_package_info(&package_info, name, &version_manifest)?;
 
     Ok(())
 }
@@ -74,7 +70,7 @@ fn print_grid(items: Vec<String>) {
 }
 
 /// Print package information in npm view style format
-fn print_package_info(package_info: &Value, name: &str, version_manifest: Option<&Value>) -> Result<()> {
+fn print_package_info(package_info: &Value, name: &str, version_manifest: &Value) -> Result<()> {
     // Get the latest version from package info
     let latest_version = package_info.get("dist-tags")
         .and_then(|tags| tags.get("latest"))
@@ -82,23 +78,12 @@ fn print_package_info(package_info: &Value, name: &str, version_manifest: Option
         .unwrap_or("latest");
     
     // Get the specific version if provided, otherwise use latest
-    let target_version = if let Some(manifest) = version_manifest {
-        manifest.get("version").and_then(|v| v.as_str()).unwrap_or(latest_version)
-    } else {
-        latest_version
-    };
-    
+    let target_version = version_manifest.get("version").and_then(|v| v.as_str()).unwrap_or(latest_version);
+
     log_verbose(&format!("Target version: {}", target_version));
     
     // Get the target manifest
-    let target_manifest = if let Some(manifest) = version_manifest {
-        manifest
-    } else {
-        // Get the latest version manifest from package info
-        package_info.get("versions")
-            .and_then(|versions| versions.get(target_version))
-            .unwrap_or(package_info)
-    };
+    let target_manifest = version_manifest;
     
     // Print header line like npm view
     let description = target_manifest.get("description").and_then(|v| v.as_str()).unwrap_or("");
@@ -171,14 +156,7 @@ fn print_package_info(package_info: &Value, name: &str, version_manifest: Option
     }
     
     // Print author information
-    let author_source = if version_manifest.is_some() {
-        // For specific version, try version manifest first, then fallback to package info
-        target_manifest.get("author")
-            .or_else(|| package_info.get("author"))
-    } else {
-        // For latest version, use target manifest
-        target_manifest.get("author")
-    };
+    let author_source = target_manifest.get("author").or_else(|| package_info.get("author"));
     
     if let Some(author) = author_source.and_then(|v| v.as_object()) {
         if let Some(author_name) = author.get("name").and_then(|v| v.as_str()) {
@@ -191,12 +169,7 @@ fn print_package_info(package_info: &Value, name: &str, version_manifest: Option
     }
     
     // Print repository information
-    let repo_source = if version_manifest.is_some() {
-        target_manifest.get("repository")
-            .or_else(|| package_info.get("repository"))
-    } else {
-        target_manifest.get("repository")
-    };
+    let repo_source = target_manifest.get("repository").or_else(|| package_info.get("repository"));
     
     if let Some(repo) = repo_source.and_then(|v| v.as_object()) {
         if let Some(repo_type) = repo.get("type").and_then(|v| v.as_str()) {
@@ -207,12 +180,7 @@ fn print_package_info(package_info: &Value, name: &str, version_manifest: Option
     }
     
     // Print bugs information
-    let bugs_source = if version_manifest.is_some() {
-        target_manifest.get("bugs")
-            .or_else(|| package_info.get("bugs"))
-    } else {
-        target_manifest.get("bugs")
-    };
+    let bugs_source = target_manifest.get("bugs").or_else(|| package_info.get("bugs"));
     
     if let Some(bugs) = bugs_source.and_then(|v| v.as_object()) {
         if let Some(bugs_url) = bugs.get("url").and_then(|v| v.as_str()) {
@@ -273,17 +241,11 @@ fn print_package_info(package_info: &Value, name: &str, version_manifest: Option
     }
     
     // Print time information
-    let publish_time = if version_manifest.is_some() {
-        // For specific version, try to get publish_time from the specific version in package_info
-        package_info.get("versions")
-            .and_then(|versions| versions.get(target_version))
-            .and_then(|version_info| version_info.get("publish_time"))
-            .and_then(|v| v.as_u64())
-    } else {
-        // For latest version, use target manifest
-        target_manifest.get("publish_time").and_then(|v| v.as_u64())
-    };
-    
+    let publish_time = package_info.get("versions")
+        .and_then(|versions| versions.get(target_version))
+        .and_then(|version_info| version_info.get("publish_time"))
+        .and_then(|v| v.as_u64());
+
     if let Some(publish_time) = publish_time {
         // Convert timestamp to datetime
         if let Some(published_time) = Utc.timestamp_opt(publish_time as i64 / 1000, 0).single() {
@@ -303,16 +265,10 @@ fn print_package_info(package_info: &Value, name: &str, version_manifest: Option
             };
             
             // Try to get publisher information from _npmUser field
-            let npm_user = if version_manifest.is_some() {
-                // For specific version, try to get _npmUser from the specific version
-                package_info.get("versions")
-                    .and_then(|versions| versions.get(target_version))
-                    .and_then(|version_info| version_info.get("_npmUser"))
-                    .and_then(|v| v.as_object())
-            } else {
-                // For latest version, use target manifest
-                target_manifest.get("_npmUser").and_then(|v| v.as_object())
-            };
+            let npm_user = package_info.get("versions")
+                .and_then(|versions| versions.get(target_version))
+                .and_then(|version_info| version_info.get("_npmUser"))
+                .and_then(|v| v.as_object());
             
             if let Some(npm_user) = npm_user {
                 if let Some(publisher_name) = npm_user.get("name").and_then(|v| v.as_str()) {
@@ -337,7 +293,6 @@ fn print_package_info(package_info: &Value, name: &str, version_manifest: Option
 mod tests {
     use super::*;
     use serde_json::json;
-    use serde_json::Value::String;
 
     #[test]
     fn test_print_package_info() {
@@ -356,7 +311,7 @@ mod tests {
         });
 
         // This test just ensures the function doesn't panic
-        let result = print_package_info(&manifest, "test-package", None);
+        let result = print_package_info(&manifest, "test-package", &json!("1.0.0"));
         assert!(result.is_ok());
     }
 }
