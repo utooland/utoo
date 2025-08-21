@@ -1,0 +1,10 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 9, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/umd/async-module/input/shared.js"],"sourcesContent":["await 1;\nawait 1;\nexport default \"hello\";\n"],"names":[],"mappings":";;;AAAA,MAAM;AACN,MAAM;uCACS"}},
+    {"offset": {"line": 22, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/umd/async-module/input/a.js"],"sourcesContent":["import x from \"./shared\";\n\nexport default x + \" world\";\n"],"names":[],"mappings":";;;AAAA;;;;;;uCAEe,8CAAC,GAAG"}},
+    {"offset": {"line": 39, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/umd/async-module/input/b.js"],"sourcesContent":["import x from \"./shared\";\n\nexport default x + \" world\";\n"],"names":[],"mappings":";;;AAAA;;;;;;uCAEe,8CAAC,GAAG"}},
+    {"offset": {"line": 56, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/umd/async-module/input/main.js"],"sourcesContent":["import a from \"./a\";\nimport b from \"./b\";\n\nexport default a + \", \" + b;\n"],"names":[],"mappings":";;;AAAA;AACA;;;;;;;;uCAEe,8CAAC,GAAG,OAAO,8CAAC"}},
+    {"offset": {"line": 76, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/umd/async-module/input/index.js"],"sourcesContent":["const result = await require(\"./main\");\n\nresult.default;"],"names":[],"mappings":"AAAA,MAAM,SAAS;AAEf,OAAO,OAAO"}}]
+}

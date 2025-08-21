@@ -33,7 +33,10 @@ use turbopack_core::{
     },
     output::{OutputAsset, OutputAssets},
 };
-use turbopack_ecmascript::chunk::{EcmascriptChunk, EcmascriptChunkType};
+use turbopack_ecmascript::{
+    chunk::{EcmascriptChunk, EcmascriptChunkType},
+    manifest::{chunk_asset::ManifestAsyncModule, loader_item::ManifestLoaderChunkItem},
+};
 use turbopack_ecmascript_runtime::RuntimeType;
 
 use crate::library::ecmascript::chunk::EcmascriptLibraryEvaluateChunk;
@@ -85,6 +88,11 @@ impl LibraryChunkingContextBuilder {
 
     pub fn runtime_type(mut self, runtime_type: RuntimeType) -> Self {
         self.chunking_context.runtime_type = runtime_type;
+        self
+    }
+
+    pub fn manifest_chunks(mut self) -> Self {
+        self.chunking_context.manifest_chunks = true;
         self
     }
 
@@ -163,6 +171,8 @@ pub struct LibraryChunkingContext {
     minify_type: MinifyType,
     /// Whether to generate source maps
     source_maps_type: SourceMapsType,
+    /// Whether to use manifest chunks for lazy compilation
+    manifest_chunks: bool,
     /// The module id strategy to use
     module_id_strategy: ResolvedVc<Box<dyn ModuleIdStrategy>>,
     /// The module export usage info, if available.
@@ -198,6 +208,7 @@ impl LibraryChunkingContext {
                 runtime_root,
                 runtime_export,
                 enable_module_merging: false,
+                manifest_chunks: true,
             },
         }
     }
@@ -546,19 +557,25 @@ impl ChunkingContext for LibraryChunkingContext {
     #[turbo_tasks::function]
     async fn async_loader_chunk_item(
         self: Vc<Self>,
-        _module: Vc<Box<dyn ChunkableModule>>,
-        _module_graph: Vc<ModuleGraph>,
-        _availability_info: AvailabilityInfo,
+        module: Vc<Box<dyn ChunkableModule>>,
+        module_graph: Vc<ModuleGraph>,
+        availability_info: AvailabilityInfo,
     ) -> Result<Vc<Box<dyn ChunkItem>>> {
-        bail!("Library chunking context does not support async loader chunk item")
+        let manifest_asset =
+            ManifestAsyncModule::new(module, module_graph, Vc::upcast(self), availability_info);
+        Ok(Vc::upcast(ManifestLoaderChunkItem::new(
+            manifest_asset,
+            module_graph,
+            Vc::upcast(self),
+        )))
     }
 
     #[turbo_tasks::function]
     async fn async_loader_chunk_item_id(
         self: Vc<Self>,
-        _module: Vc<Box<dyn ChunkableModule>>,
+        module: Vc<Box<dyn ChunkableModule>>,
     ) -> Result<Vc<ModuleId>> {
-        bail!("Library chunking context does not support async loader chunk item id")
+        Ok(self.chunk_item_id_from_ident(ManifestLoaderChunkItem::asset_ident_for(module)))
     }
 
     #[turbo_tasks::function]
