@@ -197,9 +197,9 @@ fn print_package_info(package_info: &Value, name: &str, version_manifest: &Value
             let show_deps = dependencies.iter()
                 .take(show_count)
                 .map(|(dep_name, dep_version)| if let Some(version_str) = dep_version.as_str() {
-                    format!("{}: {}", dep_name.cyan(), version_str.bright_green())
+                    format!("{}: {}", dep_name.blue(), version_str)
                 } else {
-                    format!("{}: {}", dep_name.cyan(), dep_version)
+                    format!("{}: {}", dep_name.blue(), dep_version)
                 })
                 .collect::<Vec<_>>();
             print_grid(show_deps);
@@ -216,9 +216,9 @@ fn print_package_info(package_info: &Value, name: &str, version_manifest: &Value
             for maintainer in maintainers {
                 if let Some(name) = maintainer.get("name").and_then(|v| v.as_str()) {
                     if let Some(email) = maintainer.get("email").and_then(|v| v.as_str()) {
-                        println!("- {} <{}>", name.white(), email.blue());
+                        println!("- {} <{}>", name.blue(), email.white());
                     } else {
-                        println!("- {}", name.white());
+                        println!("- {}", name.blue());
                     }
                 }
             }
@@ -231,9 +231,9 @@ fn print_package_info(package_info: &Value, name: &str, version_manifest: &Value
             println!("\n{}", "dist-tags:".bright_yellow().bold());
             let tags = dist_tags.iter().map(|(tag, version)| {
                 if let Some(version_str) = version.as_str() {
-                    format!("{}: {}", tag.cyan(), version_str.bright_green())
+                    format!("{}: {}", tag.blue(), version_str)
                 } else {
-                    format!("{}: {}", tag.cyan(), version)
+                    format!("{}: {}", tag.blue(), version)
                 }
             }).collect::<Vec<_>>();
             print_grid(tags);
@@ -273,15 +273,15 @@ fn print_package_info(package_info: &Value, name: &str, version_manifest: &Value
             if let Some(npm_user) = npm_user {
                 if let Some(publisher_name) = npm_user.get("name").and_then(|v| v.as_str()) {
                     if let Some(publisher_email) = npm_user.get("email").and_then(|v| v.as_str()) {
-                        println!("\n{} {} by {} <{}>", "published".bright_green(), time_str.white(), publisher_name.white(), publisher_email.blue());
+                        println!("\n{} {} by {} <{}>", "published", time_str.cyan(), publisher_name.blue(), publisher_email.white());
                     } else {
-                        println!("\n{} {} by {}", "published".bright_green(), time_str.white(), publisher_name.white());
+                        println!("\n{} {} by {}", "published", time_str.cyan(), publisher_name.blue());
                     }
                 } else {
-                    println!("\n{} {}", "published".bright_green(), time_str.white());
+                    println!("\n{} {}", "published", time_str.cyan());
                 }
             } else {
-                println!("\n{} {}", "published".bright_green(), time_str.white());
+                println!("\n{} {}", "published", time_str.cyan());
             }
         }
     }
