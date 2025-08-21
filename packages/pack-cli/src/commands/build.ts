@@ -41,7 +41,7 @@ export default class Build extends Command {
     await utooPack.build(
       projectOptions,
       path.resolve(cwd, project || cwd),
-      path.resolve(cwd, root || project || cwd),
+      root && path.resolve(cwd, root)
     );
   }
 }

@@ -2,8 +2,8 @@
   "name": "react-example",
   "version": "0.0.1",
   "scripts": {
-    "build": "utoo-pack build -p . -r ../../",
-    "dev": "utoo-pack dev -p . -r ../../"
+    "build": "utoo-pack build",
+    "dev": "utoo-pack dev"
   },
   "dependencies": {
     "react": "^18.2.0",

@@ -2,8 +2,8 @@
   "name": "split-chunks",
   "version": "1.0.0",
   "scripts": {
-    "build": "utoo-pack build -p . -r ../..",
-    "dev": "utoo-pack dev -p . -r ../..",
+    "build": "utoo-pack build",
+    "dev": "utoo-pack dev",
     "build-by-native": "../../target/release/pack-cli build",
     "dev-by-native": "../../target/release/pack-cli dev",
     "serve": "serve ."
