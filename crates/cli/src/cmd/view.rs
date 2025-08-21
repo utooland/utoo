@@ -1,6 +1,6 @@
 use crate::helper::package::parse_package_spec;
 use crate::util::logger::log_verbose;
-use crate::util::registry::{get_package_info, resolve};
+use crate::util::registry::{resolve, get_package_info};
 use anyhow::{anyhow, Result};
 use chrono::{TimeZone, Utc};
 use owo_colors::OwoColorize;
@@ -17,10 +17,9 @@ pub async fn view(package_spec: &str) -> Result<()> {
     log_verbose(&format!("Resolved package: {} (spec: {})", name, version_spec));
 
     // Get complete package information (like npm view)
-    let package_info = get_package_info(name)
+    let package_info = get_package_info(name, if version_spec.is_empty() { "latest" } else { version_spec })
         .await
         .map_err(|e| anyhow!("Failed to fetch package info for {}, reason: {}", package_spec, e))?;
-
     // Get the specific version manifest if a version was specified
     let version_manifest = if version_spec != "*" {
         let resolved = resolve(name, version_spec).await?;
@@ -79,7 +78,7 @@ fn print_package_info(package_info: &Value, name: &str, version_manifest: Option
     let latest_version = package_info.get("dist-tags")
         .and_then(|tags| tags.get("latest"))
         .and_then(|v| v.as_str())
-        .unwrap_or("unknown");
+        .unwrap_or("latest");
     
     // Get the specific version if provided, otherwise use latest
     let target_version = if let Some(manifest) = version_manifest {
@@ -87,6 +86,8 @@ fn print_package_info(package_info: &Value, name: &str, version_manifest: Option
     } else {
         latest_version
     };
+    
+    log_verbose(&format!("Target version: {}", target_version));
     
     // Get the target manifest
     let target_manifest = if let Some(manifest) = version_manifest {

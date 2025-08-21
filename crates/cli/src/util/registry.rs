@@ -232,9 +232,10 @@ impl Registry {
     }
 
     /// Get complete package information (like npm view)
-    pub async fn get_package_info(&self, name: &str) -> Result<Value> {
+    pub async fn get_package_info(&self, name: &str, version_spec: &str) -> Result<Value> {
         // Build request URL for complete package info
         let url = format!("{}/{}", self.base_url, name);
+        log_verbose(&format!("Fetching package info at {}", url));
 
         // Record start time
         let start_time = Instant::now();
@@ -325,8 +326,8 @@ pub async fn resolve(name: &str, spec: &str) -> Result<ResolvedPackage> {
 }
 
 // Global package info function
-pub async fn get_package_info(name: &str) -> Result<Value> {
-    REGISTRY.get_package_info(name).await
+pub async fn get_package_info(name: &str, version_spec: &str) -> Result<Value> {
+    REGISTRY.get_package_info(name, version_spec).await
 }
 
 // Public cache operations
