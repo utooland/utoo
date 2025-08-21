@@ -17,9 +17,10 @@ pub async fn view(package_spec: &str) -> Result<()> {
     log_verbose(&format!("Resolved package: {} (spec: {})", name, version_spec));
 
     // Get complete package information (like npm view)
-    let package_info = get_package_info(name, if version_spec.is_empty() { "latest" } else { version_spec })
+    let package_info = get_package_info(name)
         .await
         .map_err(|e| anyhow!("Failed to fetch package info for {}, reason: {}", package_spec, e))?;
+
     // Get the specific version manifest if a version was specified
     let version_manifest = if version_spec != "*" {
         let resolved = resolve(name, version_spec).await?;
