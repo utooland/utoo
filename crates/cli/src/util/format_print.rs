@@ -4,7 +4,7 @@ use term_size;
 pub fn print_grid(items: Vec<String>) {
     let terminal_width = term_size::dimensions()
         .map(|(w, _)| w)
-        .unwrap_or(80); // 默认80字符宽度
+        .unwrap_or(80); // default width if unable to get terminal size
     log_verbose(&format!("Terminal size: {terminal_width}"));
 
     let max_len = items.iter()
@@ -31,7 +31,7 @@ fn find_optimal_columns(terminal_width: usize, max_len: usize) -> usize {
             return cols;
         }
     }
-    1 // 默认返回1列
+    1 // fallback to 1 column
 }
 
 fn build_row_line(items: &[String], row: usize, cols: usize, col_len: usize) -> String {
