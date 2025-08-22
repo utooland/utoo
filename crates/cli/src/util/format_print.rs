@@ -47,7 +47,7 @@ fn build_row_line(items: &[String], row: usize, cols: usize, col_len: usize) -> 
         let item = &items[index];
         line.push_str(item);
 
-        // 添加填充空格（除了最后一列）
+        // Add spaces to align columns, except for the last column
         if col < cols - 1 && col_len > item.len() {
             let spaces = " ".repeat(col_len - item.len());
             line.push_str(&spaces);
