@@ -1,3 +1,5 @@
+#![feature(let_chains)]
+
 use std::process;
 
 use anyhow::Result;
@@ -9,6 +11,7 @@ use cmd::list::list_dependencies;
 use cmd::rebuild::rebuild;
 use cmd::run::run;
 use cmd::update::update;
+use cmd::view::view;
 use cmd::{clean::clean, deps::build_workspace};
 use helper::auto_update::init_auto_update;
 use util::config::{set_legacy_peer_deps, set_registry};
@@ -27,6 +30,7 @@ mod util;
 use crate::constants::cmd::{
     CLEAN_ABOUT, CLEAN_NAME, DEPS_ABOUT, DEPS_NAME, EXECUTE_ABOUT, EXECUTE_NAME, INSTALL_ABOUT,
     INSTALL_NAME, REBUILD_ABOUT, REBUILD_NAME, UNINSTALL_ABOUT, UNINSTALL_NAME, UPDATE_ABOUT,
+    VIEW_ABOUT, VIEW_NAME,
 };
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
 use crate::helper::cli::parse_script_and_args;
@@ -53,15 +57,12 @@ struct Cli {
     #[arg(long, global = true, action = clap::ArgAction::SetTrue)]
     legacy_peer_deps: Option<bool>,
 
-    #[arg(short = 'v', long)]
-    version: bool,
-
     /// Workspace to operate in
-    #[arg(short, long, global = true, hide = true)]
+    #[arg(long, global = true, hide = true)]
     workspace: Option<String>,
 
     /// Workspace to operate in
-    #[arg(short, long, global = true, hide = true, default_value = "false")]
+    #[arg(long, global = true, hide = true, default_value = "false")]
     workspaces: bool,
 
     script_name: Option<String>,
@@ -168,6 +169,12 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+
+    #[command(name = VIEW_NAME, alias = "vw", about = VIEW_ABOUT)]
+    View {
+        /// Package name to view
+        package: String,
+    },
 }
 
 #[tokio::main]
@@ -184,12 +191,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // set legacy_peer_deps when set --legacy
     if cli.legacy_peer_deps == Some(true) {
         set_legacy_peer_deps(cli.legacy_peer_deps);
-    }
-
-    // Handle --version flag
-    if cli.version {
-        println!("{APP_VERSION}");
-        return Ok(());
     }
 
     // Ensure the version is up to date, weak dependency
@@ -360,6 +361,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             if let Err(e) = run(&script, workspace.as_deref(), workspaces, script_args_owned).await
             {
+                log_error(&e.to_string());
+                let _ = write_verbose_logs_to_file();
+                process::exit(1);
+            }
+        }
+        Some(Commands::View { package }) => {
+            if let Err(e) = view(&package).await {
                 log_error(&e.to_string());
                 let _ = write_verbose_logs_to_file();
                 process::exit(1);

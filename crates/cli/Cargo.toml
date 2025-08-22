@@ -40,6 +40,9 @@ anyhow = { workspace = true }
 openssl = { version = "0.10", features = ["vendored"] }
 petgraph = "0.6"
 dashmap = "6.1.0"
+chrono = { version = "0.4", features = ["serde"] }
+term_size = "0.3"
+
 
 [[bench]]
 name = "install_benchmark"

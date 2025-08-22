@@ -1,12 +1,19 @@
 {
-  "rootPath": "../../",
-  "projectPath": "./",
+  "$schema": "../../packages/pack/config_schema.json",
   "config": {
     "entry": [
       {
         "import": "./src/index.ts"
       }
     ],
+    "optimization": {
+      "minify": false
+    },
+    "styles": {
+      "less": {
+        "javascriptEnabled": true
+      }
+    },
     "output": {
       "path": "./dist",
       "filename": "[name].[contenthash:8]",

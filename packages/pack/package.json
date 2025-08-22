@@ -41,6 +41,7 @@
     "react-refresh": "^0.12.0",
     "@babel/code-frame": "7.22.5",
     "@swc/helpers": "0.5.15",
+    "find-up": "4.1.0",
     "loader-runner": "^4.3.0",
     "less": "^4.0.0",
     "less-loader": "^12.0.0",
