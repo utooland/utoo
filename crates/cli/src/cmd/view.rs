@@ -9,12 +9,12 @@ use owo_colors::OwoColorize;
 
 /// View package information from registry, similar to npm view
 pub async fn view(package_spec: &str) -> Result<()> {
-    log_verbose(&format!("Viewing package: {}", package_spec));
+    log_verbose(&format!("Viewing package: {package_spec}"));
 
     // Parse package specification
     let (name, version_spec) = parse_package_spec(package_spec);
     
-    log_verbose(&format!("Resolved package: {} (spec: {})", name, version_spec));
+    log_verbose(&format!("Resolved package: {name} (spec: {version_spec})"));
 
     // Get complete package information (like npm view)
     let package_info = get_package_info(name)
@@ -109,7 +109,7 @@ fn print_dist_info(package_manifest: &PackageManifest) {
         
         if let Some(unpacked_size) = dist.unpacked_size {
             let size_mb = unpacked_size as f64 / 1024.0 / 1024.0;
-            println!("{} {} MB", ".unpackedSize:".cyan(), format!("{:.1}", size_mb).yellow());
+            println!("{} {} MB", ".unpackedSize:".cyan(), format!("{size_mb:.1}").yellow());
         }
     }
 }
@@ -120,7 +120,7 @@ fn print_author_info(package_manifest: &PackageManifest) {
             Some(email) => format!("\n{} {} <{}>", "author:".bright_magenta(), author.name.white(), email.blue()),
             None => format!("\n{} {}", "author:".bright_magenta(), author.name.white()),
         };
-        println!("{}", author_line);
+        println!("{author_line}");
     }
 }
 
@@ -163,7 +163,7 @@ fn print_maintainers(package_manifest: &PackageManifest) {
                 Some(email) => format!("- {} <{}>", maintainer.name.blue(), email.white()),
                 None => format!("- {}", maintainer.name.blue()),
             };
-            println!("{}", maintainer_line);
+            println!("{maintainer_line}");
         }
     }
 }
@@ -181,26 +181,25 @@ fn print_dist_tags(package_manifest: &PackageManifest) {
 }
 
 fn print_publish_info(package_manifest: &PackageManifest) {
-    if let Some(publish_time) = package_manifest.get_publish_time(&package_manifest.version) {
-        if let Some(published_time) = Utc.timestamp_opt(publish_time as i64 / 1000, 0).single() {
+    if let Some(publish_time) = package_manifest.get_publish_time(&package_manifest.version)
+        && let Some(published_time) = Utc.timestamp_opt(publish_time as i64 / 1000, 0).single() {
             let time_str = format_time_ago(published_time);
             let publish_line = format_publish_line(&time_str, package_manifest);
             
-            println!("\n{}", publish_line);
+            println!("\n{publish_line}");
         }
-    }
 }
 
 fn format_time_ago(published_time: chrono::DateTime<Utc>) -> String {
     let now = Utc::now();
-    let duration = now.signed_duration_since(&published_time);
+    let duration = now.signed_duration_since(published_time);
     
     match duration.num_days() {
         days if days > 365 => "over a year ago".to_string(),
         days if days > 30 => format!("{} months ago", days / 30),
-        days if days > 0 => format!("{} days ago", days),
+        days if days > 0 => format!("{days} days ago"),
         _ => match duration.num_hours() {
-            hours if hours > 0 => format!("{} hours ago", hours),
+            hours if hours > 0 => format!("{hours} hours ago"),
             _ => format!("{} minutes ago", duration.num_minutes()),
         }
     }

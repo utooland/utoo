@@ -5,23 +5,23 @@ pub fn print_grid(items: Vec<String>) {
     let terminal_width = term_size::dimensions()
         .map(|(w, _)| w)
         .unwrap_or(80); // 默认80字符宽度
-    log_verbose(&format!("Terminal size: {}", terminal_width));
+    log_verbose(&format!("Terminal size: {terminal_width}"));
 
     let max_len = items.iter()
         .map(|s| s.len())
         .max()
         .unwrap_or(1);
-    log_verbose(&format!("Max item length: {}", max_len));
+    log_verbose(&format!("Max item length: {max_len}"));
 
     let cols = find_optimal_columns(terminal_width, max_len);
-    let rows = (items.len() + cols - 1) / cols;
+    let rows = items.len().div_ceil(cols);
     let col_len = terminal_width / cols;
 
-    log_verbose(&format!("Using {} columns, {} rows, column length {}", cols, rows, col_len));
+    log_verbose(&format!("Using {cols} columns, {rows} rows, column length {col_len}"));
 
     for row in 0..rows {
         let line = build_row_line(&items, row, cols, col_len);
-        println!("{}", line);
+        println!("{line}");
     }
 }
 

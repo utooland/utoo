@@ -235,7 +235,7 @@ impl Registry {
     pub async fn get_package_info(&self, name: &str) -> Result<Value> {
         // Build request URL for complete package info
         let url = format!("{}/{}", self.base_url, name);
-        log_verbose(&format!("Fetching package info at {}", url));
+        log_verbose(&format!("Fetching package info at {url}"));
 
         // Record start time
         let start_time = Instant::now();
