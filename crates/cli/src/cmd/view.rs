@@ -44,7 +44,7 @@ fn print_grid(items: Vec<String>) {
     log_verbose(&format!("Max item length: {}", max_len));
 
     for cols in [12, 6, 4, 3, 2, 1] {
-        if (terminal_width / max_len) >= cols {
+        if (terminal_width / max_len) >= cols || cols == 1 {
             let rows = (items.len() + cols - 1) / cols; // 向上取整
             let col_len = terminal_width / cols;
             log_verbose(&format!("Using {} columns, {} rows, column length {}", cols, rows, col_len));
@@ -56,7 +56,7 @@ fn print_grid(items: Vec<String>) {
                     if index < items.len() {
                         let item = items.get(index).unwrap();
                         line.push_str(&item);
-                        if col < cols {
+                        if col < cols && col_len > item.len() {
                             let spaces = " ".repeat(col_len - item.len());
                             line.push_str(&spaces);
                         }
