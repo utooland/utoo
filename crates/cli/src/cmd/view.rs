@@ -1,11 +1,11 @@
 use crate::helper::package::parse_package_spec;
 use crate::util::logger::log_verbose;
 use crate::util::registry::{resolve, get_package_info};
+use crate::util::format_print::print_grid;
+use crate::model::package_manifest::PackageManifest;
 use anyhow::{anyhow, Result};
 use chrono::{TimeZone, Utc};
 use owo_colors::OwoColorize;
-use serde_json::Value;
-use term_size;
 
 /// View package information from registry, similar to npm view
 pub async fn view(package_spec: &str) -> Result<()> {
@@ -25,91 +25,49 @@ pub async fn view(package_spec: &str) -> Result<()> {
     let resolved_package = resolve(name, version_spec).await?;
     let version_manifest = resolved_package.manifest;
 
+    // Create PackageManifest from the raw data
+    let package_manifest = PackageManifest::from_package_info_and_manifest(
+        &package_info,
+        name,
+        &version_manifest,
+    );
+
     // Print package information in npm view format
-    print_package_info(&package_info, name, &version_manifest)?;
+    print_package_info(&package_manifest)?;
 
     Ok(())
 }
 
-fn print_grid(items: Vec<String>) {
-    let terminal_width = term_size::dimensions()
-        .map(|(w, _)| w)
-        .unwrap_or(80); // 默认80字符宽度
-    log_verbose(&format!("Terminal size: {}", terminal_width));
-
-    let max_len = items.iter()
-        .map(|s| s.len())
-        .max()
-        .unwrap_or(1);
-    log_verbose(&format!("Max item length: {}", max_len));
-
-    for cols in [12, 6, 4, 3, 2, 1] {
-        if (terminal_width / max_len) >= cols || cols == 1 {
-            let rows = (items.len() + cols - 1) / cols; // 向上取整
-            let col_len = terminal_width / cols;
-            log_verbose(&format!("Using {} columns, {} rows, column length {}", cols, rows, col_len));
-
-            for row in 0..rows {
-                let mut line = String::new();
-                for col in 0..cols {
-                    let index = col + row * cols;
-                    if index < items.len() {
-                        let item = items.get(index).unwrap();
-                        line.push_str(&item);
-                        if col < cols && col_len > item.len() {
-                            let spaces = " ".repeat(col_len - item.len());
-                            line.push_str(&spaces);
-                        }
-                    }
-                }
-                println!("{}", line);
-            }
-            return;
-        }
-    }
+/// Print package information in npm view style format
+fn print_package_info(package_manifest: &PackageManifest) -> Result<()> {
+    log_verbose(&format!("Target version: {}", package_manifest.version));
+    
+    print_package_header(package_manifest);
+    print_package_description(package_manifest);
+    print_keywords(package_manifest);
+    print_dist_info(package_manifest);
+    print_author_info(package_manifest);
+    print_repository_info(package_manifest);
+    print_bugs_info(package_manifest);
+    print_dependencies(package_manifest);
+    print_maintainers(package_manifest);
+    print_dist_tags(package_manifest);
+    print_publish_info(package_manifest);
+    
+    Ok(())
 }
 
-/// Print package information in npm view style format
-fn print_package_info(package_info: &Value, name: &str, version_manifest: &Value) -> Result<()> {
-    // Get the latest version from package info
-    let latest_version = package_info.get("dist-tags")
-        .and_then(|tags| tags.get("latest"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("latest");
+fn print_package_header(package_manifest: &PackageManifest) {
+    let description = package_manifest.description.as_deref().unwrap_or("");
+    let license = package_manifest.license.as_deref().unwrap_or("UNLICENSED");
+    let deps_count = package_manifest.dependencies_count();
+    let versions_count = package_manifest.versions_count;
     
-    // Get the specific version if provided, otherwise use latest
-    let target_version = version_manifest.get("version").and_then(|v| v.as_str()).unwrap_or(latest_version);
-
-    log_verbose(&format!("Target version: {}", target_version));
+    let deps_str = if deps_count == 0 { "none".to_string() } else { deps_count.to_string() };
     
-    // Get the target manifest
-    let target_manifest = version_manifest;
-    
-    // Print header line like npm view
-    let description = target_manifest.get("description").and_then(|v| v.as_str()).unwrap_or("");
-    
-    // Try to get license from multiple sources
-    let license = target_manifest.get("license")
-        .and_then(|v| v.as_str())
-        .or_else(|| package_info.get("license").and_then(|v| v.as_str()))
-        .unwrap_or("UNLICENSED");
-    
-    // Count dependencies
-    let deps_count = target_manifest.get("dependencies")
-        .and_then(|v| v.as_object())
-        .map(|obj| obj.len())
-        .unwrap_or(0);
-    
-    // Count versions
-    let versions_count = package_info.get("versions")
-        .and_then(|v| v.as_object())
-        .map(|obj| obj.len())
-        .unwrap_or(0);
-    
-    let deps_str = if deps_count == 0 { "none" } else { &deps_count.to_string() };
     println!("\n{}@{} | {} | deps: {} | versions: {}", 
-        name.bright_blue().bold(), 
-        target_version.bright_green(), 
+        package_manifest.name.bright_blue().bold(), 
+        package_manifest.version.bright_green(), 
         license.yellow(), 
         deps_str.cyan(), 
         versions_count.magenta());
@@ -117,201 +75,185 @@ fn print_package_info(package_info: &Value, name: &str, version_manifest: &Value
     if !description.is_empty() {
         println!("{}", description.white());
     }
-    
-    // Print homepage if available
-    if let Some(homepage) = target_manifest.get("homepage").and_then(|v| v.as_str()) {
+}
+
+fn print_package_description(package_manifest: &PackageManifest) {
+    if let Some(homepage) = &package_manifest.homepage {
         println!("{}", homepage.blue().underline());
     }
-    
     println!();
-    
-    // Print keywords
-    if let Some(keywords) = target_manifest.get("keywords").and_then(|v| v.as_array()) {
-        if !keywords.is_empty() {
-            let keyword_str = keywords
-                .iter()
-                .filter_map(|k| k.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            println!("{} {}", "keywords:".bright_cyan(), keyword_str.white());
-        }
+}
+
+fn print_keywords(package_manifest: &PackageManifest) {
+    if let Some(keywords) = package_manifest.keywords.as_ref().filter(|k| !k.is_empty()) {
+        let keyword_str = keywords.join(", ");
+        println!("{} {}", "keywords:".bright_cyan(), keyword_str.white());
     }
-    
-    // Print dist information
-    if let Some(dist) = target_manifest.get("dist") {
+}
+
+fn print_dist_info(package_manifest: &PackageManifest) {
+    if let Some(dist) = package_manifest.dist.as_ref() {
         println!("\n{}", "dist".bright_yellow().bold());
-        if let Some(tarball) = dist.get("tarball").and_then(|v| v.as_str()) {
+        
+        if let Some(tarball) = &dist.tarball {
             println!("{} {}", ".tarball:".cyan(), tarball.blue().underline());
         }
-        if let Some(shasum) = dist.get("shasum").and_then(|v| v.as_str()) {
+        
+        if let Some(shasum) = &dist.shasum {
             println!("{} {}", ".shasum:".cyan(), shasum.green());
         }
-        if let Some(integrity) = dist.get("integrity").and_then(|v| v.as_str()) {
+        
+        if let Some(integrity) = &dist.integrity {
             println!("{} {}", ".integrity:".cyan(), integrity.green());
         }
-        if let Some(unpacked_size) = dist.get("unpackedSize").and_then(|v| v.as_u64()) {
+        
+        if let Some(unpacked_size) = dist.unpacked_size {
             let size_mb = unpacked_size as f64 / 1024.0 / 1024.0;
             println!("{} {} MB", ".unpackedSize:".cyan(), format!("{:.1}", size_mb).yellow());
         }
     }
-    
-    // Print author information
-    let author_source = target_manifest.get("author").or_else(|| package_info.get("author"));
-    
-    if let Some(author) = author_source.and_then(|v| v.as_object()) {
-        if let Some(author_name) = author.get("name").and_then(|v| v.as_str()) {
-            if let Some(author_email) = author.get("email").and_then(|v| v.as_str()) {
-                println!("\n{} {} <{}>", "author:".bright_magenta(), author_name.white(), author_email.blue());
-            } else {
-                println!("\n{} {}", "author:".bright_magenta(), author_name.white());
-            }
-        }
-    }
-    
-    // Print repository information
-    let repo_source = target_manifest.get("repository").or_else(|| package_info.get("repository"));
-    
-    if let Some(repo) = repo_source.and_then(|v| v.as_object()) {
-        if let Some(repo_type) = repo.get("type").and_then(|v| v.as_str()) {
-            if let Some(repo_url) = repo.get("url").and_then(|v| v.as_str()) {
-                println!("{} {}:{}", "repository:".bright_magenta(), repo_type.green(), repo_url.blue().underline());
-            }
-        }
-    }
-    
-    // Print bugs information
-    let bugs_source = target_manifest.get("bugs").or_else(|| package_info.get("bugs"));
-    
-    if let Some(bugs) = bugs_source.and_then(|v| v.as_object()) {
-        if let Some(bugs_url) = bugs.get("url").and_then(|v| v.as_str()) {
-            println!("{} {}", "bugs:".bright_magenta(), bugs_url.blue().underline());
-        }
-    }
+}
 
-    // Print dependencies
-    if let Some(dependencies) = target_manifest.get("dependencies").and_then(|v|
-        v.as_object()) {
-        if !dependencies.is_empty() {
-            println!("\n{} {}", "dependencies:".bright_yellow().bold(), dependencies.len().white());
-            let show_count = 24;
-            let show_deps = dependencies.iter()
-                .take(show_count)
-                .map(|(dep_name, dep_version)| if let Some(version_str) = dep_version.as_str() {
-                    format!("{}: {}", dep_name.blue(), version_str)
-                } else {
-                    format!("{}: {}", dep_name.blue(), dep_version)
-                })
-                .collect::<Vec<_>>();
-            print_grid(show_deps);
-            if dependencies.len() > show_count {
-                println!("(... and {} more.)", (dependencies.len() - show_count).to_string().white());
-            }
-        }
+fn print_author_info(package_manifest: &PackageManifest) {
+    if let Some(author) = package_manifest.author.as_ref() {
+        let author_line = match &author.email {
+            Some(email) => format!("\n{} {} <{}>", "author:".bright_magenta(), author.name.white(), email.blue()),
+            None => format!("\n{} {}", "author:".bright_magenta(), author.name.white()),
+        };
+        println!("{}", author_line);
     }
-    
-    // Print maintainers
-    if let Some(maintainers) = package_info.get("maintainers").and_then(|v| v.as_array()) {
-        if !maintainers.is_empty() {
-            println!("\n{}", "maintainers:".bright_yellow().bold());
-            for maintainer in maintainers {
-                if let Some(name) = maintainer.get("name").and_then(|v| v.as_str()) {
-                    if let Some(email) = maintainer.get("email").and_then(|v| v.as_str()) {
-                        println!("- {} <{}>", name.blue(), email.white());
-                    } else {
-                        println!("- {}", name.blue());
-                    }
-                }
-            }
-        }
-    }
-    
-    // Print dist-tags
-    if let Some(dist_tags) = package_info.get("dist-tags").and_then(|v| v.as_object()) {
-        if !dist_tags.is_empty() {
-            println!("\n{}", "dist-tags:".bright_yellow().bold());
-            let tags = dist_tags.iter().map(|(tag, version)| {
-                if let Some(version_str) = version.as_str() {
-                    format!("{}: {}", tag.blue(), version_str)
-                } else {
-                    format!("{}: {}", tag.blue(), version)
-                }
-            }).collect::<Vec<_>>();
-            print_grid(tags);
-        }
-    }
-    
-    // Print time information
-    let publish_time = package_info.get("versions")
-        .and_then(|versions| versions.get(target_version))
-        .and_then(|version_info| version_info.get("publish_time"))
-        .and_then(|v| v.as_u64());
+}
 
-    if let Some(publish_time) = publish_time {
-        // Convert timestamp to datetime
-        if let Some(published_time) = Utc.timestamp_opt(publish_time as i64 / 1000, 0).single() {
-            let now = Utc::now();
-            let duration = now.signed_duration_since(&published_time);
-            
-            let time_str = if duration.num_days() > 365 {
-                format!("over a year ago")
-            } else if duration.num_days() > 30 {
-                format!("{} months ago", duration.num_days() / 30)
-            } else if duration.num_days() > 0 {
-                format!("{} days ago", duration.num_days())
-            } else if duration.num_hours() > 0 {
-                format!("{} hours ago", duration.num_hours())
-            } else {
-                format!("{} minutes ago", duration.num_minutes())
+fn print_repository_info(package_manifest: &PackageManifest) {
+    if let Some(repo) = package_manifest.repository.as_ref() {
+        println!("{} {}:{}", "repository:".bright_magenta(), repo.repo_type.green(), repo.url.blue().underline());
+    }
+}
+
+fn print_bugs_info(package_manifest: &PackageManifest) {
+    if let Some(bugs) = package_manifest.bugs.as_ref() {
+        println!("{} {}", "bugs:".bright_magenta(), bugs.url.blue().underline());
+    }
+}
+
+fn print_dependencies(package_manifest: &PackageManifest) {
+    if let Some(dependencies) = package_manifest.dependencies.as_ref().filter(|d| !d.is_empty()) {
+        println!("\n{} {}", "dependencies:".bright_yellow().bold(), dependencies.len().white());
+        
+        let show_count = 24;
+        let show_deps: Vec<String> = dependencies.iter()
+            .take(show_count)
+            .map(|(dep_name, dep_version)| format!("{}: {}", dep_name.blue(), dep_version))
+            .collect();
+        
+        print_grid(show_deps);
+        
+        if dependencies.len() > show_count {
+            println!("(... and {} more.)", (dependencies.len() - show_count).to_string().white());
+        }
+    }
+}
+
+fn print_maintainers(package_manifest: &PackageManifest) {
+    if let Some(maintainers) = package_manifest.maintainers.as_ref().filter(|m| !m.is_empty()) {
+        println!("\n{}", "maintainers:".bright_yellow().bold());
+        
+        for maintainer in maintainers {
+            let maintainer_line = match &maintainer.email {
+                Some(email) => format!("- {} <{}>", maintainer.name.blue(), email.white()),
+                None => format!("- {}", maintainer.name.blue()),
             };
-            
-            // Try to get publisher information from _npmUser field
-            let npm_user = package_info.get("versions")
-                .and_then(|versions| versions.get(target_version))
-                .and_then(|version_info| version_info.get("_npmUser"))
-                .and_then(|v| v.as_object());
-            
-            if let Some(npm_user) = npm_user {
-                if let Some(publisher_name) = npm_user.get("name").and_then(|v| v.as_str()) {
-                    if let Some(publisher_email) = npm_user.get("email").and_then(|v| v.as_str()) {
-                        println!("\n{} {} by {} <{}>", "published", time_str.cyan(), publisher_name.blue(), publisher_email.white());
-                    } else {
-                        println!("\n{} {} by {}", "published", time_str.cyan(), publisher_name.blue());
-                    }
-                } else {
-                    println!("\n{} {}", "published", time_str.cyan());
-                }
-            } else {
-                println!("\n{} {}", "published", time_str.cyan());
-            }
+            println!("{}", maintainer_line);
         }
     }
+}
+
+fn print_dist_tags(package_manifest: &PackageManifest) {
+    if let Some(dist_tags) = package_manifest.dist_tags.as_ref().filter(|d| !d.is_empty()) {
+        println!("\n{}", "dist-tags:".bright_yellow().bold());
+        
+        let tags: Vec<String> = dist_tags.iter()
+            .map(|(tag, version)| format!("{}: {}", tag.blue(), version))
+            .collect();
+        
+        print_grid(tags);
+    }
+}
+
+fn print_publish_info(package_manifest: &PackageManifest) {
+    if let Some(publish_time) = package_manifest.get_publish_time(&package_manifest.version) {
+        if let Some(published_time) = Utc.timestamp_opt(publish_time as i64 / 1000, 0).single() {
+            let time_str = format_time_ago(published_time);
+            let publish_line = format_publish_line(&time_str, package_manifest);
+            
+            println!("\n{}", publish_line);
+        }
+    }
+}
+
+fn format_time_ago(published_time: chrono::DateTime<Utc>) -> String {
+    let now = Utc::now();
+    let duration = now.signed_duration_since(&published_time);
     
-    Ok(())
+    match duration.num_days() {
+        days if days > 365 => "over a year ago".to_string(),
+        days if days > 30 => format!("{} months ago", days / 30),
+        days if days > 0 => format!("{} days ago", days),
+        _ => match duration.num_hours() {
+            hours if hours > 0 => format!("{} hours ago", hours),
+            _ => format!("{} minutes ago", duration.num_minutes()),
+        }
+    }
+}
+
+fn format_publish_line(time_str: &str, package_manifest: &PackageManifest) -> String {
+    match package_manifest.get_npm_user(&package_manifest.version) {
+        Some(npm_user) => match &npm_user.email {
+            Some(email) => format!("{} {} by {} <{}>", 
+                "published", time_str.cyan(), npm_user.name.blue(), email.white()),
+            None => format!("{} {} by {}", 
+                "published", time_str.cyan(), npm_user.name.blue()),
+        },
+        None => format!("{} {}", "published", time_str.cyan()),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use crate::model::package_manifest::{PackageManifest, Author};
+    use std::collections::HashMap;
 
     #[test]
     fn test_print_package_info() {
-        let manifest = json!({
-            "name": "test-package",
-            "version": "1.0.0",
-            "description": "A test package",
-            "homepage": "https://example.com",
-            "license": "MIT",
-            "dependencies": {
-                "lodash": "^4.17.21"
+        // Create a test PackageManifest
+        let package_manifest = PackageManifest {
+            name: "test-package".to_string(),
+            version: "1.0.0".to_string(),
+            description: Some("A test package".to_string()),
+            homepage: Some("https://example.com".to_string()),
+            license: Some("MIT".to_string()),
+            keywords: Some(vec!["test".to_string(), "package".to_string()]),
+            dependencies: {
+                let mut deps = HashMap::new();
+                deps.insert("lodash".to_string(), "^4.17.21".to_string());
+                Some(deps)
             },
-            "scripts": {
-                "test": "echo \"test\""
-            }
-        });
+            author: Some(Author {
+                name: "Test Author".to_string(),
+                email: Some("test@example.com".to_string()),
+            }),
+            repository: None,
+            bugs: None,
+            dist: None,
+            maintainers: None,
+            dist_tags: None,
+            versions: None,
+            versions_count: 1,
+        };
 
         // This test just ensures the function doesn't panic
-        let result = print_package_info(&manifest, "test-package", &json!("1.0.0"));
+        let result = print_package_info(&package_manifest);
         assert!(result.is_ok());
     }
 }

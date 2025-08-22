@@ -1,0 +1,58 @@
+use crate::util::logger::log_verbose;
+use term_size;
+
+pub fn print_grid(items: Vec<String>) {
+    let terminal_width = term_size::dimensions()
+        .map(|(w, _)| w)
+        .unwrap_or(80); // 默认80字符宽度
+    log_verbose(&format!("Terminal size: {}", terminal_width));
+
+    let max_len = items.iter()
+        .map(|s| s.len())
+        .max()
+        .unwrap_or(1);
+    log_verbose(&format!("Max item length: {}", max_len));
+
+    let cols = find_optimal_columns(terminal_width, max_len);
+    let rows = (items.len() + cols - 1) / cols;
+    let col_len = terminal_width / cols;
+
+    log_verbose(&format!("Using {} columns, {} rows, column length {}", cols, rows, col_len));
+
+    for row in 0..rows {
+        let line = build_row_line(&items, row, cols, col_len);
+        println!("{}", line);
+    }
+}
+
+fn find_optimal_columns(terminal_width: usize, max_len: usize) -> usize {
+    for &cols in &[12, 6, 4, 3, 2, 1] {
+        if (terminal_width / max_len) >= cols || cols == 1 {
+            return cols;
+        }
+    }
+    1 // 默认返回1列
+}
+
+fn build_row_line(items: &[String], row: usize, cols: usize, col_len: usize) -> String {
+    let mut line = String::new();
+
+    for col in 0..cols {
+        let index = col + row * cols;
+
+        if index >= items.len() {
+            break;
+        }
+
+        let item = &items[index];
+        line.push_str(item);
+
+        // 添加填充空格（除了最后一列）
+        if col < cols - 1 && col_len > item.len() {
+            let spaces = " ".repeat(col_len - item.len());
+            line.push_str(&spaces);
+        }
+    }
+
+    line
+}
