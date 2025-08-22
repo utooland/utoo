@@ -41,7 +41,7 @@ export default class Dev extends Command {
     await utooPack.serve(
       projectOptions,
       path.resolve(cwd, project || cwd),
-      path.resolve(cwd, root || project || cwd),
+      root && path.resolve(cwd, root),
     );
   }
 }
