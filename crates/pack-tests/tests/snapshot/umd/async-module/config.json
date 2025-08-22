@@ -1,0 +1,16 @@
+{
+    "config": {
+        "entry": [
+            {
+                "import": "input/index.js",
+                "name": "main",
+                "library": {
+                    "name": "asyncModule"
+                }
+            }
+        ],
+        "optimization": {
+            "minify": false
+        }
+    }
+}
