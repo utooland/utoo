@@ -241,49 +241,50 @@ impl Registry {
         let start_time = Instant::now();
 
         // Retry HTTP request with custom strategy
-        let package_info: Value = RetryIf::spawn(
-            create_retry_strategy(),
-            || async {
-                let response = self
-                    .client
-                    .get(&url)
-                    .send()
-                    .await
-                    .map_err(|e| RetryableError::Temporary(format!("Network error: {e}")))?;
+        let package_info: Value =
+            RetryIf::spawn(
+                create_retry_strategy(),
+                || async {
+                    let response =
+                        self.client.get(&url).send().await.map_err(|e| {
+                            RetryableError::Temporary(format!("Network error: {e}"))
+                        })?;
 
-                if response.status().is_success() {
-                    let package_info = response.json().await.map_err(|e| {
-                        RetryableError::Temporary(format!("Failed to parse JSON response: {e}"))
-                    })?;
-                    Ok(package_info)
-                } else if response.status().as_u16() == 404 {
-                    log_verbose(&format!("URL not found {url}"));
-                    Err(RetryableError::Permanent(format!(
-                        "Fetch Error: {}, status: {}",
-                        url,
-                        response.status()
-                    )))
-                } else {
-                    log_verbose(&format!(
-                        "HTTP error: url: {}, status: {}, retrying",
-                        url,
-                        response.status()
-                    ));
-                    Err(RetryableError::Temporary(format!(
-                        "HTTP error: {}, url: {}",
-                        response.status(),
-                        url
-                    )))
-                }
-            },
-            |e: &RetryableError| matches!(e, RetryableError::Temporary(_)),
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to fetch package info after retries: {e}"))?;
+                    if response.status().is_success() {
+                        let package_info = response.json().await.map_err(|e| {
+                            RetryableError::Temporary(format!("Failed to parse JSON response: {e}"))
+                        })?;
+                        Ok(package_info)
+                    } else if response.status().as_u16() == 404 {
+                        log_verbose(&format!("URL not found {url}"));
+                        Err(RetryableError::Permanent(format!(
+                            "Fetch Error: {}, status: {}",
+                            url,
+                            response.status()
+                        )))
+                    } else {
+                        log_verbose(&format!(
+                            "HTTP error: url: {}, status: {}, retrying",
+                            url,
+                            response.status()
+                        ));
+                        Err(RetryableError::Temporary(format!(
+                            "HTTP error: {}, url: {}",
+                            response.status(),
+                            url
+                        )))
+                    }
+                },
+                |e: &RetryableError| matches!(e, RetryableError::Temporary(_)),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to fetch package info after retries: {e}"))?;
 
         // Calculate and log request duration
         let duration = start_time.elapsed();
-        log_verbose(&format!("HTTP request for package info {name} took {duration:?}"));
+        log_verbose(&format!(
+            "HTTP request for package info {name} took {duration:?}"
+        ));
 
         Ok(package_info)
     }

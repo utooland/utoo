@@ -97,42 +97,62 @@ impl PackageManifest {
             });
 
         // Extract author
-        let author_source = version_manifest.get("author").or_else(|| package_info.get("author"));
-        let author = author_source
-            .and_then(|v| v.as_object())
-            .map(|obj| Author {
-                name: obj.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                email: obj.get("email").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            });
+        let author_source = version_manifest
+            .get("author")
+            .or_else(|| package_info.get("author"));
+        let author = author_source.and_then(|v| v.as_object()).map(|obj| Author {
+            name: obj
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            email: obj
+                .get("email")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+        });
 
         // Extract repository
-        let repo_source = version_manifest.get("repository").or_else(|| package_info.get("repository"));
-        let repository = repo_source
-            .and_then(|v| v.as_object())
-            .and_then(|obj| {
-                let repo_type = obj.get("type")?.as_str()?;
-                let url = obj.get("url")?.as_str()?;
-                Some(Repository {
-                    repo_type: repo_type.to_string(),
-                    url: url.to_string(),
-                })
-            });
+        let repo_source = version_manifest
+            .get("repository")
+            .or_else(|| package_info.get("repository"));
+        let repository = repo_source.and_then(|v| v.as_object()).and_then(|obj| {
+            let repo_type = obj.get("type")?.as_str()?;
+            let url = obj.get("url")?.as_str()?;
+            Some(Repository {
+                repo_type: repo_type.to_string(),
+                url: url.to_string(),
+            })
+        });
 
         // Extract bugs
-        let bugs_source = version_manifest.get("bugs").or_else(|| package_info.get("bugs"));
+        let bugs_source = version_manifest
+            .get("bugs")
+            .or_else(|| package_info.get("bugs"));
         let bugs = bugs_source
             .and_then(|v| v.as_object())
             .and_then(|obj| obj.get("url")?.as_str())
-            .map(|url| Bugs { url: url.to_string() });
+            .map(|url| Bugs {
+                url: url.to_string(),
+            });
 
         // Extract dist
         let dist = version_manifest
             .get("dist")
             .and_then(|v| v.as_object())
             .map(|obj| Dist {
-                tarball: obj.get("tarball").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                shasum: obj.get("shasum").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                integrity: obj.get("integrity").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                tarball: obj
+                    .get("tarball")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                shasum: obj
+                    .get("shasum")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                integrity: obj
+                    .get("integrity")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
                 unpacked_size: obj.get("unpackedSize").and_then(|v| v.as_u64()),
             });
 
@@ -145,7 +165,10 @@ impl PackageManifest {
                     .filter_map(|maintainer| {
                         maintainer.as_object().and_then(|obj| {
                             let name = obj.get("name")?.as_str()?.to_string();
-                            let email = obj.get("email").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            let email = obj
+                                .get("email")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
                             Some(Maintainer { name, email })
                         })
                     })
@@ -174,7 +197,10 @@ impl PackageManifest {
                             npm_user: v.get("_npmUser").and_then(|user| {
                                 user.as_object().and_then(|obj| {
                                     let name = obj.get("name")?.as_str()?.to_string();
-                                    let email = obj.get("email").and_then(|e| e.as_str()).map(|s| s.to_string());
+                                    let email = obj
+                                        .get("email")
+                                        .and_then(|e| e.as_str())
+                                        .map(|s| s.to_string());
                                     Some(NpmUser { name, email })
                                 })
                             }),
@@ -234,18 +260,11 @@ impl PackageManifest {
     }
 
     pub fn get_publish_time(&self, version: &str) -> Option<u64> {
-        self.versions
-            .as_ref()?
-            .get(version)?
-            .publish_time
+        self.versions.as_ref()?.get(version)?.publish_time
     }
 
     pub fn get_npm_user(&self, version: &str) -> Option<&NpmUser> {
-        self.versions
-            .as_ref()?
-            .get(version)?
-            .npm_user
-            .as_ref()
+        self.versions.as_ref()?.get(version)?.npm_user.as_ref()
     }
 
     pub fn dependencies_count(&self) -> usize {
