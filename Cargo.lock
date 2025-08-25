@@ -3492,9 +3492,9 @@ checksum = "b4ce301924b7887e9d637144fdade93f9dfff9b60981d4ac161db09720d39aa5"
 
 [[package]]
 name = "lock_api"
-version = "0.4.12"
+version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07af8b9cdd281b7915f413fa73f29ebd5d55d0d3f0155584dade1ff18cea1b17"
+checksum = "96936507f153605bddfcda068dd804796c84324ed2510809e5b2a624c81da765"
 dependencies = [
  "autocfg",
  "scopeguard",
@@ -4133,11 +4133,8 @@ dependencies = [
 
 [[package]]
 name = "opfs-project"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66dec7106d36912434201daaefd9cae660409446ff7093d1137525759d6fde0f"
+version = "0.1.0"
 dependencies = [
- "anyhow",
  "flate2",
  "futures",
  "futures-util",
@@ -4146,8 +4143,6 @@ dependencies = [
  "serde_json",
  "tar",
  "tokio-fs-ext",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]
@@ -4447,9 +4442,9 @@ checksum = "f38d5652c16fde515bb1ecef450ab0f6a219d619a7274976324d5e377f7dceba"
 
 [[package]]
 name = "parking_lot"
-version = "0.12.3"
+version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1bf18183cf54e8d6059647fc3063646a1801cf30896933ec2311622cc4b9a27"
+checksum = "70d58bf43669b5795d1576d0641cfb6fbb2057bf629506267a92807158584a13"
 dependencies = [
  "lock_api",
  "parking_lot_core",
@@ -4457,9 +4452,9 @@ dependencies = [
 
 [[package]]
 name = "parking_lot_core"
-version = "0.9.10"
+version = "0.9.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e401f977ab385c9e4e3ab30627d6f26d00e2c73eef317493c4ec6d468726cf8"
+checksum = "bc838d2a56b5b1a6c25f55575dfc605fabb63bb2365f6c2353ef9159aa69e4a5"
 dependencies = [
  "cfg-if",
  "libc",
@@ -5157,6 +5152,7 @@ checksum = "b418a60154510ca1a002a752ca9714984e21e4241e804d32555251faf8b78ffa"
 dependencies = [
  "either",
  "rayon-core",
+ "wasm_sync",
 ]
 
 [[package]]
@@ -5167,6 +5163,7 @@ checksum = "1465873a3dfdaa8ae7cb14b4383657caab0b3e8a0aa9ae8e04b044854c8dfce2"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
+ "wasm_sync",
 ]
 
 [[package]]
@@ -5808,9 +5805,6 @@ name = "send_wrapper"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd0b0ec5f1c1ca621c432a25813d8d60c88abe6d3e08a3eb9cf37d97a0fe3d73"
-dependencies = [
- "futures-core",
-]
 
 [[package]]
 name = "seq-macro"
@@ -6183,6 +6177,16 @@ checksum = "4f5fd57c80058a56cf5c777ab8a126398ece8e442983605d280a44ce79d0edef"
 dependencies = [
  "libc",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "socket2"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "233504af464074f9d066d7b5416c5f9b894a5862a6506e306f7b816cdd6f1807"
+dependencies = [
+ "libc",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8199,9 +8203,8 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.46.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0cc3a2344dafbe23a245241fe8b09735b521110d30fcefbbd5feb1797ca35d17"
+version = "1.47.1"
+source = "git+https://github.com/utooland/tokio.git#51ca8d3309fc4ae65e3069907ba3b983c2a217be"
 dependencies = [
  "backtrace",
  "bytes",
@@ -8212,17 +8215,19 @@ dependencies = [
  "pin-project-lite",
  "signal-hook-registry",
  "slab",
- "socket2 0.5.9",
+ "socket2 0.6.0",
  "tokio-macros",
  "tracing",
- "windows-sys 0.52.0",
+ "wasm_thread",
+ "wasmtimer",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
 name = "tokio-fs-ext"
-version = "0.3.9"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a6fc632b256d3ac6054a8b46e1027924ce3efde269c27986b061c495df572de"
+checksum = "18c1fdbd47c3cad0bde5dd73610c1e0b30b24ed01ed0f6918fef3bfaf41916d5"
 dependencies = [
  "bitflags 2.9.1",
  "cfg-if",
@@ -8230,8 +8235,9 @@ dependencies = [
  "js-sys",
  "pin-project-lite",
  "rustc-hash 2.1.1",
- "send_wrapper",
  "tokio",
+ "tokio-stream",
+ "tracing",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -8240,8 +8246,7 @@ dependencies = [
 [[package]]
 name = "tokio-macros"
 version = "2.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e06d43f1345a3bcd39f6a56dbb7dcab2ba47e68e8ac134855e7e2bdbaf8cab8"
+source = "git+https://github.com/utooland/tokio.git#51ca8d3309fc4ae65e3069907ba3b983c2a217be"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8320,15 +8325,13 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b9590b93e6fcc1739458317cccd391ad3955e2bde8913edf6f95f9e65a8f034"
+version = "0.7.16"
+source = "git+https://github.com/utooland/tokio.git#51ca8d3309fc4ae65e3069907ba3b983c2a217be"
 dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
  "futures-util",
- "hashbrown 0.14.5",
  "pin-project-lite",
  "tokio",
 ]
@@ -8741,7 +8744,6 @@ dependencies = [
  "turbo-tasks-macros",
  "turbo-tasks-malloc",
  "unsize",
- "wasmtimer",
 ]
 
 [[package]]
@@ -8775,8 +8777,6 @@ dependencies = [
  "turbo-rcstr",
  "turbo-tasks",
  "turbo-tasks-build",
- "turbo-tasks-testing",
- "wasmtimer",
 ]
 
 [[package]]
@@ -8867,6 +8867,7 @@ dependencies = [
  "turbo-tasks-build",
  "turbo-tasks-hash",
  "urlencoding",
+ "wasm_thread",
 ]
 
 [[package]]
@@ -8906,17 +8907,6 @@ name = "turbo-tasks-malloc"
 version = "0.1.0"
 dependencies = [
  "mimalloc",
-]
-
-[[package]]
-name = "turbo-tasks-testing"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "futures",
- "rustc-hash 2.1.1",
- "tokio",
- "turbo-tasks",
 ]
 
 [[package]]
@@ -9263,6 +9253,7 @@ dependencies = [
  "parking_lot",
  "regex",
  "rustc-hash 2.1.1",
+ "send_wrapper",
  "serde",
  "serde_bytes",
  "serde_json",
@@ -9642,17 +9633,21 @@ dependencies = [
  "console_error_panic_hook",
  "flate2",
  "futures",
- "futures-util",
  "js-sys",
  "opfs-project",
  "pack-api",
  "pack-core",
+ "parking_lot",
+ "parking_lot_core",
  "petgraph 0.6.5",
  "reqwest 0.12.22",
+ "rustc-hash 2.1.1",
  "serde",
+ "serde-wasm-bindgen",
  "serde_json",
  "tar",
  "tokio",
+ "tokio-fs-ext",
  "tracing",
  "tracing-subscriber",
  "tracing-web",
@@ -9660,10 +9655,11 @@ dependencies = [
  "turbo-tasks",
  "turbo-tasks-backend",
  "turbo-tasks-build",
+ "turbo-tasks-fs",
  "turbo-tasks-malloc",
+ "turbopack-core",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "wasmtimer",
 ]
 
 [[package]]
@@ -9926,8 +9922,6 @@ dependencies = [
  "cfg-if",
  "once_cell",
  "rustversion",
- "serde",
- "serde_json",
  "wasm-bindgen-macro",
 ]
 
@@ -10009,6 +10003,28 @@ checksum = "b3bc393c395cb621367ff02d854179882b9a351b4e0c93d1397e6090b53a5c2a"
 dependencies = [
  "leb128fmt",
  "wasmparser 0.235.0",
+]
+
+[[package]]
+name = "wasm_sync"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cff360cade7fec41ff0e9d2cda57fe58258c5f16def0e21302394659e6bbb0ea"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "wasm_thread"
+version = "0.3.3"
+source = "git+https://github.com/utooland/wasm_thread.git#94438ff771ee0a6a55d79e49a655707970acb615"
+dependencies = [
+ "futures",
+ "js-sys",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
@@ -10378,8 +10394,7 @@ dependencies = [
 [[package]]
 name = "wasmtimer"
 version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8d49b5d6c64e8558d9b1b065014426f35c18de636895d24893dbbd329743446"
+source = "git+https://github.com/utooland/wasmtimer-rs.git#55ad34a6d1475eb3affa7c92e7a933068cbfe609"
 dependencies = [
  "futures",
  "js-sys",

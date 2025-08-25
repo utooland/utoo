@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use serde::Serialize;
 use turbo_tasks::{
     Completion, Effects, OperationVc, ReadRef, TryJoinIterExt, Vc, VcValueType, get_effects,
 };
 use turbopack_core::{
     diagnostics::{Diagnostic, DiagnosticContextExt, PlainDiagnostic},
-    issue::{IssueDescriptionExt, IssueSeverity, PlainIssue},
+    issue::{IssueDescriptionExt, IssueSeverity, PlainIssue, StyledString},
 };
 
 use crate::endpoint::{Endpoint, EndpointIssuesAndDiags, endpoint_server_changed_operation};
@@ -94,4 +95,40 @@ pub async fn get_diagnostics<T: Send>(
     diags.sort();
 
     Ok(Arc::new(diags))
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum StyledStringSerialize<'a> {
+    Line {
+        value: Vec<StyledStringSerialize<'a>>,
+    },
+    Stack {
+        value: Vec<StyledStringSerialize<'a>>,
+    },
+    Text {
+        value: &'a str,
+    },
+    Code {
+        value: &'a str,
+    },
+    Strong {
+        value: &'a str,
+    },
+}
+
+impl<'a> From<&'a StyledString> for StyledStringSerialize<'a> {
+    fn from(value: &'a StyledString) -> Self {
+        match value {
+            StyledString::Line(parts) => StyledStringSerialize::Line {
+                value: parts.iter().map(|p| p.into()).collect(),
+            },
+            StyledString::Stack(parts) => StyledStringSerialize::Stack {
+                value: parts.iter().map(|p| p.into()).collect(),
+            },
+            StyledString::Text(string) => StyledStringSerialize::Text { value: string },
+            StyledString::Code(string) => StyledStringSerialize::Code { value: string },
+            StyledString::Strong(string) => StyledStringSerialize::Strong { value: string },
+        }
+    }
 }

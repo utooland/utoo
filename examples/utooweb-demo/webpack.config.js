@@ -1,0 +1,96 @@
+const path = require("path");
+const HtmlWebpackPlugin = require("html-webpack-plugin");
+const MiniCssExtractPlugin = require("mini-css-extract-plugin");
+
+module.exports = [
+  {
+    mode: "development",
+    entry: {
+      main: {
+        import: "./src/index.tsx",
+        filename: "main.js",
+      },
+    },
+    devtool: "eval-source-map",
+    output: {
+      path: path.resolve(__dirname, "dist"),
+      clean: false,
+    },
+    module: {
+      rules: [
+        {
+          test: /\.tsx?$/,
+          exclude: /node_modules/,
+          use: {
+            loader: "ts-loader",
+            options: {
+              transpileOnly: true,
+            },
+          },
+        },
+        {
+          test: /\.css$/,
+          use: [MiniCssExtractPlugin.loader, "css-loader"],
+        },
+      ],
+    },
+    resolve: {
+      extensions: [".tsx", ".ts", ".js"],
+    },
+    plugins: [
+      new HtmlWebpackPlugin({
+        template: "./index.html",
+        title: "Utooweb demo",
+      }),
+      new MiniCssExtractPlugin({
+        filename: "[name].css",
+      }),
+    ],
+    devServer: {
+      devMiddleware: {
+        writeToDisk: true,
+      },
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Embedder-Policy": "require-corp",
+      },
+      hot: false,
+      liveReload: false,
+      client: false,
+      webSocketServer: false,
+    },
+  },
+  {
+    mode: "development",
+    entry: {
+      tokio_worker: {
+        import: "./src/tokio_worker.ts",
+        filename: "tokio_worker.js",
+        chunkLoading: false,
+      },
+    },
+    devtool: "eval-source-map",
+    output: {
+      path: path.resolve(__dirname, "dist"),
+      clean: true,
+    },
+    module: {
+      rules: [
+        {
+          test: /\.ts?$/,
+          exclude: /node_modules/,
+          use: {
+            loader: "ts-loader",
+            options: {
+              transpileOnly: true,
+            },
+          },
+        },
+      ],
+    },
+    resolve: {
+      extensions: [".ts", ".js"],
+    },
+  },
+];

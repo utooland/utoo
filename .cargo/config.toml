@@ -83,6 +83,7 @@ rustflags = [
   "tokio_unstable",
   "--cfg",
   'getrandom_backend="wasm_js"',
+  "-Ctarget-feature=+atomics,+bulk-memory,+mutable-globals",
   "-Aunused",
 ]
 

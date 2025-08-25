@@ -240,14 +240,18 @@ impl ProjectContainer {
         let project_fs = project_fs_operation(project)
             .read_strongly_consistent()
             .await?;
-        if watch.enable {
-            project_fs
-                .start_watching_with_invalidation_reason(watch.poll_interval)
-                .await?;
-        } else {
-            project_fs.invalidate_with_reason(|path| invalidation::Initialize {
-                path: RcStr::from(path),
-            });
+        #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+        {
+            if watch.enable {
+                #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+                project_fs
+                    .start_watching_with_invalidation_reason(watch.poll_interval)
+                    .await?;
+            } else {
+                project_fs.invalidate_with_reason(|path| invalidation::Initialize {
+                    path: RcStr::from(path),
+                });
+            }
         }
         let output_fs = output_fs_operation(project)
             .read_strongly_consistent()
@@ -258,6 +262,7 @@ impl ProjectContainer {
         Ok(())
     }
 
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
     #[tracing::instrument(level = "info", name = "update project", skip_all)]
     pub async fn update(self: Vc<Self>, options: PartialProjectOptions) -> Result<()> {
         let PartialProjectOptions {
