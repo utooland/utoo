@@ -3,3 +3,7 @@
 	url = git@github.com:umijs/next.js.git
   branch = utoo-wasm
 	shallow = true
+[submodule "crates/opfs-project"]
+	path = crates/opfs-project
+  branch = "args-type"
+	url = https://github.com/utooland/opfs-project.git

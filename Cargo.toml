@@ -9,6 +9,7 @@ members = [
   "crates/cli",
   "crates/core",
   "crates/utoo-wasm",
+  "crates/opfs-project",
 ]
 exclude = ["crates/runtime", "next.js"]
 resolver = "2"
@@ -20,6 +21,7 @@ license = "MIT"
 [workspace.dependencies]
 pack-core = { path = "./crates/pack-core" }
 pack-api = { path = "./crates/pack-api" }
+opfs-project = { path = "./crates/opfs-project" }
 
 schemars = "0.8"
 futures = "0.3.31"

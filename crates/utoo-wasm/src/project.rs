@@ -161,7 +161,7 @@ impl Project {
 
         let ret = read_dir
             .into_iter()
-            .map(|e| e.map_or_else(Err, DirEntry::try_from))
+            .map(DirEntry::try_from)
             .collect::<Result<Vec<_>, std::io::Error>>()
             .map_err(|e| e.to_string())?;
 

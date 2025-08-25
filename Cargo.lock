@@ -3700,6 +3700,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "minicov"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f27fe9f1cc3c22e1687f9446c2083c4c5fc7f0bcf1c7a86bdbded14985895b4b"
+dependencies = [
+ "cc",
+ "walkdir",
+]
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4143,6 +4153,7 @@ dependencies = [
  "serde_json",
  "tar",
  "tokio-fs-ext",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -8225,9 +8236,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-fs-ext"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18c1fdbd47c3cad0bde5dd73610c1e0b30b24ed01ed0f6918fef3bfaf41916d5"
+checksum = "50013700a242425ab07dfa67aaa528e82b8311f838320b1e83e6be2a184a805c"
 dependencies = [
  "bitflags 2.9.1",
  "cfg-if",
@@ -9638,7 +9649,6 @@ dependencies = [
  "pack-api",
  "pack-core",
  "parking_lot",
- "parking_lot_core",
  "petgraph 0.6.5",
  "reqwest 0.12.22",
  "rustc-hash 2.1.1",
@@ -9983,6 +9993,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a05d73b933a847d6cccdda8f838a22ff101ad9bf93e33684f39c1f5f0eece3d"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "wasm-bindgen-test"
+version = "0.3.50"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66c8d5e33ca3b6d9fa3b4676d774c5778031d27a578c2b007f905acf816152c3"
+dependencies = [
+ "js-sys",
+ "minicov",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm-bindgen-test-macro",
+]
+
+[[package]]
+name = "wasm-bindgen-test-macro"
+version = "0.3.50"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17d5042cc5fa009658f9a7333ef24291b1291a25b6382dd68862a7f3b969f69b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.100",
 ]
 
 [[package]]
