@@ -40,7 +40,7 @@ use crate::{
 };
 
 #[turbo_tasks::value]
-pub struct Library {
+pub struct LibraryEntrypoint {
     pub name: RcStr,
     pub import: RcStr,
     pub runtime_root: Option<RcStr>,
@@ -48,12 +48,12 @@ pub struct Library {
 }
 
 #[turbo_tasks::value(transparent)]
-pub struct Libraries(pub Vec<Library>);
+pub struct LibraryEntrypoints(pub Vec<LibraryEntrypoint>);
 
 #[turbo_tasks::value]
 pub struct LibraryProject {
     pub project: ResolvedVc<Project>,
-    pub libraries: ResolvedVc<Libraries>,
+    pub libraries: ResolvedVc<LibraryEntrypoints>,
 }
 
 #[turbo_tasks::value(transparent)]
@@ -62,12 +62,15 @@ pub struct OptionLibraryProject(Option<ResolvedVc<LibraryProject>>);
 #[turbo_tasks::value_impl]
 impl LibraryProject {
     #[turbo_tasks::function]
-    pub fn new(project: ResolvedVc<Project>, libraries: ResolvedVc<Libraries>) -> Vc<Self> {
+    pub fn new(
+        project: ResolvedVc<Project>,
+        libraries: ResolvedVc<LibraryEntrypoints>,
+    ) -> Vc<Self> {
         Self { project, libraries }.cell()
     }
 
     #[turbo_tasks::function]
-    pub fn libraries(&self) -> Vc<Libraries> {
+    pub fn libraries(&self) -> Vc<LibraryEntrypoints> {
         *self.libraries
     }
 
