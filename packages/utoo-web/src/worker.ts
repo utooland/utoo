@@ -13,10 +13,10 @@ const projectEndpoint: ProjectEndpoint & {
 
   // This should be called only once
   async mount(opt) {
-    const { cwd, wasmUrl } = opt;
+    const { cwd, wasmUrl, threadUrl } = opt;
     this.wasmInit ??= initWasm(wasmUrl);
     await this.wasmInit!;
-    this.projectInternal = new ProjectInternal(cwd);
+    this.projectInternal = new ProjectInternal(cwd, threadUrl);
     return;
   },
 

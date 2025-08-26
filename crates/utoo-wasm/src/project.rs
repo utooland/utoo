@@ -9,6 +9,8 @@ use serde_wasm_bindgen::to_value;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
 
+use crate::tokio_runtime::init_tokio_runtime;
+
 #[cfg(feature = "utoo-pack")]
 use super::{
     pack::{PackProject, PartialProjectOptions, TurbopackResult},
@@ -26,8 +28,9 @@ pub struct Project {
 #[wasm_bindgen]
 impl Project {
     #[wasm_bindgen(constructor)]
-    pub fn new(cwd: String) -> Project {
+    pub fn new(cwd: String, thread_url: String) -> Project {
         opfs_project::set_cwd(&cwd);
+        init_tokio_runtime(thread_url);
         Project {
             #[cfg(feature = "utoo-pack")]
             pack_project: RwLock::new(None),
@@ -58,7 +61,11 @@ impl Project {
         };
 
         TOKIO_RUNTIME
-            .spawn(async move { pack_project.build().await })
+            .with(|rt| {
+                rt.get()
+                    .expect("tokio runtime not found")
+                    .spawn(async move { pack_project.build().await })
+            })
             .await
             .map_err(|e| e.to_string())?
             .map_or_else(
@@ -105,7 +112,11 @@ impl Project {
             };
 
             let pack_context = TOKIO_RUNTIME
-                .spawn(PackProject::initialize(options))
+                .with(|rt| {
+                    rt.get()
+                        .expect("tokio runtime not found")
+                        .spawn(PackProject::initialize(options))
+                })
                 .await
                 .context("fail to initialize pack project")??;
 

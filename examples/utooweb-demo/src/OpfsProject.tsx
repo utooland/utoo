@@ -258,7 +258,10 @@ const OpfsProject = () => {
 
         setIsLoading(true); // Set loading before install
 
-        const project = new Project({ cwd: projectName });
+        const project = new Project({
+          cwd: projectName,
+          threadUrl: "http://localhost:8080/worker_thread.js",
+        });
         setProject(project);
 
         console.log(

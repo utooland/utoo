@@ -38,5 +38,6 @@ export interface ProjectEndpoint {
 
 export interface MountOpt {
   cwd: string;
+  threadUrl: string;
   wasmUrl?: string;
 }

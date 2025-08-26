@@ -25,8 +25,6 @@ use turbo_tasks_backend::{
     noop_backing_storage, BackendOptions, NoopBackingStorage, TurboTasksBackend,
 };
 
-use crate::tokio_runtime::TOKIO_RUNTIME;
-
 pub fn register() {
     pack_api::register();
     include!(concat!(env!("OUT_DIR"), "/register.rs"));
