@@ -13,16 +13,17 @@ export class Project implements ProjectEndpoint {
     ProjectEndpoint & { mount: (opt: MountOpt) => Promise<void> }
   >;
 
-  constructor(opt: MountOpt & { worker?: Worker }) {
-    const { cwd, worker, wasmUrl } = opt;
+  constructor(opt: MountOpt & { entryUrl?: string }) {
+    const { cwd, entryUrl, wasmUrl, threadUrl } = opt;
 
     const { port1, port2 } = new MessageChannel();
 
     this.remote ??= comlink.wrap(port1);
 
     if (!ProjectWorker) {
-      ProjectWorker =
-        worker || new Worker(new URL("./worker", import.meta.url));
+      ProjectWorker = entryUrl
+        ? new Worker(entryUrl)
+        : new Worker(new URL("./worker", import.meta.url));
 
       self.addEventListener("message", (e) => {
         const port = e.ports[0];
@@ -34,7 +35,7 @@ export class Project implements ProjectEndpoint {
 
     ProjectWorker.postMessage(HandShake, [port2]);
 
-    this.#tunnel ??= this.remote.mount({ cwd, wasmUrl });
+    this.#tunnel ??= this.remote.mount({ cwd, wasmUrl, threadUrl });
   }
 
   public async install(packageLock: string): Promise<void> {

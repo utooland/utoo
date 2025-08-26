@@ -65,8 +65,8 @@ module.exports = [
     mode: "development",
     entry: {
       tokio_worker: {
-        import: "./src/tokio_worker.ts",
-        filename: "tokio_worker.js",
+        import: "./src/worker_thread.ts",
+        filename: "worker_thread.js",
         chunkLoading: false,
       },
     },
