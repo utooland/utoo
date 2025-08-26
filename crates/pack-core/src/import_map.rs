@@ -90,8 +90,11 @@ async fn insert_shared_aliases(
     _execution_context: Vc<ExecutionContext>,
     _config: Vc<Config>,
 ) -> Result<()> {
-    let pack_package = get_utoopack_path(project_path.clone()).owned().await?;
-    import_map.insert_singleton_alias("@swc/helpers", pack_package.clone());
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+    {
+        let pack_package = get_utoopack_path(project_path.clone()).owned().await?;
+        import_map.insert_singleton_alias("@swc/helpers", pack_package.clone());
+    }
     // FIXME: maybe we don't need this
     // import_map.insert_singleton_alias("styled-jsx", pack_package.clone());
     // import_map.insert_singleton_alias("react", project_path.clone());

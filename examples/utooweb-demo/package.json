@@ -3,9 +3,7 @@
   "version": "0.0.1",
   "description": "",
   "scripts": {
-    "build": "utoo-pack build -p . -r ../..",
-    "dev": "utoo-pack dev -p . -r ../..",
-    "serve": "npm run build && node ./genHtml.js && serve ./dist"
+    "start": "rm -rf dist && webpack serve"
   },
   "dependencies": {
     "react": "^19.1.0",
@@ -14,9 +12,14 @@
     "@monaco-editor/react": "^4.4.6"
   },
   "devDependencies": {
-    "@utoo/pack-cli": "*",
     "typescript": "^5.8.3",
-    "serve": "^14.2.4"
+    "html-webpack-plugin": "^5.6.0",
+    "webpack": "^5.91.0",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^5.2.2",
+    "ts-loader": "^9.5.2",
+    "css-loader": "^7.1.2",
+    "mini-css-extract-plugin": "^2.9.4"
   },
   "keywords": [],
   "author": "",

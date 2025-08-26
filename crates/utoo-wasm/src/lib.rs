@@ -22,12 +22,16 @@ use wasm_bindgen::prelude::wasm_bindgen;
 #[cfg(feature = "utoo-pack")]
 pub(crate) mod pack;
 
+mod opfs_offload;
 mod project;
+pub(crate) mod tokio_runtime;
 pub use project::Project;
 
 #[wasm_bindgen(start)]
 #[cfg(feature = "utoo-pack")]
 fn init_pack() {
+    use crate::opfs_offload::OpfsOffload;
+
     panic::set_hook(Box::new(console_error_panic_hook::hook));
 
     let fmt_layer = fmt::layer()
@@ -49,4 +53,6 @@ fn init_pack() {
 
     #[cfg(feature = "utoo-pack")]
     pack::register();
+
+    wasm_bindgen_futures::spawn_local(turbo_tasks_fs::wasm_fs_offload::server(OpfsOffload))
 }
