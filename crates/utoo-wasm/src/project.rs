@@ -49,7 +49,6 @@ impl Project {
 
     #[cfg(feature = "utoo-pack")]
     #[wasm_bindgen]
-    #[allow(clippy::await_holding_refcell_ref)]
     pub async fn build(&self) -> Result<JsValue, String> {
         self.init_pack_project().await.map_err(|e| e.to_string())?;
 
@@ -70,7 +69,6 @@ impl Project {
             )
     }
 
-    #[allow(clippy::await_holding_refcell_ref)]
     async fn init_pack_project(&self) -> anyhow::Result<()> {
         if self.pack_project.read().is_none() {
             use pack_api::project::ProjectOptions;
