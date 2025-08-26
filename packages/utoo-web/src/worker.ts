@@ -3,33 +3,35 @@ import { HandShake } from "./message";
 import { ProjectEndpoint, RawDirent } from "./type";
 import initWasm, { DirEntryType, Project as ProjectInternal } from "./utoo";
 
-const WasmInit = initWasm();
-
 const projectEndpoint: ProjectEndpoint & {
   projectInternal?: ProjectInternal;
-  mount: (cwd: string) => Promise<void>;
+  mount: (opt: MountOpt) => Promise<void>;
+  wasmInit?: Promise<any>;
 } = {
   projectInternal: undefined,
+  wasmInit: undefined,
 
-  async mount(cwd: string) {
-    await WasmInit;
+  // This should be called only once
+  async mount(opt) {
+    const { cwd, wasmUrl } = opt;
+    this.wasmInit = initWasm(wasmUrl);
     this.projectInternal = new ProjectInternal(cwd);
     return;
   },
 
   async install(packageLock: string) {
-    await WasmInit;
+    await this.wasmInit!;
     await this.projectInternal!.install(packageLock);
     return;
   },
 
   async build() {
-    await WasmInit;
+    await this.wasmInit!;
     return await this.projectInternal!.build();
   },
 
   async readFile(path: string, encoding?: "utf8") {
-    await WasmInit;
+    await this.wasmInit!;
     let ret;
     if (encoding === "utf8") {
       ret = await this.projectInternal!.readToString(path);
@@ -44,7 +46,7 @@ const projectEndpoint: ProjectEndpoint & {
     content: string | Uint8Array,
     _encoding?: "utf8",
   ) {
-    await WasmInit;
+    await this.wasmInit!;
     if (typeof content === "string") {
       return await this.projectInternal!.writeString(path, content);
     } else {
@@ -53,12 +55,12 @@ const projectEndpoint: ProjectEndpoint & {
   },
 
   async copyFile(src: string, dst: string) {
-    await WasmInit;
+    await this.wasmInit!;
     return await this.projectInternal!.copyFile(src, dst);
   },
 
   async readdir(path: string, options?: { recursive?: boolean }) {
-    await WasmInit;
+    await this.wasmInit!;
     const dirEntries = options?.recursive
       ? await this.projectInternal!.readDir(path)
       : // TODO: support recursive readDirAll
@@ -75,7 +77,7 @@ const projectEndpoint: ProjectEndpoint & {
   },
 
   async mkdir(path: string, options?: { recursive?: boolean }) {
-    await WasmInit;
+    await this.wasmInit!;
     if (options?.recursive) {
       return await this.projectInternal!.createDirAll(path);
     } else {
@@ -93,3 +95,8 @@ self.addEventListener("message", (e) => {
     ConnectedPorts.add(port);
   }
 });
+
+export interface MountOpt {
+  cwd: string;
+  wasmUrl?: string;
+}

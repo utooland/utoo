@@ -1,22 +1,21 @@
 import * as comlink from "comlink";
 import { Fork, HandShake } from "./message";
 import { Dirent, ProjectEndpoint, RawDirent } from "./type";
+import { MountOpt } from "./worker";
 
 let ProjectWorker: Worker;
 
 const ConnectedPorts = new Set<MessagePort>();
 
 export class Project implements ProjectEndpoint {
-  private cwd: string;
-
   #tunnel: Promise<void>;
 
   private remote: comlink.Remote<
-    ProjectEndpoint & { mount: (cwd: string) => Promise<void> }
+    ProjectEndpoint & { mount: (opt: MountOpt) => Promise<void> }
   >;
 
-  constructor(cwd: string, worker?: Worker) {
-    this.cwd = cwd;
+  constructor(opt: MountOpt & { worker?: Worker }) {
+    const { cwd, worker, wasmUrl } = opt;
 
     const { port1, port2 } = new MessageChannel();
 
@@ -36,7 +35,7 @@ export class Project implements ProjectEndpoint {
 
     ProjectWorker.postMessage(HandShake, [port2]);
 
-    this.#tunnel ??= this.remote.mount(this.cwd);
+    this.#tunnel ??= this.remote.mount({ cwd, wasmUrl });
   }
 
   public async install(packageLock: string): Promise<void> {
