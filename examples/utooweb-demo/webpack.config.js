@@ -59,6 +59,7 @@ module.exports = [
       liveReload: false,
       client: false,
       webSocketServer: false,
+      port: 8081,
     },
   },
   {
