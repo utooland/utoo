@@ -57,7 +57,7 @@ use crate::{
     app::{AppEntrypoint, AppProject, OptionAppProject},
     endpoint::{Endpoint, Endpoints},
     entrypoint::Entrypoints,
-    library::{Library, LibraryProject, OptionLibraryProject},
+    library::{LibraryEntrypoint, LibraryProject, OptionLibraryProject},
     tasks::BundlerTurboTasks,
     versioned_content_map::VersionedContentMap,
 };
@@ -505,13 +505,13 @@ impl Project {
     #[turbo_tasks::function]
     pub async fn library_project(self: Vc<Self>) -> Result<Vc<OptionLibraryProject>> {
         let this = self.await?;
-        let lib_vec: Vec<Library> = this
+        let lib_vec: Vec<LibraryEntrypoint> = this
             .config
             .entries()
             .await?
             .iter()
             .filter_map(|e| {
-                e.library.as_ref().map(|l| Library {
+                e.library.as_ref().map(|l| LibraryEntrypoint {
                     name: e.name.clone().unwrap_or(
                         PathBuf::from(e.import.as_str())
                             .file_stem()
