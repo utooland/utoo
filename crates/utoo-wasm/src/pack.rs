@@ -24,7 +24,6 @@ use turbo_tasks::{OperationVc, ReadConsistency, ResolvedVc, TurboTasks};
 use turbo_tasks_backend::{
     noop_backing_storage, BackendOptions, NoopBackingStorage, TurboTasksBackend,
 };
-use wasm_bindgen::{convert::IntoWasmAbi, prelude::wasm_bindgen, JsValue};
 
 use crate::tokio_runtime::TOKIO_RUNTIME;
 
