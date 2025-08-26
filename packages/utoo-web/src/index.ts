@@ -1,7 +1,6 @@
 import * as comlink from "comlink";
 import { Fork, HandShake } from "./message";
-import { Dirent, ProjectEndpoint, RawDirent } from "./type";
-import { MountOpt } from "./worker";
+import { Dirent, MountOpt, ProjectEndpoint, RawDirent } from "./type";
 
 let ProjectWorker: Worker;
 

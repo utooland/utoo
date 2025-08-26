@@ -1,6 +1,6 @@
 import * as comlink from "comlink";
 import { HandShake } from "./message";
-import { ProjectEndpoint, RawDirent } from "./type";
+import { MountOpt, ProjectEndpoint, RawDirent } from "./type";
 import initWasm, { DirEntryType, Project as ProjectInternal } from "./utoo";
 
 const projectEndpoint: ProjectEndpoint & {
@@ -14,7 +14,8 @@ const projectEndpoint: ProjectEndpoint & {
   // This should be called only once
   async mount(opt) {
     const { cwd, wasmUrl } = opt;
-    this.wasmInit = initWasm(wasmUrl);
+    this.wasmInit ??= initWasm(wasmUrl);
+    await this.wasmInit!;
     this.projectInternal = new ProjectInternal(cwd);
     return;
   },
@@ -95,8 +96,3 @@ self.addEventListener("message", (e) => {
     ConnectedPorts.add(port);
   }
 });
-
-export interface MountOpt {
-  cwd: string;
-  wasmUrl?: string;
-}

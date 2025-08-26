@@ -36,4 +36,7 @@ export interface ProjectEndpoint {
   copyFile(src: string, dst: string): Promise<void>;
 }
 
-export interface ProjectEndpoint {}
+export interface MountOpt {
+  cwd: string;
+  wasmUrl?: string;
+}
