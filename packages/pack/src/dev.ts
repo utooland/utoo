@@ -56,7 +56,7 @@ async function serveInternal(
     await xcodeProfilingReady();
   }
 
-  startServer(
+  await startServer(
     {
       hostname: serverOptions?.hostname || "localhost",
       port: serverOptions?.port || 3000,
