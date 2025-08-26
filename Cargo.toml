@@ -99,7 +99,7 @@ turbopack-test-utils = { path = "./next.js/turbopack/crates/turbopack-test-utils
 too_many_arguments = "allow"
 
 [profile.release]
-opt-level = 3
+opt-level = "z"
 lto = "fat"
 strip = "symbols"
 
@@ -132,10 +132,6 @@ strip = "none"
 incremental = true
 codegen-units = 256
 debug = 1
-
-[profile.wasm-release]
-inherits = "release"
-lto = "thin"
 
 [patch.crates-io]
 tokio = { git = "https://github.com/utooland/tokio.git", package = "tokio" }
