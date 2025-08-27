@@ -36,8 +36,11 @@ export interface ProjectEndpoint {
   copyFile(src: string, dst: string): Promise<void>;
 }
 
-export interface MountOpt {
+export interface ProjectOptions {
   cwd: string;
-  threadUrl: string;
+  workerUrl?: string;
+  threadWorkerUrl: string;
   wasmUrl?: string;
+  serviceWorkerUrl: string;
+  proxiedResourcePath: string;
 }

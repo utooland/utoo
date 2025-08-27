@@ -1,11 +1,18 @@
 import * as comlink from "comlink";
 import { HandShake } from "./message";
-import { MountOpt, ProjectEndpoint, RawDirent } from "./type";
+import { ProjectEndpoint, ProjectOptions, RawDirent } from "./type";
 import initWasm, { DirEntryType, Project as ProjectInternal } from "./utoo";
+
+declare let self: DedicatedWorkerGlobalScope;
 
 const projectEndpoint: ProjectEndpoint & {
   projectInternal?: ProjectInternal;
-  mount: (opt: MountOpt) => Promise<void>;
+  mount: (
+    opt: Omit<
+      ProjectOptions,
+      "workerUrl" | "serviceWorkerUrl" | "proxiedResourcePath"
+    >,
+  ) => Promise<void>;
   wasmInit?: Promise<any>;
 } = {
   projectInternal: undefined,
@@ -13,10 +20,10 @@ const projectEndpoint: ProjectEndpoint & {
 
   // This should be called only once
   async mount(opt) {
-    const { cwd, wasmUrl, threadUrl } = opt;
+    const { cwd, wasmUrl, threadWorkerUrl } = opt;
     this.wasmInit ??= initWasm(wasmUrl);
     await this.wasmInit!;
-    this.projectInternal = new ProjectInternal(cwd, threadUrl);
+    this.projectInternal = new ProjectInternal(cwd, threadWorkerUrl);
     return;
   },
 

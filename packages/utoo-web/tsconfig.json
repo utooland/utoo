@@ -3,6 +3,11 @@
     "rootDir": "./src",
     "outDir": "./esm",
     "target": "ES2018",
+    "lib": [
+      "DOM",
+      "WebWorker",
+      "ESNext",
+    ],
     "allowJs": true,
     "esModuleInterop": true,
     "moduleResolution": "bundler",
@@ -12,7 +17,10 @@
     "skipLibCheck": true,
     "noImplicitReturns": true
   },
-  "include": ["src"],
-  "exclude": ["dist"]
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "dist"
+  ]
 }
-
