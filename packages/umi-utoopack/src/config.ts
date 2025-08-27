@@ -8,7 +8,6 @@ import type { IOpts } from "./types";
 export async function getProdUtooPackConfig(
   opts: IOpts,
 ): Promise<BundleOptions> {
-  console.log("entry: ", opts.entry);
   const webpackConfig = await getConfig({
     cwd: opts.cwd,
     rootDir: opts.rootDir,
