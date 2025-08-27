@@ -18,7 +18,6 @@ import {
 import type { IOpts } from "./types";
 
 export async function build(opts: IOpts) {
-  // @ts-ignore
   const { cwd, onBuildComplete } = opts;
 
   // 添加一个 checkConfig 对于 utoopack 不支持的配置警告一下
