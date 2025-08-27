@@ -260,7 +260,7 @@ const OpfsProject = () => {
 
         const project = new Project({
           cwd: projectName,
-          threadUrl: "http://localhost:8081/worker_thread.js",
+          threadUrl: "http://localhost:8081/thread_worker.js",
         });
         setProject(project);
 
