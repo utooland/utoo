@@ -1,4 +1,4 @@
-import { Project } from "@utoo/web";
+import { Project as UtooProject } from "@utoo/web";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { packageLock } from "./packageLock";
 import MonacoEditor from "@monaco-editor/react";
@@ -115,8 +115,8 @@ const FileTreeItem = React.memo(
   },
 );
 
-const OpfsProject = () => {
-  const [project, setProject] = useState<Project | null>(null);
+const Project = () => {
+  const [project, setProject] = useState<UtooProject | null>(null);
   const [fileTree, setFileTree] = useState<FileTreeNode[]>([]);
   const [selectedFilePath, setSelectedFilePath] = useState("");
   const [selectedFileContent, setSelectedFileContent] = useState("");
@@ -258,9 +258,9 @@ const OpfsProject = () => {
 
         setIsLoading(true); // Set loading before install
 
-        const project = new Project({
+        const project = new UtooProject({
           cwd: projectName,
-          threadUrl: "http://localhost:8081/worker_thread.js",
+          threadUrl: "http://localhost:8081/thread_worker.js",
         });
         setProject(project);
 
@@ -570,7 +570,7 @@ interface ProjectFileItem {
   isDirectory: () => boolean;
 }
 
-export default OpfsProject;
+export default Project;
 
 interface FileTreeNode {
   name: string;
