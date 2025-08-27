@@ -108,8 +108,6 @@ export async function getDevUtooPackConfig(
     hmr: false,
     analyze: process.env.ANALYZE,
   });
-  // console.log('webpackConfig: ', JSON.stringify(webpackConfig.entry, null, 2))
-
   let utooBundlerOpts = compatOptionsFromWebpack({
     ...lodash.omit(webpackConfig, ["target", "module"]),
     compatMode: true,
