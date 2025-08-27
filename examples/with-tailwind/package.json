@@ -3,7 +3,8 @@
   "version": "0.0.1",
   "scripts": {
     "dev": "utoo-pack dev",
-    "build": "utoo-pack build"
+    "build": "utoo-pack build",
+    "serve": "node ./genHtml.js"
   },
   "dependencies": {
     "react": "^18.2.0",

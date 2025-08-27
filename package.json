@@ -16,6 +16,7 @@
     "packages/pack",
     "packages/pack-cli",
     "packages/style-loader",
+    "packages/umi-utoopack",
     "crates/pack-core/js",
     "crates/pack/js",
     "examples/define",

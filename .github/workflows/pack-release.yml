@@ -157,9 +157,12 @@ jobs:
           echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc &&
           npm version --workspace=@utoo/pack "${VERSION}" &&
           npm version --workspace=@utoo/pack-cli "${VERSION}" &&
+          npm version --workspace=@umijs/bundler-utoopack "${VERSION}" &&
           npm install --workspace=@utoo/pack-cli @utoo/pack --save-exact &&
+          npm install --workspace=@umijs/bundler-utoopack @utoo/pack --save-exact &&
           npm publish --workspace=@utoo/pack --access public &&
-          npm publish --workspace=@utoo/pack-cli --access public
+          npm publish --workspace=@utoo/pack-cli --access public &&
+          npm publish --workspace=@umijs/bundler-utoopack --access public
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -4,3 +4,6 @@ target
 .DS_Store
 *.trace
 rustc-ice*.txt
+/packages/*/node_modules
+/examples/*/node_modules
+

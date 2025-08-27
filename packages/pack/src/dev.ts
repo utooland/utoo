@@ -285,7 +285,6 @@ export async function initialize(
     projectPath,
     rootPath,
   );
-  await hotReloader.start();
 
   const requestHandlerImpl = async (
     req: IncomingMessage,
