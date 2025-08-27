@@ -31,8 +31,7 @@ export async function build(opts: IOpts) {
   } catch (e: any) {
     console.error(e.message);
     const err = new Error("Build with utoopack failed.");
-    // @ts-ignore
-    err.stack = null;
+    (err as any).stack = null;
     throw err;
   }
 
