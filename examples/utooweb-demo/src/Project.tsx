@@ -1,9 +1,16 @@
-import { Project as UtooProject } from "@utoo/web";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { packageLock } from "./packageLock";
 import MonacoEditor from "@monaco-editor/react";
+import { installServiceWorker, Project as UtooProject } from "@utoo/web";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { packageLock } from "./packageLock";
 
 import "./styles.css";
+import { demoFiles } from "./demoFiles";
 
 const projectName = "/utooweb-demo";
 
@@ -124,6 +131,7 @@ const Project = () => {
   const [error, setError] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string>(""); // For page preview
   const [isBuilding, setIsBuilding] = useState(false);
+  const initStarted = useRef(false);
 
   type UpdateTreeWithChildrenFn = (
     tree: FileTreeNode[],
@@ -218,10 +226,8 @@ const Project = () => {
         const content: string = await project.readFile(filePath, "utf8");
         setSelectedFileContent(content);
 
-        // If index.html, generate preview URL
-        if (filePath.endsWith("index.html")) {
-          const blob = new Blob([content], { type: "text/html" });
-          setPreviewUrl(URL.createObjectURL(blob));
+        if (filePath.endsWith("dist/index.html")) {
+          setPreviewUrl(`${location.origin}/preview/${filePath}`);
         }
       } catch (e: any) {
         setError(`Error reading file: ${e.message}`);
@@ -230,108 +236,99 @@ const Project = () => {
     [project],
   );
 
-  useEffect(() => {
-    const tryPreviewIndex = async () => {
-      if (!project) return;
-      try {
-        const content = await project.readFile("./index.html", "utf8");
-        const blob = new Blob([content], { type: "text/html" });
-        setPreviewUrl(URL.createObjectURL(blob));
-      } catch {
-        setPreviewUrl("");
-      }
-    };
-    tryPreviewIndex();
-  }, [project]);
-
   // Memoize the file tree to prevent unnecessary re-renders
   const memoizedFileTree = useMemo(() => fileTree, [fileTree]);
 
   useEffect(() => {
+    if (initStarted.current) return;
+    initStarted.current = true;
+
     const initialize = async () => {
+      setIsLoading(true);
       try {
-        if (!navigator.storage || !navigator.storage.getDirectory) {
-          throw new Error(
-            "Your browser does not support the Origin Private File System.",
-          );
-        }
-
-        setIsLoading(true); // Set loading before install
-
-        const project = new UtooProject({
+        const projectInstance = new UtooProject({
           cwd: projectName,
-          threadUrl: "http://localhost:8081/thread_worker.js",
+          // workerUrl: 'http://localhost:8081/packages_utoo-web_esm_worker_js.js',
+          // wasmUrl: 'http://localhost:8081/b1c486557a266e9e0690.wasm',
+          threadWorkerUrl: "http://localhost:8081/threadWorker.js",
+          serviceWorkerUrl: "http://localhost:8081/serviceWorker.js",
+          proxiedResourcePath: "preview",
         });
-        setProject(project);
 
-        console.log(
-          "%cOPFS Project:%c Start to install dependencies.",
-          "color: blue;",
-          "color: green;",
-        );
+        await projectInstance.installServiceWorker();
 
-        const start = performance.now();
-        await project.install(JSON.stringify(packageLock));
-        await project.mkdir("src");
-        await project.writeFile("src/index.tsx", "console.log('1')");
-        await project.writeFile(
-          "utoopack.json",
-          JSON.stringify(
-            {
-              entry: [
-                {
-                  import: "./src/index.tsx",
-                  name: "index",
-                },
-              ],
-            },
-            null,
-            2,
-          ),
-        );
+        setProject(projectInstance);
 
-        console.log(
-          `%cOPFS Project:%c Finished to install dependencies in ${Math.round(performance.now() - start)} ms.`,
-          "color: blue;",
-          "color: green;",
-        );
+        await installDependencies(projectInstance);
+        await initUtooProject(projectInstance);
 
-        // new Worker(new URL("./worker", import.meta.url));
-
-        // Read only the top-level directory without recursion
-        const rootItems = await project.readdir(".");
-        const initialTree = [
-          {
-            name: projectName,
-            fullName: ".",
-            type: "directory" as const,
-            children: rootItems
-              .map((item) => ({
-                ...item,
-                fullName: `./${item.name}`,
-                type: item.isDirectory()
-                  ? ("directory" as const)
-                  : ("file" as const),
-                children: item.isDirectory() ? [] : null,
-              }))
-              .sort((a, b) =>
-                a.type === b.type
-                  ? a.name.localeCompare(b.name)
-                  : a.type.localeCompare(b.type),
-              ),
-          },
-        ];
+        const initialTree = await buildInitialFileTree(projectInstance);
         setFileTree(initialTree);
       } catch (e) {
         const errorMessage = e instanceof Error ? e.message : String(e);
         setError(`Initialization failed: ${errorMessage}`);
       } finally {
-        setIsLoading(false); // Reset loading after install
+        setIsLoading(false);
       }
+    };
+
+    const installDependencies = async (project: UtooProject): Promise<void> => {
+      console.log(
+        "%cOPFS Project:%c Start to install dependencies.",
+        "color: blue;",
+        "color: green",
+      );
+      const start = performance.now();
+      await project.install(JSON.stringify(packageLock));
+      console.log(
+        `%cOPFS Project:%c Finished to install dependencies in ${Math.round(performance.now() - start)} ms.`,
+        "color: blue;",
+        "color: green",
+      );
+    };
+
+    const buildInitialFileTree = async (
+      project: UtooProject,
+    ): Promise<FileTreeNode[]> => {
+      const rootItems = await project.readdir(".");
+      const initialTree = [
+        {
+          name: projectName,
+          fullName: ".",
+          type: "directory" as const,
+          children: rootItems
+            .filter((item) => item.name !== "utooweb-demo")
+            .map((item) => ({
+              ...item,
+              fullName: `./${item.name}`,
+              type: item.isDirectory()
+                ? ("directory" as const)
+                : ("file" as const),
+              children: item.isDirectory() ? [] : null,
+            }))
+            .sort((a, b) =>
+              a.type === b.type
+                ? a.name.localeCompare(b.name)
+                : a.type.localeCompare(b.type),
+            ),
+        },
+      ];
+      return initialTree;
     };
 
     initialize();
   }, []);
+
+  const initUtooProject = async (project: UtooProject): Promise<void> => {
+    await project.mkdir("src");
+
+    for (const filePath in demoFiles) {
+      if (Object.prototype.hasOwnProperty.call(demoFiles, filePath)) {
+        const content = demoFiles[filePath as keyof typeof demoFiles];
+        await project.writeFile(filePath, content);
+      }
+    }
+  };
 
   // Code editor area
   const monacoDisplay = useMemo(
@@ -418,15 +415,62 @@ const Project = () => {
   const handleBuild = useCallback(async () => {
     if (!project) return;
     setIsBuilding(true);
+    setError("");
     try {
       await project.build();
+
+      // After build, read stats.json and generate a preview
+      try {
+        const statsContent = await project.readFile("dist/stats.json", "utf8");
+        const stats = JSON.parse(statsContent);
+
+        let styles = "";
+        let scripts = "";
+
+        if (stats.assets) {
+          for (const asset of stats.assets) {
+            const assetPath = `/dist/${asset.name}`;
+            if (asset.name.endsWith(".css")) {
+              styles += `<link rel="stylesheet" href="${assetPath}">`;
+            } else if (asset.name.endsWith(".js")) {
+              scripts += `<script src="${assetPath}"></script>`;
+            }
+          }
+        }
+
+        const html = `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <meta charset="utf-8" />
+              <title>Preview</title>
+              ${styles}
+            </head>
+            <body>
+              <div id="root"></div>
+              ${scripts}
+            </body>
+          </html>
+        `;
+
+        await project.writeFile("dist/index.html", html);
+
+        // Refresh file tree to show `dist` directory
+        const root = fileTree.find((node) => node.fullName === ".");
+        if (root) {
+          await handleDirectoryExpand(root);
+        }
+      } catch (e: any) {
+        console.error("Failed to process stats.json:", e);
+        setError(`Build succeeded, but failed to display stats: ${e.message}`);
+      }
     } catch (e: any) {
       console.error("Build failed: ", e);
       setError(`Build failed: ${e.message}`);
     } finally {
       setIsBuilding(false);
     }
-  }, [project]);
+  }, [project, fileTree, handleDirectoryExpand]);
 
   return (
     <div

@@ -1,6 +1,6 @@
 import * as comlink from "comlink";
-import { Fork, HandShake } from "./message";
-import { Dirent, MountOpt, ProjectEndpoint, RawDirent } from "./type";
+import { Fork, HandShake, ServiceWorkerHandShake } from "./message";
+import { Dirent, ProjectEndpoint, ProjectOptions, RawDirent } from "./type";
 
 let ProjectWorker: Worker;
 
@@ -9,33 +9,74 @@ const ConnectedPorts = new Set<MessagePort>();
 export class Project implements ProjectEndpoint {
   #tunnel: Promise<void>;
 
+  private serviceWorkerUrl: string;
+
+  private proxiedResourcePath: string;
+
   private remote: comlink.Remote<
-    ProjectEndpoint & { mount: (opt: MountOpt) => Promise<void> }
+    ProjectEndpoint & {
+      mount: (
+        opt: Omit<
+          ProjectOptions,
+          "workerUrl" | "serviceWorkerUrl" | "proxiedResourcePath"
+        >,
+      ) => Promise<void>;
+    }
   >;
 
-  constructor(opt: MountOpt & { entryUrl?: string }) {
-    const { cwd, entryUrl, wasmUrl, threadUrl } = opt;
+  constructor(options: ProjectOptions) {
+    const {
+      cwd,
+      workerUrl,
+      wasmUrl,
+      threadWorkerUrl,
+      serviceWorkerUrl,
+      proxiedResourcePath,
+    } = options;
+
+    this.serviceWorkerUrl = serviceWorkerUrl;
+
+    this.proxiedResourcePath = proxiedResourcePath;
 
     const { port1, port2 } = new MessageChannel();
 
     this.remote ??= comlink.wrap(port1);
 
     if (!ProjectWorker) {
-      ProjectWorker = entryUrl
-        ? new Worker(entryUrl)
+      ProjectWorker = workerUrl
+        ? new Worker(workerUrl)
         : new Worker(new URL("./worker", import.meta.url));
-
-      self.addEventListener("message", (e) => {
-        const port = e.ports[0];
-        if (e.data === Fork && !ConnectedPorts.has(port)) {
-          ProjectWorker.postMessage(HandShake, [port]);
-        }
+      window.addEventListener("message", (e) => {
+        this.connectWorker(e);
+      });
+      navigator.serviceWorker.addEventListener("message", (e) => {
+        this.connectWorker(e);
       });
     }
 
     ProjectWorker.postMessage(HandShake, [port2]);
 
-    this.#tunnel ??= this.remote.mount({ cwd, wasmUrl, threadUrl });
+    this.#tunnel ??= this.remote.mount({
+      cwd,
+      wasmUrl,
+      threadWorkerUrl,
+    });
+  }
+
+  private connectWorker(e: MessageEvent) {
+    const port = e.ports[0];
+    if (e.data === Fork && !ConnectedPorts.has(port)) {
+      ProjectWorker.postMessage(HandShake, [port]);
+    }
+  }
+
+  public async installServiceWorker() {
+    await navigator.serviceWorker.register(this.serviceWorkerUrl);
+
+    navigator.serviceWorker.controller?.postMessage({
+      [ServiceWorkerHandShake]: true,
+      previewPath: this.proxiedResourcePath,
+    });
   }
 
   public async install(packageLock: string): Promise<void> {
@@ -87,9 +128,11 @@ export class Project implements ProjectEndpoint {
     return await this.remote.mkdir(path, options);
   }
 
-  public static fork(channel: MessageChannel): ProjectEndpoint {
-    self.postMessage(Fork, {
-      targetOrigin: "*",
+  public static fork(
+    channel: MessageChannel,
+    eventSource: Client | DedicatedWorkerGlobalScope,
+  ): ProjectEndpoint {
+    eventSource.postMessage(Fork, {
       transfer: [channel.port2],
     });
 
