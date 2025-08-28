@@ -115,7 +115,9 @@ impl CommandService {
         println!();
         println!(
             "\nFor more information, visit: {}",
-            "https://github.com/umijs/mako/tree/next".blue().underline()
+            "https://github.com/utooland/utoo/tree/next"
+                .blue()
+                .underline()
         );
 
         Ok(())

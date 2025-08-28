@@ -60,7 +60,7 @@ indoc = "2.0.0"
 parking_lot = "0.12.1"
 
 # Dependencies from nextjs, should keep the same rev!
-## Dependencies for common cache and task. See https://github.com/umijs/next.js/blob/canary/turbopack/crates/turbopack/architecture.md
+## Dependencies for common cache and task. See https://github.com/utooland/next.js/blob/canary/turbopack/crates/turbopack/architecture.md
 turbo-tasks = { path = "./next.js/turbopack/crates/turbo-tasks" }
 turbo-tasks-fs = { path = "./next.js/turbopack/crates/turbo-tasks-fs" }
 turbo-tasks-env = { path = "./next.js/turbopack/crates/turbo-tasks-env" }

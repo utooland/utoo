@@ -427,7 +427,7 @@
         {
           "featureLevel2": "",
           "featureStatus": "✅",
-          "featureDetails": "[Webpack compat example](https://github.com/umijs/mako/tree/next/examples/webpack-compat)",
+          "featureDetails": "[Webpack compat example](https://github.com/utooland/utoo/tree/next/examples/webpack-compat)",
           "remarks": "Made it easy to migrate from webpack-based projects"
         }
       ]

@@ -31,5 +31,5 @@
     "examples/resolve",
     "examples/react"
   ],
-  "repository": "https://github.com/umijs/mako"
+  "repository": "https://github.com/utooland/utoo"
 }
