@@ -18,5 +18,5 @@
   "devDependencies": {
     "@utoo/pack-cli": "*"
   },
-  "repository": "git@github.com:umijs/mako.git"
+  "repository": "git@github.com:utooland/utoo.git"
 }
