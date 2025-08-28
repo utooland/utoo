@@ -70,7 +70,7 @@
     "@types/webpack": "^5.28.5"
   },
   "engines": {
-    "node": ">= 10"
+    "node": ">= 20"
   },
   "scripts": {
     "build:cjs": "rm -rf cjs && tsc -p ./tsconfig.json --module commonjs --outDir cjs && cp src/*.d.ts cjs/",
