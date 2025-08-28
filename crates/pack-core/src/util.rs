@@ -125,7 +125,7 @@ pub fn convert_to_project_relative(project_inside_path: &str, project_path: &str
     }
 }
 
-// issue: https://github.com/umijs/mako/issues/2081
+// issue: https://github.com/utooland/utoo/issues/2081
 // issue: https://github.com/vercel/next.js/issues/82106
 pub fn resolve_loader_path(loader_name: &str, project_dir: &FileSystemPath) -> RcStr {
     if loader_name.starts_with("./") || loader_name.starts_with("../") {

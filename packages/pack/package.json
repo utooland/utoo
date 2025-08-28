@@ -83,5 +83,5 @@
     "version": "napi version",
     "generate-features-list": "node ./scripts/generate-feature-list.js"
   },
-  "repository": "git@github.com:umijs/mako.git"
+  "repository": "git@github.com:utooland/utoo.git"
 }

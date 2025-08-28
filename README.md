@@ -1,6 +1,6 @@
-> ⚠️ Notice: we are working on making a better bundler on top of Turbopack, see <https://github.com/umijs/mako/issues/1872>.
+> ⚠️ Notice: we are working on making a better bundler on top of Turbopack, see <https://github.com/utooland/utoo/issues/1872>.
 >
-> If you encountered some critical problems when using current Mako, you can report issues at [Mako 0.x Feedback in discussions](https://github.com/umijs/mako/discussions/categories/mako-0-x-feedback).
+> If you encountered some critical problems when using current Mako, you can report issues at [Mako 0.x Feedback in discussions](https://github.com/utooland/utoo/discussions/categories/mako-0-x-feedback).
 
 ----
 
@@ -33,7 +33,7 @@ Install the bundler globally if you need build capabilities:
 npm install -g @utoo/pack
 ```
 
-You can track features progress at [`@utoo/pack features list`](https://github.com/umijs/mako/blob/next/packages/pack/docs/features-list.md)
+You can track features progress at [`@utoo/pack features list`](https://github.com/utooland/utoo/blob/next/packages/pack/docs/features-list.md)
 
 ## ✨ Features
 
