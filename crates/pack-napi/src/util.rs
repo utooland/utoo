@@ -110,7 +110,7 @@ pub fn log_internal_error_and_inform(err_info: &str) {
 
     writeln!(log_file, "{LOG_DIVIDER}\n{err_info}").unwrap();
     eprintln!(
-        "{}: An unexpected Turbopack error occurred. Please report the content of {}, along with a description of what you were doing when the error occurred, to https://github.com/umijs/mako/issues/new?template=1.bug_report.yml",
+        "{}: An unexpected Turbopack error occurred. Please report the content of {}, along with a description of what you were doing when the error occurred, to https://github.com/utooland/utoo/issues/new?template=1.bug_report.yml",
         "FATAL".red().bold(),
         PANIC_LOG.to_string_lossy()
     );

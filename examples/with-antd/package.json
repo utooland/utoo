@@ -34,5 +34,5 @@
     "@utoo/pack-cli": "*",
     "serve": "^14.2.4"
   },
-  "repository": "git@github.com:umijs/mako.git"
+  "repository": "git@github.com:utooland/utoo.git"
 }
