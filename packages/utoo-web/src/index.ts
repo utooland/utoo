@@ -1,6 +1,12 @@
 import * as comlink from "comlink";
 import { Fork, HandShake, ServiceWorkerHandShake } from "./message";
-import { Dirent, ProjectEndpoint, ProjectOptions, RawDirent } from "./type";
+import {
+  Dirent,
+  ProjectEndpoint,
+  ProjectOptions,
+  RawDirent,
+  ServiceWorkerOptions,
+} from "./type";
 
 let ProjectWorker: Worker;
 
@@ -9,9 +15,7 @@ const ConnectedPorts = new Set<MessagePort>();
 export class Project implements ProjectEndpoint {
   #tunnel: Promise<void>;
 
-  private serviceWorkerUrl: string;
-
-  private proxiedResourcePath: string;
+  private serviceWorkerOptions?: ServiceWorkerOptions;
 
   private remote: comlink.Remote<
     ProjectEndpoint & {
@@ -25,18 +29,10 @@ export class Project implements ProjectEndpoint {
   >;
 
   constructor(options: ProjectOptions) {
-    const {
-      cwd,
-      workerUrl,
-      wasmUrl,
-      threadWorkerUrl,
-      serviceWorkerUrl,
-      proxiedResourcePath,
-    } = options;
+    const { cwd, workerUrl, wasmUrl, threadWorkerUrl, serviceWorkerOptions } =
+      options;
 
-    this.serviceWorkerUrl = serviceWorkerUrl;
-
-    this.proxiedResourcePath = proxiedResourcePath;
+    this.serviceWorkerOptions = serviceWorkerOptions;
 
     const { port1, port2 } = new MessageChannel();
 
@@ -49,9 +45,12 @@ export class Project implements ProjectEndpoint {
       window.addEventListener("message", (e) => {
         this.connectWorker(e);
       });
-      navigator.serviceWorker.addEventListener("message", (e) => {
-        this.connectWorker(e);
-      });
+
+      if (this.serviceWorkerOptions) {
+        navigator.serviceWorker.addEventListener("message", (e) => {
+          this.connectWorker(e);
+        });
+      }
     }
 
     ProjectWorker.postMessage(HandShake, [port2]);
@@ -71,12 +70,16 @@ export class Project implements ProjectEndpoint {
   }
 
   public async installServiceWorker() {
-    await navigator.serviceWorker.register(this.serviceWorkerUrl);
+    if (this.serviceWorkerOptions) {
+      const { serviceWorkerUrl, proxiedResourcePath } =
+        this.serviceWorkerOptions;
+      await navigator.serviceWorker.register(serviceWorkerUrl);
 
-    navigator.serviceWorker.controller?.postMessage({
-      [ServiceWorkerHandShake]: true,
-      previewPath: this.proxiedResourcePath,
-    });
+      navigator.serviceWorker.controller?.postMessage({
+        [ServiceWorkerHandShake]: true,
+        proxiedResourcePath,
+      });
+    }
   }
 
   public async install(packageLock: string): Promise<void> {
