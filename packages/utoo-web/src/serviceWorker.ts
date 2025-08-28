@@ -11,11 +11,11 @@ let _promise__: Promise<void> = new Promise((resolve) => {
 
 let projectEndpoint: ProjectEndpoint | undefined;
 
-let proxiedPath: string | undefined;
+let proxiedResourcePath: string | undefined;
 
 self.addEventListener("message", (event) => {
   if (event.data && event.data[ServiceWorkerHandShake] === true) {
-    proxiedPath = event.data.previewPath;
+    proxiedResourcePath = event.data.proxiedResourcePath;
     projectEndpoint = Project.fork(
       new MessageChannel(),
       event.source as Client,
@@ -27,19 +27,20 @@ self.addEventListener("message", (event) => {
 self.addEventListener("fetch", async (event: FetchEvent) => {
   const { url, referrer } = event.request;
   if (
-    new URL(url).pathname.startsWith(`/${proxiedPath}`) ||
-    (referrer && new URL(referrer).pathname.startsWith(`/${proxiedPath}`))
+    new URL(url).pathname.startsWith(`/${proxiedResourcePath}`) ||
+    (referrer &&
+      new URL(referrer).pathname.startsWith(`/${proxiedResourcePath}`))
   ) {
     await _promise__;
     const projectPath =
-      "." + new URL(url).pathname.replace(`/${proxiedPath}`, "");
-    event.respondWith(readFromProject(projectPath));
+      "." + new URL(url).pathname.replace(`/${proxiedResourcePath}`, "");
+    event.respondWith(readFileFromProject(projectPath));
   } else {
     event.respondWith(fetch(event.request));
   }
 });
 
-async function readFromProject(projectPath: string): Promise<Response> {
+async function readFileFromProject(projectPath: string): Promise<Response> {
   try {
     const content = await projectEndpoint!.readFile(projectPath);
 

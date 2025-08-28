@@ -251,8 +251,10 @@ const Project = () => {
           // workerUrl: 'http://localhost:8081/packages_utoo-web_esm_worker_js.js',
           // wasmUrl: 'http://localhost:8081/b1c486557a266e9e0690.wasm',
           threadWorkerUrl: "http://localhost:8081/threadWorker.js",
-          serviceWorkerUrl: "http://localhost:8081/serviceWorker.js",
-          proxiedResourcePath: "preview",
+          serviceWorkerOptions: {
+            serviceWorkerUrl: "http://localhost:8081/serviceWorker.js",
+            proxiedResourcePath: "preview",
+          },
         });
 
         await projectInstance.installServiceWorker();
