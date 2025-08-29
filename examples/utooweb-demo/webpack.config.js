@@ -11,7 +11,7 @@ module.exports = [
         filename: "main.js",
       },
     },
-    devtool: "eval-source-map",
+    devtool: "source-map",
     output: {
       path: path.resolve(__dirname, "dist"),
       clean: false,
@@ -76,7 +76,7 @@ module.exports = [
         chunkLoading: false,
       },
     },
-    devtool: "eval-source-map",
+    devtool: "cheap-module-source-map",
     output: {
       path: path.resolve(__dirname, "dist"),
       clean: true,
@@ -97,6 +97,14 @@ module.exports = [
     },
     resolve: {
       extensions: [".ts", ".js"],
+    },
+    optimization: {
+      minimize: false,
+      splitChunks: false,
+      runtimeChunk: false,
+    },
+    experiments: {
+      outputModule: false,
     },
   },
 ];
