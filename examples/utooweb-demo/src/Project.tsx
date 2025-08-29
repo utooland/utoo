@@ -6,6 +6,7 @@ import { useBuild } from "./hooks/useBuild";
 import { FileTreeItem } from "./components/FileTree";
 import { Editor } from "./components/Editor";
 import { Preview } from "./components/Preview";
+import { Panel } from "./components/Panel";
 import "./styles.css";
 
 const Project = () => {
@@ -19,37 +20,55 @@ const Project = () => {
     fetchFileContent,
     error: fileContentError,
   } = useFileContent(project);
-  const { isBuilding, handleBuild, error: buildError } = useBuild(project, fileTree, handleDirectoryExpand);
+  const { isBuilding, handleBuild, error: buildError } = useBuild(
+    project,
+    fileTree,
+    handleDirectoryExpand,
+  );
 
   const error = projectError || fileContentError || buildError;
 
   const memoizedFileTree = useMemo(() => fileTree, [fileTree]);
 
+  const buildButton = (
+    <button
+      onClick={handleBuild}
+      disabled={isBuilding || !project}
+      style={{
+        padding: "0.25rem 0.75rem",
+        borderRadius: "0.375rem",
+        border: "none",
+        fontSize: '0.875rem',
+        background: isBuilding ? "#d1d5db" : "#2563eb",
+        color: "#fff",
+        fontWeight: 500,
+        cursor: isBuilding ? "not-allowed" : "pointer",
+        transition: "background 0.2s",
+      }}
+    >
+      {isBuilding ? "Building..." : "Build"}
+    </button>
+  );
+
   return (
     <div
       style={{
         height: "100vh",
-        padding: "0",
         display: "flex",
         flexDirection: "row",
-        gap: "0",
         backgroundColor: "#f3f4f6",
         fontFamily: "sans-serif",
       }}
     >
-      {/* Left file tree */}
-      <div
+      <Panel
+        title="Project"
+        actions={buildButton}
         style={{
-          width: "400px",
-          padding: "1rem",
-          backgroundColor: "#ffffff",
+          width: "25%",
+          minWidth: "300px",
           borderRight: "1px solid #e5e7eb",
-          overflowY: "auto",
-          display: "flex",
-          flexDirection: "row",
-          boxSizing: "border-box",
-          justifyContent: "space-between",
         }}
+        contentStyle={{ padding: "0.5rem 1rem" }}
       >
         {isLoading && (
           <p style={{ textAlign: "center", color: "#22c55e", fontWeight: 500 }}>
@@ -81,62 +100,31 @@ const Project = () => {
             ))}
           </ul>
         )}
-        <div
-          style={{
-            marginRight: "4px",
-            marginTop: "-8px",
-          }}
-        >
-          <div style={{ height: "24px", width: "100%" }} />
-          <button
-            onClick={handleBuild}
-            disabled={isBuilding || !project}
-            style={{
-              padding: "0.3rem 1rem",
-              borderRadius: "0.5rem",
-              border: "none",
-              background: isBuilding ? "#d1d5db" : "#2563eb",
-              color: "#fff",
-              fontWeight: 600,
-              cursor: isBuilding ? "not-allowed" : "pointer",
-              transition: "background 0.2s",
-            }}
-          >
-            {isBuilding ? "Building..." : "Build"}
-          </button>
-        </div>
-      </div>
+      </Panel>
 
-      {/* Middle code editor */}
-      <div
+      <Panel
+        title="Editor"
         style={{
-          width: "35%",
+          width: "40%",
           minWidth: "320px",
-          padding: "1rem",
-          backgroundColor: "#ffffff",
           borderRight: "1px solid #e5e7eb",
-          overflowY: "auto",
-          display: "flex",
-          flexDirection: "column",
         }}
+        contentStyle={{ paddingTop: '0.5rem' }}
       >
-        <Editor filePath={selectedFilePath} content={selectedFileContent} onContentChange={setSelectedFileContent} />
-      </div>
+        <Editor
+          filePath={selectedFilePath}
+          content={selectedFileContent}
+          onContentChange={setSelectedFileContent}
+        />
+      </Panel>
 
-      {/* Right page preview */}
-      <div
-        style={{
-          width: "35%",
-          minWidth: "320px",
-          padding: "1rem",
-          backgroundColor: "#ffffff",
-          overflowY: "auto",
-          display: "flex",
-          flexDirection: "column",
-        }}
+      <Panel
+        title="Preview"
+        style={{ width: "35%", minWidth: "320px" }}
+        contentStyle={{ padding: "1rem" }}
       >
         <Preview url={previewUrl} />
-      </div>
+      </Panel>
     </div>
   );
 };

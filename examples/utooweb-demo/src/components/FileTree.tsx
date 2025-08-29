@@ -51,8 +51,10 @@ export const FileTreeItem = React.memo(
           }}
           onClick={toggleCollapse}
         >
-          <span style={{ width: "1rem", textAlign: "center" }}></span>
-          {item.type === "directory" ? (isCollapsed ? "▶" : "▼") : "📄"}
+          <span style={{ width: "1rem", textAlign: "center" }}>
+            {item.type === "directory" ? (isCollapsed ? "▶" : "▼") : ""}
+          </span>
+          <span>{item.type === "file" ? "📄" : "📁"}</span>
           <span>{item.name}</span>
           {isNodeLoading && (
             <span
