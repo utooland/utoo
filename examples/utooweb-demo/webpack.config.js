@@ -98,13 +98,5 @@ module.exports = [
     resolve: {
       extensions: [".ts", ".js"],
     },
-    optimization: {
-      minimize: false,
-      splitChunks: false,
-      runtimeChunk: false,
-    },
-    experiments: {
-      outputModule: false,
-    },
   },
 ];
