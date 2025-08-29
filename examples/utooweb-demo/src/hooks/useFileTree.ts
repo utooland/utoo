@@ -15,7 +15,6 @@ export const useFileTree = (project: UtooProject | null) => {
                 fullName: ".",
                 type: "directory" as const,
                 children: rootItems
-                    .filter((item) => item.name !== "utooweb-demo")
                     .map((item) => ({
                         ...item,
                         fullName: `./${item.name}`,
