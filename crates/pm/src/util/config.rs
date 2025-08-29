@@ -8,7 +8,6 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::sync::OnceLock;
 
-
 pub type ConfigResult<T> = Result<T>;
 
 #[derive(Debug, Serialize, Deserialize, Default)]

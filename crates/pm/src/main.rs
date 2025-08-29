@@ -29,7 +29,11 @@ mod service;
 mod util;
 
 use crate::constants::cmd::{
-    CLEAN_ABOUT, CLEAN_ALIAS, CLEAN_NAME, CONFIG_ABOUT, CONFIG_ALIAS, CONFIG_NAME, DEPS_ABOUT, DEPS_ALIAS, DEPS_NAME, EXECUTE_ABOUT, EXECUTE_ALIAS, EXECUTE_NAME, INSTALL_ABOUT, INSTALL_ALIAS, INSTALL_NAME, LIST_ALIAS, LIST_NAME, REBUILD_ABOUT, REBUILD_ALIAS, REBUILD_NAME, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT, UNINSTALL_ALIAS, UNINSTALL_NAME, UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT, VIEW_ALIAS, VIEW_NAME
+    CLEAN_ABOUT, CLEAN_ALIAS, CLEAN_NAME, CONFIG_ABOUT, CONFIG_ALIAS, CONFIG_NAME, DEPS_ABOUT,
+    DEPS_ALIAS, DEPS_NAME, EXECUTE_ABOUT, EXECUTE_ALIAS, EXECUTE_NAME, INSTALL_ABOUT,
+    INSTALL_ALIAS, INSTALL_NAME, LIST_ALIAS, LIST_NAME, REBUILD_ABOUT, REBUILD_ALIAS, REBUILD_NAME,
+    RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT, UNINSTALL_ALIAS, UNINSTALL_NAME, UPDATE_ABOUT,
+    UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT, VIEW_ALIAS, VIEW_NAME,
 };
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
 use crate::helper::cli::parse_script_and_args;
@@ -422,32 +426,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 process::exit(1);
             }
         }
-        Some(Commands::Config { command }) => {
-            match command {
-                ConfigCommands::Set { key, value, global } => {
-                    if let Err(e) = handle_config_set(key, value, global) {
-                        log_error(&e.to_string());
-                        let _ = write_verbose_logs_to_file();
-                        process::exit(1);
-                    }
+        Some(Commands::Config { command }) => match command {
+            ConfigCommands::Set { key, value, global } => {
+                if let Err(e) = handle_config_set(key, value, global) {
+                    log_error(&e.to_string());
+                    let _ = write_verbose_logs_to_file();
+                    process::exit(1);
                 }
-                ConfigCommands::Get { key, global, override_values } => {
-                    if let Err(e) = handle_config_get(key, global, override_values) {
-                        log_error(&e.to_string());
-                        let _ = write_verbose_logs_to_file();
-                        process::exit(1);
-                    }
-                }
-                ConfigCommands::List { global } => {
-                    if let Err(e) = handle_config_list(global) {
-                        log_error(&e.to_string());
-                        let _ = write_verbose_logs_to_file();
-                        process::exit(1);
-                    }
-                }
-
             }
-        }
+            ConfigCommands::Get {
+                key,
+                global,
+                override_values,
+            } => {
+                if let Err(e) = handle_config_get(key, global, override_values) {
+                    log_error(&e.to_string());
+                    let _ = write_verbose_logs_to_file();
+                    process::exit(1);
+                }
+            }
+            ConfigCommands::List { global } => {
+                if let Err(e) = handle_config_list(global) {
+                    log_error(&e.to_string());
+                    let _ = write_verbose_logs_to_file();
+                    process::exit(1);
+                }
+            }
+        },
         None => {
             // Check if the first argument is a script name
             if let Some(script_name) = std::env::args().nth(1) {
@@ -457,7 +462,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Check if there's a custom command available
                 if let Ok(Some(_)) = config_service.get_available_cmd(&script_name) {
                     // Execute the custom command
-                    config_service.execute_command(&script_name, &std::env::args().skip(2).collect::<Vec<String>>())?;
+                    config_service.execute_command(
+                        &script_name,
+                        &std::env::args().skip(2).collect::<Vec<String>>(),
+                    )?;
                     return Ok(());
                 }
 

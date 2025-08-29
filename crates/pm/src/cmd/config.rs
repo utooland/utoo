@@ -17,11 +17,7 @@ pub fn handle_config_set(key: String, value: String, global: bool) -> Result<()>
     Ok(())
 }
 
-pub fn handle_config_get(
-    key: String,
-    global: bool,
-    override_values: Vec<String>,
-) -> Result<()> {
+pub fn handle_config_get(key: String, global: bool, override_values: Vec<String>) -> Result<()> {
     let overrides: HashMap<String, String> = override_values
         .iter()
         .filter_map(|arg| arg.strip_prefix("--").and_then(|s| parse_key_val(s).ok()))

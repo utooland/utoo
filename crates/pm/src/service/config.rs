@@ -1,5 +1,5 @@
-use crate::util::config::{Config, ConfigResult};
 use crate::constants::cmd;
+use crate::util::config::{Config, ConfigResult};
 use crate::util::logger::log_verbose;
 use anyhow::anyhow;
 use colored::*;
@@ -16,7 +16,8 @@ impl ConfigService {
     }
 
     pub fn get_available_commands(&self) -> ConfigResult<Vec<(String, String)>> {
-        Ok(self.config
+        Ok(self
+            .config
             .list()?
             .filter(|(key, _)| key.ends_with(".cmd"))
             .filter_map(|(key, _)| {
@@ -57,7 +58,11 @@ impl ConfigService {
         // Define all utoo-pm commands using constants
         let builtin_commands = vec![
             (cmd::INSTALL_NAME, cmd::INSTALL_ALIAS, cmd::INSTALL_ABOUT),
-            (cmd::UNINSTALL_NAME, cmd::UNINSTALL_ALIAS, cmd::UNINSTALL_ABOUT),
+            (
+                cmd::UNINSTALL_NAME,
+                cmd::UNINSTALL_ALIAS,
+                cmd::UNINSTALL_ABOUT,
+            ),
             (cmd::REBUILD_NAME, cmd::REBUILD_ALIAS, cmd::REBUILD_ABOUT),
             (cmd::CLEAN_NAME, cmd::CLEAN_ALIAS, cmd::CLEAN_ABOUT),
             (cmd::DEPS_NAME, cmd::DEPS_ALIAS, cmd::DEPS_ABOUT),
@@ -77,22 +82,40 @@ impl ConfigService {
         let get_max_length = |items: &[&str]| items.iter().map(|s| s.len()).max().unwrap_or(0);
 
         let max_width = max(
-            get_max_length(&builtin_commands.iter().map(|(name, _, _)| *name).collect::<Vec<_>>()),
-            get_max_length(&option_names)
+            get_max_length(
+                &builtin_commands
+                    .iter()
+                    .map(|(name, _, _)| *name)
+                    .collect::<Vec<_>>(),
+            ),
+            get_max_length(&option_names),
         );
 
         // Print all commands
-        builtin_commands.iter().for_each(|(name, alias, description)| {
-            let description = if alias.is_empty() {
-                description.to_string()
-            } else {
-                format!("{} ({})", description, alias.yellow())
-            };
-            println!("  {:<width$}    {}", name.cyan(), description, width = max_width);
-        });
+        builtin_commands
+            .iter()
+            .for_each(|(name, alias, description)| {
+                let description = if alias.is_empty() {
+                    description.to_string()
+                } else {
+                    format!("{} ({})", description, alias.yellow())
+                };
+                println!(
+                    "  {:<width$}    {}",
+                    name.cyan(),
+                    description,
+                    width = max_width
+                );
+            });
 
         config_commands.iter().for_each(|(name, alias)| {
-            println!("  {:<width$}    {} {}", name.cyan(), "→".bold(), alias, width = max_width);
+            println!(
+                "  {:<width$}    {} {}",
+                name.cyan(),
+                "→".bold(),
+                alias,
+                width = max_width
+            );
         });
 
         println!();
@@ -108,12 +131,20 @@ impl ConfigService {
             width = max_width
         );
         println!();
-        println!("For more command information, run {}", "ut i --help".dimmed());
-        println!("Github: {}", "https://github.com/utooland/utoo".blue().underline());
+        println!(
+            "For more command information, run {}",
+            "ut i --help".dimmed()
+        );
+        println!(
+            "Github: {}",
+            "https://github.com/utooland/utoo".blue().underline()
+        );
         if is_empty {
             println!();
             println!("{}", "Notice:".yellow().bold());
-            println!("  No additional commands configured yet. Here are some common configurations:");
+            println!(
+                "  No additional commands configured yet. Here are some common configurations:"
+            );
             println!();
             println!(
                 "  {}  Set registry",
@@ -142,7 +173,11 @@ impl ConfigService {
         let mut cmd_parts: Vec<&str> = cmd_string.split_whitespace().collect();
 
         if cmd_parts.is_empty() {
-            return Err(anyhow!("Invalid command alias for '{}': '{}'", command, cmd_string));
+            return Err(anyhow!(
+                "Invalid command alias for '{}': '{}'",
+                command,
+                cmd_string
+            ));
         }
 
         let program = cmd_parts.remove(0);
@@ -152,5 +187,4 @@ impl ConfigService {
         let status = cmd.status()?;
         std::process::exit(status.code().unwrap_or(1));
     }
-
 }
