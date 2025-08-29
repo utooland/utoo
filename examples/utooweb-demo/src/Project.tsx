@@ -14,6 +14,7 @@ const Project = () => {
   const {
     selectedFilePath,
     selectedFileContent,
+    setSelectedFileContent,
     previewUrl,
     fetchFileContent,
     error: fileContentError,
@@ -119,7 +120,7 @@ const Project = () => {
           flexDirection: "column",
         }}
       >
-        <Editor filePath={selectedFilePath} content={selectedFileContent} />
+        <Editor filePath={selectedFilePath} content={selectedFileContent} onContentChange={setSelectedFileContent} />
       </div>
 
       {/* Right page preview */}

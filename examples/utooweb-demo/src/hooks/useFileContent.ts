@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Project as UtooProject } from "@utoo/web";
 import { serviceWorkerScope } from "../services/utooService";
 
@@ -7,6 +7,7 @@ export const useFileContent = (project: UtooProject | null) => {
     const [selectedFileContent, setSelectedFileContent] = useState("");
     const [previewUrl, setPreviewUrl] = useState<string>("");
     const [error, setError] = useState("");
+    const debounceTimer = useRef<NodeJS.Timeout | null>(null);
 
     const fetchFileContent = useCallback(
         async (filePath: string): Promise<void> => {
@@ -28,5 +29,29 @@ export const useFileContent = (project: UtooProject | null) => {
         [project],
     );
 
-    return { selectedFilePath, selectedFileContent, previewUrl, fetchFileContent, error };
+    useEffect(() => {
+        if (debounceTimer.current) {
+            clearTimeout(debounceTimer.current);
+        }
+
+        if (project && selectedFilePath && selectedFileContent) {
+            debounceTimer.current = setTimeout(async () => {
+                try {
+                    await project.writeFile(selectedFilePath, selectedFileContent);
+                    console.log(`File ${selectedFilePath} auto-saved successfully.`);
+                } catch (e: any) {
+                    setError(`Error auto-saving file: ${e.message}`);
+                }
+            }, 300);
+        }
+
+        return () => {
+            if (debounceTimer.current) {
+                clearTimeout(debounceTimer.current);
+            }
+        };
+    }, [selectedFileContent, selectedFilePath, project]);
+
+
+    return { selectedFilePath, selectedFileContent, setSelectedFileContent, previewUrl, fetchFileContent, error };
 };

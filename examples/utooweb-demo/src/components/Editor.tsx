@@ -4,9 +4,10 @@ import MonacoEditor from "@monaco-editor/react";
 interface EditorProps {
     filePath: string;
     content: string;
+    onContentChange: (newContent: string) => void;
 }
 
-export const Editor = ({ filePath, content }: EditorProps) => {
+export const Editor = ({ filePath, content, onContentChange }: EditorProps) => {
     const monacoDisplay = useMemo(
         () => (
             <div style={{ height: "100%", width: "100%" }}>
@@ -37,8 +38,9 @@ export const Editor = ({ filePath, content }: EditorProps) => {
                                             : "plaintext"
                         }
                         value={content}
+                        onChange={(value) => onContentChange(value || "")}
                         options={{
-                            readOnly: true,
+                            readOnly: false,
                             fontSize: 14,
                             minimap: { enabled: false },
                             scrollBeyondLastLine: false,
@@ -47,7 +49,7 @@ export const Editor = ({ filePath, content }: EditorProps) => {
                 </div>
             </div>
         ),
-        [filePath, content],
+        [filePath, content, onContentChange],
     );
 
     return monacoDisplay;
