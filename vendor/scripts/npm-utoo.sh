@@ -30,7 +30,7 @@ cp ../templates/postinstall.utoo.sh.template "$ENTRY_DIR/postinstall.sh"
 chmod +x "$ENTRY_DIR/postinstall.sh"
 
 # copy README.md from repository root
-cp ../../../README.md "$ENTRY_DIR/README.md"
+cp ../../README.md "$ENTRY_DIR/README.md"
 
 # create placeholder binaries
 mkdir -p "$ENTRY_DIR/bin"
