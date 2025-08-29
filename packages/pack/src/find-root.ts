@@ -30,7 +30,7 @@ function isWorkspaceRoot(pkgPath: string) {
   return Boolean(pkgJsonContent.workspaces);
 }
 
-// refer from: https://github.com/umijs/mako/blob/next/crates/cli/src/helper/workspace.rs#L153
+// refer from: https://github.com/umijs/mako/blob/next/crates/pm/src/helper/workspace.rs#L153
 // TODO: 这块逻辑后续跟 utoo-pkg 使用一套方法
 export function findWorkspacesRoot(cwd: string) {
   const pkgJson = findPackageJson(cwd);

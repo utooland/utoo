@@ -65,5 +65,4 @@ install_binary() {
 }
 
 # Install both binaries
-install_binary "ut"
 install_binary "utoo"

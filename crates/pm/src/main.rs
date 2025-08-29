@@ -4,6 +4,7 @@ use std::process;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use cmd::config::{handle_config_get, handle_config_list, handle_config_set};
 use cmd::deps::build_deps;
 use cmd::execute::execute;
 use cmd::install::{install, install_global_package, update_packages};
@@ -28,9 +29,11 @@ mod service;
 mod util;
 
 use crate::constants::cmd::{
-    CLEAN_ABOUT, CLEAN_NAME, DEPS_ABOUT, DEPS_NAME, EXECUTE_ABOUT, EXECUTE_NAME, INSTALL_ABOUT,
-    INSTALL_NAME, REBUILD_ABOUT, REBUILD_NAME, UNINSTALL_ABOUT, UNINSTALL_NAME, UPDATE_ABOUT,
-    VIEW_ABOUT, VIEW_NAME,
+    CLEAN_ABOUT, CLEAN_ALIAS, CLEAN_NAME, CONFIG_ABOUT, CONFIG_ALIAS, CONFIG_NAME, DEPS_ABOUT,
+    DEPS_ALIAS, DEPS_NAME, EXECUTE_ABOUT, EXECUTE_ALIAS, EXECUTE_NAME, INSTALL_ABOUT,
+    INSTALL_ALIAS, INSTALL_NAME, LIST_ALIAS, LIST_NAME, REBUILD_ABOUT, REBUILD_ALIAS, REBUILD_NAME,
+    RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT, UNINSTALL_ALIAS, UNINSTALL_NAME, UPDATE_ABOUT,
+    UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT, VIEW_ALIAS, VIEW_NAME,
 };
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
 use crate::helper::cli::parse_script_and_args;
@@ -47,6 +50,9 @@ struct Cli {
 
     #[arg(long)]
     ignore_scripts: bool,
+
+    #[arg(short = 'v', long = "version")]
+    version: bool,
 
     #[arg(long, global = true)]
     verbose: bool,
@@ -69,9 +75,34 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+enum ConfigCommands {
+    #[command(about = "Set a configuration value with the specified key")]
+    Set {
+        key: String,
+        value: String,
+        #[arg(long)]
+        global: bool,
+    },
+    #[command(about = "Retrieve a configuration value by its key")]
+    Get {
+        key: String,
+        #[arg(long)]
+        global: bool,
+        #[arg(allow_hyphen_values = true)]
+        #[arg(trailing_var_arg = true)]
+        override_values: Vec<String>,
+    },
+    #[command(about = "Display all configuration key-value pairs")]
+    List {
+        #[arg(long)]
+        global: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum Commands {
     /// Install dependencies
-    #[command(name = INSTALL_NAME, alias = "i", about = INSTALL_ABOUT)]
+    #[command(name = INSTALL_NAME, alias = INSTALL_ALIAS, about = INSTALL_ABOUT)]
     Install {
         /// Package specifications (e.g. "lodash@4.17.21" "react@18.0.0")
         specs: Vec<String>,
@@ -104,7 +135,7 @@ enum Commands {
         prefix: Option<String>,
     },
     /// Uninstall dependencies
-    #[command(name = UNINSTALL_NAME, alias = "un", about = UNINSTALL_ABOUT)]
+    #[command(name = UNINSTALL_NAME, alias = UNINSTALL_ALIAS, about = UNINSTALL_ABOUT)]
     Uninstall {
         /// Package specifications (e.g. "lodash@4.17.21" "react@18.0.0")
         specs: Vec<String>,
@@ -118,26 +149,26 @@ enum Commands {
         ignore_scripts: bool,
     },
 
-    #[command(name = REBUILD_NAME, alias = "rb", about = REBUILD_ABOUT)]
+    #[command(name = REBUILD_NAME, alias = REBUILD_ALIAS, about = REBUILD_ABOUT)]
     Rebuild,
 
-    #[command(name = CLEAN_NAME, alias = "c", about = CLEAN_ABOUT)]
+    #[command(name = CLEAN_NAME, alias = CLEAN_ALIAS, about = CLEAN_ABOUT)]
     Clean {
         #[arg(default_value = "*")]
         pattern: String,
     },
 
-    #[command(name = DEPS_NAME, alias = "d", about = DEPS_ABOUT)]
+    #[command(name = DEPS_NAME, alias = DEPS_ALIAS, about = DEPS_ABOUT)]
     Deps {
         #[arg(long)]
         workspace_only: bool,
     },
 
-    #[command(name = "update", alias = "u", about = UPDATE_ABOUT)]
+    #[command(name = UPDATE_NAME, alias = UPDATE_ALIAS, about = UPDATE_ABOUT)]
     Update,
 
     /// List dependencies like npm list
-    #[command(name = "list", alias = "ls")]
+    #[command(name = LIST_NAME, alias = LIST_ALIAS)]
     List {
         /// Package name to show dependencies for
         #[arg(value_name = "PACKAGE")]
@@ -145,7 +176,7 @@ enum Commands {
     },
 
     /// Run scripts defined in package.json
-    #[command(name = "run", alias = "r")]
+    #[command(name = RUN_NAME, alias = RUN_ALIAS)]
     Run {
         /// Script name to run
         script: String,
@@ -160,7 +191,7 @@ enum Commands {
     },
 
     /// Execute packages similar to npx
-    #[command(name = EXECUTE_NAME, alias = "x", about = EXECUTE_ABOUT)]
+    #[command(name = EXECUTE_NAME, alias = EXECUTE_ALIAS, about = EXECUTE_ABOUT)]
     Execute {
         /// Command to execute
         command: String,
@@ -170,17 +201,39 @@ enum Commands {
         args: Vec<String>,
     },
 
-    #[command(name = VIEW_NAME, alias = "vw", about = VIEW_ABOUT)]
+    #[command(name = VIEW_NAME, alias = VIEW_ALIAS, about = VIEW_ABOUT)]
     View {
         /// Package name to view
         package: String,
+    },
+
+    #[command(name = CONFIG_NAME, alias = CONFIG_ALIAS, about = CONFIG_ABOUT)]
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommands,
     },
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().collect();
+
+    // Check for help flag
+    if args.len() > 1 && (args[1] == "-h" || args[1] == "--help") {
+        let config = crate::util::config::Config::load(false)?;
+        let config_service = crate::service::config::ConfigService::new(config);
+        config_service.print_help()?;
+        return Ok(());
+    }
+
     log_time(); // Start global timer
     let cli = Cli::parse();
+
+    // Check for version flag
+    if cli.version {
+        println!("{APP_VERSION}");
+        return Ok(());
+    }
 
     // global verbose
     set_verbose(cli.verbose);
@@ -373,9 +426,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 process::exit(1);
             }
         }
+        Some(Commands::Config { command }) => match command {
+            ConfigCommands::Set { key, value, global } => {
+                if let Err(e) = handle_config_set(key, value, global) {
+                    log_error(&e.to_string());
+                    let _ = write_verbose_logs_to_file();
+                    process::exit(1);
+                }
+            }
+            ConfigCommands::Get {
+                key,
+                global,
+                override_values,
+            } => {
+                if let Err(e) = handle_config_get(key, global, override_values) {
+                    log_error(&e.to_string());
+                    let _ = write_verbose_logs_to_file();
+                    process::exit(1);
+                }
+            }
+            ConfigCommands::List { global } => {
+                if let Err(e) = handle_config_list(global) {
+                    log_error(&e.to_string());
+                    let _ = write_verbose_logs_to_file();
+                    process::exit(1);
+                }
+            }
+        },
         None => {
             // Check if the first argument is a script name
             if let Some(script_name) = std::env::args().nth(1) {
+                // First check if there's a custom command configured for this script name
+                let config = crate::util::config::Config::load(false)?;
+                let config_service = crate::service::config::ConfigService::new(config);
+                // Check if there's a custom command available
+                if let Ok(Some(_)) = config_service.get_available_cmd(&script_name) {
+                    // Execute the custom command
+                    config_service.execute_command(
+                        &script_name,
+                        &std::env::args().skip(2).collect::<Vec<String>>(),
+                    )?;
+                    return Ok(());
+                }
+
+                // If no custom command found, try to run as script
                 let args = std::env::args().skip(1).collect::<Vec<String>>();
                 let script_args = parse_script_and_args(&args);
                 let script_args_owned = script_args.map(|args| {

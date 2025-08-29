@@ -76,10 +76,8 @@ jobs:
       - name: Update Cargo.toml version
         run: |
           VERSION=${{ steps.get_version.outputs.VERSION }}
-          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" crates/cli/Cargo.toml
-          rm crates/cli/Cargo.toml.bak
-          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" crates/core/Cargo.toml
-          rm crates/core/Cargo.toml.bak
+          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" crates/pm/Cargo.toml
+          rm crates/pm/Cargo.toml.bak
 
       - name: Install Rust
         uses: actions-rs/toolchain@v1
@@ -105,13 +103,13 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --bin utoo --bin ut --target ${{ matrix.target }}
+          args: --release --bin utoo --target ${{ matrix.target }}
 
       - name: Package Binaries
         run: |
           cd target/${{ matrix.target }}/release
           tar -czf ../../../utoo-${{ matrix.platform_os }}-${{ matrix.platform_cpu }}.tar.gz \
-            utoo ut
+            utoo
 
       - name: Upload Release Asset
         env:
@@ -135,7 +133,7 @@ jobs:
         run: |
           set -e
           cd vendor/scripts
-          BINS=("utoo" "ut")
+          BINS=("utoo")
           for BIN in "${BINS[@]}"; do
             PACKAGE_NAME=$(echo "$BIN")
             ./npm-binary.sh "$PACKAGE_NAME" "$VERSION" \
@@ -169,18 +167,6 @@ jobs:
           node-version: "18.x"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Publish Main Packages
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          VERSION: ${{ steps.get_version.outputs.VERSION }}
-        run: |
-          set -e
-          cd vendor/scripts
-          BINS=("utoo" "ut")
-          for BIN in "${BINS[@]}"; do
-            PACKAGE_NAME=$(echo "$BIN")
-            ./npm-main.sh "$PACKAGE_NAME" "$VERSION"
-          done
       - name: Publish Main utoo Package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
