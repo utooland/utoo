@@ -8237,9 +8237,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-fs-ext"
-version = "0.5.4"
+version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3768e656a4795a2eaaca9137c35022a351b59e1021763636bfc992549fab94b4"
+checksum = "bf2ac1dbf33f98e9df5eb87347aff810be149ec04ac884163e7708d047c2c8d6"
 dependencies = [
  "bitflags 2.9.1",
  "cfg-if",
@@ -9657,7 +9657,6 @@ dependencies = [
  "turbo-tasks-backend",
  "turbo-tasks-build",
  "turbo-tasks-fs",
- "turbo-tasks-malloc",
  "turbopack-core",
  "wasm-bindgen",
  "wasm-bindgen-futures",

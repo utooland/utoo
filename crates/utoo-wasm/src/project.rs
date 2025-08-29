@@ -4,8 +4,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::Context;
-use opfs_project::DirEntry as RawDirEntry;
 use serde_wasm_bindgen::to_value;
+use tokio_fs_ext::{DirEntry as RawDirEntry, Metadata as RawMetadata};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
 
@@ -200,6 +200,37 @@ impl Project {
             .map_err(|e| e.to_string())?;
         Ok(())
     }
+
+    #[wasm_bindgen(js_name = removeFile)]
+    pub async fn remove_file(&self, path: &str) -> Result<(), String> {
+        opfs_project::remove_file(path)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = removeDir)]
+    pub async fn remove_dir(&self, path: &str, recursive: bool) -> Result<(), String> {
+        if recursive {
+            opfs_project::remove_dir_all(path)
+                .await
+                .map_err(|e| e.to_string())?;
+        } else {
+            opfs_project::remove_dir(path)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = metadata)]
+    pub async fn metadata(&self, path: &str) -> Result<Metadata, String> {
+        opfs_project::metadata(path)
+            .await
+            .and_then(Metadata::try_from)
+            .map_err(|e| e.to_string())
+    }
 }
 
 #[wasm_bindgen(inspectable)]
@@ -221,10 +252,10 @@ pub enum DirEntryType {
 impl TryFrom<RawDirEntry> for DirEntry {
     type Error = std::io::Error;
 
-    fn try_from(v: RawDirEntry) -> Result<Self, Self::Error> {
+    fn try_from(raw: RawDirEntry) -> Result<Self, Self::Error> {
         Ok(DirEntry {
             r#type: {
-                let file_type = v.file_type()?;
+                let file_type = raw.file_type()?;
                 if file_type.is_dir() {
                     DirEntryType::Directory
                 } else if file_type.is_file() {
@@ -233,7 +264,31 @@ impl TryFrom<RawDirEntry> for DirEntry {
                     return Err(std::io::Error::from(std::io::ErrorKind::Unsupported));
                 }
             },
-            name: v.file_name().to_string_lossy().to_string(),
+            name: raw.file_name().to_string_lossy().to_string(),
+        })
+    }
+}
+
+#[wasm_bindgen(inspectable)]
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct Metadata {
+    r#type: DirEntryType,
+    file_size: u64,
+}
+
+impl TryFrom<RawMetadata> for Metadata {
+    type Error = std::io::Error;
+
+    fn try_from(raw: RawMetadata) -> Result<Self, Self::Error> {
+        Ok(Metadata {
+            r#type: if raw.is_file() {
+                DirEntryType::File
+            } else if raw.is_dir() {
+                DirEntryType::Directory
+            } else {
+                return Err(std::io::Error::from(std::io::ErrorKind::Unsupported));
+            },
+            file_size: raw.len(),
         })
     }
 }

@@ -89,6 +89,29 @@ const projectEndpoint: ProjectEndpoint & {
       return await this.projectInternal!.createDir(path);
     }
   },
+
+  async rm(path: string, options?: { recursive?: boolean }) {
+    await this.wasmInit!;
+    let metadata = (await this.projectInternal!.metadata(path)).toJSON();
+
+    switch ((metadata as any).type as DirEntryType) {
+      case "file":
+        return await this.projectInternal!.removeFile(path);
+      case "directory":
+        return await this.projectInternal!.removeDir(
+          path,
+          !!options?.recursive,
+        );
+      default:
+        // nothing to remove now
+        break;
+    }
+  },
+
+  async rmdir(path: string, options?: { recursive?: boolean }) {
+    await this.wasmInit!;
+    return await this.projectInternal!.removeDir(path, !!options?.recursive);
+  },
 };
 
 const ConnectedPorts = new Set<MessagePort>();

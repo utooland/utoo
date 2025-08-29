@@ -68,7 +68,7 @@ export class Project implements ProjectEndpoint {
   public async installServiceWorker() {
     if (this.serviceWorkerOptions) {
       const { url, scope } = this.serviceWorkerOptions;
-      // Should add "Service-Worker-Allowed": "/" in page root response,
+      // Should add "Service-Worker-Allowed": "/" in page root response headers,
       await navigator.serviceWorker.register(url, { scope: "/" });
 
       navigator.serviceWorker.controller?.postMessage({
@@ -127,6 +127,15 @@ export class Project implements ProjectEndpoint {
     return await this.remote.mkdir(path, options);
   }
 
+  public async rm(path: string, options?: { recursive?: boolean }) {
+    await this.#tunnel;
+    return await this.remote.rm(path, options);
+  }
+  public async rmdir(path: string, options?: { recursive?: boolean }) {
+    await this.#tunnel;
+    return await this.remote.rmdir(path, options);
+  }
+
   public static fork(
     channel: MessageChannel,
     eventSource: Client | DedicatedWorkerGlobalScope,
@@ -145,7 +154,6 @@ class ForkedProject implements ProjectEndpoint {
   constructor(port: MessagePort) {
     this.endpoint ??= comlink.wrap(port);
   }
-
   public async install(packageLock: string) {
     return await this.endpoint.install(packageLock);
   }
@@ -176,6 +184,13 @@ class ForkedProject implements ProjectEndpoint {
 
   public async mkdir(path: string, options?: { recursive?: boolean }) {
     return await this.endpoint.mkdir(path, options);
+  }
+
+  public async rm(path: string, options?: { recursive?: boolean }) {
+    return await this.endpoint.rm(path, options);
+  }
+  public async rmdir(path: string, options?: { recursive?: boolean }) {
+    return await this.endpoint.rmdir(path, options);
   }
 }
 
