@@ -20,19 +20,15 @@ export class Project implements ProjectEndpoint {
   private remote: comlink.Remote<
     ProjectEndpoint & {
       mount: (
-        opt: Omit<
-          ProjectOptions,
-          "workerUrl" | "serviceWorkerUrl" | "proxiedResourcePath"
-        >,
+        opt: Omit<ProjectOptions, "workerUrl" | "serviceWorker">,
       ) => Promise<void>;
     }
   >;
 
   constructor(options: ProjectOptions) {
-    const { cwd, workerUrl, wasmUrl, threadWorkerUrl, serviceWorkerOptions } =
-      options;
+    const { cwd, workerUrl, wasmUrl, threadWorkerUrl, serviceWorker } = options;
 
-    this.serviceWorkerOptions = serviceWorkerOptions;
+    this.serviceWorkerOptions = serviceWorker;
 
     const { port1, port2 } = new MessageChannel();
 
@@ -71,13 +67,13 @@ export class Project implements ProjectEndpoint {
 
   public async installServiceWorker() {
     if (this.serviceWorkerOptions) {
-      const { serviceWorkerUrl, proxiedResourcePath } =
-        this.serviceWorkerOptions;
-      await navigator.serviceWorker.register(serviceWorkerUrl);
+      const { url, scope } = this.serviceWorkerOptions;
+      // Should add "Service-Worker-Allowed": "/" in page root response,
+      await navigator.serviceWorker.register(url, { scope: "/" });
 
       navigator.serviceWorker.controller?.postMessage({
         [ServiceWorkerHandShake]: true,
-        proxiedResourcePath,
+        scope,
       });
     }
   }

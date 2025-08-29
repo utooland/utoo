@@ -8,12 +8,9 @@ declare let self: DedicatedWorkerGlobalScope;
 const projectEndpoint: ProjectEndpoint & {
   projectInternal?: ProjectInternal;
   mount: (
-    opt: Omit<
-      ProjectOptions,
-      "workerUrl" | "serviceWorkerUrl" | "proxiedResourcePath"
-    >,
+    opt: Omit<ProjectOptions, "workerUrl" | "serviceWorker">,
   ) => Promise<void>;
-  wasmInit?: Promise<any>;
+  wasmInit?: ReturnType<typeof initWasm>;
 } = {
   projectInternal: undefined,
   wasmInit: undefined,
