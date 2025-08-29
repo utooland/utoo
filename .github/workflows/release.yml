@@ -76,8 +76,8 @@ jobs:
       - name: Update Cargo.toml version
         run: |
           VERSION=${{ steps.get_version.outputs.VERSION }}
-          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" crates/cli/Cargo.toml
-          rm crates/cli/Cargo.toml.bak
+          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" crates/pm/Cargo.toml
+          rm crates/pm/Cargo.toml.bak
 
       - name: Install Rust
         uses: actions-rs/toolchain@v1

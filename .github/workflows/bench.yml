@@ -1,4 +1,4 @@
-name: utoo-cli-benchmark
+name: utoo-pm-benchmark
 
 on:
   workflow_dispatch:
@@ -23,4 +23,4 @@ jobs:
       with:
         toolchain: nightly-2025-06-04
         command: bench
-        args: -p utoo-cli
+        args: -p utoo-pm
