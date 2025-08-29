@@ -1,4 +1,5 @@
 pub mod clean;
+pub mod config;
 pub mod deps;
 pub mod execute;
 pub mod install;

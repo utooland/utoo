@@ -7,7 +7,6 @@ members = [
   "crates/pack-schema",
   "crates/pack-tests",
   "crates/cli",
-  "crates/core",
 ]
 exclude = ["crates/runtime", "next.js"]
 resolver = "2"
