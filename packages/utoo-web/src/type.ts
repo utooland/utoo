@@ -41,10 +41,10 @@ export interface ProjectOptions {
   workerUrl?: string;
   threadWorkerUrl: string;
   wasmUrl?: string;
-  serviceWorkerOptions?: ServiceWorkerOptions;
+  serviceWorker?: ServiceWorkerOptions;
 }
 
 export interface ServiceWorkerOptions {
-  serviceWorkerUrl: string;
-  proxiedResourcePath: string;
+  url: string;
+  scope: string;
 }
