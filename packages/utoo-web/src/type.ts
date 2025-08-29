@@ -33,6 +33,8 @@ export interface ProjectEndpoint {
   ): Promise<void>;
   readdir(path: string, options?: { recursive?: boolean }): Promise<Dirent[]>;
   mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
+  rm(path: string, options?: { recursive?: boolean }): Promise<void>;
+  rmdir(path: string, options?: { recursive?: boolean }): Promise<void>;
   copyFile(src: string, dst: string): Promise<void>;
 }
 
