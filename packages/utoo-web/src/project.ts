@@ -168,9 +168,9 @@ export class Project implements ProjectEndpoint {
 
   public static fork(
     channel: MessageChannel,
-    eventSource: Client | DedicatedWorkerGlobalScope,
+    eventSource?: Client | DedicatedWorkerGlobalScope,
   ): ProjectEndpoint {
-    eventSource.postMessage(Fork, {
+    (eventSource || (self as DedicatedWorkerGlobalScope)).postMessage(Fork, {
       transfer: [channel.port2],
     });
 

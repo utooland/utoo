@@ -124,14 +124,14 @@ export default App;
           name: "index",
         },
         {
-          import: './src/sass-demo.tsx',
+          import: "./src/sass-demo.tsx",
           name: "sass-demo",
-        }
+        },
       ],
       stats: true,
       optimization: {
         minify: false,
-      }
+      },
     },
     null,
     2,

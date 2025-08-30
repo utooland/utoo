@@ -6,6 +6,7 @@ export const FileTreeItem = React.memo(
     item,
     onFileClick,
     onDirectoryExpand,
+    selectedFile,
   }: FileTreeItemProps & {
     onDelete?: (item: FileTreeNode) => Promise<void>;
   }) => {
@@ -37,6 +38,8 @@ export const FileTreeItem = React.memo(
       [onDirectoryExpand, item],
     );
 
+    const isSelected = selectedFile === item.fullName;
+
     return (
       <li style={{ listStyleType: "none" }}>
         <div
@@ -48,6 +51,7 @@ export const FileTreeItem = React.memo(
             borderRadius: "0.5rem",
             cursor: "pointer",
             transition: "background-color 0.2s ease-in-out",
+            backgroundColor: isSelected ? "rgba(0, 0, 0, 0.1)" : "transparent",
           }}
           onClick={toggleCollapse}
         >
@@ -102,6 +106,7 @@ export const FileTreeItem = React.memo(
                   item={child}
                   onFileClick={onFileClick}
                   onDirectoryExpand={onDirectoryExpand}
+                  selectedFile={selectedFile}
                 />
               ))}
           </ul>
