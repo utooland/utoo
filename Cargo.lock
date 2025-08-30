@@ -8237,9 +8237,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-fs-ext"
-version = "0.5.5"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf2ac1dbf33f98e9df5eb87347aff810be149ec04ac884163e7708d047c2c8d6"
+checksum = "5421f082289a0de4940f3750d926c39d6d67521f147fd4c302c54b74a5e4e2ca"
 dependencies = [
  "bitflags 2.9.1",
  "cfg-if",
@@ -8249,7 +8249,6 @@ dependencies = [
  "rustc-hash 2.1.1",
  "tokio",
  "tokio-stream",
- "tracing",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
