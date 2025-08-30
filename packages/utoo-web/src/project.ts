@@ -70,11 +70,42 @@ export class Project implements ProjectEndpoint {
     if (this.serviceWorkerOptions) {
       const { url, scope } = this.serviceWorkerOptions;
       // Should add "Service-Worker-Allowed": "/" in page root response headers,
-      await navigator.serviceWorker.register(url, { scope: "/" });
+      const registration = await navigator.serviceWorker.register(url, {
+        scope: "/",
+      });
 
-      navigator.serviceWorker.controller?.postMessage({
-        [ServiceWorkerHandShake]: true,
-        scope,
+      return new Promise<void>((resolve) => {
+        function sendMessage(sw: ServiceWorker) {
+          sw.postMessage({
+            [ServiceWorkerHandShake]: true,
+            scope,
+          });
+          resolve();
+        }
+
+        function listenForActivation(sw: ServiceWorker) {
+          sw.addEventListener("statechange", () => {
+            if (sw.state === "activated") {
+              sendMessage(sw);
+            }
+          });
+        }
+
+        function checkSWState(registration: ServiceWorkerRegistration) {
+          if (registration.active) {
+            sendMessage(registration.active);
+          } else if (registration.installing) {
+            listenForActivation(registration.installing);
+          }
+
+          registration.addEventListener("updatefound", () => {
+            if (registration.installing) {
+              listenForActivation(registration.installing);
+            }
+          });
+        }
+
+        checkSWState(registration);
       });
     }
   }
