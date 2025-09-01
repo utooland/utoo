@@ -77,7 +77,7 @@ async fn execute_update(version: &str) -> Result<()> {
 }
 
 async fn check_remote_version() -> Result<()> {
-    let registry_url = format!("{}/@utoo/utoo/latest", get_registry());
+    let registry_url = format!("{}/utoo/latest", get_registry());
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_millis(2000))
         .build()

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::thread;
 use tokio::sync::Semaphore;
@@ -11,6 +11,7 @@ use crate::helper::lock::{
     PackageLock, ensure_package_lock, group_by_depth, prepare_global_package_json,
 };
 use crate::helper::workspace::update_cwd_to_root;
+use crate::helper::global_bin::get_global_bin_dir;
 use crate::model::package::PackageInfo;
 use crate::service::install::install_packages;
 use crate::util::cache::get_cache_dir;
@@ -112,7 +113,7 @@ pub async fn install(ignore_scripts: bool, root_path: &Path) -> Result<()> {
     }
 }
 
-pub async fn install_global_package(npm_spec: &str, prefix: &Option<String>) -> Result<()> {
+pub async fn install_global_package(npm_spec: &str, prefix: &Option<&str>) -> Result<()> {
     // Prepare global package directory and package.json
     let package_path = prepare_global_package_json(npm_spec, prefix)
         .await
@@ -129,17 +130,9 @@ pub async fn install_global_package(npm_spec: &str, prefix: &Option<String>) -> 
     let package_info =
         PackageInfo::from_path(&package_path).context("Failed to create package info from path")?;
 
-    let target_bin_dir = match prefix {
-        Some(prefix) => PathBuf::from(prefix).join("bin"),
-
-        // If prefix is not set, link to the bin directory of the current executable
-        // ~/.nvm/versions/node/v20.15.0/bin/utoo -> ~/.nvm/versions/node/v20.15.0/bin
-        None => std::env::current_exe()
-            .context("Failed to get current executable path")?
-            .parent()
-            .context("Failed to get executable parent directory")?
-            .to_path_buf(),
-    };
+    // Get global bin directory using the common helper
+    let target_bin_dir = get_global_bin_dir(&prefix)
+        .context("Failed to get global bin directory")?;
 
     // Link binary files to global
     log_verbose(&format!(

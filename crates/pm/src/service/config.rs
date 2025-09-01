@@ -70,6 +70,7 @@ impl ConfigService {
             (cmd::LIST_NAME, cmd::LIST_ALIAS, cmd::LIST_ABOUT),
             (cmd::EXECUTE_NAME, cmd::EXECUTE_ALIAS, cmd::EXECUTE_ABOUT),
             (cmd::VIEW_NAME, cmd::VIEW_ALIAS, cmd::VIEW_ABOUT),
+            (cmd::LINK_NAME, cmd::LINK_ALIAS, cmd::LINK_ABOUT),
             (cmd::CONFIG_NAME, cmd::CONFIG_ALIAS, cmd::CONFIG_ABOUT),
             (cmd::RUN_NAME, cmd::RUN_ALIAS, cmd::RUN_ABOUT),
             ("*", "", "→ ut run *"),

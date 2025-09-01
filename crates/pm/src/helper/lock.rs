@@ -176,7 +176,7 @@ pub async fn parse_package_spec(spec: &str) -> Result<(String, String, String)> 
 
 pub async fn prepare_global_package_json(
     npm_spec: &str,
-    prefix: &Option<String>,
+    prefix: &Option<&str>,
 ) -> Result<PathBuf> {
     // Parse package name and version
     let (name, _version, version_spec) = parse_package_spec(npm_spec).await?;
