@@ -113,7 +113,7 @@ pub async fn install(ignore_scripts: bool, root_path: &Path) -> Result<()> {
     }
 }
 
-pub async fn install_global_package(npm_spec: &str, prefix: &Option<&str>) -> Result<()> {
+pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Result<()> {
     // Prepare global package directory and package.json
     let package_path = prepare_global_package_json(npm_spec, prefix)
         .await
