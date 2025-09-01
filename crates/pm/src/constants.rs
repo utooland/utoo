@@ -46,4 +46,8 @@ pub mod cmd {
     pub const CONFIG_NAME: &str = "config";
     pub const CONFIG_ALIAS: &str = "cfg";
     pub const CONFIG_ABOUT: &str = "Manage configuration";
+
+    pub const LINK_NAME: &str = "link";
+    pub const LINK_ALIAS: &str = "ln";
+    pub const LINK_ABOUT: &str = "Link a package to global or create symlink to global package";
 }

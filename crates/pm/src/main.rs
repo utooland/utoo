@@ -8,6 +8,7 @@ use cmd::config::{handle_config_get, handle_config_list, handle_config_set};
 use cmd::deps::build_deps;
 use cmd::execute::execute;
 use cmd::install::{install, install_global_package, update_packages};
+use cmd::link::{link_current_to_global, link_global_to_local};
 use cmd::list::list_dependencies;
 use cmd::rebuild::rebuild;
 use cmd::run::run;
@@ -31,9 +32,10 @@ mod util;
 use crate::constants::cmd::{
     CLEAN_ABOUT, CLEAN_ALIAS, CLEAN_NAME, CONFIG_ABOUT, CONFIG_ALIAS, CONFIG_NAME, DEPS_ABOUT,
     DEPS_ALIAS, DEPS_NAME, EXECUTE_ABOUT, EXECUTE_ALIAS, EXECUTE_NAME, INSTALL_ABOUT,
-    INSTALL_ALIAS, INSTALL_NAME, LIST_ALIAS, LIST_NAME, REBUILD_ABOUT, REBUILD_ALIAS, REBUILD_NAME,
-    RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT, UNINSTALL_ALIAS, UNINSTALL_NAME, UPDATE_ABOUT,
-    UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT, VIEW_ALIAS, VIEW_NAME,
+    INSTALL_ALIAS, INSTALL_NAME, LINK_ABOUT, LINK_ALIAS, LINK_NAME, LIST_ALIAS, LIST_NAME,
+    REBUILD_ABOUT, REBUILD_ALIAS, REBUILD_NAME, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT,
+    UNINSTALL_ALIAS, UNINSTALL_NAME, UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT,
+    VIEW_ALIAS, VIEW_NAME,
 };
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
 use crate::helper::cli::parse_script_and_args;
@@ -44,6 +46,7 @@ use crate::helper::workspace::update_cwd_to_root;
 #[command(version = APP_VERSION)]
 #[command(about = APP_ABOUT)]
 #[command(allow_external_subcommands(true))]
+#[command(disable_version_flag(true))]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -207,6 +210,17 @@ enum Commands {
         package: String,
     },
 
+    /// Link current package to global or create symlink to global package
+    #[command(name = LINK_NAME, alias = LINK_ALIAS, about = LINK_ABOUT)]
+    Link {
+        /// Package name to link from global (if not provided, links current package to global)
+        packages: Option<Vec<String>>,
+
+        /// prefix for global package path
+        #[arg(short, long)]
+        prefix: Option<String>,
+    },
+
     #[command(name = CONFIG_NAME, alias = CONFIG_ALIAS, about = CONFIG_ABOUT)]
     Config {
         #[command(subcommand)]
@@ -275,7 +289,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if global {
                     // For global installs, process packages one by one
                     for spec in specs.iter() {
-                        if let Err(e) = install_global_package(spec, &prefix).await {
+                        if let Err(e) = install_global_package(spec, prefix.as_deref()).await {
                             log_error(&e.to_string());
                             let _ = write_verbose_logs_to_file();
                             process::exit(1);
@@ -424,6 +438,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 log_error(&e.to_string());
                 let _ = write_verbose_logs_to_file();
                 process::exit(1);
+            }
+        }
+        Some(Commands::Link { packages, prefix }) => {
+            match packages {
+                None => {
+                    // Link current package to global
+                    if let Err(e) = link_current_to_global(prefix.as_deref()).await {
+                        log_error(&e.to_string());
+                        let _ = write_verbose_logs_to_file();
+                        process::exit(1);
+                    }
+                    log_time_end("package linked");
+                }
+                Some(packages) => {
+                    for package in packages.iter() {
+                        if let Err(e) = link_global_to_local(package, prefix.as_deref()).await {
+                            log_error(&e.to_string());
+                            let _ = write_verbose_logs_to_file();
+                            process::exit(1);
+                        }
+                    }
+                    log_time_end(&format!("'{}' linked to local", packages.join(", ")));
+                }
             }
         }
         Some(Commands::Config { command }) => match command {

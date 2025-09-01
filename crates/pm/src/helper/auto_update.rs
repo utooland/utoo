@@ -41,7 +41,7 @@ pub async fn init_auto_update() -> Result<()> {
             "New version found: {} (current version: {}), updating automatically...",
             cache.version, current_version
         ));
-        log_info(&format!("utoo i @utoo/utoo{} -g", cache.version));
+        log_info(&format!("utoo i utoo@{} -g", cache.version));
 
         execute_update(&cache.version).await?;
     }
@@ -60,7 +60,7 @@ async fn check_and_update_cache() -> Result<VersionCache> {
 
 async fn execute_update(version: &str) -> Result<()> {
     let status = Command::new("utoo")
-        .args(["i", &format!("@utoo/utoo@{version}"), "-g"])
+        .args(["i", &format!("utoo@{version}"), "-g"])
         .env("CI", "1")
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -77,7 +77,7 @@ async fn execute_update(version: &str) -> Result<()> {
 }
 
 async fn check_remote_version() -> Result<()> {
-    let registry_url = format!("{}/@utoo/utoo/latest", get_registry());
+    let registry_url = format!("{}/utoo/latest", get_registry());
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_millis(2000))
         .build()
