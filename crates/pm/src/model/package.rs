@@ -140,16 +140,11 @@ impl PackageInfo {
         })
     }
 
-    pub async fn link_to_global(&self, global_bin_dir: &Path) -> Result<()> {
-        // Ensure bin directory exists
-        tokio::fs::create_dir_all(&global_bin_dir)
-            .await
-            .context("Failed to create global bin directory")?;
-
+    pub async fn link_to_target(&self, target_bin_dir: &Path) -> Result<()> {
         // Link each binary file
         for (bin_name, relative_path) in &self.bin_files {
             let target_path = self.path.join(relative_path);
-            let link_path = global_bin_dir.join(bin_name);
+            let link_path = target_bin_dir.join(bin_name);
 
             log_verbose(&format!(
                 "Linking global binary: {bin_name} -> {relative_path}"
@@ -163,6 +158,12 @@ impl PackageInfo {
             // Create symbolic link
             link(&target_path, &link_path).context("Failed to create symbolic link")?;
         }
+
+        Ok(())
+    }
+
+    pub async fn link_to_global(&self, global_bin_dir: &Path) -> Result<()> {
+        self.link_to_target(global_bin_dir).await?;
 
         // Update PATH environment variable for current process
         if let Ok(current_path) = env::var("PATH") {

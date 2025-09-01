@@ -14,13 +14,14 @@ pub struct ScriptService;
 impl ScriptService {
     /// Check if node-gyp exists in PATH by searching directories
     fn has_node_gyp_in_path() -> bool {
-        if let Ok(paths) = env::var("PATH")
-            && let Some(dir) = paths.split(':').next()
-        {
-            let node_gyp_path = Path::new(dir).join("node-gyp");
-            return node_gyp_path.exists();
+        if let Ok(paths) = env::var("PATH") {
+            paths
+                .split(':')
+                .map(|dir| Path::new(dir).join("node-gyp"))
+                .any(|path| path.exists())
+        } else {
+            false
         }
-        false
     }
 
     /// Ensure node-gyp is available in PATH, install globally if not
@@ -38,6 +39,7 @@ impl ScriptService {
                 .status()
                 .context("Failed to install node-gyp globally")?;
             if !status.success() {
+                log_verbose(&format!("Failed to install node-gyp globally: {status}"));
                 anyhow::bail!("Failed to install node-gyp globally");
             }
             return Ok(true);

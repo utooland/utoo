@@ -3,6 +3,7 @@ pub mod config;
 pub mod deps;
 pub mod execute;
 pub mod install;
+pub mod link;
 pub mod list;
 pub mod rebuild;
 pub mod run;
