@@ -289,7 +289,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if global {
                     // For global installs, process packages one by one
                     for spec in specs.iter() {
-                        if let Err(e) = install_global_package(spec, &prefix.as_deref()).await {
+                        if let Err(e) = install_global_package(spec, prefix.as_deref()).await {
                             log_error(&e.to_string());
                             let _ = write_verbose_logs_to_file();
                             process::exit(1);

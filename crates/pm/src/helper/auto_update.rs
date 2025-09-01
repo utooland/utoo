@@ -41,7 +41,7 @@ pub async fn init_auto_update() -> Result<()> {
             "New version found: {} (current version: {}), updating automatically...",
             cache.version, current_version
         ));
-        log_info(&format!("utoo i @utoo/utoo@{} -g", cache.version));
+        log_info(&format!("utoo i utoo@{} -g", cache.version));
 
         execute_update(&cache.version).await?;
     }

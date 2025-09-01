@@ -132,7 +132,7 @@ pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Res
 
     // Get global bin directory using the common helper
     let target_bin_dir =
-        get_global_bin_dir(prefix).context("Failed to get global bin directory")?;
+        get_global_bin_dir(&prefix).context("Failed to get global bin directory")?;
 
     // Link binary files to global
     log_verbose(&format!(
@@ -154,7 +154,7 @@ mod tests {
     #[tokio::test]
     async fn test_install_global_package_invalid_spec() {
         // Test installing with invalid package spec
-        let result = install_global_package("invalid-package-that-does-not-exist", &None).await;
+        let result = install_global_package("invalid-package-that-does-not-exist", None).await;
         assert!(result.is_err(), "Should fail with invalid package spec");
     }
 }
