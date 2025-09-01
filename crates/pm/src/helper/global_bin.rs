@@ -28,14 +28,12 @@ pub fn get_global_bin_dir(prefix: &Option<&str>) -> Result<PathBuf> {
 pub fn get_global_package_dir(prefix: &Option<&str>) -> Result<PathBuf> {
     let lib_path = match prefix {
         Some(prefix) => PathBuf::from(prefix).join("lib/node_modules"),
-        None => {
-            std::env::current_exe()
-                .context("Failed to get current executable path")?
-                .parent()
-                .context("Failed to get executable parent directory")?
-                .to_path_buf()
-                .join("lib/node_modules")
-        }
+        None => std::env::current_exe()
+            .context("Failed to get current executable path")?
+            .parent()
+            .context("Failed to get executable parent directory")?
+            .to_path_buf()
+            .join("lib/node_modules"),
     };
     Ok(lib_path)
 }

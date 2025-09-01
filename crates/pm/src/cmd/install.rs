@@ -6,12 +6,12 @@ use std::thread;
 use tokio::sync::Semaphore;
 
 use crate::cmd::rebuild::rebuild;
+use crate::helper::global_bin::get_global_bin_dir;
 use crate::helper::lock::update_package_json;
 use crate::helper::lock::{
     PackageLock, ensure_package_lock, group_by_depth, prepare_global_package_json,
 };
 use crate::helper::workspace::update_cwd_to_root;
-use crate::helper::global_bin::get_global_bin_dir;
 use crate::model::package::PackageInfo;
 use crate::service::install::install_packages;
 use crate::util::cache::get_cache_dir;
@@ -131,8 +131,8 @@ pub async fn install_global_package(npm_spec: &str, prefix: &Option<&str>) -> Re
         PackageInfo::from_path(&package_path).context("Failed to create package info from path")?;
 
     // Get global bin directory using the common helper
-    let target_bin_dir = get_global_bin_dir(&prefix)
-        .context("Failed to get global bin directory")?;
+    let target_bin_dir =
+        get_global_bin_dir(&prefix).context("Failed to get global bin directory")?;
 
     // Link binary files to global
     log_verbose(&format!(

@@ -15,7 +15,8 @@ impl ScriptService {
     /// Check if node-gyp exists in PATH by searching directories
     fn has_node_gyp_in_path() -> bool {
         if let Ok(paths) = env::var("PATH") {
-            paths.split(':')
+            paths
+                .split(':')
                 .map(|dir| Path::new(dir).join("node-gyp"))
                 .any(|path| path.exists())
         } else {
