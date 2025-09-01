@@ -44,7 +44,7 @@ pub async fn install_package_to_cache(package_name: &str) -> Result<PathBuf> {
     log_info(&format!("Installing package {name} to cache using utoo..."));
     install_global_package(
         package_name,
-        &Some(package_cache_dir.to_string_lossy().to_string().as_str()),
+        Some(&package_cache_dir.to_string_lossy()),
     )
     .await?;
     log_info(&format!("Package {name} installed successfully using utoo"));
