@@ -19,7 +19,7 @@ use std::path::PathBuf;
 // let bin_dir = get_global_bin_dir(&None)?;
 //
 // // Use custom prefix
-// let bin_dir = get_global_bin_dir(&Some("/usr/local".to_string()))?;
+// let bin_dir = get_global_bin_dir(&Some("/usr/local"))?;
 // ```
 pub fn get_global_bin_dir(prefix: &Option<&str>) -> Result<PathBuf> {
     Ok(get_global_package_dir(prefix)?.join("bin"))
