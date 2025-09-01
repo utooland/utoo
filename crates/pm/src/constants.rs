@@ -49,5 +49,5 @@ pub mod cmd {
 
     pub const LINK_NAME: &str = "link";
     pub const LINK_ALIAS: &str = "ln";
-    pub const LINK_ABOUT: &str = "Link a package to global or create symlink to global package";
+    pub const LINK_ABOUT: &str = "Link a package like npm link";
 }

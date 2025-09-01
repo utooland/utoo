@@ -62,7 +62,7 @@ jobs:
 
       - name: Configure git safe directory
         run: |
-          git config --global --add safe.directory /__w/mako/mako
+          git config --global --add safe.directory /__w/utoo/utoo
 
       - name: Get version from release or use alpha version
         id: get_version
