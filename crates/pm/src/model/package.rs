@@ -163,7 +163,6 @@ impl PackageInfo {
     }
 
     pub async fn link_to_global(&self, global_bin_dir: &Path) -> Result<()> {
-
         self.link_to_target(global_bin_dir).await?;
 
         // Update PATH environment variable for current process
