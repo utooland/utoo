@@ -39,7 +39,7 @@ impl ScriptService {
                 .status()
                 .context("Failed to install node-gyp globally")?;
             if !status.success() {
-                log_verbose(&format!("Failed to install node-gyp globally: {}", status));
+                log_verbose(&format!("Failed to install node-gyp globally: {status}"));
                 anyhow::bail!("Failed to install node-gyp globally");
             }
             return Ok(true);

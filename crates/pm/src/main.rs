@@ -453,7 +453,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Some(packages) => {
                     for package in packages.iter() {
-                        if let Err(e) = link_global_to_local(&package, prefix.as_deref()).await {
+                        if let Err(e) = link_global_to_local(package, prefix.as_deref()).await {
                             log_error(&e.to_string());
                             let _ = write_verbose_logs_to_file();
                             process::exit(1);
