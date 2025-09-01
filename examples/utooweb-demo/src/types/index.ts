@@ -11,6 +11,7 @@ export interface FileTreeItemProps {
   item: FileTreeNode;
   onFileClick: (filePath: string) => Promise<void>;
   onDirectoryExpand?: (parentItem: FileTreeNode) => Promise<void>;
+  selectedFile: string | null;
 }
 
 export interface DirectoryExpandParams {

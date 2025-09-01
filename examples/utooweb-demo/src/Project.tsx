@@ -1,12 +1,12 @@
 import React, { useMemo } from "react";
-import { useUtooProject } from "./hooks/useUtooProject";
-import { useFileTree } from "./hooks/useFileTree";
-import { useFileContent } from "./hooks/useFileContent";
-import { useBuild } from "./hooks/useBuild";
-import { FileTreeItem } from "./components/FileTree";
 import { Editor } from "./components/Editor";
-import { Preview } from "./components/Preview";
+import { FileTreeItem } from "./components/FileTree";
 import { Panel } from "./components/Panel";
+import { Preview } from "./components/Preview";
+import { useBuild } from "./hooks/useBuild";
+import { useFileContent } from "./hooks/useFileContent";
+import { useFileTree } from "./hooks/useFileTree";
+import { useUtooProject } from "./hooks/useUtooProject";
 import "./styles.css";
 
 const Project = () => {
@@ -20,11 +20,11 @@ const Project = () => {
     fetchFileContent,
     error: fileContentError,
   } = useFileContent(project);
-  const { isBuilding, handleBuild, error: buildError } = useBuild(
-    project,
-    fileTree,
-    handleDirectoryExpand,
-  );
+  const {
+    isBuilding,
+    handleBuild,
+    error: buildError,
+  } = useBuild(project, fileTree, handleDirectoryExpand);
 
   const error = projectError || fileContentError || buildError;
 
@@ -38,7 +38,7 @@ const Project = () => {
         padding: "0.25rem 0.75rem",
         borderRadius: "0.375rem",
         border: "none",
-        fontSize: '0.875rem',
+        fontSize: "0.875rem",
         background: isBuilding ? "#d1d5db" : "#2563eb",
         color: "#fff",
         fontWeight: 500,
@@ -96,6 +96,7 @@ const Project = () => {
                 onDirectoryExpand={
                   item.type === "directory" ? handleDirectoryExpand : undefined
                 }
+                selectedFile={selectedFilePath} // Pass the selectedFilePath state here
               />
             ))}
           </ul>
@@ -109,7 +110,7 @@ const Project = () => {
           minWidth: "320px",
           borderRight: "1px solid #e5e7eb",
         }}
-        contentStyle={{ paddingTop: '0.5rem' }}
+        contentStyle={{ paddingTop: "0.5rem" }}
       >
         <Editor
           filePath={selectedFilePath}
