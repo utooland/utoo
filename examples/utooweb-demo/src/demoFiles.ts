@@ -3,7 +3,9 @@ export const demoFiles = {
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import Demo from './demo';
-import SassDemo from './sass-demo.tsx';
+// import SassDemo from './sass-demo';
+
+// console.log(SassDemo);
 
 createRoot(document.getElementById('root')).render(<Demo />);
 `,
@@ -97,24 +99,28 @@ const App: React.FC = () => (
 export default App;
 `,
   "src/sass-demo.tsx": `
-     import React from 'react';
-     import styles from './index.module.scss';
+// import React from 'react';
+import styles from './index.module.scss';
 
-     export default function SassDemo() {
-        return (
-          <div>
-            <h1 className={styles.title}>Utoopack web with Sass</h1>
-          </div>
-        )
-     }
+console.log(styles);
+console.log('hello world');
+
+// const SassDemo: React.FC = () => {
+//   return (
+//     <div>
+//       <h1 className={styles.title}>Utoopack web with Sass</h1>
+//     </div>
+//   )
+// }
+// export default SassDemo;
   `,
   "src/index.module.scss": `
-    $primary-color: rgb(121, 202, 242);
+$primary-color: rgb(121, 202, 242);
 
-    .title {
-      background: $primary-color;
-      display: inline-block;
-    }
+.title {
+  background: $primary-color;
+  display: inline-block;
+}
   `,
   "utoopack.json": JSON.stringify(
     {

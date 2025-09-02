@@ -46,7 +46,7 @@ export const useBuild = (project: UtooProject | null, fileTree: FileTreeNode[], 
             }
         } catch (e: any) {
             console.error("Build failed: ", e);
-            setError(`Build failed: ${e.message}`);
+            setError(`Build failed: ${JSON.stringify(e)}`);
         } finally {
             setIsBuilding(false);
         }

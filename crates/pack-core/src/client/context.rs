@@ -33,6 +33,7 @@ use turbopack_node::{
     transforms::postcss::{PostCssConfigLocation, PostCssTransformOptions},
 };
 
+use crate::shared::webpack_rules::webpack_loader_options;
 use crate::{
     client::runtime_entry::RuntimeEntries,
     config::{
@@ -61,10 +62,6 @@ use crate::{
     },
     util::{foreign_code_context_condition, internal_assets_conditions},
 };
-
-// TODO: support this in wasm
-#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-use crate::shared::webpack_rules::webpack_loader_options;
 
 use super::{
     react_refresh::assert_can_resolve_react_refresh, runtime_entry::RuntimeEntry,
@@ -230,39 +227,22 @@ pub async fn get_client_module_options_context(
     // foreign_code_context_condition. This allows to import codes from
     // node_modules that requires webpack loaders, which next-dev implicitly
     // does by default.
-    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
     let conditions = vec!["browser".into(), mode.await?.condition().into()];
-    let foreign_enable_webpack_loaders = {
-        #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-        {
-            webpack_loader_options(
-                project_path.clone(),
-                config,
-                conditions
-                    .iter()
-                    .cloned()
-                    .chain(once("foreign".into()))
-                    .collect(),
-            )
-            .await?
-        }
-        #[cfg(all(target_family = "wasm", target_os = "unknown"))]
-        {
-            None
-        }
-    };
+
+    let foreign_enable_webpack_loaders = webpack_loader_options(
+        project_path.clone(),
+        config,
+        conditions
+            .iter()
+            .cloned()
+            .chain(once("foreign".into()))
+            .collect(),
+    )
+    .await?;
 
     // Now creates a webpack rules that applies to all codes.
-    let enable_webpack_loaders = {
-        #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-        {
-            webpack_loader_options(project_path.clone(), config, conditions).await?
-        }
-        #[cfg(all(target_family = "wasm", target_os = "unknown"))]
-        {
-            None
-        }
-    };
+    let enable_webpack_loaders =
+        webpack_loader_options(project_path.clone(), config, conditions).await?;
 
     let tree_shaking_mode_for_user_code = *config
         .tree_shaking_mode_for_user_code(mode_ref.is_development())
