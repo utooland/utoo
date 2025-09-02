@@ -7,4 +7,5 @@ let x: TypeA<string> = { content: 'wd' };
 
 x;
 
+
 ReactDOM.createRoot(document.getElementById('root')!).render(<App />);
