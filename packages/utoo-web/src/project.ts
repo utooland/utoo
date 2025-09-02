@@ -1,6 +1,7 @@
 import * as comlink from "comlink";
 import { ForkedProject } from "./forkedProject";
-import { Fork, HandShake, ServiceWorkerHandShake } from "./message";
+import { installServiceWorker } from "./installServiceWorker";
+import { Fork, HandShake } from "./message";
 import {
   Dirent,
   ProjectEndpoint,
@@ -14,7 +15,7 @@ let ProjectWorker: Worker;
 const ConnectedPorts = new Set<MessagePort>();
 
 export class Project implements ProjectEndpoint {
-  #tunnel: Promise<void>;
+  #mount: Promise<void>;
 
   private serviceWorkerOptions?: ServiceWorkerOptions;
 
@@ -52,7 +53,7 @@ export class Project implements ProjectEndpoint {
 
     ProjectWorker.postMessage(HandShake, [port2]);
 
-    this.#tunnel ??= this.remote.mount({
+    this.#mount ??= this.remote.mount({
       cwd,
       wasmUrl,
       threadWorkerUrl,
@@ -70,62 +71,26 @@ export class Project implements ProjectEndpoint {
     if (this.serviceWorkerOptions) {
       const { url, scope } = this.serviceWorkerOptions;
       // Should add "Service-Worker-Allowed": "/" in page root response headers,
-      const registration = await navigator.serviceWorker.register(url, {
-        scope: "/",
-      });
-
-      return new Promise<void>((resolve) => {
-        function sendMessage(sw: ServiceWorker) {
-          sw.postMessage({
-            [ServiceWorkerHandShake]: true,
-            scope,
-          });
-          resolve();
-        }
-
-        function listenForActivation(sw: ServiceWorker) {
-          sw.addEventListener("statechange", () => {
-            if (sw.state === "activated") {
-              sendMessage(sw);
-            }
-          });
-        }
-
-        function checkSWState(registration: ServiceWorkerRegistration) {
-          if (registration.active) {
-            sendMessage(registration.active);
-          } else if (registration.installing) {
-            listenForActivation(registration.installing);
-          }
-
-          registration.addEventListener("updatefound", () => {
-            if (registration.installing) {
-              listenForActivation(registration.installing);
-            }
-          });
-        }
-
-        checkSWState(registration);
-      });
+      return await installServiceWorker(url, scope);
     }
   }
 
-  public async init() {
-    return await this.#tunnel;
+  public async mount() {
+    return await this.#mount;
   }
 
   public async install(packageLock: string) {
-    await this.#tunnel;
+    await this.#mount;
     return await this.remote.install(packageLock);
   }
 
   public async build(): Promise<void> {
-    await this.#tunnel;
+    await this.#mount;
     return await this.remote.build();
   }
 
   public async readFile(path: string, encoding?: "utf8") {
-    await this.#tunnel;
+    await this.#mount;
     return (await this.remote.readFile(path, encoding)) as any;
   }
 
@@ -134,12 +99,12 @@ export class Project implements ProjectEndpoint {
     content: string | Uint8Array,
     encoding?: "utf8",
   ) {
-    await this.#tunnel;
+    await this.#mount;
     return await this.remote.writeFile(path, content, encoding);
   }
 
   public async copyFile(src: string, dst: string) {
-    await this.#tunnel;
+    await this.#mount;
     return await this.remote.copyFile(src, dst);
   }
 
@@ -147,7 +112,7 @@ export class Project implements ProjectEndpoint {
     path: string,
     options?: { recursive?: boolean },
   ): Promise<Dirent[]> {
-    await this.#tunnel;
+    await this.#mount;
     const dirEntry = (await this.remote.readdir(
       path,
       options,
@@ -156,17 +121,17 @@ export class Project implements ProjectEndpoint {
   }
 
   public async mkdir(path: string, options?: { recursive?: boolean }) {
-    await this.#tunnel;
+    await this.#mount;
     return await this.remote.mkdir(path, options);
   }
 
   public async rm(path: string, options?: { recursive?: boolean }) {
-    await this.#tunnel;
+    await this.#mount;
     return await this.remote.rm(path, options);
   }
 
   public async rmdir(path: string, options?: { recursive?: boolean }) {
-    await this.#tunnel;
+    await this.#mount;
     return await this.remote.rmdir(path, options);
   }
 
