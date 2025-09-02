@@ -4116,9 +4116,9 @@ dependencies = [
 
 [[package]]
 name = "opfs-project"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb71335fd11e9472e804e59c380e09e025ccdee1d7e784603134339f880eed46"
+checksum = "af3058e7beaf30f8fe0ea45bc5a057b498ba0583680ea07ecab86a9c91c3befe"
 dependencies = [
  "flate2",
  "futures",
@@ -8237,14 +8237,15 @@ dependencies = [
 
 [[package]]
 name = "tokio-fs-ext"
-version = "0.5.6"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5421f082289a0de4940f3750d926c39d6d67521f147fd4c302c54b74a5e4e2ca"
+checksum = "87223f929731a8c553fc96b4fe4799eaca35e22b7e6a7aab420093cfaa96b930"
 dependencies = [
  "bitflags 2.9.1",
  "cfg-if",
  "futures",
  "js-sys",
+ "notify-types",
  "pin-project-lite",
  "rustc-hash 2.1.1",
  "tokio",
@@ -8857,6 +8858,7 @@ dependencies = [
  "jsonc-parser 0.21.1",
  "mime",
  "notify",
+ "notify-types",
  "parking_lot",
  "rayon",
  "regex",
