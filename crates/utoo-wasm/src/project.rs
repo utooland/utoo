@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::Context;
+use pack_api::project::WatchOptions;
 use serde_wasm_bindgen::to_value;
 use tokio_fs_ext::{DirEntry as RawDirEntry, Metadata as RawMetadata};
 use wasm_bindgen::prelude::*;
@@ -108,6 +109,10 @@ impl Project {
                 project_path: project_path.clone(),
                 config,
                 build_id: project_path.clone(),
+                watch: WatchOptions {
+                    enable: true,
+                    ..Default::default()
+                },
                 ..Default::default()
             };
 

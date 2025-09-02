@@ -110,7 +110,11 @@ export class Project implements ProjectEndpoint {
     }
   }
 
-  public async install(packageLock: string): Promise<void> {
+  public async init() {
+    return await this.#tunnel;
+  }
+
+  public async install(packageLock: string) {
     await this.#tunnel;
     return await this.remote.install(packageLock);
   }

@@ -1,5 +1,5 @@
 use std::{io, path::Path};
-use tokio_fs_ext::{offload, Metadata, ReadDir};
+use tokio_fs_ext::{offload, watch, Metadata, ReadDir};
 
 pub struct OpfsOffload;
 
@@ -42,5 +42,14 @@ impl offload::FsOffload for OpfsOffload {
 
     async fn metadata(&self, path: impl AsRef<Path>) -> io::Result<Metadata> {
         opfs_project::metadata(path).await
+    }
+
+    async fn watch_dir(
+        &self,
+        path: impl AsRef<Path>,
+        recursive: bool,
+        cb: impl Fn(watch::event::Event) + Send + Sync + 'static,
+    ) -> io::Result<()> {
+        watch::watch_dir(path, recursive, cb).await
     }
 }
