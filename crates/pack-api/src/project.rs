@@ -585,7 +585,10 @@ impl Project {
         DiskFileSystem::new(
             PROJECT_FILESYSTEM_NAME.into(),
             self.root_path.clone(),
+            #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
             vec![],
+            #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+            vec![rcstr!("./node_modules")],
         )
     }
 
@@ -597,7 +600,14 @@ impl Project {
 
     #[turbo_tasks::function]
     pub fn output_fs(&self) -> Vc<DiskFileSystem> {
-        DiskFileSystem::new("output".into(), self.project_path.clone(), vec![])
+        DiskFileSystem::new(
+            "output".into(),
+            self.project_path.clone(),
+            #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+            vec![],
+            #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+            vec![rcstr!("./node_modules")],
+        )
     }
 
     #[turbo_tasks::function]
