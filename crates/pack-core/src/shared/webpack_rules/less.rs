@@ -35,9 +35,12 @@ pub async fn maybe_add_less_loader(
             .or(Some(&empty_additional_data)));
         let rule = rules.get_mut(pattern);
         let less_loader = WebpackLoaderItem {
+            #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
             loader: get_utoopack_dependency_package(project_path.clone(), rcstr!("less-loader"))
                 .owned()
                 .await?,
+            #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+            loader: rcstr!("less-loader"),
             options: take(
                 serde_json::json!({
                     "implementation": less_options.get("implementation"),

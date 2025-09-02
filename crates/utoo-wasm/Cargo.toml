@@ -41,6 +41,7 @@ rustc-hash = { workspace = true }
 tokio-fs-ext = { version = "0.5.6", features = ["wasm_offload"] }
 console_error_panic_hook = { version = "0.1.7" }
 opfs-project = "0.1.4"
+lazy_static = "1.4"
 
 ## turbpack specific - conditional on utoo-pack feature
 turbo-rcstr = { workspace = true, optional = true }

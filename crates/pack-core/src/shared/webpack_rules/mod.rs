@@ -47,11 +47,14 @@ pub async fn webpack_loader_options(
             WebpackLoadersOptions {
                 rules,
                 conditions,
+                #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
                 loader_runner_package: Some(
                     loader_runner_package_mapping(project_path)
                         .to_resolved()
                         .await?,
                 ),
+                #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+                loader_runner_package: None,
             }
             .resolved_cell(),
         )
