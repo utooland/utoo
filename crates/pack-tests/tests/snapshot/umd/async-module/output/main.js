@@ -2,96 +2,102 @@
 // Dummy runtime
 })([["main.js", {
 
-475: ((__turbopack_context__) => {
+99: ((__turbopack_context__) => {
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
 
-__turbopack_context__.s({
-    "default": ()=>__TURBOPACK__default__export__
-});
+__turbopack_context__.s([
+    "default",
+    ()=>__TURBOPACK__default__export__
+]);
 await 1;
 await 1;
 const __TURBOPACK__default__export__ = "hello";
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, true);}),
-58: ((__turbopack_context__) => {
+890: ((__turbopack_context__) => {
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
 
-__turbopack_context__.s({
-    "default": ()=>__TURBOPACK__default__export__
-});
-var __TURBOPACK__imported__module__475__ = __turbopack_context__.i(475);
-var __turbopack_async_dependencies__ = __turbopack_handle_async_dependencies__([
-    __TURBOPACK__imported__module__475__
+__turbopack_context__.s([
+    "default",
+    ()=>__TURBOPACK__default__export__
 ]);
-[__TURBOPACK__imported__module__475__] = __turbopack_async_dependencies__.then ? (await __turbopack_async_dependencies__)() : __turbopack_async_dependencies__;
+var __TURBOPACK__imported__module__99__ = __turbopack_context__.i(99);
+var __turbopack_async_dependencies__ = __turbopack_handle_async_dependencies__([
+    __TURBOPACK__imported__module__99__
+]);
+[__TURBOPACK__imported__module__99__] = __turbopack_async_dependencies__.then ? (await __turbopack_async_dependencies__)() : __turbopack_async_dependencies__;
 ;
-const __TURBOPACK__default__export__ = __TURBOPACK__imported__module__475__["default"] + " world";
+const __TURBOPACK__default__export__ = __TURBOPACK__imported__module__99__["default"] + " world";
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, false);}),
-536: ((__turbopack_context__) => {
+152: ((__turbopack_context__) => {
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
 
-__turbopack_context__.s({
-    "default": ()=>__TURBOPACK__default__export__
-});
-var __TURBOPACK__imported__module__475__ = __turbopack_context__.i(475);
-var __turbopack_async_dependencies__ = __turbopack_handle_async_dependencies__([
-    __TURBOPACK__imported__module__475__
+__turbopack_context__.s([
+    "default",
+    ()=>__TURBOPACK__default__export__
 ]);
-[__TURBOPACK__imported__module__475__] = __turbopack_async_dependencies__.then ? (await __turbopack_async_dependencies__)() : __turbopack_async_dependencies__;
+var __TURBOPACK__imported__module__99__ = __turbopack_context__.i(99);
+var __turbopack_async_dependencies__ = __turbopack_handle_async_dependencies__([
+    __TURBOPACK__imported__module__99__
+]);
+[__TURBOPACK__imported__module__99__] = __turbopack_async_dependencies__.then ? (await __turbopack_async_dependencies__)() : __turbopack_async_dependencies__;
 ;
-const __TURBOPACK__default__export__ = __TURBOPACK__imported__module__475__["default"] + " world";
+const __TURBOPACK__default__export__ = __TURBOPACK__imported__module__99__["default"] + " world";
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, false);}),
-666: ((__turbopack_context__) => {
+386: ((__turbopack_context__) => {
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
 
-__turbopack_context__.s({
-    "default": ()=>__TURBOPACK__default__export__
-});
-var __TURBOPACK__imported__module__58__ = __turbopack_context__.i(58);
-var __TURBOPACK__imported__module__536__ = __turbopack_context__.i(536);
-var __turbopack_async_dependencies__ = __turbopack_handle_async_dependencies__([
-    __TURBOPACK__imported__module__58__,
-    __TURBOPACK__imported__module__536__
+__turbopack_context__.s([
+    "default",
+    ()=>__TURBOPACK__default__export__
 ]);
-[__TURBOPACK__imported__module__58__, __TURBOPACK__imported__module__536__] = __turbopack_async_dependencies__.then ? (await __turbopack_async_dependencies__)() : __turbopack_async_dependencies__;
+var __TURBOPACK__imported__module__890__ = __turbopack_context__.i(890);
+var __TURBOPACK__imported__module__152__ = __turbopack_context__.i(152);
+var __turbopack_async_dependencies__ = __turbopack_handle_async_dependencies__([
+    __TURBOPACK__imported__module__890__,
+    __TURBOPACK__imported__module__152__
+]);
+[__TURBOPACK__imported__module__890__, __TURBOPACK__imported__module__152__] = __turbopack_async_dependencies__.then ? (await __turbopack_async_dependencies__)() : __turbopack_async_dependencies__;
 ;
 ;
-const __TURBOPACK__default__export__ = __TURBOPACK__imported__module__58__["default"] + ", " + __TURBOPACK__imported__module__536__["default"];
+const __TURBOPACK__default__export__ = __TURBOPACK__imported__module__890__["default"] + ", " + __TURBOPACK__imported__module__152__["default"];
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, false);}),
-460: ((__turbopack_context__) => {
+636: ((__turbopack_context__) => {
 "use strict";
 
 // This is the async chunk
-__turbopack_context__.s({
-    "default": ()=>__TURBOPACK__default__export__,
-    "nested": ()=>nested
-});
+__turbopack_context__.s([
+    "default",
+    ()=>__TURBOPACK__default__export__,
+    "nested",
+    ()=>nested
+]);
 const __TURBOPACK__default__export__ = 42;
-const nested = ()=>Promise.resolve().then(()=>__turbopack_context__.r(58));
+const nested = ()=>Promise.resolve().then(()=>__turbopack_context__.r(890));
 }),
-735: ((__turbopack_context__) => {
+111: ((__turbopack_context__) => {
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
 
-const result = await __turbopack_context__.r(666);
-await Promise.resolve().then(()=>__turbopack_context__.r(460));
+const result = await __turbopack_context__.r(386);
+await Promise.resolve().then(()=>__turbopack_context__.r(636));
 result.default;
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, true);}),
 },
-{"otherChunks":[],"runtimeModuleIds":[735]},
+{"otherChunks":[],"runtimeModuleIds":[111]},
 ]]);
 
 

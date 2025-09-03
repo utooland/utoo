@@ -81,6 +81,7 @@ turbo-rcstr = { workspace = true, features = ["napi"] }
 turbo-tasks = { workspace = true }
 turbo-tasks-backend = { workspace = true }
 turbo-tasks-fs = { workspace = true }
+turbo-unix-path = { workspace = true }
 pack-api = { workspace = true }
 pack-core = { workspace = true }
 turbo-tasks-malloc = { workspace = true, default-features = false, features = [

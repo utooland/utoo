@@ -1,6 +1,5 @@
-(globalThis.TURBOPACK = globalThis.TURBOPACK || []).push([
+(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {},
-    {"otherChunks":["2815c_tests_snapshot_concatenate_modules_side-effects-import_input_b4143d3e.js"],"runtimeModuleIds":[690]}
+    {"otherChunks":["75859_tests_snapshot_concatenate_modules_side-effects-import_input_7857eab4.js"],"runtimeModuleIds":[514]}
 ]);
 // Dummy runtime
