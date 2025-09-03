@@ -26,12 +26,14 @@ pub async fn get_sass_loader_rules(
         serde_json::json!(["legacy-js-api"])
     };
 
+    let empty_additional_data = serde_json::Value::String("".to_string());
     sass_options.insert("silenceDeprecations".into(), silence_deprecations);
     // additionalData is a loader option but utoopack has it under `sassOptions` in
     // `project.json`
     let additional_data = sass_options
         .get("prependData")
-        .or(sass_options.get("additionalData"));
+        .or(sass_options.get("additionalData"))
+        .or(Some(&empty_additional_data));
 
     let sass_loader = WebpackLoaderItem {
         loader: get_utoopack_dependency_package(project_path.clone(), rcstr!("sass-loader"))
