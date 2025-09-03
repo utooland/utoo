@@ -8216,7 +8216,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 [[package]]
 name = "tokio"
 version = "1.47.1"
-source = "git+https://github.com/utooland/tokio.git#51ca8d3309fc4ae65e3069907ba3b983c2a217be"
+source = "git+https://github.com/utooland/tokio.git#0b9f7720e2b65634e0fb7d7d8be9073fc21d96a1"
 dependencies = [
  "backtrace",
  "bytes",
@@ -8237,9 +8237,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-fs-ext"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87223f929731a8c553fc96b4fe4799eaca35e22b7e6a7aab420093cfaa96b930"
+checksum = "4ad92d6bbf0a431eb81210baebb6253e42f0f8b225fd02f30ebcbbd83951d90f"
 dependencies = [
  "bitflags 2.9.1",
  "cfg-if",
@@ -8258,7 +8258,7 @@ dependencies = [
 [[package]]
 name = "tokio-macros"
 version = "2.5.0"
-source = "git+https://github.com/utooland/tokio.git#51ca8d3309fc4ae65e3069907ba3b983c2a217be"
+source = "git+https://github.com/utooland/tokio.git#0b9f7720e2b65634e0fb7d7d8be9073fc21d96a1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8338,7 +8338,7 @@ dependencies = [
 [[package]]
 name = "tokio-util"
 version = "0.7.16"
-source = "git+https://github.com/utooland/tokio.git#51ca8d3309fc4ae65e3069907ba3b983c2a217be"
+source = "git+https://github.com/utooland/tokio.git#0b9f7720e2b65634e0fb7d7d8be9073fc21d96a1"
 dependencies = [
  "bytes",
  "futures-core",
@@ -8876,7 +8876,6 @@ dependencies = [
  "turbo-tasks-build",
  "turbo-tasks-hash",
  "urlencoding",
- "wasm_thread",
 ]
 
 [[package]]
@@ -10003,7 +10002,7 @@ dependencies = [
 [[package]]
 name = "wasm_thread"
 version = "0.3.3"
-source = "git+https://github.com/utooland/wasm_thread.git#94438ff771ee0a6a55d79e49a655707970acb615"
+source = "git+https://github.com/utooland/wasm_thread.git#1155d645aedfdbe55f8ea336a9e8a8150239beb0"
 dependencies = [
  "futures",
  "js-sys",
@@ -10366,8 +10365,9 @@ dependencies = [
 
 [[package]]
 name = "wasmtimer"
-version = "0.4.2"
-source = "git+https://github.com/utooland/wasmtimer-rs.git#55ad34a6d1475eb3affa7c92e7a933068cbfe609"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c598d6b99ea013e35844697fc4670d08339d5cda15588f193c6beedd12f644b"
 dependencies = [
  "futures",
  "js-sys",
