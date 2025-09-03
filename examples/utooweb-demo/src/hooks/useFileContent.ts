@@ -3,11 +3,10 @@ import { Project as UtooProject } from "@utoo/web";
 import { serviceWorkerScope } from "../services/utooService";
 
 export const useFileContent = (project: UtooProject | null) => {
-    const [selectedFilePath, setSelectedFilePath] = useState("");
+    const [selectedFilePath, setSelectedFilePath] = useState("src/index.tsx");
     const [selectedFileContent, setSelectedFileContent] = useState("");
     const [previewUrl, setPreviewUrl] = useState<string>("");
     const [error, setError] = useState("");
-    const debounceTimer = useRef<NodeJS.Timeout | null>(null);
 
     const fetchFileContent = useCallback(
         async (filePath: string): Promise<void> => {
@@ -29,13 +28,21 @@ export const useFileContent = (project: UtooProject | null) => {
         [project],
     );
 
+    const debouncedWriteRef = useRef<NodeJS.Timeout | null>(null);
+
     useEffect(() => {
-        if (debounceTimer.current) {
-            clearTimeout(debounceTimer.current);
+        if (selectedFilePath) {
+            document.title = `Editing ${selectedFilePath}`;
+        }
+    }, [selectedFilePath]);
+
+    useEffect(() => {
+        if (debouncedWriteRef.current) {
+            clearTimeout(debouncedWriteRef.current);
         }
 
         if (project && selectedFilePath && selectedFileContent) {
-            debounceTimer.current = setTimeout(async () => {
+            debouncedWriteRef.current = setTimeout(async () => {
                 try {
                     await project.writeFile(selectedFilePath, selectedFileContent);
                     console.log(`File ${selectedFilePath} auto-saved successfully.`);
@@ -46,12 +53,18 @@ export const useFileContent = (project: UtooProject | null) => {
         }
 
         return () => {
-            if (debounceTimer.current) {
-                clearTimeout(debounceTimer.current);
+            if (debouncedWriteRef.current) {
+                clearTimeout(debouncedWriteRef.current);
             }
         };
     }, [selectedFileContent, selectedFilePath, project]);
 
-
-    return { selectedFilePath, selectedFileContent, setSelectedFileContent, previewUrl, fetchFileContent, error };
+    return {
+        selectedFilePath,
+        selectedFileContent,
+        setSelectedFileContent,
+        previewUrl,
+        fetchFileContent,
+        error,
+    };
 };

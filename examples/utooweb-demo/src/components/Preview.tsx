@@ -1,12 +1,23 @@
-import React from "react";
+import React, { forwardRef, useImperativeHandle, useRef } from "react";
 
 interface PreviewProps {
     url: string;
 }
 
-export const Preview = ({ url }: PreviewProps) => {
+export const Preview = forwardRef(({ url }: PreviewProps, ref) => {
+    const iframeRef = useRef<HTMLIFrameElement>(null);
+
+    useImperativeHandle(ref, () => ({
+        reload: () => {
+            if (iframeRef.current) {
+                iframeRef.current.contentWindow?.location.reload();
+            }
+        },
+    }));
+
     return url ? (
         <iframe
+            ref={iframeRef}
             src={url}
             title="preview"
             style={{
@@ -24,4 +35,4 @@ export const Preview = ({ url }: PreviewProps) => {
             No index.html to preview
         </div>
     );
-};
+});

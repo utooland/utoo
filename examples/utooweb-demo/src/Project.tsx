@@ -20,11 +20,18 @@ const Project = () => {
     fetchFileContent,
     error: fileContentError,
   } = useFileContent(project);
+
+  const previewRef = React.useRef<{ reload: () => void }>(null);
+
   const {
     isBuilding,
     handleBuild,
     error: buildError,
-  } = useBuild(project, fileTree, handleDirectoryExpand);
+  } = useBuild(project, fileTree, handleDirectoryExpand, () => {
+    if (previewRef.current) {
+      previewRef.current.reload();
+    }
+  });
 
   const error = projectError || fileContentError || buildError;
 
@@ -124,7 +131,7 @@ const Project = () => {
         style={{ width: "35%", minWidth: "320px" }}
         contentStyle={{ padding: "1rem" }}
       >
-        <Preview url={previewUrl} />
+        <Preview ref={previewRef} url={previewUrl} />
       </Panel>
     </div>
   );

@@ -129,10 +129,6 @@ $primary-color: rgb(121, 202, 242);
           import: "./src/index.tsx",
           name: "index",
         },
-        {
-          import: "./src/sass-demo.tsx",
-          name: "sass-demo",
-        },
       ],
       stats: true,
       optimization: {
@@ -146,9 +142,6 @@ $primary-color: rgb(121, 202, 242);
     {
       name: "utoo-wasm-demo",
       version: "",
-      resolved: null,
-      integrity: null,
-      license: null,
       dependencies: {
         "react-dom": "18.2.0",
         antd: "latest",
@@ -158,15 +151,6 @@ $primary-color: rgb(121, 202, 242);
         "@types/react": "^18.2.67",
         "@types/react-dom": "^18.2.22",
       },
-      peerDependencies: null,
-      optionalDependencies: null,
-      requires: null,
-      bin: null,
-      peer: null,
-      dev: null,
-      optional: null,
-      hasInstallScript: null,
-      workspaces: null,
     },
     null,
     2,

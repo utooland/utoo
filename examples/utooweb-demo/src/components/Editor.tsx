@@ -8,11 +8,17 @@ interface EditorProps {
 }
 
 export const Editor = ({ filePath, content, onContentChange }: EditorProps) => {
+    const modelUri = filePath ? `file:///${filePath.replace(/^\.\//, '')}` : undefined;
+
+    if (!filePath) {
+        return null;
+    }
+
     return (
         <MonacoEditor
             height="100%"
             width="100%"
-            path={filePath}
+            path={modelUri}
             language={
                 ["tsx", "ts", "jsx", "js"].some((ext) =>
                     filePath.endsWith(ext),
