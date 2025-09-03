@@ -553,6 +553,43 @@
         }
       }
     },
+    "SchemaModularizeImportPackageConfig": {
+      "description": "Modularize import package configuration",
+      "type": "object",
+      "required": [
+        "transform"
+      ],
+      "properties": {
+        "handleDefaultImport": {
+          "description": "Handle default import",
+          "default": false,
+          "type": "boolean"
+        },
+        "handleNamespaceImport": {
+          "description": "Handle namespace import",
+          "default": false,
+          "type": "boolean"
+        },
+        "preventFullImport": {
+          "description": "Prevent full import of the package",
+          "default": false,
+          "type": "boolean"
+        },
+        "skipDefaultConversion": {
+          "description": "Skip default conversion",
+          "default": false,
+          "type": "boolean"
+        },
+        "transform": {
+          "description": "Transform configuration",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SchemaTransform"
+            }
+          ]
+        }
+      }
+    },
     "SchemaModuleConfig": {
       "description": "Module configuration",
       "type": "object",
@@ -609,7 +646,9 @@
             "object",
             "null"
           ],
-          "additionalProperties": true
+          "additionalProperties": {
+            "$ref": "#/definitions/SchemaModularizeImportPackageConfig"
+          }
         },
         "moduleIds": {
           "description": "Module ID generation strategy",
@@ -856,6 +895,32 @@
           "description": "Styled components configuration"
         }
       }
+    },
+    "SchemaTransform": {
+      "description": "Transform configuration for modularize imports",
+      "anyOf": [
+        {
+          "description": "String transform template",
+          "type": "string"
+        },
+        {
+          "description": "Vector of transformation pairs",
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "maxItems": 2,
+            "minItems": 2
+          }
+        }
+      ]
     }
   }
 }

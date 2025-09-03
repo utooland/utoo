@@ -241,7 +241,7 @@ pub struct SchemaOptimizationConfig {
     /// Modularize imports configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Modularize imports configuration")]
-    pub modularize_imports: Option<HashMap<String, serde_json::Value>>,
+    pub modularize_imports: Option<HashMap<String, SchemaModularizeImportPackageConfig>>,
 
     /// Whether to concatenate modules when possible to reduce the number of chunks
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -258,6 +258,46 @@ pub enum SchemaModuleIds {
     Named,
     Deterministic,
 }
+
+/// Transform configuration for modularize imports
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SchemaTransform {
+    /// String transform template
+    String(String),
+    /// Vector of transformation pairs
+    Vec(Vec<(String, String)>),
+}
+
+/// Modularize import package configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaModularizeImportPackageConfig {
+    /// Transform configuration
+    #[schemars(description = "Transform configuration")]
+    pub transform: SchemaTransform,
+    
+    /// Prevent full import of the package
+    #[serde(default)]
+    #[schemars(description = "Prevent full import of the package")]
+    pub prevent_full_import: bool,
+    
+    /// Skip default conversion
+    #[serde(default)]
+    #[schemars(description = "Skip default conversion")]
+    pub skip_default_conversion: bool,
+    
+    /// Handle default import
+    #[serde(default)]
+    #[schemars(description = "Handle default import")]
+    pub handle_default_import: bool,
+    
+    /// Handle namespace import
+    #[serde(default)]
+    #[schemars(description = "Handle namespace import")]
+    pub handle_namespace_import: bool,
+}
+
 
 /// Console removal configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

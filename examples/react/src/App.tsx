@@ -7,6 +7,7 @@ import styles from './index.module.less';
 export function App() {
   return <>
     <h1 className={styles.pre}>App2 {foo} - HMR Test by {dataText}</h1>
+    <h1>React Version is: {React.version}</h1>
     <Person />
   </>;
 }

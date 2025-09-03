@@ -30,6 +30,10 @@ pub struct ModularizeImportPackageConfig {
     pub prevent_full_import: bool,
     #[serde(default)]
     pub skip_default_conversion: bool,
+    #[serde(default)]
+    pub handle_default_import: bool,
+    #[serde(default)]
+    pub handle_namespace_import: bool,
 }
 
 #[derive(
@@ -97,8 +101,8 @@ impl ModularizeImportsTransformer {
                                 },
                                 prevent_full_import: v.prevent_full_import,
                                 skip_default_conversion: v.skip_default_conversion,
-                                handle_default_import: false,
-                                handle_namespace_import: false,
+                                handle_default_import: v.handle_default_import,
+                                handle_namespace_import: v.handle_namespace_import,
                             }),
                         )
                     })
