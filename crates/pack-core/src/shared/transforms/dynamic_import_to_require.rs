@@ -22,8 +22,9 @@ pub fn get_dynamic_import_to_require_rule() -> ModuleRule {
     ModuleRule::new(
         module_rule_match_js_no_url(false),
         vec![ModuleRuleEffect::ExtendEcmascriptTransforms {
-            prepend: ResolvedVc::cell(vec![dynamic_import_to_require_transform]),
-            append: ResolvedVc::cell(vec![]),
+            preprocess: ResolvedVc::cell(vec![dynamic_import_to_require_transform]),
+            main: ResolvedVc::cell(vec![]),
+            postprocess: ResolvedVc::cell(vec![]),
         }],
     )
 }

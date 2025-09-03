@@ -276,28 +276,27 @@ pub struct SchemaModularizeImportPackageConfig {
     /// Transform configuration
     #[schemars(description = "Transform configuration")]
     pub transform: SchemaTransform,
-    
+
     /// Prevent full import of the package
     #[serde(default)]
     #[schemars(description = "Prevent full import of the package")]
     pub prevent_full_import: bool,
-    
+
     /// Skip default conversion
     #[serde(default)]
     #[schemars(description = "Skip default conversion")]
     pub skip_default_conversion: bool,
-    
+
     /// Handle default import
     #[serde(default)]
     #[schemars(description = "Handle default import")]
     pub handle_default_import: bool,
-    
+
     /// Handle namespace import
     #[serde(default)]
     #[schemars(description = "Handle namespace import")]
     pub handle_namespace_import: bool,
 }
-
 
 /// Console removal configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

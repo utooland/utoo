@@ -1,4 +1,4 @@
-use std::{iter::once, str::FromStr};
+use std::{collections::BTreeSet, str::FromStr};
 
 use anyhow::Result;
 use turbo_rcstr::{RcStr, rcstr};
@@ -54,7 +54,7 @@ use crate::{
             styled_jsx::get_styled_jsx_transform_rule,
             swc_ecma_transform_plugins::get_swc_ecma_transform_plugin_rule,
         },
-        webpack_rules::webpack_loader_options,
+        webpack_rules::{WebpackLoaderBuiltinCondition, webpack_loader_options},
     },
     transform_options::{
         get_decorators_transform_options, get_jsx_transform_options,
@@ -128,19 +128,18 @@ pub async fn get_client_compile_time_info(
             .into(),
     )]);
     let define_env = Vc::cell(define_env);
+    let environment = BrowserEnvironment {
+        dom: true,
+        web_worker: false,
+        service_worker: false,
+        browserslist_query: browserslist_query.to_owned(),
+    }
+    .resolved_cell();
 
     CompileTimeInfo::builder(
-        Environment::new(ExecutionEnvironment::Browser(
-            BrowserEnvironment {
-                dom: true,
-                web_worker: false,
-                service_worker: false,
-                browserslist_query: browserslist_query.to_owned(),
-            }
-            .resolved_cell(),
-        ))
-        .to_resolved()
-        .await?,
+        Environment::new(ExecutionEnvironment::Browser(environment), *environment)
+            .to_resolved()
+            .await?,
     )
     .defines(client_defines(define_env).to_resolved().await?)
     .free_var_references(client_free_vars(define_env).to_resolved().await?)
@@ -223,25 +222,21 @@ pub async fn get_client_module_options_context(
     .to_resolved()
     .await?;
 
-    // A separate webpack rules will be applied to codes matching
-    // foreign_code_context_condition. This allows to import codes from
-    // node_modules that requires webpack loaders, which next-dev implicitly
-    // does by default.
-    let conditions = vec!["browser".into(), mode.await?.condition().into()];
-    let foreign_enable_webpack_loaders = webpack_loader_options(
-        project_path.clone(),
-        config,
-        conditions
-            .iter()
-            .cloned()
-            .chain(once("foreign".into()))
-            .collect(),
-    )
-    .await?;
+    let mut loader_conditions = BTreeSet::new();
+    loader_conditions.insert(WebpackLoaderBuiltinCondition::Browser);
+    loader_conditions.extend(mode.await?.webpack_loader_conditions());
+
+    // A separate webpack rules will be applied to codes matching foreign_code_context_condition.
+    // This allows to import codes from node_modules that requires webpack loaders, which dev
+    // implicitly does by default.
+    let mut foreign_conditions = loader_conditions.clone();
+    foreign_conditions.insert(WebpackLoaderBuiltinCondition::Foreign);
+    let foreign_enable_webpack_loaders =
+        *webpack_loader_options(project_path.clone(), config, foreign_conditions).await?;
 
     // Now creates a webpack rules that applies to all codes.
     let enable_webpack_loaders =
-        webpack_loader_options(project_path.clone(), config, conditions).await?;
+        *webpack_loader_options(project_path.clone(), config, loader_conditions).await?;
 
     let tree_shaking_mode_for_user_code = *config
         .tree_shaking_mode_for_user_code(mode_ref.is_development())

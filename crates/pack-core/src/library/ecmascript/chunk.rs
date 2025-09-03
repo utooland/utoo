@@ -11,7 +11,9 @@ use turbopack_core::{
         Chunk, ChunkingContext, EvaluatableAssets, MinifyType, ModuleChunkItemIdExt, ModuleId,
     },
     code_builder::{Code, CodeBuilder},
-    environment::{EdgeWorkerEnvironment, Environment, ExecutionEnvironment, NodeJsVersion},
+    environment::{
+        BrowserEnvironment, EdgeWorkerEnvironment, Environment, ExecutionEnvironment, NodeJsVersion,
+    },
     ident::AssetIdent,
     output::{OutputAsset, OutputAssets},
     source_map::{GenerateSourceMap, OptionStringifiedSourceMap, SourceMapAsset},
@@ -113,14 +115,17 @@ impl EcmascriptLibraryEvaluateChunk {
         // Get runtime code based on runtime type
         match runtime_type {
             RuntimeType::Development | RuntimeType::Production => {
+                let css_environment = BrowserEnvironment::default().resolved_cell();
                 let runtime_code = get_library_runtime_code(
-                    Environment::new(ExecutionEnvironment::EdgeWorker(
-                        EdgeWorkerEnvironment {
-                            // FIXME
-                            node_version: NodeJsVersion::default().resolved_cell(),
-                        }
-                        .resolved_cell(),
-                    )),
+                    Environment::new(
+                        ExecutionEnvironment::EdgeWorker(
+                            EdgeWorkerEnvironment {
+                                node_version: NodeJsVersion::default().resolved_cell(),
+                            }
+                            .resolved_cell(),
+                        ),
+                        *css_environment,
+                    ),
                     Vc::cell(None),
                     Vc::cell(None),
                     runtime_type,

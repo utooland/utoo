@@ -3,7 +3,7 @@ use std::io::Write;
 use anyhow::Result;
 use indoc::writedoc;
 use turbo_rcstr::RcStr;
-use turbo_tasks::Vc;
+use turbo_tasks::{ResolvedVc, Vc};
 use turbopack_core::{
     code_builder::{Code, CodeBuilder},
     environment::Environment,
@@ -16,7 +16,7 @@ use super::{asset_context::get_runtime_asset_context, embed_js::embed_static_cod
 /// Returns the code for the ECMAScript runtime.
 #[turbo_tasks::function]
 pub async fn get_library_runtime_code(
-    environment: Vc<Environment>,
+    environment: ResolvedVc<Environment>,
     chunk_base_path: Vc<Option<RcStr>>,
     chunk_suffix_path: Vc<Option<RcStr>>,
     _runtime_type: RuntimeType,
@@ -26,7 +26,7 @@ pub async fn get_library_runtime_code(
     runtime_export: Vc<Vec<RcStr>>,
     runtime_module_ids: Vc<Vec<RcStr>>,
 ) -> Result<Vc<Code>> {
-    let asset_context = get_runtime_asset_context(environment).await?;
+    let asset_context = get_runtime_asset_context(*environment).resolve().await?;
 
     let shared_runtime_utils_code = embed_static_code(
         asset_context,

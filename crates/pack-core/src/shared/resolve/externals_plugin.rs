@@ -1,7 +1,11 @@
 use anyhow::Result;
 use turbo_esregex::EsRegex;
+use turbo_rcstr::rcstr;
 use turbo_tasks::{ResolvedVc, Vc};
-use turbo_tasks_fs::{self, FileSystemPath, glob::Glob};
+use turbo_tasks_fs::{
+    self, FileSystemPath,
+    glob::{Glob, GlobOptions},
+};
 use turbopack_core::{
     reference_type::ReferenceType,
     resolve::{
@@ -131,7 +135,10 @@ impl ExternalsPlugin {
 impl BeforeResolvePlugin for ExternalsPlugin {
     #[turbo_tasks::function]
     fn before_resolve_condition(&self) -> Vc<BeforeResolvePluginCondition> {
-        BeforeResolvePluginCondition::from_request_glob(Glob::new("*".into()))
+        BeforeResolvePluginCondition::from_request_glob(Glob::new(
+            rcstr!("*"),
+            GlobOptions::default(),
+        ))
     }
 
     #[turbo_tasks::function]
@@ -146,7 +153,10 @@ impl BeforeResolvePlugin for ExternalsPlugin {
 
         // get request module name
         let module_name = match &*request_value {
-            Request::Module { module, .. } => module,
+            Request::Module {
+                module: Pattern::Constant(name),
+                ..
+            } => name,
             Request::Raw {
                 path: Pattern::Constant(name),
                 ..
@@ -242,7 +252,10 @@ impl AfterResolvePlugin for ExternalsPlugin {
     #[turbo_tasks::function]
     fn after_resolve_condition(&self) -> Vc<AfterResolvePluginCondition> {
         // We need to match files in node_modules to handle subpath externals
-        AfterResolvePluginCondition::new(self.root.clone(), Glob::new("**/node_modules/**".into()))
+        AfterResolvePluginCondition::new(
+            self.root.clone(),
+            Glob::new(rcstr!("**/node_modules/**"), GlobOptions::default()),
+        )
     }
 
     #[turbo_tasks::function]
@@ -258,7 +271,7 @@ impl AfterResolvePlugin for ExternalsPlugin {
         let request_value = &*request.await?;
 
         let Request::Module {
-            module: package,
+            module: Pattern::Constant(package),
             path: package_sub_path,
             ..
         } = request_value

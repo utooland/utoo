@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 39, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/externals/subpath/input/index.ts"],"sourcesContent":["import antd from \"antd\";\nimport Button from \"antd/es/button\";\nimport DatePicker from \"antd/es/date-picker\";\nimport InputGroup from \"antd/es/input/Group\";\nimport version from \"antd/es/version\";\nimport zh_CN from \"antd/es/locale/zh_CN\";\nimport zh_TW from \"antd/es/locale/zh_TW\";\n\nconsole.log(antd);\nconsole.log(Button, DatePicker);\nconsole.log(InputGroup);\nconsole.log(version, zh_CN, zh_TW);"],"names":[],"mappings":";AAAA;AACA;AACA;AACA;AACA;;;;;;;;AAIA,QAAQ,GAAG,CAAC,+CAAI;AAChB,QAAQ,GAAG,CAAC,8CAAM,EAAE,+CAAU;AAC9B,QAAQ,GAAG,CAAC,+CAAU;AACtB,QAAQ,GAAG,CAAC,8CAAO,EAAE,KAAA,GAAO,KAAA"}}]
+}

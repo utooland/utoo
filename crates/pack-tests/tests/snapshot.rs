@@ -17,7 +17,8 @@ use std::{collections::VecDeque, fs, io, path::PathBuf, sync::Once};
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{ReadConsistency, ResolvedVc, TurboTasks, ValueToString, Vc, apply_effects};
 use turbo_tasks_backend::{BackendOptions, TurboTasksBackend, noop_backing_storage};
-use turbo_tasks_fs::{FileSystemPath, util::sys_to_unix};
+use turbo_tasks_fs::FileSystemPath;
+use turbo_unix_path::sys_to_unix;
 use turbopack_core::{asset::Asset, issue::IssueDescriptionExt, output::OutputAsset};
 use turbopack_test_utils::snapshot::{UPDATE, diff, expected, matches_expected, snapshot_issues};
 
