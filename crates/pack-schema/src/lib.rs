@@ -296,6 +296,11 @@ pub struct SchemaModularizeImportPackageConfig {
     #[serde(default)]
     #[schemars(description = "Handle namespace import")]
     pub handle_namespace_import: bool,
+
+    /// Style import configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Style import configuration")]
+    pub style: Option<String>,
 }
 
 /// Console removal configuration
