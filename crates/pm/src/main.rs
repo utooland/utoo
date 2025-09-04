@@ -260,7 +260,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         set_legacy_peer_deps(cli.legacy_peer_deps);
     }
 
-    // Ensure the version is up to date, weak dependency
+    // Initialize auto update with immediate check and background monitoring
     if let Err(_e) = init_auto_update().await {
         log_warning("Auto update cancelled");
     }
