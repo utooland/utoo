@@ -6,6 +6,7 @@ pub mod global_bin;
 pub mod install_runtime;
 pub mod lock;
 pub mod package;
+pub mod registry;
 pub mod ruborist;
 pub mod workspace;
 

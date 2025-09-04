@@ -6,16 +6,26 @@ use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::fs;
+use std::thread;
 use tokio::sync::Semaphore;
 
-use crate::helper::lock::{Package, extract_package_name, path_to_pkg_name};
+use crate::cmd::rebuild::rebuild;
+use crate::helper::global_bin::get_global_bin_dir;
+use crate::helper::lock::{
+    PackageLock, ensure_package_lock, group_by_depth, prepare_global_package_json,
+    update_package_json, Package, extract_package_name, path_to_pkg_name
+};
 use crate::helper::workspace;
 use crate::helper::{is_cpu_compatible, is_os_compatible};
+use crate::model::package::PackageInfo;
+use crate::util::cache::get_cache_dir;
 use crate::util::cloner::clone;
 use crate::util::downloader::download;
 use crate::util::linker::link;
-use crate::util::logger::{PROGRESS_BAR, log_progress, log_verbose};
+use crate::util::logger::{
+    PROGRESS_BAR, finish_progress_bar, log_info, log_progress, log_verbose, start_progress_bar
+};
+use crate::util::save_type::{PackageAction, SaveType};
 
 use super::binary::update_package_binary;
 
@@ -273,7 +283,7 @@ pub async fn install_packages(
                                         log_verbose(&format!("{name} has install script"));
                                         let has_install_script_flag_path =
                                             cache_path.join("_hasInstallScript");
-                                        fs::write(has_install_script_flag_path, "").await?;
+                                        tokio::fs::write(has_install_script_flag_path, "").await?;
                                     }
                                 }
                                 Err(e) => {
@@ -333,6 +343,133 @@ pub async fn install_packages(
     }
 
     Ok(())
+}
+
+pub struct InstallService;
+
+impl InstallService {
+    pub async fn update_packages(
+        action: PackageAction,
+        specs: &[&str],
+        workspace: Option<String>,
+        ignore_scripts: bool,
+        save_type: SaveType,
+    ) -> Result<()> {
+        log_verbose(&format!(
+            "update packages: {:?} {:?} {:?} {:?}",
+            action, specs, &workspace, ignore_scripts
+        ));
+
+        if specs.is_empty() {
+            return Err(anyhow::anyhow!("No package specifications provided"));
+        }
+
+        let cwd = std::env::current_dir().context("Failed to get current directory")?;
+
+        // Update working directory to project root (if in workspace)
+        let root_path = crate::helper::workspace::update_cwd_to_root(&cwd).await?;
+
+        // Update package.json and package-lock.json for all packages in batch
+        update_package_json(&root_path, &action, specs, &workspace, &save_type)
+            .await
+            .context("Failed to update package.json")?;
+
+        // Rebuild Deps
+        crate::cmd::deps::build_deps(&root_path)
+            .await
+            .context("Failed to build package-lock.json")?;
+
+        Self::install(ignore_scripts, &root_path)
+            .await
+            .context("Failed to install packages")?;
+
+        Ok(())
+    }
+
+    pub async fn install(ignore_scripts: bool, root_path: &Path) -> Result<()> {
+        // Package lock prerequisite check
+        ensure_package_lock(root_path).await?;
+
+        // load package-lock.json
+        let package_lock: PackageLock = serde_json::from_reader(
+            std::fs::File::open(root_path.join("package-lock.json"))
+                .context("Failed to open package-lock.json")?,
+        )
+        .map_err(|e| anyhow::anyhow!("Failed to parse package-lock.json: {}", e))?;
+
+        let cache_dir = get_cache_dir();
+
+        let groups = group_by_depth(&package_lock.packages);
+
+        let mut depths: Vec<_> = groups.keys().cloned().collect();
+        depths.sort_unstable();
+        if !package_lock.packages.is_empty() {
+            start_progress_bar();
+            PROGRESS_BAR.set_length(package_lock.packages.len() as u64);
+        }
+
+        // Get the number of logical CPU cores of the system and set it to twice the number of CPU cores
+        let concurrent_limit = thread::available_parallelism()
+            .map(|n| n.get() * 2)
+            .unwrap_or(20)
+            .max(20);
+        log_verbose(&format!("Setting concurrent limit to {concurrent_limit}"));
+        let semaphore = Arc::new(Semaphore::new(concurrent_limit));
+
+        install_packages(&groups, &cache_dir, root_path, semaphore)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to install packages: {}", e))?;
+
+        finish_progress_bar("node_modules cloned");
+
+        if !ignore_scripts {
+            log_info(
+                "Starting to execute dependency hook scripts, you can add --ignore-scripts to skip",
+            );
+            rebuild(root_path).await?;
+            log_info("💫 All dependencies installed successfully");
+            Ok(())
+        } else {
+            log_info(
+                "💫 All dependencies installed successfully (you can run 'utoo rebuild' to trigger dependency hooks)",
+            );
+            Ok(())
+        }
+    }
+
+    pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Result<()> {
+        // Prepare global package directory and package.json
+        let package_path = prepare_global_package_json(npm_spec, prefix)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to prepare global package.json: {}", e))?;
+
+        log_verbose(&format!("Installing global package: {npm_spec}"));
+
+        // Install dependencies
+        Self::install(false, &package_path)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to install global package dependencies: {}", e))?;
+
+        // Create package info from path
+        let package_info =
+            PackageInfo::from_path(&package_path).context("Failed to create package info from path")?;
+
+        // Get global bin directory using the common helper
+        let target_bin_dir =
+            get_global_bin_dir(&prefix).context("Failed to get global bin directory")?;
+
+        // Link binary files to global
+        log_verbose(&format!(
+            "Linking binary files to global... {}",
+            target_bin_dir.display()
+        ));
+        package_info
+            .link_to_global(&target_bin_dir)
+            .await
+            .context("Failed to link binary files to global")?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
