@@ -9,7 +9,8 @@ use crate::helper::workspace::find_workspaces;
 use crate::util::config::get_legacy_peer_deps;
 use crate::util::json::{load_package_json_from_path, load_package_lock_json_from_path};
 use crate::util::logger::{log_verbose, log_warning};
-use crate::util::node::{EdgeType, Node, Overrides};
+use crate::model::node::{EdgeType, Node};
+use crate::model::override_rule::Overrides;
 use crate::util::registry::{resolve, resolve_dependency};
 use crate::util::relative_path::to_relative_path;
 use crate::util::save_type::{PackageAction, SaveType};
@@ -348,7 +349,7 @@ pub async fn validate_deps(
 ) -> Result<Vec<InvalidDependency>> {
     let mut invalid_deps = Vec::new();
     // Initialize overrides
-    let overrides = Overrides::new(pkg_file.clone()).parse(pkg_file.clone());
+    let overrides = Overrides::parse(pkg_file.clone());
 
     if let Some(packages) = pkgs_in_pkg_lock.as_object() {
         for (pkg_path, pkg_info) in packages {
@@ -568,7 +569,7 @@ fn check_duplicate_dependencies(node: &Arc<Node>) {
 
 /// Create package information based on node type
 fn create_package_info(node: &Arc<Node>, root_path: &Path, total_packages: &mut i32) -> Value {
-    let mut pkg_info = if node.is_root {
+    let mut pkg_info = if node.is_root() {
         create_root_package_info(node)
     } else {
         create_non_root_package_info(node, root_path, total_packages)
@@ -604,7 +605,7 @@ fn create_non_root_package_info(
         "name": node.package.get("name"),
     });
 
-    if node.is_workspace {
+    if node.is_workspace() {
         info["version"] = json!(node.package.get("version"));
     } else if node.is_link {
         info["link"] = json!(true);
@@ -666,7 +667,7 @@ fn add_package_fields(pkg_info: &mut Value, node: &Arc<Node>) {
 fn get_package_fields(node: &Arc<Node>) -> Vec<&'static str> {
     if node.is_link {
         vec![]
-    } else if node.is_root {
+    } else if node.is_root() {
         vec![
             "dependencies",
             "devDependencies",
@@ -685,7 +686,7 @@ fn get_package_fields(node: &Arc<Node>) -> Vec<&'static str> {
             "cpu",
         ];
 
-        if node.is_workspace {
+        if node.is_workspace() {
             fields.push("devDependencies");
         }
 
@@ -720,7 +721,7 @@ fn add_children_to_stack(
 /// Generate the prefix path for a child node
 fn generate_child_prefix(prefix: &str, child: &Arc<Node>, root_path: &Path) -> String {
     if prefix.is_empty() {
-        if child.is_workspace {
+        if child.is_workspace() {
             // Convert workspace path to relative path
             child
                 .path
@@ -751,7 +752,7 @@ fn get_relative_target_path(current: &Node, root_path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::node::Node;
+    use crate::model::node::Node;
     use serde_json::json;
     use std::fs;
     use tempfile::TempDir;
