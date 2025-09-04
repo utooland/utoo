@@ -15,7 +15,7 @@ use cmd::run::run;
 use cmd::update::update;
 use cmd::view::view;
 use cmd::{clean::clean, deps::build_workspace};
-use helper::auto_update::init_auto_update;
+use helper::auto_update::{check_and_force_update, init_auto_update_async};
 use util::config::{set_legacy_peer_deps, set_registry};
 use util::logger::{
     log_error, log_time, log_time_end, log_warning, set_verbose, write_verbose_logs_to_file,
@@ -260,8 +260,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         set_legacy_peer_deps(cli.legacy_peer_deps);
     }
 
-    // Ensure the version is up to date, weak dependency
-    if let Err(_e) = init_auto_update().await {
+    // Start async version check, returns immediately without blocking
+    if let Err(_e) = init_auto_update_async().await {
+        log_warning("Auto update check cancelled");
+    }
+
+    // Check and execute forced update before command execution
+    if let Err(_e) = check_and_force_update().await {
         log_warning("Auto update cancelled");
     }
 
