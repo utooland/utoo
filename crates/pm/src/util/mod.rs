@@ -8,7 +8,6 @@ pub mod json;
 pub mod linker;
 pub mod logger;
 pub mod node_search;
-pub mod package_installer;
 pub mod registry;
 pub mod relative_path;
 pub mod retry;
