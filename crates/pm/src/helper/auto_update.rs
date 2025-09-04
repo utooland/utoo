@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
@@ -22,15 +22,18 @@ static UPDATE_AVAILABLE: AtomicBool = AtomicBool::new(false);
 static UPDATE_VERSION: Lazy<Arc<RwLock<Option<String>>>> =
     Lazy::new(|| Arc::new(RwLock::new(None)));
 
-/// Initialize async auto update check - returns immediately, doesn't block main flow
-pub async fn init_auto_update_async() -> Result<()> {
+/// Initialize auto update with immediate check and background monitoring
+pub async fn init_auto_update() -> Result<()> {
     // Skip auto update in CI environment
     let ci_env = std::env::var("CI").unwrap_or_default();
     if ci_env == "1" || ci_env.to_lowercase() == "true" {
         return Ok(());
     }
 
-    // Start background version check task
+    // Check immediately and update if needed
+    check_and_force_update().await?;
+
+    // Then start background task for future checks
     tokio::spawn(async {
         if let Err(e) = background_version_check().await {
             log_verbose(&format!("Background version check failed: {e}"));
@@ -48,7 +51,8 @@ pub async fn check_and_force_update() -> Result<()> {
         if let Some(ref new_version) = *version {
             log_info(&format!(
                 "New version found: {} (current version: {}), updating automatically...",
-                new_version, env!("CARGO_PKG_VERSION")
+                new_version,
+                env!("CARGO_PKG_VERSION")
             ));
 
             // Execute forced update
@@ -61,7 +65,6 @@ pub async fn check_and_force_update() -> Result<()> {
     Ok(())
 }
 
-
 /// Background version check task
 async fn background_version_check() -> Result<()> {
     // Check cache first
@@ -71,7 +74,8 @@ async fn background_version_check() -> Result<()> {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            if now - cache.check_time > 3600 { // Keep 1 hour cache
+            if now - cache.check_time > 3600 {
+                // Keep 1 hour cache
                 // Cache expired, check remote version asynchronously
                 if let Ok(new_cache) = check_remote_version_fast().await {
                     new_cache
@@ -106,7 +110,6 @@ async fn background_version_check() -> Result<()> {
 
     Ok(())
 }
-
 
 async fn execute_update(version: &str) -> Result<()> {
     let status = Command::new("utoo")
@@ -166,7 +169,6 @@ async fn check_remote_version_fast() -> Result<VersionCache> {
     Ok(cache)
 }
 
-
 fn get_cache_path() -> PathBuf {
     let home = dirs::home_dir().unwrap_or_default();
     home.join(".utoo").join("remote-version.json")
@@ -193,14 +195,14 @@ mod tests {
     use super::*;
     use std::process::{Command, Stdio};
     use std::sync::atomic::Ordering;
-    use tokio::time::{sleep, Duration};
+    use tokio::time::{Duration, sleep};
 
     #[tokio::test]
-    async fn test_init_auto_update_async_ci_environment() {
+    async fn test_init_auto_update_with_immediate_check_ci_environment() {
         // Set CI environment variable
         unsafe { std::env::set_var("CI", "1") };
 
-        let result = init_auto_update_async().await;
+        let result = init_auto_update().await;
         assert!(result.is_ok());
 
         // Clean up
@@ -208,18 +210,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_init_auto_update_async_starts_background_task() {
+    async fn test_init_auto_update_with_immediate_check_normal_flow() {
         // Ensure we're not in CI
         unsafe { std::env::remove_var("CI") };
 
-        let result = init_auto_update_async().await;
+        let result = init_auto_update().await;
         assert!(result.is_ok());
 
         // Give background task a moment to start
         sleep(Duration::from_millis(100)).await;
 
-        // The function should return immediately without waiting for background task
-        // This test mainly verifies that the function doesn't block
+        // The function should return after checking for immediate updates
+        // and starting background task
+        // This test mainly verifies that the function completes successfully
+    }
+
+    #[tokio::test]
+    async fn test_init_auto_update_with_immediate_check_ci_true_lowercase() {
+        // Set CI environment variable to lowercase "true"
+        unsafe { std::env::set_var("CI", "true") };
+
+        let result = init_auto_update().await;
+        assert!(result.is_ok());
+
+        // Clean up
+        unsafe { std::env::remove_var("CI") };
     }
 
     #[tokio::test]
