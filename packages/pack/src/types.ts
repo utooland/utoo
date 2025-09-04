@@ -154,6 +154,9 @@ export interface ConfigComplete {
         transform: string | Record<string, string>;
         preventFullImport?: boolean;
         skipDefaultConversion?: boolean;
+        handleDefaultImport?: boolean;
+        handleNamespaceImport?: boolean;
+        style?: string;
       }
     >;
     packageImports?: string[];
