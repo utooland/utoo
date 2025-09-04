@@ -580,6 +580,13 @@
           "default": false,
           "type": "boolean"
         },
+        "style": {
+          "description": "Style import configuration",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "transform": {
           "description": "Transform configuration",
           "allOf": [
