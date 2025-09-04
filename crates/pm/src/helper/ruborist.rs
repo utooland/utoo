@@ -14,7 +14,8 @@ use crate::util::json::load_package_json_from_path;
 use crate::util::logger::{
     PROGRESS_BAR, finish_progress_bar, log_progress, log_verbose, start_progress_bar,
 };
-use crate::util::node::{Edge, EdgeType, Node, get_node_from_root_by_path};
+use crate::model::node::{Edge, EdgeType, Node};
+use crate::util::node_search::get_node_from_root_by_path;
 use crate::util::registry::{ResolvedPackage, load_cache, resolve_dependency, store_cache};
 use crate::util::semver::matches;
 
@@ -62,13 +63,13 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                         log_verbose(&format!("deps {}@{} already resolved", edge.name, edge.spec));
 
                         // Only process workspace nodes from root to avoid cycles
-                        if !edge.from.is_root {
+                        if !edge.from.is_root() {
                             return Ok(());
                         }
 
                         // Add workspace node to next level if not processed before
                         if let Some(new_node) = edge.to.read().unwrap().as_ref().cloned() {
-                            if !new_node.is_workspace {
+                            if !new_node.is_workspace() {
                                 return Ok(());
                             }
 
@@ -501,7 +502,7 @@ impl Ruborist {
         // build a map of workspace nodes
         let mut workspace_map = HashMap::new();
         for workspace in children.iter() {
-            if workspace.is_workspace {
+            if workspace.is_workspace() {
                 workspace_map.insert(workspace.name.clone(), workspace.clone());
             }
         }
@@ -544,7 +545,7 @@ impl Ruborist {
 
             // find duplicate deps
             for child in children.iter() {
-                if child.is_workspace {
+                if child.is_workspace() {
                     continue;
                 }
                 name_map
@@ -681,7 +682,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::util::node::Node;
+    use crate::model::node::Node;
 
     #[tokio::test]
     async fn test_fix_dep_path() {
@@ -832,7 +833,7 @@ mod tests {
         while let Some(node) = stack.pop() {
             let children = node.children.read().unwrap();
             for child in children.iter() {
-                if child.is_workspace {
+                if child.is_workspace() {
                     assert!(
                         !processed_workspaces.contains(&child.name),
                         "Workspace {} should only be processed once",
