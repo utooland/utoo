@@ -1,5 +1,5 @@
 [submodule "next.js"]
 	path = next.js
 	url = git@github.com:utooland/next.js.git
-  branch = utoo-wasm
+  branch = utoo
 	shallow = true
