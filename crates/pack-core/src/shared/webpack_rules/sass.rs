@@ -36,12 +36,12 @@ pub async fn get_sass_loader_rules(
         .or(Some(&empty_additional_data));
 
     let sass_loader = WebpackLoaderItem {
-            #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+        #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
         loader: get_utoopack_dependency_package(project_path.clone(), rcstr!("sass-loader"))
             .owned()
             .await?,
-            #[cfg(all(target_family = "wasm", target_os = "unknown"))]
-            loader: rcstr!("sass-loader"),
+        #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+        loader: rcstr!("sass-loader"),
         options: take(
             serde_json::json!({
                 "implementation": sass_options.get("implementation"),
@@ -54,12 +54,12 @@ pub async fn get_sass_loader_rules(
         ),
     };
     let resolve_url_loader = WebpackLoaderItem {
-            #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+        #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
         loader: get_utoopack_dependency_package(project_path.clone(), rcstr!("resolve-url-loader"))
             .owned()
             .await?,
-            #[cfg(all(target_family = "wasm", target_os = "unknown"))]
-            loader: rcstr!("resolve-url-loader"),
+        #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+        loader: rcstr!("resolve-url-loader"),
         options: take(
             serde_json::json!({
                 //https://github.com/vercel/turbo/blob/d527eb54be384a4658243304cecd547d09c05c6b/crates/turbopack-node/src/transforms/webpack.rs#L191
