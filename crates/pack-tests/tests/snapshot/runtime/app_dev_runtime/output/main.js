@@ -506,8 +506,8 @@ function normalizeChunkPath(path) {
     } else if (path.startsWith('./')) {
         path = path.substring(2);
     }
-    if (path.endsWith('/')) {
-        path = path.slice(0, -1);
+    if (!path.endsWith('/')) {
+        path += '/';
     }
     return path;
 }
@@ -678,8 +678,8 @@ browserContextPrototype.P = resolveAbsolutePath;
     // It is important to reverse the array so when bootstrapping we can infer what chunk is being
     // evaluated by poping urls off of this array.  See `getPathFromScript`
     let bootstrap = `self.TURBOPACK_WORKER_LOCATION = ${JSON.stringify(location.origin)};
-self.TURBOPACK_NEXT_CHUNK_URLS = ${JSON.stringify(chunks.reverse().map(getChunkRelativeUrl), null, 2)};
-importScripts(...self.TURBOPACK_NEXT_CHUNK_URLS.map(c => self.TURBOPACK_WORKER_LOCATION + c).reverse());`;
+self.TURBOPACK_NEXT_CHUNK_URLS = ${JSON.stringify(chunks.reverse(), null, 2)};
+importScripts(...self.TURBOPACK_NEXT_CHUNK_URLS.map(c => self.TURBOPACK_WORKER_LOCATION + "/" + c).reverse());`;
     let blob = new Blob([
         bootstrap
     ], {

@@ -48,6 +48,7 @@ use crate::{
     shared::{
         resolve::externals_plugin::ExternalsPlugin,
         transforms::{
+            css_modules::get_auto_css_modules_rule,
             dynamic_import_to_require::get_dynamic_import_to_require_rule,
             emotion::get_emotion_transform_rule, remove_console::get_remove_console_transform_rule,
             styled_components::get_styled_components_transform_rule,
@@ -60,7 +61,9 @@ use crate::{
         get_decorators_transform_options, get_jsx_transform_options,
         get_typescript_transform_options,
     },
-    util::{foreign_code_context_condition, internal_assets_conditions},
+    util::{
+        foreign_code_context_condition, internal_assets_conditions, module_styles_rule_condition,
+    },
 };
 
 use super::{
@@ -248,6 +251,9 @@ pub async fn get_client_module_options_context(
 
     let mut client_rules = get_client_transforms_rules(config).await?;
     let foreign_client_rules = get_client_transforms_rules(config).await?;
+
+    client_rules.push(get_auto_css_modules_rule());
+
     let additional_rules: Vec<ModuleRule> = vec![
         get_swc_ecma_transform_plugin_rule(config, project_path.clone()).await?,
         get_emotion_transform_rule(config).await?,
@@ -300,6 +306,7 @@ pub async fn get_client_module_options_context(
             } else {
                 SourceMapsType::None
             },
+            module_css_condition: Some(module_styles_rule_condition()),
             ..Default::default()
         },
         execution_context: Some(execution_context),
