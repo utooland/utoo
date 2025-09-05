@@ -46,8 +46,8 @@ pub async fn get_less_loader_rules(
     let mut rules = Vec::new();
 
     for (pattern, rename) in [
-        (rcstr!("*.module.less"), rcstr!(".module.css")),
-        (rcstr!("*.less"), rcstr!(".css")),
+        (rcstr!("*.module.less"), rcstr!("*.module.css")),
+        (rcstr!("*.less"), rcstr!("*.css")),
     ] {
         rules.push((
             pattern,

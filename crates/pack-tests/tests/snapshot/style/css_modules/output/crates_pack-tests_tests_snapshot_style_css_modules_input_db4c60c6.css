@@ -9,8 +9,8 @@
   font-size: 24px;
 }
 
-/* [project]/.css?modules [client] (css) */
-.-css\?modules__uw1sgq__button {
+/* [project]/crates/pack-tests/tests/snapshot/style/css_modules/input/auto_css_modules/style.less.css?modules [client] (css) */
+.style-less__Ha9uLq__button {
   color: #fff;
   background-color: #007bff;
   border: none;
@@ -51,8 +51,8 @@
   font-size: 24px;
 }
 
-/* [project]/.module.css [client] (css) */
-.-module__PBs03G__button {
+/* [project]/crates/pack-tests/tests/snapshot/style/css_modules/input/normal_css_modules/style.module.less.module.css [client] (css) */
+.style-module-less-module__n1Cx1q__button {
   color: #fff;
   background-color: #007bff;
   border: none;
@@ -76,4 +76,4 @@
   background-color: #1e7e34;
 }
 
-/*# sourceMappingURL=_1cf48903.css.map*/
+/*# sourceMappingURL=crates_pack-tests_tests_snapshot_style_css_modules_input_db4c60c6.css.map*/
