@@ -9,7 +9,7 @@ __turbopack_context__.v({
 415, ((__turbopack_context__) => {
 
 __turbopack_context__.v({
-  "button": "-css?modules__uw1sgq__button",
+  "button": "style-less__Ha9uLq__button",
 });
 }),
 197, ((__turbopack_context__) => {
@@ -40,7 +40,7 @@ __turbopack_context__.v({
 49, ((__turbopack_context__) => {
 
 __turbopack_context__.v({
-  "button": "-module__PBs03G__button",
+  "button": "style-module-less-module__n1Cx1q__button",
 });
 }),
 565, ((__turbopack_context__) => {
