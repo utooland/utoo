@@ -7,6 +7,7 @@ members = [
   "crates/pack-schema",
   "crates/pack-tests",
   "crates/pm",
+  "crates/utoo-wasm",
 ]
 exclude = ["crates/runtime", "next.js"]
 resolver = "2"
@@ -18,9 +19,10 @@ license = "MIT"
 [workspace.dependencies]
 pack-core = { path = "./crates/pack-core" }
 pack-api = { path = "./crates/pack-api" }
+
 schemars = "0.8"
 futures = "0.3.31"
-tokio = { version = "1.43.0", features = ["full"] }
+tokio = { version = "1.47.1" }
 thiserror = "1.0"
 anyhow = "1.0.96"
 tracing = "0.1.41"
@@ -41,6 +43,7 @@ criterion = "0.6.0"
 dirs = "5.0"
 toml = "0.8"
 async-trait = "0.1.64"
+rayon = "1.10.0"
 
 # SWC crates
 swc_core = { version = "36.0.1", features = [
@@ -57,7 +60,7 @@ url = "2.2.2"
 urlencoding = "2.1.2"
 qstring = "0.7.2"
 indoc = "2.0.0"
-parking_lot = "0.12.1"
+parking_lot = "0.12.4"
 
 # Dependencies from nextjs, should keep the same rev!
 ## Dependencies for common cache and task. See https://github.com/utooland/next.js/blob/canary/turbopack/crates/turbopack/architecture.md
@@ -82,7 +85,7 @@ turbopack-browser = { path = "./next.js/turbopack/crates/turbopack-browser" }
 turbopack-core = { path = "./next.js/turbopack/crates/turbopack-core" }
 turbopack-resolve = { path = "./next.js/turbopack/crates/turbopack-resolve" }
 turbopack-ecmascript = { path = "./next.js/turbopack/crates/turbopack-ecmascript" }
-turbopack-ecmascript-plugins = { path = "./next.js/turbopack/crates/turbopack-ecmascript-plugins" }
+turbopack-ecmascript-plugins = { path = "./next.js/turbopack/crates/turbopack-ecmascript-plugins", default-features = false }
 turbopack-ecmascript-runtime = { path = "./next.js/turbopack/crates/turbopack-ecmascript-runtime" }
 turbopack-ecmascript-hmr-protocol = { path = "./next.js/turbopack/crates/turbopack-ecmascript-hmr-protocol" }
 turbopack-image = { path = "./next.js/turbopack/crates/turbopack-image" }
@@ -97,7 +100,7 @@ turbopack-test-utils = { path = "./next.js/turbopack/crates/turbopack-test-utils
 too_many_arguments = "allow"
 
 [profile.release]
-opt-level = 3
+opt-level = "z"
 lto = "fat"
 strip = "symbols"
 
@@ -120,4 +123,17 @@ lto = false
 strip = "none"
 incremental = true
 codegen-units = 256
-debug = 2
+debug = 1
+
+[profile.wasm-dev]
+inherits = "release"
+opt-level = 1
+lto = false
+strip = "none"
+incremental = true
+codegen-units = 256
+debug = 1
+
+[patch.crates-io]
+tokio = { git = "https://github.com/utooland/tokio.git", package = "tokio" }
+tokio-util = { git = "https://github.com/utooland/tokio.git", package = "tokio-util" }

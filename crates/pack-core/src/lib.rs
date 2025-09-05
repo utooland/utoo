@@ -22,6 +22,7 @@ pub fn register() {
     turbo_tasks::register();
     turbo_tasks_bytes::register();
     turbo_tasks_fs::register();
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
     turbo_tasks_fetch::register();
     turbopack_browser::register();
     turbopack_node::register();

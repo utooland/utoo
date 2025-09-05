@@ -1,0 +1,36 @@
+{
+  "name": "@utoo/web",
+  "version": "0.0.1",
+  "module": "esm/index.js",
+  "types": "esm/index.d.ts",
+  "files": [
+    "esm/*"
+  ],
+  "scripts": {
+    "install-toolchain": "cargo install wasm-bindgen-cli && brew install binaryen",
+    "build-wasm": "cargo build -p utoo-wasm --target wasm32-unknown-unknown -Z build-std=panic_abort,std",
+    "build-wasm:pm": "cargo build -p utoo-wasm --target wasm32-unknown-unknown --no-default-features -Z build-std=panic_abort,std",
+    "bindgen-dev": "wasm-bindgen ../../target/wasm32-unknown-unknown/wasm-dev/utoo_wasm.wasm --out-dir src/utoo --out-name index --target web --debug --keep-debug --no-demangle",
+    "bindgen-build": "wasm-bindgen ../../target/wasm32-unknown-unknown/release/utoo_wasm.wasm --out-dir src/utoo --out-name index --target web",
+    "bindgen-build:local": "wasm-bindgen ../../target/wasm32-unknown-unknown/release-local/utoo_wasm.wasm --out-dir src/utoo --out-name index --target web",
+    "tsc": "rm -rf esm && tsc -p ./tsconfig.json",
+    "dev": "npm run build-wasm -- --profile wasm-dev && npm run bindgen-dev && npm run tsc && cp src/utoo/index_bg.wasm esm/utoo",
+    "dev:pm": "npm run build-wasm:pm -- --profile wasm-dev && npm run bindgen-dev && npm run tsc && cp src/utoo/index_bg.wasm esm/utoo",
+    "wasm-opt": "wasm-opt src/utoo/index_bg.wasm -o esm/utoo/index_bg.wasm --enable-threads --enable-bulk-memory --enable-nontrapping-float-to-int -Oz",
+    "build": "npm run build-wasm -- --release && npm run bindgen-build && npm run tsc && npm run wasm-opt",
+    "build:local": "npm run build-wasm -- --profile release-local && npm run bindgen-build:local && npm run tsc && cp src/utoo/index_bg.wasm esm/utoo",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "comlink": "^4.4.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">= 20"
+  },
+  "author": "xusd320",
+  "license": "MIT",
+  "repository": "git@github.com:utooland/utoo.git"
+}

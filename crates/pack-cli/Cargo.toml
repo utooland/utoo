@@ -28,9 +28,11 @@ turbo-tasks = { workspace = true }
 turbo-tasks-backend = { workspace = true }
 turbo-tasks-malloc = { workspace = true }
 turbopack-core = { workspace = true }
-turbopack-trace-utils = { workspace = true }
 turbopack-cli-utils = { workspace = true }
 turbopack-dev-server = { workspace = true }
+
+[target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]
+turbopack-trace-utils = { workspace = true }
 
 [build-dependencies]
 turbo-tasks-build = { workspace = true }

@@ -133,8 +133,8 @@ pub async fn get_client_compile_time_info(
     let define_env = Vc::cell(define_env);
     let environment = BrowserEnvironment {
         dom: true,
-        web_worker: false,
-        service_worker: false,
+        web_worker: true,
+        service_worker: true,
         browserslist_query: browserslist_query.to_owned(),
     }
     .resolved_cell();
@@ -234,6 +234,7 @@ pub async fn get_client_module_options_context(
     // implicitly does by default.
     let mut foreign_conditions = loader_conditions.clone();
     foreign_conditions.insert(WebpackLoaderBuiltinCondition::Foreign);
+
     let foreign_enable_webpack_loaders =
         *webpack_loader_options(project_path.clone(), config, foreign_conditions).await?;
 
@@ -271,12 +272,23 @@ pub async fn get_client_module_options_context(
         client_rules.push(get_dynamic_import_to_require_rule());
     }
 
+    let postcss_package = {
+        #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+        {
+            Some(
+                get_postcss_package_mapping(project_path.clone())
+                    .to_resolved()
+                    .await?,
+            )
+        }
+        #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+        {
+            None
+        }
+    };
+
     let postcss_transform_options = PostCssTransformOptions {
-        postcss_package: Some(
-            get_postcss_package_mapping(project_path.clone())
-                .to_resolved()
-                .await?,
-        ),
+        postcss_package,
         config_location: PostCssConfigLocation::ProjectPathOrLocalPath,
         ..Default::default()
     };

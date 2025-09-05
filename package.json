@@ -16,6 +16,7 @@
     "packages/pack",
     "packages/pack-cli",
     "packages/style-loader",
+    "packages/utoo-web",
     "crates/pack-core/js",
     "crates/pack/js",
     "examples/define",
@@ -29,7 +30,8 @@
     "examples/with-style-loader",
     "examples/with-tailwind",
     "examples/resolve",
-    "examples/react"
+    "examples/react",
+    "examples/utooweb-demo"
   ],
   "repository": "https://github.com/utooland/utoo"
 }

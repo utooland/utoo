@@ -14,6 +14,8 @@
       "clean": true
     },
     "optimization": {
+      "minify": false,
+      "moduleIds": "named",
       "splitChunks": {
         "js": {
           "minChunkSize": 50000,

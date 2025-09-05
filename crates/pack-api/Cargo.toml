@@ -6,17 +6,18 @@ license.workspace = true
 
 [dependencies]
 anyhow = { workspace = true, features = ["backtrace"] }
-pack-core = { workspace = true }
 qstring = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true, features = ["sync"] }
 url = { workspace = true }
 futures = { workspace = true }
 urlencoding = { workspace = true }
 parking_lot = { workspace = true }
+
+## turbpack specific
 turbo-rcstr = { workspace = true }
 turbo-tasks = { workspace = true }
 turbo-tasks-env = { workspace = true }
@@ -29,7 +30,7 @@ turbopack-core = { workspace = true }
 turbopack-node = { workspace = true }
 turbopack-nodejs = { workspace = true }
 turbopack-static = { workspace = true }
-turbopack-trace-utils = { workspace = true }
+pack-core = { workspace = true }
 
 [build-dependencies]
 anyhow = { workspace = true }

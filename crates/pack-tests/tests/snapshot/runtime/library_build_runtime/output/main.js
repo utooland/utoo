@@ -423,8 +423,8 @@ function normalizeChunkPath(path) {
     } else if (path.startsWith("./")) {
         path = path.substring(2);
     }
-    if (path.endsWith("/")) {
-        path = path.slice(0, -1);
+    if (!path.endsWith("/")) {
+        path += "/";
     }
     return path;
 }

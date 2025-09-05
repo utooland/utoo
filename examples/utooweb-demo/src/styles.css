@@ -1,0 +1,62 @@
+body {
+  font-family: "Inter", sans-serif;
+  background-color: #e5e7eb;
+}
+
+.collapsible {
+  display: none;
+}
+
+.tree-item {
+  cursor: pointer;
+  transition: background-color 0.2s ease-in-out;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.tree-item:hover {
+  background-color: #f3f4f6;
+}
+
+.tree-item-content {
+  display: flex;
+  align-items: center;
+}
+
+.icon {
+  margin-right: 8px;
+  width: 16px;
+  text-align: center;
+}
+
+#file-textarea {
+  height: 100%;
+  min-height: 200px;
+  overflow-y: hidden;
+  box-sizing: border-box;
+  border: 1px solid #d1d5db;
+  resize: none;
+}
+
+.file-content {
+  width: 100%;
+}
+
+.scrollbar-custom::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-custom::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 10px;
+}
+
+.scrollbar-custom::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 10px;
+}
+
+.scrollbar-custom::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}

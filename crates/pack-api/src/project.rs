@@ -24,9 +24,14 @@ use turbo_tasks::{
 };
 use turbo_tasks_env::{EnvMap, ProcessEnv};
 use turbo_tasks_fs::{DiskFileSystem, FileSystem, FileSystemPath, VirtualFileSystem, invalidation};
-use turbopack::{
-    evaluate_context::node_build_environment, global_module_ids::get_global_module_id_strategy,
-};
+use turbopack::global_module_ids::get_global_module_id_strategy;
+
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+use turbopack::evaluate_context::node_build_environment;
+
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+use turbopack::evaluate_context::webworker_build_environment;
+
 use turbopack_core::{
     PROJECT_FILESYSTEM_NAME,
     changed::content_changed,
@@ -51,7 +56,6 @@ use turbopack_core::{
 };
 use turbopack_node::execution_context::ExecutionContext;
 use turbopack_nodejs::NodeJsChunkingContext;
-use turbopack_trace_utils::exit::ExitReceiver;
 
 use crate::{
     app::{AppEntrypoint, AppProject, OptionAppProject},
@@ -693,28 +697,57 @@ impl Project {
         let node_root = self.node_root().owned().await?;
         let mode = self.mode().await?;
 
-        let node_execution_chunking_context = Vc::upcast(
-            NodeJsChunkingContext::builder(
-                self.project_root().owned().await?,
-                node_root.clone(),
-                self.node_root_to_root_path().owned().await?,
-                node_root.clone(),
-                node_root.clone(),
-                node_root.clone(),
-                node_build_environment().to_resolved().await?,
-                mode.runtime_type(),
-            )
-            .source_maps(if *self.config().source_maps().await? {
-                SourceMapsType::Full
-            } else {
-                SourceMapsType::None
-            })
-            .build(),
-        );
+        let project_root = self.project_root().owned().await?;
+        let node_root_to_root_path = self.node_root_to_root_path().owned().await?;
+        let source_maps = if *self.config().source_maps().await? {
+            SourceMapsType::Full
+        } else {
+            SourceMapsType::None
+        };
+
+        let execution_chunking_context = {
+            #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+            {
+                let build_environment = node_build_environment().to_resolved().await?;
+                Vc::upcast(
+                    NodeJsChunkingContext::builder(
+                        project_root,
+                        node_root.clone(),
+                        node_root_to_root_path,
+                        node_root.clone(),
+                        node_root.clone(),
+                        node_root.clone(),
+                        build_environment,
+                        mode.runtime_type(),
+                    )
+                    .source_maps(source_maps)
+                    .build(),
+                )
+            }
+            #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+            {
+                use turbopack_browser::BrowserChunkingContext;
+                let build_environment = webworker_build_environment().to_resolved().await?;
+                Vc::upcast(
+                    BrowserChunkingContext::builder(
+                        project_root,
+                        node_root.clone(),
+                        node_root_to_root_path,
+                        node_root.clone(),
+                        node_root.clone(),
+                        node_root.clone(),
+                        build_environment,
+                        mode.runtime_type(),
+                    )
+                    .source_maps(source_maps)
+                    .build(),
+                )
+            }
+        };
 
         Ok(ExecutionContext::new(
             self.project_path().owned().await?,
-            node_execution_chunking_context,
+            execution_chunking_context,
             self.env(),
         ))
     }
@@ -1229,12 +1262,6 @@ async fn copy_output_assets_operation(project: ResolvedVc<Project>) -> Result<Vc
         }
     }
     Ok(OutputAssets::new(assets))
-}
-
-pub struct ProjectInstance {
-    pub turbo_tasks: BundlerTurboTasks,
-    pub container: ResolvedVc<ProjectContainer>,
-    pub exit_receiver: tokio::sync::Mutex<Option<ExitReceiver>>,
 }
 
 fn clean_directory(dist_path: &Path) -> Result<()> {

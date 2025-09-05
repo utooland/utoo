@@ -1,0 +1,60 @@
+[package]
+name = "utoo-wasm"
+version = "0.1.0"
+edition = "2021"
+
+description = "WASM bindings for utoo-pm & utoo-pack"
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+default = ["utoo-pack"]
+utoo-pack = [
+  "turbo-rcstr",
+  "turbo-tasks",
+  "turbo-tasks-fs",
+  "turbo-tasks-backend",
+  "turbopack-core",
+  "pack-core",
+  "pack-api",
+]
+
+[dependencies]
+wasm-bindgen = "0.2.100"
+wasm-bindgen-futures = "0.4.50"
+reqwest = { version = "0.12.22" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { workspace = true }
+serde-wasm-bindgen = "0.6.5"
+js-sys = "0.3"
+petgraph = "0.6"
+flate2 = "1.1.2"
+tar = "0.4.44"
+futures = { workspace = true }
+anyhow = { workspace = true, features = ["backtrace"] }
+tracing = { workspace = true }
+tokio = { workspace = true, features = ["rt", "time", "rt-multi-thread"] }
+tracing-subscriber = { workspace = true }
+tracing-web = "0.1.3"
+rustc-hash = { workspace = true }
+tokio-fs-ext = { version = "0.6.1", features = ["opfs_offload", "opfs_watch"] }
+console_error_panic_hook = { version = "0.1.7" }
+opfs-project = "0.1.5"
+
+## turbpack specific - conditional on utoo-pack feature
+turbo-rcstr = { workspace = true, optional = true }
+turbo-tasks = { workspace = true, optional = true }
+turbo-tasks-fs = { workspace = true, optional = true }
+turbo-tasks-backend = { workspace = true, optional = true }
+turbopack-core = { workspace = true, optional = true }
+pack-core = { workspace = true, optional = true }
+pack-api = { workspace = true, optional = true }
+
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
+parking_lot = { workspace = true, features = ["nightly"] }
+
+
+[build-dependencies]
+anyhow = { workspace = true }
+turbo-tasks-build = { workspace = true }
