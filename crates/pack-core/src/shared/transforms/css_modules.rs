@@ -39,8 +39,13 @@ impl CssModulesImportVisitor {
     }
 
     fn should_add_modules_suffix(&self, source: &str) -> bool {
-        // Don't add `?modules`` if it already exists
-        if source.contains("?modules") {
+        // Don't add `?modules` if it already exists
+        if source.contains("?modules")
+            || source.ends_with(".module.css")
+            || source.ends_with(".module.less")
+            || source.ends_with(".module.sass")
+            || source.ends_with(".module.scss")
+        {
             return false;
         }
 

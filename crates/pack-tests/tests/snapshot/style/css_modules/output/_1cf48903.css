@@ -40,19 +40,19 @@
   font-weight: bold;
 }
 
-/* [project]/crates/pack-tests/tests/snapshot/style/css_modules/input/normal_css_modules/style.module.css?modules [client] (css) */
-.style-module__CBgovW__container {
+/* [project]/crates/pack-tests/tests/snapshot/style/css_modules/input/normal_css_modules/style.module.css [client] (css) */
+.style-module__otGYcG__container {
   background-color: #f0f0f0;
   padding: 20px;
 }
 
-.style-module__CBgovW__title {
+.style-module__otGYcG__title {
   color: #333;
   font-size: 24px;
 }
 
-/* [project]/.module.css?modules [client] (css) */
-.-module__JwJvKq__button {
+/* [project]/.module.css [client] (css) */
+.-module__PBs03G__button {
   color: #fff;
   background-color: #007bff;
   border: none;
@@ -60,20 +60,20 @@
   padding: 10px 20px;
 }
 
-/* [project]/crates/pack-tests/tests/snapshot/style/css_modules/input/normal_css_modules/style.module.sass.module.css?modules [client] (css) */
-.style-module-sass-module__KjB_ka__card {
+/* [project]/crates/pack-tests/tests/snapshot/style/css_modules/input/normal_css_modules/style.module.sass.module.css [client] (css) */
+.style-module-sass-module__qgbigG__card {
   border-radius: 8px;
   padding: 16px;
   box-shadow: 0 2px 4px #0000001a;
 }
 
-/* [project]/crates/pack-tests/tests/snapshot/style/css_modules/input/normal_css_modules/style.module.scss.module.css?modules [client] (css) */
-.style-module-scss-module__cEoLTW__header {
+/* [project]/crates/pack-tests/tests/snapshot/style/css_modules/input/normal_css_modules/style.module.scss.module.css [client] (css) */
+.style-module-scss-module__nX14Vq__header {
   background-color: #28a745;
 }
 
-.style-module-scss-module__cEoLTW__header:hover {
+.style-module-scss-module__nX14Vq__header:hover {
   background-color: #1e7e34;
 }
 
-/*# sourceMappingURL=_d26edc79.css.map*/
+/*# sourceMappingURL=_1cf48903.css.map*/

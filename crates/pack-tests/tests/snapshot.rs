@@ -211,6 +211,11 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
             "path": "output"
         });
         user_config["output"] = default_output;
+    } else {
+        let output = user_config.get("output").unwrap();
+        if !output.get("path").is_some() {
+            user_config["output"]["path"] = serde_json::Value::String("output".to_string());
+        }
     }
 
     // Ensure default mode is present
