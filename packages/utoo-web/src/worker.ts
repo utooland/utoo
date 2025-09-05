@@ -123,3 +123,4 @@ self.addEventListener("message", (e) => {
     ConnectedPorts.add(port);
   }
 });
+export { projectEndpoint };

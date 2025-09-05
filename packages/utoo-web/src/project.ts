@@ -53,11 +53,21 @@ export class Project implements ProjectEndpoint {
 
     ProjectWorker.postMessage(HandShake, [port2]);
 
-    this.#mount ??= this.remote.mount({
-      cwd,
-      wasmUrl,
-      threadWorkerUrl,
-    });
+    this.#mount ??= this.remote
+      .mount({
+        cwd,
+        wasmUrl,
+        threadWorkerUrl,
+      })
+      .catch((ex) => {
+        throw new Error("Failed to establish utoo project tunnel connection", {
+          cause: ex,
+        });
+      });
+  }
+
+  get worker() {
+    return ProjectWorker;
   }
 
   private connectWorker(e: MessageEvent) {
@@ -86,6 +96,11 @@ export class Project implements ProjectEndpoint {
 
   public async build(): Promise<void> {
     await this.#mount;
+    try {
+      await this.remote.readFile("utoopack.json");
+    } catch (ex) {
+      throw new Error("utoopack.json not found", { cause: ex });
+    }
     return await this.remote.build();
   }
 
