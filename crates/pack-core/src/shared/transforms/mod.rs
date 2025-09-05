@@ -7,6 +7,7 @@ use turbopack_ecmascript::{CustomTransformer, EcmascriptInputTransform};
 
 use image::{StructuredImageModuleType, module::BlurPlaceholderMode};
 
+pub mod css_modules;
 pub mod dynamic_import_to_require;
 pub mod emotion;
 pub mod image;

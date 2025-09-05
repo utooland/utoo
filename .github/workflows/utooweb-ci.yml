@@ -36,7 +36,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: nightly-2025-06-04
-      - name: NPM Publish
+      - name: Build WASM
         run: |
           npm run build:local --workspace=@utoo/web
           ls packages/utoo-web/esm/utoo

@@ -1,0 +1,9 @@
+$primary-color: #28a745;
+
+.header {
+  background-color: $primary-color;
+  
+  &:hover {
+    background-color: darken($primary-color, 10%);
+  }
+}
