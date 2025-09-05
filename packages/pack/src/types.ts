@@ -83,6 +83,10 @@ export type TurbopackLoaderItem =
       options: Record<string, JSONValue>;
     };
 
+export type TurbopackRuleConfigItemOrShortcut =
+  | TurbopackLoaderItem[]
+  | TurbopackRuleConfigItem;
+
 export type TurbopackRuleConfigItemOptions = {
   loaders: TurbopackLoaderItem[];
   as?: string;
@@ -150,6 +154,9 @@ export interface ConfigComplete {
         transform: string | Record<string, string>;
         preventFullImport?: boolean;
         skipDefaultConversion?: boolean;
+        handleDefaultImport?: boolean;
+        handleNamespaceImport?: boolean;
+        style?: string;
       }
     >;
     packageImports?: string[];

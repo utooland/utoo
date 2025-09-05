@@ -1,13 +1,16 @@
-(globalThis.TURBOPACK = globalThis.TURBOPACK || []).push(["main.js", {
+((__TURBOPACK__) => {
+// Dummy runtime
+})([["main.js", {
 
 2: ((__turbopack_context__) => {
 "use strict";
 
 // MERGED MODULE: [project]/crates/pack-tests/tests/snapshot/concatenate_modules/library-shared/input/big/index.js [library] (ecmascript)
 ;
-__turbopack_context__.s({
-    "default": ()=>__TURBOPACK__default__export__1
-}, 2);
+__turbopack_context__.s([
+    "default",
+    ()=>__TURBOPACK__default__export__1
+], 2);
 // MERGED MODULE: [project]/crates/pack-tests/tests/snapshot/concatenate_modules/library-shared/input/big/other.js [library] (ecmascript)
 ;
 const __TURBOPACK__default__export__ = `
@@ -70,23 +73,21 @@ const __TURBOPACK__default__export__1 = __TURBOPACK__default__export__.length;
 345: ((__turbopack_context__) => {
 "use strict";
 
-__turbopack_context__.s({});
+__turbopack_context__.s([]);
 var __TURBOPACK__imported__module__2__ = __turbopack_context__.i(2);
 ;
 console.log('x', __TURBOPACK__imported__module__2__["default"]);
 }),
-523: ((__turbopack_context__) => {
+523: ((__turbopack_context__, module, exports) => {
 
-var { m: module, e: exports } = __turbopack_context__;
-{
 setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.r(345)), 500);
-}}),
+}),
 999: ((__turbopack_context__) => {
 "use strict";
 
 // MERGED MODULE: [project]/crates/pack-tests/tests/snapshot/concatenate_modules/library-shared/input/y/middle.js [library] (ecmascript)
 ;
-__turbopack_context__.s({}, 999);
+__turbopack_context__.s([], 999);
 // MERGED MODULE: [project]/crates/pack-tests/tests/snapshot/concatenate_modules/library-shared/input/y/inner.js [library] (ecmascript)
 ;
 var __TURBOPACK__imported__module__2__ = __turbopack_context__.i(2);
@@ -94,16 +95,14 @@ var __TURBOPACK__imported__module__2__ = __turbopack_context__.i(2);
 console.log('y', __TURBOPACK__imported__module__2__["default"]);
 ;
 }),
-798: ((__turbopack_context__) => {
+798: ((__turbopack_context__, module, exports) => {
 
-var { m: module, e: exports } = __turbopack_context__;
-{
 setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.r(999)), 1000);
-}}),
+}),
 324: ((__turbopack_context__) => {
 "use strict";
 
-__turbopack_context__.s({});
+__turbopack_context__.s([]);
 var __TURBOPACK__imported__module__523__ = __turbopack_context__.i(523);
 var __TURBOPACK__imported__module__798__ = __turbopack_context__.i(798);
 ;
@@ -111,8 +110,7 @@ var __TURBOPACK__imported__module__798__ = __turbopack_context__.i(798);
 }),
 },
 {"otherChunks":[],"runtimeModuleIds":[324]},
-]);
-// Dummy runtime
+]]);
 
 
 //# sourceMappingURL=main.js.map

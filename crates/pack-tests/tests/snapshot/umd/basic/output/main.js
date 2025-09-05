@@ -1,12 +1,16 @@
-(globalThis.TURBOPACK = globalThis.TURBOPACK || []).push(["main.js", {
+((__TURBOPACK__) => {
+// Dummy runtime
+})([["main.js", {
 
 16: ((__turbopack_context__) => {
 "use strict";
 
-__turbopack_context__.s({
-    "jsx": ()=>jsx,
-    "jsxs": ()=>jsxs
-});
+__turbopack_context__.s([
+    "jsx",
+    ()=>jsx,
+    "jsxs",
+    ()=>jsxs
+]);
 function jsx() {
     return 'purposefully empty stub for react/jsx-runtime.js';
 }
@@ -24,15 +28,16 @@ __turbopack_context__.v(mod);
 86: ((__turbopack_context__) => {
 "use strict";
 
-__turbopack_context__.s({
-    "a": ()=>a
-});
+__turbopack_context__.s([
+    "a",
+    ()=>a
+]);
 const a = "aaa";
 }),
 27: ((__turbopack_context__) => {
 "use strict";
 
-__turbopack_context__.s({});
+__turbopack_context__.s([]);
 var __TURBOPACK__imported__module__16__ = __turbopack_context__.i(16);
 // @ts-ignore
 var __TURBOPACK__imported__module__11__ = __turbopack_context__.i(11);
@@ -56,8 +61,7 @@ root.render(/*#__PURE__*/ (0, __TURBOPACK__imported__module__16__["jsx"])(App, {
 }),
 },
 {"otherChunks":[],"runtimeModuleIds":[27]},
-]);
-// Dummy runtime
+]]);
 
 
 //# sourceMappingURL=main.js.map

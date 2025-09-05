@@ -1,29 +1,24 @@
-(globalThis.TURBOPACK = globalThis.TURBOPACK || []).push([typeof document === "object" ? document.currentScript : undefined, {
-
-631: ((__turbopack_context__) => {
+(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([typeof document === "object" ? document.currentScript : undefined,
+631, ((__turbopack_context__) => {
 "use strict";
 
 const mod = globalThis["bar"];
 
 __turbopack_context__.v(mod);
 }),
-414: ((__turbopack_context__) => {
+414, ((__turbopack_context__, module, exports) => {
 
-var { m: module, e: exports } = __turbopack_context__;
-{
 const mod = __turbopack_context__.x("bar", () => require("bar"));
 
 module.exports = mod;
-}}),
-43: ((__turbopack_context__) => {
+}),
+43, ((__turbopack_context__, module, exports) => {
 
-var { m: module, e: exports } = __turbopack_context__;
-{
 const mod = __turbopack_context__.x("bar_require2", () => require("bar_require2"));
 
 module.exports = mod;
-}}),
-377: ((__turbopack_context__) => {
+}),
+377, ((__turbopack_context__) => {
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
@@ -33,7 +28,7 @@ const mod = await __turbopack_context__.y("bar");
 __turbopack_context__.n(mod);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, true);}),
-569: ((__turbopack_context__) => {
+569, ((__turbopack_context__) => {
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
@@ -43,7 +38,7 @@ const mod = await __turbopack_context__.y("bar_import2");
 __turbopack_context__.n(mod);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, true);}),
-462: ((__turbopack_context__) => {
+462, ((__turbopack_context__) => {
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
@@ -62,7 +57,7 @@ try {
 __turbopack_context__.v(mod);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, true);}),
-747: ((__turbopack_context__) => {
+747, ((__turbopack_context__) => {
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
@@ -81,12 +76,12 @@ try {
 __turbopack_context__.v(mod);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, true);}),
-114: ((__turbopack_context__) => {
+114, ((__turbopack_context__) => {
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
 
-__turbopack_context__.s({});
+__turbopack_context__.s([]);
 var __TURBOPACK__imported__module__631__ = __turbopack_context__.i(631);
 var __TURBOPACK__imported__module__414__ = __turbopack_context__.i(414);
 var __TURBOPACK__imported__module__43__ = __turbopack_context__.i(43);
@@ -112,6 +107,6 @@ console.log(__TURBOPACK__imported__module__631__["default"], __TURBOPACK__import
 console.log(__TURBOPACK__imported__module__462__["default"], __TURBOPACK__imported__module__747__["default"]);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, false);}),
-}]);
+]);
 
 //# sourceMappingURL=__afb6d116.js.map

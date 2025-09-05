@@ -1,0 +1,22 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "optimization": {
+      "modularizeImports": {
+        "antd": {
+          "transform": "antd/es/{{ kebabCase member }}",
+          "preventFullImport": false,
+          "skipDefaultConversion": false,
+          "style": "style"
+        }
+      },
+      "moduleIds": "named",
+      "minify": false
+    }
+  }
+}

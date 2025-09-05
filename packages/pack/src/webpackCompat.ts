@@ -420,7 +420,7 @@ function compatOptimization(
   const {
     moduleIds,
     minimize,
-    // TODO: concatenateModules to be supported, need to upgrade to next.js@15.4
+    concatenateModules,
   } = webpackOptimization;
   return {
     moduleIds:
@@ -430,6 +430,7 @@ function compatOptimization(
           ? "deterministic"
           : undefined,
     minify: minimize,
+    concatenateModules,
   };
 }
 

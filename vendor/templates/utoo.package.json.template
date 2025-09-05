@@ -4,16 +4,17 @@
   "description": "Utoo CLI tool",
   "bin": {
     "utoo": "bin/utoo",
-    "ut": "bin/ut",
+    "ut": "bin/utoo",
     "utx": "bin/utx"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/utooland/utoo.git"
   },
-  "dependencies": {
-    "@utoo/utoo": "{{version}}",
-    "@utoo/ut": "{{version}}"
+  "optionalDependencies": {
+    "@utoo/utoo-linux-x64": "{{version}}",
+    "@utoo/utoo-darwin-x64": "{{version}}",
+    "@utoo/utoo-darwin-arm64": "{{version}}"
   },
   "os": ["darwin", "linux"],
   "cpu": ["x64", "arm64"],

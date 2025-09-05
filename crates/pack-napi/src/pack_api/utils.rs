@@ -45,8 +45,14 @@ pub fn create_turbo_tasks(
 
         // TODO: check is_ci;
         let is_ci: bool = false;
-        let (backing_storage, cache_state) =
-            default_backing_storage(&output_path.join(".turbopack/.cache"), &version_info, is_ci)?;
+        // TODO: support short session: https://github.com/vercel/next.js/pull/82224/files
+        let is_short_session: bool = false;
+        let (backing_storage, cache_state) = default_backing_storage(
+            &output_path.join(".turbopack/.cache"),
+            &version_info,
+            is_ci,
+            is_short_session,
+        )?;
         let tt = TurboTasks::new(turbo_tasks_backend::TurboTasksBackend::new(
             turbo_tasks_backend::BackendOptions {
                 storage_mode: Some(if std::env::var("TURBO_ENGINE_READ_ONLY").is_ok() {

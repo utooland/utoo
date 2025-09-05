@@ -62,7 +62,7 @@ jobs:
 
       - name: Configure git safe directory
         run: |
-          git config --global --add safe.directory /__w/mako/mako
+          git config --global --add safe.directory /__w/utoo/utoo
 
       - name: Get version from release or use alpha version
         id: get_version
@@ -76,10 +76,8 @@ jobs:
       - name: Update Cargo.toml version
         run: |
           VERSION=${{ steps.get_version.outputs.VERSION }}
-          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" crates/cli/Cargo.toml
-          rm crates/cli/Cargo.toml.bak
-          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" crates/core/Cargo.toml
-          rm crates/core/Cargo.toml.bak
+          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" crates/pm/Cargo.toml
+          rm crates/pm/Cargo.toml.bak
 
       - name: Install Rust
         uses: actions-rs/toolchain@v1
@@ -88,6 +86,10 @@ jobs:
           toolchain: nightly-2025-06-04
           override: true
           target: ${{ matrix.target }}
+
+      - name: Add cross-compilation target for x86_64 on macOS
+        if: ${{ matrix.target == 'x86_64-apple-darwin' }}
+        run: rustup target add x86_64-apple-darwin
 
       - name: Add SSH private keys for submodule repositories
         uses: webfactory/ssh-agent@v0.7.0
@@ -101,16 +103,15 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --bin utoo --bin ut
+          args: --release --bin utoo --target ${{ matrix.target }}
 
       - name: Package Binaries
         run: |
-          cd target/release
-          tar -czf ../../utoo-${{ matrix.platform_os }}-${{ matrix.platform_cpu }}.tar.gz \
-            utoo ut
+          cd target/${{ matrix.target }}/release
+          tar -czf ../../../utoo-${{ matrix.platform_os }}-${{ matrix.platform_cpu }}.tar.gz \
+            utoo
 
       - name: Upload Release Asset
-        if: ${{ matrix.platform_os == 'linux' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -132,11 +133,11 @@ jobs:
         run: |
           set -e
           cd vendor/scripts
-          BINS=("utoo" "ut")
+          BINS=("utoo")
           for BIN in "${BINS[@]}"; do
             PACKAGE_NAME=$(echo "$BIN")
             ./npm-binary.sh "$PACKAGE_NAME" "$VERSION" \
-              "../../target/release/$BIN" \
+              "../../target/${{ matrix.target }}/release/$BIN" \
               "${{ matrix.platform_os }}" "${{ matrix.platform_cpu }}"
           done
 
@@ -166,18 +167,6 @@ jobs:
           node-version: "18.x"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Publish Main Packages
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          VERSION: ${{ steps.get_version.outputs.VERSION }}
-        run: |
-          set -e
-          cd vendor/scripts
-          BINS=("utoo" "ut")
-          for BIN in "${BINS[@]}"; do
-            PACKAGE_NAME=$(echo "$BIN")
-            ./npm-main.sh "$PACKAGE_NAME" "$VERSION"
-          done
       - name: Publish Main utoo Package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

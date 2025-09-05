@@ -41,7 +41,8 @@ use turbo_tasks::{
     NonLocalValue, OperationValue, ReadRef, ResolvedVc, TaskInput, TransientInstance, UpdateInfo,
     Vc, trace::TraceRawVcs,
 };
-use turbo_tasks_fs::{FileContent, FileSystem, get_relative_path_to, util::uri_from_file};
+use turbo_tasks_fs::{FileContent, FileSystem, util::uri_from_file};
+use turbo_unix_path::get_relative_path_to;
 use turbopack_core::{
     PROJECT_FILESYSTEM_NAME, SOURCE_URL_PROTOCOL,
     error::PrettyPrintError,

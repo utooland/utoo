@@ -30,6 +30,12 @@ pub struct ModularizeImportPackageConfig {
     pub prevent_full_import: bool,
     #[serde(default)]
     pub skip_default_conversion: bool,
+    #[serde(default)]
+    pub handle_default_import: bool,
+    #[serde(default)]
+    pub handle_namespace_import: bool,
+    #[serde(default)]
+    pub style: Option<String>,
 }
 
 #[derive(
@@ -63,8 +69,9 @@ pub fn get_modularize_imports_rule(
     ModuleRule::new(
         module_rule_match_js_no_url(enable_mdx_rs),
         vec![ModuleRuleEffect::ExtendEcmascriptTransforms {
-            prepend: ResolvedVc::cell(vec![]),
-            append: ResolvedVc::cell(vec![transformer]),
+            preprocess: ResolvedVc::cell(vec![]),
+            main: ResolvedVc::cell(vec![]),
+            postprocess: ResolvedVc::cell(vec![transformer]),
         }],
     )
 }
@@ -97,8 +104,9 @@ impl ModularizeImportsTransformer {
                                 },
                                 prevent_full_import: v.prevent_full_import,
                                 skip_default_conversion: v.skip_default_conversion,
-                                handle_default_import: false,
-                                handle_namespace_import: false,
+                                handle_default_import: v.handle_default_import,
+                                handle_namespace_import: v.handle_namespace_import,
+                                style: v.style.clone(),
                             }),
                         )
                     })

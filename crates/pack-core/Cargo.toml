@@ -15,6 +15,7 @@ test = ["turbopack-ecmascript-runtime/test", "turbopack-browser/test"]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 base64 = "0.22.1"
+either = { workspace = true, features = ["serde"] }
 qstring = "0.7.2"
 serde = { workspace = true }
 serde_json = { workspace = true }

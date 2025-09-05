@@ -1,9 +1,10 @@
 use anyhow::{Context, Result, bail};
+use either::Either;
 use rustc_hash::FxHashSet;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value as JsonValue;
 use turbo_esregex::EsRegex;
-use turbo_rcstr::RcStr;
+use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{
     FxIndexMap, NonLocalValue, OperationValue, ResolvedVc, Vc, debug::ValueDebugFormat,
     trace::TraceRawVcs,
@@ -11,10 +12,14 @@ use turbo_tasks::{
 use turbo_tasks_env::EnvMap;
 use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::{
-    ConditionItem, ConditionPath, LoaderRuleItem, OptionWebpackRules,
+    ConditionItem, ConditionPath, LoaderRuleItem, WebpackRules,
     module_options_context::{MdxTransformOptions, OptionWebpackConditions},
 };
-use turbopack_core::{chunk::ChunkingConfig, resolve::ResolveAliasMap};
+use turbopack_core::{
+    chunk::ChunkingConfig,
+    issue::{Issue, IssueExt, IssueStage, OptionStyledString, StyledString},
+    resolve::ResolveAliasMap,
+};
 use turbopack_ecmascript::{OptionTreeShaking, TreeShakingMode};
 use turbopack_ecmascript_plugins::transform::{
     emotion::EmotionTransformConfig, styled_components::StyledComponentsTransformConfig,
@@ -22,8 +27,11 @@ use turbopack_ecmascript_plugins::transform::{
 use turbopack_node::transforms::webpack::{WebpackLoaderItem, WebpackLoaderItems};
 
 use crate::{
-    import_map::mdx_import_source_file, mode::Mode,
-    shared::transforms::ModularizeImportPackageConfig, util::resolve_loader_path,
+    import_map::mdx_import_source_file,
+    mode::Mode,
+    shared::{
+        transforms::ModularizeImportPackageConfig, webpack_rules::WebpackLoaderBuiltinCondition,
+    },
 };
 
 #[turbo_tasks::value(transparent)]
@@ -332,32 +340,96 @@ pub enum OutputType {
 }
 
 #[derive(
+    Serialize, Deserialize, Clone, PartialEq, Eq, Debug, TraceRawVcs, NonLocalValue, OperationValue,
+)]
+// We can end up with confusing behaviors if we silently ignore extra properties, since `Base` will
+// match nearly every object, since it has no required field.
+#[serde(deny_unknown_fields)]
+pub enum ConfigConditionItem {
+    #[serde(rename = "all")]
+    All(Box<[ConfigConditionItem]>),
+    #[serde(rename = "any")]
+    Any(Box<[ConfigConditionItem]>),
+    #[serde(rename = "not")]
+    Not(Box<ConfigConditionItem>),
+    #[serde(untagged)]
+    Builtin(WebpackLoaderBuiltinCondition),
+    #[serde(untagged)]
+    Base {
+        #[serde(default)]
+        path: Option<ConfigConditionPath>,
+        #[serde(default)]
+        content: Option<RegexComponents>,
+    },
+}
+
+impl TryFrom<ConfigConditionItem> for ConditionItem {
+    type Error = anyhow::Error;
+
+    fn try_from(config: ConfigConditionItem) -> Result<Self> {
+        let try_from_vec = |conds: Box<[_]>| {
+            conds
+                .into_iter()
+                .map(ConditionItem::try_from)
+                .collect::<Result<_>>()
+        };
+        Ok(match config {
+            ConfigConditionItem::All(conds) => ConditionItem::All(try_from_vec(conds)?),
+            ConfigConditionItem::Any(conds) => ConditionItem::Any(try_from_vec(conds)?),
+            ConfigConditionItem::Not(cond) => ConditionItem::Not(Box::new((*cond).try_into()?)),
+            ConfigConditionItem::Builtin(cond) => {
+                ConditionItem::Builtin(RcStr::from(cond.as_str()))
+            }
+            ConfigConditionItem::Base { path, content } => ConditionItem::Base {
+                path: path.map(ConditionPath::try_from).transpose()?,
+                content: content
+                    .map(EsRegex::try_from)
+                    .transpose()?
+                    .map(EsRegex::resolved_cell),
+            },
+        })
+    }
+}
+
+#[derive(
     Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TraceRawVcs, NonLocalValue, OperationValue,
 )]
 #[serde(rename_all = "camelCase")]
-pub struct RuleConfigItemOptions {
+pub struct RuleConfigItem {
     pub loaders: Vec<LoaderItem>,
     #[serde(default, alias = "as")]
     pub rename_as: Option<RcStr>,
+    #[serde(default)]
+    pub condition: Option<ConfigConditionItem>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TraceRawVcs, NonLocalValue, OperationValue)]
+#[serde(transparent)]
+pub struct RuleConfigCollection(Vec<RuleConfigCollectionItem>);
+
+impl<'de> Deserialize<'de> for RuleConfigCollection {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match either::serde_untagged::deserialize::<Vec<RuleConfigCollectionItem>, RuleConfigItem, D>(
+            deserializer,
+        )? {
+            Either::Left(collection) => Ok(RuleConfigCollection(collection)),
+            Either::Right(item) => Ok(RuleConfigCollection(vec![RuleConfigCollectionItem::Full(
+                item,
+            )])),
+        }
+    }
 }
 
 #[derive(
     Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TraceRawVcs, NonLocalValue, OperationValue,
 )]
-#[serde(rename_all = "camelCase", untagged)]
-pub enum RuleConfigItemOrShortcut {
-    Loaders(Vec<LoaderItem>),
-    Advanced(RuleConfigItem),
-}
-
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TraceRawVcs, NonLocalValue, OperationValue,
-)]
-#[serde(rename_all = "camelCase", untagged)]
-pub enum RuleConfigItem {
-    Options(RuleConfigItemOptions),
-    Conditional(FxIndexMap<RcStr, RuleConfigItem>),
-    Boolean(bool),
+#[serde(untagged)]
+pub enum RuleConfigCollectionItem {
+    Shorthand(LoaderItem),
+    Full(RuleConfigItem),
 }
 
 #[derive(
@@ -434,50 +506,53 @@ pub struct OptionalReactCompilerOptions(Option<ResolvedVc<ReactCompilerOptions>>
 )]
 #[serde(rename_all = "camelCase")]
 pub struct ModuleConfig {
-    pub rules: Option<FxIndexMap<RcStr, RuleConfigItemOrShortcut>>,
+    pub rules: Option<FxIndexMap<RcStr, RuleConfigCollection>>,
     #[turbo_tasks(trace_ignore)]
     pub conditions: Option<FxIndexMap<RcStr, ConfigConditionItem>>,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(
+    Serialize, Deserialize, Clone, PartialEq, Eq, Debug, TraceRawVcs, NonLocalValue, OperationValue,
+)]
+#[serde(deny_unknown_fields)]
 pub struct RegexComponents {
     source: RcStr,
     flags: RcStr,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-#[serde(tag = "type", content = "value", rename_all = "camelCase")]
+#[derive(
+    Clone, PartialEq, Eq, Debug, Serialize, Deserialize, TraceRawVcs, NonLocalValue, OperationValue,
+)]
+#[serde(
+    tag = "type",
+    content = "value",
+    rename_all = "camelCase",
+    deny_unknown_fields
+)]
 pub enum ConfigConditionPath {
     Glob(RcStr),
     Regex(RegexComponents),
 }
 
-impl TryInto<ConditionPath> for ConfigConditionPath {
-    fn try_into(self) -> Result<ConditionPath> {
-        Ok(match self {
+impl TryFrom<ConfigConditionPath> for ConditionPath {
+    type Error = anyhow::Error;
+
+    fn try_from(config: ConfigConditionPath) -> Result<ConditionPath> {
+        Ok(match config {
             ConfigConditionPath::Glob(path) => ConditionPath::Glob(path),
             ConfigConditionPath::Regex(path) => {
-                ConditionPath::Regex(EsRegex::new(&path.source, &path.flags)?.resolved_cell())
+                ConditionPath::Regex(EsRegex::try_from(path)?.resolved_cell())
             }
         })
     }
+}
 
+impl TryFrom<RegexComponents> for EsRegex {
     type Error = anyhow::Error;
-}
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct ConfigConditionItem {
-    pub path: ConfigConditionPath,
-}
-
-impl TryInto<ConditionItem> for ConfigConditionItem {
-    fn try_into(self) -> Result<ConditionItem> {
-        Ok(ConditionItem {
-            path: self.path.try_into()?,
-        })
+    fn try_from(components: RegexComponents) -> Result<EsRegex> {
+        EsRegex::new(&components.source, &components.flags)
     }
-
-    type Error = anyhow::Error;
 }
 
 #[derive(
@@ -739,6 +814,96 @@ pub struct OptionServerActions(Option<ServerActions>);
 #[turbo_tasks::value(transparent)]
 pub struct ExternalsConfig(FxIndexMap<RcStr, ExternalConfig>);
 
+fn turbopack_config_documentation_link() -> RcStr {
+    rcstr!(
+        "https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#configuring-webpack-loaders"
+    )
+}
+
+#[turbo_tasks::value(shared)]
+struct InvalidLoaderRuleRenameAsIssue {
+    glob: RcStr,
+    rename_as: RcStr,
+    config_file_path: FileSystemPath,
+}
+
+#[turbo_tasks::value_impl]
+impl Issue for InvalidLoaderRuleRenameAsIssue {
+    #[turbo_tasks::function]
+    async fn file_path(&self) -> Result<Vc<FileSystemPath>> {
+        Ok(self.config_file_path.clone().cell())
+    }
+
+    #[turbo_tasks::function]
+    fn stage(&self) -> Vc<IssueStage> {
+        IssueStage::Config.cell()
+    }
+
+    #[turbo_tasks::function]
+    async fn title(&self) -> Result<Vc<StyledString>> {
+        Ok(
+            StyledString::Text(format!("Invalid loader rule for extension: {}", self.glob).into())
+                .cell(),
+        )
+    }
+
+    #[turbo_tasks::function]
+    async fn description(&self) -> Result<Vc<OptionStyledString>> {
+        Ok(Vc::cell(Some(
+            StyledString::Text(RcStr::from(format!(
+                "The extension {} contains a wildcard, but the `as` option does not: {}",
+                self.glob, self.rename_as,
+            )))
+            .resolved_cell(),
+        )))
+    }
+
+    #[turbo_tasks::function]
+    fn documentation_link(&self) -> Vc<RcStr> {
+        Vc::cell(turbopack_config_documentation_link())
+    }
+}
+
+#[turbo_tasks::value(shared)]
+struct InvalidLoaderRuleConditionIssue {
+    condition: ConfigConditionItem,
+    config_file_path: FileSystemPath,
+}
+
+#[turbo_tasks::value_impl]
+impl Issue for InvalidLoaderRuleConditionIssue {
+    #[turbo_tasks::function]
+    async fn file_path(self: Vc<Self>) -> Result<Vc<FileSystemPath>> {
+        Ok(self.await?.config_file_path.clone().cell())
+    }
+
+    #[turbo_tasks::function]
+    fn stage(self: Vc<Self>) -> Vc<IssueStage> {
+        IssueStage::Config.cell()
+    }
+
+    #[turbo_tasks::function]
+    async fn title(&self) -> Result<Vc<StyledString>> {
+        Ok(StyledString::Text(rcstr!("Invalid condition for Turbopack loader rule")).cell())
+    }
+
+    #[turbo_tasks::function]
+    async fn description(&self) -> Result<Vc<OptionStyledString>> {
+        Ok(Vc::cell(Some(
+            StyledString::Text(RcStr::from(
+                serde_json::to_string_pretty(&self.condition)
+                    .expect("condition must be serializable"),
+            ))
+            .resolved_cell(),
+        )))
+    }
+
+    #[turbo_tasks::function]
+    fn documentation_link(&self) -> Vc<RcStr> {
+        Vc::cell(turbopack_config_documentation_link())
+    }
+}
+
 #[turbo_tasks::value_impl]
 impl Config {
     #[turbo_tasks::function]
@@ -839,96 +1004,92 @@ impl Config {
     }
 
     #[turbo_tasks::function]
-    pub fn webpack_rules(
-        &self,
-        active_conditions: Vec<RcStr>,
-        project_dir: FileSystemPath,
-    ) -> Vc<OptionWebpackRules> {
+    pub fn webpack_rules(&self, project_path: FileSystemPath) -> Result<Vc<WebpackRules>> {
         let Some(turbo_rules) = self.module.as_ref().and_then(|t| t.rules.as_ref()) else {
-            return Vc::cell(None);
+            return Ok(Vc::cell(Vec::new()));
         };
         if turbo_rules.is_empty() {
-            return Vc::cell(None);
+            return Ok(Vc::cell(Vec::new()));
         }
-        let active_conditions = active_conditions.into_iter().collect::<FxHashSet<_>>();
-        let mut rules = FxIndexMap::default();
-        for (ext, rule) in turbo_rules.iter() {
+        let mut rules = Vec::new();
+        for (glob, rule_collection) in turbo_rules.iter() {
             fn transform_loaders(
-                loaders: &[LoaderItem],
-                project_dir: &FileSystemPath,
+                loaders: &mut dyn Iterator<Item = &LoaderItem>,
             ) -> ResolvedVc<WebpackLoaderItems> {
                 ResolvedVc::cell(
                     loaders
-                        .iter()
                         .map(|item| match item {
                             LoaderItem::LoaderName(name) => WebpackLoaderItem {
-                                loader: resolve_loader_path(name, project_dir),
+                                loader: name.clone(),
                                 options: Default::default(),
                             },
-                            LoaderItem::LoaderOptions(options) => WebpackLoaderItem {
-                                loader: resolve_loader_path(&options.loader, project_dir),
-                                options: options.options.clone(),
-                            },
+                            LoaderItem::LoaderOptions(options) => options.clone(),
                         })
                         .collect(),
                 )
             }
-            enum FindRuleResult<'a> {
-                Found(&'a RuleConfigItemOptions),
-                NotFound,
-                Break,
-            }
-            fn find_rule<'a>(
-                rule: &'a RuleConfigItem,
-                active_conditions: &FxHashSet<RcStr>,
-            ) -> FindRuleResult<'a> {
-                match rule {
-                    RuleConfigItem::Options(rule) => FindRuleResult::Found(rule),
-                    RuleConfigItem::Conditional(map) => {
-                        for (condition, rule) in map.iter() {
-                            if condition == "default" || active_conditions.contains(condition) {
-                                match find_rule(rule, active_conditions) {
-                                    FindRuleResult::Found(rule) => {
-                                        return FindRuleResult::Found(rule);
-                                    }
-                                    FindRuleResult::Break => {
-                                        return FindRuleResult::Break;
-                                    }
-                                    FindRuleResult::NotFound => {}
-                                }
-                            }
-                        }
-                        FindRuleResult::NotFound
-                    }
-                    RuleConfigItem::Boolean(_) => FindRuleResult::Break,
-                }
-            }
-            match rule {
-                RuleConfigItemOrShortcut::Loaders(loaders) => {
-                    rules.insert(
-                        ext.clone(),
-                        LoaderRuleItem {
-                            loaders: transform_loaders(loaders, &project_dir),
-                            rename_as: None,
-                        },
-                    );
-                }
-                RuleConfigItemOrShortcut::Advanced(rule) => {
-                    if let FindRuleResult::Found(RuleConfigItemOptions { loaders, rename_as }) =
-                        find_rule(rule, &active_conditions)
-                    {
-                        rules.insert(
-                            ext.clone(),
+            // let config_file_path = || project_path.join(&self.config_file_name);
+            for item in &rule_collection.0 {
+                match item {
+                    RuleConfigCollectionItem::Shorthand(loaders) => {
+                        rules.push((
+                            glob.clone(),
                             LoaderRuleItem {
-                                loaders: transform_loaders(loaders, &project_dir),
-                                rename_as: rename_as.clone(),
+                                loaders: transform_loaders(&mut [loaders].into_iter()),
+                                rename_as: None,
+                                condition: None,
                             },
-                        );
+                        ));
+                    }
+                    RuleConfigCollectionItem::Full(RuleConfigItem {
+                        loaders,
+                        rename_as,
+                        condition,
+                    }) => {
+                        // If the extension contains a wildcard, and the rename_as does not,
+                        // emit an issue to prevent users from encountering duplicate module
+                        // names.
+                        if glob.contains("*")
+                            && let Some(rename_as) = rename_as.as_ref()
+                            && !rename_as.contains("*")
+                        {
+                            InvalidLoaderRuleRenameAsIssue {
+                                glob: glob.clone(),
+                                config_file_path: project_path.clone(),
+                                rename_as: rename_as.clone(),
+                            }
+                            .resolved_cell()
+                            .emit();
+                        }
+
+                        let condition = if let Some(condition) = condition {
+                            if let Ok(cond) = ConditionItem::try_from(condition.clone()) {
+                                Some(cond)
+                            } else {
+                                InvalidLoaderRuleConditionIssue {
+                                    condition: condition.clone(),
+                                    config_file_path: project_path.clone(),
+                                }
+                                .resolved_cell()
+                                .emit();
+                                None
+                            }
+                        } else {
+                            None
+                        };
+                        rules.push((
+                            glob.clone(),
+                            LoaderRuleItem {
+                                loaders: transform_loaders(&mut loaders.iter()),
+                                rename_as: rename_as.clone(),
+                                condition,
+                            },
+                        ));
                     }
                 }
             }
         }
-        Vc::cell(Some(ResolvedVc::cell(rules)))
+        Ok(Vc::cell(rules))
     }
 
     #[turbo_tasks::function]

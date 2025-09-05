@@ -6,8 +6,8 @@
   "author": "xusd320",
   "license": "MIT",
   "scripts": {
-    "build": "utoo-pack build -p . -r ../..",
-    "dev": "utoo-pack dev -p . -r ../..",
+    "build": "utoo-pack build",
+    "dev": "utoo-pack dev",
     "build-by-native": "../../target/release/pack-cli build",
     "dev-by-native": "../../target/release/pack-cli dev",
     "serve": "rm -rf ./dist && npm run build && node ./genHtml.js && serve ./dist"

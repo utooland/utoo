@@ -65,6 +65,7 @@ fn match_js_extension(enable_mdx_rs: bool) -> Vec<RuleCondition> {
             vec![
                 RuleCondition::ResourcePathEndsWith(".md".to_string()),
                 RuleCondition::ResourcePathEndsWith(".mdx".to_string()),
+                RuleCondition::ContentTypeStartsWith("text/markdown".to_string()),
             ]
             .as_mut(),
         );
@@ -86,28 +87,36 @@ pub(crate) fn module_rule_match_js_no_url(enable_mdx_rs: bool) -> RuleCondition 
     ])
 }
 
+pub(crate) enum EcmascriptTransformStage {
+    /// Transforms to run first: transpile TypeScript, decorators, ...
+    Preprocess,
+    /// Transforms to execute on standard EcmaScript (plus JSX): styled-jsx, swc plugins, ...
+    Main,
+    #[allow(dead_code)]
+    /// Transforms to run last: JSX, preset-env, scan for imports, ...
+    Postprocess,
+}
+
 /// Create a new module rule for the given ecmatransform, runs against
 /// any ecmascript (with mdx if enabled) except url reference type
 pub(crate) fn get_ecma_transform_rule(
     transformer: Box<dyn CustomTransformer + Send + Sync>,
     enable_mdx_rs: bool,
-    prepend: bool,
+    stage: EcmascriptTransformStage,
 ) -> ModuleRule {
     let transformer = EcmascriptInputTransform::Plugin(ResolvedVc::cell(transformer as _));
-    let (prepend, append) = if prepend {
-        (
-            ResolvedVc::cell(vec![transformer]),
-            ResolvedVc::cell(vec![]),
-        )
-    } else {
-        (
-            ResolvedVc::cell(vec![]),
-            ResolvedVc::cell(vec![transformer]),
-        )
+    let (preprocess, main, postprocess) = match stage {
+        EcmascriptTransformStage::Preprocess => (vec![transformer], vec![], vec![]),
+        EcmascriptTransformStage::Main => (vec![], vec![transformer], vec![]),
+        EcmascriptTransformStage::Postprocess => (vec![], vec![], vec![transformer]),
     };
 
     ModuleRule::new(
         module_rule_match_js_no_url(enable_mdx_rs),
-        vec![ModuleRuleEffect::ExtendEcmascriptTransforms { prepend, append }],
+        vec![ModuleRuleEffect::ExtendEcmascriptTransforms {
+            preprocess: ResolvedVc::cell(preprocess),
+            main: ResolvedVc::cell(main),
+            postprocess: ResolvedVc::cell(postprocess),
+        }],
     )
 }

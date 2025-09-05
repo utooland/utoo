@@ -1,6 +1,8 @@
 use turbo_tasks::OperationValue;
 use turbopack_ecmascript_runtime::RuntimeType;
 
+use crate::shared::webpack_rules::WebpackLoaderBuiltinCondition;
+
 /// The mode in which Next.js is running.
 #[turbo_tasks::value(shared)]
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Hash, OperationValue)]
@@ -23,6 +25,16 @@ impl Mode {
             Mode::Development => "development",
             Mode::Production => "production",
         }
+    }
+
+    /// Returns conditions that can be used in the "rules" section for
+    /// defining webpack loader configuration.
+    pub fn webpack_loader_conditions(&self) -> impl Iterator<Item = WebpackLoaderBuiltinCondition> {
+        match self {
+            Mode::Development => [WebpackLoaderBuiltinCondition::Development],
+            Mode::Production => [WebpackLoaderBuiltinCondition::Production],
+        }
+        .into_iter()
     }
 
     /// Returns the exports condition for the current mode.

@@ -2,24 +2,23 @@ use std::mem::take;
 
 use anyhow::{Result, bail};
 use serde_json::Value as JsonValue;
-use turbo_rcstr::rcstr;
+use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{ResolvedVc, Vc};
 use turbo_tasks_fs::FileSystemPath;
-use turbopack::module_options::{LoaderRuleItem, OptionWebpackRules, WebpackRules};
+use turbopack::module_options::LoaderRuleItem;
 use turbopack_node::transforms::webpack::WebpackLoaderItem;
 
 use crate::import_map::get_utoopack_dependency_package;
 
-#[turbo_tasks::function]
-pub async fn maybe_add_sass_loader(
+pub async fn get_sass_loader_rules(
     project_path: FileSystemPath,
     sass_options: Vc<JsonValue>,
-    webpack_rules: Option<Vc<WebpackRules>>,
-) -> Result<Vc<OptionWebpackRules>> {
+) -> Result<Vec<(RcStr, LoaderRuleItem)>> {
     let sass_options = sass_options.await?;
     let Some(mut sass_options) = sass_options.as_object().cloned() else {
         bail!("sass_options must be an object");
     };
+
     // TODO: Remove this once we upgrade to sass-loader 16
     let silence_deprecations = if let Some(v) = sass_options.get("silenceDeprecations") {
         v.clone()
@@ -27,89 +26,67 @@ pub async fn maybe_add_sass_loader(
         serde_json::json!(["legacy-js-api"])
     };
 
+    let empty_additional_data = serde_json::Value::String("".to_string());
     sass_options.insert("silenceDeprecations".into(), silence_deprecations);
-    let mut rules = if let Some(webpack_rules) = webpack_rules {
-        webpack_rules.owned().await?
-    } else {
-        Default::default()
-    };
-    for (pattern, rename) in [
-        ("*.module.scss", ".module.css"),
-        ("*.module.sass", ".module.css"),
-        ("*.scss", ".css"),
-        ("*.sass", ".css"),
-    ] {
-        // additionalData is a loader option but Next.js has it under `sassOptions` in
-        // `config.js`
-        let empty_additional_data = serde_json::Value::String("".to_string());
-        let additional_data = sass_options.get("prependData").or(sass_options
-            .get("additionalData")
-            .or(Some(&empty_additional_data)));
-        let rule = rules.get_mut(pattern);
-        let sass_loader = WebpackLoaderItem {
+    // additionalData is a loader option but utoopack has it under `sassOptions` in
+    // `project.json`
+    let additional_data = sass_options
+        .get("prependData")
+        .or(sass_options.get("additionalData"))
+        .or(Some(&empty_additional_data));
+
+    let sass_loader = WebpackLoaderItem {
             #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-            loader: get_utoopack_dependency_package(project_path.clone(), rcstr!("sass-loader"))
-                .owned()
-                .await?,
+        loader: get_utoopack_dependency_package(project_path.clone(), rcstr!("sass-loader"))
+            .owned()
+            .await?,
             #[cfg(all(target_family = "wasm", target_os = "unknown"))]
             loader: rcstr!("sass-loader"),
-            options: take(
-                serde_json::json!({
-                    "implementation": sass_options.get("implementation"),
-                    "sourceMap": true,
-                    "sassOptions": sass_options,
-                    "additionalData": additional_data
-                })
-                .as_object_mut()
-                .unwrap(),
-            ),
-        };
-        let resolve_url_loader = WebpackLoaderItem {
+        options: take(
+            serde_json::json!({
+                "implementation": sass_options.get("implementation"),
+                "sourceMap": true,
+                "sassOptions": sass_options,
+                "additionalData": additional_data
+            })
+            .as_object_mut()
+            .unwrap(),
+        ),
+    };
+    let resolve_url_loader = WebpackLoaderItem {
             #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-            loader: get_utoopack_dependency_package(
-                project_path.clone(),
-                rcstr!("resolve-url-loader"),
-            )
+        loader: get_utoopack_dependency_package(project_path.clone(), rcstr!("resolve-url-loader"))
             .owned()
             .await?,
             #[cfg(all(target_family = "wasm", target_os = "unknown"))]
             loader: rcstr!("resolve-url-loader"),
-            options: take(
-                serde_json::json!({
-                    //https://github.com/vercel/turbo/blob/d527eb54be384a4658243304cecd547d09c05c6b/crates/turbopack-node/src/transforms/webpack.rs#L191
-                    "sourceMap": true
-                })
-                .as_object_mut()
-                .unwrap(),
-            ),
-        };
+        options: take(
+            serde_json::json!({
+                //https://github.com/vercel/turbo/blob/d527eb54be384a4658243304cecd547d09c05c6b/crates/turbopack-node/src/transforms/webpack.rs#L191
+                "sourceMap": true
+            })
+            .as_object_mut()
+            .unwrap(),
+        ),
+    };
 
-        if let Some(rule) = rule {
-            // Without `as`, loader result would be JS code, so we don't want to apply
-            // sass-loader on that.
-            let Some(rename_as) = rule.rename_as.as_ref() else {
-                continue;
-            };
-            // Only when the result should run through the sass pipeline, we apply
-            // sass-loader.
-            if rename_as != "*" {
-                continue;
-            }
-            let mut loaders = rule.loaders.owned().await?;
+    let loaders = ResolvedVc::cell(vec![resolve_url_loader, sass_loader]);
 
-            loaders.push(resolve_url_loader);
-            loaders.push(sass_loader);
-            rule.loaders = ResolvedVc::cell(loaders);
-        } else {
-            rules.insert(
-                pattern.into(),
-                LoaderRuleItem {
-                    loaders: ResolvedVc::cell(vec![resolve_url_loader, sass_loader]),
-                    rename_as: Some(format!("*{rename}").into()),
-                },
-            );
-        }
+    let mut rules = Vec::new();
+
+    for (pattern, rename) in [
+        (rcstr!("*.module.s[ac]ss"), rcstr!("*.module.css")),
+        (rcstr!("*.s[ac]ss"), rcstr!("*.css")),
+    ] {
+        rules.push((
+            pattern,
+            LoaderRuleItem {
+                loaders,
+                rename_as: Some(rename),
+                condition: None,
+            },
+        ));
     }
 
-    Ok(Vc::cell(Some(ResolvedVc::cell(rules))))
+    Ok(rules)
 }

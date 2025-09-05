@@ -11,7 +11,9 @@ use turbopack_core::{
         Chunk, ChunkingContext, EvaluatableAssets, MinifyType, ModuleChunkItemIdExt, ModuleId,
     },
     code_builder::{Code, CodeBuilder},
-    environment::{EdgeWorkerEnvironment, Environment, ExecutionEnvironment, NodeJsVersion},
+    environment::{
+        BrowserEnvironment, EdgeWorkerEnvironment, Environment, ExecutionEnvironment, NodeJsVersion,
+    },
     ident::AssetIdent,
     output::{OutputAsset, OutputAssets},
     source_map::{GenerateSourceMap, OptionStringifiedSourceMap, SourceMapAsset},
@@ -101,17 +103,58 @@ impl EcmascriptLibraryEvaluateChunk {
 
         let mut code = CodeBuilder::default();
 
-        // When a chunk is executed, it will either register itself with the current
-        // instance of the runtime, or it will push itself onto the list of pending
-        // chunks (`self.TURBOPACK`).
-        //
-        // When the runtime executes (see the `evaluate` module), it will pick up and
-        // register all pending chunks, and replace the list of pending chunks
-        // with itself so later chunks can register directly with it.
         writedoc!(
             code,
             r#"
-                (globalThis.TURBOPACK = globalThis.TURBOPACK || []).push([{chunk_path}, {{
+                ((__TURBOPACK__) => {{
+            "#,
+        )?;
+
+        let runtime_type = this.chunking_context.await?.runtime_type();
+
+        // Get runtime code based on runtime type
+        match runtime_type {
+            RuntimeType::Development | RuntimeType::Production => {
+                let css_environment = BrowserEnvironment::default().resolved_cell();
+                let runtime_code = get_library_runtime_code(
+                    Environment::new(
+                        ExecutionEnvironment::EdgeWorker(
+                            EdgeWorkerEnvironment {
+                                node_version: NodeJsVersion::default().resolved_cell(),
+                            }
+                            .resolved_cell(),
+                        ),
+                        *css_environment,
+                    ),
+                    Vc::cell(None),
+                    Vc::cell(None),
+                    runtime_type,
+                    output_root_to_root_path,
+                    source_maps,
+                    this.chunking_context.runtime_root(),
+                    this.chunking_context.runtime_export(),
+                    Vc::cell(
+                        runtime_module_ids
+                            .iter()
+                            .map(|id| id.to_string().into())
+                            .collect(),
+                    ),
+                )
+                .await?;
+
+                code.push_code(&runtime_code);
+            }
+            #[cfg(feature = "test")]
+            RuntimeType::Dummy => {
+                let runtime_code = turbopack_ecmascript_runtime::get_dummy_runtime_code();
+                code.push_code(&runtime_code);
+            }
+        }
+
+        writedoc!(
+            code,
+            r#"
+                }})([[{chunk_path}, {{
             "#,
             chunk_path = StringifyJs(chunk_public_path)
         )?;
@@ -133,36 +176,7 @@ impl EcmascriptLibraryEvaluateChunk {
 
         write!(code, "\n}},")?;
         write!(code, "\n{},", StringifyJs(&params))?;
-        writeln!(code, "\n]);")?;
-
-        let runtime_type = this.chunking_context.await?.runtime_type();
-
-        match runtime_type {
-            RuntimeType::Development | RuntimeType::Production => {
-                let runtime_code = get_library_runtime_code(
-                    Environment::new(ExecutionEnvironment::EdgeWorker(
-                        EdgeWorkerEnvironment {
-                            // FIXME
-                            node_version: NodeJsVersion::default().resolved_cell(),
-                        }
-                        .resolved_cell(),
-                    )),
-                    Vc::cell(None),
-                    Vc::cell(None),
-                    runtime_type,
-                    output_root_to_root_path,
-                    source_maps,
-                    this.chunking_context.runtime_root(),
-                    this.chunking_context.runtime_export(),
-                );
-                code.push_code(&*runtime_code.await?);
-            }
-            #[cfg(feature = "test")]
-            RuntimeType::Dummy => {
-                let runtime_code = turbopack_ecmascript_runtime::get_dummy_runtime_code();
-                code.push_code(&runtime_code);
-            }
-        }
+        writeln!(code, "\n]]);")?;
 
         let mut code = code.build();
 

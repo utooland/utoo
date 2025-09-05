@@ -1,11 +1,11 @@
-use std::path::{MAIN_SEPARATOR, MAIN_SEPARATOR_STR, Path};
+use std::path::{MAIN_SEPARATOR, Path};
 
 use anyhow::{Context, Result};
 use dunce::{canonicalize, simplified};
 use serde::{Deserialize, Serialize};
 use turbo_rcstr::RcStr;
 use turbo_tasks::{NonLocalValue, TaskInput, Vc, trace::TraceRawVcs};
-use turbo_tasks_fs::{FileSystem, FileSystemPath};
+use turbo_tasks_fs::FileSystem;
 use turbopack::condition::ContextCondition;
 
 use crate::config::Config;
@@ -122,77 +122,5 @@ pub fn convert_to_project_relative(project_inside_path: &str, project_path: &str
         )
     } else {
         Ok(project_inside_path.into())
-    }
-}
-
-// issue: https://github.com/utooland/utoo/issues/2081
-// issue: https://github.com/vercel/next.js/issues/82106
-pub fn resolve_loader_path(loader_name: &str, project_dir: &FileSystemPath) -> RcStr {
-    if loader_name.starts_with("./") || loader_name.starts_with("../") {
-        // This is a relative path with explicit prefix, convert to absolute path
-        let cwd = std::env::current_dir().unwrap_or_default();
-        let project_path = std::path::Path::new(project_dir.path.as_str());
-        let loader_path = std::path::Path::new(loader_name);
-
-        // Handle the case where project_path might contain parts that are already in cwd
-        let resolved_project_path = if project_path.is_relative() {
-            // If project_path is relative, check if it starts with a path that's already in cwd
-            let cwd_str = cwd.to_string_lossy();
-            let project_str = project_path.to_string_lossy();
-
-            // Check if the last components of cwd match the beginning of project_path
-            let cwd_components: Vec<&str> = cwd_str
-                .split(MAIN_SEPARATOR)
-                .filter(|s| !s.is_empty())
-                .collect();
-            let project_components: Vec<&str> = project_str
-                .split(MAIN_SEPARATOR)
-                .filter(|s| !s.is_empty())
-                .collect();
-
-            // Find the longest common suffix of cwd that matches the beginning of project_path
-            let mut common_length = 0;
-            for i in 1..=std::cmp::min(cwd_components.len(), project_components.len()) {
-                let cwd_suffix = &cwd_components[cwd_components.len() - i..];
-                let project_prefix = &project_components[..i];
-                if cwd_suffix == project_prefix {
-                    common_length = i;
-                }
-            }
-
-            if common_length > 0 {
-                // Remove the common part from project_path
-                let remaining_components = &project_components[common_length..];
-                if !remaining_components.is_empty() {
-                    cwd.join(remaining_components.join(MAIN_SEPARATOR_STR))
-                } else {
-                    cwd
-                }
-            } else {
-                cwd.join(project_path)
-            }
-        } else {
-            // If project_path is absolute, use it directly
-            project_path.to_path_buf()
-        };
-
-        // Then join with the loader path
-        let full_path = resolved_project_path.join(loader_path);
-
-        // Use canonicalize to normalize the path and remove any duplicate components
-        if let Ok(canonical_path) = canonicalize(&full_path) {
-            canonical_path.to_string_lossy().into()
-        } else {
-            // If canonicalization fails, check if the original path exists
-            if full_path.exists() {
-                full_path.to_string_lossy().into()
-            } else {
-                // If path doesn't exist, return the original loader name
-                loader_name.into()
-            }
-        }
-    } else {
-        // This is not a relative path (could be a package name or absolute path), keep as is
-        loader_name.into()
     }
 }

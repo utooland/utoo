@@ -3,7 +3,7 @@ use std::io::Write;
 use anyhow::Result;
 use indoc::writedoc;
 use turbo_rcstr::RcStr;
-use turbo_tasks::Vc;
+use turbo_tasks::{ResolvedVc, Vc};
 use turbopack_core::{
     code_builder::{Code, CodeBuilder},
     environment::Environment,
@@ -16,16 +16,17 @@ use super::{asset_context::get_runtime_asset_context, embed_js::embed_static_cod
 /// Returns the code for the ECMAScript runtime.
 #[turbo_tasks::function]
 pub async fn get_library_runtime_code(
-    environment: Vc<Environment>,
+    environment: ResolvedVc<Environment>,
     chunk_base_path: Vc<Option<RcStr>>,
     chunk_suffix_path: Vc<Option<RcStr>>,
-    runtime_type: RuntimeType,
+    _runtime_type: RuntimeType,
     output_root_to_root_path: Vc<RcStr>,
     generate_source_map: bool,
     runtime_root: Vc<Option<RcStr>>,
     runtime_export: Vc<Vec<RcStr>>,
+    runtime_module_ids: Vc<Vec<RcStr>>,
 ) -> Result<Vc<Code>> {
-    let asset_context = get_runtime_asset_context(environment).await?;
+    let asset_context = get_runtime_asset_context(*environment).resolve().await?;
 
     let shared_runtime_utils_code = embed_static_code(
         asset_context,
@@ -46,9 +47,8 @@ pub async fn get_library_runtime_code(
 
     writedoc!(
         code,
-        r#"
-            (() => {{
-            if (!Array.isArray(globalThis.TURBOPACK)) {{
+        r#"            
+            if (!Array.isArray(__TURBOPACK__)) {{
                 return;
             }}
 
@@ -93,21 +93,11 @@ pub async fn get_library_runtime_code(
     writedoc!(
         code,
         r#"
-            const chunksToRegister = globalThis.TURBOPACK;
-            globalThis.TURBOPACK = {{ push: registerChunk }};
+            const chunksToRegister = __TURBOPACK__;
+            __TURBOPACK__ = {{ push: registerChunk }};
             chunksToRegister.forEach(registerChunk);
         "#
     )?;
-    if matches!(runtime_type, RuntimeType::Development) {
-        writedoc!(
-            code,
-            r#"
-            const chunkListsToRegister = globalThis.TURBOPACK_CHUNK_LISTS || [];
-            chunkListsToRegister.forEach(registerChunkList);
-            globalThis.TURBOPACK_CHUNK_LISTS = {{ push: registerChunkList }};
-        "#
-        )?;
-    }
 
     let runtime_root = &*runtime_root.await?;
     let runtime_export = &*runtime_export.await?;
@@ -121,17 +111,29 @@ pub async fn get_library_runtime_code(
             .join("")
     };
 
+    let runtime_module_ids = &*runtime_module_ids.await?;
+
     writedoc!(
         code,
         r#"
             function factory () {{
-                return esmImport(null, Array.from(runtimeModules));
-            }};
+                const runtimeModuleIds = {};
+                if (runtimeModuleIds.length > 0) {{
+                    const module = moduleCache[runtimeModuleIds[0]];
+                    if (module.error) throw module.error;
+                    // any ES module has to have `module.namespaceObject` defined.
+                    if (module.namespaceObject) return module.namespaceObject;
+                    // only ESM can be an async module, so we don't need to worry about exports being a promise here.
+                    const raw = module.exports;
+                    return module.namespaceObject = interopEsm(raw, createNS(raw), raw && raw.__esModule);
+                }}
+            }}
 
             if (typeof exports === 'object' && typeof module === 'object') {{
                 module.exports = factory();
             }} else if (typeof exports === 'object') {{
         "#,
+        StringifyJs(runtime_module_ids),
     )?;
 
     if let Some(runtime_root) = runtime_root {
@@ -167,7 +169,6 @@ pub async fn get_library_runtime_code(
         code,
         r#"
             }}
-            }})();
         "#
     )?;
 

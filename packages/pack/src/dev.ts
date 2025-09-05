@@ -6,6 +6,7 @@ import path from "path";
 import send from "send";
 import { Duplex, Writable } from "stream";
 import url from "url";
+import { findRootDir } from "./find-root";
 import { createHotReloader } from "./hmr";
 import { createSelfSignedCertificate } from "./mkcert";
 import { BundleOptions } from "./types";
@@ -36,6 +37,10 @@ export function serve(
   const bundleOptions = (<WebpackConfig>options).compatMode
     ? compatOptionsFromWebpack(<WebpackConfig>options)
     : <BundleOptions>options;
+  if (!rootPath) {
+    // help user to find the rootDir automatically
+    rootPath = findRootDir(projectPath || process.cwd());
+  }
   return serveInternal(bundleOptions, projectPath, rootPath, serverOptions);
 }
 
@@ -51,7 +56,7 @@ async function serveInternal(
     await xcodeProfilingReady();
   }
 
-  startServer(
+  await startServer(
     {
       hostname: serverOptions?.hostname || "localhost",
       port: serverOptions?.port || 3000,

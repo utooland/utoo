@@ -11,12 +11,12 @@
     "@utoo/pack": "*"
   },
   "devDependencies": {
-    "@types/node": "^18",
+    "@types/node": "^20.3.0",
     "oclif": "^4",
     "typescript": "^5"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">= 20"
   },
   "files": [
     "./bin",
