@@ -48,4 +48,4 @@ path = "benches/deps_benchmark.rs"
 
 [dev-dependencies]
 mockito = "1.7.0"
-tokio = { workspace = true, features = ["test-util"]}
+tokio = { workspace = true, features = ["test-utili", "macros"] }
