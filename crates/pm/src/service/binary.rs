@@ -405,12 +405,12 @@ mod tests {
     async fn test_handle_cypress() {
         let temp_dir = tempdir().unwrap();
         let dir = temp_dir.path();
-        println!("Test directory: {:?}", dir);
+        println!("Test directory: {dir:?}");
 
         // Create necessary directory structure
         let lib_tasks_dir = dir.join("lib/tasks");
         std::fs::create_dir_all(&lib_tasks_dir).unwrap();
-        println!("Created directory: {:?}", lib_tasks_dir);
+        println!("Created directory: {lib_tasks_dir:?}");
 
         // Create test download.js file
         let download_file = lib_tasks_dir.join("download.js");
@@ -419,7 +419,7 @@ mod tests {
             return version ? prepend('desktop/' + version) : prepend('desktop');
         "#;
         std::fs::write(&download_file, original_content).unwrap();
-        println!("Created file: {:?}", download_file);
+        println!("Created file: {download_file:?}");
 
         let pkg = json!({
             "name": "cypress",
@@ -441,7 +441,7 @@ mod tests {
             .unwrap();
 
         let content = std::fs::read_to_string(&download_file).unwrap();
-        println!("File content after modification:\n{}", content);
+        println!("File content after modification:\n{content}");
 
         assert!(
             content.contains("https://example.com"),
