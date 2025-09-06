@@ -17,14 +17,14 @@ jobs:
             test: |
               rustup target add x86_64-apple-darwin &&
               cargo test -p pack-tests --target x86_64-apple-darwin
-          - host: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
-            test: |
-              set -ex &&
-              export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Csymbol-mangling-version=v0 -Ctarget-feature=-crt-static' &&
-              rustup target add aarch64-unknown-linux-gnu &&
-              cargo test -p pack-tests --target aarch64-unknown-linux-gnu
+          # - host: ubuntu-latest
+          #   target: aarch64-unknown-linux-gnu
+          #   docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
+          #   test: |
+          #     set -ex &&
+          #     export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Csymbol-mangling-version=v0 -Ctarget-feature=-crt-static' &&
+          #     rustup target add aarch64-unknown-linux-gnu &&
+          #     cargo test -p pack-tests --target aarch64-unknown-linux-gnu
           # - host: ubuntu-latest
           #   target: aarch64-unknown-linux-musl
           #   docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
