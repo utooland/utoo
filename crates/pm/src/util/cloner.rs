@@ -16,7 +16,7 @@ use std::os::unix::ffi::OsStrExt;
 
 #[cfg(target_os = "linux")]
 mod linux_clone {
-    use crate::util::logger::{log_verbose, log_warning};
+    use crate::util::logger::log_verbose;
     use anyhow::Result;
     use std::fs::File;
     use std::os::unix::io::AsRawFd;
@@ -97,7 +97,7 @@ mod linux_clone {
             match copy_file_with_ficlone(src, dst).await {
                 Ok(_) => return Ok(()),
                 Err(e) => {
-                    log_verbose(&format!("FICLONE failed: {}, trying copy_file_range", e));
+                    log_verbose(&format!("FICLONE failed: {e}, trying copy_file_range"));
                 }
             }
         }
@@ -107,10 +107,7 @@ mod linux_clone {
             match copy_file_with_range(src, dst).await {
                 Ok(_) => return Ok(()),
                 Err(e) => {
-                    log_verbose(&format!(
-                        "copy_file_range failed: {}, using regular copy",
-                        e
-                    ));
+                    log_verbose(&format!("copy_file_range failed: {e}, using regular copy"));
                 }
             }
         }
@@ -717,7 +714,7 @@ mod tests {
 
             // Test case when source path is a file instead of a directory
             create_test_file(&temp.path(), "not_a_dir", b"content").await?;
-            let result = linux_clone::clone_dir(&temp.path().join("not_a_dir"), &dst_dir).await;
+            let result = linux_clone::clone_dir(temp.path().join("not_a_dir"), &dst_dir).await;
             assert!(result.is_err());
             assert_eq!(
                 result
