@@ -389,6 +389,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(unused_imports)]
     async fn test_need_run_with_script() {
         let _dir = tempdir().unwrap();
 
