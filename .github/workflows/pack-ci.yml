@@ -66,7 +66,7 @@ jobs:
           #   test: |
           #     git config --system core.longpaths true &&
           #     cargo test -p pack-tests --target x86_64-pc-windows-msvc
-    name: ${{ matrix.settings.target }}
+    name: utoopack-ci-${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
