@@ -1,8 +1,8 @@
 import React from "react";
-import { foo } from "./foo.ts";
-import dataText from "./test.txt";
 import Person from "../static/person.svg";
+import { foo } from "./foo.ts";
 import styles from "./index.module.less";
+import dataText from "./test.txt";
 
 export function App() {
   return (
