@@ -338,7 +338,7 @@ impl AfterResolvePlugin for ExternalsPlugin {
                                     //     ty: ExternalType::Global,
                                     //     traced: ExternalTraced::Traced,
                                     // },
-                                    // ignore will just skip this module and the code which import the moudle will be undefined.
+                                    // ignore will just skip this module and the code which import the module will be undefined.
                                     ResolveResultItem::Ignore,
                                 )));
                             }

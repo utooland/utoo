@@ -370,7 +370,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let _ = write_verbose_logs_to_file();
                 process::exit(1);
             }
-            log_time_end("All packages rebuilded");
+            log_time_end("All packages rebuilt");
         }
         Some(Commands::Deps { workspace_only }) => {
             let cwd = std::env::current_dir()?;

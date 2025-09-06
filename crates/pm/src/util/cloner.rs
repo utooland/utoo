@@ -310,7 +310,7 @@ pub async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
     Ok(true)
 }
 
-// find the first non builded subdirectory
+// find the first non built subdirectory
 pub async fn find_real_src<P: AsRef<Path>>(src: P) -> Option<PathBuf> {
     let mut read_dir = fs::read_dir(src.as_ref()).await.ok()?;
     while let Some(entry) = read_dir.next_entry().await.ok()? {
@@ -546,7 +546,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_find_real_src_with_builded_dir() -> Result<()> {
+    async fn test_find_real_src_with_built_dir() -> Result<()> {
         let temp = TempDir::new()?;
         let dir = temp.path().join("test_dir");
         fs::create_dir(&dir).await?;

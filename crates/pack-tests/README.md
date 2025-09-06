@@ -2,7 +2,7 @@
 
 An extracted create to perform snapshot tests on utoopack.
 
-## Tesing
+## Testing
 
 Before test, please install `cargo-nextest`:
 

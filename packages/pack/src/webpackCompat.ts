@@ -417,11 +417,7 @@ function compatOptimization(
   if (!webpackOptimization) {
     return;
   }
-  const {
-    moduleIds,
-    minimize,
-    concatenateModules,
-  } = webpackOptimization;
+  const { moduleIds, minimize, concatenateModules } = webpackOptimization;
   return {
     moduleIds:
       moduleIds === "named"

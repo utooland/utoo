@@ -247,7 +247,7 @@ fn place_deps(name: String, pkg: ResolvedPackage, parent: &Arc<Node>) -> Result<
 
 #[derive(Debug)]
 pub enum FindResult {
-    Reuse(Arc<Node>),    // can resue
+    Reuse(Arc<Node>),    // can reuse
     Conflict(Arc<Node>), // conflict, return parent node
     New(Arc<Node>),      // need to install under root node
 }
@@ -553,7 +553,7 @@ impl Ruborist {
                     .push(child.clone());
             }
 
-            // hanlde dup node
+            // handle dup node
             for (_, nodes) in name_map {
                 if nodes.len() > 1 {
                     // find max edges_in node to save the cost
