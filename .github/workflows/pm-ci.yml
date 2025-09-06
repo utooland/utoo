@@ -65,7 +65,7 @@ jobs:
           #   test: |
           #     git config --system core.longpaths true &&
           #     cargo test -p utoo-pm --target x86_64-pc-windows-msvc
-    name: stable - ${{ matrix.settings.target }}
+    name: ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
