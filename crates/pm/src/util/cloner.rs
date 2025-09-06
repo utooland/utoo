@@ -717,7 +717,7 @@ mod tests {
             let result =
                 linux_clone::clone_dir(temp.path().join("not_a_dir").as_ref(), &dst_dir).await;
             assert!(result.is_err());
-            // FIXME: 
+            // FIXME:
             // assert_eq!(
             //     result
             //         .unwrap_err()
