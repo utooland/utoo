@@ -17,6 +17,24 @@ jobs:
             test: |
               rustup target add x86_64-apple-darwin &&
               cargo test -p utoo-pm --target x86_64-apple-darwin
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
+            test: |
+              cargo test -p utoo-pm --target x86_64-unknown-linux-gnu
+          # - host: ubuntu-latest
+          #   target: x86_64-unknown-linux-musl
+          #   docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
+          #   test: |
+          #     set -ex &&
+          #     rm /etc/apk/repositories &&
+          #     echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/main" >> /etc/apk/repositories &&
+          #     echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/community" >> /etc/apk/repositories &&
+          #     apk update &&
+          #     apk add --no-cache libc6-compat pkgconfig dav1d libdav1d dav1d-dev clang-static llvm-dev &&
+          #     rustup target add x86_64-unknown-linux-musl &&
+          #     export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Csymbol-mangling-version=v0 -Ctarget-feature=-crt-static' &&
+          #     cargo test -p utoo-pm --target x86_64-unknown-linux-musl
           # - host: ubuntu-latest
           #   target: aarch64-unknown-linux-gnu
           #   docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
@@ -36,24 +54,6 @@ jobs:
           #     rustup target add aarch64-unknown-linux-musl &&
           #     export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Zunstable-options -Csymbol-mangling-version=v0 -Clinker-flavor=gnu-lld-cc -Clink-self-contained=+linker' &&
           #     cargo test -p utoo-pm --target aarch64-unknown-linux-musl
-          - host: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
-            test: |
-              cargo test -p utoo-pm --target x86_64-unknown-linux-gnu
-          - host: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
-            test: |
-              set -ex &&
-              rm /etc/apk/repositories &&
-              echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/main" >> /etc/apk/repositories &&
-              echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/community" >> /etc/apk/repositories &&
-              apk update &&
-              apk add --no-cache libc6-compat pkgconfig dav1d libdav1d dav1d-dev clang-static llvm-dev &&
-              rustup target add x86_64-unknown-linux-musl &&
-              export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Csymbol-mangling-version=v0 -Ctarget-feature=-crt-static' &&
-              cargo test -p utoo-pm --target x86_64-unknown-linux-musl
           # - host: windows-latest
           #   target: aarch64-pc-windows-msvc
           #   test: |

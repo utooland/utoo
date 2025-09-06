@@ -10,7 +10,7 @@ name = "utoo"
 path = "src/main.rs"
 
 [dependencies]
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
 owo-colors = { workspace = true }
 serde = { workspace = true }
 serde_json = "1.0"
@@ -31,7 +31,6 @@ tempfile = "3.15.0"
 deno_semver = "0.7"
 futures = { workspace = true }
 glob = "0.3.1"
-criterion = { workspace = true }
 regex = "1.10"
 anyhow = { workspace = true }
 openssl = { version = "0.10", features = ["vendored"] }
@@ -47,5 +46,5 @@ harness = false
 path = "benches/deps_benchmark.rs"
 
 [dev-dependencies]
+criterion = { workspace = true }
 mockito = "1.7.0"
-tokio = { workspace = true, features = ["test-utili", "macros"] }

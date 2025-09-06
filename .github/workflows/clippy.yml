@@ -2,7 +2,7 @@ name: clippy
 on: [pull_request]
 
 jobs:
-  format:
+  clippy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
