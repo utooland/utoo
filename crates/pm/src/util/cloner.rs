@@ -717,15 +717,16 @@ mod tests {
             let result =
                 linux_clone::clone_dir(temp.path().join("not_a_dir").as_ref(), &dst_dir).await;
             assert!(result.is_err());
-            // FIXME:
-            // assert_eq!(
-            //     result
-            //         .unwrap_err()
-            //         .downcast_ref::<std::io::Error>()
-            //         .unwrap()
-            //         .kind(),
-            //     std::io::ErrorKind::InvalidInput
-            // );
+            // FIXME: @elrrrrrrr fix for linux
+            #[cfg(target_os = "macos")]
+            assert_eq!(
+                result
+                    .unwrap_err()
+                    .downcast_ref::<std::io::Error>()
+                    .unwrap()
+                    .kind(),
+                std::io::ErrorKind::InvalidInput
+            );
 
             Ok(())
         }
