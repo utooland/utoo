@@ -1,8 +1,8 @@
 [package]
-name = "pack-schema"
-version = "0.1.0"
-edition = "2024"
-license = "MIT"
+name        = "pack-schema"
+version     = "0.1.0"
+edition     = "2024"
+license     = "MIT"
 description = "Schema generator for Mako configuration files"
 
 [[bin]]
@@ -10,9 +10,7 @@ name = "pack-schema"
 path = "src/main.rs"
 
 [dependencies]
-serde = { workspace = true }
+pack-core  = { path = "../pack-core" }
+schemars   = { workspace = true }
+serde      = { workspace = true }
 serde_json = { workspace = true }
-schemars = { workspace = true }
-pack-core = { path = "../pack-core" }
-
-

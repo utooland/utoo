@@ -1,6 +1,6 @@
 [package]
-name = "pack-cli"
-version = "0.1.0"
+name              = "pack-cli"
+version           = "0.1.0"
 edition.workspace = true
 license.workspace = true
 
@@ -8,27 +8,26 @@ license.workspace = true
 name = "pack-cli"
 path = "src/main.rs"
 
-
 [dependencies]
-pack-api = { workspace = true }
-pack-core = { workspace = true }
-anyhow = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
-tokio = { workspace = true }
-clap = { workspace = true, features = ["derive", "env"] }
-serde = { workspace = true }
-dunce = { workspace = true }
-rustc-hash = { workspace = true }
-serde_json = { workspace = true }
-owo-colors = { workspace = true }
-swc_core = { workspace = true }
-turbo-rcstr = { workspace = true }
-turbo-tasks = { workspace = true }
-turbo-tasks-backend = { workspace = true }
-turbo-tasks-malloc = { workspace = true }
-turbopack-core = { workspace = true }
-turbopack-cli-utils = { workspace = true }
+anyhow               = { workspace = true }
+clap                 = { workspace = true, features = ["derive", "env"] }
+dunce                = { workspace = true }
+owo-colors           = { workspace = true }
+pack-api             = { workspace = true }
+pack-core            = { workspace = true }
+rustc-hash           = { workspace = true }
+serde                = { workspace = true }
+serde_json           = { workspace = true }
+swc_core             = { workspace = true }
+tokio                = { workspace = true }
+tracing              = { workspace = true }
+tracing-subscriber   = { workspace = true }
+turbo-rcstr          = { workspace = true }
+turbo-tasks          = { workspace = true }
+turbo-tasks-backend  = { workspace = true }
+turbo-tasks-malloc   = { workspace = true }
+turbopack-cli-utils  = { workspace = true }
+turbopack-core       = { workspace = true }
 turbopack-dev-server = { workspace = true }
 
 [target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]
