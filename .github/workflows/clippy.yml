@@ -23,4 +23,5 @@ jobs:
           override: true
           components: clippy
       - name: Cargo clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings --no-deps
+
