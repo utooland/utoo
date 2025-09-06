@@ -1,4 +1,4 @@
-name: utoo-pm-benchmark
+name: utoopm-benchmark
 
 on:
   workflow_dispatch:
