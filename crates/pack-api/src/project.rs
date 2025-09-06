@@ -62,7 +62,6 @@ use crate::{
     endpoint::{Endpoint, Endpoints},
     entrypoint::Entrypoints,
     library::{LibraryEntrypoint, LibraryProject, OptionLibraryProject},
-    tasks::BundlerTurboTasks,
     versioned_content_map::VersionedContentMap,
 };
 
