@@ -714,7 +714,7 @@ mod tests {
 
             // Test case when source path is a file instead of a directory
             create_test_file(&temp.path(), "not_a_dir", b"content").await?;
-            let result = linux_clone::clone_dir(temp.path().join("not_a_dir"), &dst_dir).await;
+            let result = linux_clone::clone_dir(temp.path().join("not_a_dir").as_ref(), &dst_dir).await;
             assert!(result.is_err());
             assert_eq!(
                 result
