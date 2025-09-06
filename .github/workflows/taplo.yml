@@ -7,7 +7,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submoduls: false
+          submodules: false
       - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:

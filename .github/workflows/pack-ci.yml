@@ -71,7 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submoduls: false
+          submodules: false
       - name: Add SSH private keys for submodule repositories
         uses: webfactory/ssh-agent@v0.7.0
         with:
