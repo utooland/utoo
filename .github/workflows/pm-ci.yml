@@ -25,9 +25,6 @@ jobs:
           #   target: x86_64-unknown-linux-musl
           #   docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
           #   test: |
-          #     set -ex &&
-          #     apk update &&
-          #     apk add --no-cache libc6-compat pkgconfig dav1d libdav1d dav1d-dev clang-static llvm-dev &&
           #     rustup target add x86_64-unknown-linux-musl &&
           #     export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Csymbol-mangling-version=v0 -Ctarget-feature=-crt-static' &&
           #     cargo test -p utoo-pm --target x86_64-unknown-linux-musl
@@ -41,9 +38,6 @@ jobs:
           #   target: aarch64-unknown-linux-musl
           #   docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
           #   test: |
-          #     set -e &&
-          #     apk update &&
-          #     apk add --no-cache libc6-compat pkgconfig dav1d libdav1d dav1d-dev clang-static llvm-dev &&
           #     rustup target add aarch64-unknown-linux-musl &&
           #     export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Zunstable-options -Csymbol-mangling-version=v0 -Clinker-flavor=gnu-lld-cc -Clink-self-contained=+linker' &&
           #     cargo test -p utoo-pm --target aarch64-unknown-linux-musl
