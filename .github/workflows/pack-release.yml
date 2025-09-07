@@ -72,7 +72,7 @@ jobs:
               git config --system core.longpaths true &&
               npm run build:binding --workspace=@utoo/pack -- --target x86_64-pc-windows-msvc
             target: x86_64-pc-windows-msvc
-    name: ${{ matrix.settings.target }} - node@20
+    name: utoopack-release-${{ matrix.settings.target }} - node@20
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
