@@ -79,7 +79,7 @@ impl VisitMut for CssModulesImportVisitor {
             .any(|spec| matches!(spec, swc_core::ecma::ast::ImportSpecifier::Default(_)));
 
         if has_default_import && self.should_add_modules_suffix(&source_value) {
-            let new_source = format!("{}?modules", source_value);
+            let new_source = format!("{source_value}?modules");
             import_decl.src = Box::new(quote_str!(new_source));
         }
 

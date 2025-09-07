@@ -1,0 +1,20 @@
+# https://github.com/crate-ci/typos
+# cargo install typos-cli
+# typos
+
+[default]
+
+[files]
+ignore-vcs = true 
+extend-exclude = [
+    "next.js/",
+    "crates/pack-tests/tests/snapshot/**/output/",
+]
+
+[type.sourcemap]
+extend-glob = ["*.js.map"]
+check-file = false
+
+[type.snapshot]
+extend-glob = ["*.snapshot"]
+check-file = false

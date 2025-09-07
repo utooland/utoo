@@ -1,4 +1,4 @@
-name: utoo-release
+name: utoopm-release
 
 on:
   release:

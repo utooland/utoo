@@ -206,25 +206,25 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
         };
 
     // Ensure default output configuration is present
-    if !user_config.get("output").is_some() {
+    if user_config.get("output").is_none() {
         let default_output = serde_json::json!({
             "path": "output"
         });
         user_config["output"] = default_output;
     } else {
         let output = user_config.get("output").unwrap();
-        if !output.get("path").is_some() {
+        if output.get("path").is_none() {
             user_config["output"]["path"] = serde_json::Value::String("output".to_string());
         }
     }
 
     // Ensure default mode is present
-    if !user_config.get("mode").is_some() {
+    if user_config.get("mode").is_none() {
         user_config["mode"] = serde_json::Value::String("production".to_string());
     }
 
     // Ensure optimization is present (minify default to false for snapshots)
-    if !user_config.get("optimization").is_some() {
+    if user_config.get("optimization").is_none() {
         let default_optimization = serde_json::json!({
             "minify": false,
         });
