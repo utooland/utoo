@@ -1,8 +1,5 @@
 name: utooweb-release
 
-env:
-  APP_NAME: "@utoo/web"
-
 on:
   release:
     types: [published]

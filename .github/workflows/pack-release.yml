@@ -1,9 +1,5 @@
 name: utoopack-release
 
-env:
-  DEBUG: napi:*
-  APP_NAME: "@utoo/pack"
-
 on:
   release:
     types: [published]

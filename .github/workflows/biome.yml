@@ -1,5 +1,10 @@
 name: biome
-on: [pull_request]
+
+on:
+  push:
+    branches: ['next']
+  pull_request:
+    types: [opened, synchronize]
 
 jobs:
   biome:
