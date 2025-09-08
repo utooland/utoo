@@ -1,0 +1,16 @@
+#!/bin/sh
+
+# rust clippy check
+cargo clippy --all-targets -- -D warnings --no-deps
+
+# rust fmt check
+cargo fmt --check
+
+# toml fmt check
+taplo format --check
+
+# biome check
+npx biome ci
+
+# typos check
+typos
