@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
-use super::http_client::get_package_manifest;
+use super::http_client::{get_package_manifest, get_package_manifest_with_semver};
 use crate::model::node::EdgeType;
 use crate::util::logger::log_verbose;
 
@@ -29,9 +29,18 @@ pub struct RegistryService;
 
 impl RegistryService {
     pub async fn resolve_package(name: &str, spec: &str) -> Result<ResolvedPackage> {
-        let (version, mut manifest) = get_package_manifest(name, spec).await?;
+        // Try the new semver-based approach first
+        let (version, mut manifest) = match get_package_manifest_with_semver(name, spec).await {
+            Ok(result) => result,
+            Err(_) => {
+                // Fallback to original method for compatibility
+                log_verbose(&format!("Falling back to original method for {name}@{spec}"));
+                get_package_manifest(name, spec).await?
+            }
+        };
+
         log_verbose(&format!("Resolved {name}@{spec} => {version}"));
-        
+
         if let Some(obj) = manifest.as_object_mut() {
             // merge dependencies and devDependencies
             if let Some(optional_deps) = obj.get("optionalDependencies").and_then(|v| v.as_object())
