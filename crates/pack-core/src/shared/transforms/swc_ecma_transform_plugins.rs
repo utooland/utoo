@@ -48,7 +48,7 @@ pub async fn get_swc_ecma_transform_rule_impl(
         SwcEcmaTransformPluginsTransformer, SwcPluginModule,
     };
 
-    use crate::shared::transforms::get_ecma_transform_rule;
+    use crate::shared::transforms::{EcmascriptTransformStage, get_ecma_transform_rule};
 
     let plugins = plugin_configs
         .iter()
