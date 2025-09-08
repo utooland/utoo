@@ -2,7 +2,7 @@ name: format
 
 on:
   push:
-    branches: ['next']
+    branches: ["next"]
   pull_request:
     types: [opened, synchronize]
 
@@ -23,4 +23,4 @@ jobs:
         with:
           command: fmt
           toolchain: nightly-2025-06-04
-          args: --all -- --check
+          args: --check
