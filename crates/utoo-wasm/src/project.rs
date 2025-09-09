@@ -54,7 +54,11 @@ impl Project {
     #[cfg(feature = "utoo-pack")]
     #[wasm_bindgen]
     pub async fn build(&self) -> Result<JsValue, String> {
-        self.init_pack_project().await.map_err(|e| e.to_string())?;
+        use turbopack_core::error::PrettyPrintError;
+
+        self.init_pack_project()
+            .await
+            .map_err(|e| PrettyPrintError(&e).to_string())?;
 
         let pack_project = match self.pack_project.read().as_ref() {
             Some(pack_project) => pack_project.clone(),
@@ -70,7 +74,7 @@ impl Project {
             .await
             .map_err(|e| e.to_string())?
             .map_or_else(
-                |e| Err(e.to_string()),
+                |e| Err(PrettyPrintError(&e).to_string()),
                 |turbopack_result| {
                     serde_wasm_bindgen::to_value(&turbopack_result).map_err(|e| e.to_string())
                 },
