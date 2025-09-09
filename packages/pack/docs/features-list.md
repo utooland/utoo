@@ -39,6 +39,7 @@
 |  | `removeConsole` | ✅ | [terser `drop_console`](https://github.com/terser/terser/blob/da1e6fb2acd90e62bac69967718b89d6f00aab79/README.md?plain=1#L734) |  |
 | Styles | `less` | ✅ | [Webpack `less-loader`](https://github.com/webpack-contrib/less-loader) |  |
 |  | `sass` | ✅ | [Webpack `sass-loader`](https://github.com/webpack-contrib/sass-loader) |  |
+|  | `postcss` | ✅ | [PostCss](https://postcss.org/) |  |
 |  | `inlineCss` | ✅ | [Webpack `style-loader`](https://github.com/webpack-contrib/style-loader) |  |
 |  | `styledJsx` | ✅ | [Vercel `styled-jsx`](https://github.com/vercel/styled-jsx) |  |
 |  | `styledComponents` | ✅ | [Styled Components](https://github.com/styled-components/styled-components) |  |

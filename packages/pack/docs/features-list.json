@@ -262,6 +262,12 @@
           "remarks": ""
         },
         {
+          "featureLevel2": "`postcss`",
+          "featureStatus": "✅",
+          "featureDetails": "[PostCss](https://postcss.org/)",
+          "remarks": ""
+        },
+        {
           "featureLevel2": "`inlineCss`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `style-loader`](https://github.com/webpack-contrib/style-loader)",
