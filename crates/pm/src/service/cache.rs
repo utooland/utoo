@@ -198,9 +198,8 @@ impl PackageCache {
             .or_insert_with(|| Arc::new(RwLock::new(None)))
             .clone();
 
-        // L1 Cache: Fast read-only check with read lock
-        {
-            let cached = shard.read().await;
+        // L1 Cache: Fast read-only check (non-blocking)
+        if let Ok(cached) = shard.try_read() {
             if let Some(ref cached_info) = *cached {
                 if !cached_info.is_expired(Self::MEMORY_CACHE_TTL) {
                     log_verbose(&format!("Memory cache hit for {name}"));
@@ -214,47 +213,40 @@ impl PackageCache {
                     // Continue to reload from disk
                 }
             }
+        } else {
+            log_verbose(&format!("🔍 Could not acquire read lock for {name}, loading from disk"));
         }
 
-        // L2 Cache: Request coalescing with optimized write lock usage
-        let start = Instant::now();
-        let mut cached = shard.write().await;
-        log_verbose(&format!("Acquired write lock for {name}, took {:?}", start.elapsed()));
-
-        // Double-check pattern: another thread might have loaded it while we were waiting
-        if let Some(ref cached_info) = *cached {
-            if !cached_info.is_expired(Self::MEMORY_CACHE_TTL) {
-                log_verbose(&format!("Memory cache hit after write lock for {name}"));
-                let versions_info = Arc::clone(&cached_info.info);
-                // Release write lock before reconstruction to reduce lock contention
-                drop(cached);
-                return Some(self.reconstruct_package_info(&versions_info, name).await);
-            }
-        }
-
-        // Load from disk while holding write lock
+        // L2 Cache: Load from disk without blocking locks (lockless approach)
+        log_verbose(&format!("🔍 Loading {name} from disk (lockless)"));
         let load_start = Instant::now();
         let versions_info = self.load_versions_from_shard(name).await;
 
         match versions_info {
             Some(info) => {
                 log_verbose(&format!("Package versions loaded {name}, took {:?}", load_start.elapsed()));
-                // Create Arc once and reuse
                 let info_arc = Arc::new(info);
-                // Update cache before releasing lock
-                *cached = Some(CachedVersionsInfo {
-                    info: Arc::clone(&info_arc),
-                    loaded_at: SystemTime::now()
-                });
-                // Release write lock immediately after cache update
-                drop(cached);
+                
+                // Try to update cache, but don't block if we can't
+                if let Ok(mut cached) = shard.try_write() {
+                    *cached = Some(CachedVersionsInfo {
+                        info: Arc::clone(&info_arc),
+                        loaded_at: SystemTime::now()
+                    });
+                    log_verbose(&format!("🔍 Cache updated for {name} (lockless)"));
+                } else {
+                    log_verbose(&format!("🔍 Could not update cache for {name}, continuing anyway"));
+                }
+                
                 log_verbose(&format!("Package versions hit for {name}, loaded to memory"));
                 Some(self.reconstruct_package_info(&info_arc, name).await)
             }
             None => {
-                // Clear cache if we didn't find anything
-                *cached = None;
-                drop(cached);
+                // Try to clear cache, but don't block
+                if let Ok(mut cached) = shard.try_write() {
+                    *cached = None;
+                    log_verbose(&format!("🔍 Cache cleared for {name} (lockless)"));
+                }
                 log_verbose(&format!("No cache found for {name}"));
                 None
             }
@@ -274,22 +266,42 @@ impl PackageCache {
             .and_then(|v| v.as_array());
 
         if let Some(version_list) = version_list {
+            log_verbose(&format!("🔍 Reconstructing package info for {name} with {} versions", version_list.len()));
             let mut versions_obj = serde_json::json!({});
 
             // Only load cached manifests (don't try to load all versions from disk)
-            for version_name in version_list {
-                if let Some(version_str) = version_name.as_str() {
-                    let manifest_file = get_package_manifest_cache_file(name, version_str);
-                    // Only load if file exists and is readable (avoid I/O for non-cached versions)
-                    if let Ok(true) = tokio::fs::try_exists(&manifest_file).await {
-                        if let Ok(content) = tokio::fs::read_to_string(&manifest_file).await {
-                            if let Ok(version_manifest) = serde_json::from_str::<VersionManifest>(&content) {
-                                versions_obj[version_str] = version_manifest.manifest;
-                                log_verbose(&format!("Loaded cached manifest for {name}@{version_str}"));
+            // Acquire semaphore permit to limit concurrent file I/O operations
+            let available_permits = self.io_semaphore.available_permits();
+            log_verbose(&format!("🔍 Acquiring I/O semaphore for {name} reconstruction (available: {})", available_permits));
+            let _permit = match self.io_semaphore.acquire().await {
+                Ok(permit) => {
+                    log_verbose(&format!("🔍 I/O semaphore acquired for {name} reconstruction (remaining: {})", self.io_semaphore.available_permits()));
+                    Some(permit)
+                },
+                Err(_) => {
+                    log_verbose(&format!("Failed to acquire I/O semaphore for reconstruct_package_info {name}, skipping manifest loading"));
+                    None
+                }
+            };
+            
+            // Only perform file I/O if we successfully acquired the semaphore permit
+            if _permit.is_some() {
+                for version_name in version_list {
+                    if let Some(version_str) = version_name.as_str() {
+                        let manifest_file = get_package_manifest_cache_file(name, version_str);
+                        // Only load if file exists and is readable (avoid I/O for non-cached versions)
+                        if let Ok(true) = tokio::fs::try_exists(&manifest_file).await {
+                            if let Ok(content) = tokio::fs::read_to_string(&manifest_file).await {
+                                if let Ok(version_manifest) = serde_json::from_str::<VersionManifest>(&content) {
+                                    versions_obj[version_str] = version_manifest.manifest;
+                                    log_verbose(&format!("Loaded cached manifest for {name}@{version_str}"));
+                                }
                             }
                         }
                     }
                 }
+            } else {
+                log_verbose(&format!("Skipping manifest loading for {name} due to semaphore acquisition failure"));
             }
 
             // Always create version object structure for backward compatibility
@@ -309,6 +321,10 @@ impl PackageCache {
             } else {
                 log_verbose(&format!("Reconstructed package info with {} cached manifests for {name}", versions_obj.as_object().unwrap().len()));
             }
+            
+            // Explicitly drop permit to release semaphore
+            drop(_permit);
+            log_verbose(&format!("🔍 Finished reconstructing package info for {name}, semaphore permit released"));
 
             // Replace version array with version object and ensure dist-tags are at top level
             full_data["versions"] = versions_obj;

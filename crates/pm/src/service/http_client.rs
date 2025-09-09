@@ -7,7 +7,7 @@ use tokio_retry::RetryIf;
 
 use super::cache::PACKAGE_CACHE;
 use crate::util::config::get_registry;
-use crate::util::logger::log_verbose;
+use crate::util::logger::{log_error, log_verbose};
 use crate::util::retry::{RetryableError, build_dns_cached_client, create_retry_strategy};
 use crate::util::semver::max_satisfying;
 
@@ -156,6 +156,132 @@ impl RegistryHttpClient {
         Ok((version, manifest))
     }
 
+    /// Get package versions info with caching (name) => (version_list, dist-tags)
+    /// Cache stored at ~/.cache/nm/<name>/versions.json
+    pub async fn get_package_versions(&self, name: &str) -> Result<(Vec<String>, Value)> {
+        // Use get_package_info which handles caching internally to avoid double cache access
+        let package_info = self.get_package_info(name).await?;
+
+        let version_list: Vec<String> = match package_info.get("versions") {
+            Some(versions) => {
+                if let Some(versions_obj) = versions.as_object() {
+                    // Standard npm registry format: versions is an object with version keys
+                    versions_obj.keys().cloned().collect()
+                } else if let Some(versions_array) = versions.as_array() {
+                    // Alternative format: versions is an array of version strings
+                    versions_array
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .collect()
+                } else {
+                    log_verbose(&format!("Unexpected versions format for {}: {:?}", name, versions));
+                    Vec::new()
+                }
+            }
+            None => {
+                log_verbose(&format!("No versions field found for package {}", name));
+                Vec::new()
+            }
+        };
+        let dist_tags = package_info.get("dist-tags").cloned().unwrap_or_default();
+
+        Ok((version_list, dist_tags))
+    }
+
+    /// Get specific version manifest with caching (name, version) => manifest
+    /// Cache stored at ~/.cache/nm/<name>/manifests/<version>.json
+    pub async fn get_package_version_manifest(&self, name: &str, version: &str) -> Result<Value> {
+        // First try to get from versions cache (if we have the full manifest)
+        if let Some((versions, _)) = self.try_get_package_versions_cached(name).await {
+            if let Some(manifest) = versions.get(version) {
+                log_verbose(&format!("Found {name}@{version} manifest in versions cache"));
+                return Ok(manifest.clone());
+            }
+        }
+
+        // Try to load from manifest cache file directly
+        if let Some(manifest) = self.load_version_manifest_from_cache(name, version).await {
+            log_verbose(&format!("Loaded {name}@{version} manifest from cache file"));
+            return Ok(manifest);
+        }
+
+        // Fallback: fetch from registry
+        log_verbose(&format!("Fetching {name}@{version} manifest from registry"));
+        let url = format!("{}/{}/{}", self.base_url, name, version);
+
+        let manifest: Value = RetryIf::spawn(
+            create_retry_strategy(),
+            || async {
+                let response = self
+                    .client
+                    .get(&url)
+                    .header("Accept", "application/vnd.npm.install-v1+json")
+                    .send()
+                    .await
+                    .map_err(|e| RetryableError::Temporary(format!("Network error: {e}")))?;
+
+                if response.status().is_success() {
+                    let manifest = response.json().await.map_err(|e| {
+                        RetryableError::Temporary(format!("Failed to parse JSON response: {e}"))
+                    })?;
+                    Ok(manifest)
+                } else if response.status().as_u16() == 404 {
+                    Err(RetryableError::Permanent(format!(
+                        "Version {version} not found for package {name}"
+                    )))
+                } else {
+                    Err(RetryableError::Temporary(format!(
+                        "HTTP error: {}, url: {}",
+                        response.status(),
+                        url
+                    )))
+                }
+            },
+            |e: &RetryableError| matches!(e, RetryableError::Temporary(_)),
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to fetch version manifest after retries: {e}"))?;
+
+        // Cache the fetched manifest
+        PACKAGE_CACHE.cache_version_manifest(name, version, &manifest).await;
+
+        Ok(manifest)
+    }
+
+    /// Try to get cached package versions without triggering network requests
+    async fn try_get_package_versions_cached(&self, name: &str) -> Option<(Value, Value)> {
+        let cached_info = PACKAGE_CACHE.get_package_info(name).await?;
+        let versions = cached_info.data.get("versions").cloned().unwrap_or_default();
+        let dist_tags = cached_info.data.get("dist-tags").cloned().unwrap_or_default();
+        Some((versions, dist_tags))
+    }
+
+    /// Load version manifest from cache file directly
+    async fn load_version_manifest_from_cache(&self, name: &str, version: &str) -> Option<Value> {
+        let manifest_file = crate::util::cache::get_package_manifest_cache_file(name, version);
+
+        if !tokio::fs::try_exists(&manifest_file).await.unwrap_or(false) {
+            return None;
+        }
+
+        match tokio::fs::read_to_string(&manifest_file).await {
+            Ok(content) => {
+                match serde_json::from_str::<crate::service::cache::VersionManifest>(&content) {
+                    Ok(version_manifest) => Some(version_manifest.manifest),
+                    Err(e) => {
+                        log_verbose(&format!("Failed to parse manifest file for {name}@{version}: {e}"));
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                log_verbose(&format!("Failed to read manifest file for {name}@{version}: {e}"));
+                None
+            }
+        }
+    }
+
     /// Get complete package information with etag caching
     pub async fn get_package_info(&self, name: &str) -> Result<Value> {
         let start = Instant::now();
@@ -180,13 +306,13 @@ impl RegistryHttpClient {
             }
         }
 
-        if cached_info.is_some() {
-            log_verbose(&format!(
-                "Using cached package info for {name}, fetched in {:?}",
-                start.elapsed()
-            ));
-            return Ok(cached_info.unwrap().data);
-        }
+        // if cached_info.is_some() {
+        //     log_verbose(&format!(
+        //         "Using cached package info for {name}, fetched in {:?}",
+        //         start.elapsed()
+        //     ));
+        //     // return Ok(cached_info.unwrap().data);
+        // }
 
         log_verbose(&format!("Fetching package info at {url}"));
 
@@ -276,7 +402,7 @@ impl RegistryHttpClient {
         }
     }
 
-    /// Get package manifest using complete package info and semver matching
+    /// Get package manifest using version cache and semver matching
     pub async fn get_package_manifest_with_semver(&self, name: &str, spec: &str) -> Result<(String, Value)> {
         // First check cache for version
         if let Some(version) = PACKAGE_CACHE.get_version(name, spec).await
@@ -286,52 +412,37 @@ impl RegistryHttpClient {
             return Ok((version, manifest));
         }
 
-        // Get complete package info
-        let package_info = self.get_package_info(name).await?;
-
-        // Extract versions
-        let versions = package_info
-            .get("versions")
-            .and_then(|v| v.as_object())
-            .ok_or_else(|| anyhow::anyhow!("Invalid package info: missing versions {package_info:?}"))?;
+        // Get package versions and dist-tags using the new caching system
+        let (version_list, dist_tags) = self.get_package_versions(name).await?;
 
         // Find the best matching version using semver
         let version_str = if spec == "*" || spec == "latest" {
-            // Get latest version
-            package_info
-                .get("dist-tags")
-                .and_then(|tags| tags.get("latest"))
+            // Get latest version from dist-tags
+            dist_tags
+                .get("latest")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| {
                     // Fallback to highest version
-                    max_satisfying(versions.keys().map(|k| k.as_str()), "*")
+                    max_satisfying(version_list.iter().map(|s| s.as_str()), "*")
                         .map(|v| v.to_string())
                         .unwrap_or_else(|| "latest".to_string())
                 })
         } else {
             // Use semver matching
-            max_satisfying(versions.keys().map(|k| k.as_str()), spec)
+            max_satisfying(version_list.iter().map(|s| s.as_str()), spec)
                 .map(|v| v.to_string())
-                .ok_or_else(|| anyhow::anyhow!("No version found matching {spec}, {versions:?}"))?
+                .ok_or_else(|| anyhow::anyhow!("No version found matching {name}@{spec}, available versions: {}", version_list.join(", ")))?
         };
 
-        // Get the manifest for this version
-        let manifest = versions
-            .get(&version_str)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Version {version_str} not found in package info"))?;
+        // Get the manifest for this version using the new caching system
+        let manifest = self.get_package_version_manifest(name, &version_str).await?;
 
         log_verbose(&format!("Resolved {name}@{spec} => {version_str}"));
 
-        // Update cache
+        // Update cache for the spec -> version mapping
         PACKAGE_CACHE
             .set_manifest(name, spec, &version_str, manifest.clone())
-            .await;
-
-        // Cache the resolved version manifest for future direct access
-        PACKAGE_CACHE
-            .cache_version_manifest(name, &version_str, &manifest)
             .await;
 
         Ok((version_str, manifest))
@@ -351,6 +462,13 @@ pub async fn get_package_manifest_with_semver(name: &str, spec: &str) -> Result<
     REGISTRY_CLIENT.get_package_manifest_with_semver(name, spec).await
 }
 
+pub async fn get_package_versions(name: &str) -> Result<(Vec<String>, Value)> {
+    REGISTRY_CLIENT.get_package_versions(name).await
+}
+
+pub async fn get_package_version_manifest(name: &str, version: &str) -> Result<Value> {
+    REGISTRY_CLIENT.get_package_version_manifest(name, version).await
+}
 #[cfg(test)]
 mod tests {
     use super::RegistryHttpClient;
