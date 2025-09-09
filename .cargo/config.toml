@@ -15,7 +15,12 @@ linker = "aarch64-linux-musl-gcc"
 rustflags = ["-C", "target-feature=-crt-static"]
 
 [target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]
+rustflags = [
+  "--cfg",
+  "tokio_unstable",
+  "-C",
+  "target-feature=+crt-static"
+]
 
 [target.wasm32-unknown-unknown]
 rustflags = [
