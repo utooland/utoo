@@ -3,11 +3,18 @@ export const demoFiles = {
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import Demo from './demo';
+import "./index.css";
+
 // import SassDemo from './sass-demo';
 
 // console.log(SassDemo);
 
 createRoot(document.getElementById('root')).render(<Demo />);
+`,
+  "src/index.css": `
+body {
+  background-color: aliceblue
+}
 `,
   "src/demo.tsx": `
 import React from 'react';

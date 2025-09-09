@@ -287,19 +287,28 @@ pub async fn get_client_module_options_context(
         }
     };
 
-    let postcss_transform_options = PostCssTransformOptions {
-        postcss_package,
-        config_location: PostCssConfigLocation::ProjectPathOrLocalPath,
-        ..Default::default()
-    };
-    let postcss_foreign_transform_options = PostCssTransformOptions {
-        // For node_modules we don't want to resolve postcss config relative to the file being
-        // compiled, instead it only uses the project root postcss config.
-        config_location: PostCssConfigLocation::ProjectPath,
-        ..postcss_transform_options.clone()
-    };
-    let enable_postcss_transform = Some(postcss_transform_options.resolved_cell());
-    let enable_foreign_postcss_transform = Some(postcss_foreign_transform_options.resolved_cell());
+    let postcss_transform_options =
+        postcss_package.map(|postcss_package| PostCssTransformOptions {
+            postcss_package: Some(postcss_package),
+            config_location: PostCssConfigLocation::ProjectPathOrLocalPath,
+            ..Default::default()
+        });
+    let postcss_foreign_transform_options =
+        postcss_transform_options
+            .as_ref()
+            .map(|postcss_transform_options| {
+                PostCssTransformOptions {
+                    // For node_modules we don't want to resolve postcss config relative to the file being
+                    // compiled, instead it only uses the project root postcss config.
+                    config_location: PostCssConfigLocation::ProjectPath,
+                    ..postcss_transform_options.clone()
+                }
+            });
+
+    let enable_postcss_transform = postcss_transform_options
+        .map(|postcss_transform_options| postcss_transform_options.resolved_cell());
+    let enable_foreign_postcss_transform = postcss_foreign_transform_options
+        .map(|postcss_foreign_transform_options| postcss_foreign_transform_options.resolved_cell());
 
     let module_options_context = ModuleOptionsContext {
         ecmascript: EcmascriptOptionsContext {
