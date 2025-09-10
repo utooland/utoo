@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "format:js": "biome check --write .",
+    "biome": "biome check --write .",
     "prepare": "husky"
   },
   "keywords": [],

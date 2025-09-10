@@ -19,6 +19,10 @@ module.exports = [
     module: {
       rules: [
         {
+          test: /raw\/.*/,
+          type: "asset/source",
+        },
+        {
           test: /\.tsx?$/,
           exclude: /node_modules/,
           use: {
@@ -31,10 +35,6 @@ module.exports = [
         {
           test: /\.css$/,
           use: [MiniCssExtractPlugin.loader, "css-loader"],
-        },
-        {
-          test: /raw\/.*/,
-          type: "asset/source",
         },
       ],
     },

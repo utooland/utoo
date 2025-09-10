@@ -1,15 +1,15 @@
 // @ts-ignore
-import AppTsx from "./raw/App.js";
+import AppTsx from "./demo_raw/App.tsx";
 // @ts-ignore
-import IndexTsx from "./raw/index.tsx";
+import IndexTsx from "./demo_raw/index.tsx";
 // @ts-ignore
-import PackageJson from "./raw/package.json";
+import PackageJson from "./demo_raw/package.json";
 // @ts-ignore
-import PackageLock from "./raw/package-lock.json";
+import PackageLock from "./demo_raw/package-lock.json";
 // @ts-ignore
-import UtoopackJson from "./raw/utoopack.json";
+import UtoopackJson from "./demo_raw/utoopack.json";
 
-export const demoFiles = {
+export const demoFiles: Record<string, any> = {
   "src/index.tsx": IndexTsx,
   "src/App.tsx": AppTsx,
   "utoopack.json": UtoopackJson,
