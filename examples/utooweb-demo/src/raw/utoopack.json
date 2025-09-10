@@ -1,0 +1,9 @@
+{
+  "entry": [
+    {
+      "import": "./src/index.tsx",
+      "name": "index"
+    }
+  ],
+  "stats": true
+}
