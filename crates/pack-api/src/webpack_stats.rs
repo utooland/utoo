@@ -163,7 +163,14 @@ pub async fn generate_webpack_stats(output_assets: Vc<OutputAssets>) -> Result<V
     chunk_items
         .iter()
         .map(|(chunk_item, chunks)| async {
-            let size = *chunk_item.content_ident().await?.path.read().len().await?;
+            let size = match chunk_item.content_ident().await?.path.read().len().await {
+                Ok(size_vc) => *size_vc,
+                Err(_) => {
+                    // For virtual file system or other read errors, use None as size
+                    // This prevents the build from failing when dealing with virtual files
+                    None
+                }
+            };
             let path = chunk_item.asset_ident().path().await?.path.clone();
             {
                 let mut modules = modules.lock();
