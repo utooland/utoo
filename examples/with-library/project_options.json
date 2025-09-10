@@ -9,7 +9,10 @@
         "import": "./src/index.ts",
         "library": {
           "name": "MyLibrary",
-          "export": ["default", "value"]
+          "export": [
+            "default",
+            "value"
+          ]
         }
       }
     ],

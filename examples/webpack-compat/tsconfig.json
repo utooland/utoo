@@ -9,6 +9,11 @@
     "strict": true,
     "skipLibCheck": true
   },
-  "include": ["src", "pack.ts"],
-  "exclude": ["dist"]
+  "include": [
+    "src",
+    "pack.ts"
+  ],
+  "exclude": [
+    "dist"
+  ]
 }

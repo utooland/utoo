@@ -11,5 +11,9 @@
     "skipLibCheck": true,
     "noImplicitReturns": true
   },
-  "exclude": ["dist", "webpack.config.js", "genHtml.js"]
+  "exclude": [
+    "dist",
+    "webpack.config.js",
+    "genHtml.js"
+  ]
 }

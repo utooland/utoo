@@ -19,6 +19,10 @@ module.exports = [
     module: {
       rules: [
         {
+          test: /raw\/.*/,
+          type: "asset/source",
+        },
+        {
           test: /\.tsx?$/,
           exclude: /node_modules/,
           use: {
