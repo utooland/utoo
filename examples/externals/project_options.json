@@ -1,8 +1,7 @@
 {
   "$schema": "../../packages/pack/config_schema.json",
-  "rootPath": "../../",
-  "projectPath": "./",
   "config": {
+    "stats": true,
     "entry": [
       {
         "import": "./index.js"
