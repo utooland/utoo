@@ -6,8 +6,8 @@
     "start": "rm -rf dist && webpack serve"
   },
   "dependencies": {
-    "react": "^18",
-    "react-dom": "^18",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
     "@utoo/web": "*",
     "@monaco-editor/react": "^4.4.6"
   },
