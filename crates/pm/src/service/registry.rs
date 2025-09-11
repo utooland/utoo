@@ -30,7 +30,7 @@ pub struct RegistryService;
 impl RegistryService {
     pub async fn resolve_package(name: &str, spec: &str) -> Result<ResolvedPackage> {
         log_verbose(&format!("🔍 RegistryService::resolve_package starting for {}@{}", name, spec));
-        
+
         // Try the new semver-based approach first
         let (version, mut manifest) = match get_package_manifest_with_semver(name, spec).await {
             Ok(result) => result,
@@ -65,7 +65,7 @@ impl RegistryService {
         }
 
         log_verbose(&format!("🔍 RegistryService::resolve_package completed for {}@{} => {}", name, spec, version));
-        
+
         Ok(ResolvedPackage {
             name: name.to_string(),
             version,
@@ -78,20 +78,20 @@ impl RegistryService {
 pub async fn resolve(name: &str, spec: &str) -> Result<ResolvedPackage> {
     let start_time = std::time::Instant::now();
     log_verbose(&format!("🔍 Starting resolve for {}@{}", name, spec));
-    
+
     let result = RegistryService::resolve_package(name, spec).await;
-    
+
     match &result {
         Ok(resolved) => {
-            log_verbose(&format!("🔍 resolve completed for {}@{} => {} in {:?}", 
+            log_verbose(&format!("🔍 resolve completed for {}@{} => {} in {:?}",
                 name, spec, resolved.version, start_time.elapsed()));
         },
         Err(e) => {
-            log_verbose(&format!("🔍 resolve FAILED for {}@{} in {:?}: {}", 
+            log_verbose(&format!("🔍 resolve FAILED for {}@{} in {:?}: {}",
                 name, spec, start_time.elapsed(), e));
         }
     }
-    
+
     result
 }
 
@@ -103,14 +103,14 @@ pub async fn resolve_dependency(
     let start_time = std::time::Instant::now();
     log_verbose(&format!("🔍 Starting resolve_dependency for {}@{} ({})", name, spec, match edge_type {
         EdgeType::Prod => "prod",
-        EdgeType::Dev => "dev", 
+        EdgeType::Dev => "dev",
         EdgeType::Peer => "peer",
         EdgeType::Optional => "optional",
     }));
-    
+
     match resolve(name, spec).await {
         Ok(resolved) => {
-            log_verbose(&format!("🔍 resolve_dependency completed for {}@{} => {} in {:?}", 
+            log_verbose(&format!("🔍 resolve_dependency completed for {}@{} => {} in {:?}",
                 name, spec, resolved.version, start_time.elapsed()));
             Ok(Some(resolved))
         },
@@ -118,13 +118,13 @@ pub async fn resolve_dependency(
             let elapsed = start_time.elapsed();
             if *edge_type == EdgeType::Optional {
                 log_verbose(&format!(
-                    "skipping optional dependency {}@{} due to resolve error after {:?}: {}", 
+                    "skipping optional dependency {}@{} due to resolve error after {:?}: {}",
                     name, spec, elapsed, e
                 ));
                 Ok(None)
             } else {
                 log_verbose(&format!(
-                    "🔍 resolve_dependency FAILED for {}@{} after {:?}: {}", 
+                    "🔍 resolve_dependency FAILED for {}@{} after {:?}: {}",
                     name, spec, elapsed, e
                 ));
                 Err(e)

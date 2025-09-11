@@ -334,7 +334,8 @@ impl RegistryHttpClient {
                 match response.status().as_u16() {
                     304 => {
                         // Not Modified - cache is still valid
-                        log_verbose(&format!("304 Not Modified for {name}, cache is valid"));
+                        let duration = start_time.elapsed();
+                        log_verbose(&format!("304 Not Modified for {name}, cache is valid {response:?}, took {duration:?}"));
                         Ok(None) // Signal to use cached data
                     }
                     200..=299 => {
@@ -460,10 +461,6 @@ pub async fn get_package_info(name: &str) -> Result<Value> {
 
 pub async fn get_package_manifest_with_semver(name: &str, spec: &str) -> Result<(String, Value)> {
     REGISTRY_CLIENT.get_package_manifest_with_semver(name, spec).await
-}
-
-pub async fn get_package_versions(name: &str) -> Result<(Vec<String>, Value)> {
-    REGISTRY_CLIENT.get_package_versions(name).await
 }
 
 pub async fn get_package_version_manifest(name: &str, version: &str) -> Result<Value> {

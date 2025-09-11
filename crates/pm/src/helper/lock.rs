@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::{collections::HashMap, fs};
 
 use crate::helper::workspace::find_workspaces;
+use crate::service::http_client::get_package_version_manifest;
 use crate::util::config::get_legacy_peer_deps;
 use crate::util::json::{load_package_json_from_path, load_package_lock_json_from_path};
 use crate::util::logger::{log_verbose, log_warning};
@@ -434,13 +435,12 @@ pub async fn validate_deps(
                                 dep_info.get("version").and_then(|v| v.as_str())
                                 && !semver::matches(&effective_req_version, actual_version)
                             {
-                                if let Some(resolved_dep) = resolve_dependency(
+                                let resolved_dep = get_package_version_manifest(
                                     dep_name,
                                     &effective_req_version,
-                                    &EdgeType::Optional,
                                 )
-                                .await?
-                                    && resolved_dep.version == actual_version
+                                .await?;
+                                if resolved_dep.get("version").is_some_and(|v| v.as_str() == Some(actual_version))
                                 {
                                     log_verbose(&format!(
                                         "Package {pkg_path} {dep_field} dependency {dep_name} (required version: {req_version_str}, effective version: {effective_req_version}) hit bug-version {current_path}@{actual_version}"
