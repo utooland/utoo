@@ -2,7 +2,7 @@ name: utooweb-ci
 
 on:
   push:
-    branches: ['next']
+    branches: ["next"]
   pull_request:
     types: [opened, synchronize]
 
@@ -30,7 +30,7 @@ jobs:
         run: |
           npm install
           npm install binaryen@123.0.0 --global
-          cargo install -f wasm-bindgen-cli --version 0.2.100
+          cargo install -f wasm-bindgen-cli --version 0.2.101
           rustup target add wasm32-unknown-unknown
           rustup component add rust-src --toolchain nightly-2025-06-04-x86_64-unknown-linux-gnu
       - name: Install rust
@@ -41,4 +41,3 @@ jobs:
         run: |
           npm run build:local --workspace=@utoo/web
           ls packages/utoo-web/esm/utoo
-
