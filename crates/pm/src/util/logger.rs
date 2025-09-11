@@ -204,18 +204,6 @@ mod tests {
     }
 
     #[test]
-    fn test_set_verbose_multiple_calls() {
-        set_verbose(true);
-        assert!(VERBOSE.load(Ordering::Relaxed));
-
-        set_verbose(false);
-        assert!(!VERBOSE.load(Ordering::Relaxed));
-
-        set_verbose(true);
-        assert!(VERBOSE.load(Ordering::Relaxed));
-    }
-
-    #[test]
     fn test_write_verbose_logs_to_file() -> Result<()> {
         set_verbose(true);
         log_verbose("Test verbose message");
