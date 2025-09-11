@@ -34,7 +34,7 @@ async fn clean_node_modules_dir(
     node_modules: &Path,
     cwd: &Path,
     valid_packages: &std::collections::HashSet<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     // clean up symlinks for npminstall
     if let Ok(mut entries) = tokio::fs::read_dir(node_modules).await {
         while let Ok(Some(entry)) = entries.next_entry().await {
@@ -53,7 +53,7 @@ async fn clean_node_modules_dir(
 }
 
 /// Clean up a symlink
-async fn clean_symlink(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+async fn clean_symlink(path: &Path) -> Result<()> {
     log_verbose(&format!("Removing symlink: {}", path.display()));
     if let Err(e) = tokio::fs::remove_file(path).await {
         log_verbose(&format!(
@@ -66,7 +66,7 @@ async fn clean_symlink(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Clean up a directory, handling scoped packages and legacy npm install packages
-async fn clean_directory(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+async fn clean_directory(path: &Path) -> Result<()> {
     if let Some(file_name) = path.file_name()
         && let Some(name) = file_name.to_str()
     {
@@ -80,7 +80,7 @@ async fn clean_directory(path: &Path) -> Result<(), Box<dyn std::error::Error>> 
 }
 
 /// Clean up a scoped package directory
-async fn clean_scoped_package(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+async fn clean_scoped_package(path: &Path) -> Result<()> {
     if let Ok(mut scope_entries) = tokio::fs::read_dir(path).await {
         while let Ok(Some(scope_entry)) = scope_entries.next_entry().await {
             let scope_path = scope_entry.path();
@@ -106,7 +106,7 @@ async fn clean_scoped_package(path: &Path) -> Result<(), Box<dyn std::error::Err
 async fn clean_legacy_npminstall_package(
     path: &Path,
     name: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let at_count = name.matches('@').count();
     if name.starts_with('_') && (at_count == 2 || at_count == 4) {
         log_verbose(&format!("Removing legacy package: {}", path.display()));
@@ -180,7 +180,7 @@ async fn clean_unused_packages(
 async fn clean_deps(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let mut valid_packages = std::collections::HashSet::new();
     for packages in groups.values() {
         for (path, _) in packages {
@@ -217,7 +217,7 @@ pub async fn install_packages(
     cache_dir: &Path,
     cwd: &Path,
     semaphore: Arc<Semaphore>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     // clean unused deps
     clean_deps(groups, cwd).await?;
 
@@ -227,7 +227,7 @@ pub async fn install_packages(
     for depth in depths.iter() {
         if let Some(packages) = groups.get(depth) {
             let mut tasks: Vec<
-                tokio::task::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+                tokio::task::JoinHandle<Result<()>>,
             > = Vec::new();
             for (path, package) in packages.iter() {
                 let path = path.clone();
@@ -293,10 +293,7 @@ pub async fn install_packages(
                                         cache_path.display(),
                                         e
                                     ));
-                                    return Err(Box::new(std::io::Error::other(format!(
-                                        "{name} download failed: {e}"
-                                    )))
-                                        as Box<dyn std::error::Error + Send + Sync>);
+                                    return Err(anyhow::anyhow!("{name} download failed: {e}"));
                                 }
                             }
                         }
@@ -479,7 +476,7 @@ mod tests {
     use tokio::fs;
 
     #[tokio::test]
-    async fn test_clean_symlink() -> Result<(), Box<dyn std::error::Error>> {
+    async fn test_clean_symlink() -> Result<()> {
         let temp_dir = TempDir::new()?;
         let target_dir = temp_dir.path().join("utoo-cli");
         let symlink_path = temp_dir.path().join("symlink");
@@ -504,7 +501,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_clean_scoped_package() -> Result<(), Box<dyn std::error::Error>> {
+    async fn test_clean_scoped_package() -> Result<()> {
         let temp_dir = TempDir::new()?;
         let scope_dir = temp_dir.path().join("@utoo");
         fs::create_dir(&scope_dir).await?;
@@ -530,7 +527,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_clean_legacy_npminstall_package() -> Result<(), Box<dyn std::error::Error>> {
+    async fn test_clean_legacy_npminstall_package() -> Result<()> {
         let temp_dir = TempDir::new()?;
         let legacy_dir = temp_dir.path().join("_utoo-cli@1.0.0@2.0.0");
         fs::create_dir(&legacy_dir).await?;

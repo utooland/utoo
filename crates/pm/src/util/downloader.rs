@@ -99,7 +99,7 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-async fn try_unpack(bytes: &[u8], dest: &Path) -> Result<(), Box<dyn std::error::Error>> {
+async fn try_unpack(bytes: &[u8], dest: &Path) -> Result<()> {
     fs::create_dir_all(dest)?;
 
     let tar_tgz = GzipDecoder::new(BufReader::new(bytes));
@@ -110,26 +110,26 @@ async fn try_unpack(bytes: &[u8], dest: &Path) -> Result<(), Box<dyn std::error:
         let mut archive = TarArchive::new(tar_gz);
 
         for entry in archive.entries()? {
-            let mut file = entry.map_err(|e| format!("Failed to read file entry: {e}"))?;
+            let mut file = entry.map_err(|e| anyhow::anyhow!("Failed to read file entry: {e}"))?;
             let path = file
                 .path()
-                .map_err(|e| format!("Failed to parse file path: {e}"))?
+                .map_err(|e| anyhow::anyhow!("Failed to parse file path: {e}"))?
                 .into_owned();
             let full_path = dest.join(&path);
 
             if let Some(parent) = full_path.parent() {
                 fs::create_dir_all(parent).map_err(|e| {
-                    format!("Failed to create directory {}: {}", parent.display(), e)
+                    anyhow::anyhow!("Failed to create directory {}: {}", parent.display(), e)
                 })?;
             }
 
             file.unpack(&full_path)
-                .map_err(|e| format!("Failed to unpack file {}: {}", path.display(), e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to unpack file {}: {}", path.display(), e))?;
 
             let permissions = if full_path.is_dir() { 0o755 } else { 0o644 };
 
             fs::set_permissions(&full_path, fs::Permissions::from_mode(permissions))
-                .map_err(|e| format!("Failed to set permissions {}: {}", path.display(), e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to set permissions {}: {}", path.display(), e))?;
         }
     }
 
