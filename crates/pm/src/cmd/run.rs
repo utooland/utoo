@@ -132,7 +132,7 @@ pub async fn run_script(
 /// Check if a workspace has the specified script configured
 async fn need_run(cwd: &Path, workspace_name: &str, script_name: &str) -> Result<bool> {
     // Find the workspace path
-    let workspace_dir = match find_workspace_path(&cwd, workspace_name).await {
+    let workspace_dir = match find_workspace_path(cwd, workspace_name).await {
         Ok(path) => path,
         Err(_) => {
             log_info(&format!("Workspace '{workspace_name}' not found, skipping"));
