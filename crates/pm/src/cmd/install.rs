@@ -56,7 +56,7 @@ mod tests {
             &[],
             None,
             false,
-            SaveType::Save,
+            SaveType::Prod,
         ).await;
         assert!(result.is_err(), "Should fail with empty specs");
     }

@@ -245,7 +245,7 @@ pub async fn install_packages(
                             log_verbose(&format!(
                                 "Link failed: source={resolved}, target={path}, error={e}"
                             ));
-                            return Err(format!("Link failed: {e}").into());
+                            return Err(anyhow::anyhow!("Link failed: {e}"));
                         }
                         PROGRESS_BAR.inc(1);
                         continue;
@@ -307,13 +307,12 @@ pub async fn install_packages(
                                 update_package_binary(&cwd_clone.join(&path), &name).await?;
                                 Ok(())
                             }
-                            Err(e) => Err(format!(
+                            Err(e) => Err(anyhow::anyhow!(
                                 "Copy failed {} to {}: {}",
                                 cache_path.display(),
                                 cwd_clone.join(&path).display(),
                                 e
-                            )
-                            .into()),
+                            )),
                         }
                     });
                     tasks.push(task);
@@ -328,11 +327,11 @@ pub async fn install_packages(
                     Ok(Ok(())) => continue,
                     Ok(Err(e)) => {
                         log_verbose(&format!("Task execution error: {e}"));
-                        return Err(format!("Error during installation: {e}").into());
+                        return Err(anyhow::anyhow!("Error during installation: {e}"));
                     }
                     Err(e) => {
                         log_verbose(&format!("Task join error: {e}"));
-                        return Err(format!("Task execution failed: {e}").into());
+                        return Err(anyhow::anyhow!("Task execution failed: {e}"));
                     }
                 }
             }
