@@ -109,14 +109,20 @@ async function buildInternal(
   await project.shutdown();
 
   if (process.env.ANALYZE) {
-    await analyzeBundle(projectPath || process.cwd(), bundleOptions.config.output?.path || "dist");
+    await analyzeBundle(
+      projectPath || process.cwd(),
+      bundleOptions.config.output?.path || "dist",
+    );
   }
 
   // TODO: Maybe run tasks in worker is a better way, see
   // https://github.com/vercel/next.js/blob/512d8283054407ab92b2583ecce3b253c3be7b85/packages/next/src/lib/worker.ts
 }
 
-async function analyzeBundle(projectPath: string, outputPath: string): Promise<void> { console.log("ANALYZE: analyzeBundle called!");
+async function analyzeBundle(
+  projectPath: string,
+  outputPath: string,
+): Promise<void> {
   const statsPath = join(projectPath, outputPath, "stats.json");
 
   if (!existsSync(statsPath)) {
@@ -130,15 +136,6 @@ async function analyzeBundle(projectPath: string, outputPath: string): Promise<v
     const analyzer = spawn("npx", ["webpack-bundle-analyzer", statsPath], {
       stdio: "inherit",
       shell: true,
-    });
-
-    analyzer.on("close", (code) => {
-      if (code === 0) {
-        console.log("Bundle analysis completed.");
-        resolve();
-      } else {
-        reject(new Error(`Bundle analyzer exited with code ${code}`));
-      }
     });
 
     analyzer.on("error", (error) => {
