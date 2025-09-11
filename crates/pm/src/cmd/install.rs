@@ -43,21 +43,18 @@ mod tests {
         // Test installing with empty package spec
         let result = install_global_package("", None).await;
         assert!(result.is_err(), "Should fail with empty package spec");
-        
+
         let result = install_global_package("   ", None).await;
-        assert!(result.is_err(), "Should fail with whitespace-only package spec");
+        assert!(
+            result.is_err(),
+            "Should fail with whitespace-only package spec"
+        );
     }
 
     #[tokio::test]
     async fn test_update_packages_empty_specs() {
         // Test update with empty specs
-        let result = update_packages(
-            PackageAction::Add,
-            &[],
-            None,
-            false,
-            SaveType::Prod,
-        ).await;
+        let result = update_packages(PackageAction::Add, &[], None, false, SaveType::Prod).await;
         assert!(result.is_err(), "Should fail with empty specs");
     }
 }

@@ -12,8 +12,8 @@ use tokio::sync::Semaphore;
 use crate::cmd::rebuild::rebuild;
 use crate::helper::global_bin::get_global_bin_dir;
 use crate::helper::lock::{
-    PackageLock, ensure_package_lock, group_by_depth, prepare_global_package_json,
-    update_package_json, Package, extract_package_name, path_to_pkg_name
+    Package, PackageLock, ensure_package_lock, extract_package_name, group_by_depth,
+    path_to_pkg_name, prepare_global_package_json, update_package_json,
 };
 use crate::helper::workspace;
 use crate::helper::{is_cpu_compatible, is_os_compatible};
@@ -23,7 +23,7 @@ use crate::util::cloner::clone;
 use crate::util::downloader::download;
 use crate::util::linker::link;
 use crate::util::logger::{
-    PROGRESS_BAR, finish_progress_bar, log_info, log_progress, log_verbose, start_progress_bar
+    PROGRESS_BAR, finish_progress_bar, log_info, log_progress, log_verbose, start_progress_bar,
 };
 use crate::util::save_type::{PackageAction, SaveType};
 
@@ -103,10 +103,7 @@ async fn clean_scoped_package(path: &Path) -> Result<()> {
 }
 
 /// Clean up a legacy npminstall package
-async fn clean_legacy_npminstall_package(
-    path: &Path,
-    name: &str,
-) -> Result<()> {
+async fn clean_legacy_npminstall_package(path: &Path, name: &str) -> Result<()> {
     let at_count = name.matches('@').count();
     if name.starts_with('_') && (at_count == 2 || at_count == 4) {
         log_verbose(&format!("Removing legacy package: {}", path.display()));
@@ -177,10 +174,7 @@ async fn clean_unused_packages(
     Ok(())
 }
 
-async fn clean_deps(
-    groups: &HashMap<usize, Vec<(String, Package)>>,
-    cwd: &Path,
-) -> Result<()> {
+async fn clean_deps(groups: &HashMap<usize, Vec<(String, Package)>>, cwd: &Path) -> Result<()> {
     let mut valid_packages = std::collections::HashSet::new();
     for packages in groups.values() {
         for (path, _) in packages {
@@ -226,9 +220,7 @@ pub async fn install_packages(
 
     for depth in depths.iter() {
         if let Some(packages) = groups.get(depth) {
-            let mut tasks: Vec<
-                tokio::task::JoinHandle<Result<()>>,
-            > = Vec::new();
+            let mut tasks: Vec<tokio::task::JoinHandle<Result<()>>> = Vec::new();
             for (path, package) in packages.iter() {
                 let path = path.clone();
                 let package = package.clone();
@@ -447,8 +439,8 @@ impl InstallService {
             .map_err(|e| anyhow::anyhow!("Failed to install global package dependencies: {}", e))?;
 
         // Create package info from path
-        let package_info =
-            PackageInfo::from_path(&package_path).context("Failed to create package info from path")?;
+        let package_info = PackageInfo::from_path(&package_path)
+            .context("Failed to create package info from path")?;
 
         // Get global bin directory using the common helper
         let target_bin_dir =

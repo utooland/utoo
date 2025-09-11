@@ -31,7 +31,6 @@ impl RegistryHttpClient {
         }
     }
 
-
     fn build_url(&self, name: &str, spec: &str) -> String {
         if spec.starts_with("npm:") {
             let npm_spec = spec.strip_prefix("npm:").unwrap();

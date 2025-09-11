@@ -360,7 +360,9 @@ async fn main() -> Result<()> {
                     if specs.len() == 1 { "" } else { "s" }
                 ));
             } else {
-                return Err(anyhow::anyhow!("Package specification is required for uninstall"));
+                return Err(anyhow::anyhow!(
+                    "Package specification is required for uninstall"
+                ));
             }
         }
         Some(Commands::Rebuild) => {

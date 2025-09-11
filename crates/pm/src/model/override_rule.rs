@@ -1,8 +1,8 @@
-use serde_json::Value;
 use super::super::helper::package::parse_package_spec;
 use super::super::util::json::merge_json_objects;
-use super::super::util::semver::{is_valid_version, matches};
 use super::super::util::registry::resolve;
+use super::super::util::semver::{is_valid_version, matches};
+use serde_json::Value;
 
 #[derive(Debug, Clone)]
 pub struct OverrideRule {
@@ -42,7 +42,7 @@ impl Overrides {
         let mut rules = Vec::new();
         let parser = Self::new(pkg.clone());
         parser.parse_rules(&merged_value, None, &mut rules);
-        
+
         Some(Self {
             package: pkg,
             rules,

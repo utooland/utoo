@@ -45,7 +45,6 @@ pub async fn get_node_from_root_by_path(root: &Arc<Node>, pkg_path: &str) -> Res
     Ok(current_node)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,5 +106,4 @@ mod tests {
         let node = result.unwrap();
         assert_eq!(node.name, "test-package");
     }
-
 }

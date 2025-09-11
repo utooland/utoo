@@ -9,12 +9,12 @@ use tokio::sync::Semaphore;
 
 use crate::helper::install_runtime::install_runtime;
 use crate::helper::workspace::find_workspaces;
+use crate::model::node::{Edge, EdgeType, Node};
 use crate::util::config::get_legacy_peer_deps;
 use crate::util::json::load_package_json_from_path;
 use crate::util::logger::{
     PROGRESS_BAR, finish_progress_bar, log_progress, log_verbose, start_progress_bar,
 };
-use crate::model::node::{Edge, EdgeType, Node};
 use crate::util::node_search::get_node_from_root_by_path;
 use crate::util::registry::{ResolvedPackage, load_cache, resolve_dependency, store_cache};
 use crate::util::semver::matches;

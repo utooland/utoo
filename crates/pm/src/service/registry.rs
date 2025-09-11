@@ -31,7 +31,7 @@ impl RegistryService {
     pub async fn resolve_package(name: &str, spec: &str) -> Result<ResolvedPackage> {
         let (version, mut manifest) = get_package_manifest(name, spec).await?;
         log_verbose(&format!("Resolved {name}@{spec} => {version}"));
-        
+
         if let Some(obj) = manifest.as_object_mut() {
             // merge dependencies and devDependencies
             if let Some(optional_deps) = obj.get("optionalDependencies").and_then(|v| v.as_object())

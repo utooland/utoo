@@ -128,8 +128,9 @@ async fn try_unpack(bytes: &[u8], dest: &Path) -> Result<()> {
 
             let permissions = if full_path.is_dir() { 0o755 } else { 0o644 };
 
-            fs::set_permissions(&full_path, fs::Permissions::from_mode(permissions))
-                .map_err(|e| anyhow::anyhow!("Failed to set permissions {}: {}", path.display(), e))?;
+            fs::set_permissions(&full_path, fs::Permissions::from_mode(permissions)).map_err(
+                |e| anyhow::anyhow!("Failed to set permissions {}: {}", path.display(), e),
+            )?;
         }
     }
 
