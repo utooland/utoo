@@ -61,24 +61,7 @@ impl PackageManagementService {
     /// Parse a package spec and resolve the latest version
     async fn parse_package_spec(package_spec: &str) -> Result<(String, String, String)> {
         let (name, version_spec) = crate::util::cache::parse_pattern(package_spec);
-
-        // If no version specified, resolve latest
-        let version = if version_spec == "*" {
-            // Resolve the latest version
-            match crate::util::registry::resolve(&name, "*").await {
-                Ok(resolved) => resolved.version,
-                Err(e) => {
-                    return Err(anyhow::anyhow!(
-                        "Failed to resolve package '{}': {}",
-                        name,
-                        e
-                    ));
-                }
-            }
-        } else {
-            version_spec
-        };
-
-        Ok((name, version, package_spec.to_string()))
+        let resolved = crate::util::registry::resolve(&name, &version_spec).await?;
+        Ok((name, resolved.version, package_spec.to_string()))
     }
 }

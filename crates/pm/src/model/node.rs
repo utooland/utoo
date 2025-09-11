@@ -161,6 +161,10 @@ impl Node {
         self.node_type == NodeType::Workspace
     }
 
+    pub fn is_link(&self) -> bool {
+        self.node_type == NodeType::Link
+    }
+
     // Add incoming edge reference
     pub fn add_invoke(&self, edge: &Arc<Edge>) {
         let mut edges = self.edges_in.write().unwrap();

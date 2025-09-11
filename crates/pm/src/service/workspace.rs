@@ -32,7 +32,7 @@ impl WorkspaceService {
             // Collect workspace nodes
             for child in ideal_tree.children.read().unwrap().iter() {
                 let name = child.name.clone();
-                if child.is_link {
+                if child.is_link() {
                     continue;
                 }
                 workspace_names.insert(name.clone());

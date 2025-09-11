@@ -509,7 +509,7 @@ impl Ruborist {
 
         // find the deps between workspace
         for workspace in children.iter() {
-            if workspace.is_link {
+            if workspace.is_link() {
                 continue;
             }
             PROGRESS_BAR.inc_length(1);

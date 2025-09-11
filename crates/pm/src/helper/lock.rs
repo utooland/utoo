@@ -177,7 +177,7 @@ pub async fn parse_package_spec(spec: &str) -> Result<(String, String, String)> 
 
 pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -> Result<PathBuf> {
     // Parse package name and version
-    let (name, _version, version_spec) = parse_package_spec(npm_spec).await?;
+    let (name, version, version_spec) = parse_package_spec(npm_spec).await?;
     let lib_path = match prefix {
         Some(prefix) => PathBuf::from(prefix).join("lib/node_modules"),
         None => {
@@ -552,7 +552,7 @@ fn check_duplicate_dependencies(node: &Arc<Node>) {
     let mut name_count = HashMap::new();
 
     for child in children.iter() {
-        if !child.is_link {
+        if !child.is_link() {
             *name_count.entry(child.name.as_str()).or_insert(0) += 1;
         }
     }
@@ -607,7 +607,7 @@ fn create_non_root_package_info(
 
     if node.is_workspace() {
         info["version"] = json!(node.package.get("version"));
-    } else if node.is_link {
+    } else if node.is_link() {
         info["link"] = json!(true);
         let target_path = get_relative_target_path(node, root_path);
         info["resolved"] = json!(target_path);
@@ -665,7 +665,7 @@ fn add_package_fields(pkg_info: &mut Value, node: &Arc<Node>) {
 
 /// Get the list of fields to include based on node type
 fn get_package_fields(node: &Arc<Node>) -> Vec<&'static str> {
-    if node.is_link {
+    if node.is_link() {
         vec![]
     } else if node.is_root() {
         vec![
