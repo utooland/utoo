@@ -22,7 +22,6 @@ use std::path::PathBuf;
 // let bin_dir = get_global_bin_dir(Some("/usr/local"))?;
 // ```
 
-
 fn get_current_exe_dir() -> Result<PathBuf> {
     Ok(std::env::current_exe()
         .context("Failed to get current executable path")?
@@ -34,7 +33,7 @@ fn get_current_exe_dir() -> Result<PathBuf> {
 pub fn get_global_bin_dir(prefix: Option<&str>) -> Result<PathBuf> {
     match prefix {
         Some(prefix) => Ok(PathBuf::from(prefix).join("bin")),
-        None => Ok(get_current_exe_dir()?)
+        None => Ok(get_current_exe_dir()?),
     }
 }
 
@@ -54,7 +53,7 @@ mod tests {
     fn test_get_global_bin_dir_with_prefix() {
         let prefix: Option<&str> = Some("/usr/local");
         let result = get_global_bin_dir(prefix).unwrap();
-        assert_eq!(result, PathBuf::from("/usr/local/lib/node_modules/bin"));
+        assert_eq!(result, PathBuf::from("/usr/local/bin"));
     }
 
     #[test]
@@ -63,9 +62,7 @@ mod tests {
             .expect("current_exe should exist")
             .parent()
             .expect("exe should have a parent directory")
-            .to_path_buf()
-            .join("lib/node_modules")
-            .join("bin");
+            .to_path_buf();
         let result = get_global_bin_dir(None).unwrap();
         assert_eq!(result, expected);
     }
@@ -74,6 +71,13 @@ mod tests {
     fn test_get_global_bin_dir_with_empty_prefix() {
         let prefix: Option<&str> = Some("");
         let result = get_global_bin_dir(prefix).unwrap();
-        assert_eq!(result, PathBuf::from("lib/node_modules/bin"));
+        assert_eq!(result, PathBuf::from("bin"));
+    }
+
+    #[test]
+    fn test_get_global_package_dir_with_empty_prefix() {
+        let prefix: Option<&str> = Some("");
+        let result = get_global_package_dir(prefix).unwrap();
+        assert_eq!(result, PathBuf::from("lib/node_modules"));
     }
 }
