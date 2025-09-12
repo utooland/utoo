@@ -24,7 +24,7 @@ pub async fn link_current_to_global(prefix: Option<&str>) -> Result<()> {
         anyhow::anyhow!("Failed to prepare dependencies for package to link: {}", e)
     })?;
 
-    let global_package_path = get_global_package_dir(&prefix)?.join(package_info.name.clone());
+    let global_package_path = get_global_package_dir(prefix)?.join(&package_info.name);
     // link local project to global package
     link(&project_path, &global_package_path).with_context(|| {
         format!(
@@ -55,7 +55,7 @@ pub async fn link_global_to_local(package_name: &str, prefix: Option<&str>) -> R
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
     let project_path = update_cwd_to_project(&cwd).await?;
 
-    let global_package_path = get_global_package_dir(&prefix)?.join(package_name);
+    let global_package_path = get_global_package_dir(prefix)?.join(package_name);
 
     // Create package info from path
     let package_info = PackageInfo::from_path(&global_package_path).with_context(|| {
@@ -85,7 +85,7 @@ pub async fn link_global_to_local(package_name: &str, prefix: Option<&str>) -> R
     if package_info.has_bin_files() {
         log_verbose(&format!(
             "Linking binary files to project bin directory: {}",
-            package_info.name
+            &package_info.name
         ));
         let bin_dir = project_path.join("node_modules/.bin");
         package_info
