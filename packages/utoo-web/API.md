@@ -1,6 +1,8 @@
-# `@utoo/web` API Documentation
+# [`@utoo/web`]## Quick Start Guide
 
-`@utoo/web` is a powerful library that enables you to run a complete web development environment, including a virtual file system, dependency management, and a build process, entirely within the browser. It deeply integrates `utoopack`, a new builder based on Rust and Turbopack, and leverages modern web technologies like Web Workers, Service Workers, and the Origin Private File System (OPFS) to provide a seamless and fast development experience without a backend server.
+Getting a project up and running involves four main steps, as demonstrated in `examples/utooweb-demo`. You can also experience the demo online at [`utoo-repl`](https://utoo-repl.vercel.app/).tps://www.npmjs.com/package/@utoo/web) API Documentation
+
+`@utoo/web` is a powerful library that enables you to run a complete web development environment, including a virtual file system, dependency management, and a build process, entirely within the browser. It deeply integrates [`utoopack`](https://github.com/utooland/utoo), a new builder based on [`Rust`](https://www.rust-lang.org/) and [`turbopack`](https://nextjs.org/docs/app/api-reference/turbopack), and leverages modern web technologies like Web Workers, Service Workers, and the Origin Private File System (OPFS) to provide a seamless and fast development experience without a backend server.
 
 ## Core Concepts
 
@@ -8,14 +10,14 @@ Before diving into the API, it's important to understand the four main component
 
 1.  **Virtual File System**: The entire project, including source code and `node_modules`, lives in the browser's Origin Private File System (OPFS). The `Project` class provides a Node.js-like `fs` interface to interact with it.
 2.  **Project Main Worker**: The core logic of the `Project` instance runs within its own Web Worker. The `Project` object you interact with in the main thread is a proxy that delegates all core tasks (like file system operations) to this worker. This architecture is key to keeping the UI responsive.
-3.  **Thread Worker**: Heavy tasks like bundling and compilation are offloaded to a dedicated Web Worker. This ensures the main UI thread remains responsive, even during a build.
+3.  **Thread Worker**: Heavy tasks like bundling and compilation are offloaded to a dedicated Web Worker. This ensures the main UI thread remains responsive, even during a build. We have ported [`tokio`](https://github.com/utooland/tokio) to the browser to take full advantage of multi-core CPUs for improved performance. The **Thread Worker** will be completely taken over by the tokio runtime.
 4.  **Service Worker**: A Service Worker acts as a local server. It intercepts requests from the preview `iframe`, reads the corresponding files from the OPFS, and serves them back, allowing you to preview your built application.
 
 ---
 
 ## Quick Start Guide
 
-Getting a project up and running involves four main steps, as demonstrated in `examples/utooweb-demo`.
+Getting a project up and running involves four main steps, as demonstrated in `examples/utooweb-demo`. You can also experience the demo online at [`utoo-repl`](https://utoo-repl.vercel.app).
 
 ### 1. Instantiate the Project
 
@@ -152,6 +154,20 @@ Creates a new directory.
 
 *   `path` (string): The path to the directory to be created.
 
+#### `project.rm(path, options)`
+
+Removes a file or directory.
+
+*   `path` (string): The path to the file or directory to be removed.
+*   `options` (object, optional):
+    *   `recursive` (boolean): If `true`, performs a recursive directory removal. Defaults to `false`.
+
+#### `project.rmdir(path)`
+
+Removes a directory.
+
+*   `path` (string): The path to the directory to be removed.
+
 ### Preview Functionality
 
 #### `project.installServiceWorker()`
@@ -210,7 +226,7 @@ The `utooweb-demo` shows a complete workflow for editing, building, and previewi
     await project.writeFile("dist/index.html", generatedHtml);
     ```
 
-4.  **Previewing**: The `Preview` component contains an `iframe` whose `src` points to the entry point within the service worker's scope (e.g., `/preview/dist/index.html`). When the build completes, the `iframe` is reloaded, causing the service worker to serve the newly generated files from the OPFS.
+4.  **Previewing**: The `Preview` component contains an `iframe` whose `src` points to the entry point within the service worker's scope (e.g., `/preview/dist/index.html`). When the build completes, the `iframe` reloads from the Service Worker with the newly generated artifact files from OPFS.
 
 This cycle provides a fast and interactive development loop, all running locally in the user's browser.
 
@@ -283,3 +299,8 @@ import "@utoo/web/esm/serviceWorker";
 ```
 
 Your build setup should be configured to output these files to a location that your main application can access, so you can provide their URLs to the `UtooProject` constructor.
+
+## Notes
+* Due to the current default memory allocator for Rust, [`dlmalloc`](https://github.com/alexcrichton/dlmalloc-rs), having less than ideal performance on multi-threaded `wasm`, we are currently trying to support [`mimalloc`](https://github.com/microsoft/mimalloc) with reference to [`emscripten`](https://emscripten.org/docs/tools_reference/settings_reference.html#malloc)'s solution. Once successful, the build speed will be greatly improved;
+* In the future, we will also support the [`HMR`](https://webpack.js.org/concepts/hot-module-replacement/) feature in the browser;
+* Advanced features of turbopack such as [`webpack loaders`](https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#configuring-webpack-loaders), [`persistent caching`](https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopackPersistentCaching), are also in the plan and will be supported directly in the browser in the future.

@@ -1,21 +1,21 @@
-# `@utoo/web` API 文档
+# [`@utoo/web`](https://www.npmjs.com/package/@utoo/web) API 文档
 
-`@utoo/web` 是一个功能强大的库，它允许您在浏览器中完整地运行一套 Web 开发环境，包括虚拟文件系统、依赖管理和构建流程。它深度整合了基于 Rust 和 Turbopack 的全新构建器 `utoopack`，并利用 Web Workers、Service Workers 和源私有文件系统（OPFS）等现代 Web 技术，提供无缝且快速的开发体验，无需后端服务器。
+`@utoo/web` 是一个功能强大的库，它允许您在浏览器中完整地运行一套 Web 开发环境，包括虚拟文件系统、依赖管理和构建流程。它深度整合了基于 [`Rust`](https://www.rust-lang.org/) 和 [`turbopack`](https://nextjs.org/docs/app/api-reference/turbopack) 的全新构建器 [`utoopack`](https://github.com/utooland/utoo)，并利用 Web Workers、Service Workers 和源私有文件系统（OPFS）等现代 Web 技术，提供无缝且快速的开发体验，无需后端服务器。
 
 ## 核心概念
 
 在深入了解 API 之前，理解构成 `@utoo/web` 的四个主要组件非常重要：
 
-1.  **虚拟文件系统 (Virtual File System)**：整个项目，包括源代码和 `node_modules`，都存在于浏览器的源私有文件系统（OPFS）中。`Project` 类提供了一个类似 Node.js `fs` 的接口来与其交互。
+1.  **Virtual File System**：整个项目，包括源代码和 `node_modules`，都存在于浏览器的源私有文件系统（OPFS）中。`Project` 类提供了一个类似 Node.js `fs` 的接口来与其交互。
 2.  **Project Main Worker**：`Project` 实例的核心逻辑运行在它自己的 Web Worker 中。您在主线程中与之交互的 `Project` 对象实际上是一个代理，它将所有核心任务（如文件系统操作）委托给此 Worker。这种架构是保持 UI 响应流畅的关键。
-3.  **Thread Worker**：像打包和编译这样的重度任务被卸载到一个专用的 Web Worker 中。这确保了即使在构建过程中，主 UI 线程也能保持响应。
+3.  **Thread Worker**：像打包和编译这样的重度任务被卸载到一个专用的 Web Worker 中。这确保了即使在构建过程中，主 UI 线程也能保持响应。我们将 [`tokio`](https://github.com/utooland/tokio) 移植到了浏览器上，以充分利用多核 CPU 提升性能。**Thread Worker** 将完全被 tokio runtime 接管。
 4.  **Service Worker**：Service Worker 充当本地服务器。它拦截来自预览 `iframe` 的请求，从 OPFS 中读取相应的文件，并将其提供回去，从而允许您预览构建好的应用程序。
 
 ---
 
 ## 快速上手指南
 
-启动一个项目主要涉及四个步骤，如 `examples/utooweb-demo` 中所示。
+启动一个项目主要涉及四个步骤，如 `examples/utooweb-demo` 中所示。你也可以在 [`utoo-repl`](https://utoo-repl.vercel.app) 在线体验演示效果。
 
 ### 1. 实例化项目
 
@@ -152,6 +152,20 @@ await project.writeFile('utoopack.json', JSON.stringify(utoopackConfig, null, 2)
 
 *   `path` (string): 要创建的目录的路径。
 
+#### `project.rm(path, options)`
+
+删除一个文件或目录。
+
+*   `path` (string): 要删除的文件或目录的路径。
+*   `options` (object, 可选):
+    *   `recursive` (boolean): 如果为 `true`，则执行递归目录删除。默认为 `false`。
+
+#### `project.rmdir(path)`
+
+删除一个目录。
+
+*   `path` (string): 要删除的目录的路径。
+
 ### 预览功能
 
 #### `project.installServiceWorker()`
@@ -191,7 +205,7 @@ await project.writeFile('utoopack.json', JSON.stringify(utoopackConfig, null, 2)
     // 在 useBuild.ts 中
     setIsBuilding(true);
     try {
-        await project.build();
+      await project.build();
         // 构建成功
     } catch (e) {
         // 构建失败
@@ -210,7 +224,7 @@ await project.writeFile('utoopack.json', JSON.stringify(utoopackConfig, null, 2)
     await project.writeFile("dist/index.html", generatedHtml);
     ```
 
-4.  **预览**: `Preview` 组件包含一个 `iframe`，其 `src` 指向 Service Worker 范围内的入口点（例如 `/preview/dist/index.html`）。构建完成后，`iframe` 会重新加载，导致 Service Worker 从 OPFS 提供新生成的文件。
+4.  **预览**: `Preview` 组件包含一个 `iframe`，其 `src` 指向 Service Worker 范围内的入口点（例如 `/preview/dist/index.html`）。构建完成后，`iframe` 会重新从 Service Worker 加载 OPFS 中新生成的产物文件。
 
 这个循环提供了一个快速、交互式的开发循环，全部在用户的浏览器中本地运行。
 
@@ -283,3 +297,8 @@ import "@utoo/web/esm/serviceWorker";
 ```
 
 您的构建设置应配置为将这些文件输出到主应用程序可以访问的位置，以便您可以将其 URL 提供给 `UtooProject` 构造函数。
+
+## 注意
+* 由于当前 Rust 上默认的内存分配器 [`dlmalloc`](https://github.com/alexcrichton/dlmalloc-rs) 在多线程 `wasm` 上性能不够理想，我们目前正在尝试参考 [`emscripten`](https://emscripten.org/docs/tools_reference/settings_reference.html#malloc) 的方案支持 [`mimalloc`](https://github.com/microsoft/mimalloc)，一旦成功，构建速度将会有大幅提升；
+* 未来我们也会在浏览器中支持 [`HMR`](https://webpack.js.org/concepts/hot-module-replacement/) 功能;
+* turbopack 的部分高级功能如[`webpack loaders`](https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#configuring-webpack-loaders), [`持久化缓存`](https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopackPersistentCaching)，目前也在计划之中，未来会在浏览器内直接支持。
