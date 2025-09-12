@@ -229,7 +229,7 @@ enum Commands {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
     // Check for help flag
@@ -360,7 +360,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if specs.len() == 1 { "" } else { "s" }
                 ));
             } else {
-                return Err("Package specification is required for uninstall".into());
+                return Err(anyhow::anyhow!(
+                    "Package specification is required for uninstall"
+                ));
             }
         }
         Some(Commands::Rebuild) => {

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::helper::package::parse_package_name;
 use crate::helper::workspace::{find_workspace_path, update_cwd_to_project};
 use crate::model::package::{PackageInfo, Scripts};
@@ -128,11 +130,9 @@ pub async fn run_script(
 }
 
 /// Check if a workspace has the specified script configured
-async fn need_run(workspace_name: &str, script_name: &str) -> Result<bool> {
-    let cwd = std::env::current_dir().context("Failed to get current directory")?;
-
+async fn need_run(cwd: &Path, workspace_name: &str, script_name: &str) -> Result<bool> {
     // Find the workspace path
-    let workspace_dir = match find_workspace_path(&cwd, workspace_name).await {
+    let workspace_dir = match find_workspace_path(cwd, workspace_name).await {
         Ok(path) => path,
         Err(_) => {
             log_info(&format!("Workspace '{workspace_name}' not found, skipping"));
@@ -199,7 +199,7 @@ pub async fn run_script_in_all_workspaces(
         // Filter workspaces that actually have the script configured
         let mut workspaces_to_run = Vec::new();
         for workspace_name in layer {
-            if need_run(workspace_name, script_name).await? {
+            if need_run(&cwd, workspace_name, script_name).await? {
                 workspaces_to_run.push(workspace_name.clone());
             }
         }
@@ -417,29 +417,22 @@ mod tests {
             "workspaces": ["packages/*"]
         }"#;
         fs::write(_dir.path().join("package.json"), root_package_json).unwrap();
-        std::env::set_current_dir(_dir.path()).unwrap();
+
+        let cwd = _dir.path();
 
         // Test existing script
-        let result = need_run("@test/pkg1", "build").await;
+        let result = need_run(cwd, "@test/pkg1", "build").await;
         assert!(result.is_ok());
         assert!(result.unwrap());
 
         // Test non-existing script
-        let result = need_run("@test/pkg1", "nonexistent").await;
-        // FIXME: @elrrrrrrr fix for linux and macos x86
-        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        let result = need_run(cwd, "@test/pkg1", "nonexistent").await;
         assert!(result.is_ok());
-        // FIXME: @elrrrrrrr fix for linux and macos x86
-        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         assert!(!result.unwrap());
 
         // Test non-existing workspace
-        let result = need_run("nonexistent-workspace", "build").await;
-        // FIXME: @elrrrrrrr fix for linux and macos x86
-        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        let result = need_run(cwd, "nonexistent-workspace", "build").await;
         assert!(result.is_ok());
-        // FIXME: @elrrrrrrr fix for linux and macos x86
-        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         assert!(!result.unwrap());
     }
 }

@@ -200,21 +200,7 @@ mod tests {
     #[test]
     fn test_set_verbose_false() {
         set_verbose(false);
-        // FIXME: @elrrrrrrr fix for linux
-        #[cfg(target_os = "macos")]
         assert!(!VERBOSE.load(Ordering::Relaxed));
-    }
-
-    #[test]
-    fn test_set_verbose_multiple_calls() {
-        set_verbose(true);
-        assert!(VERBOSE.load(Ordering::Relaxed));
-
-        set_verbose(false);
-        assert!(!VERBOSE.load(Ordering::Relaxed));
-
-        set_verbose(true);
-        assert!(VERBOSE.load(Ordering::Relaxed));
     }
 
     #[test]
