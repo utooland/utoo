@@ -141,5 +141,11 @@ async function analyzeBundle(
     analyzer.on("error", (error) => {
       reject(new Error(`Failed to start bundle analyzer: ${error.message}`));
     });
+
+    analyzer.on("close", () => {
+      // The analyzer process has finished, so we can resolve the promise
+      // to allow the build process to exit gracefully.
+      resolve();
+    });
   });
 }
