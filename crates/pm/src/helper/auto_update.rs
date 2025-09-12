@@ -1,3 +1,4 @@
+use crate::constants::APP_VERSION;
 use crate::util::config::get_registry;
 use crate::util::logger::{log_error, log_info, log_verbose};
 use anyhow::{Context, Result};
@@ -24,6 +25,11 @@ static UPDATE_VERSION: Lazy<Arc<RwLock<Option<String>>>> =
 
 /// Initialize auto update with immediate check and background monitoring
 pub async fn init_auto_update() -> Result<()> {
+    // Skip for local development
+    if APP_VERSION == "0.0.0" {
+        return Ok(());
+    }
+
     // Skip auto update in CI environment
     let ci_env = std::env::var("CI").unwrap_or_default();
     if ci_env == "1" || ci_env.to_lowercase() == "true" {

@@ -33,16 +33,17 @@ fn get_current_exe_dir() -> Result<PathBuf> {
 pub fn get_global_bin_dir(prefix: Option<&str>) -> Result<PathBuf> {
     match prefix {
         Some(prefix) => Ok(PathBuf::from(prefix).join("bin")),
-        None => Ok(get_current_exe_dir()?),
+        None => get_current_exe_dir(),
     }
 }
 
 pub fn get_global_package_dir(prefix: Option<&str>) -> Result<PathBuf> {
-    let lib_path = match prefix {
-        Some(prefix) => PathBuf::from(prefix).join("lib/node_modules"),
-        None => get_current_exe_dir()?.join("lib/node_modules"),
+    let base_path = match prefix {
+        Some(prefix) => PathBuf::from(prefix),
+        None => get_current_exe_dir()?,
     };
-    Ok(lib_path)
+
+    Ok(base_path.join("lib/node_modules"))
 }
 
 #[cfg(test)]
