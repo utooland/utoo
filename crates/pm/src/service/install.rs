@@ -444,7 +444,7 @@ impl InstallService {
 
         // Get global bin directory using the common helper
         let target_bin_dir =
-            get_global_bin_dir(&prefix).context("Failed to get global bin directory")?;
+            get_global_bin_dir(prefix).context("Failed to get global bin directory")?;
 
         // Link binary files to global
         log_verbose(&format!(
