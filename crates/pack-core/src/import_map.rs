@@ -95,11 +95,9 @@ async fn insert_shared_aliases(
         let pack_package = get_utoopack_path(project_path.clone()).owned().await?;
         import_map.insert_singleton_alias("@swc/helpers", pack_package.clone());
     }
-    // FIXME: maybe we don't need this
     // import_map.insert_singleton_alias("styled-jsx", pack_package.clone());
-    // import_map.insert_singleton_alias("react", project_path.clone());
-    // import_map.insert_singleton_alias("react-dom", project_path.clone());
-    //
+    import_map.insert_singleton_alias("react", project_path.clone());
+    import_map.insert_singleton_alias("react-dom", project_path.clone());
     insert_package_alias(
         import_map,
         "@vercel/turbopack-ecmascript-runtime/",
