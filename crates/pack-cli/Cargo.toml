@@ -33,8 +33,5 @@ turbopack-dev-server = { workspace = true }
 [target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]
 turbopack-trace-utils = { workspace = true }
 
-[build-dependencies]
-turbo-tasks-build = { workspace = true }
-
 [lints]
 workspace = true

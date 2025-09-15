@@ -33,9 +33,7 @@ turbopack-nodejs    = { workspace = true }
 turbopack-static    = { workspace = true }
 
 [build-dependencies]
-anyhow            = { workspace = true }
-turbo-tasks-build = { workspace = true }
-
+anyhow = { workspace = true }
 vergen = { version = "9.0.6", features = ["cargo"] }
 
 [lints]

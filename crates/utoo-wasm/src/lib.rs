@@ -49,8 +49,9 @@ fn init_pack() {
 
     #[cfg(feature = "utoo-pack")]
     {
-        pack::register();
-
+        unsafe {
+            pack::__wasm_call_ctors();
+        }
         wasm_bindgen_futures::spawn_local(turbo_tasks_fs::wasm_fs_offload::server(
             crate::opfs_offload::OpfsOffload,
         ))

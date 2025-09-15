@@ -61,7 +61,7 @@ use super::{
     endpoint::ExternalEndpoint,
     utils::{NapiDiagnostic, NapiIssue, TurbopackResult, VcArc, create_turbo_tasks, subscribe},
 };
-use crate::{register, util::DhatProfilerGuard};
+use crate::util::DhatProfilerGuard;
 
 static SOURCE_MAP_PREFIX: LazyLock<String> = LazyLock::new(|| format!("{SOURCE_URL_PROTOCOL}///"));
 static SOURCE_MAP_PREFIX_PROJECT: LazyLock<String> =
@@ -250,7 +250,6 @@ pub async fn project_new(
     options: NapiProjectOptions,
     turbo_engine_options: NapiTurboEngineOptions,
 ) -> napi::Result<External<ProjectInstance>> {
-    register();
     let (exit, exit_receiver) = ExitHandler::new_receiver();
 
     if let Some(dhat_profiler) = DhatProfilerGuard::try_init() {

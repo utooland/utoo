@@ -18,14 +18,12 @@ use turbopack_trace_utils::{
     exit::ExitGuard, filter_layer::FilterLayer, raw_trace::RawTraceLayer, trace_writer::TraceWriter,
 };
 
-use pack_cli::{Command, Mode, PartialProjectOptions, build, register, serve};
+use pack_cli::{Command, Mode, PartialProjectOptions, build, serve};
 
 #[global_allocator]
 static ALLOC: TurboMalloc = TurboMalloc;
 
 fn main() {
-    register();
-
     let args = Command::parse();
 
     let dev = matches!(args.mode, Mode::Dev);

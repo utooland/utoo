@@ -39,6 +39,3 @@ turbopack-node               = { workspace = true }
 turbopack-nodejs             = { workspace = true, features = ["test"] }
 turbopack-resolve            = { workspace = true }
 turbopack-test-utils         = { workspace = true }
-
-[build-dependencies]
-turbo-tasks-build = { workspace = true }

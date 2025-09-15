@@ -53,7 +53,3 @@ turbopack-core      = { workspace = true, optional = true }
 
 [target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
 parking_lot = { workspace = true, features = ["nightly"] }
-
-[build-dependencies]
-anyhow            = { workspace = true }
-turbo-tasks-build = { workspace = true }

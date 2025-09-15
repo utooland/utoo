@@ -64,7 +64,6 @@ turbo-esregex          = { path = "./next.js/turbopack/crates/turbo-esregex" }
 turbo-rcstr            = { path = "./next.js/turbopack/crates/turbo-rcstr" }
 turbo-tasks            = { path = "./next.js/turbopack/crates/turbo-tasks" }
 turbo-tasks-backend    = { path = "./next.js/turbopack/crates/turbo-tasks-backend" }
-turbo-tasks-build      = { path = "./next.js/turbopack/crates/turbo-tasks-build" }
 turbo-tasks-bytes      = { path = "./next.js/turbopack/crates/turbo-tasks-bytes" }
 turbo-tasks-env        = { path = "./next.js/turbopack/crates/turbo-tasks-env" }
 turbo-tasks-fetch      = { path = "./next.js/turbopack/crates/turbo-tasks-fetch" }

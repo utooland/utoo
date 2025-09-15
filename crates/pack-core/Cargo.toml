@@ -71,8 +71,5 @@ turbopack-ecmascript-plugins = { workspace = true, default-features = true, feat
 getrandom                    = { version = "0.3", features = ["wasm_js"] }
 turbopack-ecmascript-plugins = { workspace = true, default-features = false, features = ["transform_emotion"] }
 
-[build-dependencies]
-turbo-tasks-build = { workspace = true }
-
 [lints]
 workspace = true
