@@ -90,5 +90,3 @@ console.log('SASS styles2:', __TURBOPACK__imported__module__565__["default"]);
 console.log('SCSS styles2:', __TURBOPACK__imported__module__351__["default"]);
 }),
 ]);
-
-//# sourceMappingURL=crates_pack-tests_tests_snapshot_style_css_modules_input_a4667d8f.js.map
