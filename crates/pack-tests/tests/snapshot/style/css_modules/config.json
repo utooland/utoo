@@ -6,8 +6,6 @@
           "name": "main"
         }
       ],
-      "output": {
-        "sourceMaps": false
-      }
+      "sourceMaps": false
     }
   } 
