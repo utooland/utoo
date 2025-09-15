@@ -30,8 +30,9 @@ DEALINGS IN THE SOFTWARE.
 //#![deny(clippy::all)]
 #![feature(arbitrary_self_types)]
 #![feature(arbitrary_self_types_pointers)]
+#![allow(unexpected_cfgs)]
 
-use std::{cell::OnceCell, sync::Once};
+use std::cell::OnceCell;
 
 use tokio::runtime::Runtime;
 
@@ -98,20 +99,4 @@ pub fn create_custom_tokio_runtime(rt: Runtime) {
         #[allow(static_mut_refs)]
         USER_DEFINED_RT.get_or_init(move || Some(rt));
     }
-}
-
-static REGISTER_ONCE: Once = Once::new();
-
-#[cfg(not(target_arch = "wasm32"))]
-fn register() {
-    REGISTER_ONCE.call_once(|| {
-        ::pack_api::register();
-        pack_core::register();
-        include!(concat!(env!("OUT_DIR"), "/register.rs"));
-    });
-}
-
-#[cfg(target_arch = "wasm32")]
-fn register() {
-    //noop
 }

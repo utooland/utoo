@@ -92,12 +92,10 @@ turbopack-trace-server            = { workspace = true }
 turbopack-trace-utils             = { workspace = true }
 
 [build-dependencies]
-anyhow            = { workspace = true }
-napi-build        = "2"
-serde             = { workspace = true }
-serde_json        = { workspace = true }
-turbo-tasks-build = { workspace = true }
-
+anyhow       = { workspace = true }
+napi-build   = "2"
+serde        = { workspace = true }
+serde_json   = { workspace = true }
 vergen-gitcl = { version = "1.0.8", features = ["cargo"] }
 
 [lints]

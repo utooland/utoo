@@ -3,6 +3,7 @@
 #![feature(arbitrary_self_types)]
 #![feature(arbitrary_self_types_pointers)]
 #![feature(iter_intersperse)]
+#![allow(unexpected_cfgs)]
 
 pub mod app;
 pub mod endpoint;
@@ -17,9 +18,3 @@ pub mod tasks;
 pub mod utils;
 pub mod versioned_content_map;
 pub mod webpack_stats;
-
-pub fn register() {
-    pack_core::register();
-    turbopack_nodejs::register();
-    include!(concat!(env!("OUT_DIR"), "/register.rs"));
-}

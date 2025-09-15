@@ -146,12 +146,9 @@ pub async fn webpack_loader_options(
         return Ok(Vc::cell(None));
     }
 
-    let conditions = config.webpack_conditions().to_resolved().await?;
-
     Ok(Vc::cell(Some(
         WebpackLoadersOptions {
             rules: ResolvedVc::cell(rules),
-            conditions,
             #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
             loader_runner_package: Some(
                 loader_runner_package_mapping(project_path)

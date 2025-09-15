@@ -9,7 +9,7 @@ use turbopack::{
     css::chunk::CssChunkType,
     module_options::{
         CssOptionsContext, EcmascriptOptionsContext, JsxTransformOptions, ModuleOptionsContext,
-        ModuleRule, TypeofWindow, TypescriptTransformOptions,
+        ModuleRule, TypescriptTransformOptions,
     },
     resolve_options_context::ResolveOptionsContext,
 };
@@ -27,7 +27,7 @@ use turbopack_core::{
     file_source::FileSource,
     free_var_references,
 };
-use turbopack_ecmascript::chunk::EcmascriptChunkType;
+use turbopack_ecmascript::{TypeofWindow, chunk::EcmascriptChunkType};
 use turbopack_node::{
     execution_context::ExecutionContext,
     transforms::postcss::{PostCssConfigLocation, PostCssTransformOptions},
@@ -140,7 +140,7 @@ pub async fn get_client_compile_time_info(
     .resolved_cell();
 
     CompileTimeInfo::builder(
-        Environment::new(ExecutionEnvironment::Browser(environment), *environment)
+        Environment::new(ExecutionEnvironment::Browser(environment))
             .to_resolved()
             .await?,
     )
