@@ -2,6 +2,7 @@
 #![feature(min_specialization)]
 #![feature(arbitrary_self_types)]
 #![feature(arbitrary_self_types_pointers)]
+#![allow(unexpected_cfgs)]
 
 use std::sync::Arc;
 
@@ -95,9 +96,4 @@ pub async fn initialize_project_container(
         .await?;
 
     Ok((turbo_tasks, project_container))
-}
-
-pub fn register() {
-    pack_api::register();
-    include!(concat!(env!("OUT_DIR"), "/register.rs"));
 }

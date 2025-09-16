@@ -45,10 +45,7 @@ pub async fn create_web_entry_source(
                         .to_resolved()
                         .await?;
 
-                    let entry_modules = app
-                        .app_entry_modules(Vc::upcast(asset_context))
-                        .await?
-                        .to_vec();
+                    let entry_modules = app.app_entry_modules(asset_context).await?.to_vec();
 
                     entry_modules
                         .into_iter()

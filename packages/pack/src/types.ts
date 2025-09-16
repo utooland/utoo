@@ -98,7 +98,6 @@ export type TurbopackRuleCondition = {
 
 export interface ModuleOptions {
   rules?: Record<string, TurbopackRuleConfigItem>;
-  conditions?: Record<string, TurbopackRuleCondition>;
 }
 
 export interface ResolveOptions {
