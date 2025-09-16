@@ -88,7 +88,7 @@ if ! grep -q "react" package-lock.json; then
     exit 1
 fi
 echo -e "${GREEN}PASS: antd-test deps tree successful${NC}"
-cd ../../../../
+cd ../../..
 
 
 # Case 7: test global install
