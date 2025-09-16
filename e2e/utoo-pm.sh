@@ -17,7 +17,7 @@ echo -e "node path: $(node -e 'console.log(process.arch)')"
 echo -e "${YELLOW}Case 1: Clone and install ant-design${NC}"
 cd e2e/pm/ant-design
 if [ ! -d "ant-design" ]; then
-  git clone --depth=1 https://github.com/ant-design/ant-design.git
+  git clone --depth=1 --single-branch https://github.com/ant-design/ant-design.git
 fi
 cd ant-design
 echo "Installing dependencies for ant-design..."
