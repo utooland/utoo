@@ -216,7 +216,7 @@ impl RegistryHttpClient {
                 let response = self
                     .client
                     .get(&url)
-                    .header("Accept", "application/vnd.npm.install-v1+json")
+                    .header("Accept", "application/json")
                     .send()
                     .await
                     .map_err(|e| RetryableError::Temporary(format!("Network error: {e}")))?;
@@ -231,6 +231,7 @@ impl RegistryHttpClient {
                         "Version {version} not found for package {name}"
                     )))
                 } else {
+                    log_error(&format!("HTTP error: {:?}, url: {}", response, url));
                     Err(RetryableError::Temporary(format!(
                         "HTTP error: {}, url: {}",
                         response.status(),

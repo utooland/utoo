@@ -34,9 +34,9 @@ impl RegistryService {
         // Try the new semver-based approach first
         let (version, mut manifest) = match get_package_manifest_with_semver(name, spec).await {
             Ok(result) => result,
-            Err(_) => {
+            Err(e) => {
                 // Fallback to original method for compatibility
-                log_verbose(&format!("Falling back to original method for {name}@{spec}"));
+                log_verbose(&format!("Falling back to original method for {name}@{spec} reason: {e}"));
                 get_package_manifest(name, spec).await?
             }
         };

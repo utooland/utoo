@@ -88,20 +88,16 @@ pub fn get_cache_dir() -> PathBuf {
 
 pub fn get_package_versions_cache_file(package_name: &str) -> PathBuf {
     // Escape package name for filesystem compatibility
-    let safe_name = package_name.replace('/', "_").replace('@', "_");
-    get_cache_dir().join(safe_name).join("versions.json")
+    get_cache_dir().join(package_name).join("versions.json")
 }
 
 pub fn get_package_manifest_cache_file(package_name: &str, version: &str) -> PathBuf {
     // Escape package name and version for filesystem compatibility
-    let safe_name = package_name.replace('/', "_").replace('@', "_");
-    let safe_version = version.replace('/', "_").replace('\\', "_");
-    get_cache_dir().join(safe_name).join("manifests").join(format!("{}.json", safe_version))
+    get_cache_dir().join(package_name).join("manifests").join(format!("{}.json", version))
 }
 
 pub fn get_package_cache_dir(package_name: &str) -> PathBuf {
-    let safe_name = package_name.replace('/', "_").replace('@', "_");
-    get_cache_dir().join(safe_name)
+    get_cache_dir().join(package_name)
 }
 
 #[cfg(test)]
