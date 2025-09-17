@@ -142,34 +142,18 @@ impl RegistryService {
             None => return Err(anyhow::anyhow!("No versions found for {name}")),
         };
 
-        let dist_tags = full_manifest.get("dist-tags").cloned().unwrap_or_default();
-
         // Step 3: Find matching version
-        let version_str = if let Some(dist_tags_obj) = dist_tags.as_object() {
-            if let Some(tag_version) = dist_tags_obj.get(spec).and_then(|v| v.as_str()) {
-                log_verbose(&format!(
-                    "Found dist-tag {spec} -> {tag_version} for {name}"
-                ));
-                tag_version.to_string()
-            } else {
-                semver::max_satisfying(version_list.iter().map(|s| s.as_str()), spec)
-                    .map(|v| v.to_string())
-                    .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "No version found matching {name}@{spec}, available versions: {}",
-                            version_list.join(", ")
-                        )
-                    })?
-            }
-        } else {
-            semver::max_satisfying(version_list.iter().map(|s| s.as_str()), spec)
+        let dist_tags = full_manifest.get("dist-tags").cloned().unwrap_or_default();
+        let version_str = match dist_tags.get(spec).and_then(|v| v.as_str()) {
+            Some(version) => version.to_string(),
+            None => semver::max_satisfying(version_list.iter().map(|s| s.as_str()), spec)
                 .map(|v| v.to_string())
                 .ok_or_else(|| {
                     anyhow::anyhow!(
                         "No version found matching {name}@{spec}, available versions: {}",
                         version_list.join(", ")
                     )
-                })?
+                })?,
         };
 
         // Step 4: Get specific version manifest with caching
