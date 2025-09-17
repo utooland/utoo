@@ -86,6 +86,18 @@ impl RegistryService {
 
     /// Get version manifest with caching
     pub async fn get_version_manifest(name: &str, version: &str) -> Result<Value> {
+        // For registries that support semver, don't cache individual manifests
+        // because the server handles semver resolution directly
+        if get_registry_support_semver() {
+            // Normalize spec for HTTP request
+            let (normalized_name, normalized_version) = Self::normalize_for_http(name, version);
+
+            // Fetch from HTTP directly, no caching needed for semver-supporting registries
+            let manifest = fetch_version_manifest(&normalized_name, &normalized_version).await?;
+            return Ok(manifest);
+        }
+
+        // For registries that don't support semver, we need to cache specific version manifests
         // Try to load from manifest cache file first
         if let Some(manifest) = self::load_version_manifest_from_cache(name, version).await {
             log_verbose(&format!("Loaded {name}@{version} manifest from cache file"));
@@ -98,7 +110,7 @@ impl RegistryService {
         // Fetch from HTTP
         let manifest = fetch_version_manifest(&normalized_name, &normalized_version).await?;
 
-        // Cache the result
+        // Cache the result for non-semver registries
         PACKAGE_CACHE
             .cache_version_manifest(name, version, &manifest)
             .await;
@@ -173,6 +185,20 @@ impl RegistryService {
             "🔍 RegistryService::resolve_package starting for {name}@{spec}"
         ));
 
+        // Check project-level cache first
+        if let Some(cached_version) = PACKAGE_CACHE.get_version_in_project_cache(name, spec).await
+            && let Some(cached_manifest) = PACKAGE_CACHE.get_manifest_in_project_cache(name, spec, &cached_version).await
+        {
+            log_verbose(&format!(
+                "🔍 Found cached resolution for {name}@{spec} => {cached_version}"
+            ));
+            return Ok(ResolvedPackage {
+                name: name.to_string(),
+                version: cached_version,
+                manifest: cached_manifest,
+            });
+        }
+
         let (version, mut manifest) = if get_registry_support_semver() {
             // For supported registries, use optimized approach
             let manifest = Self::get_version_manifest(name, spec).await?;
@@ -211,6 +237,23 @@ impl RegistryService {
         log_verbose(&format!(
             "🔍 RegistryService::resolve_package completed for {name}@{spec} => {version}"
         ));
+
+        // Store resolved package in project-level cache for future lookups
+        PACKAGE_CACHE
+            .set_manifest_in_project_cache(name, spec, &version, manifest.clone())
+            .await;
+
+        if !get_registry_support_semver() {
+            let name_clone = name.to_string();
+            let version_clone = version.clone();
+            let manifest_clone = manifest.clone();
+
+            tokio::spawn(async move {
+                PACKAGE_CACHE
+                    .cache_version_manifest(&name_clone, &version_clone, &manifest_clone)
+                    .await;
+            });
+        }
 
         Ok(ResolvedPackage {
             name: name.to_string(),

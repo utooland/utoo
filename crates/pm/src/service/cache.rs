@@ -394,6 +394,37 @@ impl PackageCache {
             }
         }
     }
+
+    // Project-level cache methods (for dependency resolution state)
+    pub async fn get_manifest_in_project_cache(&self, name: &str, _spec: &str, version: &str) -> Option<Value> {
+        // First try to load from project-level cache (for project-specific resolved manifests)
+        let cache = self.cache.read().await;
+        if let Some(manifest) = cache
+            .get(name)
+            .and_then(|(_, versions)| versions.get(version))
+            .cloned()
+        {
+            return Some(manifest);
+        }
+        None
+    }
+
+    pub async fn set_manifest_in_project_cache(&self, name: &str, spec: &str, version: &str, manifest: Value) {
+        let mut cache = self.cache.write().await;
+        let (specs, versions) = cache
+            .entry(name.to_string())
+            .or_insert_with(|| (HashMap::new(), HashMap::new()));
+        specs.insert(spec.to_string(), version.to_string());
+        versions.insert(version.to_string(), manifest.clone());
+    }
+
+    pub async fn get_version_in_project_cache(&self, name: &str, spec: &str) -> Option<String> {
+        let cache = self.cache.read().await;
+        cache
+            .get(name)
+            .and_then(|(specs, _)| specs.get(spec))
+            .cloned()
+    }
 }
 
 // Utility functions for project-level cache management (not global package cache)
