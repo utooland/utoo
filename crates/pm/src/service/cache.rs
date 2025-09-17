@@ -89,18 +89,16 @@ impl PackageCache {
         }
 
         match tokio::fs::read_to_string(&versions_file).await {
-            Ok(content) => {
-                match serde_json::from_str::<VersionsInfo>(&content) {
-                    Ok(versions_info) => {
-                        log_verbose(&format!("Loaded versions for {name} from shard"));
-                        Some(versions_info)
-                    }
-                    Err(e) => {
-                        log_verbose(&format!("Failed to parse versions file for {name}: {e}"));
-                        None
-                    }
+            Ok(content) => match serde_json::from_str::<VersionsInfo>(&content) {
+                Ok(versions_info) => {
+                    log_verbose(&format!("Loaded versions for {name} from shard"));
+                    Some(versions_info)
                 }
-            }
+                Err(e) => {
+                    log_verbose(&format!("Failed to parse versions file for {name}: {e}"));
+                    None
+                }
+            },
             Err(e) => {
                 log_verbose(&format!("Failed to read versions file for {name}: {e}"));
                 None
@@ -135,13 +133,13 @@ impl PackageCache {
             .clone();
 
         // Check memory cache first
-        if let Ok(cached) = shard.try_read() {
-            if let Some(ref cached_info) = *cached {
-                log_verbose(&format!("Memory cache hit for {name}"));
-                let versions_info = Arc::clone(&cached_info.info);
-                drop(cached);
-                return Some(self.reconstruct_package_info(&versions_info, name).await);
-            }
+        if let Ok(cached) = shard.try_read()
+            && let Some(ref cached_info) = *cached
+        {
+            log_verbose(&format!("Memory cache hit for {name}"));
+            let versions_info = Arc::clone(&cached_info.info);
+            drop(cached);
+            return Some(self.reconstruct_package_info(&versions_info, name).await);
         }
 
         // Load from disk if not in memory
@@ -202,9 +200,7 @@ impl PackageCache {
                             serde_json::from_str::<VersionManifest>(&content)
                     {
                         versions_obj[version_str] = version_manifest.manifest;
-                        log_verbose(&format!(
-                            "Loaded cached manifest for {name}@{version_str}"
-                        ));
+                        log_verbose(&format!("Loaded cached manifest for {name}@{version_str}"));
                     }
                 }
             }
@@ -390,13 +386,14 @@ impl PackageCache {
 
         if let Ok(content) = serde_json::to_string_pretty(&version_manifest) {
             if let Err(e) = tokio::fs::write(&manifest_file, content).await {
-                log_verbose(&format!("Failed to cache manifest for {name}@{version}: {e}"));
+                log_verbose(&format!(
+                    "Failed to cache manifest for {name}@{version}: {e}"
+                ));
             } else {
                 log_verbose(&format!("Cached manifest for {name}@{version}"));
             }
         }
     }
-
 }
 
 // Utility functions for project-level cache management (not global package cache)

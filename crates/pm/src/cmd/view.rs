@@ -3,7 +3,7 @@ use crate::model::package_manifest::PackageManifest;
 use crate::service::registry::get_full_manifest;
 use crate::util::format_print::print_grid;
 use crate::util::logger::log_verbose;
-use crate::util::registry::{resolve};
+use crate::util::registry::resolve;
 use anyhow::{Result, anyhow};
 use chrono::{TimeZone, Utc};
 use owo_colors::OwoColorize;

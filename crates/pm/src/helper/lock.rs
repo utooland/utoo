@@ -6,13 +6,12 @@ use std::sync::Arc;
 use std::{collections::HashMap, fs};
 
 use crate::helper::workspace::find_workspaces;
-use crate::model::node::Node;
+use crate::model::node::{EdgeType, Node};
 use crate::model::override_rule::Overrides;
 use crate::util::config::get_legacy_peer_deps;
 use crate::util::json::{load_package_json_from_path, load_package_lock_json_from_path};
 use crate::util::logger::{log_verbose, log_warning};
-use crate::util::registry::resolve;
-use crate::service::registry::get_version_manifest_by_full_versions;
+use crate::util::registry::{resolve, resolve_dependency};
 use crate::util::relative_path::to_relative_path;
 use crate::util::save_type::{PackageAction, SaveType};
 use crate::util::semver;
@@ -435,12 +434,13 @@ pub async fn validate_deps(
                                 dep_info.get("version").and_then(|v| v.as_str())
                                 && !semver::matches(&effective_req_version, actual_version)
                             {
-                                let (_resolved_version, resolved_manifest) =
-                                    get_version_manifest_by_full_versions(dep_name, &effective_req_version)
-                                        .await?;
-                                if resolved_manifest
-                                    .get("version")
-                                    .is_some_and(|v| v.as_str() == Some(actual_version))
+                                if let Some(resolved_dep) = resolve_dependency(
+                                    dep_name,
+                                    &effective_req_version,
+                                    &EdgeType::Optional,
+                                )
+                                .await?
+                                    && resolved_dep.version == actual_version
                                 {
                                     log_verbose(&format!(
                                         "Package {pkg_path} {dep_field} dependency {dep_name} (required version: {req_version_str}, effective version: {effective_req_version}) hit bug-version {current_path}@{actual_version}"

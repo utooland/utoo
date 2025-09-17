@@ -17,7 +17,9 @@ pub struct RegistryHttpClient {
 static REGISTRY_CLIENT: Lazy<RegistryHttpClient> = Lazy::new(|| {
     let client = build_dns_cached_client();
     let base_url = get_registry().trim_end_matches('/').to_string();
-    log_verbose(&format!("Initialized HTTP client with base URL: {}", base_url));
+    log_verbose(&format!(
+        "Initialized HTTP client with base URL: {base_url}"
+    ));
 
     RegistryHttpClient { client, base_url }
 });
@@ -32,7 +34,11 @@ impl RegistryHttpClient {
     }
 
     /// Fetch complete package information via HTTP (no caching)
-    pub async fn fetch_full_manifest(&self, name: &str, etag: Option<&str>) -> Result<(Value, Option<String>)> {
+    pub async fn fetch_full_manifest(
+        &self,
+        name: &str,
+        etag: Option<&str>,
+    ) -> Result<(Value, Option<String>)> {
         let url = format!("{}/{}", self.base_url, name);
         log_verbose(&format!("Fetching full manifest for {name} from {url}"));
 
@@ -40,10 +46,7 @@ impl RegistryHttpClient {
         let response = RetryIf::spawn(
             create_retry_strategy(),
             || async {
-                let mut request = self
-                    .client
-                    .get(&url)
-                    .header("Accept", "application/json");
+                let mut request = self.client.get(&url).header("Accept", "application/json");
 
                 // Add If-None-Match header if etag provided
                 if let Some(etag_value) = etag {
@@ -96,7 +99,9 @@ impl RegistryHttpClient {
                 if e.to_string().contains("NOT_MODIFIED") {
                     Err(anyhow::anyhow!("Not modified"))
                 } else {
-                    Err(anyhow::anyhow!("Failed to fetch full manifest after retries: {e}"))
+                    Err(anyhow::anyhow!(
+                        "Failed to fetch full manifest after retries: {e}"
+                    ))
                 }
             }
         }
@@ -159,7 +164,10 @@ impl RegistryHttpClient {
 // Global HTTP client access functions - pure HTTP operations only
 
 /// Fetch complete package information via HTTP
-pub async fn fetch_full_manifest(name: &str, etag: Option<&str>) -> Result<(Value, Option<String>)> {
+pub async fn fetch_full_manifest(
+    name: &str,
+    etag: Option<&str>,
+) -> Result<(Value, Option<String>)> {
     REGISTRY_CLIENT.fetch_full_manifest(name, etag).await
 }
 

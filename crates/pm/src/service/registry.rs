@@ -35,22 +35,28 @@ impl RegistryService {
     pub async fn get_full_manifest(name: &str) -> Result<Value> {
         // Check cache first
         let cached_info = PACKAGE_CACHE.get_full_manifests(name).await;
-        let etag = cached_info.as_ref().map(|info| info.etag.as_deref()).flatten();
+        let etag = cached_info.as_ref().and_then(|info| info.etag.as_deref());
 
         // Fetch from HTTP with etag
         match fetch_full_manifest(name, etag).await {
             Ok((data, new_etag)) => {
                 // Update cache with new data
-                PACKAGE_CACHE.set_package_info(name, data.clone(), new_etag).await;
+                PACKAGE_CACHE
+                    .set_package_info(name, data.clone(), new_etag)
+                    .await;
                 Ok(data)
             }
             Err(e) if e.to_string().contains("Not modified") => {
                 // Use cached data
                 if let Some(cached) = cached_info {
-                    log_verbose(&format!("Using cached full manifest for {name} (not modified)"));
+                    log_verbose(&format!(
+                        "Using cached full manifest for {name} (not modified)"
+                    ));
                     Ok(cached.data)
                 } else {
-                    Err(anyhow::anyhow!("Received 304 Not Modified but no cached data available"))
+                    Err(anyhow::anyhow!(
+                        "Received 304 Not Modified but no cached data available"
+                    ))
                 }
             }
             Err(e) => Err(e),
@@ -69,13 +75,18 @@ impl RegistryService {
         let manifest = fetch_version_manifest(name, version).await?;
 
         // Cache the result
-        PACKAGE_CACHE.cache_version_manifest(name, version, &manifest).await;
+        PACKAGE_CACHE
+            .cache_version_manifest(name, version, &manifest)
+            .await;
 
         Ok(manifest)
     }
 
     /// Get version manifest by full versions approach with caching
-    pub async fn get_version_manifest_by_full_versions(name: &str, spec: &str) -> Result<(String, Value)> {
+    pub async fn get_version_manifest_by_full_versions(
+        name: &str,
+        spec: &str,
+    ) -> Result<(String, Value)> {
         // Step 1: Get full manifest with caching
         let full_manifest = Self::get_full_manifest(name).await?;
 
@@ -101,7 +112,9 @@ impl RegistryService {
         // Step 3: Find matching version
         let version_str = if let Some(dist_tags_obj) = dist_tags.as_object() {
             if let Some(tag_version) = dist_tags_obj.get(spec).and_then(|v| v.as_str()) {
-                log_verbose(&format!("Found dist-tag {spec} -> {tag_version} for {name}"));
+                log_verbose(&format!(
+                    "Found dist-tag {spec} -> {tag_version} for {name}"
+                ));
                 tag_version.to_string()
             } else {
                 semver::max_satisfying(version_list.iter().map(|s| s.as_str()), spec)
@@ -139,7 +152,12 @@ impl RegistryService {
         let (version, mut manifest) = if get_registry_support_semver() {
             // For supported registries, use optimized approach
             let manifest = Self::get_version_manifest(name, spec).await?;
-            let version = manifest.get("version").unwrap().as_str().unwrap().to_string();
+            let version = manifest
+                .get("version")
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_string();
             (version, manifest)
         } else {
             // Use full versions approach
@@ -147,18 +165,21 @@ impl RegistryService {
         };
 
         // Clean up optional dependencies
-        if let Some(obj) = manifest.as_object_mut() {
-            if let Some(optional_deps) = obj.get("optionalDependencies").and_then(|v| v.as_object()) {
-                let optional_keys: Vec<String> = optional_deps.keys().cloned().collect();
-                if let Some(deps) = obj.get_mut("dependencies").and_then(|v| v.as_object_mut()) {
-                    for key in &optional_keys {
-                        deps.remove(key);
-                    }
+        if let Some(obj) = manifest.as_object_mut()
+            && let Some(optional_deps) = obj.get("optionalDependencies").and_then(|v| v.as_object())
+        {
+            let optional_keys: Vec<String> = optional_deps.keys().cloned().collect();
+            if let Some(deps) = obj.get_mut("dependencies").and_then(|v| v.as_object_mut()) {
+                for key in &optional_keys {
+                    deps.remove(key);
                 }
-                if let Some(dev_deps) = obj.get_mut("devDependencies").and_then(|v| v.as_object_mut()) {
-                    for key in &optional_keys {
-                        dev_deps.remove(key);
-                    }
+            }
+            if let Some(dev_deps) = obj
+                .get_mut("devDependencies")
+                .and_then(|v| v.as_object_mut())
+            {
+                for key in &optional_keys {
+                    dev_deps.remove(key);
                 }
             }
         }
@@ -179,10 +200,11 @@ impl RegistryService {
 async fn load_version_manifest_from_cache(name: &str, version: &str) -> Option<Value> {
     let manifest_file = crate::util::cache::get_package_manifest_cache_file(name, version);
 
-    if let Ok(content) = tokio::fs::read_to_string(&manifest_file).await {
-        if let Ok(version_manifest) = serde_json::from_str::<crate::service::cache::VersionManifest>(&content) {
-            return Some(version_manifest.manifest);
-        }
+    if let Ok(content) = tokio::fs::read_to_string(&manifest_file).await
+        && let Ok(version_manifest) =
+            serde_json::from_str::<crate::service::cache::VersionManifest>(&content)
+    {
+        return Some(version_manifest.manifest);
     }
     None
 }
@@ -223,11 +245,6 @@ pub async fn resolve(name: &str, spec: &str) -> Result<ResolvedPackage> {
 /// Get full manifest with caching
 pub async fn get_full_manifest(name: &str) -> Result<Value> {
     RegistryService::get_full_manifest(name).await
-}
-
-/// Get version manifest by full versions approach with caching
-pub async fn get_version_manifest_by_full_versions(name: &str, spec: &str) -> Result<(String, Value)> {
-    RegistryService::get_version_manifest_by_full_versions(name, spec).await
 }
 
 pub async fn resolve_dependency(

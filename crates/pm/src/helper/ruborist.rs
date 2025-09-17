@@ -53,10 +53,6 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
             let total_deps = edges.len();
             PROGRESS_BAR.inc_length(total_deps as u64);
             log_progress(&format!("resolving {}", node.name));
-            log_verbose(&format!(
-                "🔍 Processing node {} with {} dependencies",
-                node.name, total_deps
-            ));
 
             let mut tasks = Vec::new();
 
