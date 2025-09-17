@@ -163,8 +163,9 @@ static LEGACY_PEER_DEPS: LazyLock<ConfigValue<bool>> =
 
 static IS_NPM_REGISTRY: LazyLock<bool> = LazyLock::new(|| {
     let registry = REGISTRY.get();
-    let is_npm_registry = registry.contains("registry.npmjs.org") || registry.contains("registry.npmmirror.com");
-    log_verbose(&format!("is_npm_registry: {}", is_npm_registry));
+    let is_npm_registry =
+        registry.contains("registry.npmjs.org") || registry.contains("registry.npmmirror.com");
+    log_verbose(&format!("is_npm_registry: {is_npm_registry}"));
     is_npm_registry
 });
 

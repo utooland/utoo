@@ -80,7 +80,9 @@ impl RegistryService {
                     ))
                 }
             }
-            Err(e) => Err(e),
+            Err(e) => {
+                Err(anyhow::anyhow!("Failed to get full manifest for {name}: {e}").context(e))
+            }
         }
     }
 
@@ -89,11 +91,8 @@ impl RegistryService {
         // For registries that support semver, don't cache individual manifests
         // because the server handles semver resolution directly
         if get_registry_support_semver() {
-            // Normalize spec for HTTP request
-            let (normalized_name, normalized_version) = Self::normalize_for_http(name, version);
-
             // Fetch from HTTP directly, no caching needed for semver-supporting registries
-            let manifest = fetch_version_manifest(&normalized_name, &normalized_version).await?;
+            let manifest = fetch_version_manifest(name, version).await?;
             return Ok(manifest);
         }
 
@@ -187,7 +186,9 @@ impl RegistryService {
 
         // Check project-level cache first
         if let Some(cached_version) = PACKAGE_CACHE.get_version_in_project_cache(name, spec).await
-            && let Some(cached_manifest) = PACKAGE_CACHE.get_manifest_in_project_cache(name, spec, &cached_version).await
+            && let Some(cached_manifest) = PACKAGE_CACHE
+                .get_manifest_in_project_cache(name, spec, &cached_version)
+                .await
         {
             log_verbose(&format!(
                 "🔍 Found cached resolution for {name}@{spec} => {cached_version}"
@@ -199,9 +200,13 @@ impl RegistryService {
             });
         }
 
+        // Normalize spec for HTTP request
+        let (normalized_name, normalized_version) = Self::normalize_for_http(name, spec);
+
         let (version, mut manifest) = if get_registry_support_semver() {
             // For supported registries, use optimized approach
-            let manifest = Self::get_version_manifest(name, spec).await?;
+            let manifest =
+                Self::get_version_manifest(&normalized_name, &normalized_version).await?;
             let version = manifest
                 .get("version")
                 .unwrap()
@@ -211,7 +216,8 @@ impl RegistryService {
             (version, manifest)
         } else {
             // Use full versions approach
-            Self::get_version_manifest_by_full_versions(name, spec).await?
+            Self::get_version_manifest_by_full_versions(&normalized_name, &normalized_version)
+                .await?
         };
 
         // Clean up optional dependencies

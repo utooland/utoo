@@ -396,7 +396,12 @@ impl PackageCache {
     }
 
     // Project-level cache methods (for dependency resolution state)
-    pub async fn get_manifest_in_project_cache(&self, name: &str, _spec: &str, version: &str) -> Option<Value> {
+    pub async fn get_manifest_in_project_cache(
+        &self,
+        name: &str,
+        _spec: &str,
+        version: &str,
+    ) -> Option<Value> {
         // First try to load from project-level cache (for project-specific resolved manifests)
         let cache = self.cache.read().await;
         if let Some(manifest) = cache
@@ -409,7 +414,13 @@ impl PackageCache {
         None
     }
 
-    pub async fn set_manifest_in_project_cache(&self, name: &str, spec: &str, version: &str, manifest: Value) {
+    pub async fn set_manifest_in_project_cache(
+        &self,
+        name: &str,
+        spec: &str,
+        version: &str,
+        manifest: Value,
+    ) {
         let mut cache = self.cache.write().await;
         let (specs, versions) = cache
             .entry(name.to_string())

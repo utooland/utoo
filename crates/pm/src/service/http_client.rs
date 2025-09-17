@@ -43,7 +43,7 @@ impl RegistryHttpClient {
         log_verbose(&format!("Fetching full manifest for {name} from {url}"));
 
         let start = Instant::now();
-        let response = RetryIf::spawn(
+        let result = RetryIf::spawn(
             create_retry_strategy(),
             || async {
                 let mut request = self.client.get(&url).header("Accept", "application/json");
@@ -53,13 +53,35 @@ impl RegistryHttpClient {
                     request = request.header("If-None-Match", etag_value);
                 }
 
-                let response = request
-                    .send()
-                    .await
-                    .map_err(|e| RetryableError::Temporary(format!("Network error: {e}")))?;
+                let response = request.send().await.map_err(|e| {
+                    if e.is_timeout() {
+                        RetryableError::Temporary(format!("Request timeout: {e}"))
+                    } else if e.is_connect() {
+                        RetryableError::Temporary(format!("Connection error: {e}"))
+                    } else {
+                        RetryableError::Temporary(format!("Network error: {e}"))
+                    }
+                })?;
 
                 if response.status().is_success() {
-                    Ok(response)
+                    // Extract ETag before consuming response for JSON
+                    let etag = response
+                        .headers()
+                        .get("etag")
+                        .and_then(|v| v.to_str().ok())
+                        .map(Self::normalize_etag)
+                        .map(|s| s.to_string());
+
+                    // Parse JSON inside retry loop to handle response body timeouts
+                    let data = response.json().await.map_err(|e| {
+                        if e.is_timeout() {
+                            RetryableError::Temporary(format!("Response body timeout: {e}"))
+                        } else {
+                            RetryableError::Temporary(format!("Failed to parse JSON response: {e}"))
+                        }
+                    })?;
+
+                    Ok((data, etag))
                 } else if response.status().as_u16() == 304 {
                     // Not Modified - return special marker
                     Err(RetryableError::Permanent("NOT_MODIFIED".to_string()))
@@ -79,21 +101,13 @@ impl RegistryHttpClient {
             |err: &RetryableError| matches!(err, RetryableError::Temporary(_)),
         );
 
-        match response.await {
-            Ok(response) => {
-                let new_etag = response
-                    .headers()
-                    .get("etag")
-                    .and_then(|v| v.to_str().ok())
-                    .map(Self::normalize_etag)
-                    .map(|s| s.to_string());
-
-                let data = response.json().await?;
+        match result.await {
+            Ok((data, etag)) => {
                 log_verbose(&format!(
                     "Successfully fetched full manifest for {name} in {:?}",
                     start.elapsed()
                 ));
-                Ok((data, new_etag))
+                Ok((data, etag))
             }
             Err(e) => {
                 if e.to_string().contains("NOT_MODIFIED") {
@@ -127,11 +141,23 @@ impl RegistryHttpClient {
                     .header("Accept", accept)
                     .send()
                     .await
-                    .map_err(|e| RetryableError::Temporary(format!("Network error: {e}")))?;
+                    .map_err(|e| {
+                        if e.is_timeout() {
+                            RetryableError::Temporary(format!("Request timeout: {e}"))
+                        } else if e.is_connect() {
+                            RetryableError::Temporary(format!("Connection error: {e}"))
+                        } else {
+                            RetryableError::Temporary(format!("Network error: {e}"))
+                        }
+                    })?;
 
                 if response.status().is_success() {
                     let manifest = response.json().await.map_err(|e| {
-                        RetryableError::Temporary(format!("Failed to parse JSON response: {e}"))
+                        if e.is_timeout() {
+                            RetryableError::Temporary(format!("Response body timeout: {e}"))
+                        } else {
+                            RetryableError::Temporary(format!("Failed to parse JSON response: {e}"))
+                        }
                     })?;
                     Ok(manifest)
                 } else if response.status().as_u16() == 404 {
