@@ -59,7 +59,7 @@
 | Dev Server |  | ✅ |  |  |
 | Lazy Compiling |  | 🟠 |  |  |
 | Webpack partitially compatible mode |  | ✅ | [Webpack compat example](https://github.com/utooland/utoo/tree/next/examples/webpack-compat) | Made it easy to migrate from webpack-based projects |
-| CSR |  | 🟠 |  |  |
+| CSR |  | ✅ |  |  |
 | SSR |  | ❓ |  |  |
 | RSC |  | ❓ |  |  |
 | Server Action |  | ❓ |  |  |
