@@ -1,6 +1,6 @@
 use crate::helper::package::parse_package_spec;
 use crate::model::package_manifest::PackageManifest;
-use crate::service::http_client::get_full_manifest;
+use crate::service::registry::get_full_manifest;
 use crate::util::format_print::print_grid;
 use crate::util::logger::log_verbose;
 use crate::util::registry::{resolve};
