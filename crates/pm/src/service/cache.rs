@@ -168,33 +168,7 @@ impl PackageCache {
         *cache = data.cache;
     }
 
-    pub async fn get_manifest(&self, name: &str, _spec: &str, version: &str) -> Option<Value> {
-        let cache = self.cache.read().await;
-        cache
-            .get(name)
-            .and_then(|(_, versions)| versions.get(version))
-            .cloned()
-    }
-
-    pub async fn set_manifest(&self, name: &str, spec: &str, version: &str, manifest: Value) {
-        let mut cache = self.cache.write().await;
-        let (specs, versions) = cache
-            .entry(name.to_string())
-            .or_insert_with(|| (HashMap::new(), HashMap::new()));
-
-        specs.insert(spec.to_string(), version.to_string());
-        versions.insert(version.to_string(), manifest);
-    }
-
-    pub async fn get_version(&self, name: &str, spec: &str) -> Option<String> {
-        let cache = self.cache.read().await;
-        cache
-            .get(name)
-            .and_then(|(specs, _)| specs.get(spec))
-            .cloned()
-    }
-
-    pub async fn get_package_info(&self, name: &str) -> Option<PackageInfo> {
+    pub async fn get_full_manifests(&self, name: &str) -> Option<PackageInfo> {
         // Get or create the shard for this specific package
         let shard = self
             .package_shards

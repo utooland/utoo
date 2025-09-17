@@ -3,8 +3,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
-use super::http_client::{get_package_manifest, get_package_manifest_with_semver};
+use super::http_client::get_version_manifest_by_full_versions;
 use crate::model::node::EdgeType;
+use crate::service::http_client::get_version_manifest;
+use crate::util::config::get_registry_support_semver;
 use crate::util::logger::log_verbose;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -33,17 +35,15 @@ impl RegistryService {
             "🔍 RegistryService::resolve_package starting for {name}@{spec}"
         ));
 
-        // Try the new semver-based approach first
-        let (version, mut manifest) = match get_package_manifest_with_semver(name, spec).await {
-            Ok(result) => result,
-            Err(e) => {
-                // Fallback to original method for compatibility
-                log_verbose(&format!(
-                    "Falling back to original method for {name}@{spec} reason: {e}"
-                ));
-                get_package_manifest(name, spec).await?
-            }
+        let mut manifest = if get_registry_support_semver() {
+            // For supported registries, we'll implement semver-optimized approach later
+            // For now, use the full versions approach
+            get_version_manifest(name, spec).await?
+        } else {
+            get_version_manifest_by_full_versions(name, spec).await?
         };
+
+        let version = manifest.get("version").unwrap().as_str().unwrap().to_string();
 
         log_verbose(&format!("Resolved {name}@{spec} => {version}"));
 

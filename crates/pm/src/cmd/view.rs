@@ -1,8 +1,9 @@
 use crate::helper::package::parse_package_spec;
 use crate::model::package_manifest::PackageManifest;
+use crate::service::http_client::get_full_manifest;
 use crate::util::format_print::print_grid;
 use crate::util::logger::log_verbose;
-use crate::util::registry::{get_package_info, resolve};
+use crate::util::registry::{resolve};
 use anyhow::{Result, anyhow};
 use chrono::{TimeZone, Utc};
 use owo_colors::OwoColorize;
@@ -17,7 +18,7 @@ pub async fn view(package_spec: &str) -> Result<()> {
     log_verbose(&format!("Resolved package: {name} (spec: {version_spec})"));
 
     // Get complete package information (like npm view)
-    let package_info = get_package_info(name).await.map_err(|e| {
+    let package_info = get_full_manifest(name).await.map_err(|e| {
         anyhow!(
             "Failed to fetch package info for {}, reason: {}",
             package_spec,
