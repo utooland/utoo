@@ -36,13 +36,12 @@ impl RegistryHttpClient {
     fn normalize_etag(etag: &str) -> String {
         let etag = etag.trim();
         // Remove W/ prefix for weak ETags but keep the rest intact
-        if etag.starts_with("W/") {
-            etag[2..].to_string()
+        if let Some(stripped) = etag.strip_prefix("W/") {
+            stripped.to_string()
         } else {
             etag.to_string()
         }
     }
-
 
     fn build_url(&self, name: &str, spec: &str) -> String {
         if spec.starts_with("npm:") {
@@ -78,7 +77,9 @@ impl RegistryHttpClient {
             let npm_spec = spec.strip_prefix("npm:").unwrap();
             if let Some(last_at_index) = npm_spec.rfind('@') {
                 let (pkg_name, version) = npm_spec.split_at(last_at_index);
-                return self.get_package_manifest_with_semver(pkg_name, &version[1..]).await;
+                return self
+                    .get_package_manifest_with_semver(pkg_name, &version[1..])
+                    .await;
             }
         }
 
@@ -175,12 +176,14 @@ impl RegistryHttpClient {
                         .map(|s| s.to_string())
                         .collect()
                 } else {
-                    log_verbose(&format!("Unexpected versions format for {}: {:?}", name, versions));
+                    log_verbose(&format!(
+                        "Unexpected versions format for {name}: {versions:?}"
+                    ));
                     Vec::new()
                 }
             }
             None => {
-                log_verbose(&format!("No versions field found for package {}", name));
+                log_verbose(&format!("No versions field found for package {name}"));
                 Vec::new()
             }
         };
@@ -193,11 +196,13 @@ impl RegistryHttpClient {
     /// Cache stored at ~/.cache/nm/<name>/manifests/<version>.json
     pub async fn get_package_version_manifest(&self, name: &str, version: &str) -> Result<Value> {
         // First try to get from versions cache (if we have the full manifest)
-        if let Some((versions, _)) = self.try_get_package_versions_cached(name).await {
-            if let Some(manifest) = versions.get(version) {
-                log_verbose(&format!("Found {name}@{version} manifest in versions cache"));
-                return Ok(manifest.clone());
-            }
+        if let Some((versions, _)) = self.try_get_package_versions_cached(name).await
+            && let Some(manifest) = versions.get(version)
+        {
+            log_verbose(&format!(
+                "Found {name}@{version} manifest in versions cache"
+            ));
+            return Ok(manifest.clone());
         }
 
         // Try to load from manifest cache file directly
@@ -231,7 +236,7 @@ impl RegistryHttpClient {
                         "Version {version} not found for package {name}"
                     )))
                 } else {
-                    log_error(&format!("HTTP error: {:?}, url: {}", response, url));
+                    log_error(&format!("HTTP error: {response:?}, url: {url}"));
                     Err(RetryableError::Temporary(format!(
                         "HTTP error: {}, url: {}",
                         response.status(),
@@ -245,7 +250,9 @@ impl RegistryHttpClient {
         .map_err(|e| anyhow::anyhow!("Failed to fetch version manifest after retries: {e}"))?;
 
         // Cache the fetched manifest
-        PACKAGE_CACHE.cache_version_manifest(name, version, &manifest).await;
+        PACKAGE_CACHE
+            .cache_version_manifest(name, version, &manifest)
+            .await;
 
         Ok(manifest)
     }
@@ -253,8 +260,16 @@ impl RegistryHttpClient {
     /// Try to get cached package versions without triggering network requests
     async fn try_get_package_versions_cached(&self, name: &str) -> Option<(Value, Value)> {
         let cached_info = PACKAGE_CACHE.get_package_info(name).await?;
-        let versions = cached_info.data.get("versions").cloned().unwrap_or_default();
-        let dist_tags = cached_info.data.get("dist-tags").cloned().unwrap_or_default();
+        let versions = cached_info
+            .data
+            .get("versions")
+            .cloned()
+            .unwrap_or_default();
+        let dist_tags = cached_info
+            .data
+            .get("dist-tags")
+            .cloned()
+            .unwrap_or_default();
         Some((versions, dist_tags))
     }
 
@@ -271,13 +286,17 @@ impl RegistryHttpClient {
                 match serde_json::from_str::<crate::service::cache::VersionManifest>(&content) {
                     Ok(version_manifest) => Some(version_manifest.manifest),
                     Err(e) => {
-                        log_verbose(&format!("Failed to parse manifest file for {name}@{version}: {e}"));
+                        log_verbose(&format!(
+                            "Failed to parse manifest file for {name}@{version}: {e}"
+                        ));
                         None
                     }
                 }
             }
             Err(e) => {
-                log_verbose(&format!("Failed to read manifest file for {name}@{version}: {e}"));
+                log_verbose(&format!(
+                    "Failed to read manifest file for {name}@{version}: {e}"
+                ));
                 None
             }
         }
@@ -299,12 +318,15 @@ impl RegistryHttpClient {
 
         // Create request with conditional headers if we have cached data
         let mut request_builder = self.client.get(&url);
-        if let Some(ref info) = cached_info {
-            if let Some(ref etag) = info.etag {
-                request_builder = request_builder.header("If-None-Match", etag)
+        if let Some(ref info) = cached_info
+            && let Some(ref etag) = info.etag
+        {
+            request_builder = request_builder
+                .header("If-None-Match", etag)
                 .header("Accept", "application/vnd.npm.install-v1+json");
-                log_verbose(&format!("Making conditional request for {name} with ETag: {etag}"));
-            }
+            log_verbose(&format!(
+                "Making conditional request for {name} with ETag: {etag}"
+            ));
         }
 
         // if cached_info.is_some() {
@@ -343,7 +365,7 @@ impl RegistryHttpClient {
                         let etag = response.headers()
                             .get("etag")
                             .and_then(|h| h.to_str().ok())
-                            .map(|s| Self::normalize_etag(s));
+                            .map(Self::normalize_etag);
 
                         log_verbose(&format!("{url} headers: {:?}", response.headers()));
                         log_verbose(&format!("{url} ETag: {etag:?}"));
@@ -389,7 +411,9 @@ impl RegistryHttpClient {
         match result {
             Some((package_info, etag)) => {
                 // New data received, cache it
-                PACKAGE_CACHE.set_package_info(name, package_info.clone(), etag).await;
+                PACKAGE_CACHE
+                    .set_package_info(name, package_info.clone(), etag)
+                    .await;
                 Ok(package_info)
             }
             None => {
@@ -398,14 +422,20 @@ impl RegistryHttpClient {
                     Ok(info.data)
                 } else {
                     // This shouldn't happen - we got 304 but no cached data
-                    Err(anyhow::anyhow!("Received 304 Not Modified but no cached data available"))
+                    Err(anyhow::anyhow!(
+                        "Received 304 Not Modified but no cached data available"
+                    ))
                 }
             }
         }
     }
 
     /// Get package manifest using version cache and semver matching
-    pub async fn get_package_manifest_with_semver(&self, name: &str, spec: &str) -> Result<(String, Value)> {
+    pub async fn get_package_manifest_with_semver(
+        &self,
+        name: &str,
+        spec: &str,
+    ) -> Result<(String, Value)> {
         // First check cache for version
         if let Some(version) = PACKAGE_CACHE.get_version(name, spec).await
             && let Some(manifest) = PACKAGE_CACHE.get_manifest(name, spec, &version).await
@@ -434,11 +464,18 @@ impl RegistryHttpClient {
             // Use semver matching
             max_satisfying(version_list.iter().map(|s| s.as_str()), spec)
                 .map(|v| v.to_string())
-                .ok_or_else(|| anyhow::anyhow!("No version found matching {name}@{spec}, available versions: {}", version_list.join(", ")))?
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "No version found matching {name}@{spec}, available versions: {}",
+                        version_list.join(", ")
+                    )
+                })?
         };
 
         // Get the manifest for this version using the new caching system
-        let manifest = self.get_package_version_manifest(name, &version_str).await?;
+        let manifest = self
+            .get_package_version_manifest(name, &version_str)
+            .await?;
 
         log_verbose(&format!("Resolved {name}@{spec} => {version_str}"));
 
@@ -461,11 +498,15 @@ pub async fn get_package_info(name: &str) -> Result<Value> {
 }
 
 pub async fn get_package_manifest_with_semver(name: &str, spec: &str) -> Result<(String, Value)> {
-    REGISTRY_CLIENT.get_package_manifest_with_semver(name, spec).await
+    REGISTRY_CLIENT
+        .get_package_manifest_with_semver(name, spec)
+        .await
 }
 
 pub async fn get_package_version_manifest(name: &str, version: &str) -> Result<Value> {
-    REGISTRY_CLIENT.get_package_version_manifest(name, version).await
+    REGISTRY_CLIENT
+        .get_package_version_manifest(name, version)
+        .await
 }
 #[cfg(test)]
 mod tests {

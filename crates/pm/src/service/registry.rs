@@ -29,14 +29,18 @@ pub struct RegistryService;
 
 impl RegistryService {
     pub async fn resolve_package(name: &str, spec: &str) -> Result<ResolvedPackage> {
-        log_verbose(&format!("🔍 RegistryService::resolve_package starting for {}@{}", name, spec));
+        log_verbose(&format!(
+            "🔍 RegistryService::resolve_package starting for {name}@{spec}"
+        ));
 
         // Try the new semver-based approach first
         let (version, mut manifest) = match get_package_manifest_with_semver(name, spec).await {
             Ok(result) => result,
             Err(e) => {
                 // Fallback to original method for compatibility
-                log_verbose(&format!("Falling back to original method for {name}@{spec} reason: {e}"));
+                log_verbose(&format!(
+                    "Falling back to original method for {name}@{spec} reason: {e}"
+                ));
                 get_package_manifest(name, spec).await?
             }
         };
@@ -64,7 +68,9 @@ impl RegistryService {
             }
         }
 
-        log_verbose(&format!("🔍 RegistryService::resolve_package completed for {}@{} => {}", name, spec, version));
+        log_verbose(&format!(
+            "🔍 RegistryService::resolve_package completed for {name}@{spec} => {version}"
+        ));
 
         Ok(ResolvedPackage {
             name: name.to_string(),
@@ -77,18 +83,28 @@ impl RegistryService {
 // Global resolve function
 pub async fn resolve(name: &str, spec: &str) -> Result<ResolvedPackage> {
     let start_time = std::time::Instant::now();
-    log_verbose(&format!("🔍 Starting resolve for {}@{}", name, spec));
+    log_verbose(&format!("🔍 Starting resolve for {name}@{spec}"));
 
     let result = RegistryService::resolve_package(name, spec).await;
 
     match &result {
         Ok(resolved) => {
-            log_verbose(&format!("🔍 resolve completed for {}@{} => {} in {:?}",
-                name, spec, resolved.version, start_time.elapsed()));
-        },
+            log_verbose(&format!(
+                "🔍 resolve completed for {}@{} => {} in {:?}",
+                name,
+                spec,
+                resolved.version,
+                start_time.elapsed()
+            ));
+        }
         Err(e) => {
-            log_verbose(&format!("🔍 resolve FAILED for {}@{} in {:?}: {}",
-                name, spec, start_time.elapsed(), e));
+            log_verbose(&format!(
+                "🔍 resolve FAILED for {}@{} in {:?}: {}",
+                name,
+                spec,
+                start_time.elapsed(),
+                e
+            ));
         }
     }
 
@@ -101,31 +117,39 @@ pub async fn resolve_dependency(
     edge_type: &EdgeType,
 ) -> Result<Option<ResolvedPackage>> {
     let start_time = std::time::Instant::now();
-    log_verbose(&format!("🔍 Starting resolve_dependency for {}@{} ({})", name, spec, match edge_type {
-        EdgeType::Prod => "prod",
-        EdgeType::Dev => "dev",
-        EdgeType::Peer => "peer",
-        EdgeType::Optional => "optional",
-    }));
+    log_verbose(&format!(
+        "🔍 Starting resolve_dependency for {}@{} ({})",
+        name,
+        spec,
+        match edge_type {
+            EdgeType::Prod => "prod",
+            EdgeType::Dev => "dev",
+            EdgeType::Peer => "peer",
+            EdgeType::Optional => "optional",
+        }
+    ));
 
     match resolve(name, spec).await {
         Ok(resolved) => {
-            log_verbose(&format!("🔍 resolve_dependency completed for {}@{} => {} in {:?}",
-                name, spec, resolved.version, start_time.elapsed()));
+            log_verbose(&format!(
+                "🔍 resolve_dependency completed for {}@{} => {} in {:?}",
+                name,
+                spec,
+                resolved.version,
+                start_time.elapsed()
+            ));
             Ok(Some(resolved))
-        },
+        }
         Err(e) => {
             let elapsed = start_time.elapsed();
             if *edge_type == EdgeType::Optional {
                 log_verbose(&format!(
-                    "skipping optional dependency {}@{} due to resolve error after {:?}: {}",
-                    name, spec, elapsed, e
+                    "skipping optional dependency {name}@{spec} due to resolve error after {elapsed:?}: {e}"
                 ));
                 Ok(None)
             } else {
                 log_verbose(&format!(
-                    "🔍 resolve_dependency FAILED for {}@{} after {:?}: {}",
-                    name, spec, elapsed, e
+                    "🔍 resolve_dependency FAILED for {name}@{spec} after {elapsed:?}: {e}"
                 ));
                 Err(e)
             }

@@ -41,13 +41,10 @@ pub fn is_valid_version(version: &str) -> bool {
 }
 
 /// Find the maximum version from a list of versions that satisfies the given range
-pub fn max_satisfying<'a>(
-    versions: impl Iterator<Item = &'a str>,
-    range: &str,
-) -> Option<Version> {
+pub fn max_satisfying<'a>(versions: impl Iterator<Item = &'a str>, range: &str) -> Option<Version> {
     let req = VersionReq::parse_from_npm(range).ok()?;
     let start = Instant::now();
-    let res =versions
+    let res = versions
         .filter_map(|v| Version::parse_from_npm(v).ok())
         .filter(|v| req.matches(v))
         .max();
@@ -79,7 +76,7 @@ mod tests {
 
     #[test]
     fn test_max_satisfying() {
-        let versions = vec!["1.0.0", "1.1.0", "1.2.0", "2.0.0", "2.1.0"];
+        let versions = ["1.0.0", "1.1.0", "1.2.0", "2.0.0", "2.1.0"];
 
         assert_eq!(
             max_satisfying(versions.iter().cloned(), "^1.0.0"),
@@ -101,9 +98,6 @@ mod tests {
             Some(Version::parse_from_npm("2.1.0").unwrap())
         );
 
-        assert_eq!(
-            max_satisfying(versions.iter().cloned(), "^3.0.0"),
-            None
-        );
+        assert_eq!(max_satisfying(versions.iter().cloned(), "^3.0.0"), None);
     }
 }

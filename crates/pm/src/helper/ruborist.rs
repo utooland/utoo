@@ -40,7 +40,9 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
 
     while !current_level.lock().unwrap().is_empty() {
         let level_count = current_level.lock().unwrap().len();
-        log_verbose(&format!("🔍 Starting new dependency level with {} nodes", level_count));
+        log_verbose(&format!(
+            "🔍 Starting new dependency level with {level_count} nodes"
+        ));
 
         let next_level = Arc::new(Mutex::new(Vec::new()));
         let nodes = current_level.lock().unwrap().clone();
@@ -51,7 +53,10 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
             let total_deps = edges.len();
             PROGRESS_BAR.inc_length(total_deps as u64);
             log_progress(&format!("resolving {}", node.name));
-            log_verbose(&format!("🔍 Processing node {} with {} dependencies", node.name, total_deps));
+            log_verbose(&format!(
+                "🔍 Processing node {} with {} dependencies",
+                node.name, total_deps
+            ));
 
             let mut tasks = Vec::new();
 
@@ -245,7 +250,9 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
 
         // waiting for all tasks in this level to finish
         let level_task_count = level_tasks.len();
-        log_verbose(&format!("🔍 Waiting for {} level tasks to complete", level_task_count));
+        log_verbose(&format!(
+            "🔍 Waiting for {level_task_count} level tasks to complete"
+        ));
 
         futures::future::try_join_all(level_tasks)
             .await
@@ -258,7 +265,7 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                 anyhow::anyhow!(err_msg)
             })?;
 
-        log_verbose(&format!("🔍 All {} level tasks completed", level_task_count));
+        log_verbose(&format!("🔍 All {level_task_count} level tasks completed"));
 
         // continue to next level
         *current_level.lock().unwrap() = next_level.lock().unwrap().clone();

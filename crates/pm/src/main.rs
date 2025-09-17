@@ -18,7 +18,8 @@ use cmd::{clean::clean, deps::build_workspace};
 use helper::auto_update::init_auto_update;
 use util::config::{set_legacy_peer_deps, set_registry};
 use util::logger::{
-    log_error, log_time, log_time_end, log_verbose, log_warning, set_verbose, write_verbose_logs_to_file,
+    log_error, log_time, log_time_end, log_verbose, log_warning, set_verbose,
+    write_verbose_logs_to_file,
 };
 use util::save_type::{PackageAction, SaveType, parse_save_type};
 

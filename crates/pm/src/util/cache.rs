@@ -93,7 +93,10 @@ pub fn get_package_versions_cache_file(package_name: &str) -> PathBuf {
 
 pub fn get_package_manifest_cache_file(package_name: &str, version: &str) -> PathBuf {
     // Escape package name and version for filesystem compatibility
-    get_cache_dir().join(package_name).join("manifests").join(format!("{}.json", version))
+    get_cache_dir()
+        .join(package_name)
+        .join("manifests")
+        .join(format!("{version}.json"))
 }
 
 pub fn get_package_cache_dir(package_name: &str) -> PathBuf {
