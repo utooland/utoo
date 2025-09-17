@@ -6,17 +6,17 @@ use std::sync::Arc;
 use std::{collections::HashMap, fs};
 
 use crate::helper::workspace::find_workspaces;
-use crate::service::http_client::get_package_version_manifest;
+use crate::model::node::Node;
+use crate::model::override_rule::Overrides;
 use crate::util::config::get_legacy_peer_deps;
 use crate::util::json::{load_package_json_from_path, load_package_lock_json_from_path};
 use crate::util::logger::{log_verbose, log_warning};
-use crate::model::node::{EdgeType, Node};
-use crate::model::override_rule::Overrides;
-use crate::util::registry::{resolve, resolve_dependency};
+use crate::util::registry::resolve;
 use crate::util::relative_path::to_relative_path;
 use crate::util::save_type::{PackageAction, SaveType};
 use crate::util::semver;
 use crate::util::{cache::parse_pattern, cloner::clone, downloader::download};
+use crate::service::http_client::get_package_version_manifest;
 use crate::{cmd::deps::build_deps, util::logger::log_info};
 
 use super::workspace::find_workspace_path;
@@ -552,7 +552,7 @@ fn check_duplicate_dependencies(node: &Arc<Node>) {
     let mut name_count = HashMap::new();
 
     for child in children.iter() {
-        if !child.is_link {
+        if !child.is_link() {
             *name_count.entry(child.name.as_str()).or_insert(0) += 1;
         }
     }
@@ -607,7 +607,7 @@ fn create_non_root_package_info(
 
     if node.is_workspace() {
         info["version"] = json!(node.package.get("version"));
-    } else if node.is_link {
+    } else if node.is_link() {
         info["link"] = json!(true);
         let target_path = get_relative_target_path(node, root_path);
         info["resolved"] = json!(target_path);
@@ -665,7 +665,7 @@ fn add_package_fields(pkg_info: &mut Value, node: &Arc<Node>) {
 
 /// Get the list of fields to include based on node type
 fn get_package_fields(node: &Arc<Node>) -> Vec<&'static str> {
-    if node.is_link {
+    if node.is_link() {
         vec![]
     } else if node.is_root() {
         vec![
@@ -772,14 +772,13 @@ mod tests {
         for (version, spec, expected) in test_cases {
             let version_to_write = match spec {
                 spec if spec.is_empty() || spec == "*" || spec == "latest" => {
-                    format!("^{}", version)
+                    format!("^{version}")
                 }
                 spec => spec.to_string(),
             };
             assert_eq!(
                 version_to_write, expected,
-                "Failed for version: {}, spec: {}",
-                version, spec
+                "Failed for version: {version}, spec: {spec}",
             );
         }
     }
@@ -887,7 +886,7 @@ mod tests {
         );
 
         // Test writing the ideal tree to lock file
-        let result = write_ideal_tree_to_lock_file(&temp_path.to_path_buf(), &root).await;
+        let result = write_ideal_tree_to_lock_file(temp_path, &root).await;
         assert!(result.is_ok());
 
         // Verify the lock file was created
@@ -947,11 +946,7 @@ mod tests {
         fs::write(temp_path.join("package-lock.json"), pkg_lock.to_string()).unwrap();
 
         // Test that files are in sync
-        assert!(
-            !is_pkg_lock_outdated(&temp_path.to_path_buf())
-                .await
-                .unwrap()
-        );
+        assert!(!is_pkg_lock_outdated(temp_path).await.unwrap());
 
         // Test case 2: package.json has new dependency
         let pkg_json_updated = json!({
@@ -967,9 +962,7 @@ mod tests {
         });
 
         fs::write(temp_path.join("package.json"), pkg_json_updated.to_string()).unwrap();
-        let outdated = is_pkg_lock_outdated(&temp_path.to_path_buf())
-            .await
-            .unwrap();
+        let outdated = is_pkg_lock_outdated(temp_path).await.unwrap();
         assert!(outdated);
 
         // Test case 3: package.json has updated version
@@ -989,11 +982,7 @@ mod tests {
             pkg_json_version_updated.to_string(),
         )
         .unwrap();
-        assert!(
-            is_pkg_lock_outdated(&temp_path.to_path_buf())
-                .await
-                .unwrap()
-        );
+        assert!(is_pkg_lock_outdated(temp_path).await.unwrap());
 
         // Test case 4: package.json has removed dependency
         let pkg_json_removed = json!({
@@ -1006,11 +995,7 @@ mod tests {
         });
 
         fs::write(temp_path.join("package.json"), pkg_json_removed.to_string()).unwrap();
-        assert!(
-            is_pkg_lock_outdated(&temp_path.to_path_buf())
-                .await
-                .unwrap()
-        );
+        assert!(is_pkg_lock_outdated(temp_path).await.unwrap());
 
         // Test case 4: package.json has removed dependency
         let pkg_json_engines_changed = json!({
@@ -1033,11 +1018,7 @@ mod tests {
             pkg_json_engines_changed.to_string(),
         )
         .unwrap();
-        assert!(
-            is_pkg_lock_outdated(&temp_path.to_path_buf())
-                .await
-                .unwrap()
-        );
+        assert!(is_pkg_lock_outdated(temp_path).await.unwrap());
     }
 
     #[test]
@@ -1184,7 +1165,7 @@ mod tests {
 
         // Verify workspace package
         let workspace_pkg = packages.get("packages/workspace-a").unwrap();
-        println!("workspace_pkg: {:?}", workspace_pkg);
+        println!("workspace_pkg: {workspace_pkg:?}");
         assert_eq!(workspace_pkg["name"], "workspace-a");
 
         // Verify bin configuration
@@ -1479,11 +1460,7 @@ mod tests {
         fs::write(temp_path.join("package-lock.json"), pkg_lock.to_string()).unwrap();
 
         // Test that empty object and missing field are treated as equal
-        assert!(
-            !is_pkg_lock_outdated(&temp_path.to_path_buf())
-                .await
-                .unwrap()
-        );
+        assert!(!is_pkg_lock_outdated(temp_path).await.unwrap());
 
         // Test reverse case: package.json has no dependencies field, package-lock.json has empty dependencies
         let pkg_json_no_deps = json!({
@@ -1514,10 +1491,6 @@ mod tests {
         .unwrap();
 
         // Test that missing field and empty object are treated as equal
-        assert!(
-            !is_pkg_lock_outdated(&temp_path.to_path_buf())
-                .await
-                .unwrap()
-        );
+        assert!(!is_pkg_lock_outdated(temp_path).await.unwrap());
     }
 }

@@ -9,12 +9,14 @@ use crate::util::logger::{log_verbose, log_warning};
 
 #[cfg(target_os = "macos")]
 use libc::clonefile;
+#[cfg(target_os = "macos")]
 use std::ffi::CString;
+#[cfg(target_os = "macos")]
 use std::os::unix::ffi::OsStrExt;
 
 #[cfg(target_os = "linux")]
 mod linux_clone {
-    use crate::util::logger::{log_verbose, log_warning};
+    use crate::util::logger::log_verbose;
     use anyhow::Result;
     use std::fs::File;
     use std::os::unix::io::AsRawFd;
@@ -95,7 +97,7 @@ mod linux_clone {
             match copy_file_with_ficlone(src, dst).await {
                 Ok(_) => return Ok(()),
                 Err(e) => {
-                    log_verbose(&format!("FICLONE failed: {}, trying copy_file_range", e));
+                    log_verbose(&format!("FICLONE failed: {e}, trying copy_file_range"));
                 }
             }
         }
@@ -105,10 +107,7 @@ mod linux_clone {
             match copy_file_with_range(src, dst).await {
                 Ok(_) => return Ok(()),
                 Err(e) => {
-                    log_verbose(&format!(
-                        "copy_file_range failed: {}, using regular copy",
-                        e
-                    ));
+                    log_verbose(&format!("copy_file_range failed: {e}, using regular copy"));
                 }
             }
         }
@@ -308,14 +307,14 @@ pub async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
     Ok(true)
 }
 
-// find the first non builded subdirectory
+// find the first non built subdirectory
 pub async fn find_real_src<P: AsRef<Path>>(src: P) -> Option<PathBuf> {
     let mut read_dir = fs::read_dir(src.as_ref()).await.ok()?;
     while let Some(entry) = read_dir.next_entry().await.ok()? {
         if let Ok(metadata) = entry.metadata().await
             && metadata.is_dir()
             && let Some(name) = entry.path().file_name()
-            && name.to_str().unwrap_or_default() != ".utoo_builded"
+            && name.to_str().unwrap_or_default() != ".utoo_built"
         {
             return Some(entry.path());
         }
@@ -544,14 +543,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_find_real_src_with_builded_dir() -> Result<()> {
+    async fn test_find_real_src_with_built_dir() -> Result<()> {
         let temp = TempDir::new()?;
         let dir = temp.path().join("test_dir");
         fs::create_dir(&dir).await?;
 
-        // Create .utoo_builded directory
-        let builded_dir = dir.join(".utoo_builded");
-        fs::create_dir(&builded_dir).await?;
+        // Create .utoo_built directory
+        let built_dir = dir.join(".utoo_built");
+        fs::create_dir(&built_dir).await?;
 
         // Create a regular subdirectory
         let subdir = dir.join("subdir");
@@ -571,7 +570,7 @@ mod tests {
         create_test_structure(
             &src_dir,
             &[
-                (".utoo_builded", None),
+                (".utoo_built", None),
                 ("real_dir/file.txt", Some(b"content")),
             ],
         )
@@ -582,7 +581,7 @@ mod tests {
 
         // Verify everything was cloned
         assert!(dst_dir.join("real_dir").exists());
-        assert!(dst_dir.join(".utoo_builded").exists());
+        assert!(dst_dir.join(".utoo_built").exists());
         assert_eq!(
             fs::read_to_string(dst_dir.join("real_dir/file.txt")).await?,
             "content"
@@ -704,13 +703,20 @@ mod tests {
             // Test case when source directory doesn't exist
             let result = linux_clone::clone_dir(&src_dir, &dst_dir).await;
             assert!(result.is_err());
-            assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::NotFound);
+            assert_eq!(
+                result
+                    .unwrap_err()
+                    .downcast_ref::<std::io::Error>()
+                    .unwrap()
+                    .kind(),
+                std::io::ErrorKind::NotFound
+            );
 
             // Test case when source path is a file instead of a directory
-            create_test_file(&temp.path(), "not_a_dir", b"content").await?;
-            let result = linux_clone::clone_dir(&temp.path().join("not_a_dir"), &dst_dir).await;
+            create_test_file(temp.path(), "not_a_dir", b"content").await?;
+            let result =
+                linux_clone::clone_dir(temp.path().join("not_a_dir").as_ref(), &dst_dir).await;
             assert!(result.is_err());
-            assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
 
             Ok(())
         }

@@ -9,12 +9,12 @@ use tokio::sync::Semaphore;
 
 use crate::helper::install_runtime::install_runtime;
 use crate::helper::workspace::find_workspaces;
+use crate::model::node::{Edge, EdgeType, Node};
 use crate::util::config::get_legacy_peer_deps;
 use crate::util::json::load_package_json_from_path;
 use crate::util::logger::{
     PROGRESS_BAR, finish_progress_bar, log_progress, log_verbose, start_progress_bar,
 };
-use crate::model::node::{Edge, EdgeType, Node};
 use crate::util::node_search::get_node_from_root_by_path;
 use crate::util::registry::{ResolvedPackage, load_cache, resolve_dependency, store_cache};
 use crate::util::semver::matches;
@@ -41,7 +41,7 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
     while !current_level.lock().unwrap().is_empty() {
         let level_count = current_level.lock().unwrap().len();
         log_verbose(&format!("🔍 Starting new dependency level with {} nodes", level_count));
-        
+
         let next_level = Arc::new(Mutex::new(Vec::new()));
         let nodes = current_level.lock().unwrap().clone();
         let mut level_tasks = Vec::new();
@@ -61,10 +61,10 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                 let processed_workspace_nodes = processed_workspace_nodes.clone();
 
                 tasks.push(async move {
-                    log_verbose(&format!("🔍 Task for {}@{} acquiring concurrency permit (available: {})", 
+                    log_verbose(&format!("🔍 Task for {}@{} acquiring concurrency permit (available: {})",
                         edge.name, edge.spec, CONCURRENCY_LIMITER.available_permits()));
                     let _permit = CONCURRENCY_LIMITER.acquire().await.unwrap();
-                    log_verbose(&format!("🔍 Task for {}@{} acquired concurrency permit (remaining: {})", 
+                    log_verbose(&format!("🔍 Task for {}@{} acquired concurrency permit (remaining: {})",
                         edge.name, edge.spec, CONCURRENCY_LIMITER.available_permits()));
 
                     if *edge.valid.read().unwrap() {
@@ -92,7 +92,7 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                     }
 
                     log_verbose(&format!("going to build deps {}@{} from [{}]", edge.name, edge.spec, edge.from));
-                    
+
                     // Add debug logs to track progress
                     let start_time = std::time::Instant::now();
                     log_verbose(&format!("🔍 Starting dependency resolution for {}@{}", edge.name, edge.spec));
@@ -235,7 +235,7 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                             next_level.lock().unwrap().push(new_node);
                         }
                     }
-                    
+
                     log_verbose(&format!("🔍 Task for {}@{} completed, releasing concurrency permit", edge.name, edge.spec));
                     Ok::<_, anyhow::Error>(())
                 });
@@ -246,7 +246,7 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
         // waiting for all tasks in this level to finish
         let level_task_count = level_tasks.len();
         log_verbose(&format!("🔍 Waiting for {} level tasks to complete", level_task_count));
-        
+
         futures::future::try_join_all(level_tasks)
             .await
             .map_err(|e| {
@@ -257,7 +257,7 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                     .join("\n");
                 anyhow::anyhow!(err_msg)
             })?;
-            
+
         log_verbose(&format!("🔍 All {} level tasks completed", level_task_count));
 
         // continue to next level
@@ -283,7 +283,7 @@ fn place_deps(name: String, pkg: ResolvedPackage, parent: &Arc<Node>) -> Result<
 
 #[derive(Debug)]
 pub enum FindResult {
-    Reuse(Arc<Node>),    // can resue
+    Reuse(Arc<Node>),    // can reuse
     Conflict(Arc<Node>), // conflict, return parent node
     New(Arc<Node>),      // need to install under root node
 }
@@ -544,7 +544,7 @@ impl Ruborist {
 
         // find the deps between workspace
         for workspace in children.iter() {
-            if workspace.is_link {
+            if workspace.is_link() {
                 continue;
             }
             PROGRESS_BAR.inc_length(1);
@@ -589,7 +589,7 @@ impl Ruborist {
                     .push(child.clone());
             }
 
-            // hanlde dup node
+            // handle dup node
             for (_, nodes) in name_map {
                 if nodes.len() > 1 {
                     // find max edges_in node to save the cost

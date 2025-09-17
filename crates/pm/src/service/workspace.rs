@@ -32,7 +32,7 @@ impl WorkspaceService {
             // Collect workspace nodes
             for child in ideal_tree.children.read().unwrap().iter() {
                 let name = child.name.clone();
-                if child.is_link {
+                if child.is_link() {
                     continue;
                 }
                 workspace_names.insert(name.clone());
@@ -142,7 +142,7 @@ mod tests {
         let temp = tempdir().unwrap();
         create_mock_workspace(temp.path());
         let result = WorkspaceService::build_workspace_json(temp.path()).await;
-        println!("{:?}", result);
+        println!("{result:?}");
         assert!(result.is_ok(), "build_workspace_json should succeed");
         let json = result.unwrap();
         let edges = json.get("edges").unwrap().as_array().unwrap();

@@ -1,19 +1,19 @@
 {
-    "$schema": "../../packages/pack/config_schema.json",
-    "rootPath": "../../",
-    "projectPath": "./",
-    "config": {
-        "entry": [
-            {
-                "name": "index",
-                "import": "./src/index.jsx"
-            }
-        ],
-        "output": {
-            "clean": true
-        },
-        "optimization": {
-            "minify": false
-        }
+  "$schema": "../../packages/pack/config_schema.json",
+  "rootPath": "../../",
+  "projectPath": "./",
+  "config": {
+    "entry": [
+      {
+        "name": "index",
+        "import": "./src/index.jsx"
+      }
+    ],
+    "output": {
+      "clean": true
+    },
+    "optimization": {
+      "minify": false
     }
+  }
 }

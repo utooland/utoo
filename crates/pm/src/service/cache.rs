@@ -226,7 +226,7 @@ impl PackageCache {
             Some(info) => {
                 log_verbose(&format!("Package versions loaded {name}, took {:?}", load_start.elapsed()));
                 let info_arc = Arc::new(info);
-                
+
                 // Try to update cache, but don't block if we can't
                 if let Ok(mut cached) = shard.try_write() {
                     *cached = Some(CachedVersionsInfo {
@@ -237,7 +237,7 @@ impl PackageCache {
                 } else {
                     log_verbose(&format!("🔍 Could not update cache for {name}, continuing anyway"));
                 }
-                
+
                 log_verbose(&format!("Package versions hit for {name}, loaded to memory"));
                 Some(self.reconstruct_package_info(&info_arc, name).await)
             }
@@ -283,7 +283,7 @@ impl PackageCache {
                     None
                 }
             };
-            
+
             // Only perform file I/O if we successfully acquired the semaphore permit
             if _permit.is_some() {
                 for version_name in version_list {
@@ -321,7 +321,7 @@ impl PackageCache {
             } else {
                 log_verbose(&format!("Reconstructed package info with {} cached manifests for {name}", versions_obj.as_object().unwrap().len()));
             }
-            
+
             // Explicitly drop permit to release semaphore
             drop(_permit);
             log_verbose(&format!("🔍 Finished reconstructing package info for {name}, semaphore permit released"));

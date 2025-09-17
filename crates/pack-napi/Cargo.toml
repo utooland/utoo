@@ -1,6 +1,6 @@
 [package]
-name = "pack-napi"
-version = "0.1.0"
+name              = "pack-napi"
+version           = "0.1.0"
 edition.workspace = true
 license.workspace = true
 
@@ -9,10 +9,10 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 plugin = [
+  "pack-core/plugin",
   "swc_core/plugin_transform_host_native",
   "swc_core/plugin_transform_host_native_filesystem_cache",
   "swc_core/plugin_transform_host_native_shared_runtime",
-  "pack-core/plugin",
   "turbopack-ecmascript-plugins/swc_ecma_transform_plugin",
 ]
 
@@ -25,22 +25,28 @@ __internal_dhat-heap = ["dhat"]
 # effectively does nothing.
 __internal_dhat-ad-hoc = ["dhat"]
 
-
 [dependencies]
 anyhow = { workspace = true, features = ["backtrace"] }
+console-subscriber = { workspace = true, optional = true }
+dhat = { version = "0.3.2", optional = true }
 napi = { version = "2", default-features = false, features = [
+  "error_anyhow",
   "napi3",
   "serde-json",
   "tokio_rt",
-  "error_anyhow",
   # Lightningcss uses this features
+  "compat-mode",
   "napi4",
   "napi5",
-  "compat-mode",
 ] }
 napi-derive = "2"
+owo-colors = { workspace = true }
 pack-api = { workspace = true }
 pack-core = { workspace = true }
+rand = { workspace = true }
+rustc-hash = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 swc_core = { workspace = true, features = [
   "base_concurrent",
   "base_node",
@@ -62,49 +68,35 @@ swc_core = { workspace = true, features = [
   "ecma_utils",
   "ecma_visit",
 ] }
-turbopack-ecmascript-plugins = { workspace = true, optional = true }
-console-subscriber = { workspace = true, optional = true }
-rand = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 tracing-chrome = "0.7.2"
-serde = { workspace = true }
-serde_json = { workspace = true }
-rustc-hash = { workspace = true }
+tracing-subscriber = { workspace = true }
+turbopack-ecmascript-plugins = { workspace = true, optional = true }
 urlencoding = { workspace = true }
-owo-colors = { workspace = true }
-dhat = { version = "0.3.2", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { workspace = true, features = ["full"] }
-turbo-rcstr = { workspace = true, features = ["napi"] }
-turbo-tasks = { workspace = true }
-turbo-tasks-backend = { workspace = true }
-turbo-tasks-fs = { workspace = true }
-turbo-unix-path = { workspace = true }
-pack-api = { workspace = true }
-pack-core = { workspace = true }
-turbo-tasks-malloc = { workspace = true, default-features = false, features = [
-  "custom_allocator",
-] }
-
-turbopack = { workspace = true }
-turbopack-core = { workspace = true }
+pack-api                          = { workspace = true }
+pack-core                         = { workspace = true }
+tokio                             = { workspace = true, features = ["full"] }
+turbo-rcstr                       = { workspace = true, features = ["napi"] }
+turbo-tasks                       = { workspace = true }
+turbo-tasks-backend               = { workspace = true }
+turbo-tasks-fs                    = { workspace = true }
+turbo-tasks-malloc                = { workspace = true, default-features = false, features = ["custom_allocator"] }
+turbo-unix-path                   = { workspace = true }
+turbopack                         = { workspace = true }
+turbopack-core                    = { workspace = true }
 turbopack-ecmascript-hmr-protocol = { workspace = true }
-turbopack-trace-utils = { workspace = true }
-turbopack-trace-server = { workspace = true }
-turbopack-ecmascript-plugins = { workspace = true, optional = true }
-
+turbopack-ecmascript-plugins      = { workspace = true, optional = true }
+turbopack-trace-server            = { workspace = true }
+turbopack-trace-utils             = { workspace = true }
 
 [build-dependencies]
-anyhow = { workspace = true }
-napi-build = "2"
-serde = { workspace = true }
-serde_json = { workspace = true }
-turbo-tasks-build = { workspace = true }
-
+anyhow       = { workspace = true }
+napi-build   = "2"
+serde        = { workspace = true }
+serde_json   = { workspace = true }
 vergen-gitcl = { version = "1.0.8", features = ["cargo"] }
-
 
 [lints]
 workspace = true

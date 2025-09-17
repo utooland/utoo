@@ -1,0 +1,21 @@
+name: biome
+
+on:
+  push:
+    branches: ['next']
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  biome:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install
+      - name: Run Biome
+        run: npx biome ci .

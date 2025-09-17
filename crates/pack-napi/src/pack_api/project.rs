@@ -23,10 +23,7 @@ use pack_api::{
         hmr_update_with_issues_operation,
     },
     operation::EntrypointsOperation,
-    project::{
-        DefineEnv, PartialProjectOptions, ProjectContainer, ProjectInstance, ProjectOptions,
-        WatchOptions,
-    },
+    project::{DefineEnv, PartialProjectOptions, ProjectContainer, ProjectOptions, WatchOptions},
     source_map::get_source_map_rope,
     tasks::{BundlerTurboTasks, RootTask},
 };
@@ -54,7 +51,9 @@ use turbopack_core::{
 };
 use turbopack_ecmascript_hmr_protocol::{ClientUpdateInstruction, ResourceIdentifier};
 use turbopack_trace_utils::{
-    exit::ExitHandler, filter_layer::FilterLayer, raw_trace::RawTraceLayer,
+    exit::{ExitHandler, ExitReceiver},
+    filter_layer::FilterLayer,
+    raw_trace::RawTraceLayer,
     trace_writer::TraceWriter,
 };
 
@@ -62,7 +61,7 @@ use super::{
     endpoint::ExternalEndpoint,
     utils::{NapiDiagnostic, NapiIssue, TurbopackResult, VcArc, create_turbo_tasks, subscribe},
 };
-use crate::{register, util::DhatProfilerGuard};
+use crate::util::DhatProfilerGuard;
 
 static SOURCE_MAP_PREFIX: LazyLock<String> = LazyLock::new(|| format!("{SOURCE_URL_PROTOCOL}///"));
 static SOURCE_MAP_PREFIX_PROJECT: LazyLock<String> =
@@ -240,12 +239,17 @@ impl From<NapiDefineEnv> for DefineEnv {
     }
 }
 
+pub struct ProjectInstance {
+    pub turbo_tasks: BundlerTurboTasks,
+    pub container: ResolvedVc<ProjectContainer>,
+    pub exit_receiver: tokio::sync::Mutex<Option<ExitReceiver>>,
+}
+
 #[napi(ts_return_type = "Promise<{ __napiType: \"Project\" }>")]
 pub async fn project_new(
     options: NapiProjectOptions,
     turbo_engine_options: NapiTurboEngineOptions,
 ) -> napi::Result<External<ProjectInstance>> {
-    register();
     let (exit, exit_receiver) = ExitHandler::new_receiver();
 
     if let Some(dhat_profiler) = DhatProfilerGuard::try_init() {

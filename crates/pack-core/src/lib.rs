@@ -1,6 +1,7 @@
 #![feature(arbitrary_self_types_pointers)]
 #![feature(box_patterns)]
 #![feature(str_as_str)]
+#![allow(unexpected_cfgs)]
 
 pub mod client;
 pub mod config;
@@ -17,18 +18,3 @@ pub mod transform_options;
 pub mod util;
 
 pub use emit::{all_assets_from_entries, emit_assets};
-
-pub fn register() {
-    turbo_tasks::register();
-    turbo_tasks_bytes::register();
-    turbo_tasks_fs::register();
-    turbo_tasks_fetch::register();
-    turbopack_browser::register();
-    turbopack_node::register();
-    turbopack::register();
-    turbopack_image::register();
-    turbopack_ecmascript::register();
-    turbopack_ecmascript_plugins::register();
-    turbo_esregex::register();
-    include!(concat!(env!("OUT_DIR"), "/register.rs"));
-}

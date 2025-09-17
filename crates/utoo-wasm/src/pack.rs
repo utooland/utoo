@@ -1,0 +1,253 @@
+use rustc_hash::FxHashMap;
+use serde_json::{json, Value};
+use std::{ops::Deref, path::PathBuf, str::FromStr, sync::Arc};
+use tokio::time::Instant;
+use turbo_tasks_fs::FileContent;
+use turbopack_core::{
+    diagnostics::PlainDiagnostic,
+    error::PrettyPrintError,
+    issue::{PlainIssue, PlainIssueSource, PlainSource},
+    source_pos::SourcePos as SourcePosInner,
+};
+
+use anyhow::{Context, Ok, Result};
+use pack_api::{
+    endpoint::Endpoint,
+    entrypoint::{get_all_written_entrypoints_with_issues_operation, EntrypointsWithIssues},
+    project::{ProjectContainer, ProjectOptions, WatchOptions},
+    tasks::BundlerTurboTasks,
+    utils::StyledStringSerialize,
+};
+use serde::{Deserialize, Deserializer, Serialize};
+use turbo_rcstr::RcStr;
+use turbo_tasks::{OperationVc, ReadConsistency, ResolvedVc, TurboTasks};
+use turbo_tasks_backend::{
+    noop_backing_storage, BackendOptions, NoopBackingStorage, TurboTasksBackend,
+};
+
+unsafe extern "C" {
+    pub fn __wasm_call_ctors();
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq)]
+pub struct PartialProjectOptions {
+    pub project_path: String,
+
+    pub config: Option<String>,
+}
+
+pub struct PackProject {
+    pub turbo_tasks: BundlerTurboTasks,
+    pub container: ResolvedVc<ProjectContainer>,
+}
+
+impl PackProject {
+    pub async fn initialize(options: ProjectOptions) -> Result<Self> {
+        let turbo_tasks = create_turbo_tasks()?;
+        let container = turbo_tasks
+            .run_once(async move {
+                let project_container = ProjectContainer::new("utoopack-web".into(), false);
+                let project_container = project_container.to_resolved().await?;
+                project_container.initialize(options).await?;
+                Ok(project_container)
+            })
+            .await?;
+
+        Ok(PackProject {
+            turbo_tasks,
+            container,
+        })
+    }
+
+    pub async fn build(&self) -> Result<TurbopackResult> {
+        let start = Instant::now();
+        let turbo_tasks = self.turbo_tasks.clone();
+        let container = self.container;
+        let (entrypoints, issues, diags) = turbo_tasks
+            .run_once(async move {
+                let entrypoints_with_issues_op =
+                    get_all_written_entrypoints_with_issues_operation(container);
+
+                let EntrypointsWithIssues {
+                    entrypoints,
+                    issues,
+                    diagnostics,
+                    effects,
+                } = &*entrypoints_with_issues_op
+                    .read_strongly_consistent()
+                    .await?;
+                effects.apply().await?;
+
+                Ok((entrypoints.clone(), issues.clone(), diagnostics.clone()))
+            })
+            .await?;
+
+        tracing::info!("all project entrypoints wrote to disk.");
+
+        tracing::info!(
+            "pack tasks with {} apps {} libraries finished in {:?}",
+            entrypoints
+                .apps
+                .as_ref()
+                .map(|apps| apps.0.len())
+                .unwrap_or_default(),
+            entrypoints
+                .libraries
+                .as_ref()
+                .map(|libraries| libraries.0.len())
+                .unwrap_or_default(),
+            start.elapsed()
+        );
+
+        Ok(TurbopackResult {
+            issues: issues.iter().map(|i| Issue::from(&**i)).collect(),
+            diagnostics: diags.iter().map(|d| Diagnostic::from(d)).collect(),
+        })
+    }
+}
+
+pub fn create_turbo_tasks() -> Result<BundlerTurboTasks> {
+    Ok(BundlerTurboTasks::Memory(TurboTasks::new(
+        turbo_tasks_backend::TurboTasksBackend::new(
+            turbo_tasks_backend::BackendOptions {
+                storage_mode: None,
+                dependency_tracking: true,
+                ..Default::default()
+            },
+            noop_backing_storage(),
+        ),
+    )))
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Issue {
+    pub severity: String,
+    pub stage: String,
+    pub file_path: String,
+    pub title: serde_json::Value,
+    pub description: Option<serde_json::Value>,
+    pub detail: Option<serde_json::Value>,
+    pub source: Option<IssueSource>,
+    pub documentation_link: String,
+    pub import_traces: serde_json::Value,
+}
+
+impl From<&PlainIssue> for Issue {
+    fn from(issue: &PlainIssue) -> Self {
+        Self {
+            description: issue
+                .description
+                .as_ref()
+                .map(|styled| serde_json::to_value(StyledStringSerialize::from(styled)).unwrap()),
+            stage: issue.stage.to_string(),
+            file_path: issue.file_path.to_string(),
+            detail: issue
+                .detail
+                .as_ref()
+                .map(|styled| serde_json::to_value(StyledStringSerialize::from(styled)).unwrap()),
+            documentation_link: issue.documentation_link.to_string(),
+            severity: issue.severity.as_str().to_string(),
+            source: issue.source.as_ref().map(|source| source.into()),
+            title: serde_json::to_value(StyledStringSerialize::from(&issue.title)).unwrap(),
+            import_traces: serde_json::to_value(&issue.import_traces).unwrap(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct IssueSource {
+    pub source: Source,
+    pub range: Option<IssueSourceRange>,
+}
+
+impl From<&PlainIssueSource> for IssueSource {
+    fn from(
+        PlainIssueSource {
+            asset: source,
+            range,
+        }: &PlainIssueSource,
+    ) -> Self {
+        Self {
+            source: (&**source).into(),
+            range: range.as_ref().map(|range| range.into()),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Source {
+    pub ident: String,
+    pub content: Option<String>,
+}
+
+impl From<&PlainSource> for Source {
+    fn from(source: &PlainSource) -> Self {
+        Self {
+            ident: source.ident.to_string(),
+            content: match &*source.content {
+                FileContent::Content(content) => match content.content().to_str() {
+                    std::result::Result::Ok(str) => Some(str.into_owned()),
+                    Err(_) => None,
+                },
+                FileContent::NotFound => None,
+            },
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct IssueSourceRange {
+    pub start: SourcePos,
+    pub end: SourcePos,
+}
+
+impl From<&(SourcePosInner, SourcePosInner)> for IssueSourceRange {
+    fn from((start, end): &(SourcePosInner, SourcePosInner)) -> Self {
+        Self {
+            start: (*start).into(),
+            end: (*end).into(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SourcePos {
+    pub line: u32,
+    pub column: u32,
+}
+
+impl From<SourcePosInner> for SourcePos {
+    fn from(pos: SourcePosInner) -> Self {
+        Self {
+            line: pos.line,
+            column: pos.column,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Diagnostic {
+    pub category: String,
+    pub name: String,
+    pub payload: FxHashMap<String, String>,
+}
+
+impl Diagnostic {
+    pub fn from(diagnostic: &PlainDiagnostic) -> Self {
+        Self {
+            category: diagnostic.category.to_string(),
+            name: diagnostic.name.to_string(),
+            payload: diagnostic
+                .payload
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct TurbopackResult {
+    pub issues: Vec<Issue>,
+    pub diagnostics: Vec<Diagnostic>,
+}

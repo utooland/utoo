@@ -1,53 +1,53 @@
 {
-    "$schema": "../../packages/pack/config_schema.json",
-    "rootPath": "../../",
-    "projectPath": "./",
-    "config": {
-        "entry": [
-            {
-                "import": "./src/index.tsx",
-                "name": "index"
-            }
-        ],
-        "output": {
-            "path": "./dist",
-            "clean": true,
-            "copy": [
-                {
-                    "from": "./static/index.css",
-                    "to": "./index.css"
-                }
-            ]
-        },
-        "optimization": {
-            "minify": false
-        },
-        "module": {
-            "rules": {
-                "*.txt": {
-                    "loaders": [
-                        "./test-file-loader.js"
-                    ],
-                    "as": "*.js"
-                },
-                "#svg": {
-                    "loaders": [
-                        "@svgr/webpack"
-                    ],
-                    "as": "*.js"
-                }
-            },
-            "conditions": {
-                "#svg": {
-                    "path": {
-                        "type": "regex",
-                        "value": {
-                            "source": ".*\\.svg$",
-                            "flags": "i"
-                        }
-                    }
-                }
-            }
+  "$schema": "../../packages/pack/config_schema.json",
+  "rootPath": "../../",
+  "projectPath": "./",
+  "config": {
+    "entry": [
+      {
+        "import": "./src/index.tsx",
+        "name": "index"
+      }
+    ],
+    "output": {
+      "path": "./dist",
+      "clean": true,
+      "copy": [
+        {
+          "from": "./static/index.css",
+          "to": "./index.css"
         }
+      ]
+    },
+    "optimization": {
+      "minify": false
+    },
+    "module": {
+      "rules": {
+        "*.txt": {
+          "loaders": [
+            "./test-file-loader.js"
+          ],
+          "as": "*.js"
+        },
+        "#svg": {
+          "loaders": [
+            "@svgr/webpack"
+          ],
+          "as": "*.js"
+        }
+      },
+      "conditions": {
+        "#svg": {
+          "path": {
+            "type": "regex",
+            "value": {
+              "source": ".*\\.svg$",
+              "flags": "i"
+            }
+          }
+        }
+      }
     }
+  }
 }

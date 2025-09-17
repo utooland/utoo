@@ -1,11 +1,10 @@
 {
   "$schema": "../../packages/pack/config_schema.json",
-  "rootPath": "../../",
-  "projectPath": "./",
   "config": {
+    "stats": true,
     "entry": [
       {
-        "import": "./index.js"    
+        "import": "./index.js"
       }
     ],
     "output": {
@@ -39,7 +38,9 @@
       "antd": {
         "root": "antd",
         "subPath": {
-          "exclude": ["style"],
+          "exclude": [
+            "style"
+          ],
           "rules": [
             {
               "regex": "/(version|message|notification)$/",
@@ -48,7 +49,7 @@
             {
               "regex": "/^\/(?:es|lib)\/([a-z\\-]+)$/",
               "target": "$1",
-               "targetConverter": "PascalCase"
+              "targetConverter": "PascalCase"
             },
             {
               "regex": "/^\/(?:es|lib)\/([a-z-]+)\/([A-Z][a-zA-Z-]+)$/",

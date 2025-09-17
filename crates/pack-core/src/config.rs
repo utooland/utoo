@@ -13,7 +13,7 @@ use turbo_tasks_env::EnvMap;
 use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::{
     ConditionItem, ConditionPath, LoaderRuleItem, WebpackRules,
-    module_options_context::{MdxTransformOptions, OptionWebpackConditions},
+    module_options_context::MdxTransformOptions,
 };
 use turbopack_core::{
     chunk::ChunkingConfig,
@@ -507,8 +507,6 @@ pub struct OptionalReactCompilerOptions(Option<ResolvedVc<ReactCompilerOptions>>
 #[serde(rename_all = "camelCase")]
 pub struct ModuleConfig {
     pub rules: Option<FxIndexMap<RcStr, RuleConfigCollection>>,
-    #[turbo_tasks(trace_ignore)]
-    pub conditions: Option<FxIndexMap<RcStr, ConfigConditionItem>>,
 }
 
 #[derive(
@@ -1090,24 +1088,6 @@ impl Config {
             }
         }
         Ok(Vc::cell(rules))
-    }
-
-    #[turbo_tasks::function]
-    pub fn webpack_conditions(&self) -> Result<Vc<OptionWebpackConditions>> {
-        let Some(config_conditions) = self.module.as_ref().and_then(|t| t.conditions.as_ref())
-        else {
-            return Ok(Vc::cell(None));
-        };
-
-        let conditions = config_conditions
-            .iter()
-            .map(|(k, v)| {
-                let item: Result<ConditionItem> = TryInto::<ConditionItem>::try_into((*v).clone());
-                item.map(|item| (k.clone(), item))
-            })
-            .collect::<Result<FxIndexMap<RcStr, ConditionItem>>>()?;
-
-        Ok(Vc::cell(Some(ResolvedVc::cell(conditions))))
     }
 
     #[turbo_tasks::function]

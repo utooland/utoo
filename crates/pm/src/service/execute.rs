@@ -1,6 +1,6 @@
+use crate::service::package_management::PackageManagementService;
 use crate::util::binary_resolver;
 use crate::util::logger::{log_error, log_info, log_verbose};
-use crate::service::package_management::PackageManagementService;
 use anyhow::{Result, anyhow};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -24,7 +24,8 @@ pub async fn execute_package(command: &str, args: Vec<String>) -> Result<()> {
     let package_name = command;
 
     // Install the package to cache
-    let package_cache_dir = PackageManagementService::install_package_to_cache(package_name).await?;
+    let package_cache_dir =
+        PackageManagementService::install_package_to_cache(package_name).await?;
 
     // Try to find the binary in the cached package
     // utoo -x eslint --version

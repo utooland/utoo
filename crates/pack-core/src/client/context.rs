@@ -9,7 +9,7 @@ use turbopack::{
     css::chunk::CssChunkType,
     module_options::{
         CssOptionsContext, EcmascriptOptionsContext, JsxTransformOptions, ModuleOptionsContext,
-        ModuleRule, TypeofWindow, TypescriptTransformOptions,
+        ModuleRule, TypescriptTransformOptions,
     },
     resolve_options_context::ResolveOptionsContext,
 };
@@ -27,7 +27,7 @@ use turbopack_core::{
     file_source::FileSource,
     free_var_references,
 };
-use turbopack_ecmascript::chunk::EcmascriptChunkType;
+use turbopack_ecmascript::{TypeofWindow, chunk::EcmascriptChunkType};
 use turbopack_node::{
     execution_context::ExecutionContext,
     transforms::postcss::{PostCssConfigLocation, PostCssTransformOptions},
@@ -48,6 +48,7 @@ use crate::{
     shared::{
         resolve::externals_plugin::ExternalsPlugin,
         transforms::{
+            css_modules::get_auto_css_modules_rule,
             dynamic_import_to_require::get_dynamic_import_to_require_rule,
             emotion::get_emotion_transform_rule, remove_console::get_remove_console_transform_rule,
             styled_components::get_styled_components_transform_rule,
@@ -60,7 +61,9 @@ use crate::{
         get_decorators_transform_options, get_jsx_transform_options,
         get_typescript_transform_options,
     },
-    util::{foreign_code_context_condition, internal_assets_conditions},
+    util::{
+        foreign_code_context_condition, internal_assets_conditions, module_styles_rule_condition,
+    },
 };
 
 use super::{
@@ -130,14 +133,14 @@ pub async fn get_client_compile_time_info(
     let define_env = Vc::cell(define_env);
     let environment = BrowserEnvironment {
         dom: true,
-        web_worker: false,
-        service_worker: false,
+        web_worker: true,
+        service_worker: true,
         browserslist_query: browserslist_query.to_owned(),
     }
     .resolved_cell();
 
     CompileTimeInfo::builder(
-        Environment::new(ExecutionEnvironment::Browser(environment), *environment)
+        Environment::new(ExecutionEnvironment::Browser(environment))
             .to_resolved()
             .await?,
     )
@@ -231,6 +234,7 @@ pub async fn get_client_module_options_context(
     // implicitly does by default.
     let mut foreign_conditions = loader_conditions.clone();
     foreign_conditions.insert(WebpackLoaderBuiltinCondition::Foreign);
+
     let foreign_enable_webpack_loaders =
         *webpack_loader_options(project_path.clone(), config, foreign_conditions).await?;
 
@@ -248,6 +252,9 @@ pub async fn get_client_module_options_context(
 
     let mut client_rules = get_client_transforms_rules(config).await?;
     let foreign_client_rules = get_client_transforms_rules(config).await?;
+
+    client_rules.push(get_auto_css_modules_rule());
+
     let additional_rules: Vec<ModuleRule> = vec![
         get_swc_ecma_transform_plugin_rule(config, project_path.clone()).await?,
         get_emotion_transform_rule(config).await?,
@@ -265,23 +272,43 @@ pub async fn get_client_module_options_context(
         client_rules.push(get_dynamic_import_to_require_rule());
     }
 
-    let postcss_transform_options = PostCssTransformOptions {
-        postcss_package: Some(
-            get_postcss_package_mapping(project_path.clone())
-                .to_resolved()
-                .await?,
-        ),
-        config_location: PostCssConfigLocation::ProjectPathOrLocalPath,
-        ..Default::default()
+    let postcss_package = {
+        #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+        {
+            Some(
+                get_postcss_package_mapping(project_path.clone())
+                    .to_resolved()
+                    .await?,
+            )
+        }
+        #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+        {
+            None
+        }
     };
-    let postcss_foreign_transform_options = PostCssTransformOptions {
-        // For node_modules we don't want to resolve postcss config relative to the file being
-        // compiled, instead it only uses the project root postcss config.
-        config_location: PostCssConfigLocation::ProjectPath,
-        ..postcss_transform_options.clone()
-    };
-    let enable_postcss_transform = Some(postcss_transform_options.resolved_cell());
-    let enable_foreign_postcss_transform = Some(postcss_foreign_transform_options.resolved_cell());
+
+    let postcss_transform_options =
+        postcss_package.map(|postcss_package| PostCssTransformOptions {
+            postcss_package: Some(postcss_package),
+            config_location: PostCssConfigLocation::ProjectPathOrLocalPath,
+            ..Default::default()
+        });
+    let postcss_foreign_transform_options =
+        postcss_transform_options
+            .as_ref()
+            .map(|postcss_transform_options| {
+                PostCssTransformOptions {
+                    // For node_modules we don't want to resolve postcss config relative to the file being
+                    // compiled, instead it only uses the project root postcss config.
+                    config_location: PostCssConfigLocation::ProjectPath,
+                    ..postcss_transform_options.clone()
+                }
+            });
+
+    let enable_postcss_transform = postcss_transform_options
+        .map(|postcss_transform_options| postcss_transform_options.resolved_cell());
+    let enable_foreign_postcss_transform = postcss_foreign_transform_options
+        .map(|postcss_foreign_transform_options| postcss_foreign_transform_options.resolved_cell());
 
     let module_options_context = ModuleOptionsContext {
         ecmascript: EcmascriptOptionsContext {
@@ -300,6 +327,7 @@ pub async fn get_client_module_options_context(
             } else {
                 SourceMapsType::None
             },
+            module_css_condition: Some(module_styles_rule_condition()),
             ..Default::default()
         },
         execution_context: Some(execution_context),

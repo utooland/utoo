@@ -5,91 +5,37 @@ UTOO_WORKSPACE_DIR = { value = "", relative = true }
 rustflags = [
   "--cfg",
   "tokio_unstable",
-  "-Zshare-generics=y",
-  "-Zthreads=8",
-  "-Csymbol-mangling-version=v0",
 ]
-incremental = true
 
 [cache]
 auto-clean-frequency = "1 day"
 
-[profile.dev]
-incremental = true
-debug = true
-
-[profile.release]
-incremental = true
-lto = "thin"
-codegen-units = 1
-strip = true
+[target.aarch64-unknown-linux-musl]
+linker = "aarch64-linux-musl-gcc"
+rustflags = ["-C", "target-feature=-crt-static"]
 
 [target.x86_64-pc-windows-msvc]
-linker = "rust-lld"
 rustflags = [
   "--cfg",
   "tokio_unstable",
-  "-Zshare-generics=y",
   "-C",
-  "target-feature=+crt-static",
+  "target-feature=+crt-static"
 ]
 
-[target.i686-pc-windows-msvc]
+[target.wasm32-unknown-unknown]
 rustflags = [
   "--cfg",
   "tokio_unstable",
-  "-Zshare-generics=y",
-  "-C",
-  "target-feature=+crt-static",
-]
-
-[target.aarch64-pc-windows-msvc]
-linker = "rust-lld"
-
-[target.'cfg(target_os = "macos")']
-linker = "rust-lld"
-
-[target.'cfg(all(target_os = "linux", target_env = "gnu"))']
-rustflags = [
   "--cfg",
-  "tokio_unstable",
-  "-Zshare-generics=y",
-  "-Zthreads=8",
-  "-Zunstable-options",
-  "-Csymbol-mangling-version=v0",
-  "-Clinker-flavor=gnu-lld-cc",
-  "-Clink-self-contained=+linker",
+  'getrandom_backend="wasm_js"',
+  "-Ctarget-feature=+atomics,+bulk-memory,+mutable-globals",
+  "-Aunused",
 ]
-
-[target.aarch64-unknown-linux-musl]
-# Config need to be mirrowed to .github/workflows/pack-release.yml
-linker = "aarch64-linux-musl-gcc"
-rustflags = [
-  "--cfg",
-  "tokio_unstable",
-  "-Zshare-generics=y",
-  "-Csymbol-mangling-version=v0",
-  "-Ctarget-feature=-crt-static",
-  "-Clink-arg=-lgcc",
-]
-
-[target.x86_64-unknown-linux-musl]
-# Config need to be mirrowed to .github/workflows/pack-release.yml
-rustflags = [
-  "--cfg",
-  "tokio_unstable",
-  "-Zshare-generics=y",
-  "-Zthreads=8",
-  "-Csymbol-mangling-version=v0",
-  "-Ctarget-feature=-crt-static",
-]
-
-[target.armv7-unknown-linux-gnueabihf]
-linker = "arm-linux-gnueabihf-gcc"
 
 [unstable.git]
 shallow_index = true
 shallow_deps = true
+
 [unstable.gitoxide]
 fetch = true
 checkout = true

@@ -1,6 +1,6 @@
 ## with-tailwindcss
 
-A example from muse, the following featues need to enable:
+A example from muse, the following features need to enable:
 
 - postcss & postcss-loader
 - tailwindcss

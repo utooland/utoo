@@ -1,9 +1,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use crate::helper::lock::{
-    serialize_tree_to_packages, write_ideal_tree_to_lock_file,
-};
+use crate::helper::lock::{serialize_tree_to_packages, write_ideal_tree_to_lock_file};
 use crate::helper::ruborist::Ruborist;
 use crate::service::workspace::WorkspaceService;
 use crate::util::json::load_package_json_from_path;
@@ -80,7 +78,8 @@ impl DependencyResolutionService {
 
         std::fs::write(&temp_path, serde_json::to_string_pretty(&workspace_file)?)
             .context("Failed to write temporary workspace.json")?;
-        std::fs::rename(temp_path, target_path).context("Failed to rename temporary workspace.json")?;
+        std::fs::rename(temp_path, target_path)
+            .context("Failed to rename temporary workspace.json")?;
 
         Ok(())
     }

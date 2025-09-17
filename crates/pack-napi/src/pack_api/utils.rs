@@ -6,7 +6,10 @@ use napi::{
     bindgen_prelude::{External, ToNapiValue},
     threadsafe_function::{ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
-use pack_api::tasks::{BundlerTurboTasks, RootTask};
+use pack_api::{
+    tasks::{BundlerTurboTasks, RootTask},
+    utils::StyledStringSerialize,
+};
 use rustc_hash::FxHashMap;
 use serde::Serialize;
 use turbo_tasks::{
@@ -21,7 +24,7 @@ use turbo_tasks_fs::FileContent;
 use turbopack_core::{
     diagnostics::PlainDiagnostic,
     error::PrettyPrintError,
-    issue::{PlainIssue, PlainIssueSource, PlainSource, StyledString},
+    issue::{PlainIssue, PlainIssueSource, PlainSource},
     source_pos::SourcePos,
 };
 
@@ -182,42 +185,6 @@ impl From<&PlainIssue> for NapiIssue {
             source: issue.source.as_ref().map(|source| source.into()),
             title: serde_json::to_value(StyledStringSerialize::from(&issue.title)).unwrap(),
             import_traces: serde_json::to_value(&issue.import_traces).unwrap(),
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum StyledStringSerialize<'a> {
-    Line {
-        value: Vec<StyledStringSerialize<'a>>,
-    },
-    Stack {
-        value: Vec<StyledStringSerialize<'a>>,
-    },
-    Text {
-        value: &'a str,
-    },
-    Code {
-        value: &'a str,
-    },
-    Strong {
-        value: &'a str,
-    },
-}
-
-impl<'a> From<&'a StyledString> for StyledStringSerialize<'a> {
-    fn from(value: &'a StyledString) -> Self {
-        match value {
-            StyledString::Line(parts) => StyledStringSerialize::Line {
-                value: parts.iter().map(|p| p.into()).collect(),
-            },
-            StyledString::Stack(parts) => StyledStringSerialize::Stack {
-                value: parts.iter().map(|p| p.into()).collect(),
-            },
-            StyledString::Text(string) => StyledStringSerialize::Text { value: string },
-            StyledString::Code(string) => StyledStringSerialize::Code { value: string },
-            StyledString::Strong(string) => StyledStringSerialize::Strong { value: string },
         }
     }
 }

@@ -66,7 +66,7 @@ pub async fn collect_matching_versions(
     pkg_name: String,
     version_pattern: &str,
     to_delete: &mut Vec<(String, String, std::path::PathBuf)>,
-) -> Result<(), std::io::Error> {
+) -> anyhow::Result<()> {
     let mut version_entries = fs::read_dir(path).await?;
     while let Some(version_entry) = version_entries.next_entry().await? {
         let version = version_entry.file_name();
@@ -201,7 +201,7 @@ mod tests {
         assert!(!matches_pattern("1.0.1", "1.0.0*"));
     }
 
-    async fn setup_test_dir() -> Result<TempDir, std::io::Error> {
+    async fn setup_test_dir() -> anyhow::Result<TempDir> {
         let temp_dir = TempDir::new().unwrap();
         let base_path = temp_dir.path();
 
@@ -215,8 +215,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_collect_matching_versions_exact_match() -> Result<(), Box<dyn std::error::Error>>
-    {
+    async fn test_collect_matching_versions_exact_match() -> anyhow::Result<()> {
         let temp_dir = setup_test_dir().await?;
         let mut to_delete = Vec::new();
 
@@ -235,7 +234,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_collect_matching_versions_wildcard() -> Result<(), Box<dyn std::error::Error>> {
+    async fn test_collect_matching_versions_wildcard() -> anyhow::Result<()> {
         let temp_dir = setup_test_dir().await?;
         let mut to_delete = Vec::new();
 
@@ -254,7 +253,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_collect_matching_versions_empty_dir() -> Result<(), Box<dyn std::error::Error>> {
+    async fn test_collect_matching_versions_empty_dir() -> anyhow::Result<()> {
         let temp_dir = TempDir::new()?;
         let mut to_delete = Vec::new();
 

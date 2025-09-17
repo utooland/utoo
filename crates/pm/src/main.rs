@@ -229,7 +229,7 @@ enum Commands {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
     // Check for help flag
@@ -260,7 +260,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         set_legacy_peer_deps(cli.legacy_peer_deps);
     }
 
-    // Ensure the version is up to date, weak dependency
+    // Initialize auto update with immediate check and background monitoring
     if let Err(_e) = init_auto_update().await {
         log_warning("Auto update cancelled");
     }
@@ -360,7 +360,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if specs.len() == 1 { "" } else { "s" }
                 ));
             } else {
-                return Err("Package specification is required for uninstall".into());
+                return Err(anyhow::anyhow!(
+                    "Package specification is required for uninstall"
+                ));
             }
         }
         Some(Commands::Rebuild) => {
@@ -370,7 +372,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let _ = write_verbose_logs_to_file();
                 process::exit(1);
             }
-            log_time_end("All packages rebuilded");
+            log_time_end("All packages rebuilt");
         }
         Some(Commands::Deps { workspace_only }) => {
             let cwd = std::env::current_dir()?;

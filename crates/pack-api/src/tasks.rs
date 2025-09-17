@@ -5,11 +5,16 @@ use turbo_tasks::{
     TaskId, TurboTasks, TurboTasksApi, UpdateInfo, Vc, task_statistics::TaskStatisticsApi,
     trace::TraceRawVcs,
 };
-use turbo_tasks_backend::{DefaultBackingStorage, NoopBackingStorage, TurboTasksBackend};
+
+use turbo_tasks_backend::{NoopBackingStorage, TurboTasksBackend};
+
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+use turbo_tasks_backend::DefaultBackingStorage;
 
 #[derive(Clone)]
 pub enum BundlerTurboTasks {
     Memory(Arc<TurboTasks<TurboTasksBackend<NoopBackingStorage>>>),
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
     PersistentCaching(Arc<TurboTasks<TurboTasksBackend<DefaultBackingStorage>>>),
 }
 
@@ -17,6 +22,7 @@ impl BundlerTurboTasks {
     pub fn dispose_root_task(&self, task: TaskId) {
         match self {
             BundlerTurboTasks::Memory(turbo_tasks) => turbo_tasks.dispose_root_task(task),
+            #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
             BundlerTurboTasks::PersistentCaching(turbo_tasks) => {
                 turbo_tasks.dispose_root_task(task)
             }
@@ -31,6 +37,7 @@ impl BundlerTurboTasks {
     {
         match self {
             BundlerTurboTasks::Memory(turbo_tasks) => turbo_tasks.spawn_root_task(functor),
+            #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
             BundlerTurboTasks::PersistentCaching(turbo_tasks) => {
                 turbo_tasks.spawn_root_task(functor)
             }
@@ -43,6 +50,7 @@ impl BundlerTurboTasks {
     ) -> Result<T> {
         match self {
             BundlerTurboTasks::Memory(turbo_tasks) => turbo_tasks.run_once(future).await,
+            #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
             BundlerTurboTasks::PersistentCaching(turbo_tasks) => turbo_tasks.run_once(future).await,
         }
     }
@@ -54,6 +62,7 @@ impl BundlerTurboTasks {
     {
         match self {
             BundlerTurboTasks::Memory(turbo_tasks) => turbo_tasks.spawn_once_task(future),
+            #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
             BundlerTurboTasks::PersistentCaching(turbo_tasks) => {
                 turbo_tasks.spawn_once_task(future)
             }
@@ -71,6 +80,7 @@ impl BundlerTurboTasks {
                     .aggregated_update_info(aggregation, timeout)
                     .await
             }
+            #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
             BundlerTurboTasks::PersistentCaching(turbo_tasks) => {
                 turbo_tasks
                     .aggregated_update_info(aggregation, timeout)
@@ -86,6 +96,7 @@ impl BundlerTurboTasks {
                     .get_or_wait_aggregated_update_info(aggregation)
                     .await
             }
+            #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
             BundlerTurboTasks::PersistentCaching(turbo_tasks) => {
                 turbo_tasks
                     .get_or_wait_aggregated_update_info(aggregation)
@@ -97,6 +108,7 @@ impl BundlerTurboTasks {
     pub async fn stop_and_wait(&self) {
         match self {
             BundlerTurboTasks::Memory(turbo_tasks) => turbo_tasks.stop_and_wait().await,
+            #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
             BundlerTurboTasks::PersistentCaching(turbo_tasks) => turbo_tasks.stop_and_wait().await,
         }
     }
@@ -104,6 +116,7 @@ impl BundlerTurboTasks {
     pub fn task_statistics(&self) -> &TaskStatisticsApi {
         match self {
             BundlerTurboTasks::Memory(turbo_tasks) => turbo_tasks.task_statistics(),
+            #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
             BundlerTurboTasks::PersistentCaching(turbo_tasks) => turbo_tasks.task_statistics(),
         }
     }

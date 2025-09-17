@@ -4,18 +4,21 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "format:js": "biome check --write ."
+    "biome": "biome check --write .",
+    "prepare": "husky"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "@biomejs/biome": "2.1.2"
+    "@biomejs/biome": "2.1.2",
+    "husky": "^9.1.7"
   },
   "workspaces": [
     "packages/pack",
     "packages/pack-cli",
     "packages/style-loader",
+    "packages/utoo-web",
     "crates/pack-core/js",
     "crates/pack/js",
     "examples/define",
@@ -29,7 +32,8 @@
     "examples/with-style-loader",
     "examples/with-tailwind",
     "examples/resolve",
-    "examples/react"
+    "examples/react",
+    "examples/utooweb-demo"
   ],
   "repository": "https://github.com/utooland/utoo"
 }

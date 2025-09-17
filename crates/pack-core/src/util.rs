@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use turbo_rcstr::RcStr;
 use turbo_tasks::{NonLocalValue, TaskInput, Vc, trace::TraceRawVcs};
 use turbo_tasks_fs::FileSystem;
-use turbopack::condition::ContextCondition;
+use turbopack::{condition::ContextCondition, module_options::RuleCondition};
 
 use crate::config::Config;
 
@@ -123,4 +123,34 @@ pub fn convert_to_project_relative(project_inside_path: &str, project_path: &str
     } else {
         Ok(project_inside_path.into())
     }
+}
+
+// TODO: add a config to enable autoCssModules
+pub fn module_styles_rule_condition() -> RuleCondition {
+    RuleCondition::any(vec![
+        RuleCondition::ResourcePathEndsWith(".module.css".into()),
+        RuleCondition::ResourcePathEndsWith(".module.scss".into()),
+        RuleCondition::ResourcePathEndsWith(".module.sass".into()),
+        RuleCondition::ResourcePathEndsWith(".module.less".into()),
+        RuleCondition::ResourceQueryContains {
+            extension: ".less".into(),
+            query: "?modules".into(),
+        },
+        RuleCondition::ResourceQueryContains {
+            extension: ".css".into(),
+            query: "?modules".into(),
+        },
+        RuleCondition::ResourceQueryContains {
+            extension: ".sass".into(),
+            query: "?modules".into(),
+        },
+        RuleCondition::ResourceQueryContains {
+            extension: ".less".into(),
+            query: "?modules".into(),
+        },
+        RuleCondition::ContentTypeStartsWith("text/css+module".into()),
+        RuleCondition::ContentTypeStartsWith("text/sass+module".into()),
+        RuleCondition::ContentTypeStartsWith("text/scss+module".into()),
+        RuleCondition::ContentTypeStartsWith("text/less+module".into()),
+    ])
 }

@@ -17,7 +17,7 @@ export function findRootLockFile(cwd: string) {
   );
 }
 
-// compitable with tnpm
+// compatible with tnpm
 export function findPackageJson(cwd: string) {
   return findUp.sync(["package.json"], {
     cwd,

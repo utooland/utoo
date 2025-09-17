@@ -38,7 +38,6 @@ pub struct Node {
 
     // Node type and flags (immutable)
     pub node_type: NodeType,
-    pub is_link: bool,
     pub target: RwLock<Option<Arc<Node>>>,
 
     // Dependency type flags (mutable)
@@ -80,7 +79,6 @@ impl Node {
             edges_out: RwLock::new(Vec::new()),
             edges_in: RwLock::new(Vec::new()),
             node_type: NodeType::Regular,
-            is_link: false,
             target: RwLock::new(None),
             is_dev: RwLock::new(None),
             is_peer: RwLock::new(None),
@@ -101,7 +99,6 @@ impl Node {
             edges_out: RwLock::new(Vec::new()),
             edges_in: RwLock::new(Vec::new()),
             node_type: NodeType::Root,
-            is_link: false,
             target: RwLock::new(None),
             is_dev: RwLock::new(None),
             is_peer: RwLock::new(None),
@@ -114,7 +111,6 @@ impl Node {
     pub fn new_link(name: String, target: Arc<Node>) -> Arc<Self> {
         Arc::new(Self {
             name,
-            is_link: true,
             path: target.path.clone(),
             package: target.package.clone(),
             version: target.version.clone(),
@@ -143,7 +139,6 @@ impl Node {
             edges_out: RwLock::new(Vec::new()),
             edges_in: RwLock::new(Vec::new()),
             node_type: NodeType::Workspace,
-            is_link: false,
             target: RwLock::new(None),
             is_dev: RwLock::new(None),
             is_peer: RwLock::new(None),
@@ -159,6 +154,10 @@ impl Node {
 
     pub fn is_workspace(&self) -> bool {
         self.node_type == NodeType::Workspace
+    }
+
+    pub fn is_link(&self) -> bool {
+        self.node_type == NodeType::Link
     }
 
     // Add incoming edge reference

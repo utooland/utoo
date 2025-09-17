@@ -1,4 +1,5 @@
 #![allow(clippy::needless_return)] // tokio macro-generated code doesn't respect this
+#![allow(unexpected_cfgs)]
 #![cfg(test)]
 
 mod util;
@@ -13,7 +14,7 @@ use pack_api::{
     project::{DefineEnv, ProjectContainer, ProjectOptions, WatchOptions},
 };
 use rustc_hash::FxHashSet;
-use std::{collections::VecDeque, fs, io, path::PathBuf, sync::Once};
+use std::{collections::VecDeque, fs, io, path::PathBuf};
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{ReadConsistency, ResolvedVc, TurboTasks, ValueToString, Vc, apply_effects};
 use turbo_tasks_backend::{BackendOptions, TurboTasksBackend, noop_backing_storage};
@@ -23,20 +24,6 @@ use turbopack_core::{asset::Asset, issue::IssueDescriptionExt, output::OutputAss
 use turbopack_test_utils::snapshot::{UPDATE, diff, expected, matches_expected, snapshot_issues};
 
 use crate::util::REPO_ROOT;
-
-fn register() {
-    turbo_tasks::register();
-    turbo_tasks_env::register();
-    turbo_tasks_fs::register();
-    turbopack::register();
-    turbopack_nodejs::register();
-    turbopack_browser::register();
-    turbopack_ecmascript_plugins::register();
-    turbopack_resolve::register();
-    turbopack_core::register();
-    pack_core::register();
-    include!(concat!(env!("OUT_DIR"), "/register_test_snapshot.rs"));
-}
 
 fn default_config() -> String {
     r#"{
@@ -111,9 +98,6 @@ fn test(resource: PathBuf) {
 
 #[tokio::main(flavor = "current_thread")]
 async fn run(resource: PathBuf) -> Result<()> {
-    static REGISTER_ONCE: Once = Once::new();
-    REGISTER_ONCE.call_once(register);
-
     let tt = TurboTasks::new(TurboTasksBackend::new(
         BackendOptions {
             storage_mode: None,
@@ -157,9 +141,6 @@ async fn run_inner_options(resource: RcStr) -> Result<()> {
 
 #[turbo_tasks::function(operation)]
 async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
-    // Register pack-api functions
-    pack_api::register();
-
     let test_path = canonicalize(&resource)?;
     assert!(test_path.exists(), "{resource} does not exist");
     assert!(
@@ -206,20 +187,25 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
         };
 
     // Ensure default output configuration is present
-    if !user_config.get("output").is_some() {
+    if user_config.get("output").is_none() {
         let default_output = serde_json::json!({
             "path": "output"
         });
         user_config["output"] = default_output;
+    } else {
+        let output = user_config.get("output").unwrap();
+        if output.get("path").is_none() {
+            user_config["output"]["path"] = serde_json::Value::String("output".to_string());
+        }
     }
 
     // Ensure default mode is present
-    if !user_config.get("mode").is_some() {
+    if user_config.get("mode").is_none() {
         user_config["mode"] = serde_json::Value::String("production".to_string());
     }
 
     // Ensure optimization is present (minify default to false for snapshots)
-    if !user_config.get("optimization").is_some() {
+    if user_config.get("optimization").is_none() {
         let default_optimization = serde_json::json!({
             "minify": false,
         });
@@ -347,14 +333,7 @@ async fn walk_asset(
     seen.insert(full_path.clone());
     diff(full_path, asset.content()).await?;
 
-    queue.extend(
-        asset
-            .references()
-            .await?
-            .iter()
-            .copied()
-            .flat_map(ResolvedVc::try_downcast::<Box<dyn OutputAsset>>),
-    );
+    queue.extend(asset.references().await?.iter().copied());
 
     Ok(())
 }

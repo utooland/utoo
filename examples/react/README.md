@@ -1,4 +1,4 @@
-## react-exmaple
+## react-example
 
 A simple demo for utoopack bundle react app.
 

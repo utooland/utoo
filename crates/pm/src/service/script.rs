@@ -474,7 +474,7 @@ mod tests {
         // Should return Ok(true) because node-gyp exists
         let result = ScriptService::ensure_node_gyp().await;
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), true);
+        assert!(result.unwrap());
         // Restore original PATH
         unsafe {
             env::set_var("PATH", original_path);
