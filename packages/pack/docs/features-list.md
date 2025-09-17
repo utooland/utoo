@@ -49,8 +49,8 @@
 | Images | `inline` | ✅ | [Webpack `url-loader`](https://github.com/webpack-contrib/url-loader) |  |
 |  | `blur placeholder` | ✅ | [Next.js `Image` component](https://nextjs.org/docs/app/api-reference/components/image#blurdataurl) |  |
 | MDX |  | ❓ | [MDX.js](https://www.mdxjs.cn/) |  |
-| Stats |  | 🟠 | [Webpack `stats` configuration](https://webpack.js.org/configuration/stats/#root) |  |
-| Analysis |  | 🟠 | [Webpack Bundle Analyzer](https://github.com/webpack-contrib/webpack-bundle-analyzer) |  |
+| Stats |  | ✅ | [Webpack `stats` configuration](https://webpack.js.org/configuration/stats/#root) |  |
+| Analysis |  | ✅ | [Webpack Bundle Analyzer](https://github.com/webpack-contrib/webpack-bundle-analyzer) |  |
 | Magic Comments | `webpackChunkName` | 🟠 | [Webpack `module` methods](https://webpack.js.org/api/module-methods/#magic-comments) |  |
 |  | `webpackIgnore` | 🟠 | [Webpack `module` methods](https://webpack.js.org/api/module-methods/#magic-comments) |  |
 | SWC Transform Plugin |  | ✅ | [SWC ECMAScript Plugins](https://swc.rs/docs/plugin/ecmascript/getting-started) |  |
