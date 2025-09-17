@@ -181,7 +181,7 @@ impl RegistryService {
 
     pub async fn resolve_package(name: &str, spec: &str) -> Result<ResolvedPackage> {
         log_verbose(&format!(
-            "🔍 RegistryService::resolve_package starting for {name}@{spec}"
+            "RegistryService::resolve_package starting for {name}@{spec}"
         ));
 
         // Check project-level cache first
@@ -191,7 +191,7 @@ impl RegistryService {
                 .await
         {
             log_verbose(&format!(
-                "🔍 Found cached resolution for {name}@{spec} => {cached_version}"
+                "Found cached resolution for {name}@{spec} => {cached_version}"
             ));
             return Ok(ResolvedPackage {
                 name: name.to_string(),
@@ -241,7 +241,7 @@ impl RegistryService {
         }
 
         log_verbose(&format!(
-            "🔍 RegistryService::resolve_package completed for {name}@{spec} => {version}"
+            "RegistryService::resolve_package completed for {name}@{spec} => {version}"
         ));
 
         // Store resolved package in project-level cache for future lookups
@@ -285,14 +285,14 @@ async fn load_version_manifest_from_cache(name: &str, version: &str) -> Option<V
 // Global resolve function
 pub async fn resolve(name: &str, spec: &str) -> Result<ResolvedPackage> {
     let start_time = std::time::Instant::now();
-    log_verbose(&format!("🔍 Starting resolve for {name}@{spec}"));
+    log_verbose(&format!("Starting resolve for {name}@{spec}"));
 
     let result = RegistryService::resolve_package(name, spec).await;
 
     match &result {
         Ok(resolved) => {
             log_verbose(&format!(
-                "🔍 resolve completed for {}@{} => {} in {:?}",
+                "resolve completed for {}@{} => {} in {:?}",
                 name,
                 spec,
                 resolved.version,
@@ -301,7 +301,7 @@ pub async fn resolve(name: &str, spec: &str) -> Result<ResolvedPackage> {
         }
         Err(e) => {
             log_verbose(&format!(
-                "🔍 resolve FAILED for {}@{} in {:?}: {}",
+                "resolve FAILED for {}@{} in {:?}: {}",
                 name,
                 spec,
                 start_time.elapsed(),
@@ -327,7 +327,7 @@ pub async fn resolve_dependency(
 ) -> Result<Option<ResolvedPackage>> {
     let start_time = std::time::Instant::now();
     log_verbose(&format!(
-        "🔍 Starting resolve_dependency for {}@{} ({})",
+        "Starting resolve_dependency for {}@{} ({})",
         name,
         spec,
         match edge_type {
@@ -341,7 +341,7 @@ pub async fn resolve_dependency(
     match resolve(name, spec).await {
         Ok(resolved) => {
             log_verbose(&format!(
-                "🔍 resolve_dependency completed for {}@{} => {} in {:?}",
+                "resolve_dependency completed for {}@{} => {} in {:?}",
                 name,
                 spec,
                 resolved.version,
@@ -358,7 +358,7 @@ pub async fn resolve_dependency(
                 Ok(None)
             } else {
                 log_verbose(&format!(
-                    "🔍 resolve_dependency FAILED for {name}@{spec} after {elapsed:?}: {e}"
+                    "resolve_dependency FAILED for {name}@{spec} after {elapsed:?}: {e}"
                 ));
                 Err(e)
             }

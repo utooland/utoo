@@ -41,7 +41,7 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
     while !current_level.lock().unwrap().is_empty() {
         let level_count = current_level.lock().unwrap().len();
         log_verbose(&format!(
-            "🔍 Starting new dependency level with {level_count} nodes"
+            "Starting new dependency level with {level_count} nodes"
         ));
 
         let next_level = Arc::new(Mutex::new(Vec::new()));
@@ -62,10 +62,10 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                 let processed_workspace_nodes = processed_workspace_nodes.clone();
 
                 tasks.push(async move {
-                    log_verbose(&format!("🔍 Task for {}@{} acquiring concurrency permit (available: {})",
+                    log_verbose(&format!("Task for {}@{} acquiring concurrency permit (available: {})",
                         edge.name, edge.spec, CONCURRENCY_LIMITER.available_permits()));
                     let _permit = CONCURRENCY_LIMITER.acquire().await.unwrap();
-                    log_verbose(&format!("🔍 Task for {}@{} acquired concurrency permit (remaining: {})",
+                    log_verbose(&format!("Task for {}@{} acquired concurrency permit (remaining: {})",
                         edge.name, edge.spec, CONCURRENCY_LIMITER.available_permits()));
 
                     if *edge.valid.read().unwrap() {
@@ -96,7 +96,7 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
 
                     // Add debug logs to track progress
                     let start_time = std::time::Instant::now();
-                    log_verbose(&format!("🔍 Starting dependency resolution for {}@{}", edge.name, edge.spec));
+                    log_verbose(&format!("Starting dependency resolution for {}@{}", edge.name, edge.spec));
 
                     match find_compatible_node(&edge.from, &edge.name, &edge.spec) {
                         FindResult::Reuse(existing_node) => {
@@ -116,14 +116,14 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                             existing_node.update_type();
                         }
                         FindResult::Conflict(conflict_node) => {
-                            log_verbose(&format!("🔍 Conflict found for {}@{}, resolving...", edge.name, edge.spec));
+                            log_verbose(&format!("Conflict found for {}@{}, resolving...", edge.name, edge.spec));
                             let resolved = match resolve_dependency(&edge.name, &edge.spec, &edge.edge_type).await? {
                                 Some(resolved) => {
-                                    log_verbose(&format!("🔍 Resolved dependency {}@{} => {}", edge.name, edge.spec, resolved.version));
+                                    log_verbose(&format!("Resolved dependency {}@{} => {}", edge.name, edge.spec, resolved.version));
                                     resolved
                                 },
                                 None => {
-                                    log_verbose(&format!("🔍 No resolution found for {}@{}", edge.name, edge.spec));
+                                    log_verbose(&format!("No resolution found for {}@{}", edge.name, edge.spec));
                                     return Ok(());
                                 },
                             };
@@ -170,7 +170,7 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                             for (field, edge_type) in dep_types {
                                 if let Some(deps) = new_node.package.get(field)
                                     && let Some(deps) = deps.as_object() {
-                                        log_verbose(&format!("🔍 Processing {} dependencies for {}", field, new_node.name));
+                                        log_verbose(&format!("Processing {} dependencies for {}", field, new_node.name));
                                         for (name, version) in deps {
                                             let version_spec = version.as_str().unwrap_or("").to_string();
                                             let dep_edge = Edge::new(new_node.clone(), edge_type.clone(), name.clone(), version_spec);
@@ -180,21 +180,21 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                                             ));
                                             new_node.add_edge(dep_edge).await;
                                         }
-                                        log_verbose(&format!("🔍 Finished processing {} dependencies for {}", field, new_node.name));
+                                        log_verbose(&format!("Finished processing {} dependencies for {}", field, new_node.name));
                                     }
                             }
 
                             next_level.lock().unwrap().push(new_node);
                         }
                         FindResult::New(install_location) => {
-                            log_verbose(&format!("🔍 New installation needed for {}@{}, resolving dependency...", edge.name, edge.spec));
+                            log_verbose(&format!("New installation needed for {}@{}, resolving dependency...", edge.name, edge.spec));
                             let resolved = match resolve_dependency(&edge.name, &edge.spec, &edge.edge_type).await? {
                                 Some(resolved) => {
-                                    log_verbose(&format!("🔍 Dependency resolved {}@{} => {}", edge.name, edge.spec, resolved.version));
+                                    log_verbose(&format!("Dependency resolved {}@{} => {}", edge.name, edge.spec, resolved.version));
                                     resolved
                                 },
                                 None => {
-                                    log_verbose(&format!("🔍 No resolution found for {}@{}", edge.name, edge.spec));
+                                    log_verbose(&format!("No resolution found for {}@{}", edge.name, edge.spec));
                                     return Ok(());
                                 },
                             };
@@ -237,7 +237,7 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                         }
                     }
 
-                    log_verbose(&format!("🔍 Task for {}@{} completed, releasing concurrency permit", edge.name, edge.spec));
+                    log_verbose(&format!("Task for {}@{} completed, releasing concurrency permit", edge.name, edge.spec));
                     Ok::<_, anyhow::Error>(())
                 });
             }
@@ -247,7 +247,7 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
         // waiting for all tasks in this level to finish
         let level_task_count = level_tasks.len();
         log_verbose(&format!(
-            "🔍 Waiting for {level_task_count} level tasks to complete"
+            "Waiting for {level_task_count} level tasks to complete"
         ));
 
         futures::future::try_join_all(level_tasks)
@@ -261,7 +261,7 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                 anyhow::anyhow!(err_msg)
             })?;
 
-        log_verbose(&format!("🔍 All {level_task_count} level tasks completed"));
+        log_verbose(&format!("All {level_task_count} level tasks completed"));
 
         // continue to next level
         *current_level.lock().unwrap() = next_level.lock().unwrap().clone();
