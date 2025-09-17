@@ -338,7 +338,7 @@
       "children": [
         {
           "featureLevel2": "",
-          "featureStatus": "🟠",
+          "featureStatus": "✅",
           "featureDetails": "[Webpack `stats` configuration](https://webpack.js.org/configuration/stats/#root)",
           "remarks": ""
         }
@@ -349,7 +349,7 @@
       "children": [
         {
           "featureLevel2": "",
-          "featureStatus": "🟠",
+          "featureStatus": "✅",
           "featureDetails": "[Webpack Bundle Analyzer](https://github.com/webpack-contrib/webpack-bundle-analyzer)",
           "remarks": ""
         }
@@ -443,7 +443,7 @@
       "children": [
         {
           "featureLevel2": "",
-          "featureStatus": "🟠",
+          "featureStatus": "✅",
           "featureDetails": "",
           "remarks": ""
         }

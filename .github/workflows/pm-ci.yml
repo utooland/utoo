@@ -2,7 +2,7 @@ name: utoopm-ci
 
 on:
   push:
-    branches: ['next', 'rpm']
+    branches: ['next']
   pull_request:
     types: [opened, synchronize]
 
