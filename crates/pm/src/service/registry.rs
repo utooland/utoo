@@ -31,6 +31,27 @@ pub struct ResolvedPackage {
 pub struct RegistryService;
 
 impl RegistryService {
+    /// Normalize spec for HTTP requests (handle npm:, workspace: prefixes)
+    /// Returns (normalized_name, normalized_spec)
+    fn normalize_for_http(name: &str, spec: &str) -> (String, String) {
+        if spec.starts_with("npm:") {
+            let npm_spec = spec.strip_prefix("npm:").unwrap();
+            if let Some(last_at_index) = npm_spec.rfind('@') {
+                let (pkg_name, version) = npm_spec.split_at(last_at_index);
+                return (pkg_name.to_string(), version[1..].to_string());
+            } else {
+                return (npm_spec.to_string(), "*".to_string());
+            }
+        }
+
+        if spec.starts_with("workspace:") {
+            let workspace_spec = spec.strip_prefix("workspace:").unwrap();
+            return (name.to_string(), workspace_spec.to_string());
+        }
+
+        (name.to_string(), spec.to_string())
+    }
+
     /// Get full manifest with caching
     pub async fn get_full_manifest(name: &str) -> Result<Value> {
         // Check cache first
@@ -71,8 +92,11 @@ impl RegistryService {
             return Ok(manifest);
         }
 
+        // Normalize spec for HTTP request
+        let (normalized_name, normalized_version) = Self::normalize_for_http(name, version);
+
         // Fetch from HTTP
-        let manifest = fetch_version_manifest(name, version).await?;
+        let manifest = fetch_version_manifest(&normalized_name, &normalized_version).await?;
 
         // Cache the result
         PACKAGE_CACHE
