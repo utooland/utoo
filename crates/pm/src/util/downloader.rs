@@ -21,32 +21,14 @@ use super::{
     retry::{RetryableError, create_retry_strategy},
 };
 
-use dashmap::DashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 // Global downloader client with DNS cache
 static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
 
-static DOWNLOAD_LOCKS: Lazy<DashMap<u64, Arc<Mutex<()>>>> = Lazy::new(DashMap::new);
-
-fn lock_key(url: &str, dest: &Path) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    url.hash(&mut hasher);
-    dest.to_string_lossy().hash(&mut hasher);
-    hasher.finish()
-}
-
 pub async fn download(url: &str, dest: &Path) -> Result<()> {
     let start = std::time::Instant::now();
-    let key = lock_key(url, dest);
-    let lock = DOWNLOAD_LOCKS
-        .entry(key)
-        .or_insert_with(|| Arc::new(Mutex::new(())))
-        .clone();
-    let _guard = lock.lock().await;
 
     let resolved_path = dest.join("_resolved");
     if resolved_path.exists() {

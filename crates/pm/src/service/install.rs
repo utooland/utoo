@@ -6,7 +6,6 @@ use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::thread;
 use tokio::sync::Semaphore;
 
 use crate::cmd::rebuild::rebuild;
@@ -397,10 +396,7 @@ impl InstallService {
         }
 
         // Get the number of logical CPU cores of the system and set it to twice the number of CPU cores
-        let concurrent_limit = thread::available_parallelism()
-            .map(|n| n.get() * 2)
-            .unwrap_or(20)
-            .max(20);
+        let concurrent_limit = 20;
         log_verbose(&format!("Setting concurrent limit to {concurrent_limit}"));
         let semaphore = Arc::new(Semaphore::new(concurrent_limit));
 

@@ -6,6 +6,7 @@ use crate::util::logger::{
     PROGRESS_BAR, finish_progress_bar, log_info, log_progress, log_verbose, start_progress_bar,
 };
 use anyhow::{Context, Result};
+use futures;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -294,22 +295,37 @@ impl PackageService {
             start_progress_bar();
             PROGRESS_BAR.set_length(total_scripts as u64);
         }
-        // Execute preinstall scripts
-        for package in &queues[1] {
-            if let Some(script) = &package.scripts.preinstall {
-                log_progress(&format!("{} preinstall", package.fullname));
-                ScriptService::execute_script(package, "preinstall", false)
-                    .await
-                    .map_err(|e| {
-                        anyhow::anyhow!(
-                            "Failed to execute preinstall script for {} (command: {}): {}",
-                            package.fullname,
-                            script,
-                            e
-                        )
-                    })?;
-                PROGRESS_BAR.inc(1);
-            }
+
+        // Execute preinstall scripts in parallel
+        let preinstall_tasks: Vec<_> = queues[1]
+            .iter()
+            .filter_map(|package| {
+                package.scripts.preinstall.as_ref().map(|script| {
+                    let package = package.clone();
+                    let script = script.clone();
+                    async move {
+                        log_progress(&format!("{} preinstall", package.fullname));
+                        let result = ScriptService::execute_script(&package, "preinstall", false)
+                            .await
+                            .map_err(|e| {
+                                anyhow::anyhow!(
+                                    "Failed to execute preinstall script for {} (command: {}): {}",
+                                    package.fullname,
+                                    script,
+                                    e
+                                )
+                            });
+                        PROGRESS_BAR.inc(1);
+                        result
+                    }
+                })
+            })
+            .collect();
+
+        // Wait for all preinstall tasks to complete
+        let preinstall_results: Vec<Result<()>> = futures::future::join_all(preinstall_tasks).await;
+        for result in preinstall_results {
+            result?;
         }
 
         // Link binary files
@@ -357,40 +373,68 @@ impl PackageService {
             }
         }
 
-        // Execute install scripts
-        for package in &queues[3] {
-            if let Some(script) = &package.scripts.install {
-                log_progress(&format!("{} install", package.fullname));
-                ScriptService::execute_script(package, "install", false)
-                    .await
-                    .map_err(|e| {
-                        anyhow::anyhow!(
-                            "Failed to execute install script for {} (command: {}): {}",
-                            package.fullname,
-                            script,
-                            e
-                        )
-                    })?;
-                PROGRESS_BAR.inc(1);
-            }
+        // Execute install scripts in parallel
+        let install_tasks: Vec<_> = queues[3]
+            .iter()
+            .filter_map(|package| {
+                package.scripts.install.as_ref().map(|script| {
+                    let package = package.clone();
+                    let script = script.clone();
+                    async move {
+                        log_progress(&format!("{} install", package.fullname));
+                        let result = ScriptService::execute_script(&package, "install", false)
+                            .await
+                            .map_err(|e| {
+                                anyhow::anyhow!(
+                                    "Failed to execute install script for {} (command: {}): {}",
+                                    package.fullname,
+                                    script,
+                                    e
+                                )
+                            });
+                        PROGRESS_BAR.inc(1);
+                        result
+                    }
+                })
+            })
+            .collect();
+
+        // Wait for all install tasks to complete
+        let install_results: Vec<Result<()>> = futures::future::join_all(install_tasks).await;
+        for result in install_results {
+            result?;
         }
 
-        // Execute postinstall scripts
-        for package in &queues[4] {
-            if let Some(script) = &package.scripts.postinstall {
-                log_progress(&format!("{} postinstall", package.fullname));
-                ScriptService::execute_script(package, "postinstall", false)
-                    .await
-                    .map_err(|e| {
-                        anyhow::anyhow!(
-                            "Failed to execute postinstall script for {} (command: {}): {}",
-                            package.fullname,
-                            script,
-                            e
-                        )
-                    })?;
-                PROGRESS_BAR.inc(1);
-            }
+        // Execute postinstall scripts in parallel
+        let postinstall_tasks: Vec<_> = queues[4]
+            .iter()
+            .filter_map(|package| {
+                package.scripts.postinstall.as_ref().map(|script| {
+                    let package = package.clone();
+                    let script = script.clone();
+                    async move {
+                        log_progress(&format!("{} postinstall", package.fullname));
+                        let result = ScriptService::execute_script(&package, "postinstall", false)
+                            .await
+                            .map_err(|e| {
+                                anyhow::anyhow!(
+                                    "Failed to execute postinstall script for {} (command: {}): {}",
+                                    package.fullname,
+                                    script,
+                                    e
+                                )
+                            });
+                        PROGRESS_BAR.inc(1);
+                        result
+                    }
+                })
+            })
+            .collect();
+
+        // Wait for all postinstall tasks to complete
+        let postinstall_results: Vec<Result<()>> = futures::future::join_all(postinstall_tasks).await;
+        for result in postinstall_results {
+            result?;
         }
 
         finish_progress_bar("scripts executed");
