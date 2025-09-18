@@ -55,7 +55,7 @@ impl BundlerTurboTasks {
         }
     }
 
-    pub fn spawn_once_task<T, Fut>(&self, future: Fut) -> TaskId
+    pub fn spawn_once_task<T, Fut>(&self, future: Fut)
     where
         T: Send,
         Fut: Future<Output = Result<Vc<T>>> + Send + 'static,

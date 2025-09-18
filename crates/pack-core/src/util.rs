@@ -132,22 +132,22 @@ pub fn module_styles_rule_condition() -> RuleCondition {
         RuleCondition::ResourcePathEndsWith(".module.scss".into()),
         RuleCondition::ResourcePathEndsWith(".module.sass".into()),
         RuleCondition::ResourcePathEndsWith(".module.less".into()),
-        RuleCondition::ResourceQueryContains {
-            extension: ".less".into(),
-            query: "?modules".into(),
-        },
-        RuleCondition::ResourceQueryContains {
-            extension: ".css".into(),
-            query: "?modules".into(),
-        },
-        RuleCondition::ResourceQueryContains {
-            extension: ".sass".into(),
-            query: "?modules".into(),
-        },
-        RuleCondition::ResourceQueryContains {
-            extension: ".less".into(),
-            query: "?modules".into(),
-        },
+        RuleCondition::All(vec![
+            RuleCondition::ResourceQueryContains("?modules".into()),
+            RuleCondition::ResourcePathEndsWith(".less".into()),
+        ]),
+        RuleCondition::All(vec![
+            RuleCondition::ResourceQueryContains("?modules".into()),
+            RuleCondition::ResourcePathEndsWith(".css".into()),
+        ]),
+        RuleCondition::All(vec![
+            RuleCondition::ResourceQueryContains("?modules".into()),
+            RuleCondition::ResourcePathEndsWith(".sass".into()),
+        ]),
+        RuleCondition::All(vec![
+            RuleCondition::ResourceQueryContains("?modules".into()),
+            RuleCondition::ResourcePathEndsWith(".scss".into()),
+        ]),
         RuleCondition::ContentTypeStartsWith("text/css+module".into()),
         RuleCondition::ContentTypeStartsWith("text/sass+module".into()),
         RuleCondition::ContentTypeStartsWith("text/scss+module".into()),
