@@ -10,6 +10,7 @@ use std::thread;
 use tokio::sync::mpsc;
 use std::path::PathBuf;
 use dashmap::DashMap;
+use once_cell::sync::Lazy;
 
 use crate::cmd::rebuild::rebuild;
 use crate::helper::global_bin::get_global_bin_dir;
@@ -328,6 +329,21 @@ impl PackageCompletionTracker {
 // Simple depth synchronization using global counter
 static DEPTH_COMPLETION_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
+// Pre-download task management
+static PRE_DOWNLOAD_SEMAPHORE: Lazy<tokio::sync::Semaphore> = Lazy::new(|| {
+    tokio::sync::Semaphore::new(4) // 限制4个并发预下载任务
+});
+
+#[derive(Debug)]
+pub struct UnifiedDownloadTask {
+    pub name: String,
+    pub version: String,
+    pub resolved_url: String,
+    pub cache_path: PathBuf,
+    pub has_install_script: bool,
+    pub clone_targets: Option<Vec<PathBuf>>, // None = 预下载，Some = 正常下载
+}
+
 
 // Multi-threaded lock-free download worker
 async fn download_worker_multi(
@@ -616,6 +632,147 @@ async fn clone_worker_multi(
         }
     }
     log_verbose(&format!("Clone worker {} finished", worker_id));
+}
+
+// 统一的下载和解压函数
+pub async fn download_and_extract_package(
+    name: &str,
+    version: &str,
+    tarball_url: &str,
+    cache_path: &Path,
+    has_install_script: bool,
+    clone_targets: Option<Vec<PathBuf>>,
+) -> Result<()> {
+    use crate::util::retry::{RetryableError, create_retry_strategy, build_dns_cached_client};
+    use once_cell::sync::Lazy;
+    use reqwest::Client;
+    use tokio_retry::RetryIf;
+    use reqwest::StatusCode;
+
+    static UNIFIED_DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
+
+    let _permit = if clone_targets.is_none() {
+        // 预下载需要获取信号量许可
+        Some(PRE_DOWNLOAD_SEMAPHORE.acquire().await.unwrap())
+    } else {
+        None
+    };
+
+    log_verbose(&format!("Downloading {}@{} from {}", name, version, tarball_url));
+
+    // 下载
+    let download_result = RetryIf::spawn(
+        create_retry_strategy(),
+        || async {
+            let response = UNIFIED_DOWNLOADER_CLIENT
+                .get(tarball_url)
+                .send()
+                .await
+                .map_err(|e| RetryableError::Temporary(format!("Network error: {}", e)))?;
+
+            match response.status() {
+                StatusCode::OK => {
+                    let bytes = response.bytes().await.map_err(|e| {
+                        RetryableError::Temporary(format!("Failed to read response: {}", e))
+                    })?;
+                    Ok(bytes.to_vec())
+                }
+                StatusCode::NOT_FOUND => {
+                    log_verbose(&format!("URL not found {}", tarball_url));
+                    Err(RetryableError::Permanent(format!("URL not found {}", tarball_url)))
+                }
+                status => {
+                    log_verbose(&format!("Error: {status}, url: {}, retrying", tarball_url));
+                    Err(RetryableError::Temporary(format!(
+                        "HTTP error: {status}, url: {}",
+                        tarball_url
+                    )))
+                }
+            }
+        },
+        |e: &RetryableError| matches!(e, RetryableError::Temporary(_)),
+    )
+    .await?;
+
+    // 解压到缓存
+    use async_compression::tokio::bufread::GzipDecoder;
+    use tokio::io::BufReader;
+    use tokio_tar::Archive;
+    use futures::StreamExt;
+    use tokio::fs;
+    use std::fs::Permissions;
+    use std::os::unix::fs::PermissionsExt;
+
+    let tar_gz = GzipDecoder::new(BufReader::new(&download_result[..]));
+    let mut archive = Archive::new(tar_gz);
+    let mut files_extracted = 0;
+
+    let mut entries = archive.entries()?;
+
+    while let Some(entry) = entries.next().await {
+        let mut file = entry?;
+
+        let path = file.path()?.into_owned();
+
+        if file.header().entry_type().is_dir() {
+            continue;
+        }
+
+        let original_mode = file.header().mode().unwrap_or(0o644);
+        let file_path = cache_path.join(&path);
+
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+
+        let mut temp_file = tokio::fs::File::create(&file_path).await?;
+        tokio::io::copy(&mut file, &mut temp_file).await?;
+
+        let permissions = Permissions::from_mode(original_mode);
+        fs::set_permissions(&file_path, permissions).await?;
+
+        files_extracted += 1;
+    }
+
+    if files_extracted == 0 {
+        return Err(anyhow::anyhow!("No files extracted from tarball"));
+    }
+
+    // 创建标记文件
+    let resolved_path = cache_path.join("_resolved");
+    fs::write(&resolved_path, "").await?;
+
+    if has_install_script {
+        let install_script_path = cache_path.join("_hasInstallScript");
+        fs::write(&install_script_path, "").await?;
+    }
+
+    log_verbose(&format!(
+        "Downloaded and extracted {}@{}: {} files to {}",
+        name,
+        version,
+        files_extracted,
+        cache_path.display()
+    ));
+
+    // 如果有clone目标，则进行clone
+    if let Some(targets) = clone_targets {
+        for target in targets {
+            if let Err(e) = crate::util::cloner::clone(cache_path, &target, false).await {
+                log_verbose(&format!(
+                    "Failed to clone {}@{} from {} to {}: {}",
+                    name, version, cache_path.display(), target.display(), e
+                ));
+            } else {
+                log_verbose(&format!(
+                    "Cloned {}@{} from cache to {}",
+                    name, version, target.display()
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 pub async fn install_packages_optimized(

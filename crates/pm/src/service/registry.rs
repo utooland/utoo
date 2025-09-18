@@ -266,6 +266,7 @@ async fn load_version_manifest_from_cache(name: &str, version: &str) -> Option<V
     None
 }
 
+
 // Global resolve function
 pub async fn resolve(name: &str, spec: &str) -> Result<ResolvedPackage> {
     let start_time = std::time::Instant::now();
@@ -331,6 +332,56 @@ pub async fn resolve_dependency(
                 resolved.version,
                 start_time.elapsed()
             ));
+
+            // Start pre-download in background if tarball URL is available
+            if let Some(dist) = resolved.manifest.get("dist")
+                && let Some(tarball_url) = dist.get("tarball")
+                && let Some(tarball_url_str) = tarball_url.as_str()
+            {
+                let cache_dir = crate::util::cache::get_cache_dir();
+                let cache_path = cache_dir.join(format!("{}/{}", resolved.name, resolved.version));
+                let cache_flag_path = cache_path.join("_resolved");
+
+                // Only pre-download if not already cached
+                if !cache_flag_path.exists() {
+                    let name_clone = resolved.name.clone();
+                    let version_clone = resolved.version.clone();
+                    let url_clone = tarball_url_str.to_string();
+                    let cache_path_clone = cache_path.clone();
+                    let has_install_script = resolved.manifest.get("hasInstallScript") == Some(&serde_json::json!(true));
+
+                    // Start async download in background
+                    tokio::spawn(async move {
+                        log_verbose(&format!(
+                            "Pre-downloading {}@{} from {}",
+                            name_clone, version_clone, url_clone
+                        ));
+
+                        match crate::service::install::download_and_extract_package(
+                            &name_clone,
+                            &version_clone,
+                            &url_clone,
+                            &cache_path_clone,
+                            has_install_script,
+                            None // 预下载不需要clone
+                        ).await {
+                            Ok(_) => {
+                                log_verbose(&format!(
+                                    "Pre-download completed for {}@{}",
+                                    name_clone, version_clone
+                                ));
+                            }
+                            Err(e) => {
+                                log_verbose(&format!(
+                                    "Pre-download failed for {}@{}: {}",
+                                    name_clone, version_clone, e
+                                ));
+                            }
+                        }
+                    });
+                }
+            }
+
             Ok(Some(resolved))
         }
         Err(e) => {
