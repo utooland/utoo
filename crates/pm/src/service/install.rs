@@ -229,23 +229,15 @@ struct DownloadTask {
     has_install_script: Option<bool>,
 }
 
-// Extract task
+
+// Streaming extract task - no intermediate file storage
 #[derive(Debug)]
-struct ExtractTask {
+struct StreamingExtractTask {
     downloaded_data: Vec<u8>,
     cache_path: PathBuf,
     package_key: PackageKey,
     has_install_script: Option<bool>,
     clone_targets: Vec<CloneTarget>,
-}
-
-// File write task
-#[derive(Debug)]
-struct FileWriteTask {
-    file_path: PathBuf,
-    file_data: Vec<u8>,
-    file_mode: u32, // Store original file permissions
-    package_tracker: Arc<PackageCacheTracker>,
 }
 
 // Clone task
@@ -254,17 +246,14 @@ struct CloneTask {
     cache_path: PathBuf,
     target_path: PathBuf,
     package_name: String,
-    has_install_script: Option<bool>,
 }
 
-// Package cache tracker
+// Simplified package completion tracker
 #[derive(Debug)]
-struct PackageCacheTracker {
+struct PackageCompletionTracker {
     package_key: PackageKey,
     cache_path: PathBuf,
     clone_targets: Vec<CloneTarget>,
-    total_files: usize,
-    files_written: AtomicUsize,
     has_install_script: Option<bool>,
 }
 
@@ -320,36 +309,30 @@ impl DownloadDeduplicator {
     }
 }
 
-impl PackageCacheTracker {
+impl PackageCompletionTracker {
     fn new(
         package_key: PackageKey,
         cache_path: PathBuf,
         clone_targets: Vec<CloneTarget>,
-        total_files: usize,
         has_install_script: Option<bool>,
-    ) -> Arc<Self> {
-        Arc::new(Self {
+    ) -> Self {
+        Self {
             package_key,
             cache_path,
             clone_targets,
-            total_files,
-            files_written: AtomicUsize::new(0),
             has_install_script,
-        })
-    }
-
-    /// Mark one file as written, return whether all files are completed
-    fn mark_file_written(&self) -> bool {
-        let written = self.files_written.fetch_add(1, Ordering::SeqCst) + 1;
-        written >= self.total_files
+        }
     }
 }
+
+// Simple depth synchronization using global counter
+static DEPTH_COMPLETION_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 
 // Multi-threaded lock-free download worker
 async fn download_worker_multi(
     mut download_rx: mpsc::Receiver<DownloadTask>,
-    extract_senders: Vec<mpsc::Sender<ExtractTask>>,
+    extract_senders: Vec<mpsc::Sender<StreamingExtractTask>>,
     deduplicator: Arc<DownloadDeduplicator>,
     worker_id: usize,
 ) {
@@ -408,9 +391,9 @@ async fn download_worker_multi(
 
                 // Get clone target list
                 if let Some(clone_targets) = deduplicator.complete_package(&task.key) {
-                    // Round-robin distribute to extract worker
+                    // Round-robin distribute to streaming extract worker
                     let extract_idx = EXTRACT_COUNTER.fetch_add(1, Ordering::Relaxed) % extract_senders.len();
-                    let extract_task = ExtractTask {
+                    let extract_task = StreamingExtractTask {
                         downloaded_data: data,
                         cache_path: task.cache_path,
                         package_key: task.key,
@@ -419,7 +402,7 @@ async fn download_worker_multi(
                     };
 
                     if let Err(e) = extract_senders[extract_idx].send(extract_task).await {
-                        log_verbose(&format!("Worker {} failed to send extract task: {}", worker_id, e));
+                        log_verbose(&format!("Worker {} failed to send streaming extract task: {}", worker_id, e));
                     }
                 }
             }
@@ -439,32 +422,34 @@ async fn download_worker_multi(
     log_verbose(&format!("Download worker {} finished", worker_id));
 }
 
-// Multi-threaded lock-free extract worker
-async fn extract_worker_multi(
-    mut extract_rx: mpsc::Receiver<ExtractTask>,
-    write_senders: Vec<mpsc::Sender<FileWriteTask>>,
+// Streaming extract worker - directly write files without intermediate storage
+async fn streaming_extract_worker(
+    mut extract_rx: mpsc::Receiver<StreamingExtractTask>,
+    clone_senders: Vec<mpsc::Sender<CloneTask>>,
     worker_id: usize,
 ) {
     use async_compression::tokio::bufread::GzipDecoder;
     use tokio::io::BufReader;
     use tokio_tar::Archive;
-    use std::collections::HashMap;
     use futures::StreamExt;
+    use tokio::fs;
+    use std::fs::Permissions;
+    use std::os::unix::fs::PermissionsExt;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    static WRITE_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    static CLONE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-    log_verbose(&format!("Extract worker {} started", worker_id));
+    log_verbose(&format!("Streaming extract worker {} started", worker_id));
 
     while let Some(task) = extract_rx.recv().await {
-        log_verbose(&format!("Worker {} extracting {} to memory", worker_id, task.package_key.name));
+        log_verbose(&format!("Worker {} streaming extract {} directly to disk", worker_id, task.package_key.name));
 
-        // Extract to memory
+        // Extract and write files in streaming fashion
         let tar_gz = GzipDecoder::new(BufReader::new(&task.downloaded_data[..]));
         let mut archive = Archive::new(tar_gz);
-        let mut files: HashMap<PathBuf, (Vec<u8>, u32)> = HashMap::new(); // (file content, permissions)
+        let mut files_extracted = 0;
 
-        // Read all files to memory
+        // Read and immediately write each file
         let mut entries = match archive.entries() {
             Ok(entries) => entries,
             Err(e) => {
@@ -473,12 +458,15 @@ async fn extract_worker_multi(
             }
         };
 
+        let mut extraction_success = true;
+
         while let Some(entry) = entries.next().await {
             let mut file = match entry {
                 Ok(file) => file,
                 Err(e) => {
                     log_verbose(&format!("Worker {} failed to read file entry for {}: {}", worker_id, task.package_key.name, e));
-                    continue;
+                    extraction_success = false;
+                    break;
                 }
             };
 
@@ -498,128 +486,97 @@ async fn extract_worker_multi(
             // Get original permissions
             let original_mode = file.header().mode().unwrap_or(0o644);
 
-            // Read file content to memory
-            let mut content = Vec::new();
-            if let Err(e) = tokio::io::copy(&mut file, &mut content).await {
-                log_verbose(&format!("Worker {} failed to read file content for {} in {}: {}", worker_id, path.display(), task.package_key.name, e));
-                continue;
+            // Construct target file path
+            let file_path = task.cache_path.join(&path);
+
+            // Create parent directory
+            if let Some(parent) = file_path.parent() {
+                if let Err(e) = fs::create_dir_all(parent).await {
+                    log_verbose(&format!("Worker {} failed to create directory {}: {}", worker_id, parent.display(), e));
+                    extraction_success = false;
+                    break;
+                }
             }
 
-            files.insert(path, (content, original_mode));
+            // Stream file content directly to disk
+            let mut temp_file = match tokio::fs::File::create(&file_path).await {
+                Ok(f) => f,
+                Err(e) => {
+                    log_verbose(&format!("Worker {} failed to create file {}: {}", worker_id, file_path.display(), e));
+                    extraction_success = false;
+                    break;
+                }
+            };
+
+            if let Err(e) = tokio::io::copy(&mut file, &mut temp_file).await {
+                log_verbose(&format!("Worker {} failed to write file content for {} in {}: {}", worker_id, path.display(), task.package_key.name, e));
+                extraction_success = false;
+                break;
+            }
+
+            // Set original permissions
+            let permissions = Permissions::from_mode(original_mode);
+            if let Err(e) = fs::set_permissions(&file_path, permissions).await {
+                log_verbose(&format!("Worker {} failed to set permissions for {}: {}", worker_id, file_path.display(), e));
+            }
+
+            files_extracted += 1;
         }
 
-        if files.is_empty() {
+        if !extraction_success {
+            log_verbose(&format!("Worker {} extraction failed for {}", worker_id, task.package_key.name));
+            continue;
+        }
+
+        if files_extracted == 0 {
             log_verbose(&format!("Worker {} no files extracted for {}", worker_id, task.package_key.name));
             continue;
         }
 
-        log_verbose(&format!("Worker {} extracted {} files for {} to memory", worker_id, files.len(), task.package_key.name));
+        log_verbose(&format!("Worker {} successfully extracted {} files for {} directly to disk", worker_id, files_extracted, task.package_key.name));
 
-        // Create package tracker
-        let tracker = PackageCacheTracker::new(
-            task.package_key,
+        // Create completion tracker
+        let completion_tracker = PackageCompletionTracker::new(
+            task.package_key.clone(),
             task.cache_path.clone(),
             task.clone_targets,
-            files.len(),
             task.has_install_script,
         );
 
-        // Round-robin distribute file write tasks
-        for (file_idx, (relative_path, (file_data, file_mode))) in files.into_iter().enumerate() {
-            let file_path = task.cache_path.join(&relative_path);
-            let write_idx = (WRITE_COUNTER.fetch_add(1, Ordering::Relaxed) + file_idx) % write_senders.len();
-
-            let write_task = FileWriteTask {
-                file_path,
-                file_data,
-                file_mode,
-                package_tracker: Arc::clone(&tracker),
-            };
-
-            if let Err(e) = write_senders[write_idx].send(write_task).await {
-                log_verbose(&format!("Worker {} failed to send write task: {}", worker_id, e));
-                break;
-            }
-        }
-    }
-    log_verbose(&format!("Extract worker {} finished", worker_id));
-}
-
-// Multi-threaded lock-free write worker
-async fn write_worker_multi(
-    mut write_rx: mpsc::Receiver<FileWriteTask>,
-    clone_senders: Vec<mpsc::Sender<CloneTask>>,
-    worker_id: usize,
-) {
-    use tokio::fs;
-    use std::fs::Permissions;
-    use std::os::unix::fs::PermissionsExt;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    static CLONE_COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-    log_verbose(&format!("Write worker {} started", worker_id));
-
-    while let Some(task) = write_rx.recv().await {
-        // Create parent directory
-        if let Some(parent) = task.file_path.parent() {
-            if let Err(e) = fs::create_dir_all(parent).await {
-                log_verbose(&format!("Worker {} failed to create directory {}: {}", worker_id, parent.display(), e));
-                continue;
-            }
-        }
-
-        // Write file
-        if let Err(e) = fs::write(&task.file_path, &task.file_data).await {
-            log_verbose(&format!("Worker {} failed to write file {}: {}", worker_id, task.file_path.display(), e));
+        // All files written successfully, create _resolved marker
+        let resolved_path = completion_tracker.cache_path.join("_resolved");
+        if let Err(e) = fs::write(&resolved_path, "").await {
+            log_verbose(&format!("Worker {} failed to write _resolved for {}: {}", worker_id, completion_tracker.package_key.name, e));
             continue;
         }
 
-        // Use original permissions from tar file
-        let permissions = Permissions::from_mode(task.file_mode);
-        if let Err(e) = fs::set_permissions(&task.file_path, permissions).await {
-            log_verbose(&format!("Worker {} failed to set permissions for {}: {}", worker_id, task.file_path.display(), e));
+        // Write _hasInstallScript marker if needed
+        if completion_tracker.has_install_script.is_some() {
+            let install_script_path = completion_tracker.cache_path.join("_hasInstallScript");
+            if let Err(e) = fs::write(&install_script_path, "").await {
+                log_verbose(&format!("Worker {} failed to write _hasInstallScript for {}: {}", worker_id, completion_tracker.package_key.name, e));
+            }
         }
 
-        // Mark file write completion
-        let all_files_written = task.package_tracker.mark_file_written();
+        log_verbose(&format!("Worker {} package {} cache completed via streaming", worker_id, completion_tracker.package_key.name));
 
-        if all_files_written {
-            // All files written, create _resolved marker
-            let resolved_path = task.package_tracker.cache_path.join("_resolved");
-            if let Err(e) = fs::write(&resolved_path, "").await {
-                log_verbose(&format!("Worker {} failed to write _resolved for {}: {}", worker_id, task.package_tracker.package_key.name, e));
-                continue;
-            }
+        // Round-robin distribute clone tasks
+        for (clone_idx, clone_target) in completion_tracker.clone_targets.iter().enumerate() {
+            let sender_idx = (CLONE_COUNTER.fetch_add(1, Ordering::Relaxed) + clone_idx) % clone_senders.len();
+            let clone_task = CloneTask {
+                cache_path: completion_tracker.cache_path.clone(),
+                target_path: clone_target.target_path.clone(),
+                package_name: clone_target.package_name.clone(),
+            };
 
-            // Write _hasInstallScript marker
-            if task.package_tracker.has_install_script.is_some() {
-                let install_script_path = task.package_tracker.cache_path.join("_hasInstallScript");
-                if let Err(e) = fs::write(&install_script_path, "").await {
-                    log_verbose(&format!("Worker {} failed to write _hasInstallScript for {}: {}", worker_id, task.package_tracker.package_key.name, e));
-                }
-            }
-
-            log_verbose(&format!("Worker {} package {} cache completed", worker_id, task.package_tracker.package_key.name));
-
-            // Round-robin distribute clone tasks
-            for (clone_idx, clone_target) in task.package_tracker.clone_targets.iter().enumerate() {
-                let sender_idx = (CLONE_COUNTER.fetch_add(1, Ordering::Relaxed) + clone_idx) % clone_senders.len();
-                let clone_task = CloneTask {
-                    cache_path: task.package_tracker.cache_path.clone(),
-                    target_path: clone_target.target_path.clone(),
-                    package_name: clone_target.package_name.clone(),
-                    has_install_script: task.package_tracker.has_install_script,
-                };
-
-                if let Err(e) = clone_senders[sender_idx].send(clone_task).await {
-                    log_verbose(&format!("Worker {} failed to send clone task: {}", worker_id, e));
-                }
+            if let Err(e) = clone_senders[sender_idx].send(clone_task).await {
+                log_verbose(&format!("Worker {} failed to send clone task: {}", worker_id, e));
             }
         }
     }
-    log_verbose(&format!("Write worker {} finished", worker_id));
+    log_verbose(&format!("Streaming extract worker {} finished", worker_id));
 }
+
 
 // Multi-threaded lock-free clone worker
 async fn clone_worker_multi(
@@ -643,6 +600,9 @@ async fn clone_worker_multi(
                 if let Err(e) = update_package_binary(&task.target_path, &task.package_name).await {
                     log_verbose(&format!("Worker {} failed to update binary for {}: {}", worker_id, task.package_name, e));
                 }
+
+                // Decrement depth completion counter
+                DEPTH_COMPLETION_COUNTER.fetch_sub(1, Ordering::SeqCst);
             }
             Err(e) => {
                 log_verbose(&format!(
@@ -669,19 +629,18 @@ pub async fn install_packages_optimized(
     let mut depths: Vec<_> = groups.keys().cloned().collect();
     depths.sort_unstable();
 
-    // Create multiple channels for true lock-free parallelism
-    let download_worker_count = thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8);
-    let extract_worker_count = thread::available_parallelism().map(|n| n.get()).unwrap_or(2).min(4); // CPU intensive, fewer workers
-    let write_worker_count = thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8);
-    let clone_worker_count = thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8);
+    let thread_count = thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8);
+    // Create multiple channels for streaming parallelism (no separate write workers needed)
+    let download_worker_count = thread_count * 2;
+    let extract_worker_count = thread_count;
+    let clone_worker_count = thread_count;
 
-    log_verbose(&format!("True lock-free workers - download: {}, extract: {}, write: {}, clone: {}",
-        download_worker_count, extract_worker_count, write_worker_count, clone_worker_count));
+    log_verbose(&format!("Streaming workers - download: {}, extract: {}, clone: {}",
+        download_worker_count, extract_worker_count, clone_worker_count));
 
-    // Create round-robin channels for each stage
+    // Create round-robin channels for streaming pipeline
     let mut download_channels = Vec::new();
     let mut extract_channels = Vec::new();
-    let mut write_channels = Vec::new();
     let mut clone_channels = Vec::new();
 
     for _ in 0..download_worker_count {
@@ -690,13 +649,8 @@ pub async fn install_packages_optimized(
     }
 
     for _ in 0..extract_worker_count {
-        let (tx, rx) = mpsc::channel::<ExtractTask>(50);
+        let (tx, rx) = mpsc::channel::<StreamingExtractTask>(30); // Smaller buffer since no intermediate storage
         extract_channels.push((tx, rx));
-    }
-
-    for _ in 0..write_worker_count {
-        let (tx, rx) = mpsc::channel::<FileWriteTask>(200);
-        write_channels.push((tx, rx));
     }
 
     for _ in 0..clone_worker_count {
@@ -707,10 +661,9 @@ pub async fn install_packages_optimized(
     // Create deduplicator
     let deduplicator = Arc::new(DownloadDeduplicator::new());
 
-    // Extract senders and spawn workers - completely lock-free
+    // Extract senders for streaming pipeline
     let download_senders: Vec<_> = download_channels.iter().map(|(tx, _)| tx.clone()).collect();
     let extract_senders: Vec<_> = extract_channels.iter().map(|(tx, _)| tx.clone()).collect();
-    let write_senders: Vec<_> = write_channels.iter().map(|(tx, _)| tx.clone()).collect();
     let clone_senders: Vec<_> = clone_channels.iter().map(|(tx, _)| tx.clone()).collect();
 
     let mut workers = Vec::new();
@@ -726,22 +679,12 @@ pub async fn install_packages_optimized(
         workers.push(worker);
     }
 
-    // Spawn extract workers
+    // Spawn streaming extract workers
     for (i, (_, rx)) in extract_channels.into_iter().enumerate() {
-        let write_senders_clone = write_senders.clone();
-
-        let worker = tokio::spawn(async move {
-            extract_worker_multi(rx, write_senders_clone, i).await;
-        });
-        workers.push(worker);
-    }
-
-    // Spawn write workers
-    for (i, (_, rx)) in write_channels.into_iter().enumerate() {
         let clone_senders_clone = clone_senders.clone();
 
         let worker = tokio::spawn(async move {
-            write_worker_multi(rx, clone_senders_clone, i).await;
+            streaming_extract_worker(rx, clone_senders_clone, i).await;
         });
         workers.push(worker);
     }
@@ -754,10 +697,14 @@ pub async fn install_packages_optimized(
         workers.push(worker);
     }
 
-    // Process packages by depth using deduplicator
-    let mut task_counter = 0;
+    // Process packages by depth using deduplicator - maintain batch processing for layer ordering
     for depth in depths.iter() {
+        log_verbose(&format!("Processing depth level {}", depth));
+
         if let Some(packages) = groups.get(depth) {
+            let mut batch_tasks = Vec::new();
+
+            // Prepare all tasks for this depth level
             for (path, package) in packages.iter() {
                 if let Some(resolved) = &package.resolved {
                     if package.link.is_some() {
@@ -809,54 +756,79 @@ pub async fn install_packages_optimized(
                         package_name: name.clone(),
                     };
 
-                    // Check status and register with deduplicator
-                    match deduplicator.check_and_register(package_key.clone(), clone_target.clone(), &cache_flag_path) {
-                        PackageStatus::AlreadyCached => {
-                            // Direct clone from cache using round-robin
-                            let clone_task = CloneTask {
-                                cache_path,
-                                target_path: clone_target.target_path,
-                                package_name: clone_target.package_name,
-                                has_install_script: package.has_install_script,
-                            };
-
-                            let clone_idx = task_counter % clone_senders.len();
-                            if let Err(e) = clone_senders[clone_idx].send(clone_task).await {
-                                log_verbose(&format!("Failed to send direct clone task for {}: {}", name, e));
-                            }
-                            task_counter += 1;
-                        }
-                        PackageStatus::NeedDownload => {
-                            // Create download task using round-robin
-                            let download_task = DownloadTask {
-                                key: package_key,
-                                cache_path,
-                                has_install_script: package.has_install_script,
-                            };
-
-                            let download_idx = task_counter % download_senders.len();
-                            if let Err(e) = download_senders[download_idx].send(download_task).await {
-                                log_verbose(&format!("Failed to send download task for {}: {}", name, e));
-                            }
-                            task_counter += 1;
-                        }
-                        PackageStatus::InProgress => {
-                            // Already being downloaded by another task, just wait
-                            log_verbose(&format!("Package {} already in progress, added to clone targets", name));
-                        }
-                    }
+                    // Prepare task for batch execution
+                    batch_tasks.push((package_key, clone_target, cache_path, cache_flag_path, package.has_install_script));
                 } else {
                     PROGRESS_BAR.inc(1);
                     log_verbose(&format!("{path} no resolved info skipped"));
                 }
             }
+
+            // Execute all tasks in this batch level concurrently
+            if batch_tasks.is_empty() {
+                log_verbose(&format!("Depth level {} has no tasks, skipping", depth));
+                continue;
+            }
+
+            log_verbose(&format!("Executing {} tasks for depth level {}", batch_tasks.len(), depth));
+
+            // Reset and set depth completion counter for this batch
+            DEPTH_COMPLETION_COUNTER.store(batch_tasks.len(), Ordering::SeqCst);
+            let mut task_counter = 0;
+
+            for (package_key, clone_target, cache_path, cache_flag_path, has_install_script) in batch_tasks {
+                // Check status and register with deduplicator
+                match deduplicator.check_and_register(package_key.clone(), clone_target.clone(), &cache_flag_path) {
+                    PackageStatus::AlreadyCached => {
+                        // Direct clone from cache using round-robin
+                        let clone_task = CloneTask {
+                            cache_path,
+                            target_path: clone_target.target_path,
+                            package_name: clone_target.package_name,
+                        };
+
+                        let clone_idx = task_counter % clone_senders.len();
+                        if let Err(e) = clone_senders[clone_idx].send(clone_task).await {
+                            log_verbose(&format!("Failed to send direct clone task for {}: {}", package_key.name, e));
+                        }
+                        task_counter += 1;
+                    }
+                    PackageStatus::NeedDownload => {
+                        // Create download task using round-robin
+                        let download_task = DownloadTask {
+                            key: package_key.clone(),
+                            cache_path,
+                            has_install_script,
+                        };
+
+                        let download_idx = task_counter % download_senders.len();
+                        if let Err(e) = download_senders[download_idx].send(download_task).await {
+                            log_verbose(&format!("Failed to send download task for {}: {}", package_key.name, e));
+                        }
+                        task_counter += 1;
+                    }
+                    PackageStatus::InProgress => {
+                        // Already being downloaded by another task, just wait
+                        log_verbose(&format!("Package {} already in progress, added to clone targets", package_key.name));
+                    }
+                }
+            }
+
+            // Wait for this depth level to complete before moving to next depth level
+            log_verbose(&format!("Waiting for depth level {} ({} tasks) to complete", depth, task_counter));
+
+            // Wait for all tasks in this depth to complete
+            while DEPTH_COMPLETION_COUNTER.load(Ordering::SeqCst) > 0 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+            }
+
+            log_verbose(&format!("Depth level {} completed, proceeding to next level", depth));
         }
     }
 
     // Close all channels to signal workers to finish
     drop(download_senders);
     drop(extract_senders);
-    drop(write_senders);
     drop(clone_senders);
 
     // Wait for all workers to complete
