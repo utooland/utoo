@@ -11,7 +11,10 @@ NC='\033[0m' # No Color
 
 echo -e "${YELLOW}Starting utoo-pm e2e tests...${NC}"
 echo -e "utoo path: $(which utoo)"
+echo -e "ut path: $(which ut)"
 echo -e "node path: $(node -e 'console.log(process.arch)')"
+
+ut config set registry https://registry.npmjs.org --global
 
 # Case 1: Clone and install ant-design-x (next)
 echo -e "${YELLOW}Case 2: Clone and install ant-design-x (next)${NC}"
@@ -21,7 +24,9 @@ if [ ! -d "ant-design-x" ]; then
 fi
 cd ant-design-x
 echo "Installing dependencies for ant-design-x (next)..."
-utoo install --registry=https://registry.npmjs.org || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
+utoo deps  || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
+utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
+utoo rebuild || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
 echo -e "${GREEN}PASS: ant-design-x (next) cloned and installed${NC}"
 cd ../../
 
