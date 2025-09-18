@@ -1,16 +1,19 @@
 use anyhow::Context;
 use anyhow::Result;
+use dashmap::DashMap;
 use glob::glob;
+use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
+use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 use std::thread;
 use tokio::sync::mpsc;
-use std::path::PathBuf;
-use dashmap::DashMap;
-use once_cell::sync::Lazy;
 
 use crate::cmd::rebuild::rebuild;
 use crate::helper::global_bin::get_global_bin_dir;
@@ -230,7 +233,6 @@ struct DownloadTask {
     has_install_script: Option<bool>,
 }
 
-
 // Streaming extract task - no intermediate file storage
 #[derive(Debug)]
 struct StreamingExtractTask {
@@ -279,10 +281,11 @@ impl DownloadDeduplicator {
     }
 
     /// Check package status and register clone target
-    fn check_and_register(&self,
+    fn check_and_register(
+        &self,
         key: PackageKey,
         clone_target: CloneTarget,
-        cache_flag_path: &Path
+        cache_flag_path: &Path,
     ) -> PackageStatus {
         // Check if cache already exists
         if cache_flag_path.exists() {
@@ -334,17 +337,6 @@ static PRE_DOWNLOAD_SEMAPHORE: Lazy<tokio::sync::Semaphore> = Lazy::new(|| {
     tokio::sync::Semaphore::new(4) // 限制4个并发预下载任务
 });
 
-#[derive(Debug)]
-pub struct UnifiedDownloadTask {
-    pub name: String,
-    pub version: String,
-    pub resolved_url: String,
-    pub cache_path: PathBuf,
-    pub has_install_script: bool,
-    pub clone_targets: Option<Vec<PathBuf>>, // None = 预下载，Some = 正常下载
-}
-
-
 // Multi-threaded lock-free download worker
 async fn download_worker_multi(
     mut download_rx: mpsc::Receiver<DownloadTask>,
@@ -352,20 +344,23 @@ async fn download_worker_multi(
     deduplicator: Arc<DownloadDeduplicator>,
     worker_id: usize,
 ) {
-    use crate::util::retry::{RetryableError, create_retry_strategy, build_dns_cached_client};
+    use crate::util::retry::{RetryableError, build_dns_cached_client, create_retry_strategy};
     use once_cell::sync::Lazy;
     use reqwest::Client;
-    use tokio_retry::RetryIf;
     use reqwest::StatusCode;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio_retry::RetryIf;
 
     static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
     static EXTRACT_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-    log_verbose(&format!("Download worker {} started", worker_id));
+    log_verbose(&format!("Download worker {worker_id} started"));
 
     while let Some(task) = download_rx.recv().await {
-        log_verbose(&format!("Worker {} downloading {}", worker_id, task.key.name));
+        log_verbose(&format!(
+            "Worker {} downloading {}",
+            worker_id, task.key.name
+        ));
 
         // Pure download, get byte data
         let download_result = RetryIf::spawn(
@@ -386,10 +381,16 @@ async fn download_worker_multi(
                     }
                     StatusCode::NOT_FOUND => {
                         log_verbose(&format!("URL not found {}", task.key.resolved_url));
-                        Err(RetryableError::Permanent(format!("URL not found {}", task.key.resolved_url)))
+                        Err(RetryableError::Permanent(format!(
+                            "URL not found {}",
+                            task.key.resolved_url
+                        )))
                     }
                     status => {
-                        log_verbose(&format!("Error: {status}, url: {}, retrying", task.key.resolved_url));
+                        log_verbose(&format!(
+                            "Error: {status}, url: {}, retrying",
+                            task.key.resolved_url
+                        ));
                         Err(RetryableError::Temporary(format!(
                             "HTTP error: {status}, url: {}",
                             task.key.resolved_url
@@ -408,7 +409,8 @@ async fn download_worker_multi(
                 // Get clone target list
                 if let Some(clone_targets) = deduplicator.complete_package(&task.key) {
                     // Round-robin distribute to streaming extract worker
-                    let extract_idx = EXTRACT_COUNTER.fetch_add(1, Ordering::Relaxed) % extract_senders.len();
+                    let extract_idx =
+                        EXTRACT_COUNTER.fetch_add(1, Ordering::Relaxed) % extract_senders.len();
                     let extract_task = StreamingExtractTask {
                         downloaded_data: data,
                         cache_path: task.cache_path,
@@ -418,16 +420,16 @@ async fn download_worker_multi(
                     };
 
                     if let Err(e) = extract_senders[extract_idx].send(extract_task).await {
-                        log_verbose(&format!("Worker {} failed to send streaming extract task: {}", worker_id, e));
+                        log_verbose(&format!(
+                            "Worker {worker_id} failed to send streaming extract task: {e}"
+                        ));
                     }
                 }
             }
             Err(e) => {
                 log_verbose(&format!(
                     "Worker {} download failed: url={}, error={}",
-                    worker_id,
-                    task.key.resolved_url,
-                    e
+                    worker_id, task.key.resolved_url, e
                 ));
 
                 // Download failed, remove from deduplicator to avoid permanent blocking
@@ -435,7 +437,7 @@ async fn download_worker_multi(
             }
         }
     }
-    log_verbose(&format!("Download worker {} finished", worker_id));
+    log_verbose(&format!("Download worker {worker_id} finished"));
 }
 
 // Streaming extract worker - directly write files without intermediate storage
@@ -445,20 +447,23 @@ async fn streaming_extract_worker(
     worker_id: usize,
 ) {
     use async_compression::tokio::bufread::GzipDecoder;
-    use tokio::io::BufReader;
-    use tokio_tar::Archive;
     use futures::StreamExt;
-    use tokio::fs;
     use std::fs::Permissions;
     use std::os::unix::fs::PermissionsExt;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::fs;
+    use tokio::io::BufReader;
+    use tokio_tar::Archive;
 
     static CLONE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-    log_verbose(&format!("Streaming extract worker {} started", worker_id));
+    log_verbose(&format!("Streaming extract worker {worker_id} started"));
 
     while let Some(task) = extract_rx.recv().await {
-        log_verbose(&format!("Worker {} streaming extract {} directly to disk", worker_id, task.package_key.name));
+        log_verbose(&format!(
+            "Worker {} streaming extract {} directly to disk",
+            worker_id, task.package_key.name
+        ));
 
         // Extract and write files in streaming fashion
         let tar_gz = GzipDecoder::new(BufReader::new(&task.downloaded_data[..]));
@@ -469,7 +474,10 @@ async fn streaming_extract_worker(
         let mut entries = match archive.entries() {
             Ok(entries) => entries,
             Err(e) => {
-                log_verbose(&format!("Worker {} failed to read archive entries for {}: {}", worker_id, task.package_key.name, e));
+                log_verbose(&format!(
+                    "Worker {} failed to read archive entries for {}: {}",
+                    worker_id, task.package_key.name, e
+                ));
                 continue;
             }
         };
@@ -480,7 +488,10 @@ async fn streaming_extract_worker(
             let mut file = match entry {
                 Ok(file) => file,
                 Err(e) => {
-                    log_verbose(&format!("Worker {} failed to read file entry for {}: {}", worker_id, task.package_key.name, e));
+                    log_verbose(&format!(
+                        "Worker {} failed to read file entry for {}: {}",
+                        worker_id, task.package_key.name, e
+                    ));
                     extraction_success = false;
                     break;
                 }
@@ -489,7 +500,10 @@ async fn streaming_extract_worker(
             let path = match file.path() {
                 Ok(path) => path.into_owned(),
                 Err(e) => {
-                    log_verbose(&format!("Worker {} failed to get file path for {}: {}", worker_id, task.package_key.name, e));
+                    log_verbose(&format!(
+                        "Worker {} failed to get file path for {}: {}",
+                        worker_id, task.package_key.name, e
+                    ));
                     continue;
                 }
             };
@@ -506,26 +520,42 @@ async fn streaming_extract_worker(
             let file_path = task.cache_path.join(&path);
 
             // Create parent directory
-            if let Some(parent) = file_path.parent() {
-                if let Err(e) = fs::create_dir_all(parent).await {
-                    log_verbose(&format!("Worker {} failed to create directory {}: {}", worker_id, parent.display(), e));
-                    extraction_success = false;
-                    break;
-                }
+            if let Some(parent) = file_path.parent()
+                && let Err(e) = fs::create_dir_all(parent).await
+            {
+                log_verbose(&format!(
+                    "Worker {} failed to create directory {}: {}",
+                    worker_id,
+                    parent.display(),
+                    e
+                ));
+                extraction_success = false;
+                break;
             }
 
             // Stream file content directly to disk
             let mut temp_file = match tokio::fs::File::create(&file_path).await {
                 Ok(f) => f,
                 Err(e) => {
-                    log_verbose(&format!("Worker {} failed to create file {}: {}", worker_id, file_path.display(), e));
+                    log_verbose(&format!(
+                        "Worker {} failed to create file {}: {}",
+                        worker_id,
+                        file_path.display(),
+                        e
+                    ));
                     extraction_success = false;
                     break;
                 }
             };
 
             if let Err(e) = tokio::io::copy(&mut file, &mut temp_file).await {
-                log_verbose(&format!("Worker {} failed to write file content for {} in {}: {}", worker_id, path.display(), task.package_key.name, e));
+                log_verbose(&format!(
+                    "Worker {} failed to write file content for {} in {}: {}",
+                    worker_id,
+                    path.display(),
+                    task.package_key.name,
+                    e
+                ));
                 extraction_success = false;
                 break;
             }
@@ -533,23 +563,37 @@ async fn streaming_extract_worker(
             // Set original permissions
             let permissions = Permissions::from_mode(original_mode);
             if let Err(e) = fs::set_permissions(&file_path, permissions).await {
-                log_verbose(&format!("Worker {} failed to set permissions for {}: {}", worker_id, file_path.display(), e));
+                log_verbose(&format!(
+                    "Worker {} failed to set permissions for {}: {}",
+                    worker_id,
+                    file_path.display(),
+                    e
+                ));
             }
 
             files_extracted += 1;
         }
 
         if !extraction_success {
-            log_verbose(&format!("Worker {} extraction failed for {}", worker_id, task.package_key.name));
+            log_verbose(&format!(
+                "Worker {} extraction failed for {}",
+                worker_id, task.package_key.name
+            ));
             continue;
         }
 
         if files_extracted == 0 {
-            log_verbose(&format!("Worker {} no files extracted for {}", worker_id, task.package_key.name));
+            log_verbose(&format!(
+                "Worker {} no files extracted for {}",
+                worker_id, task.package_key.name
+            ));
             continue;
         }
 
-        log_verbose(&format!("Worker {} successfully extracted {} files for {} directly to disk", worker_id, files_extracted, task.package_key.name));
+        log_verbose(&format!(
+            "Worker {} successfully extracted {} files for {} directly to disk",
+            worker_id, files_extracted, task.package_key.name
+        ));
 
         // Create completion tracker
         let completion_tracker = PackageCompletionTracker::new(
@@ -562,7 +606,10 @@ async fn streaming_extract_worker(
         // All files written successfully, create _resolved marker
         let resolved_path = completion_tracker.cache_path.join("_resolved");
         if let Err(e) = fs::write(&resolved_path, "").await {
-            log_verbose(&format!("Worker {} failed to write _resolved for {}: {}", worker_id, completion_tracker.package_key.name, e));
+            log_verbose(&format!(
+                "Worker {} failed to write _resolved for {}: {}",
+                worker_id, completion_tracker.package_key.name, e
+            ));
             continue;
         }
 
@@ -570,15 +617,22 @@ async fn streaming_extract_worker(
         if completion_tracker.has_install_script.is_some() {
             let install_script_path = completion_tracker.cache_path.join("_hasInstallScript");
             if let Err(e) = fs::write(&install_script_path, "").await {
-                log_verbose(&format!("Worker {} failed to write _hasInstallScript for {}: {}", worker_id, completion_tracker.package_key.name, e));
+                log_verbose(&format!(
+                    "Worker {} failed to write _hasInstallScript for {}: {}",
+                    worker_id, completion_tracker.package_key.name, e
+                ));
             }
         }
 
-        log_verbose(&format!("Worker {} package {} cache completed via streaming", worker_id, completion_tracker.package_key.name));
+        log_verbose(&format!(
+            "Worker {} package {} cache completed via streaming",
+            worker_id, completion_tracker.package_key.name
+        ));
 
         // Round-robin distribute clone tasks
         for (clone_idx, clone_target) in completion_tracker.clone_targets.iter().enumerate() {
-            let sender_idx = (CLONE_COUNTER.fetch_add(1, Ordering::Relaxed) + clone_idx) % clone_senders.len();
+            let sender_idx =
+                (CLONE_COUNTER.fetch_add(1, Ordering::Relaxed) + clone_idx) % clone_senders.len();
             let clone_task = CloneTask {
                 cache_path: completion_tracker.cache_path.clone(),
                 target_path: clone_target.target_path.clone(),
@@ -586,35 +640,39 @@ async fn streaming_extract_worker(
             };
 
             if let Err(e) = clone_senders[sender_idx].send(clone_task).await {
-                log_verbose(&format!("Worker {} failed to send clone task: {}", worker_id, e));
+                log_verbose(&format!(
+                    "Worker {worker_id} failed to send clone task: {e}"
+                ));
             }
         }
     }
-    log_verbose(&format!("Streaming extract worker {} finished", worker_id));
+    log_verbose(&format!("Streaming extract worker {worker_id} finished"));
 }
 
-
 // Multi-threaded lock-free clone worker
-async fn clone_worker_multi(
-    mut clone_rx: mpsc::Receiver<CloneTask>,
-    worker_id: usize,
-) {
+async fn clone_worker_multi(mut clone_rx: mpsc::Receiver<CloneTask>, worker_id: usize) {
     use crate::util::cloner::clone;
 
-    log_verbose(&format!("Clone worker {} started", worker_id));
+    log_verbose(&format!("Clone worker {worker_id} started"));
 
     while let Some(task) = clone_rx.recv().await {
         log_verbose(&format!("Worker {} clone {}", worker_id, task.package_name));
 
         match clone(&task.cache_path, &task.target_path, true).await {
             Ok(_) => {
-                log_verbose(&format!("Worker {} {} resolved", worker_id, task.package_name));
+                log_verbose(&format!(
+                    "Worker {} {} resolved",
+                    worker_id, task.package_name
+                ));
                 PROGRESS_BAR.inc(1);
                 log_progress(&format!("{} resolved", task.package_name));
 
                 // Update package binary
                 if let Err(e) = update_package_binary(&task.target_path, &task.package_name).await {
-                    log_verbose(&format!("Worker {} failed to update binary for {}: {}", worker_id, task.package_name, e));
+                    log_verbose(&format!(
+                        "Worker {} failed to update binary for {}: {}",
+                        worker_id, task.package_name, e
+                    ));
                 }
 
                 // Decrement depth completion counter
@@ -631,7 +689,7 @@ async fn clone_worker_multi(
             }
         }
     }
-    log_verbose(&format!("Clone worker {} finished", worker_id));
+    log_verbose(&format!("Clone worker {worker_id} finished"));
 }
 
 // 统一的下载和解压函数
@@ -643,11 +701,11 @@ pub async fn download_and_extract_package(
     has_install_script: bool,
     clone_targets: Option<Vec<PathBuf>>,
 ) -> Result<()> {
-    use crate::util::retry::{RetryableError, create_retry_strategy, build_dns_cached_client};
+    use crate::util::retry::{RetryableError, build_dns_cached_client, create_retry_strategy};
     use once_cell::sync::Lazy;
     use reqwest::Client;
-    use tokio_retry::RetryIf;
     use reqwest::StatusCode;
+    use tokio_retry::RetryIf;
 
     static UNIFIED_DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
 
@@ -658,7 +716,7 @@ pub async fn download_and_extract_package(
         None
     };
 
-    log_verbose(&format!("Downloading {}@{} from {}", name, version, tarball_url));
+    log_verbose(&format!("Downloading {name}@{version} from {tarball_url}"));
 
     // 下载
     let download_result = RetryIf::spawn(
@@ -668,24 +726,25 @@ pub async fn download_and_extract_package(
                 .get(tarball_url)
                 .send()
                 .await
-                .map_err(|e| RetryableError::Temporary(format!("Network error: {}", e)))?;
+                .map_err(|e| RetryableError::Temporary(format!("Network error: {e}")))?;
 
             match response.status() {
                 StatusCode::OK => {
                     let bytes = response.bytes().await.map_err(|e| {
-                        RetryableError::Temporary(format!("Failed to read response: {}", e))
+                        RetryableError::Temporary(format!("Failed to read response: {e}"))
                     })?;
                     Ok(bytes.to_vec())
                 }
                 StatusCode::NOT_FOUND => {
-                    log_verbose(&format!("URL not found {}", tarball_url));
-                    Err(RetryableError::Permanent(format!("URL not found {}", tarball_url)))
+                    log_verbose(&format!("URL not found {tarball_url}"));
+                    Err(RetryableError::Permanent(format!(
+                        "URL not found {tarball_url}"
+                    )))
                 }
                 status => {
-                    log_verbose(&format!("Error: {status}, url: {}, retrying", tarball_url));
+                    log_verbose(&format!("Error: {status}, url: {tarball_url}, retrying"));
                     Err(RetryableError::Temporary(format!(
-                        "HTTP error: {status}, url: {}",
-                        tarball_url
+                        "HTTP error: {status}, url: {tarball_url}"
                     )))
                 }
             }
@@ -696,12 +755,12 @@ pub async fn download_and_extract_package(
 
     // 解压到缓存
     use async_compression::tokio::bufread::GzipDecoder;
-    use tokio::io::BufReader;
-    use tokio_tar::Archive;
     use futures::StreamExt;
-    use tokio::fs;
     use std::fs::Permissions;
     use std::os::unix::fs::PermissionsExt;
+    use tokio::fs;
+    use tokio::io::BufReader;
+    use tokio_tar::Archive;
 
     let tar_gz = GzipDecoder::new(BufReader::new(&download_result[..]));
     let mut archive = Archive::new(tar_gz);
@@ -761,12 +820,18 @@ pub async fn download_and_extract_package(
             if let Err(e) = crate::util::cloner::clone(cache_path, &target, false).await {
                 log_verbose(&format!(
                     "Failed to clone {}@{} from {} to {}: {}",
-                    name, version, cache_path.display(), target.display(), e
+                    name,
+                    version,
+                    cache_path.display(),
+                    target.display(),
+                    e
                 ));
             } else {
                 log_verbose(&format!(
                     "Cloned {}@{} from cache to {}",
-                    name, version, target.display()
+                    name,
+                    version,
+                    target.display()
                 ));
             }
         }
@@ -786,14 +851,18 @@ pub async fn install_packages_optimized(
     let mut depths: Vec<_> = groups.keys().cloned().collect();
     depths.sort_unstable();
 
-    let thread_count = thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8);
+    let thread_count = thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(8);
     // Create multiple channels for streaming parallelism (no separate write workers needed)
     let download_worker_count = thread_count * 2;
     let extract_worker_count = thread_count;
     let clone_worker_count = thread_count;
 
-    log_verbose(&format!("Streaming workers - download: {}, extract: {}, clone: {}",
-        download_worker_count, extract_worker_count, clone_worker_count));
+    log_verbose(&format!(
+        "Streaming workers - download: {download_worker_count}, extract: {extract_worker_count}, clone: {clone_worker_count}"
+    ));
 
     // Create round-robin channels for streaming pipeline
     let mut download_channels = Vec::new();
@@ -856,7 +925,7 @@ pub async fn install_packages_optimized(
 
     // Process packages by depth using deduplicator - maintain batch processing for layer ordering
     for depth in depths.iter() {
-        log_verbose(&format!("Processing depth level {}", depth));
+        log_verbose(&format!("Processing depth level {depth}"));
 
         if let Some(packages) = groups.get(depth) {
             let mut batch_tasks = Vec::new();
@@ -865,7 +934,7 @@ pub async fn install_packages_optimized(
             for (path, package) in packages.iter() {
                 if let Some(resolved) = &package.resolved {
                     if package.link.is_some() {
-                        let link_name = extract_package_name(&path);
+                        let link_name = extract_package_name(path);
                         if link_name.is_empty() {
                             PROGRESS_BAR.inc(1);
                             log_verbose(&format!("Link skipped due to empty package name: {path}"));
@@ -895,11 +964,14 @@ pub async fn install_packages_optimized(
                         continue;
                     }
 
-                    let name = package.name.as_ref().map(|s| s.clone()).unwrap_or_else(|| extract_package_name(&path));
+                    let name = package
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| extract_package_name(path));
                     let version = package.version.as_ref().unwrap();
                     let cache_path = cache_dir.join(format!("{name}/{version}"));
                     let cache_flag_path = cache_dir.join(format!("{name}/{version}/_resolved"));
-                    let target_path = cwd.join(&path);
+                    let target_path = cwd.join(path);
 
                     // Create package key and clone target
                     let package_key = PackageKey {
@@ -914,7 +986,13 @@ pub async fn install_packages_optimized(
                     };
 
                     // Prepare task for batch execution
-                    batch_tasks.push((package_key, clone_target, cache_path, cache_flag_path, package.has_install_script));
+                    batch_tasks.push((
+                        package_key,
+                        clone_target,
+                        cache_path,
+                        cache_flag_path,
+                        package.has_install_script,
+                    ));
                 } else {
                     PROGRESS_BAR.inc(1);
                     log_verbose(&format!("{path} no resolved info skipped"));
@@ -923,19 +1001,29 @@ pub async fn install_packages_optimized(
 
             // Execute all tasks in this batch level concurrently
             if batch_tasks.is_empty() {
-                log_verbose(&format!("Depth level {} has no tasks, skipping", depth));
+                log_verbose(&format!("Depth level {depth} has no tasks, skipping"));
                 continue;
             }
 
-            log_verbose(&format!("Executing {} tasks for depth level {}", batch_tasks.len(), depth));
+            log_verbose(&format!(
+                "Executing {} tasks for depth level {}",
+                batch_tasks.len(),
+                depth
+            ));
 
             // Reset and set depth completion counter for this batch
             DEPTH_COMPLETION_COUNTER.store(batch_tasks.len(), Ordering::SeqCst);
             let mut task_counter = 0;
 
-            for (package_key, clone_target, cache_path, cache_flag_path, has_install_script) in batch_tasks {
+            for (package_key, clone_target, cache_path, cache_flag_path, has_install_script) in
+                batch_tasks
+            {
                 // Check status and register with deduplicator
-                match deduplicator.check_and_register(package_key.clone(), clone_target.clone(), &cache_flag_path) {
+                match deduplicator.check_and_register(
+                    package_key.clone(),
+                    clone_target.clone(),
+                    &cache_flag_path,
+                ) {
                     PackageStatus::AlreadyCached => {
                         // Direct clone from cache using round-robin
                         let clone_task = CloneTask {
@@ -946,7 +1034,10 @@ pub async fn install_packages_optimized(
 
                         let clone_idx = task_counter % clone_senders.len();
                         if let Err(e) = clone_senders[clone_idx].send(clone_task).await {
-                            log_verbose(&format!("Failed to send direct clone task for {}: {}", package_key.name, e));
+                            log_verbose(&format!(
+                                "Failed to send direct clone task for {}: {}",
+                                package_key.name, e
+                            ));
                         }
                         task_counter += 1;
                     }
@@ -960,26 +1051,36 @@ pub async fn install_packages_optimized(
 
                         let download_idx = task_counter % download_senders.len();
                         if let Err(e) = download_senders[download_idx].send(download_task).await {
-                            log_verbose(&format!("Failed to send download task for {}: {}", package_key.name, e));
+                            log_verbose(&format!(
+                                "Failed to send download task for {}: {}",
+                                package_key.name, e
+                            ));
                         }
                         task_counter += 1;
                     }
                     PackageStatus::InProgress => {
                         // Already being downloaded by another task, just wait
-                        log_verbose(&format!("Package {} already in progress, added to clone targets", package_key.name));
+                        log_verbose(&format!(
+                            "Package {} already in progress, added to clone targets",
+                            package_key.name
+                        ));
                     }
                 }
             }
 
             // Wait for this depth level to complete before moving to next depth level
-            log_verbose(&format!("Waiting for depth level {} ({} tasks) to complete", depth, task_counter));
+            log_verbose(&format!(
+                "Waiting for depth level {depth} ({task_counter} tasks) to complete"
+            ));
 
             // Wait for all tasks in this depth to complete
             while DEPTH_COMPLETION_COUNTER.load(Ordering::SeqCst) > 0 {
                 tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
             }
 
-            log_verbose(&format!("Depth level {} completed, proceeding to next level", depth));
+            log_verbose(&format!(
+                "Depth level {depth} completed, proceeding to next level"
+            ));
         }
     }
 
@@ -991,13 +1092,12 @@ pub async fn install_packages_optimized(
     // Wait for all workers to complete
     for worker in workers {
         if let Err(e) = worker.await {
-            log_verbose(&format!("Worker error: {}", e));
+            log_verbose(&format!("Worker error: {e}"));
         }
     }
 
     Ok(())
 }
-
 
 pub struct InstallService;
 

@@ -266,7 +266,6 @@ async fn load_version_manifest_from_cache(name: &str, version: &str) -> Option<V
     None
 }
 
-
 // Global resolve function
 pub async fn resolve(name: &str, spec: &str) -> Result<ResolvedPackage> {
     let start_time = std::time::Instant::now();
@@ -348,13 +347,13 @@ pub async fn resolve_dependency(
                     let version_clone = resolved.version.clone();
                     let url_clone = tarball_url_str.to_string();
                     let cache_path_clone = cache_path.clone();
-                    let has_install_script = resolved.manifest.get("hasInstallScript") == Some(&serde_json::json!(true));
+                    let has_install_script =
+                        resolved.manifest.get("hasInstallScript") == Some(&serde_json::json!(true));
 
                     // Start async download in background
                     tokio::spawn(async move {
                         log_verbose(&format!(
-                            "Pre-downloading {}@{} from {}",
-                            name_clone, version_clone, url_clone
+                            "Pre-downloading {name_clone}@{version_clone} from {url_clone}"
                         ));
 
                         match crate::service::install::download_and_extract_package(
@@ -363,18 +362,18 @@ pub async fn resolve_dependency(
                             &url_clone,
                             &cache_path_clone,
                             has_install_script,
-                            None // 预下载不需要clone
-                        ).await {
+                            None, // 预下载不需要clone
+                        )
+                        .await
+                        {
                             Ok(_) => {
                                 log_verbose(&format!(
-                                    "Pre-download completed for {}@{}",
-                                    name_clone, version_clone
+                                    "Pre-download completed for {name_clone}@{version_clone}"
                                 ));
                             }
                             Err(e) => {
                                 log_verbose(&format!(
-                                    "Pre-download failed for {}@{}: {}",
-                                    name_clone, version_clone, e
+                                    "Pre-download failed for {name_clone}@{version_clone}: {e}"
                                 ));
                             }
                         }

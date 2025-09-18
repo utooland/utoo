@@ -147,7 +147,6 @@ async fn try_unpack(bytes: &[u8], dest: &Path) -> Result<()> {
     Ok(())
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
