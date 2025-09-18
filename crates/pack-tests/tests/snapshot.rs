@@ -108,14 +108,12 @@ async fn run(resource: PathBuf) -> Result<()> {
         },
         noop_backing_storage(),
     ));
-    let task = tt.spawn_once_task(async move {
+    tt.spawn_once_task(async move {
         let emit_op = run_inner_options(resource.to_str().unwrap().into());
         emit_op.read_strongly_consistent().await?;
         apply_effects(emit_op).await?;
         Ok(Vc::<()>::default())
     });
-    tt.wait_task_completion(task, ReadConsistency::Strong)
-        .await?;
 
     Ok(())
 }
