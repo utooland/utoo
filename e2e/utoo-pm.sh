@@ -21,7 +21,7 @@ if [ ! -d "ant-design-x" ]; then
 fi
 cd ant-design-x
 echo "Installing dependencies for ant-design-x (next)..."
-utoo install || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
+utoo install --registry=https://registry.npmjs.org || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
 echo -e "${GREEN}PASS: ant-design-x (next) cloned and installed${NC}"
 cd ../../
 
