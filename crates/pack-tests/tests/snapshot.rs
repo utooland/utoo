@@ -16,7 +16,7 @@ use pack_api::{
 use rustc_hash::FxHashSet;
 use std::{collections::VecDeque, fs, io, path::PathBuf};
 use turbo_rcstr::{RcStr, rcstr};
-use turbo_tasks::{ReadConsistency, ResolvedVc, TurboTasks, ValueToString, Vc, apply_effects};
+use turbo_tasks::{ResolvedVc, TurboTasks, ValueToString, Vc, apply_effects};
 use turbo_tasks_backend::{BackendOptions, TurboTasksBackend, noop_backing_storage};
 use turbo_tasks_fs::FileSystemPath;
 use turbo_unix_path::sys_to_unix;
