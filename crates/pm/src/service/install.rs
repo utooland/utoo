@@ -206,7 +206,7 @@ async fn clean_deps(groups: &HashMap<usize, Vec<(String, Package)>>, cwd: &Path)
     Ok(())
 }
 
-// 包的唯一标识
+// Unique package identifier
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 struct PackageKey {
     name: String,
@@ -214,14 +214,14 @@ struct PackageKey {
     resolved_url: String,
 }
 
-// Clone目标信息
+// Clone target information
 #[derive(Debug, Clone)]
 struct CloneTarget {
     target_path: PathBuf,
     package_name: String,
 }
 
-// 下载任务
+// Download task
 #[derive(Debug)]
 struct DownloadTask {
     key: PackageKey,
@@ -229,7 +229,7 @@ struct DownloadTask {
     has_install_script: Option<bool>,
 }
 
-// 解压任务
+// Extract task
 #[derive(Debug)]
 struct ExtractTask {
     downloaded_data: Vec<u8>,
@@ -239,16 +239,16 @@ struct ExtractTask {
     clone_targets: Vec<CloneTarget>,
 }
 
-// 文件写入任务
+// File write task
 #[derive(Debug)]
 struct FileWriteTask {
     file_path: PathBuf,
     file_data: Vec<u8>,
-    file_mode: u32, // 存储原始文件权限
+    file_mode: u32, // Store original file permissions
     package_tracker: Arc<PackageCacheTracker>,
 }
 
-// Clone任务
+// Clone task
 #[derive(Debug)]
 struct CloneTask {
     cache_path: PathBuf,
@@ -257,7 +257,7 @@ struct CloneTask {
     has_install_script: Option<bool>,
 }
 
-// 包缓存跟踪器
+// Package cache tracker
 #[derive(Debug)]
 struct PackageCacheTracker {
     package_key: PackageKey,
@@ -268,7 +268,7 @@ struct PackageCacheTracker {
     has_install_script: Option<bool>,
 }
 
-// 去重管理器
+// Download deduplicator
 #[derive(Debug)]
 struct DownloadDeduplicator {
     in_progress: DashMap<PackageKey, Vec<CloneTarget>>,
@@ -288,33 +288,33 @@ impl DownloadDeduplicator {
         }
     }
 
-    /// 检查包状态并注册clone目标
+    /// Check package status and register clone target
     fn check_and_register(&self,
         key: PackageKey,
         clone_target: CloneTarget,
         cache_flag_path: &Path
     ) -> PackageStatus {
-        // 检查缓存是否存在
+        // Check if cache already exists
         if cache_flag_path.exists() {
             return PackageStatus::AlreadyCached;
         }
 
-        // 尝试注册到正在进行的下载任务
+        // Try to register to in-progress download task
         match self.in_progress.entry(key) {
             dashmap::mapref::entry::Entry::Occupied(mut entry) => {
-                // 已有下载任务，添加clone目标
+                // Download task already exists, add clone target
                 entry.get_mut().push(clone_target);
                 PackageStatus::InProgress
             }
             dashmap::mapref::entry::Entry::Vacant(entry) => {
-                // 新的下载任务，创建clone目标列表
+                // New download task, create clone target list
                 entry.insert(vec![clone_target]);
                 PackageStatus::NeedDownload
             }
         }
     }
 
-    /// 获取并移除完成的包的clone目标列表
+    /// Get and remove clone target list for completed package
     fn complete_package(&self, key: &PackageKey) -> Option<Vec<CloneTarget>> {
         self.in_progress.remove(key).map(|(_, targets)| targets)
     }
@@ -338,7 +338,7 @@ impl PackageCacheTracker {
         })
     }
 
-    /// 标记一个文件写入完成，返回是否所有文件都已完成
+    /// Mark one file as written, return whether all files are completed
     fn mark_file_written(&self) -> bool {
         let written = self.files_written.fetch_add(1, Ordering::SeqCst) + 1;
         written >= self.total_files
@@ -346,7 +346,7 @@ impl PackageCacheTracker {
 }
 
 
-// 多线程无锁 download worker
+// Multi-threaded lock-free download worker
 async fn download_worker_multi(
     mut download_rx: mpsc::Receiver<DownloadTask>,
     extract_senders: Vec<mpsc::Sender<ExtractTask>>,
@@ -368,7 +368,7 @@ async fn download_worker_multi(
     while let Some(task) = download_rx.recv().await {
         log_verbose(&format!("Worker {} downloading {}", worker_id, task.key.name));
 
-        // 纯下载，获取字节数据
+        // Pure download, get byte data
         let download_result = RetryIf::spawn(
             create_retry_strategy(),
             || async {
@@ -406,9 +406,9 @@ async fn download_worker_multi(
             Ok(data) => {
                 log_progress(&format!("{} downloaded", task.key.name));
 
-                // 获取clone目标列表
+                // Get clone target list
                 if let Some(clone_targets) = deduplicator.complete_package(&task.key) {
-                    // Round-robin 分发到解压 worker
+                    // Round-robin distribute to extract worker
                     let extract_idx = EXTRACT_COUNTER.fetch_add(1, Ordering::Relaxed) % extract_senders.len();
                     let extract_task = ExtractTask {
                         downloaded_data: data,
@@ -431,7 +431,7 @@ async fn download_worker_multi(
                     e
                 ));
 
-                // 下载失败，从去重器中移除，避免永久阻塞
+                // Download failed, remove from deduplicator to avoid permanent blocking
                 deduplicator.complete_package(&task.key);
             }
         }
@@ -439,7 +439,7 @@ async fn download_worker_multi(
     log_verbose(&format!("Download worker {} finished", worker_id));
 }
 
-// 多线程无锁 extract worker
+// Multi-threaded lock-free extract worker
 async fn extract_worker_multi(
     mut extract_rx: mpsc::Receiver<ExtractTask>,
     write_senders: Vec<mpsc::Sender<FileWriteTask>>,
@@ -459,12 +459,12 @@ async fn extract_worker_multi(
     while let Some(task) = extract_rx.recv().await {
         log_verbose(&format!("Worker {} extracting {} to memory", worker_id, task.package_key.name));
 
-        // 解压到内存
+        // Extract to memory
         let tar_gz = GzipDecoder::new(BufReader::new(&task.downloaded_data[..]));
         let mut archive = Archive::new(tar_gz);
-        let mut files: HashMap<PathBuf, (Vec<u8>, u32)> = HashMap::new(); // (文件内容, 权限)
+        let mut files: HashMap<PathBuf, (Vec<u8>, u32)> = HashMap::new(); // (file content, permissions)
 
-        // 读取所有文件到内存
+        // Read all files to memory
         let mut entries = match archive.entries() {
             Ok(entries) => entries,
             Err(e) => {
@@ -490,15 +490,15 @@ async fn extract_worker_multi(
                 }
             };
 
-            // 跳过目录
+            // Skip directories
             if file.header().entry_type().is_dir() {
                 continue;
             }
 
-            // 获取原始权限
+            // Get original permissions
             let original_mode = file.header().mode().unwrap_or(0o644);
 
-            // 读取文件内容到内存
+            // Read file content to memory
             let mut content = Vec::new();
             if let Err(e) = tokio::io::copy(&mut file, &mut content).await {
                 log_verbose(&format!("Worker {} failed to read file content for {} in {}: {}", worker_id, path.display(), task.package_key.name, e));
@@ -515,7 +515,7 @@ async fn extract_worker_multi(
 
         log_verbose(&format!("Worker {} extracted {} files for {} to memory", worker_id, files.len(), task.package_key.name));
 
-        // 创建包跟踪器
+        // Create package tracker
         let tracker = PackageCacheTracker::new(
             task.package_key,
             task.cache_path.clone(),
@@ -524,7 +524,7 @@ async fn extract_worker_multi(
             task.has_install_script,
         );
 
-        // Round-robin 分发文件写入任务
+        // Round-robin distribute file write tasks
         for (file_idx, (relative_path, (file_data, file_mode))) in files.into_iter().enumerate() {
             let file_path = task.cache_path.join(&relative_path);
             let write_idx = (WRITE_COUNTER.fetch_add(1, Ordering::Relaxed) + file_idx) % write_senders.len();
@@ -545,7 +545,7 @@ async fn extract_worker_multi(
     log_verbose(&format!("Extract worker {} finished", worker_id));
 }
 
-// 多线程无锁 write worker
+// Multi-threaded lock-free write worker
 async fn write_worker_multi(
     mut write_rx: mpsc::Receiver<FileWriteTask>,
     clone_senders: Vec<mpsc::Sender<CloneTask>>,
@@ -561,7 +561,7 @@ async fn write_worker_multi(
     log_verbose(&format!("Write worker {} started", worker_id));
 
     while let Some(task) = write_rx.recv().await {
-        // 创建父目录
+        // Create parent directory
         if let Some(parent) = task.file_path.parent() {
             if let Err(e) = fs::create_dir_all(parent).await {
                 log_verbose(&format!("Worker {} failed to create directory {}: {}", worker_id, parent.display(), e));
@@ -569,30 +569,30 @@ async fn write_worker_multi(
             }
         }
 
-        // 写入文件
+        // Write file
         if let Err(e) = fs::write(&task.file_path, &task.file_data).await {
             log_verbose(&format!("Worker {} failed to write file {}: {}", worker_id, task.file_path.display(), e));
             continue;
         }
 
-        // 使用tar文件中的原始权限
+        // Use original permissions from tar file
         let permissions = Permissions::from_mode(task.file_mode);
         if let Err(e) = fs::set_permissions(&task.file_path, permissions).await {
             log_verbose(&format!("Worker {} failed to set permissions for {}: {}", worker_id, task.file_path.display(), e));
         }
 
-        // 标记文件写入完成
+        // Mark file write completion
         let all_files_written = task.package_tracker.mark_file_written();
 
         if all_files_written {
-            // 所有文件都已写入，创建 _resolved 标记
+            // All files written, create _resolved marker
             let resolved_path = task.package_tracker.cache_path.join("_resolved");
             if let Err(e) = fs::write(&resolved_path, "").await {
                 log_verbose(&format!("Worker {} failed to write _resolved for {}: {}", worker_id, task.package_tracker.package_key.name, e));
                 continue;
             }
 
-            // 写入 _hasInstallScript 标记
+            // Write _hasInstallScript marker
             if task.package_tracker.has_install_script.is_some() {
                 let install_script_path = task.package_tracker.cache_path.join("_hasInstallScript");
                 if let Err(e) = fs::write(&install_script_path, "").await {
@@ -602,7 +602,7 @@ async fn write_worker_multi(
 
             log_verbose(&format!("Worker {} package {} cache completed", worker_id, task.package_tracker.package_key.name));
 
-            // Round-robin 分发 clone 任务
+            // Round-robin distribute clone tasks
             for (clone_idx, clone_target) in task.package_tracker.clone_targets.iter().enumerate() {
                 let sender_idx = (CLONE_COUNTER.fetch_add(1, Ordering::Relaxed) + clone_idx) % clone_senders.len();
                 let clone_task = CloneTask {
@@ -621,7 +621,7 @@ async fn write_worker_multi(
     log_verbose(&format!("Write worker {} finished", worker_id));
 }
 
-// 多线程无锁 clone worker
+// Multi-threaded lock-free clone worker
 async fn clone_worker_multi(
     mut clone_rx: mpsc::Receiver<CloneTask>,
     worker_id: usize,
@@ -639,7 +639,7 @@ async fn clone_worker_multi(
                 PROGRESS_BAR.inc(1);
                 log_progress(&format!("{} resolved", task.package_name));
 
-                // 更新package binary
+                // Update package binary
                 if let Err(e) = update_package_binary(&task.target_path, &task.package_name).await {
                     log_verbose(&format!("Worker {} failed to update binary for {}: {}", worker_id, task.package_name, e));
                 }
@@ -671,7 +671,7 @@ pub async fn install_packages_optimized(
 
     // Create multiple channels for true lock-free parallelism
     let download_worker_count = thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8);
-    let extract_worker_count = thread::available_parallelism().map(|n| n.get()).unwrap_or(2).min(4); // CPU密集，少一些
+    let extract_worker_count = thread::available_parallelism().map(|n| n.get()).unwrap_or(2).min(4); // CPU intensive, fewer workers
     let write_worker_count = thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8);
     let clone_worker_count = thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8);
 
