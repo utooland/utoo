@@ -396,7 +396,7 @@ impl InstallService {
         }
 
         // Get the number of logical CPU cores of the system and set it to twice the number of CPU cores
-        let concurrent_limit = 20;
+        let concurrent_limit = 60;
         log_verbose(&format!("Setting concurrent limit to {concurrent_limit}"));
         let semaphore = Arc::new(Semaphore::new(concurrent_limit));
 
