@@ -21,9 +21,6 @@ use super::{
     retry::{RetryableError, create_retry_strategy},
 };
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-
 // Global downloader client with DNS cache
 static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
 

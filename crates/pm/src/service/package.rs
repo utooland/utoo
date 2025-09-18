@@ -432,7 +432,8 @@ impl PackageService {
             .collect();
 
         // Wait for all postinstall tasks to complete
-        let postinstall_results: Vec<Result<()>> = futures::future::join_all(postinstall_tasks).await;
+        let postinstall_results: Vec<Result<()>> =
+            futures::future::join_all(postinstall_tasks).await;
         for result in postinstall_results {
             result?;
         }
