@@ -14,20 +14,20 @@ echo -e "utoo path: $(which utoo)"
 echo -e "node path: $(node -e 'console.log(process.arch)')"
 
 # Case 1: Clone and install ant-design-x (next)
-echo -e "${YELLOW}Case 1: Clone and install ant-design-x (next)${NC}"
-cd ./ant-x-next
+echo -e "${YELLOW}Case 2: Clone and install ant-design-x (next)${NC}"
+cd e2e/pm/ant-x-next
 if [ ! -d "ant-design-x" ]; then
   git clone --branch next --single-branch https://github.com/ant-design/x.git ant-design-x
 fi
 cd ant-design-x
 echo "Installing dependencies for ant-design-x (next)..."
-utoo install --registry=https://registry.antgroup-inc.cn || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
+utoo install || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
 echo -e "${GREEN}PASS: ant-design-x (next) cloned and installed${NC}"
 cd ../../
 
 # Case 2: Clone and install ant-design
-echo -e "${YELLOW}Case 2: Clone and install ant-design${NC}"
-cd e2e/pm/ant-design
+echo -e "${YELLOW}Case 1: Clone and install ant-design${NC}"
+cd ant-design
 if [ ! -d "ant-design" ]; then
   git clone --depth=1 --single-branch https://github.com/ant-design/ant-design.git
 fi
@@ -36,7 +36,6 @@ echo "Installing dependencies for ant-design..."
 utoo install || { echo -e "${RED}FAIL: utoo install failed for ant-design${NC}"; exit 1; }
 echo -e "${GREEN}PASS: ant-design cloned and installed${NC}"
 cd ../../
-
 
 # Case 3: antd-test project install
 echo -e "${YELLOW}Case 3: antd-test project install${NC}"
