@@ -66,6 +66,14 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
+      - name: Cache nm cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/nm
+          key: e2e-nm-cache
+          restore-keys: |
+            e2e-nm-cache
+
       - name: Build utoo-pm
         run: cargo build --release --target ${{ matrix.settings.target }} --bin utoo
 
