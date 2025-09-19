@@ -107,15 +107,13 @@ async fn insert_shared_aliases(
             .root()
             .owned()
             .await?,
-    )
-    .await?;
+    );
 
     insert_package_alias(
         import_map,
         rcstr!("@utoo/pack-runtime/"),
         embed_js::embed_fs().root().owned().await?,
-    )
-    .await?;
+    );
 
     Ok(())
 }
@@ -220,16 +218,11 @@ fn insert_alias_to_alternatives<'a>(
 
 #[allow(dead_code)]
 /// Inserts an alias to an import mapping into an import map.
-async fn insert_package_alias(
-    import_map: &mut ImportMap,
-    prefix: RcStr,
-    package_root: FileSystemPath,
-) -> Result<()> {
+fn insert_package_alias(import_map: &mut ImportMap, prefix: RcStr, package_root: FileSystemPath) {
     import_map.insert_wildcard_alias(
         prefix,
         ImportMapping::PrimaryAlternative(rcstr!("./*"), Some(package_root)).resolved_cell(),
     );
-    Ok(())
 }
 
 #[turbo_tasks::function]
