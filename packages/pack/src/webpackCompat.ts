@@ -364,7 +364,9 @@ function compatResolve(
           )
         : Object.entries(alias).reduce((acc, [k, v]) => {
             if (typeof v === "string") {
-              Object.assign(acc, { [k]: v });
+              // Handle alias keys ending with $ by removing the $
+              const aliasKey = k.endsWith("$") ? k.slice(0, -1) : k;
+              Object.assign(acc, { [aliasKey]: v });
             } else {
               throw "non string alias value not supported yet";
             }
