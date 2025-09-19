@@ -41,13 +41,17 @@ type ModuleHotStatus =
 
 type ModuleHotStatusHandler = (status: ModuleHotStatus) => void;
 
-declare const module: {
+type TurbopackModule = {
   hot: {
     status: () => ModuleHotStatus;
     addStatusHandler: (handler: ModuleHotStatusHandler) => void;
     removeStatusHandler: (handler: ModuleHotStatusHandler) => void;
   };
 };
+
+declare const __turbopack_context__: any;
+
+const { m: turbopackModule }: { m: TurbopackModule } = __turbopack_context__;
 
 function isSafeExport(key: string): boolean {
   return (
@@ -175,7 +179,7 @@ function scheduleUpdate() {
     }
   }
 
-  if (canApplyUpdate(module.hot.status())) {
+  if (canApplyUpdate(turbopackModule.hot.status())) {
     // Apply update on the next tick.
     Promise.resolve().then(() => {
       applyUpdate();
@@ -185,13 +189,13 @@ function scheduleUpdate() {
 
   const statusHandler = (status) => {
     if (canApplyUpdate(status)) {
-      module.hot.removeStatusHandler(statusHandler);
+      turbopackModule.hot.removeStatusHandler(statusHandler);
       applyUpdate();
     }
   };
 
   // Apply update once the HMR runtime's status is idle.
-  module.hot.addStatusHandler(statusHandler);
+  turbopackModule.hot.addStatusHandler(statusHandler);
 }
 
 // Needs to be compatible with IE11

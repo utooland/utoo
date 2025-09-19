@@ -20,7 +20,7 @@ use turbopack_core::{
 };
 use turbopack_node::execution_context::ExecutionContext;
 
-use crate::{config::Config, mode::Mode, util::convert_to_project_relative};
+use crate::{config::Config, embed_js, mode::Mode, util::convert_to_project_relative};
 
 pub fn mdx_import_source_file() -> RcStr {
     unreachable!()
@@ -94,17 +94,25 @@ async fn insert_shared_aliases(
     {
         let pack_package = get_utoopack_path(project_path.clone()).owned().await?;
         import_map.insert_singleton_alias("@swc/helpers", pack_package.clone());
+        import_map.insert_singleton_alias("react-refresh", pack_package);
     }
     // import_map.insert_singleton_alias("styled-jsx", pack_package.clone());
     import_map.insert_singleton_alias("react", project_path.clone());
     import_map.insert_singleton_alias("react-dom", project_path.clone());
+
     insert_package_alias(
         import_map,
-        "@vercel/turbopack-ecmascript-runtime/",
+        rcstr!("@vercel/turbopack-ecmascript-runtime/"),
         turbopack_ecmascript_runtime::embed_fs()
             .root()
             .owned()
             .await?,
+    );
+
+    insert_package_alias(
+        import_map,
+        rcstr!("@utoo/pack-runtime/"),
+        embed_js::embed_fs().root().owned().await?,
     );
 
     Ok(())
@@ -208,12 +216,12 @@ fn insert_alias_to_alternatives<'a>(
     );
 }
 
-/// Inserts an alias to an import mapping into an import map.
 #[allow(dead_code)]
-fn insert_package_alias(import_map: &mut ImportMap, prefix: &str, package_root: FileSystemPath) {
+/// Inserts an alias to an import mapping into an import map.
+fn insert_package_alias(import_map: &mut ImportMap, prefix: RcStr, package_root: FileSystemPath) {
     import_map.insert_wildcard_alias(
         prefix,
-        ImportMapping::PrimaryAlternative("./*".into(), Some(package_root)).resolved_cell(),
+        ImportMapping::PrimaryAlternative(rcstr!("./*"), Some(package_root)).resolved_cell(),
     );
 }
 

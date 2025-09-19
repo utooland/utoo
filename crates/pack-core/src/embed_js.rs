@@ -4,7 +4,7 @@ use turbo_tasks::Vc;
 use turbo_tasks_fs::{FileContent, FileSystem, FileSystemPath, embed_directory};
 
 #[turbo_tasks::function]
-fn embed_fs() -> Vc<Box<dyn FileSystem>> {
+pub fn embed_fs() -> Vc<Box<dyn FileSystem>> {
     embed_directory!("@utoo/pack-runtime", "$CARGO_MANIFEST_DIR/js/src")
 }
 
