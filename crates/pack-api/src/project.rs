@@ -41,7 +41,7 @@ use turbopack_core::{
     },
     compile_time_info::CompileTimeInfo,
     issue::{
-        Issue, IssueDescriptionExt, IssueSeverity, IssueStage, OptionStyledString, StyledString,
+        CollectibleIssuesExt, Issue, IssueSeverity, IssueStage, OptionStyledString, StyledString,
     },
     module_graph::{
         GraphEntries, ModuleGraph, SingleModuleGraph, VisitedModules,
@@ -829,7 +829,7 @@ impl Project {
         async move {
             let module_graphs_op = whole_app_module_graph_operation(self);
             let module_graphs_vc = module_graphs_op.connect().resolve().await?;
-            let _ = module_graphs_op.take_issues_with_path().await?;
+            let _ = module_graphs_op.take_issues().await?;
 
             // At this point all modules have been computed and we can get rid of the node.js
             // process pools
