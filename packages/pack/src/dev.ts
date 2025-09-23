@@ -221,7 +221,6 @@ export async function startServer(
         );
       }
 
-
       try {
         let cleanupStarted = false;
         let closeUpgraded: (() => void) | null = null;

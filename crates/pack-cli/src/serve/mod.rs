@@ -38,7 +38,7 @@ pub async fn run(options: ProjectOptions) -> Result<()> {
 
     turbo_tasks
         .clone()
-        .run(async move {
+        .run_once(async move {
             let project = project_container.project().to_resolved().await?;
 
             let web_source = create_web_entry_source(*project).to_resolved().await?;
