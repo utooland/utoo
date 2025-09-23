@@ -41,7 +41,7 @@ use turbopack_core::{
     },
     compile_time_info::CompileTimeInfo,
     issue::{
-        Issue, CollectibleIssuesExt, IssueSeverity, IssueStage, OptionStyledString, StyledString,
+        CollectibleIssuesExt, Issue, IssueSeverity, IssueStage, OptionStyledString, StyledString,
     },
     module_graph::{
         GraphEntries, ModuleGraph, SingleModuleGraph, VisitedModules,
