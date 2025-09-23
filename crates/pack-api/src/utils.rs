@@ -7,7 +7,7 @@ use turbo_tasks::{
 };
 use turbopack_core::{
     diagnostics::{Diagnostic, DiagnosticContextExt, PlainDiagnostic},
-    issue::{IssueDescriptionExt, IssueSeverity, PlainIssue, StyledString},
+    issue::{CollectibleIssuesExt, IssueSeverity, PlainIssue, StyledString},
 };
 
 use crate::endpoint::{Endpoint, EndpointIssuesAndDiags, endpoint_server_changed_operation};
@@ -73,7 +73,7 @@ pub async fn strongly_consistent_catch_collectables<R: VcValueType + Send>(
 }
 
 pub async fn get_issues<T: Send>(source: OperationVc<T>) -> Result<Arc<Vec<ReadRef<PlainIssue>>>> {
-    let issues = source.peek_issues_with_path().await?;
+    let issues = source.peek_issues().await?;
     Ok(Arc::new(issues.get_plain_issues().await?))
 }
 

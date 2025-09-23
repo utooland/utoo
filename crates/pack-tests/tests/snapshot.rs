@@ -20,7 +20,7 @@ use turbo_tasks::{ResolvedVc, TurboTasks, ValueToString, Vc, apply_effects};
 use turbo_tasks_backend::{BackendOptions, TurboTasksBackend, noop_backing_storage};
 use turbo_tasks_fs::FileSystemPath;
 use turbo_unix_path::sys_to_unix;
-use turbopack_core::{asset::Asset, issue::IssueDescriptionExt, output::OutputAsset};
+use turbopack_core::{asset::Asset, issue::CollectibleIssuesExt, output::OutputAsset};
 use turbopack_test_utils::snapshot::{UPDATE, diff, expected, matches_expected, snapshot_issues};
 
 use crate::util::REPO_ROOT;
@@ -126,7 +126,7 @@ async fn run_inner_options(resource: RcStr) -> Result<()> {
         .await?
         .owned()
         .await?;
-    let captured_issues = output_op.peek_issues_with_path().await?;
+    let captured_issues = output_op.peek_issues().await?;
 
     let plain_issues = captured_issues.get_plain_issues().await?;
 

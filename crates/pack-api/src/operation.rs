@@ -4,7 +4,7 @@ use turbo_tasks::{
     CollectiblesSource, NonLocalValue, OperationVc, ResolvedVc, Vc, debug::ValueDebugFormat,
     get_effects, trace::TraceRawVcs,
 };
-use turbopack_core::{diagnostics::Diagnostic, issue::IssueDescriptionExt};
+use turbopack_core::{diagnostics::Diagnostic, issue::CollectibleIssuesExt};
 
 use crate::{endpoint::Endpoint, entrypoint::Entrypoints};
 
@@ -36,7 +36,7 @@ async fn entrypoints_without_collectibles_operation(
 ) -> Result<Vc<Entrypoints>> {
     let _ = entrypoints.resolve_strongly_consistent().await?;
     let _ = entrypoints.take_collectibles::<Box<dyn Diagnostic>>();
-    let _ = entrypoints.take_issues_with_path().await?;
+    let _ = entrypoints.take_issues().await?;
     let _ = get_effects(entrypoints).await?;
     Ok(entrypoints.connect())
 }
