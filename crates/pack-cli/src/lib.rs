@@ -87,7 +87,7 @@ pub async fn initialize_project_container(
         noop_backing_storage(),
     ));
     let project_container = turbo_tasks
-        .run_once(async move {
+        .run(async move {
             let project_container = ProjectContainer::new("utoo-pack-cli".into(), dev);
             let project_container = project_container.to_resolved().await?;
             project_container.initialize(options).await?;

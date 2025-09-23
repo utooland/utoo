@@ -22,7 +22,7 @@ pub async fn run(options: ProjectOptions) -> Result<()> {
     let (turbo_tasks, project_container) = initialize_project_container(options, dev).await?;
 
     let (entrypoints, _issues, _diagnostics) = turbo_tasks
-        .run_once(async move {
+        .run(async move {
             let entrypoints_with_issues_op =
                 get_all_written_entrypoints_with_issues_operation(project_container);
 

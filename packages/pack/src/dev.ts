@@ -215,9 +215,12 @@ export async function startServer(
         );
       }
 
-      console.log(
-        `Listening on ${serverOptions.https ? "https" : "http"}://${formattedHostname}:${port} ...`,
-      );
+      if (process.env.TURBOPACK_DEBUG_JS) {
+        console.log(
+          `Listening on ${serverOptions.https ? "https" : "http"}://${formattedHostname}:${port} ...`,
+        );
+      }
+
 
       try {
         let cleanupStarted = false;
