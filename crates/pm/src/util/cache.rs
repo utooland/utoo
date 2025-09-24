@@ -86,6 +86,19 @@ pub fn get_cache_dir() -> PathBuf {
     dirs::home_dir().unwrap().join(".cache/nm")
 }
 
+pub fn get_package_versions_cache_file(package_name: &str) -> PathBuf {
+    // Escape package name for filesystem compatibility
+    get_cache_dir().join(package_name).join("versions.json")
+}
+
+pub fn get_package_manifest_cache_file(package_name: &str, version: &str) -> PathBuf {
+    // Escape package name and version for filesystem compatibility
+    get_cache_dir()
+        .join(package_name)
+        .join("manifests")
+        .join(format!("{version}.json"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

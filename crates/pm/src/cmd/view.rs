@@ -1,8 +1,8 @@
-use crate::helper::package::parse_package_spec;
-use crate::model::package_manifest::PackageManifest;
+use crate::model::manifest::PackageManifest;
 use crate::util::format_print::print_grid;
 use crate::util::logger::log_verbose;
-use crate::util::registry::{get_package_info, resolve};
+use crate::util::registry::resolve;
+use crate::{helper::package::parse_package_spec, service::http_client::fetch_full_manifest};
 use anyhow::{Result, anyhow};
 use chrono::{TimeZone, Utc};
 use owo_colors::OwoColorize;
@@ -17,7 +17,7 @@ pub async fn view(package_spec: &str) -> Result<()> {
     log_verbose(&format!("Resolved package: {name} (spec: {version_spec})"));
 
     // Get complete package information (like npm view)
-    let package_info = get_package_info(name).await.map_err(|e| {
+    let package_info = fetch_full_manifest(name, None).await.map_err(|e| {
         anyhow!(
             "Failed to fetch package info for {}, reason: {}",
             package_spec,
@@ -30,8 +30,12 @@ pub async fn view(package_spec: &str) -> Result<()> {
     let version_manifest = resolved_package.manifest;
 
     // Create PackageManifest from the raw data
-    let package_manifest =
-        PackageManifest::from_package_info_and_manifest(&package_info, name, &version_manifest);
+    let package_info_value = serde_json::to_value(&package_info)?;
+    let package_manifest = PackageManifest::from_package_info_and_manifest(
+        &package_info_value,
+        name,
+        &version_manifest,
+    );
 
     // Print package information in npm view format
     print_package_info(&package_manifest)?;
@@ -276,7 +280,7 @@ fn format_publish_line(time_str: &str, package_manifest: &PackageManifest) -> St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::package_manifest::{Author, PackageManifest};
+    use crate::model::manifest::{Author, PackageManifest};
     use std::collections::HashMap;
 
     #[test]
@@ -297,6 +301,7 @@ mod tests {
             author: Some(Author {
                 name: "Test Author".to_string(),
                 email: Some("test@example.com".to_string()),
+                url: None,
             }),
             repository: None,
             bugs: None,

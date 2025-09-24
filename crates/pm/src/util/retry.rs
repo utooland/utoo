@@ -27,8 +27,8 @@ pub fn build_dns_cached_client() -> reqwest::Client {
     reqwest::Client::builder()
         // Set connect timeout (10 seconds)
         .connect_timeout(std::time::Duration::from_secs(10))
-        // Set total request timeout (30 seconds)
-        .timeout(std::time::Duration::from_secs(30))
+        // Set total request timeout (60 seconds)
+        .timeout(std::time::Duration::from_secs(60))
         // Set max idle connections per host
         .pool_max_idle_per_host(16)
         .build()

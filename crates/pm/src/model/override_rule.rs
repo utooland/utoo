@@ -42,7 +42,6 @@ impl Overrides {
         let mut rules = Vec::new();
         let parser = Self::new(pkg.clone());
         parser.parse_rules(&merged_value, None, &mut rules);
-
         Some(Self {
             package: pkg,
             rules,
