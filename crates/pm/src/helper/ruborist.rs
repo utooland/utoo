@@ -848,7 +848,8 @@ mod tests {
                 "workspace-b": "1.0.0"
             }
         });
-        let workspace_a_manifest = VersionManifest::from_package_json(&workspace_a_pkg_json).unwrap();
+        let workspace_a_manifest =
+            VersionManifest::from_package_json(&workspace_a_pkg_json).unwrap();
         let workspace_a = Node::new_workspace(
             "workspace-a".to_string(),
             PathBuf::from("packages/workspace-a"),
@@ -863,7 +864,8 @@ mod tests {
                 "workspace-a": "1.0.0"
             }
         });
-        let workspace_b_manifest = VersionManifest::from_package_json(&workspace_b_pkg_json).unwrap();
+        let workspace_b_manifest =
+            VersionManifest::from_package_json(&workspace_b_pkg_json).unwrap();
         let workspace_b = Node::new_workspace(
             "workspace-b".to_string(),
             PathBuf::from("packages/workspace-b"),
