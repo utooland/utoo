@@ -766,13 +766,15 @@ mod tests {
         );
 
         // Create a child node
+        let child_pkg_json = json!({
+            "name": "lodash",
+            "version": "4.17.20"
+        });
+        let child_manifest = VersionManifest::from_package_json(&child_pkg_json).unwrap();
         let child = Node::new(
             "lodash".to_string(),
             PathBuf::from("node_modules/lodash"),
-            json!({
-                "name": "lodash",
-                "version": "4.17.20"
-            }),
+            child_manifest,
         );
 
         // Add child to root
@@ -839,29 +841,33 @@ mod tests {
         );
 
         // Create workspace A
+        let workspace_a_pkg_json = json!({
+            "name": "workspace-a",
+            "version": "1.0.0",
+            "dependencies": {
+                "workspace-b": "1.0.0"
+            }
+        });
+        let workspace_a_manifest = VersionManifest::from_package_json(&workspace_a_pkg_json).unwrap();
         let workspace_a = Node::new_workspace(
             "workspace-a".to_string(),
             PathBuf::from("packages/workspace-a"),
-            json!({
-                "name": "workspace-a",
-                "version": "1.0.0",
-                "dependencies": {
-                    "workspace-b": "1.0.0"
-                }
-            }),
+            workspace_a_manifest,
         );
 
         // Create workspace B
+        let workspace_b_pkg_json = json!({
+            "name": "workspace-b",
+            "version": "1.0.0",
+            "dependencies": {
+                "workspace-a": "1.0.0"
+            }
+        });
+        let workspace_b_manifest = VersionManifest::from_package_json(&workspace_b_pkg_json).unwrap();
         let workspace_b = Node::new_workspace(
             "workspace-b".to_string(),
             PathBuf::from("packages/workspace-b"),
-            json!({
-                "name": "workspace-b",
-                "version": "1.0.0",
-                "dependencies": {
-                    "workspace-a": "1.0.0"
-                }
-            }),
+            workspace_b_manifest,
         );
 
         // Add workspaces to root

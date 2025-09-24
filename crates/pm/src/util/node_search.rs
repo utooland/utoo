@@ -65,22 +65,26 @@ mod tests {
             root_manifest,
         );
 
+        let child1_pkg_json = json!({
+            "name": "lodash",
+            "version": "4.17.20"
+        });
+        let child1_manifest = VersionManifest::from_package_json(&child1_pkg_json).unwrap();
         let child1 = Node::new(
             "lodash".to_string(),
             PathBuf::from("node_modules/lodash"),
-            json!({
-                "name": "lodash",
-                "version": "4.17.20"
-            }),
+            child1_manifest,
         );
 
+        let child2_pkg_json = json!({
+            "name": "express",
+            "version": "4.17.1"
+        });
+        let child2_manifest = VersionManifest::from_package_json(&child2_pkg_json).unwrap();
         let child2 = Node::new(
             "express".to_string(),
             PathBuf::from("node_modules/express"),
-            json!({
-                "name": "express",
-                "version": "4.17.1"
-            }),
+            child2_manifest,
         );
 
         {

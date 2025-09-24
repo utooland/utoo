@@ -706,6 +706,7 @@ fn get_relative_target_path(current: &Node, root_path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::manifest::VersionManifest;
     use crate::model::node::Node;
     use serde_json::json;
     use std::fs;
@@ -827,16 +828,18 @@ mod tests {
         let temp_path = temp_dir.path();
 
         // Create a mock ideal tree
+        let pkg_json = json!({
+            "name": "test-package",
+            "version": "1.0.0",
+            "dependencies": {
+                "lodash": "^4.17.20"
+            }
+        });
+        let root_manifest = VersionManifest::from_package_json(&pkg_json).unwrap();
         let root = Node::new(
             "test-package".to_string(),
             temp_path.to_path_buf(),
-            json!({
-                "name": "test-package",
-                "version": "1.0.0",
-                "dependencies": {
-                    "lodash": "^4.17.20"
-                }
-            }),
+            root_manifest,
         );
 
         // Test writing the ideal tree to lock file
@@ -983,21 +986,25 @@ mod tests {
 
         // Test case 1: Target path is under root path
         let target_path = root_path.join("packages/pkg-a");
+        let pkg_json = json!({
+            "name": "test-package",
+            "version": "1.0.0"
+        });
+        let manifest = VersionManifest::from_package_json(&pkg_json).unwrap();
         let node = Node::new(
             "test-package".to_string(),
             root_path.to_path_buf(),
-            json!({
-                "name": "test-package",
-                "version": "1.0.0"
-            }),
+            manifest,
         );
+        let target_pkg_json = json!({
+            "name": "target-package",
+            "version": "1.0.0"
+        });
+        let target_manifest = VersionManifest::from_package_json(&target_pkg_json).unwrap();
         node.target.write().unwrap().replace(Node::new(
             "target-package".to_string(),
             target_path.clone(),
-            json!({
-                "name": "target-package",
-                "version": "1.0.0"
-            }),
+            target_manifest,
         ));
 
         let relative_path = get_relative_target_path(&node, root_path);
@@ -1005,42 +1012,50 @@ mod tests {
 
         // Test case 2: Target path is outside root path
         let outside_path = PathBuf::from("/some/outside/path");
+        let pkg_json2 = json!({
+            "name": "test-package",
+            "version": "1.0.0"
+        });
+        let manifest2 = VersionManifest::from_package_json(&pkg_json2).unwrap();
         let node = Node::new(
             "test-package".to_string(),
             root_path.to_path_buf(),
-            json!({
-                "name": "test-package",
-                "version": "1.0.0"
-            }),
+            manifest2,
         );
+        let target_pkg_json2 = json!({
+            "name": "target-package",
+            "version": "1.0.0"
+        });
+        let target_manifest2 = VersionManifest::from_package_json(&target_pkg_json2).unwrap();
         node.target.write().unwrap().replace(Node::new(
             "target-package".to_string(),
             outside_path.clone(),
-            json!({
-                "name": "target-package",
-                "version": "1.0.0"
-            }),
+            target_manifest2,
         ));
 
         let relative_path = get_relative_target_path(&node, root_path);
         assert_eq!(relative_path, "/some/outside/path");
 
         // Test case 3: Target path is the root path
+        let pkg_json3 = json!({
+            "name": "test-package",
+            "version": "1.0.0"
+        });
+        let manifest3 = VersionManifest::from_package_json(&pkg_json3).unwrap();
         let node = Node::new(
             "test-package".to_string(),
             root_path.to_path_buf(),
-            json!({
-                "name": "test-package",
-                "version": "1.0.0"
-            }),
+            manifest3,
         );
+        let target_pkg_json3 = json!({
+            "name": "target-package",
+            "version": "1.0.0"
+        });
+        let target_manifest3 = VersionManifest::from_package_json(&target_pkg_json3).unwrap();
         node.target.write().unwrap().replace(Node::new(
             "target-package".to_string(),
             root_path.to_path_buf(),
-            json!({
-                "name": "target-package",
-                "version": "1.0.0"
-            }),
+            target_manifest3,
         ));
 
         let relative_path = get_relative_target_path(&node, root_path);
@@ -1089,28 +1104,32 @@ mod tests {
         fs::write(bin_path.join("cli.js"), "console.log('workspace-a-cli');").unwrap();
 
         // Create root node
+        let root_pkg_json = json!({
+            "name": "test-package",
+            "version": "1.0.0",
+            "workspaces": ["packages/*"]
+        });
+        let root_manifest = VersionManifest::from_package_json(&root_pkg_json).unwrap();
         let root = Node::new(
             "test-package".to_string(),
             temp_path.to_path_buf(),
-            json!({
-                "name": "test-package",
-                "version": "1.0.0",
-                "workspaces": ["packages/*"]
-            }),
+            root_manifest,
         );
 
         // Create workspace node
+        let workspace_pkg_json = json!({
+            "name": "workspace-a",
+            "version": "1.0.0",
+            "bin": {
+                "workspace-a": "./bin/index.js",
+                "workspace-a-cli": "./bin/cli.js"
+            }
+        });
+        let workspace_manifest = VersionManifest::from_package_json(&workspace_pkg_json).unwrap();
         let workspace = Node::new_workspace(
             "workspace-a".to_string(),
             workspace_path.clone(),
-            json!({
-                "name": "workspace-a",
-                "version": "1.0.0",
-                "bin": {
-                    "workspace-a": "./bin/index.js",
-                    "workspace-a-cli": "./bin/cli.js"
-                }
-            }),
+            workspace_manifest,
         );
         root.children.write().unwrap().push(workspace);
 
