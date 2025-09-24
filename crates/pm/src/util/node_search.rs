@@ -48,18 +48,21 @@ pub async fn get_node_from_root_by_path(root: &Arc<Node>, pkg_path: &str) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::manifest::VersionManifest;
     use serde_json::json;
     use std::path::PathBuf;
 
     #[tokio::test]
     async fn test_get_node_from_root_by_path() {
+        let root_manifest = VersionManifest::from_package_json(&json!({
+            "name": "test-package",
+            "version": "1.0.0"
+        }))
+        .unwrap();
         let root = Node::new_root(
             "test-package".to_string(),
             PathBuf::from("."),
-            json!({
-                "name": "test-package",
-                "version": "1.0.0"
-            }),
+            root_manifest,
         );
 
         let child1 = Node::new(

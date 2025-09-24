@@ -1,7 +1,7 @@
 use crate::model::manifest::PackageManifest;
+use crate::service::registry::resolve;
 use crate::util::format_print::print_grid;
 use crate::util::logger::log_verbose;
-use crate::util::registry::resolve;
 use crate::{helper::package::parse_package_spec, service::http_client::fetch_full_manifest};
 use anyhow::{Result, anyhow};
 use chrono::{TimeZone, Utc};
@@ -11,13 +11,24 @@ use owo_colors::OwoColorize;
 pub async fn view(package_spec: &str) -> Result<()> {
     log_verbose(&format!("Viewing package: {package_spec}"));
 
-    // Parse package specification
-    let (name, version_spec) = parse_package_spec(package_spec);
+    // Handle npm alias (e.g., wrap-ansi-cjs@npm:wrap-ansi@^7.0.0)
+    let (display_name, actual_name, version_spec) =
+        if let Some(npm_pos) = package_spec.find("@npm:") {
+            let alias_name = &package_spec[..npm_pos];
+            let npm_spec = &package_spec[npm_pos + 5..]; // Skip "@npm:"
+            let (actual_name, actual_version) = parse_package_spec(npm_spec);
+            (alias_name, actual_name, actual_version)
+        } else {
+            let (name, version_spec) = parse_package_spec(package_spec);
+            (name, name, version_spec)
+        };
 
-    log_verbose(&format!("Resolved package: {name} (spec: {version_spec})"));
+    log_verbose(&format!(
+        "Resolved package: {actual_name} (spec: {version_spec}) as {display_name}"
+    ));
 
     // Get complete package information (like npm view)
-    let package_info = fetch_full_manifest(name, None).await.map_err(|e| {
+    let package_info = fetch_full_manifest(actual_name, None).await.map_err(|e| {
         anyhow!(
             "Failed to fetch package info for {}, reason: {}",
             package_spec,
@@ -26,16 +37,17 @@ pub async fn view(package_spec: &str) -> Result<()> {
     })?;
 
     // Get the specific version manifest if a version was specified
-    let resolved_package = resolve(name, version_spec).await?;
+    let resolved_package = resolve(actual_name, version_spec).await?;
     let version_manifest = resolved_package.manifest;
 
-    // Create PackageManifest from the raw data
-    let package_info_value = serde_json::to_value(&package_info)?;
-    let package_manifest = PackageManifest::from_package_info_and_manifest(
-        &package_info_value,
-        name,
-        &version_manifest,
-    );
+    // Create PackageManifest from the typed data
+    let mut package_manifest =
+        PackageManifest::from_package_info_and_manifest(&package_info.0, &version_manifest);
+
+    // If it's an alias, override the display name
+    if display_name != actual_name {
+        package_manifest.name = display_name.to_string();
+    }
 
     // Print package information in npm view format
     print_package_info(&package_manifest)?;

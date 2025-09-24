@@ -1,6 +1,5 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::HashMap;
 
 use super::cache::{PACKAGE_CACHE, VersionsInfo};
@@ -25,7 +24,7 @@ pub struct PackageManifest {
 pub struct ResolvedPackage {
     #[allow(dead_code)]
     pub name: String,
-    pub manifest: Value,
+    pub manifest: VersionManifest,
     pub version: String,
 }
 
@@ -282,15 +281,14 @@ impl RegistryService {
             });
         }
 
-        let (version, mut manifest) = if get_registry_support_semver() {
+        let (version, manifest) = if get_registry_support_semver() {
             log_verbose(&format!(
                 "Using semver-supporting registry for: {name}@{spec}"
             ));
 
             let version_manifest = Self::resolve_version_manifest(name, spec).await?;
             let version = version_manifest.version.clone();
-            let manifest = serde_json::to_value(&version_manifest)?;
-            (version, manifest)
+            (version, version_manifest)
         } else {
             log_verbose(&format!("Using non-semver registry for: {name}@{spec}"));
 
@@ -328,33 +326,12 @@ impl RegistryService {
 
             // 5. Get specific version manifest using three-tier caching
             let version_manifest = Self::resolve_version_manifest(name, &target_version).await?;
-            let manifest = serde_json::to_value(&version_manifest)?;
-            (target_version, manifest)
+            (target_version, version_manifest)
         };
-
-        // 6. Clean up optional dependencies (preserve existing logic)
-        if let Some(obj) = manifest.as_object_mut()
-            && let Some(optional_deps) = obj.get("optionalDependencies").and_then(|v| v.as_object())
-        {
-            let optional_keys: Vec<String> = optional_deps.keys().cloned().collect();
-            if let Some(deps) = obj.get_mut("dependencies").and_then(|v| v.as_object_mut()) {
-                for key in &optional_keys {
-                    deps.remove(key);
-                }
-            }
-            if let Some(dev_deps) = obj
-                .get_mut("devDependencies")
-                .and_then(|v| v.as_object_mut())
-            {
-                for key in &optional_keys {
-                    dev_deps.remove(key);
-                }
-            }
-        }
 
         // 7. Cache resolved result in project cache
         PACKAGE_CACHE
-            .set_manifest_in_project_cache(name, spec, &version, manifest.clone())
+            .set_manifest_in_project_cache(name, spec, &version, &manifest)
             .await;
 
         log_verbose(&format!(

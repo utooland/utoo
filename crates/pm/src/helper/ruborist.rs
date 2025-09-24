@@ -9,6 +9,7 @@ use tokio::sync::Semaphore;
 
 use crate::helper::install_runtime::install_runtime;
 use crate::helper::workspace::find_workspaces;
+use crate::model::manifest::VersionManifest;
 use crate::model::node::{Edge, EdgeType, Node};
 use crate::util::config::get_legacy_peer_deps;
 use crate::util::json::load_package_json_from_path;
@@ -168,11 +169,17 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                             };
 
                             for (field, edge_type) in dep_types {
-                                if let Some(deps) = new_node.package.get(field)
-                                    && let Some(deps) = deps.as_object() {
+                                let deps_map = match field {
+                                    "dependencies" => new_node.package.dependencies.as_ref(),
+                                    "devDependencies" => new_node.package.dev_dependencies.as_ref(),
+                                    "peerDependencies" => new_node.package.peer_dependencies.as_ref(),
+                                    "optionalDependencies" => new_node.package.optional_dependencies.as_ref(),
+                                    _ => None,
+                                };
+                                if let Some(deps) = deps_map {
                                         log_verbose(&format!("Processing {} dependencies for {}", field, new_node.name));
                                         for (name, version) in deps {
-                                            let version_spec = version.as_str().unwrap_or("").to_string();
+                                            let version_spec = version.clone();
                                             let dep_edge = Edge::new(new_node.clone(), edge_type.clone(), name.clone(), version_spec);
                                             log_verbose(&format!(
                                                 "add edge {}@{} for {}",
@@ -343,7 +350,13 @@ impl Ruborist {
     }
 
     async fn init_runtime(&mut self, root: Arc<Node>) -> Result<()> {
-        let deps = install_runtime(root.package.get("engines").unwrap_or(&Value::Null))?;
+        let engines_value = root
+            .package
+            .engines
+            .as_ref()
+            .map(|engines| serde_json::to_value(engines).unwrap_or_default())
+            .unwrap_or(Value::Null);
+        let deps = install_runtime(&engines_value)?;
         for (name, version) in deps {
             let edge = Edge::new(root.clone(), EdgeType::Optional, name, version);
             root.add_edge(edge).await;
@@ -356,10 +369,11 @@ impl Ruborist {
         let pkg = load_package_json_from_path(&self.path)?;
 
         // create root node
+        let root_manifest = VersionManifest::from_package_json(&pkg)?;
         let root = Node::new_root(
             pkg["name"].as_str().unwrap_or("root").to_string(),
             self.path.clone(),
-            pkg.clone(),
+            root_manifest,
         );
         log_verbose(&format!("root node: {root:?}"));
 
@@ -424,7 +438,8 @@ impl Ruborist {
             let version = pkg["version"].as_str().unwrap_or("").to_string();
 
             // Create workspace node
-            let workspace_node = Node::new_workspace(name.clone(), path, pkg.clone());
+            let workspace_manifest = VersionManifest::from_package_json(&pkg)?;
+            let workspace_node = Node::new_workspace(name.clone(), path, workspace_manifest);
 
             // Create link node
             let link_node = Node::new_link(name.clone(), workspace_node.clone());
@@ -482,11 +497,16 @@ impl Ruborist {
             };
 
             for (field, edge_type) in dep_types {
-                if let Some(deps) = workspace_node.package.get(field)
-                    && let Some(deps) = deps.as_object()
-                {
+                let deps_map = match field {
+                    "dependencies" => workspace_node.package.dependencies.as_ref(),
+                    "devDependencies" => workspace_node.package.dev_dependencies.as_ref(),
+                    "peerDependencies" => workspace_node.package.peer_dependencies.as_ref(),
+                    "optionalDependencies" => workspace_node.package.optional_dependencies.as_ref(),
+                    _ => None,
+                };
+                if let Some(deps) = deps_map {
                     for (name, version) in deps {
-                        let version_spec = version.as_str().unwrap_or("").to_string();
+                        let version_spec = version.clone();
                         let dep_edge = Edge::new(
                             workspace_node.clone(),
                             edge_type.clone(),
@@ -702,11 +722,16 @@ impl Ruborist {
 }
 
 async fn add_dependency_edge(node: &Arc<Node>, field: &str, edge_type: EdgeType) {
-    if let Some(deps) = node.package.get(field)
-        && let Some(deps) = deps.as_object()
-    {
+    let deps_map = match field {
+        "dependencies" => node.package.dependencies.as_ref(),
+        "devDependencies" => node.package.dev_dependencies.as_ref(),
+        "peerDependencies" => node.package.peer_dependencies.as_ref(),
+        "optionalDependencies" => node.package.optional_dependencies.as_ref(),
+        _ => None,
+    };
+    if let Some(deps) = deps_map {
         for (name, version) in deps {
-            let version_spec = version.as_str().unwrap_or("").to_string();
+            let version_spec = version.clone();
             let dep_edge = Edge::new(node.clone(), edge_type.clone(), name.clone(), version_spec);
             log_verbose(&format!("add edge {}@{} for {}", name, version, node.name));
             node.add_edge(dep_edge).await;
@@ -720,21 +745,24 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::model::manifest::VersionManifest;
     use crate::model::node::Node;
 
     #[tokio::test]
     async fn test_fix_dep_path() {
         // Create a mock root node
+        let root_manifest = VersionManifest::from_package_json(&json!({
+            "name": "test-package",
+            "version": "1.0.0",
+            "dependencies": {
+                "lodash": "^4.17.20"
+            }
+        }))
+        .unwrap();
         let root = Node::new_root(
             "test-package".to_string(),
             PathBuf::from("."),
-            json!({
-                "name": "test-package",
-                "version": "1.0.0",
-                "dependencies": {
-                    "lodash": "^4.17.20"
-                }
-            }),
+            root_manifest,
         );
 
         // Create a child node
@@ -765,13 +793,15 @@ mod tests {
     #[tokio::test]
     async fn test_fix_dep_path_with_invalid_path() {
         // Create a mock root node
+        let root_manifest = VersionManifest::from_package_json(&json!({
+            "name": "test-package",
+            "version": "1.0.0"
+        }))
+        .unwrap();
         let root = Node::new_root(
             "test-package".to_string(),
             PathBuf::from("."),
-            json!({
-                "name": "test-package",
-                "version": "1.0.0"
-            }),
+            root_manifest,
         );
 
         // Create Ruborist instance
@@ -796,14 +826,16 @@ mod tests {
     #[tokio::test]
     async fn test_build_deps_with_workspace_cycle() {
         // Create a mock root node
+        let root_manifest = VersionManifest::from_package_json(&json!({
+            "name": "test-monorepo",
+            "version": "1.0.0",
+            "workspaces": ["packages/*"]
+        }))
+        .unwrap();
         let root = Node::new_root(
             "test-monorepo".to_string(),
             PathBuf::from("."),
-            json!({
-                "name": "test-monorepo",
-                "version": "1.0.0",
-                "workspaces": ["packages/*"]
-            }),
+            root_manifest,
         );
 
         // Create workspace A

@@ -8,12 +8,12 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::model::manifest::{FullManifest, VersionManifest as ModelVersionManifest};
+use crate::model::manifest::{FullManifest, VersionManifest};
 use crate::util::cache::{get_package_manifest_cache_file, get_package_versions_cache_file};
 use crate::util::logger::log_verbose;
 
 // Project-level cache for resolved packages
-type VersionMap = HashMap<String, Value>;
+type VersionMap = HashMap<String, VersionManifest>;
 type SpecMap = HashMap<String, String>; // spec -> version
 type CacheMap = HashMap<String, (SpecMap, VersionMap)>; // name -> (specs, versions)
 
@@ -27,7 +27,7 @@ pub struct VersionsInfo {
 
 // Individual version manifest stored in manifests/version.json
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VersionManifest {
+pub struct CachedVersionManifest {
     pub manifest: Value,   // specific version manifest data
     pub last_updated: u64, // Unix timestamp
 }
@@ -44,8 +44,8 @@ struct CachedVersionsInfo {
 }
 
 #[derive(Debug, Clone)]
-struct CachedVersionManifest {
-    manifest: Arc<ModelVersionManifest>,
+struct CachedVersionManifestMemory {
+    manifest: Arc<VersionManifest>,
 }
 
 pub static PACKAGE_CACHE: Lazy<PackageCache> = Lazy::new(PackageCache::new);
@@ -58,7 +58,7 @@ pub struct PackageCache {
     // High-performance sync memory caches
     full_manifests: Arc<DashMap<String, CachedFullManifest>>,
     versions_info: Arc<DashMap<String, CachedVersionsInfo>>,
-    version_manifests: Arc<DashMap<String, CachedVersionManifest>>, // key: "name@version"
+    version_manifests: Arc<DashMap<String, CachedVersionManifestMemory>>, // key: "name@version"
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,7 +122,7 @@ impl PackageCache {
     }
 
     /// Get version manifest from memory cache (sync)
-    pub fn get_version_manifest(&self, name: &str, version: &str) -> Option<ModelVersionManifest> {
+    pub fn get_version_manifest(&self, name: &str, version: &str) -> Option<VersionManifest> {
         let key = format!("{name}@{version}");
         self.version_manifests.get(&key).map(|cached| {
             log_verbose(&format!(
@@ -133,9 +133,9 @@ impl PackageCache {
     }
 
     /// Set version manifest in memory cache (sync)
-    pub fn set_version_manifest(&self, name: &str, version: &str, manifest: &ModelVersionManifest) {
+    pub fn set_version_manifest(&self, name: &str, version: &str, manifest: &VersionManifest) {
         let key = format!("{name}@{version}");
-        let cached = CachedVersionManifest {
+        let cached = CachedVersionManifestMemory {
             manifest: Arc::new(manifest.clone()),
         };
         self.version_manifests.insert(key, cached);
@@ -205,7 +205,7 @@ impl PackageCache {
         &self,
         name: &str,
         version: &str,
-    ) -> Option<ModelVersionManifest> {
+    ) -> Option<VersionManifest> {
         let manifest_file = get_package_manifest_cache_file(name, version);
 
         if !tokio::fs::try_exists(&manifest_file).await.unwrap_or(false) {
@@ -214,17 +214,17 @@ impl PackageCache {
         }
 
         match tokio::fs::read_to_string(&manifest_file).await {
-            Ok(content) => match serde_json::from_str::<VersionManifest>(&content) {
+            Ok(content) => match serde_json::from_str::<CachedVersionManifest>(&content) {
                 Ok(cached_manifest) => {
                     log_verbose(&format!("Loaded manifest from disk: {name}@{version}"));
-                    // Convert to ModelVersionManifest
+                    // Convert to VersionManifest
                     Some(
                         serde_json::from_value(cached_manifest.manifest).unwrap_or_else(|e| {
                             log_verbose(&format!(
                                 "Failed to convert cached manifest for {name}@{version}: {e}"
                             ));
                             // Return a minimal version manifest as fallback
-                            ModelVersionManifest {
+                            VersionManifest {
                                 name: name.to_string(),
                                 version: version.to_string(),
                                 ..Default::default()
@@ -253,16 +253,16 @@ impl PackageCache {
         &self,
         name: &str,
         version: &str,
-        manifest: &ModelVersionManifest,
+        manifest: &VersionManifest,
     ) {
-        let manifest_file = get_package_manifest_cache_file(name, version);
+        let manifest_file = get_package_manifest_cache_file(name, &manifest.version);
 
         // Ensure directory exists
         if let Some(parent) = manifest_file.parent() {
             let _ = tokio::fs::create_dir_all(parent).await;
         }
 
-        let version_manifest = VersionManifest {
+        let version_manifest = CachedVersionManifest {
             manifest: serde_json::to_value(manifest).unwrap_or_else(|e| {
                 log_verbose(&format!(
                     "Failed to serialize manifest for {name}@{version}: {e}"
@@ -319,7 +319,7 @@ impl PackageCache {
         name: &str,
         _spec: &str,
         version: &str,
-    ) -> Option<Value> {
+    ) -> Option<VersionManifest> {
         let cache = self.project_cache.read().await;
         if let Some(manifest) = cache
             .get(name)
@@ -336,7 +336,7 @@ impl PackageCache {
         name: &str,
         spec: &str,
         version: &str,
-        manifest: Value,
+        manifest: &VersionManifest,
     ) {
         let mut cache = self.project_cache.write().await;
         let (specs, versions) = cache

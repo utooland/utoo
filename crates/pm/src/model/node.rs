@@ -1,8 +1,8 @@
-use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use super::super::util::logger::log_verbose;
+use crate::model::manifest::VersionManifest;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum EdgeType {
@@ -26,7 +26,7 @@ pub struct Node {
     pub name: String,
     pub version: String,
     pub path: PathBuf,
-    pub package: Value,
+    pub package: VersionManifest,
 
     // Nested relationships (need mutable access)
     pub parent: RwLock<Option<Arc<Node>>>,
@@ -68,10 +68,10 @@ pub struct Edge {
 }
 
 impl Node {
-    pub fn new(name: String, path: PathBuf, pkg: Value) -> Arc<Self> {
+    pub fn new(name: String, path: PathBuf, pkg: VersionManifest) -> Arc<Self> {
         Arc::new(Self {
             name,
-            version: pkg["version"].as_str().unwrap_or("").to_string(),
+            version: pkg.version.clone(),
             path,
             package: pkg,
             parent: RwLock::new(None),
@@ -88,10 +88,10 @@ impl Node {
         })
     }
 
-    pub fn new_root(name: String, path: PathBuf, pkg: Value) -> Arc<Self> {
+    pub fn new_root(name: String, path: PathBuf, pkg: VersionManifest) -> Arc<Self> {
         Arc::new(Self {
             name,
-            version: pkg["version"].as_str().unwrap_or("").to_string(),
+            version: pkg.version.clone(),
             path,
             package: pkg.clone(),
             parent: RwLock::new(None),
@@ -104,7 +104,9 @@ impl Node {
             is_peer: RwLock::new(None),
             is_optional: RwLock::new(None),
             is_prod: RwLock::new(None),
-            overrides: super::override_rule::Overrides::parse(pkg),
+            overrides: super::override_rule::Overrides::parse(
+                serde_json::to_value(&pkg).unwrap_or_default(),
+            ),
         })
     }
 
@@ -128,10 +130,10 @@ impl Node {
         })
     }
 
-    pub fn new_workspace(name: String, path: PathBuf, pkg: Value) -> Arc<Self> {
+    pub fn new_workspace(name: String, path: PathBuf, pkg: VersionManifest) -> Arc<Self> {
         Arc::new(Self {
             name,
-            version: pkg["version"].as_str().unwrap_or("*").to_string(),
+            version: pkg.version.clone(),
             path,
             package: pkg,
             parent: RwLock::new(None),

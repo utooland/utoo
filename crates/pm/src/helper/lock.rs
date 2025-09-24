@@ -202,8 +202,11 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
     let resolved = resolve(&name, &version_spec).await?;
 
     // Get tarball URL from manifest
-    let tarball_url = resolved.manifest["dist"]["tarball"]
-        .as_str()
+    let tarball_url = resolved
+        .manifest
+        .dist
+        .tarball
+        .as_ref()
         .ok_or_else(|| anyhow!("Failed to get tarball URL from manifest"))?;
 
     // Download and extract package
@@ -225,7 +228,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
         // If the package has install scripts, create a flag file
         // in linux, we can use hardlink when FICLONE is not supported
         // so we need to copy the file to the package directory to avoid effect other packages
-        if resolved.manifest.get("hasInstallScript") == Some(&json!(true)) {
+        if resolved.manifest.has_install_script == Some(true) {
             let has_install_script_flag_path = cache_path.join("_hasInstallScript");
             fs::write(has_install_script_flag_path, "")?;
         }
@@ -569,27 +572,28 @@ fn check_duplicate_dependencies(node: &Arc<Node>) {
 
 /// Create package information based on node type
 fn create_package_info(node: &Arc<Node>, root_path: &Path, total_packages: &mut i32) -> Value {
-    let mut pkg_info = if node.is_root() {
+    if node.is_root() {
         create_root_package_info(node)
     } else {
         create_non_root_package_info(node, root_path, total_packages)
-    };
-
-    // Add package fields (dependencies, bin, license, etc.)
-    add_package_fields(&mut pkg_info, node);
-
-    pkg_info
+    }
 }
 
 /// Create package info for root node
 fn create_root_package_info(node: &Arc<Node>) -> Value {
-    let mut info = json!({
-        "name": node.name,
-        "version": node.version,
-    });
+    // Start with the full VersionManifest serialized to JSON
+    let mut info = serde_json::to_value(&node.package).unwrap_or_else(|_| json!({}));
 
-    if let Some(engines) = node.package.get("engines") {
-        info["engines"] = engines.clone();
+    // For root node, we want to use the node's name and version (which may be different from package)
+    info["name"] = json!(node.name);
+    info["version"] = json!(node.version);
+
+    // Remove lock-specific fields that shouldn't be in root
+    if let Some(obj) = info.as_object_mut() {
+        obj.remove("dist");
+        obj.remove("_npmUser");
+        obj.remove("_npmOperationalInternal");
+        obj.remove("directories");
     }
 
     info
@@ -601,24 +605,27 @@ fn create_non_root_package_info(
     root_path: &Path,
     total_packages: &mut i32,
 ) -> Value {
-    let mut info = json!({
-        "name": node.package.get("name"),
-    });
+    // Start with the full VersionManifest serialized to JSON
+    let mut info = serde_json::to_value(&node.package).unwrap_or_else(|_| json!({}));
 
     if node.is_workspace() {
-        info["version"] = json!(node.package.get("version"));
+        // For workspace nodes, only keep name and version
+        info = json!({
+            "name": node.package.name,
+            "version": node.package.version,
+        });
     } else if node.is_link() {
-        info["link"] = json!(true);
-        let target_path = get_relative_target_path(node, root_path);
-        info["resolved"] = json!(target_path);
+        // For link nodes, only keep name and link info
+        info = json!({
+            "name": node.package.name,
+            "link": true,
+            "resolved": get_relative_target_path(node, root_path)
+        });
     } else {
-        // Regular package
-        info["version"] = json!(node.package.get("version"));
-
-        let empty_dist = json!("");
-        let dist = node.package.get("dist").unwrap_or(&empty_dist);
-        info["resolved"] = json!(dist.get("tarball"));
-        info["integrity"] = json!(dist.get("integrity"));
+        // Regular package - add lock-specific fields
+        let dist = &node.package.dist;
+        info["resolved"] = json!(dist.tarball);
+        info["integrity"] = json!(dist.integrity);
 
         *total_packages += 1;
     }
@@ -645,61 +652,8 @@ fn add_optional_flags(info: &mut Value, node: &Arc<Node>) {
         _ => {}
     }
 
-    if node.package.get("hasInstallScript") == Some(&json!(true)) {
+    if node.package.has_install_script == Some(true) {
         info["hasInstallScript"] = json!(true);
-    }
-}
-
-/// Add package fields based on node type
-fn add_package_fields(pkg_info: &mut Value, node: &Arc<Node>) {
-    let fields = get_package_fields(node);
-
-    for field in fields {
-        if let Some(field_value) = node.package.get(field)
-            && should_include_field(field_value)
-        {
-            pkg_info[field] = field_value.clone();
-        }
-    }
-}
-
-/// Get the list of fields to include based on node type
-fn get_package_fields(node: &Arc<Node>) -> Vec<&'static str> {
-    if node.is_link() {
-        vec![]
-    } else if node.is_root() {
-        vec![
-            "dependencies",
-            "devDependencies",
-            "peerDependencies",
-            "optionalDependencies",
-        ]
-    } else {
-        let mut fields = vec![
-            "dependencies",
-            "peerDependencies",
-            "optionalDependencies",
-            "bin",
-            "license",
-            "engines",
-            "os",
-            "cpu",
-        ];
-
-        if node.is_workspace() {
-            fields.push("devDependencies");
-        }
-
-        fields
-    }
-}
-
-/// Check if a field value should be included in the output
-fn should_include_field(field_value: &Value) -> bool {
-    if field_value.is_object() {
-        !field_value.as_object().unwrap().is_empty()
-    } else {
-        true // Include non-object values (strings, etc.)
     }
 }
 

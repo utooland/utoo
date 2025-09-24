@@ -1,3 +1,4 @@
+// chrono is used in from_package_info_and_manifest method
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -218,6 +219,130 @@ pub struct VersionManifest {
     pub directories: Option<Directories>,
 }
 
+impl VersionManifest {
+    /// Create a VersionManifest from a package.json Value
+    pub fn from_package_json(pkg: &Value) -> Result<Self, anyhow::Error> {
+        // Create a basic VersionManifest from package.json data
+        let manifest =
+            Self {
+                name: pkg
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string(),
+                version: pkg
+                    .get("version")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("0.0.0")
+                    .to_string(),
+                description: pkg
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                main: pkg.get("main").and_then(|v| v.as_str()).map(String::from),
+                scripts: pkg.get("scripts").and_then(|v| v.as_object()).map(|obj| {
+                    obj.iter()
+                        .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
+                        .collect()
+                }),
+                repository: pkg
+                    .get("repository")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok()),
+                keywords: pkg.get("keywords").and_then(|v| v.as_array()).map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                }),
+                author: pkg
+                    .get("author")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok()),
+                license: pkg
+                    .get("license")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                bugs: pkg
+                    .get("bugs")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok()),
+                homepage: pkg
+                    .get("homepage")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                dependencies: pkg
+                    .get("dependencies")
+                    .and_then(|v| v.as_object())
+                    .map(|obj| {
+                        obj.iter()
+                            .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("*").to_string()))
+                            .collect()
+                    }),
+                dev_dependencies: pkg.get("devDependencies").and_then(|v| v.as_object()).map(
+                    |obj| {
+                        obj.iter()
+                            .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("*").to_string()))
+                            .collect()
+                    },
+                ),
+                peer_dependencies: pkg.get("peerDependencies").and_then(|v| v.as_object()).map(
+                    |obj| {
+                        obj.iter()
+                            .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("*").to_string()))
+                            .collect()
+                    },
+                ),
+                optional_dependencies: pkg
+                    .get("optionalDependencies")
+                    .and_then(|v| v.as_object())
+                    .map(|obj| {
+                        obj.iter()
+                            .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("*").to_string()))
+                            .collect()
+                    }),
+                bundled_dependencies: pkg
+                    .get("bundledDependencies")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    }),
+                engines: pkg.get("engines").and_then(|v| v.as_object()).map(|obj| {
+                    obj.iter()
+                        .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("*").to_string()))
+                        .collect()
+                }),
+                bin: pkg.get("bin").cloned(),
+                has_install_script: pkg
+                    .get("scripts")
+                    .and_then(|v| v.as_object())
+                    .map(|scripts| {
+                        scripts.contains_key("preinstall")
+                            || scripts.contains_key("install")
+                            || scripts.contains_key("postinstall")
+                    }),
+                cpu: pkg.get("cpu").cloned(),
+                os: pkg.get("os").cloned(),
+                id: format!(
+                    "{}@{}",
+                    pkg.get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown"),
+                    pkg.get("version")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("0.0.0")
+                ),
+                node_version: None,
+                npm_version: None,
+                dist: Dist::default(),
+                npm_user: None,
+                npm_operational_internal: None,
+                directories: pkg
+                    .get("directories")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok()),
+            };
+        Ok(manifest)
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Author {
     pub name: String,
@@ -380,220 +505,80 @@ pub struct VersionInfo {
 
 impl PackageManifest {
     pub fn from_package_info_and_manifest(
-        package_info: &Value,
-        name: &str,
-        version_manifest: &Value,
+        package_info: &FullManifest,
+        target_version_manifest: &VersionManifest,
     ) -> Self {
-        // Get the latest version from package info
-        let latest_version = package_info
-            .get("dist-tags")
-            .and_then(|tags| tags.get("latest"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("latest");
+        // Get the latest version from dist-tags (currently unused, but kept for future use)
+        let _latest_version = package_info.dist_tags.get("latest").map_or("latest", |v| v);
 
-        // Get the specific version if provided, otherwise use latest
-        let target_version = version_manifest
-            .get("version")
-            .and_then(|v| v.as_str())
-            .unwrap_or(latest_version);
+        // Use the target version
+        let target_version = &target_version_manifest.version;
 
-        // Extract dependencies
-        let dependencies = version_manifest
-            .get("dependencies")
-            .and_then(|v| v.as_object())
-            .map(|obj| {
-                obj.iter()
-                    .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
-                    .collect()
-            });
+        // Extract versions info from time field and combine with npm user info
+        let versions = if !package_info.time.is_empty() {
+            let mut version_map = std::collections::HashMap::new();
+            for version in package_info.time.keys() {
+                if version == "created" || version == "modified" {
+                    continue; // Skip meta timestamps
+                }
 
-        // Extract author
-        let author_source = version_manifest
-            .get("author")
-            .or_else(|| package_info.get("author"));
-        let author = author_source.and_then(|v| {
-            if let Some(s) = v.as_str() {
-                Some(Author {
-                    name: s.to_string(),
-                    email: None,
-                    url: None,
-                })
-            } else {
-                v.as_object().map(|obj| Author {
-                    name: obj
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    email: obj
-                        .get("email")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    url: obj
-                        .get("url")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                })
+                // Get npm user from the specific version manifest if available
+                let npm_user = package_info
+                    .versions
+                    .get(version)
+                    .and_then(|vm| vm.npm_user.as_ref())
+                    .cloned();
+
+                // Parse publish time from time field
+                let publish_time = package_info.time.get(version).and_then(|time_str| {
+                    // Try parsing ISO 8601 timestamp (e.g., "2021-05-20T22:47:07.137Z")
+                    chrono::DateTime::parse_from_rfc3339(time_str)
+                        .ok()
+                        .map(|dt| dt.timestamp_millis() as u64)
+                });
+
+                let version_info = VersionInfo {
+                    publish_time,
+                    npm_user,
+                };
+                version_map.insert(version.clone(), version_info);
             }
-        });
+            Some(version_map)
+        } else {
+            None
+        };
 
-        // Extract repository
-        let repo_source = version_manifest
-            .get("repository")
-            .or_else(|| package_info.get("repository"));
-        let repository = repo_source.and_then(|v| v.as_object()).and_then(|obj| {
-            let repo_type = obj.get("type")?.as_str()?;
-            let url = obj.get("url")?.as_str()?;
-            Some(Repository {
-                repo_type: repo_type.to_string(),
-                url: url.to_string(),
-                directory: obj
-                    .get("directory")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-            })
-        });
-
-        // Extract bugs
-        let bugs_source = version_manifest
-            .get("bugs")
-            .or_else(|| package_info.get("bugs"));
-        let bugs = bugs_source
-            .and_then(|v| v.as_object())
-            .and_then(|obj| obj.get("url")?.as_str())
-            .map(|url| Bugs {
-                url: url.to_string(),
-                email: bugs_source
-                    .and_then(|v| v.as_object())
-                    .and_then(|obj| obj.get("email")?.as_str())
-                    .map(|s| s.to_string()),
-            });
-
-        // Extract dist
-        let dist = version_manifest
-            .get("dist")
-            .and_then(|v| v.as_object())
-            .map(|obj| Dist {
-                tarball: obj
-                    .get("tarball")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-                shasum: obj
-                    .get("shasum")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-                integrity: obj
-                    .get("integrity")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-                file_count: obj
-                    .get("fileCount")
-                    .and_then(|v| v.as_u64())
-                    .map(|u| u as u32),
-                unpacked_size: obj.get("unpackedSize").and_then(|v| v.as_u64()),
-                npm_signature: obj
-                    .get("npm-signature")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-            });
-
-        // Extract maintainers
-        let maintainers = package_info
-            .get("maintainers")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|maintainer| {
-                        maintainer.as_object().and_then(|obj| {
-                            let name = obj.get("name")?.as_str()?.to_string();
-                            let email = obj
-                                .get("email")
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string());
-                            Some(Maintainer { name, email })
-                        })
-                    })
-                    .collect()
-            });
+        let versions_count = package_info.versions.len();
 
         // Extract dist-tags
-        let dist_tags = package_info
-            .get("dist-tags")
-            .and_then(|v| v.as_object())
-            .map(|obj| {
-                obj.iter()
-                    .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
-                    .collect()
-            });
-
-        // Extract versions info
-        let versions = package_info
-            .get("versions")
-            .and_then(|v| v.as_object())
-            .map(|obj| {
-                obj.iter()
-                    .map(|(k, v)| {
-                        let version_info = VersionInfo {
-                            publish_time: v.get("publish_time").and_then(|pt| pt.as_u64()),
-                            npm_user: v.get("_npmUser").and_then(|user| {
-                                user.as_object().and_then(|obj| {
-                                    let name = obj.get("name")?.as_str()?.to_string();
-                                    let email = obj
-                                        .get("email")
-                                        .and_then(|e| e.as_str())
-                                        .map(|s| s.to_string());
-                                    Some(NpmUser { name, email })
-                                })
-                            }),
-                        };
-                        (k.clone(), version_info)
-                    })
-                    .collect()
-            });
-
-        let versions_count = package_info
-            .get("versions")
-            .and_then(|v| v.as_object())
-            .map(|obj| obj.len())
-            .unwrap_or(0);
-
-        // Extract keywords
-        let keywords = version_manifest
-            .get("keywords")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|k| k.as_str())
-                    .map(|s| s.to_string())
-                    .collect()
-            });
-
-        // Get license from multiple sources
-        let license = version_manifest
-            .get("license")
-            .and_then(|v| v.as_str())
-            .or_else(|| package_info.get("license").and_then(|v| v.as_str()))
-            .map(|s| s.to_string());
+        let dist_tags = if package_info.dist_tags.is_empty() {
+            None
+        } else {
+            Some(package_info.dist_tags.clone())
+        };
 
         PackageManifest {
-            name: name.to_string(),
-            version: target_version.to_string(),
-            description: version_manifest
-                .get("description")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-            homepage: version_manifest
-                .get("homepage")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-            license,
-            keywords,
-            dependencies,
-            author,
-            repository,
-            bugs,
-            dist,
-            maintainers,
+            name: target_version_manifest.name.clone(),
+            version: target_version.clone(),
+            description: target_version_manifest.description.clone(),
+            homepage: target_version_manifest.homepage.clone(),
+            license: target_version_manifest.license.clone(),
+            keywords: target_version_manifest.keywords.clone(),
+            dependencies: target_version_manifest.dependencies.clone(),
+            author: target_version_manifest
+                .author
+                .clone()
+                .or_else(|| package_info.author.clone()),
+            repository: target_version_manifest
+                .repository
+                .clone()
+                .or_else(|| package_info.repository.clone()),
+            bugs: target_version_manifest
+                .bugs
+                .clone()
+                .or_else(|| package_info.bugs.clone()),
+            dist: Some(target_version_manifest.dist.clone()),
+            maintainers: package_info.maintainers.clone(),
             dist_tags,
             versions,
             versions_count,
