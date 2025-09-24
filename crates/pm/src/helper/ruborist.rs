@@ -279,7 +279,8 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
 
 // create a new node under parent
 fn place_deps(name: String, pkg: ResolvedPackage, parent: &Arc<Node>) -> Result<Arc<Node>> {
-    let new_node = Node::new(name, parent.path.clone(), pkg.manifest);
+    let node_path = parent.path.join("node_modules").join(&name);
+    let new_node = Node::new(name, node_path, pkg.manifest);
 
     log_verbose(&format!(
         "\nInstalling {}@{} under parent chain: {}",
@@ -374,6 +375,7 @@ impl Ruborist {
             pkg["name"].as_str().unwrap_or("root").to_string(),
             self.path.clone(),
             root_manifest,
+            pkg.clone(),
         );
         log_verbose(&format!("root node: {root:?}"));
 
@@ -751,18 +753,19 @@ mod tests {
     #[tokio::test]
     async fn test_fix_dep_path() {
         // Create a mock root node
-        let root_manifest = VersionManifest::from_package_json(&json!({
+        let root_pkg_json = json!({
             "name": "test-package",
             "version": "1.0.0",
             "dependencies": {
                 "lodash": "^4.17.20"
             }
-        }))
-        .unwrap();
+        });
+        let root_manifest = VersionManifest::from_package_json(&root_pkg_json).unwrap();
         let root = Node::new_root(
             "test-package".to_string(),
             PathBuf::from("."),
             root_manifest,
+            root_pkg_json,
         );
 
         // Create a child node
@@ -795,15 +798,16 @@ mod tests {
     #[tokio::test]
     async fn test_fix_dep_path_with_invalid_path() {
         // Create a mock root node
-        let root_manifest = VersionManifest::from_package_json(&json!({
+        let root_pkg_json = json!({
             "name": "test-package",
             "version": "1.0.0"
-        }))
-        .unwrap();
+        });
+        let root_manifest = VersionManifest::from_package_json(&root_pkg_json).unwrap();
         let root = Node::new_root(
             "test-package".to_string(),
             PathBuf::from("."),
             root_manifest,
+            root_pkg_json,
         );
 
         // Create Ruborist instance
@@ -828,16 +832,17 @@ mod tests {
     #[tokio::test]
     async fn test_build_deps_with_workspace_cycle() {
         // Create a mock root node
-        let root_manifest = VersionManifest::from_package_json(&json!({
+        let root_pkg_json = json!({
             "name": "test-monorepo",
             "version": "1.0.0",
             "workspaces": ["packages/*"]
-        }))
-        .unwrap();
+        });
+        let root_manifest = VersionManifest::from_package_json(&root_pkg_json).unwrap();
         let root = Node::new_root(
             "test-monorepo".to_string(),
             PathBuf::from("."),
             root_manifest,
+            root_pkg_json,
         );
 
         // Create workspace A

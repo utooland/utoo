@@ -6,12 +6,12 @@ use std::sync::Arc;
 use std::{collections::HashMap, fs};
 
 use crate::helper::workspace::find_workspaces;
-use crate::model::node::{EdgeType, Node};
+use crate::model::node::Node;
 use crate::model::override_rule::Overrides;
 use crate::util::config::get_legacy_peer_deps;
 use crate::util::json::{load_package_json_from_path, load_package_lock_json_from_path};
 use crate::util::logger::{log_verbose, log_warning};
-use crate::util::registry::{resolve, resolve_dependency};
+use crate::util::registry::resolve;
 use crate::util::relative_path::to_relative_path;
 use crate::util::save_type::{PackageAction, SaveType};
 use crate::util::semver;
@@ -357,6 +357,16 @@ pub async fn validate_deps(
     if let Some(packages) = pkgs_in_pkg_lock.as_object() {
         for (pkg_path, pkg_info) in packages {
             for (dep_field, is_optional) in get_dep_types() {
+                // Only validate devDependencies for root package and workspace packages
+                if dep_field == "devDependencies" {
+                    let is_root = pkg_path.is_empty();
+                    let is_workspace = pkg_info.get("link").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                    if !is_root && !is_workspace {
+                        continue; // Skip devDependencies for regular dependency packages
+                    }
+                }
+
                 if let Some(dependencies) = pkg_info.get(dep_field).and_then(|d| d.as_object()) {
                     for (dep_name, req_version) in dependencies {
                         let req_version_str = req_version.as_str().unwrap_or_default();
@@ -437,20 +447,8 @@ pub async fn validate_deps(
                                 dep_info.get("version").and_then(|v| v.as_str())
                                 && !semver::matches(&effective_req_version, actual_version)
                             {
-                                if let Some(resolved_dep) = resolve_dependency(
-                                    dep_name,
-                                    &effective_req_version,
-                                    &EdgeType::Optional,
-                                )
-                                .await?
-                                    && resolved_dep.version == actual_version
-                                {
-                                    log_verbose(&format!(
-                                        "Package {pkg_path} {dep_field} dependency {dep_name} (required version: {req_version_str}, effective version: {effective_req_version}) hit bug-version {current_path}@{actual_version}"
-                                    ));
-                                    continue;
-                                }
-
+                                // The actual installed version doesn't satisfy the required version
+                                // This is a real version mismatch that needs to be fixed
                                 log_verbose(&format!(
                                     "Package {pkg_path} {dep_field} dependency {dep_name} (required version: {req_version_str}, effective version: {effective_req_version}) does not match actual version {current_path}@{actual_version}"
                                 ));
@@ -584,9 +582,24 @@ fn create_root_package_info(node: &Arc<Node>) -> Value {
     // Start with the full VersionManifest serialized to JSON
     let mut info = serde_json::to_value(&node.package).unwrap_or_else(|_| json!({}));
 
+    // Ensure all dependency fields are present (even if empty) for validation consistency
+    for dep_field in ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"] {
+        if !info.get(dep_field).is_some() {
+            info[dep_field] = json!({});
+        }
+    }
+
     // For root node, we want to use the node's name and version (which may be different from package)
     info["name"] = json!(node.name);
     info["version"] = json!(node.version);
+
+    // Add overrides from the node if present (this is project-level configuration)
+    if let Some(overrides) = &node.overrides {
+        // Extract overrides from the original package JSON
+        if let Some(overrides_value) = overrides.package.get("overrides") {
+            info["overrides"] = overrides_value.clone();
+        }
+    }
 
     // Remove lock-specific fields that shouldn't be in root
     if let Some(obj) = info.as_object_mut() {
@@ -608,12 +621,17 @@ fn create_non_root_package_info(
     // Start with the full VersionManifest serialized to JSON
     let mut info = serde_json::to_value(&node.package).unwrap_or_else(|_| json!({}));
 
+    // Ensure all dependency fields are present (even if empty) for validation consistency
+    for dep_field in ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"] {
+        if !info.get(dep_field).is_some() {
+            info[dep_field] = json!({});
+        }
+    }
+
     if node.is_workspace() {
-        // For workspace nodes, only keep name and version
-        info = json!({
-            "name": node.package.name,
-            "version": node.package.version,
-        });
+        // For workspace nodes, keep all fields from the package manifest
+        // (workspace nodes should include bin, scripts, and all dependency fields)
+        // No special filtering needed, use the full serialized manifest
     } else if node.is_link() {
         // For link nodes, only keep name and link info
         info = json!({

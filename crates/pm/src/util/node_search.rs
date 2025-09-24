@@ -54,15 +54,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_node_from_root_by_path() {
-        let root_manifest = VersionManifest::from_package_json(&json!({
+        let root_pkg_json = json!({
             "name": "test-package",
             "version": "1.0.0"
-        }))
-        .unwrap();
+        });
+        let root_manifest = VersionManifest::from_package_json(&root_pkg_json).unwrap();
         let root = Node::new_root(
             "test-package".to_string(),
             PathBuf::from("."),
             root_manifest,
+            root_pkg_json,
         );
 
         let child1_pkg_json = json!({

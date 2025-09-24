@@ -88,7 +88,12 @@ impl Node {
         })
     }
 
-    pub fn new_root(name: String, path: PathBuf, pkg: VersionManifest) -> Arc<Self> {
+    pub fn new_root(
+        name: String,
+        path: PathBuf,
+        pkg: VersionManifest,
+        original_pkg_json: serde_json::Value,
+    ) -> Arc<Self> {
         Arc::new(Self {
             name,
             version: pkg.version.clone(),
@@ -104,9 +109,7 @@ impl Node {
             is_peer: RwLock::new(None),
             is_optional: RwLock::new(None),
             is_prod: RwLock::new(None),
-            overrides: super::override_rule::Overrides::parse(
-                serde_json::to_value(&pkg).unwrap_or_default(),
-            ),
+            overrides: super::override_rule::Overrides::parse(original_pkg_json),
         })
     }
 
