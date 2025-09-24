@@ -119,30 +119,6 @@ mod tests {
     use tempfile::TempDir;
     use tokio::task;
 
-    // Helper to create a simple tar.gz archive in memory
-    async fn create_tar_gz() -> Vec<u8> {
-        use tokio_tar::Builder;
-        use tokio::io::AsyncWriteExt;
-        use async_compression::tokio::write::GzipEncoder;
-
-        // Create tar data directly to a buffer
-        let mut tar_buffer = Vec::new();
-        let mut tar = Builder::new(&mut tar_buffer);
-        let mut header = tokio_tar::Header::new_gnu();
-        let content = b"hello world";
-        header.set_path("file.txt").unwrap();
-        header.set_size(content.len() as u64);
-        header.set_cksum();
-        tar.append(&header, &content[..]).await.unwrap();
-        tar.finish().await.unwrap();
-
-        // Then compress it
-        let mut encoder = GzipEncoder::new(Vec::new());
-        encoder.write_all(&tar_buffer).await.unwrap();
-        encoder.shutdown().await.unwrap();
-        encoder.into_inner()
-    }
-
     #[tokio::test]
     async fn test_download_idempotent() {
         let tar_gz = create_tar_gz().await;
