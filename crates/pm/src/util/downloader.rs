@@ -1,19 +1,15 @@
 use anyhow::{Context, Result};
 use async_compression::tokio::bufread::GzipDecoder;
-use flate2::read::GzDecoder;
 use once_cell::sync::Lazy;
 use reqwest::Client;
 use reqwest::StatusCode;
 use std::{fs::Permissions, os::unix::fs::PermissionsExt, path::Path};
-use tar::Archive as TarArchive;
 use tokio::{
     fs::{File, set_permissions},
     io::BufReader,
 };
 use tokio_retry::RetryIf;
 use tokio_tar::Archive;
-
-use std::fs;
 
 use super::retry::build_dns_cached_client;
 use super::{
@@ -100,78 +96,60 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
 }
 
 async fn try_unpack(bytes: &[u8], dest: &Path) -> Result<()> {
-    fs::create_dir_all(dest)?;
+    tokio::fs::create_dir_all(dest).await?;
 
     let tar_tgz = GzipDecoder::new(BufReader::new(bytes));
     let mut archive = Archive::new(tar_tgz);
 
-    if (archive.unpack(dest).await).is_err() {
-        let tar_gz = GzDecoder::new(bytes);
-        let mut archive = TarArchive::new(tar_gz);
+    archive.unpack(dest).await
+        .context("Failed to unpack tar.gz archive")?;
 
-        for entry in archive.entries()? {
-            let mut file = entry.map_err(|e| anyhow::anyhow!("Failed to read file entry: {e}"))?;
-            let path = file
-                .path()
-                .map_err(|e| anyhow::anyhow!("Failed to parse file path: {e}"))?
-                .into_owned();
-            let full_path = dest.join(&path);
+    set_permissions(dest, Permissions::from_mode(0o755)).await?;
 
-            if let Some(parent) = full_path.parent() {
-                fs::create_dir_all(parent).map_err(|e| {
-                    anyhow::anyhow!("Failed to create directory {}: {}", parent.display(), e)
-                })?;
-            }
-
-            file.unpack(&full_path)
-                .map_err(|e| anyhow::anyhow!("Failed to unpack file {}: {}", path.display(), e))?;
-
-            let permissions = if full_path.is_dir() { 0o755 } else { 0o644 };
-
-            fs::set_permissions(&full_path, fs::Permissions::from_mode(permissions)).map_err(
-                |e| anyhow::anyhow!("Failed to set permissions {}: {}", path.display(), e),
-            )?;
-        }
-    }
-
-    set_permissions(&dest, Permissions::from_mode(0o755)).await?;
     File::create(&dest.join("_resolved")).await?;
+
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flate2::Compression;
-    use flate2::write::GzEncoder;
     use mockito::Server;
     use std::fs;
-    use std::io::Write;
-    use tar::Builder;
     use tempfile::TempDir;
     use tokio::task;
 
     // Helper to create a simple tar.gz archive in memory
-    fn create_tar_gz() -> Vec<u8> {
-        let mut tar_data = Vec::new();
-        {
-            let mut tar = Builder::new(&mut tar_data);
-            let mut header = tar::Header::new_gnu();
+    async fn create_tar_gz() -> Vec<u8> {
+        use tokio_tar::Builder;
+        use tokio::io::AsyncWriteExt;
+        use async_compression::tokio::write::GzipEncoder;
+        use std::io::Cursor;
+
+        // Create tar data first
+        let tar_data = {
+            let mut tar_data = Vec::new();
+            let mut tar = Builder::new(Cursor::new(&mut tar_data));
+            let mut header = tokio_tar::Header::new_gnu();
             let content = b"hello world";
             header.set_path("file.txt").unwrap();
             header.set_size(content.len() as u64);
             header.set_cksum();
-            tar.append(&header, &content[..]).unwrap();
-            tar.finish().unwrap();
-        }
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(&tar_data).unwrap();
-        encoder.finish().unwrap()
+            tar.append(&header, &content[..]).await.unwrap();
+            tar.finish().await.unwrap();
+            tar_data
+        };
+
+        // Then compress it
+        let mut encoder = GzipEncoder::new(Vec::new());
+        encoder.write_all(&tar_data).await.unwrap();
+        encoder.shutdown().await.unwrap();
+        encoder.into_inner()
     }
 
     #[tokio::test]
     async fn test_download_idempotent() {
-        let tar_gz = create_tar_gz();
+        let tar_gz = create_tar_gz().await;
         let mut server = Server::new_async().await;
         let _m = server
             .mock("GET", "/pkg.tgz")
