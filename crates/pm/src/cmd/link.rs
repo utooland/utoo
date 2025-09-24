@@ -103,7 +103,7 @@ pub async fn link_global_to_local(package_name: &str, prefix: Option<&str>) -> R
 }
 
 #[cfg(test)]
-#[allow(unused_imports, dead_code)]
+#[allow(unused_imports)]
 mod tests {
     use super::*;
     use std::fs;

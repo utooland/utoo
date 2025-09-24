@@ -161,6 +161,14 @@ static REGISTRY: LazyLock<ConfigValue<String>> =
 static LEGACY_PEER_DEPS: LazyLock<ConfigValue<bool>> =
     LazyLock::new(|| ConfigValue::new("legacy-peer-deps", true));
 
+static IS_NPM_REGISTRY: LazyLock<bool> = LazyLock::new(|| {
+    let registry = REGISTRY.get();
+    let is_npm_registry =
+        registry.contains("registry.npmjs.org") || registry.contains("registry.npmmirror.com");
+    log_verbose(&format!("is_npm_registry: {is_npm_registry}"));
+    is_npm_registry
+});
+
 pub fn set_registry(registry: Option<String>) {
     // Priority: CLI argument > UTOO_REGISTRY env > config
     let final_registry = registry.or_else(|| {
@@ -181,4 +189,12 @@ pub fn set_legacy_peer_deps(value: Option<bool>) {
 
 pub fn get_legacy_peer_deps() -> bool {
     LEGACY_PEER_DEPS.get()
+}
+
+pub fn get_registry_support_abbr() -> bool {
+    !*IS_NPM_REGISTRY
+}
+
+pub fn get_registry_support_semver() -> bool {
+    !*IS_NPM_REGISTRY
 }

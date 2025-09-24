@@ -1,13 +1,12 @@
 use anyhow::Result;
 use once_cell::sync::Lazy;
 use reqwest;
-use serde_json::Value;
 use std::time::Instant;
 use tokio_retry::RetryIf;
 
-use super::cache::PACKAGE_CACHE;
-use crate::util::config::get_registry;
-use crate::util::logger::log_verbose;
+use crate::model::manifest::{FullManifest, VersionManifest};
+use crate::util::config::{get_registry, get_registry_support_abbr};
+use crate::util::logger::{log_error, log_verbose};
 use crate::util::retry::{RetryableError, build_dns_cached_client, create_retry_strategy};
 
 pub struct RegistryHttpClient {
@@ -15,185 +14,231 @@ pub struct RegistryHttpClient {
     base_url: String,
 }
 
-static REGISTRY_CLIENT: Lazy<RegistryHttpClient> = Lazy::new(RegistryHttpClient::new);
+static REGISTRY_CLIENT: Lazy<RegistryHttpClient> = Lazy::new(|| {
+    let client = build_dns_cached_client();
+    let base_url = get_registry().trim_end_matches('/').to_string();
+    log_verbose(&format!(
+        "Initialized HTTP client with base URL: {base_url}"
+    ));
 
-impl Default for RegistryHttpClient {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+    RegistryHttpClient { client, base_url }
+});
 
 impl RegistryHttpClient {
-    pub fn new() -> Self {
-        Self {
-            client: build_dns_cached_client(),
-            base_url: get_registry().to_string(),
-        }
-    }
-
+    /// Build URL for package or version requests
     fn build_url(&self, name: &str, spec: &str) -> String {
-        if spec.starts_with("npm:") {
-            let npm_spec = spec.strip_prefix("npm:").unwrap();
-            if let Some(last_at_index) = npm_spec.rfind('@') {
-                let (pkg_name, version) = npm_spec.split_at(last_at_index);
-                return format!("{}/{}/{}", self.base_url, pkg_name, &version[1..]);
-            }
-        }
-
-        if spec.starts_with("workspace:") {
-            let workspace_spec = spec.strip_prefix("workspace:").unwrap();
-            return format!("{}/{}/{}", self.base_url, name, workspace_spec);
-        }
-
-        if spec.eq("*") {
+        if spec == "*" {
             return format!("{}/{}/latest", self.base_url, name);
         }
-
         format!("{}/{}/{}", self.base_url, name, spec)
     }
 
-    pub async fn get_package_manifest(&self, name: &str, spec: &str) -> Result<(String, Value)> {
-        // First check cache for version
-        if let Some(version) = PACKAGE_CACHE.get_version(name, spec).await
-            && let Some(manifest) = PACKAGE_CACHE.get_manifest(name, spec, &version).await
-        {
-            log_verbose(&format!("Cache hit for {name}@{spec} => {version}"));
-            return Ok((version, manifest));
-        }
+    /// Fetch complete package information via HTTP (no caching)
+    pub async fn fetch_full_manifest(
+        &self,
+        name: &str,
+        etag: Option<&str>,
+    ) -> Result<(FullManifest, Option<String>)> {
+        let url = format!("{}/{}", self.base_url, name);
+        log_verbose(&format!("Fetching full manifest for {name} from {url}"));
 
-        // Build request URL
-        let url = self.build_url(name, spec);
-
-        // Record start time
-        let start_time = Instant::now();
-
-        // Retry HTTP request with custom strategy
-        let manifest: Value = RetryIf::spawn(
+        let start = Instant::now();
+        let result = RetryIf::spawn(
             create_retry_strategy(),
             || async {
-                let response = self
-                    .client
-                    .get(&url)
-                    .header("Accept", "application/vnd.npm.install-v1+json")
-                    .send()
-                    .await
-                    .map_err(|e| RetryableError::Temporary(format!("Network error: {e}")))?;
+                let mut request = self.client.get(&url).header("Accept", "application/json");
+
+                // Add If-None-Match header if etag provided
+                if let Some(etag_value) = etag {
+                    request = request.header("If-None-Match", etag_value);
+                }
+
+                let response = request.send().await.map_err(|e| {
+                    if e.is_timeout() {
+                        RetryableError::Temporary(format!("Request timeout: {e}"))
+                    } else if e.is_connect() {
+                        RetryableError::Temporary(format!("Connection error: {e}"))
+                    } else {
+                        RetryableError::Temporary(format!("Network error: {e}"))
+                    }
+                })?;
 
                 if response.status().is_success() {
-                    let manifest = response.json().await.map_err(|e| {
+                    // Extract ETag before consuming response for JSON
+                    let etag = response
+                        .headers()
+                        .get("etag")
+                        .and_then(|v| v.to_str().ok())
+                        .map(Self::normalize_etag)
+                        .map(|s| s.to_string());
+
+                    // Parse JSON inside retry loop to handle response body timeouts
+                    let json_text = response.text().await.map_err(|e| {
+                        if e.is_timeout() {
+                            RetryableError::Temporary(format!("Response body timeout: {e}"))
+                        } else {
+                            RetryableError::Temporary(format!("Failed to read response body: {e}"))
+                        }
+                    })?;
+
+                    // Try to parse as FullManifest, with fallback for problematic responses
+                    let data: FullManifest = serde_json::from_str(&json_text).map_err(|e| {
+                        log_error(&format!("Failed to parse full manifest for {name}: {e}"));
+                        log_verbose(&format!(
+                            "JSON text length: {}, first 500 chars: {}",
+                            json_text.len(),
+                            &json_text.chars().take(500).collect::<String>()
+                        ));
                         RetryableError::Temporary(format!("Failed to parse JSON response: {e}"))
                     })?;
-                    Ok(manifest)
+
+                    Ok((data, etag))
+                } else if response.status().as_u16() == 304 {
+                    // Not Modified - return special marker
+                    Err(RetryableError::Permanent("NOT_MODIFIED".to_string()))
                 } else if response.status().as_u16() == 404 {
-                    log_verbose(&format!("URL not found {url}"));
                     Err(RetryableError::Permanent(format!(
-                        "Fetch Error: {}, status: {}",
-                        url,
-                        response.status()
+                        "Package {name} not found"
                     )))
                 } else {
-                    log_verbose(&format!(
-                        "HTTP error: url: {}, status: {}, retrying",
-                        url,
-                        response.status()
-                    ));
+                    log_error(&format!("HTTP error: {response:?}, url: {url}"));
                     Err(RetryableError::Temporary(format!(
-                        "HTTP error: {}, url: {}",
+                        "HTTP error: status={}, url={}",
                         response.status(),
                         url
                     )))
                 }
             },
-            |e: &RetryableError| matches!(e, RetryableError::Temporary(_)),
+            |err: &RetryableError| matches!(err, RetryableError::Temporary(_)),
+        );
+
+        match result.await {
+            Ok((data, etag)) => {
+                log_verbose(&format!(
+                    "Successfully fetched full manifest for {name} in {:?}",
+                    start.elapsed()
+                ));
+                Ok((data, etag))
+            }
+            Err(e) => {
+                if e.to_string().contains("NOT_MODIFIED") {
+                    Err(anyhow::anyhow!("Not modified"))
+                } else {
+                    Err(anyhow::anyhow!(
+                        "Failed to fetch full manifest after retries: {e}"
+                    ))
+                }
+            }
+        }
+    }
+
+    /// Fetch specific version manifest via HTTP (no caching)
+    pub async fn fetch_version_manifest(
+        &self,
+        name: &str,
+        version: &str,
+    ) -> Result<VersionManifest> {
+        let url = self.build_url(name, version);
+        log_verbose(&format!("Fetching {name}@{version} manifest from {url}"));
+
+        let manifest: VersionManifest = RetryIf::spawn(
+            create_retry_strategy(),
+            || async {
+                let accept = if get_registry_support_abbr() {
+                    "application/vnd.npm.install-v1+json"
+                } else {
+                    "application/json"
+                };
+
+                let response = self
+                    .client
+                    .get(&url)
+                    .header("Accept", accept)
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        if e.is_timeout() {
+                            RetryableError::Temporary(format!("Request timeout: {e}"))
+                        } else if e.is_connect() {
+                            RetryableError::Temporary(format!("Connection error: {e}"))
+                        } else {
+                            RetryableError::Temporary(format!("Network error: {e}"))
+                        }
+                    })?;
+
+                if response.status().is_success() {
+                    let manifest = response.json().await.map_err(|e| {
+                        if e.is_timeout() {
+                            RetryableError::Temporary(format!("Response body timeout: {e}"))
+                        } else {
+                            RetryableError::Temporary(format!("Failed to parse JSON response: {e}"))
+                        }
+                    })?;
+                    Ok(manifest)
+                } else if response.status().as_u16() == 404 {
+                    Err(RetryableError::Permanent(format!(
+                        "Version {version} not found for package {name}"
+                    )))
+                } else {
+                    log_error(&format!("HTTP error: {response:?}, url: {url}"));
+                    Err(RetryableError::Temporary(format!(
+                        "HTTP error: status={}, url={}",
+                        response.status(),
+                        url
+                    )))
+                }
+            },
+            |err: &RetryableError| matches!(err, RetryableError::Temporary(_)),
         )
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to fetch manifest after retries: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("Failed to fetch version manifest after retries: {e}"))?;
 
-        // Calculate and log request duration
-        let duration = start_time.elapsed();
-        log_verbose(&format!("HTTP request for {name}@{spec} took {duration:?}"));
-
-        // Extract version
-        let version = match manifest.get("version").and_then(|v| v.as_str()) {
-            Some(v) => v.to_string(),
-            None => {
-                log_verbose(&format!("Invalid manifest: {manifest:?}"));
-                return Err(anyhow::anyhow!("Invalid manifest: missing version"));
-            }
-        };
-
-        // Update cache
-        PACKAGE_CACHE
-            .set_manifest(name, spec, &version, manifest.clone())
-            .await;
-
-        Ok((version, manifest))
+        Ok(manifest)
     }
 
-    /// Get complete package information (like npm view)
-    pub async fn get_package_info(&self, name: &str) -> Result<Value> {
-        // Build request URL for complete package info
-        let url = format!("{}/{}", self.base_url, name);
-        log_verbose(&format!("Fetching package info at {url}"));
-
-        // Record start time
-        let start_time = Instant::now();
-
-        // Retry HTTP request with custom strategy
-        let package_info: Value =
-            RetryIf::spawn(
-                create_retry_strategy(),
-                || async {
-                    let response =
-                        self.client.get(&url).send().await.map_err(|e| {
-                            RetryableError::Temporary(format!("Network error: {e}"))
-                        })?;
-
-                    if response.status().is_success() {
-                        let package_info = response.json().await.map_err(|e| {
-                            RetryableError::Temporary(format!("Failed to parse JSON response: {e}"))
-                        })?;
-                        Ok(package_info)
-                    } else if response.status().as_u16() == 404 {
-                        log_verbose(&format!("URL not found {url}"));
-                        Err(RetryableError::Permanent(format!(
-                            "Fetch Error: {}, status: {}",
-                            url,
-                            response.status()
-                        )))
-                    } else {
-                        log_verbose(&format!(
-                            "HTTP error: url: {}, status: {}, retrying",
-                            url,
-                            response.status()
-                        ));
-                        Err(RetryableError::Temporary(format!(
-                            "HTTP error: {}, url: {}",
-                            response.status(),
-                            url
-                        )))
-                    }
-                },
-                |e: &RetryableError| matches!(e, RetryableError::Temporary(_)),
-            )
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to fetch package info after retries: {e}"))?;
-
-        // Calculate and log request duration
-        let duration = start_time.elapsed();
-        log_verbose(&format!(
-            "HTTP request for package info {name} took {duration:?}"
-        ));
-
-        Ok(package_info)
+    /// Normalize ETag value by removing W/ prefix but keeping quotes
+    fn normalize_etag(etag: &str) -> &str {
+        etag.strip_prefix("W/").unwrap_or(etag)
     }
 }
 
-// Global HTTP client access functions
-pub async fn get_package_manifest(name: &str, spec: &str) -> Result<(String, Value)> {
-    REGISTRY_CLIENT.get_package_manifest(name, spec).await
+// Global HTTP client access functions - pure HTTP operations only
+
+/// Fetch complete package information via HTTP
+pub async fn fetch_full_manifest(
+    name: &str,
+    etag: Option<&str>,
+) -> Result<(FullManifest, Option<String>)> {
+    REGISTRY_CLIENT.fetch_full_manifest(name, etag).await
 }
 
-pub async fn get_package_info(name: &str) -> Result<Value> {
-    REGISTRY_CLIENT.get_package_info(name).await
+/// Fetch specific version manifest via HTTP
+pub async fn fetch_version_manifest(name: &str, version: &str) -> Result<VersionManifest> {
+    REGISTRY_CLIENT.fetch_version_manifest(name, version).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_etag() {
+        // Test weak ETag with quotes - remove W/ but keep quotes
+        assert_eq!(
+            RegistryHttpClient::normalize_etag("W/\"d25290f0d7ffbd35a836b75992c1b822628ffd32\""),
+            "\"d25290f0d7ffbd35a836b75992c1b822628ffd32\""
+        );
+
+        // Test strong ETag with quotes - keep as is
+        assert_eq!(
+            RegistryHttpClient::normalize_etag("\"d25290f0d7ffbd35a836b75992c1b822628ffd32\""),
+            "\"d25290f0d7ffbd35a836b75992c1b822628ffd32\""
+        );
+
+        // Test ETag without quotes - keep as is
+        assert_eq!(
+            RegistryHttpClient::normalize_etag("d25290f0d7ffbd35a836b75992c1b822628ffd32"),
+            "d25290f0d7ffbd35a836b75992c1b822628ffd32"
+        );
+    }
 }

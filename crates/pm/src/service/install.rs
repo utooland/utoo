@@ -6,7 +6,6 @@ use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::thread;
 use tokio::sync::Semaphore;
 
 use crate::cmd::rebuild::rebuild;
@@ -28,6 +27,8 @@ use crate::util::logger::{
 use crate::util::save_type::{PackageAction, SaveType};
 
 use super::binary::update_package_binary;
+
+static CONCURRENT_LIMIT: usize = 60;
 
 /// Clean up a single node_modules directory
 async fn clean_node_modules_dir(
@@ -397,12 +398,8 @@ impl InstallService {
         }
 
         // Get the number of logical CPU cores of the system and set it to twice the number of CPU cores
-        let concurrent_limit = thread::available_parallelism()
-            .map(|n| n.get() * 2)
-            .unwrap_or(20)
-            .max(20);
-        log_verbose(&format!("Setting concurrent limit to {concurrent_limit}"));
-        let semaphore = Arc::new(Semaphore::new(concurrent_limit));
+        log_verbose(&format!("Setting concurrent limit to {CONCURRENT_LIMIT}"));
+        let semaphore = Arc::new(Semaphore::new(CONCURRENT_LIMIT));
 
         install_packages(&groups, &cache_dir, root_path, semaphore)
             .await
