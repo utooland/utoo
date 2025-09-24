@@ -86,19 +86,19 @@ mod tests {
         assert!(!matches("1.2.3", "invalid"));
 
         // Test cases from the reported issue - corrected based on actual semver rules
-        assert!(matches("^16.13.1", "16.13.1"));  // Same version should match
+        assert!(matches("^16.13.1", "16.13.1")); // Same version should match
         assert!(!matches("^16.13.1", "18.3.1")); // Major version different, should NOT match
-        assert!(matches("^16.13.1", "16.14.0"));  // Minor version upgrade, should match
-        assert!(!matches("^0.8.0", "0.9.2"));     // For 0.x, minor version different, should NOT match
-        assert!(matches("^0.8.0", "0.8.5"));      // For 0.x, patch version upgrade, should match
-        assert!(matches("^17.0.1", "17.0.2"));    // Patch version upgrade, should match
-        assert!(matches("^17.0.2", "17.0.2"));    // Same version should match
+        assert!(matches("^16.13.1", "16.14.0")); // Minor version upgrade, should match
+        assert!(!matches("^0.8.0", "0.9.2")); // For 0.x, minor version different, should NOT match
+        assert!(matches("^0.8.0", "0.8.5")); // For 0.x, patch version upgrade, should match
+        assert!(matches("^17.0.1", "17.0.2")); // Patch version upgrade, should match
+        assert!(matches("^17.0.2", "17.0.2")); // Same version should match
 
         // Test prerelease versions
         assert!(!matches("^1.0.0", "1.0.0-rc.12")); // Prerelease should NOT satisfy ^1.0.0
         assert!(matches("^1.0.0-rc.10", "1.0.0-rc.12")); // Prerelease can satisfy prerelease range
-        assert!(matches("^1.0.0", "1.0.0"));        // Exact release version should match
-        assert!(matches("^1.0.0", "1.1.0"));        // Higher release version should match
+        assert!(matches("^1.0.0", "1.0.0")); // Exact release version should match
+        assert!(matches("^1.0.0", "1.1.0")); // Higher release version should match
     }
 
     #[test]

@@ -782,7 +782,6 @@ mod tests {
         assert_eq!(manifest4.keywords, None);
     }
 
-
     #[test]
     fn test_jsonparse_real_manifest() {
         // Real jsonparse manifest data (simplified)
