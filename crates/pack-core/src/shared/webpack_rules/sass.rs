@@ -13,6 +13,7 @@ use crate::import_map::get_utoopack_dependency_package;
 pub async fn get_sass_loader_rules(
     project_path: FileSystemPath,
     sass_options: Vc<JsonValue>,
+    pack_path: Vc<RcStr>,
 ) -> Result<Vec<(RcStr, LoaderRuleItem)>> {
     let sass_options = sass_options.await?;
     let Some(mut sass_options) = sass_options.as_object().cloned() else {
@@ -37,9 +38,13 @@ pub async fn get_sass_loader_rules(
 
     let sass_loader = WebpackLoaderItem {
         #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-        loader: get_utoopack_dependency_package(project_path.clone(), rcstr!("sass-loader"))
-            .owned()
-            .await?,
+        loader: get_utoopack_dependency_package(
+            project_path.clone(),
+            rcstr!("sass-loader"),
+            pack_path,
+        )
+        .owned()
+        .await?,
         #[cfg(all(target_family = "wasm", target_os = "unknown"))]
         loader: rcstr!("sass-loader"),
         options: take(
@@ -55,9 +60,13 @@ pub async fn get_sass_loader_rules(
     };
     let resolve_url_loader = WebpackLoaderItem {
         #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-        loader: get_utoopack_dependency_package(project_path.clone(), rcstr!("resolve-url-loader"))
-            .owned()
-            .await?,
+        loader: get_utoopack_dependency_package(
+            project_path.clone(),
+            rcstr!("resolve-url-loader"),
+            pack_path,
+        )
+        .owned()
+        .await?,
         #[cfg(all(target_family = "wasm", target_os = "unknown"))]
         loader: rcstr!("resolve-url-loader"),
         options: take(

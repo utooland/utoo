@@ -13,6 +13,7 @@ use crate::import_map::get_utoopack_dependency_package;
 pub async fn get_less_loader_rules(
     project_path: FileSystemPath,
     less_options: Vc<JsonValue>,
+    pack_path: Vc<RcStr>,
 ) -> Result<Vec<(RcStr, LoaderRuleItem)>> {
     let less_options = less_options.await?;
     let Some(less_options) = less_options.as_object().cloned() else {
@@ -28,9 +29,13 @@ pub async fn get_less_loader_rules(
 
     let less_loader = WebpackLoaderItem {
         #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-        loader: get_utoopack_dependency_package(project_path.clone(), rcstr!("less-loader"))
-            .owned()
-            .await?,
+        loader: get_utoopack_dependency_package(
+            project_path.clone(),
+            rcstr!("less-loader"),
+            pack_path,
+        )
+        .owned()
+        .await?,
         #[cfg(all(target_family = "wasm", target_os = "unknown"))]
         loader: rcstr!("less-loader"),
         options: take(

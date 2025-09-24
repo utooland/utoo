@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, str::FromStr};
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use turbo_rcstr::rcstr;
+use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{NonLocalValue, OperationValue, ResolvedVc, TaskInput, Vc, trace::TraceRawVcs};
 use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::{
@@ -135,12 +135,19 @@ pub async fn webpack_loader_options(
     project_path: FileSystemPath,
     config: Vc<Config>,
     builtin_conditions: BTreeSet<WebpackLoaderBuiltinCondition>,
+    pack_path: Vc<RcStr>,
 ) -> Result<Vc<OptionWebpackLoadersOptions>> {
     let mut rules = config.webpack_rules(project_path.clone()).owned().await?;
 
-    rules.append(&mut get_sass_loader_rules(project_path.clone(), config.sass_config()).await?);
-    rules.append(&mut get_less_loader_rules(project_path.clone(), config.less_config()).await?);
-    rules.append(&mut get_style_loader_rules(project_path.clone(), config.inline_css()).await?);
+    rules.append(
+        &mut get_sass_loader_rules(project_path.clone(), config.sass_config(), pack_path).await?,
+    );
+    rules.append(
+        &mut get_less_loader_rules(project_path.clone(), config.less_config(), pack_path).await?,
+    );
+    rules.append(
+        &mut get_style_loader_rules(project_path.clone(), config.inline_css(), pack_path).await?,
+    );
 
     if rules.is_empty() {
         return Ok(Vc::cell(None));
@@ -151,7 +158,7 @@ pub async fn webpack_loader_options(
             rules: ResolvedVc::cell(rules),
             #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
             loader_runner_package: Some(
-                loader_runner_package_mapping(project_path)
+                loader_runner_package_mapping(project_path, pack_path)
                     .to_resolved()
                     .await?,
             ),
@@ -166,10 +173,13 @@ pub async fn webpack_loader_options(
 }
 
 #[turbo_tasks::function]
-async fn loader_runner_package_mapping(project_path: FileSystemPath) -> Result<Vc<ImportMapping>> {
+async fn loader_runner_package_mapping(
+    project_path: FileSystemPath,
+    pack_path: Vc<RcStr>,
+) -> Result<Vc<ImportMapping>> {
     Ok(
         ImportMapping::Direct(ResolveResult::primary(ResolveResultItem::External {
-            name: get_utoopack_dependency_package(project_path, rcstr!("loader-runner"))
+            name: get_utoopack_dependency_package(project_path, rcstr!("loader-runner"), pack_path)
                 .owned()
                 .await?,
             ty: ExternalType::CommonJs,

@@ -10,7 +10,7 @@ import { findRootDir } from "./find-root";
 import { createHotReloader } from "./hmr";
 import { createSelfSignedCertificate } from "./mkcert";
 import { BundleOptions } from "./types";
-import { blockStdout } from "./util";
+import { blockStdout, getPackPath } from "./util";
 import { compatOptionsFromWebpack, WebpackConfig } from "./webpackCompat";
 import { xcodeProfilingReady } from "./xcodeProfile";
 
@@ -67,7 +67,10 @@ async function serveInternal(
           )
         : undefined,
     },
-    options,
+    {
+      ...options,
+      packPath: getPackPath(),
+    },
     projectPath || process.cwd(),
     rootPath,
   );

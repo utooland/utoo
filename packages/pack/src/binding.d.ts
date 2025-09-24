@@ -9,12 +9,6 @@ export declare class ExternalObject<T> {
     [K: symbol]: T
   }
 }
-export interface TransformOutput {
-  code: string
-  map?: string
-  output?: string
-  diagnostics: Array<string>
-}
 export interface NapiEndpointConfig {
   
 }
@@ -68,6 +62,7 @@ export interface NapiProjectOptions {
   dev: boolean
   /** The build id. */
   buildId: string
+  packPath: string
 }
 /** [NapiProjectOptions] with all fields optional. */
 export interface NapiPartialProjectOptions {
@@ -99,6 +94,7 @@ export interface NapiPartialProjectOptions {
    * debugging/profiling purposes.
    */
   noMangling?: boolean
+  packPath?: string
 }
 export interface NapiDefineEnv {
   client: Array<NapiEnvVar>

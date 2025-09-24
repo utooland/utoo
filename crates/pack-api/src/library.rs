@@ -145,6 +145,7 @@ impl LibraryEndpoint {
             self.project().config(),
             Vc::cell(true),
             Vc::cell(false),
+            self.project().pack_path(),
         ))
     }
 
@@ -155,6 +156,7 @@ impl LibraryEndpoint {
             self.project().mode(),
             self.project().config(),
             self.project().execution_context(),
+            self.project().pack_path(),
         ))
     }
 
@@ -167,6 +169,7 @@ impl LibraryEndpoint {
             self.project().execution_context(),
             // Library project not support watch mode
             Vc::cell(false),
+            self.project().pack_path(),
         )
         .resolve_entries(Vc::upcast(self.library_module_context())))
     }

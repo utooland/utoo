@@ -13,6 +13,7 @@ use crate::{config::OptionalJsonValue, import_map::get_utoopack_dependency_packa
 pub async fn get_style_loader_rules(
     project_path: FileSystemPath,
     inline_css: Vc<OptionalJsonValue>,
+    pack_path: Vc<RcStr>,
 ) -> Result<Vec<(RcStr, LoaderRuleItem)>> {
     let mut rules = Vec::new();
 
@@ -24,9 +25,13 @@ pub async fn get_style_loader_rules(
     };
 
     let style_loader = WebpackLoaderItem {
-        loader: get_utoopack_dependency_package(project_path.clone(), rcstr!("@utoo/style-loader"))
-            .owned()
-            .await?,
+        loader: get_utoopack_dependency_package(
+            project_path.clone(),
+            rcstr!("@utoo/style-loader"),
+            pack_path,
+        )
+        .owned()
+        .await?,
         options: take(
             serde_json::json!({
                 "insert": inline_css_options.get("insert"),
