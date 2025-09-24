@@ -584,7 +584,7 @@ fn create_root_package_info(node: &Arc<Node>) -> Value {
 
     // Ensure all dependency fields are present (even if empty) for validation consistency
     for dep_field in ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"] {
-        if !info.get(dep_field).is_some() {
+        if info.get(dep_field).is_none() {
             info[dep_field] = json!({});
         }
     }
@@ -623,7 +623,7 @@ fn create_non_root_package_info(
 
     // Ensure all dependency fields are present (even if empty) for validation consistency
     for dep_field in ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"] {
-        if !info.get(dep_field).is_some() {
+        if info.get(dep_field).is_none() {
             info[dep_field] = json!({});
         }
     }
