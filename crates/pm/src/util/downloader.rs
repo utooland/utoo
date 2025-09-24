@@ -101,7 +101,9 @@ async fn try_unpack(bytes: &[u8], dest: &Path) -> Result<()> {
     let tar_tgz = GzipDecoder::new(BufReader::new(bytes));
     let mut archive = Archive::new(tar_tgz);
 
-    archive.unpack(dest).await
+    archive
+        .unpack(dest)
+        .await
         .context("Failed to unpack tar.gz archive")?;
 
     set_permissions(dest, Permissions::from_mode(0o755)).await?;
