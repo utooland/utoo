@@ -52,9 +52,9 @@ pub async fn run_script(
             workspace_name,
             workspace_dir.display()
         ));
-        load_package_json_from_path(&workspace_dir)?
+        load_package_json_from_path(&workspace_dir).await?
     } else {
-        load_package_json_from_path(&updated_cwd)?
+        load_package_json_from_path(&updated_cwd).await?
     };
 
     let (scope, name, fullname) =
@@ -141,7 +141,7 @@ async fn need_run(cwd: &Path, workspace_name: &str, script_name: &str) -> Result
     };
 
     // Load package.json from workspace
-    let pkg = match load_package_json_from_path(&workspace_dir) {
+    let pkg = match load_package_json_from_path(&workspace_dir).await {
         Ok(pkg) => pkg,
         Err(_) => {
             log_info(&format!(

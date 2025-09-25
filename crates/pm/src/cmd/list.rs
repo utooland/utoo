@@ -13,7 +13,7 @@ pub async fn list_dependencies(cwd: &Path, package_name: &str) -> Result<()> {
 
     // Find package-lock.json file
     let lock_file_path = cwd.join("package-lock.json");
-    if !lock_file_path.exists() {
+    if !tokio::fs::try_exists(&lock_file_path).await? {
         return Err(anyhow::anyhow!(
             "package-lock.json not found in current directory"
         ));

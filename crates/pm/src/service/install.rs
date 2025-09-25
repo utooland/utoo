@@ -163,7 +163,7 @@ async fn clean_unused_packages(
                     }
                     // Recursively check nested node_modules
                     let nested_node_modules = pkg_dir.join("node_modules");
-                    if nested_node_modules.exists() {
+                    if tokio::fs::try_exists(&nested_node_modules).await? {
                         find_and_clean(&nested_node_modules, cwd, valid_packages).await?;
                     }
                 }
@@ -190,7 +190,7 @@ async fn clean_deps(groups: &HashMap<usize, Vec<(String, Package)>>, cwd: &Path)
     let workspaces = workspace::find_workspaces(cwd).await?;
     for (_, path, _) in workspaces {
         let workspace_node_modules = path.join("node_modules");
-        if workspace_node_modules.exists() {
+        if tokio::fs::try_exists(&workspace_node_modules).await? {
             node_modules_dirs.push(workspace_node_modules.clone());
             log_verbose(&format!(
                 "add workspace node_modules: {:?}",
@@ -234,7 +234,7 @@ pub async fn install_packages(
                             continue;
                         }
                         log_verbose(&format!("Attempting to link from {resolved} to {path}"));
-                        if let Err(e) = link(Path::new(&resolved), Path::new(&path)) {
+                        if let Err(e) = link(Path::new(&resolved), Path::new(&path)).await {
                             log_verbose(&format!(
                                 "Link failed: source={resolved}, target={path}, error={e}"
                             ));
@@ -262,7 +262,7 @@ pub async fn install_packages(
                     let cache_path = cache_dir.join(format!("{name}/{version}"));
                     let cache_flag_path = cache_dir.join(format!("{name}/{version}/_resolved"));
                     let cwd_clone = cwd.to_path_buf();
-                    let should_resolve = !cache_flag_path.exists();
+                    let should_resolve = !tokio::fs::try_exists(&cache_flag_path).await?;
                     let semaphore = Arc::clone(&semaphore);
 
                     let task = tokio::spawn(async move {
@@ -380,11 +380,11 @@ impl InstallService {
         ensure_package_lock(root_path).await?;
 
         // load package-lock.json
-        let package_lock: PackageLock = serde_json::from_reader(
-            std::fs::File::open(root_path.join("package-lock.json"))
-                .context("Failed to open package-lock.json")?,
-        )
-        .map_err(|e| anyhow::anyhow!("Failed to parse package-lock.json: {}", e))?;
+        let package_lock_content = tokio::fs::read_to_string(root_path.join("package-lock.json"))
+            .await
+            .context("Failed to read package-lock.json")?;
+        let package_lock: PackageLock = serde_json::from_str(&package_lock_content)
+            .map_err(|e| anyhow::anyhow!("Failed to parse package-lock.json: {}", e))?;
 
         let cache_dir = get_cache_dir();
 
@@ -437,6 +437,7 @@ impl InstallService {
 
         // Create package info from path
         let package_info = PackageInfo::from_path(&package_path)
+            .await
             .context("Failed to create package info from path")?;
 
         // Get global bin directory using the common helper

@@ -49,7 +49,7 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
     let _guard = lock.lock().await;
 
     let resolved_path = dest.join("_resolved");
-    if resolved_path.exists() {
+    if tokio::fs::try_exists(&resolved_path).await? {
         log_verbose(&format!(
             "Download skipped, already resolved: {}",
             dest.display()

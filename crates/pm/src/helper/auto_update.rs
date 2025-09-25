@@ -137,7 +137,7 @@ async fn execute_update(version: &str) -> Result<()> {
 
 /// Fast remote version check - short timeout, quick failure
 async fn check_remote_version_fast() -> Result<VersionCache> {
-    let registry_url = format!("{}/utoo/latest", get_registry());
+    let registry_url = format!("{}/utoo/latest", get_registry().await);
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_millis(1000)) // 1 second timeout
         .build()
@@ -306,8 +306,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_save_and_read_version_cache() -> Result<()> {
+    #[tokio::test]
+    async fn test_save_and_read_version_cache() -> Result<()> {
         let temp_dir = tempfile::tempdir()?;
         let cache_path = temp_dir.path().join(".utoo").join("remote-version.json");
 
@@ -318,15 +318,15 @@ mod tests {
 
         // Create directory structure
         if let Some(parent) = cache_path.parent() {
-            std::fs::create_dir_all(parent)?;
+            tokio::fs::create_dir_all(parent).await?;
         }
 
         // Test serialization and file writing manually (without using global HOME)
         let content = serde_json::to_string(&cache)?;
-        std::fs::write(&cache_path, &content)?;
+        tokio::fs::write(&cache_path, &content).await?;
 
         // Test reading and deserialization
-        let read_content = std::fs::read_to_string(cache_path)?;
+        let read_content = tokio::fs::read_to_string(cache_path).await?;
         let loaded_cache: VersionCache = serde_json::from_str(&read_content)?;
 
         assert_eq!(loaded_cache.version, cache.version);

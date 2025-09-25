@@ -75,11 +75,17 @@ fn deps_fields_equal(pkg_field: Option<&Value>, lock_field: Option<&Value>) -> b
 
 pub async fn ensure_package_lock(root_path: &Path) -> Result<()> {
     // check package.json exists in cwd
-    if fs::metadata(root_path.join("package.json")).is_err() {
+    if tokio::fs::metadata(root_path.join("package.json"))
+        .await
+        .is_err()
+    {
         return Err(anyhow!("package.json not found"));
     }
     // check package-lock.json exists in cwd
-    if fs::metadata(root_path.join("package-lock.json")).is_err() {
+    if tokio::fs::metadata(root_path.join("package-lock.json"))
+        .await
+        .is_err()
+    {
         log_info("Resolving dependencies");
         build_deps(root_path).await?;
         Ok(())
@@ -124,7 +130,8 @@ pub async fn update_package_json(
 
     // 3. Read package.json once
     let package_json_path = target_dir.join("package.json");
-    let mut package_json: Value = serde_json::from_reader(fs::File::open(&package_json_path)?)?;
+    let package_json_content = tokio::fs::read_to_string(&package_json_path).await?;
+    let mut package_json: Value = serde_json::from_str(&package_json_content)?;
 
     let dep_field = match save_type {
         SaveType::Dev => "devDependencies",
@@ -161,10 +168,11 @@ pub async fn update_package_json(
     }
 
     // 6. Write back to package.json once
-    fs::write(
+    tokio::fs::write(
         &package_json_path,
         serde_json::to_string_pretty(&package_json)?,
-    )?;
+    )
+    .await?;
 
     Ok(())
 }
@@ -212,7 +220,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
     let cache_flag_path = cache_dir.join(format!("{}/{}/_resolved", name, resolved.version));
 
     // Download if not cached
-    if !cache_flag_path.exists() {
+    if !tokio::fs::try_exists(&cache_flag_path).await? {
         log_verbose(&format!(
             "Downloading {} to {}",
             tarball_url,
@@ -227,7 +235,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
         // so we need to copy the file to the package directory to avoid effect other packages
         if resolved.manifest.get("hasInstallScript") == Some(&json!(true)) {
             let has_install_script_flag_path = cache_path.join("_hasInstallScript");
-            fs::write(has_install_script_flag_path, "")?;
+            tokio::fs::write(has_install_script_flag_path, "").await?;
         }
     }
 
@@ -243,7 +251,8 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
 
     // Remove devDependencies from package.json
     let package_json_path = package_path.join("package.json");
-    let mut package_json: Value = serde_json::from_reader(fs::File::open(&package_json_path)?)?;
+    let package_json_content = tokio::fs::read_to_string(&package_json_path).await?;
+    let mut package_json: Value = serde_json::from_str(&package_json_content)?;
 
     // Remove specified dependency fields and scripts.prepare
     let package_obj = package_json.as_object_mut().unwrap();
@@ -258,10 +267,11 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
     }
 
     // Write back the modified package.json
-    fs::write(
+    tokio::fs::write(
         &package_json_path,
         serde_json::to_string_pretty(&package_json)?,
-    )?;
+    )
+    .await?;
 
     log_verbose(&format!("package_path: {}", package_path.to_string_lossy()));
     Ok(package_path)
@@ -290,8 +300,8 @@ pub struct InvalidDependency {
 }
 
 pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
-    let pkg_file = load_package_json_from_path(root_path)?;
-    let lock_file = load_package_lock_json_from_path(root_path)?;
+    let pkg_file = load_package_json_from_path(root_path).await?;
+    let lock_file = load_package_lock_json_from_path(root_path).await?;
 
     // get packages in package-lock.json
     let packages = lock_file
@@ -323,7 +333,7 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
         };
 
         // check dependencies whether changed
-        for (dep_field, _is_optional) in get_dep_types() {
+        for (dep_field, _is_optional) in get_dep_types().await {
             if !deps_fields_equal(pkg.get(dep_field), lock.get(dep_field)) {
                 let name = if path.is_empty() { "root" } else { &path };
                 log_warning(&format!(
@@ -353,7 +363,7 @@ pub async fn validate_deps(
 
     if let Some(packages) = pkgs_in_pkg_lock.as_object() {
         for (pkg_path, pkg_info) in packages {
-            for (dep_field, is_optional) in get_dep_types() {
+            for (dep_field, is_optional) in get_dep_types().await {
                 if let Some(dependencies) = pkg_info.get(dep_field).and_then(|d| d.as_object()) {
                     for (dep_name, req_version) in dependencies {
                         let req_version_str = req_version.as_str().unwrap_or_default();
@@ -474,8 +484,8 @@ pub async fn validate_deps(
     Ok(invalid_deps)
 }
 
-fn get_dep_types() -> Vec<(&'static str, bool)> {
-    let legacy_peer_deps = get_legacy_peer_deps();
+async fn get_dep_types() -> Vec<(&'static str, bool)> {
+    let legacy_peer_deps = get_legacy_peer_deps().await;
 
     if legacy_peer_deps {
         vec![

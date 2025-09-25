@@ -18,7 +18,6 @@ use std::os::unix::ffi::OsStrExt;
 mod linux_clone {
     use crate::util::logger::log_verbose;
     use anyhow::Result;
-    use std::fs::File;
     use std::os::unix::io::AsRawFd;
     use std::path::Path;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -42,18 +41,28 @@ mod linux_clone {
 
     // Copy a single file using FICLONE
     async fn copy_file_with_ficlone(src: &Path, dst: &Path) -> Result<()> {
-        let src_file = File::open(src)?;
-        let dst_file = File::create(dst)?;
+        let src_file = tokio::fs::File::open(src).await?;
+        let dst_file = tokio::fs::File::create(dst).await?;
 
         let src_fd = src_file.as_raw_fd();
         let dst_fd = dst_file.as_raw_fd();
 
-        let ret = unsafe { libc::ioctl(dst_fd, libc::FICLONE, src_fd) };
+        // Use spawn_blocking to avoid blocking the async runtime
+        let result = tokio::task::spawn_blocking(move || {
+            let ret = unsafe { libc::ioctl(dst_fd, libc::FICLONE, src_fd) };
 
-        if ret < 0 {
-            let err = std::io::Error::last_os_error();
+            if ret < 0 {
+                let err = std::io::Error::last_os_error();
+                Err(err)
+            } else {
+                Ok(())
+            }
+        })
+        .await?;
+
+        if let Err(e) = result {
             FICLONE_SUPPORTED.store(false, Ordering::Relaxed);
-            return Err(err).map_err(|e| anyhow::anyhow!("FICLONE not supported: {}", e));
+            return Err(anyhow::anyhow!("FICLONE not supported: {}", e));
         }
 
         Ok(())
@@ -61,30 +70,34 @@ mod linux_clone {
 
     // Copy a single file using copy_file_range
     async fn copy_file_with_range(src: &Path, dst: &Path) -> Result<()> {
-        let src_file = File::open(src)?;
-        let dst_file = File::create(dst)?;
+        let src_file = tokio::fs::File::open(src).await?;
+        let dst_file = tokio::fs::File::create(dst).await?;
 
         let src_fd = src_file.as_raw_fd();
         let dst_fd = dst_file.as_raw_fd();
 
-        let metadata = src_file.metadata()?;
-        let mut offset: i64 = 0;
+        let metadata = src_file.metadata().await?;
+        let file_size = metadata.len() as usize;
 
-        let ret = unsafe {
-            libc::copy_file_range(
-                src_fd,
-                &mut offset,
-                dst_fd,
-                &mut offset,
-                metadata.len() as usize,
-                0,
-            )
-        };
+        // Use spawn_blocking to avoid blocking the async runtime
+        let result = tokio::task::spawn_blocking(move || {
+            let mut offset: i64 = 0;
+            let ret = unsafe {
+                libc::copy_file_range(src_fd, &mut offset, dst_fd, &mut offset, file_size, 0)
+            };
 
-        if ret < 0 {
-            let err = std::io::Error::last_os_error();
+            if ret < 0 {
+                let err = std::io::Error::last_os_error();
+                Err(err)
+            } else {
+                Ok(())
+            }
+        })
+        .await?;
+
+        if let Err(e) = result {
             COPY_FILE_RANGE_SUPPORTED.store(false, Ordering::Relaxed);
-            return Err(err).map_err(|e| anyhow::anyhow!("copy_file_range not supported: {}", e));
+            return Err(anyhow::anyhow!("copy_file_range not supported: {}", e));
         }
 
         Ok(())
@@ -113,7 +126,9 @@ mod linux_clone {
         }
 
         // Fallback to regular copy
-        let _ = fs::copy(src, dst).await.map_err(anyhow::Error::from);
+        tokio::fs::copy(src, dst)
+            .await
+            .map_err(anyhow::Error::from)?;
         Ok(())
     }
 
@@ -196,7 +211,7 @@ mod linux_clone {
 }
 
 pub async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
-    if !dst.exists() {
+    if !tokio::fs::try_exists(dst).await? {
         return Ok(false);
     }
 
@@ -331,7 +346,7 @@ pub async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
         src.to_path_buf()
     };
 
-    if dst.exists() {
+    if tokio::fs::try_exists(dst).await? {
         let is_valid = validate_directory(&real_src, dst)
             .await
             .unwrap_or_else(|e| {
@@ -623,8 +638,8 @@ mod tests {
     #[cfg(target_os = "linux")]
     mod linux_tests {
         use super::*;
-        use std::fs::File;
-        use std::io::Read;
+        use tokio::fs::File;
+        use tokio::io::AsyncReadExt;
 
         #[tokio::test]
         async fn test_clone_dir_basic() -> Result<()> {
@@ -652,11 +667,17 @@ mod tests {
 
             // Verify file contents
             let mut content = String::new();
-            File::open(dst_dir.join("file1.txt"))?.read_to_string(&mut content)?;
+            File::open(dst_dir.join("file1.txt"))
+                .await?
+                .read_to_string(&mut content)
+                .await?;
             assert_eq!(content, "content1");
 
             content.clear();
-            File::open(dst_dir.join("subdir/file3.txt"))?.read_to_string(&mut content)?;
+            File::open(dst_dir.join("subdir/file3.txt"))
+                .await?
+                .read_to_string(&mut content)
+                .await?;
             assert_eq!(content, "content3");
 
             Ok(())
@@ -688,7 +709,10 @@ mod tests {
 
             // Verify deep file content
             let mut content = String::new();
-            File::open(dst_dir.join("dir1/dir2/dir3/file.txt"))?.read_to_string(&mut content)?;
+            File::open(dst_dir.join("dir1/dir2/dir3/file.txt"))
+                .await?
+                .read_to_string(&mut content)
+                .await?;
             assert_eq!(content, "deep content");
 
             Ok(())

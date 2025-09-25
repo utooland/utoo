@@ -4,6 +4,7 @@ use std::path::Path;
 
 pub async fn rebuild(root_path: &Path) -> Result<()> {
     let packages = PackageService::collect_packages(root_path)
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to collect packages: {}", e))?;
 
     let execution_queues = PackageService::create_execution_queues(packages)

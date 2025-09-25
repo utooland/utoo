@@ -11,7 +11,7 @@ use crate::util::{
 
 pub async fn find_workspaces(root_path: &Path) -> Result<Vec<(String, PathBuf, Value)>> {
     let mut workspaces = Vec::new();
-    let pkg = load_package_json_from_path(root_path)?;
+    let pkg = load_package_json_from_path(root_path).await?;
 
     // load workspaces config
     if let Some(workspaces_config) = pkg.get("workspaces") {
@@ -36,7 +36,7 @@ pub async fn find_workspaces(root_path: &Path) -> Result<Vec<(String, PathBuf, V
                                 Ok(path) => {
                                     // load package.json in workspace
                                     let workspace_pkg =
-                                        read_json_file::<Value>(&path).context(format!(
+                                        read_json_file::<Value>(&path).await.context(format!(
                                             "Failed to parse workspace package.json at {}",
                                             path.display()
                                         ))?;
@@ -125,14 +125,16 @@ async fn find_closest_parent_pkg(start_dir: &Path) -> Result<Option<(PathBuf, Va
 
     while let Some(parent) = current.parent() {
         let package_json_path = parent.join("package.json");
-        if package_json_path.exists() {
-            let pkg = read_json_file::<Value>(&package_json_path).map_err(|e| {
-                anyhow::anyhow!(
-                    "Failed to read package.json at {}: {}",
-                    package_json_path.display(),
-                    e
-                )
-            })?;
+        if tokio::fs::try_exists(&package_json_path).await? {
+            let pkg = read_json_file::<Value>(&package_json_path)
+                .await
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to read package.json at {}: {}",
+                        package_json_path.display(),
+                        e
+                    )
+                })?;
             return Ok(Some((parent.to_path_buf(), pkg)));
         }
         current = parent.to_path_buf();
@@ -153,7 +155,7 @@ async fn find_closest_parent_pkg(start_dir: &Path) -> Result<Option<(PathBuf, Va
 pub async fn find_root_path(cwd: &Path) -> Result<PathBuf> {
     // Find closet package.json location
     let project_path = find_project_path(cwd).await?;
-    let project_pkg = load_package_json_from_path(&project_path)?;
+    let project_pkg = load_package_json_from_path(&project_path).await?;
 
     // is workspace root, return project path directly
     if is_workspace_root(&project_pkg).await {
@@ -219,7 +221,7 @@ pub async fn update_cwd_to_project(cwd: &Path) -> Result<PathBuf> {
 pub async fn find_project_path(cwd: &Path) -> Result<PathBuf> {
     // First check if current directory has package.json
     let current_package_json = cwd.join("package.json");
-    if current_package_json.exists() {
+    if tokio::fs::try_exists(&current_package_json).await? {
         return Ok(cwd.to_path_buf());
     }
 

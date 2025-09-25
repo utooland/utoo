@@ -18,7 +18,7 @@ impl ScriptService {
             paths
                 .split(':')
                 .map(|dir| Path::new(dir).join("node-gyp"))
-                .any(|path| path.exists())
+                .any(|path| std::path::Path::new(&path).exists())
         } else {
             false
         }
@@ -49,7 +49,7 @@ impl ScriptService {
 
     pub fn is_node_gyp_pkg(package: &PackageInfo) -> bool {
         // https://hitu.antgroup-inc.cn/packages/@npmcli/node-gyp/files/lib/index.js#L6:L6
-        package.path.join("binding.gyp").exists()
+        std::path::Path::new(&package.path.join("binding.gyp")).exists()
     }
 
     pub async fn execute_script(
@@ -71,7 +71,7 @@ impl ScriptService {
                 Self::ensure_node_gyp().await?;
             }
 
-            let bin_paths = Self::collect_bin_paths(package);
+            let bin_paths = Self::collect_bin_paths(package).await?;
             let env_path = Self::build_path_env(&bin_paths);
 
             let mut cmd = Command::new("sh");
@@ -164,21 +164,21 @@ impl ScriptService {
         Ok(())
     }
 
-    fn collect_bin_paths(package: &PackageInfo) -> Vec<PathBuf> {
+    async fn collect_bin_paths(package: &PackageInfo) -> Result<Vec<PathBuf>> {
         let mut bin_paths = Vec::new();
         let mut current_path = Some(package.path.as_path());
 
         while let Some(path) = current_path {
             let bin_path = path.join("node_modules/.bin");
-            if bin_path.exists()
-                && let Ok(absolute_path) = std::fs::canonicalize(&bin_path)
+            if tokio::fs::try_exists(&bin_path).await?
+                && let Ok(absolute_path) = tokio::fs::canonicalize(&bin_path).await
             {
                 bin_paths.push(absolute_path);
             }
             current_path = path.parent();
         }
 
-        bin_paths
+        Ok(bin_paths)
     }
 
     fn build_path_env(bin_paths: &[PathBuf]) -> String {
@@ -222,7 +222,7 @@ impl ScriptService {
             script_name
         ));
 
-        let bin_paths = Self::collect_bin_paths(package);
+        let bin_paths = Self::collect_bin_paths(package).await?;
         let env_path = Self::build_path_env(&bin_paths);
 
         let cmd_content = match script_args.is_empty() {
@@ -346,8 +346,8 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_collect_bin_paths_with_local_node_modules() {
+    #[tokio::test]
+    async fn test_collect_bin_paths_with_local_node_modules() {
         let temp_dir = tempdir().unwrap();
         let package_path = temp_dir.path();
 
@@ -374,7 +374,7 @@ mod tests {
             version: "1.0.0".to_string(),
         };
 
-        let bin_paths = ScriptService::collect_bin_paths(&package);
+        let bin_paths = ScriptService::collect_bin_paths(&package).await.unwrap();
         assert!(!bin_paths.is_empty());
         assert!(bin_paths[0].ends_with("node_modules/.bin"));
     }
