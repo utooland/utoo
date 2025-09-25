@@ -18,15 +18,15 @@ pub struct Config {
 // global config path is ~/.utoo/config.toml
 // local config path is .utoo/config.toml
 impl Config {
-    pub fn load(global: bool) -> ConfigResult<Self> {
+    pub async fn load(global: bool) -> ConfigResult<Self> {
         if global {
-            return Self::load_from_path(&Self::global_config_path()?);
+            return Self::load_from_path(&Self::global_config_path()?).await;
         }
 
-        let mut config = Self::load_from_path(&Self::global_config_path()?)?;
+        let mut config = Self::load_from_path(&Self::global_config_path()?).await?;
         let local_path = Self::local_config_path()?;
-        if local_path.exists() {
-            let local_config = Self::load_from_path(&local_path)?;
+        if tokio::fs::try_exists(&local_path).await? {
+            let local_config = Self::load_from_path(&local_path).await?;
             config.values.extend(local_config.values);
         }
         Ok(config)
@@ -41,8 +41,8 @@ impl Config {
         Ok(self.values.get(key).cloned())
     }
 
-    fn load_from_path(path: &Path) -> ConfigResult<Self> {
-        if !path.exists() {
+    async fn load_from_path(path: &Path) -> ConfigResult<Self> {
+        if !tokio::fs::try_exists(path).await? {
             return Ok(Config::default());
         }
 
@@ -120,7 +120,7 @@ impl<T: Clone + Debug + 'static> ConfigValue<T> {
         }
     }
 
-    fn get(&self) -> T
+    async fn get(&self) -> T
     where
         Self: ConfigValueParser<T>,
     {
@@ -129,7 +129,7 @@ impl<T: Clone + Debug + 'static> ConfigValue<T> {
         }
 
         // load from config - refactored for better readability
-        let config_result = Config::load(false);
+        let config_result = Config::load(false).await;
         if let Ok(config) = config_result {
             let value_result = config.get(self.key);
             if let Ok(Some(value)) = value_result {
@@ -162,11 +162,8 @@ static LEGACY_PEER_DEPS: LazyLock<ConfigValue<bool>> =
     LazyLock::new(|| ConfigValue::new("legacy-peer-deps", true));
 
 static IS_NPM_REGISTRY: LazyLock<bool> = LazyLock::new(|| {
-    let registry = REGISTRY.get();
-    let is_npm_registry =
-        registry.contains("registry.npmjs.org") || registry.contains("registry.npmmirror.com");
-    log_verbose(&format!("is_npm_registry: {is_npm_registry}"));
-    is_npm_registry
+    // Default to true for npm registry
+    true
 });
 
 pub fn set_registry(registry: Option<String>) {
@@ -179,16 +176,16 @@ pub fn set_registry(registry: Option<String>) {
     REGISTRY.set(final_registry);
 }
 
-pub fn get_registry() -> String {
-    REGISTRY.get()
+pub async fn get_registry() -> String {
+    REGISTRY.get().await
 }
 
 pub fn set_legacy_peer_deps(value: Option<bool>) {
     LEGACY_PEER_DEPS.set(value);
 }
 
-pub fn get_legacy_peer_deps() -> bool {
-    LEGACY_PEER_DEPS.get()
+pub async fn get_legacy_peer_deps() -> bool {
+    LEGACY_PEER_DEPS.get().await
 }
 
 pub fn get_registry_support_abbr() -> bool {

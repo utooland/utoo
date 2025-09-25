@@ -11,10 +11,10 @@ pub async fn find_binary(command: &str) -> Result<Option<PathBuf>> {
 /// Find a binary in the utoo cache directory
 /// Logic:
 /// Return the first executable file found in the bin directory
-pub fn find_binary_in_cache(package_cache_dir: &Path) -> Result<Option<PathBuf>> {
+pub async fn find_binary_in_cache(package_cache_dir: &Path) -> Result<Option<PathBuf>> {
     let bin_dir = package_cache_dir.join("bin");
 
-    if !bin_dir.exists() {
+    if !tokio::fs::try_exists(&bin_dir).await? {
         return Ok(None);
     }
 
@@ -40,7 +40,7 @@ async fn find_binary_in_hierarchy(start_path: &Path, command: &str) -> Result<Op
         let bin_path = current_path.join("node_modules").join(".bin").join(command);
 
         // Check if the binary exists and is executable
-        if bin_path.exists() {
+        if tokio::fs::try_exists(&bin_path).await? {
             return Ok(Some(bin_path));
         }
 

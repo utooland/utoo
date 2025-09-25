@@ -5,7 +5,7 @@ use std::time::Instant;
 use tokio_retry::RetryIf;
 
 use crate::model::manifest::{FullManifest, VersionManifest};
-use crate::util::config::{get_registry, get_registry_support_abbr};
+use crate::util::config::get_registry_support_abbr;
 use crate::util::logger::{log_error, log_verbose};
 use crate::util::retry::{RetryableError, build_dns_cached_client, create_retry_strategy};
 
@@ -16,7 +16,7 @@ pub struct RegistryHttpClient {
 
 static REGISTRY_CLIENT: Lazy<RegistryHttpClient> = Lazy::new(|| {
     let client = build_dns_cached_client();
-    let base_url = get_registry().trim_end_matches('/').to_string();
+    let base_url = "https://registry.npmjs.org".to_string(); // Default registry
     log_verbose(&format!(
         "Initialized HTTP client with base URL: {base_url}"
     ));

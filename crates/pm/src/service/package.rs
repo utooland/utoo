@@ -16,7 +16,7 @@ pub struct PackageService;
 
 impl PackageService {
     pub async fn process_project_hooks(root_path: &Path) -> Result<()> {
-        let data = load_package_json_from_path(root_path)?;
+        let data = load_package_json_from_path(root_path).await?;
 
         let binding = serde_json::Map::new();
         let scripts = data
@@ -98,9 +98,9 @@ impl PackageService {
         Ok(())
     }
 
-    pub fn collect_packages(root_path: &Path) -> Result<Vec<PackageInfo>> {
+    pub async fn collect_packages(root_path: &Path) -> Result<Vec<PackageInfo>> {
         log_verbose("Collecting packages...");
-        let lock_data = load_package_lock_json_from_path(root_path)?;
+        let lock_data = load_package_lock_json_from_path(root_path).await?;
 
         let mut packages = Vec::new();
         if let Some(deps) = lock_data.get("packages").and_then(|v| v.as_object()) {
@@ -109,7 +109,8 @@ impl PackageService {
                     continue;
                 }
                 if let Some(package) =
-                    Self::process_package_info(&format!("{}/{}", root_path.display(), path), info)?
+                    Self::process_package_info(&format!("{}/{}", root_path.display(), path), info)
+                        .await?
                 {
                     packages.push(package);
                 }
@@ -171,7 +172,7 @@ impl PackageService {
         Ok(queues)
     }
 
-    pub fn process_package_info(path: &str, info: &Value) -> Result<Option<PackageInfo>> {
+    pub async fn process_package_info(path: &str, info: &Value) -> Result<Option<PackageInfo>> {
         let info = match info.as_object() {
             Some(obj) => obj,
             None => return Ok(None),
@@ -215,6 +216,7 @@ impl PackageService {
 
         // parse scripts
         let scripts = Self::read_package_scripts(Path::new(path))
+            .await
             .context(format!("Failed to read scripts for package: {path}"))?;
 
         Ok(Some(PackageInfo {
@@ -248,8 +250,8 @@ impl PackageService {
         false
     }
 
-    fn read_package_scripts(package_path: &Path) -> Result<Scripts> {
-        let data = load_package_json_from_path(package_path)?;
+    async fn read_package_scripts(package_path: &Path) -> Result<Scripts> {
+        let data = load_package_json_from_path(package_path).await?;
 
         let default_scripts = serde_json::Map::new();
         let scripts = data
@@ -334,7 +336,7 @@ impl PackageService {
                 log_verbose(&format!("Linking binary files for {}", package.fullname));
                 for (bin_name, relative_path) in &package.bin_files {
                     let target_path = package.path.join(relative_path);
-                    if !target_path.exists() {
+                    if !tokio::fs::try_exists(&target_path).await? {
                         log_verbose(&format!(
                             "Binary file {} does not exist, skipping",
                             target_path.display()
@@ -359,12 +361,14 @@ impl PackageService {
                             )
                         })?;
 
-                    crate::util::linker::link(&target_path, &link_path).context(format!(
-                        "Failed to create symbolic link for {} (from: {} to: {})",
-                        package.fullname,
-                        target_path.display(),
-                        link_path.display()
-                    ))?;
+                    crate::util::linker::link(&target_path, &link_path)
+                        .await
+                        .context(format!(
+                            "Failed to create symbolic link for {} (from: {} to: {})",
+                            package.fullname,
+                            target_path.display(),
+                            link_path.display()
+                        ))?;
                 }
                 log_verbose(&format!(
                     "Linking binary files for {} successfully",

@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use std::env;
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tokio::fs::OpenOptions;
+use tokio::io::AsyncWriteExt;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use once_cell::sync::{Lazy, OnceCell};
@@ -117,7 +117,7 @@ pub fn log_progress(text: &str) {
     // log_verbose(text);
 }
 
-pub fn write_verbose_logs_to_file() -> Result<String> {
+pub async fn write_verbose_logs_to_file() -> Result<String> {
     abort_progress_bar();
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -135,9 +135,11 @@ pub fn write_verbose_logs_to_file() -> Result<String> {
             .write(true)
             .truncate(true)
             .open(&log_file)
+            .await
             .context("Failed to open log file")?;
 
         file.write_all(logs.join("\n").as_bytes())
+            .await
             .context("Failed to write logs to file")?;
 
         log_error(&format!("Verbose logs have been saved to {log_file}"));
@@ -203,19 +205,19 @@ mod tests {
         assert!(!VERBOSE.load(Ordering::Relaxed));
     }
 
-    #[test]
-    fn test_write_verbose_logs_to_file() -> Result<()> {
+    #[tokio::test]
+    async fn test_write_verbose_logs_to_file() -> Result<()> {
         set_verbose(true);
         log_verbose("Test verbose message");
         log_warning("Test warning message");
         log_error("Test error message");
         log_info("Test info message");
 
-        let log_file = write_verbose_logs_to_file()?;
+        let log_file = write_verbose_logs_to_file().await?;
         assert!(std::path::Path::new(&log_file).exists());
 
         // Clean up
-        std::fs::remove_file(log_file)?;
+        tokio::fs::remove_file(log_file).await?;
         Ok(())
     }
 

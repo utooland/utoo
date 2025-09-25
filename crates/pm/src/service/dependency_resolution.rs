@@ -15,7 +15,7 @@ impl DependencyResolutionService {
         let mut ruborist = Ruborist::new(cwd);
         ruborist.build_ideal_tree().await?;
 
-        let pkg_file = load_package_json_from_path(cwd)?;
+        let pkg_file = load_package_json_from_path(cwd).await?;
 
         const MAX_RETRIES: u32 = 5;
         let mut retry_count = 0;
@@ -76,9 +76,11 @@ impl DependencyResolutionService {
         let temp_path = cwd.join("workspace.json.tmp");
         let target_path = cwd.join("workspace.json");
 
-        std::fs::write(&temp_path, serde_json::to_string_pretty(&workspace_file)?)
+        tokio::fs::write(&temp_path, serde_json::to_string_pretty(&workspace_file)?)
+            .await
             .context("Failed to write temporary workspace.json")?;
-        std::fs::rename(temp_path, target_path)
+        tokio::fs::rename(temp_path, target_path)
+            .await
             .context("Failed to rename temporary workspace.json")?;
 
         Ok(())

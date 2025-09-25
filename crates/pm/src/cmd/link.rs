@@ -12,12 +12,14 @@ pub async fn link_current_to_global(prefix: Option<&str>) -> Result<()> {
     let project_path = update_cwd_to_project(&cwd).await?;
 
     // Create package info from path
-    let package_info = PackageInfo::from_path(&project_path).with_context(|| {
-        format!(
-            "Failed to parse package info from path: {}",
-            project_path.display()
-        )
-    })?;
+    let package_info = PackageInfo::from_path(&project_path)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to parse package info from path: {}",
+                project_path.display()
+            )
+        })?;
 
     // Install dependencies
     install(false, &project_path).await.map_err(|e| {
@@ -26,13 +28,15 @@ pub async fn link_current_to_global(prefix: Option<&str>) -> Result<()> {
 
     let global_package_path = get_global_package_dir(prefix)?.join(&package_info.name);
     // link local project to global package
-    link(&project_path, &global_package_path).with_context(|| {
-        format!(
-            "Failed to link local project to global package: {} -> {}",
-            project_path.display(),
-            global_package_path.display()
-        )
-    })?;
+    link(&project_path, &global_package_path)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to link local project to global package: {} -> {}",
+                project_path.display(),
+                global_package_path.display()
+            )
+        })?;
     // If the package has binary files, also link them to global bin directory
     if package_info.has_bin_files() {
         let global_bin_dir = global_package_path.join("bin");
@@ -58,22 +62,26 @@ pub async fn link_global_to_local(package_name: &str, prefix: Option<&str>) -> R
     let global_package_path = get_global_package_dir(prefix)?.join(package_name);
 
     // Create package info from path
-    let package_info = PackageInfo::from_path(&global_package_path).with_context(|| {
-        format!(
-            "Failed to parse package info from path: {}",
-            global_package_path.display()
-        )
-    })?;
+    let package_info = PackageInfo::from_path(&global_package_path)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to parse package info from path: {}",
+                global_package_path.display()
+            )
+        })?;
 
     // Create symlink from global package to local project
     let local_link_path = project_path.join("node_modules/").join(package_name);
-    link(&global_package_path, &local_link_path).with_context(|| {
-        format!(
-            "Failed to link global package to local: {} -> {}",
-            global_package_path.display(),
-            local_link_path.display()
-        )
-    })?;
+    link(&global_package_path, &local_link_path)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to link global package to local: {} -> {}",
+                global_package_path.display(),
+                local_link_path.display()
+            )
+        })?;
 
     log_verbose(&format!(
         "link global package to local: {} -> {}",

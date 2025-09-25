@@ -30,7 +30,7 @@ use once_cell::sync::Lazy;
 static CONCURRENCY_LIMITER: Lazy<Arc<Semaphore>> = Lazy::new(|| Arc::new(Semaphore::new(100)));
 
 pub async fn build_deps(root: Arc<Node>) -> Result<()> {
-    let legacy_peer_deps = get_legacy_peer_deps();
+    let legacy_peer_deps = get_legacy_peer_deps().await;
     log_verbose(&format!(
         "going to build deps for {root}, legacy_peer_deps: {legacy_peer_deps}"
     ));
@@ -353,7 +353,7 @@ impl Ruborist {
 
     async fn init_tree(&mut self) -> Result<Arc<Node>> {
         // load package.json
-        let pkg = load_package_json_from_path(&self.path)?;
+        let pkg = load_package_json_from_path(&self.path).await?;
 
         // create root node
         let root = Node::new_root(
@@ -367,7 +367,7 @@ impl Ruborist {
         self.init_workspaces(root.clone()).await?;
 
         // collect deps type
-        let legacy_peer_deps = get_legacy_peer_deps();
+        let legacy_peer_deps = get_legacy_peer_deps().await;
         let dep_types = if legacy_peer_deps {
             vec![
                 ("dependencies", EdgeType::Prod),
@@ -465,7 +465,7 @@ impl Ruborist {
             ));
 
             // Process workspace dependencies
-            let legacy_peer_deps = get_legacy_peer_deps();
+            let legacy_peer_deps = get_legacy_peer_deps().await;
             let dep_types = if legacy_peer_deps {
                 vec![
                     ("devDependencies", EdgeType::Dev),

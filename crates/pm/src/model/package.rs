@@ -75,9 +75,9 @@ impl PackageInfo {
         self.has_bin_files() || self.scripts.has_any_script()
     }
 
-    pub fn from_path(path: &Path) -> Result<Self> {
+    pub async fn from_path(path: &Path) -> Result<Self> {
         // Read package.json
-        let data = load_package_json_from_path(path)?;
+        let data = load_package_json_from_path(path).await?;
 
         // Parse package name
         let name = data["name"]
@@ -156,7 +156,9 @@ impl PackageInfo {
                 .map_err(|e| anyhow::anyhow!("Failed to ensure binary is executable: {}", e))?;
 
             // Create symbolic link
-            link(&target_path, &link_path).context("Failed to create symbolic link")?;
+            link(&target_path, &link_path)
+                .await
+                .context("Failed to create symbolic link")?;
         }
 
         Ok(())
@@ -185,8 +187,8 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    #[test]
-    fn test_package_info_from_path() {
+    #[tokio::test]
+    async fn test_package_info_from_path() {
         // Create a temporary directory
         let temp_dir = TempDir::new().unwrap();
         let package_dir = temp_dir.path().join("test-package");
@@ -217,7 +219,7 @@ mod tests {
         .unwrap();
 
         // Test PackageInfo::from_path
-        let package_info = PackageInfo::from_path(&package_dir).unwrap();
+        let package_info = PackageInfo::from_path(&package_dir).await.unwrap();
 
         assert_eq!(package_info.name, "test-package");
         assert_eq!(package_info.version, "1.0.0");
@@ -229,8 +231,8 @@ mod tests {
         assert!(package_info.scripts.postinstall.is_some());
     }
 
-    #[test]
-    fn test_package_info_from_path_with_scope() {
+    #[tokio::test]
+    async fn test_package_info_from_path_with_scope() {
         // Create a temporary directory
         let temp_dir = TempDir::new().unwrap();
         let package_dir = temp_dir.path().join("@scope/test-package");
@@ -245,14 +247,14 @@ mod tests {
         fs::write(package_dir.join("package.json"), package_json).unwrap();
 
         // Test PackageInfo::from_path
-        let package_info = PackageInfo::from_path(&package_dir).unwrap();
+        let package_info = PackageInfo::from_path(&package_dir).await.unwrap();
 
         assert_eq!(package_info.name, "@scope/test-package");
         assert_eq!(package_info.scope, Some("@scope".to_string()));
     }
 
-    #[test]
-    fn test_package_info_from_path_invalid_json() {
+    #[tokio::test]
+    async fn test_package_info_from_path_invalid_json() {
         // Create a temporary directory
         let temp_dir = TempDir::new().unwrap();
         let package_dir = temp_dir.path().join("test-package");
@@ -262,7 +264,7 @@ mod tests {
         fs::write(package_dir.join("package.json"), "invalid json").unwrap();
 
         // Test PackageInfo::from_path with invalid JSON
-        let result = PackageInfo::from_path(&package_dir);
+        let result = PackageInfo::from_path(&package_dir).await;
         assert!(result.is_err());
     }
 }

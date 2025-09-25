@@ -235,7 +235,7 @@ async fn main() -> Result<()> {
 
     // Check for help flag
     if args.len() > 1 && (args[1] == "-h" || args[1] == "--help") {
-        let config = crate::util::config::Config::load(false)?;
+        let config = crate::util::config::Config::load(false).await?;
         let config_service = crate::service::config::ConfigService::new(config);
         config_service.print_help()?;
         return Ok(());
@@ -270,7 +270,7 @@ async fn main() -> Result<()> {
         Some(Commands::Clean { pattern }) => {
             if let Err(e) = clean(&pattern).await {
                 log_error(&e.to_string());
-                let _ = write_verbose_logs_to_file();
+                let _ = write_verbose_logs_to_file().await;
                 process::exit(1);
             } else {
                 log_time_end(&format!("{pattern} cleaned"));
@@ -292,7 +292,7 @@ async fn main() -> Result<()> {
                     for spec in specs.iter() {
                         if let Err(e) = install_global_package(spec, prefix.as_deref()).await {
                             log_error(&e.to_string());
-                            let _ = write_verbose_logs_to_file();
+                            let _ = write_verbose_logs_to_file().await;
                             process::exit(1);
                         }
                     }
@@ -314,7 +314,7 @@ async fn main() -> Result<()> {
                     .await
                     {
                         log_error(&e.to_string());
-                        let _ = write_verbose_logs_to_file();
+                        let _ = write_verbose_logs_to_file().await;
                         process::exit(1);
                     }
                     // Log install result with correct singular/plural form in one line
@@ -329,7 +329,7 @@ async fn main() -> Result<()> {
                 let root_path = update_cwd_to_root(&cwd).await?;
                 if let Err(e) = install(ignore_scripts, &root_path).await {
                     log_error(&e.to_string());
-                    let _ = write_verbose_logs_to_file();
+                    let _ = write_verbose_logs_to_file().await;
                     process::exit(1);
                 }
                 log_time_end("All packages installed");
@@ -352,7 +352,7 @@ async fn main() -> Result<()> {
                 .await
                 {
                     log_error(&e.to_string());
-                    let _ = write_verbose_logs_to_file();
+                    let _ = write_verbose_logs_to_file().await;
                     process::exit(1);
                 }
                 log_time_end(&format!(
@@ -370,7 +370,7 @@ async fn main() -> Result<()> {
             let cwd = std::env::current_dir()?;
             if let Err(e) = rebuild(&cwd).await {
                 log_error(&e.to_string());
-                let _ = write_verbose_logs_to_file();
+                let _ = write_verbose_logs_to_file().await;
                 process::exit(1);
             }
             log_time_end("All packages rebuilt");
@@ -386,7 +386,7 @@ async fn main() -> Result<()> {
 
             if let Err(e) = result {
                 log_error(&e.to_string());
-                let _ = write_verbose_logs_to_file();
+                let _ = write_verbose_logs_to_file().await;
                 process::exit(1);
             } else {
                 log_time_end("deps resolved");
@@ -395,7 +395,7 @@ async fn main() -> Result<()> {
         Some(Commands::Update) => {
             if let Err(e) = update(false).await {
                 log_error(&e.to_string());
-                let _ = write_verbose_logs_to_file();
+                let _ = write_verbose_logs_to_file().await;
                 process::exit(1);
             }
             log_time_end("All packages updated");
@@ -405,14 +405,14 @@ async fn main() -> Result<()> {
 
             if let Err(e) = list_dependencies(&cwd, &package).await {
                 log_error(&e.to_string());
-                let _ = write_verbose_logs_to_file();
+                let _ = write_verbose_logs_to_file().await;
                 process::exit(1);
             }
         }
         Some(Commands::Execute { command, args }) => {
             if let Err(e) = execute(&command, args).await {
                 log_error(&e.to_string());
-                let _ = write_verbose_logs_to_file();
+                let _ = write_verbose_logs_to_file().await;
                 process::exit(1);
             }
         }
@@ -432,14 +432,14 @@ async fn main() -> Result<()> {
             if let Err(e) = run(&script, workspace.as_deref(), workspaces, script_args_owned).await
             {
                 log_error(&e.to_string());
-                let _ = write_verbose_logs_to_file();
+                let _ = write_verbose_logs_to_file().await;
                 process::exit(1);
             }
         }
         Some(Commands::View { package }) => {
             if let Err(e) = view(&package).await {
                 log_error(&e.to_string());
-                let _ = write_verbose_logs_to_file();
+                let _ = write_verbose_logs_to_file().await;
                 process::exit(1);
             }
         }
@@ -449,7 +449,7 @@ async fn main() -> Result<()> {
                     // Link current package to global
                     if let Err(e) = link_current_to_global(prefix.as_deref()).await {
                         log_error(&e.to_string());
-                        let _ = write_verbose_logs_to_file();
+                        let _ = write_verbose_logs_to_file().await;
                         process::exit(1);
                     }
                     log_time_end("package linked");
@@ -458,7 +458,7 @@ async fn main() -> Result<()> {
                     for package in packages.iter() {
                         if let Err(e) = link_global_to_local(package, prefix.as_deref()).await {
                             log_error(&e.to_string());
-                            let _ = write_verbose_logs_to_file();
+                            let _ = write_verbose_logs_to_file().await;
                             process::exit(1);
                         }
                     }
@@ -468,9 +468,9 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Config { command }) => match command {
             ConfigCommands::Set { key, value, global } => {
-                if let Err(e) = handle_config_set(key, value, global) {
+                if let Err(e) = handle_config_set(key, value, global).await {
                     log_error(&e.to_string());
-                    let _ = write_verbose_logs_to_file();
+                    let _ = write_verbose_logs_to_file().await;
                     process::exit(1);
                 }
             }
@@ -479,16 +479,16 @@ async fn main() -> Result<()> {
                 global,
                 override_values,
             } => {
-                if let Err(e) = handle_config_get(key, global, override_values) {
+                if let Err(e) = handle_config_get(key, global, override_values).await {
                     log_error(&e.to_string());
-                    let _ = write_verbose_logs_to_file();
+                    let _ = write_verbose_logs_to_file().await;
                     process::exit(1);
                 }
             }
             ConfigCommands::List { global } => {
-                if let Err(e) = handle_config_list(global) {
+                if let Err(e) = handle_config_list(global).await {
                     log_error(&e.to_string());
-                    let _ = write_verbose_logs_to_file();
+                    let _ = write_verbose_logs_to_file().await;
                     process::exit(1);
                 }
             }
@@ -497,7 +497,7 @@ async fn main() -> Result<()> {
             // Check if the first argument is a script name
             if let Some(script_name) = std::env::args().nth(1) {
                 // First check if there's a custom command configured for this script name
-                let config = crate::util::config::Config::load(false)?;
+                let config = crate::util::config::Config::load(false).await?;
                 let config_service = crate::service::config::ConfigService::new(config);
                 // Check if there's a custom command available
                 if let Ok(Some(_)) = config_service.get_available_cmd(&script_name) {
@@ -527,7 +527,7 @@ async fn main() -> Result<()> {
                 .await
                 {
                     log_error(&e.to_string());
-                    let _ = write_verbose_logs_to_file();
+                    let _ = write_verbose_logs_to_file().await;
                     process::exit(1);
                 }
             } else {
@@ -536,7 +536,7 @@ async fn main() -> Result<()> {
                 let root_path = update_cwd_to_root(&cwd).await?;
                 if let Err(e) = install(cli.ignore_scripts, &root_path).await {
                     log_error(&e.to_string());
-                    let _ = write_verbose_logs_to_file();
+                    let _ = write_verbose_logs_to_file().await;
                     process::exit(1);
                 }
                 log_time_end("All packages installed");

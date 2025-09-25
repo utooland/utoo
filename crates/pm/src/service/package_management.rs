@@ -38,7 +38,7 @@ impl PackageManagementService {
         ));
 
         // Maybe the package is already installed
-        if package_cache_dir.join("bin").exists() {
+        if tokio::fs::try_exists(&package_cache_dir.join("bin")).await? {
             log_verbose(&format!(
                 "Package {} already cached at {}",
                 name,

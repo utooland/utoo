@@ -3,7 +3,7 @@ use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::{env, fs};
 
-pub fn link(src: &Path, dst: &Path) -> Result<()> {
+pub async fn link(src: &Path, dst: &Path) -> Result<()> {
     // get current working directory as prefix
     let cwd = env::current_dir().context("Failed to get current working directory")?;
     // ensure the destination directory exists
@@ -18,7 +18,7 @@ pub fn link(src: &Path, dst: &Path) -> Result<()> {
     let abs_dst = cwd.join(dst);
 
     // Check if source exists
-    if !abs_src.exists() {
+    if !tokio::fs::try_exists(&abs_src).await? {
         bail!("Source file does not exist: {}", abs_src.display());
     }
 
@@ -43,8 +43,8 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    #[test]
-    fn test_link_creates_new_symlink() {
+    #[tokio::test]
+    async fn test_link_creates_new_symlink() {
         let temp_dir = TempDir::new().unwrap();
         let temp_path = temp_dir.path();
 
@@ -56,15 +56,15 @@ mod tests {
 
         assert!(!dst_path.exists());
         env::set_current_dir(temp_path).unwrap();
-        link(&src_path, &dst_path).unwrap();
+        link(&src_path, &dst_path).await.unwrap();
 
         assert!(dst_path.exists());
         assert!(dst_path.is_symlink());
         assert_eq!(fs::read_to_string(&dst_path).unwrap(), src_content);
     }
 
-    #[test]
-    fn test_link_creates_parent_directories() {
+    #[tokio::test]
+    async fn test_link_creates_parent_directories() {
         let temp_dir = TempDir::new().unwrap();
         let temp_path = temp_dir.path();
 
@@ -74,14 +74,14 @@ mod tests {
         let dst_path = temp_path.join("nested/dir/dest2.txt");
 
         env::set_current_dir(temp_path).unwrap();
-        link(&src_path, &dst_path).unwrap();
+        link(&src_path, &dst_path).await.unwrap();
 
         assert!(dst_path.exists());
         assert!(dst_path.is_symlink());
     }
 
-    #[test]
-    fn test_link_existing_same_target() {
+    #[tokio::test]
+    async fn test_link_existing_same_target() {
         let temp_dir = TempDir::new().unwrap();
         let temp_path = temp_dir.path();
 
@@ -91,13 +91,13 @@ mod tests {
         let dst_path = temp_path.join("dest3.txt");
 
         env::set_current_dir(temp_path).unwrap();
-        link(&src_path, &dst_path).unwrap();
+        link(&src_path, &dst_path).await.unwrap();
         let result = link(&src_path, &dst_path);
-        assert!(result.is_ok());
+        assert!(result.await.is_ok());
     }
 
-    #[test]
-    fn test_link_existing_different_target() {
+    #[tokio::test]
+    async fn test_link_existing_different_target() {
         let temp_dir = TempDir::new().unwrap();
         let temp_path = temp_dir.path();
 
@@ -109,9 +109,9 @@ mod tests {
         let dst_path = temp_path.join("dest4.txt");
 
         env::set_current_dir(temp_path).unwrap();
-        link(&src1_path, &dst_path).unwrap();
+        link(&src1_path, &dst_path).await.unwrap();
         let result = link(&src2_path, &dst_path);
-        assert!(result.is_ok());
+        assert!(result.await.is_ok());
         assert_eq!(fs::read_to_string(&dst_path).unwrap(), "test2");
     }
 }

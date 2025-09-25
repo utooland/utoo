@@ -31,7 +31,7 @@ pub async fn execute_package(command: &str, args: Vec<String>) -> Result<()> {
     // utoo -x eslint --version
     // utoo -x @modelcontextprotocol/create-server --version
     // utoo -x @modelcontextprotocol/create-server create-mcp-server --version
-    match binary_resolver::find_binary_in_cache(&package_cache_dir) {
+    match binary_resolver::find_binary_in_cache(&package_cache_dir).await {
         Ok(Some(binary_path)) => {
             log_verbose(&format!(
                 "Found binary in cache at: {}",
