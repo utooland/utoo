@@ -105,6 +105,10 @@ async fn insert_shared_aliases(
             "react-refresh",
             pack_path.join("node_modules/react-refresh")?,
         );
+        import_map.insert_singleton_alias(
+            "@utoo/style-loader",
+            pack_path.join("node_modules/@utoo/style-loader")?,
+        );
     }
     // import_map.insert_singleton_alias("styled-jsx", pack_package.clone());
     import_map.insert_singleton_alias("react", project_path.clone());
