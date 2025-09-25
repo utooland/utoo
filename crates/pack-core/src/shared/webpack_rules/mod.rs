@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, str::FromStr};
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use turbo_rcstr::{RcStr, rcstr};
+use turbo_rcstr::rcstr;
 use turbo_tasks::{NonLocalValue, OperationValue, ResolvedVc, TaskInput, Vc, trace::TraceRawVcs};
 use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::{

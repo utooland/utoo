@@ -62,7 +62,6 @@ use crate::{
     endpoint::{Endpoint, Endpoints},
     entrypoint::Entrypoints,
     library::{LibraryEntrypoint, LibraryProject, OptionLibraryProject},
-    project,
     versioned_content_map::VersionedContentMap,
 };
 
@@ -687,9 +686,9 @@ impl Project {
         let project_relative = if this.pack_path.starts_with(&*this.root_path) {
             this.pack_path.strip_prefix(&*this.root_path).unwrap()
         } else {
-            this.pack_path.as_str().into()
+            this.pack_path.as_str()
         };
-        Ok(root.join(&project_relative)?.cell())
+        Ok(root.join(project_relative)?.cell())
     }
 
     #[turbo_tasks::function]
