@@ -229,8 +229,30 @@ enum Commands {
     },
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    use std::{cell::RefCell, time::Instant};
+
+    // Minimize worker threads for package management operations
+    // Use only 2 threads regardless of CPU count to minimize overhead
+    let worker_threads = 10;
+
+    thread_local! {
+        static LAST_SWC_ATOM_GC_TIME: RefCell<Option<Instant>> = const { RefCell::new(None) };
+    }
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(worker_threads)
+        .max_blocking_threads(4) // Limit blocking threads for file operations
+        .thread_name("utoo-worker")
+        .on_thread_stop(|| {})
+        .on_thread_park(|| {})
+        .build()
+        .unwrap()
+        .block_on(async_main())
+}
+
+async fn async_main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
     // Check for help flag

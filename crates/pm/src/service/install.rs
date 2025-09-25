@@ -28,7 +28,7 @@ use crate::util::save_type::{PackageAction, SaveType};
 
 use super::binary::update_package_binary;
 
-static CONCURRENT_LIMIT: usize = 60;
+static CONCURRENT_LIMIT: usize = 40;
 
 /// Clean up a single node_modules directory
 async fn clean_node_modules_dir(
