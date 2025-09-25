@@ -277,6 +277,11 @@ export interface ProjectOptions {
    * The build id.
    */
   buildId?: string;
+
+  /**
+   * Absolute path for `@utoo/pack`. 
+   */
+  packPath?: string;
 }
 
 export type BundleOptions = Omit<ProjectOptions, "rootPath" | "projectPath">;

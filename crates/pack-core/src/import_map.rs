@@ -27,12 +27,10 @@ pub fn mdx_import_source_file() -> RcStr {
 }
 
 #[turbo_tasks::function]
-pub async fn get_postcss_package_mapping(
-    project_path: FileSystemPath,
-) -> Result<Vc<ImportMapping>> {
+pub async fn get_postcss_package_mapping(pack_path: FileSystemPath) -> Result<Vc<ImportMapping>> {
     Ok(
         ImportMapping::Direct(ResolveResult::primary(ResolveResultItem::External {
-            name: get_utoopack_dependency_package(project_path.clone(), rcstr!("postcss"))
+            name: get_utoopack_dependency_package(pack_path, rcstr!("postcss"))
                 .owned()
                 .await?,
             ty: ExternalType::CommonJs,
@@ -67,10 +65,18 @@ pub async fn get_client_import_map(
     project_path: FileSystemPath,
     config: Vc<Config>,
     execution_context: Vc<ExecutionContext>,
+    pack_path: FileSystemPath,
 ) -> Result<Vc<ImportMap>> {
     let mut import_map = ImportMap::empty();
 
-    insert_shared_aliases(&mut import_map, &project_path, execution_context, config).await?;
+    insert_shared_aliases(
+        &mut import_map,
+        &project_path,
+        execution_context,
+        config,
+        &pack_path,
+    )
+    .await?;
 
     insert_alias_option(
         &mut import_map,
@@ -89,12 +95,16 @@ async fn insert_shared_aliases(
     project_path: &FileSystemPath,
     _execution_context: Vc<ExecutionContext>,
     _config: Vc<Config>,
+    pack_path: &FileSystemPath,
 ) -> Result<()> {
     #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
     {
-        let pack_package = get_utoopack_path(project_path.clone()).owned().await?;
-        import_map.insert_singleton_alias("@swc/helpers", pack_package.clone());
-        import_map.insert_singleton_alias("react-refresh", pack_package);
+        import_map
+            .insert_singleton_alias("@swc/helpers", pack_path.join("node_modules/@swc/helpers")?);
+        import_map.insert_singleton_alias(
+            "react-refresh",
+            pack_path.join("node_modules/react-refresh")?,
+        );
     }
     // import_map.insert_singleton_alias("styled-jsx", pack_package.clone());
     import_map.insert_singleton_alias("react", project_path.clone());
@@ -226,34 +236,17 @@ fn insert_package_alias(import_map: &mut ImportMap, prefix: RcStr, package_root:
 }
 
 #[turbo_tasks::function]
-pub async fn get_utoopack_path(project_path: FileSystemPath) -> Result<Vc<FileSystemPath>> {
-    let result = resolve(
-        project_path.clone(),
-        ReferenceType::CommonJs(CommonJsReferenceSubType::Undefined),
-        Request::parse(Pattern::Constant(rcstr!("@utoo/pack/package.json"))),
-        node_cjs_resolve_options(project_path.root().owned().await?),
-    );
-    let source = result
-        .first_source()
-        .await?
-        .context("@utoo/pack package not found")?;
-    Ok(source.ident().path().await?.parent().cell())
-}
-
-#[turbo_tasks::function]
 pub async fn get_utoopack_dependency_package(
-    project_path: FileSystemPath,
+    pack_path: FileSystemPath,
     dependency: RcStr,
 ) -> Result<Vc<RcStr>> {
-    let utoopack_path = get_utoopack_path(project_path.clone()).owned().await?;
-
     let result = resolve(
-        utoopack_path.clone(),
+        pack_path.clone(),
         ReferenceType::CommonJs(CommonJsReferenceSubType::Undefined),
         Request::parse(Pattern::Constant(
             format!("{dependency}/package.json").into(),
         )),
-        node_cjs_resolve_options(project_path.root().owned().await?),
+        node_cjs_resolve_options(pack_path.root().owned().await?),
     );
 
     let source = result
@@ -263,16 +256,7 @@ pub async fn get_utoopack_dependency_package(
 
     let dependency_path_to_root = &source.ident().path().owned().await?;
 
-    Ok(Vc::cell(
-        dependency_path_to_root
-            .path
-            // This is a hack for special node_modules hosting like pnpm
-            // for example: require("node_modules/.pnpm/loader-runner@4.3.0/node_modules/loader-runner/lib/LoaderRunner.js") can't be resolve,
-            // but require(".pnpm/loader-runner@4.3.0/node_modules/loader-runner/lib/LoaderRunner.js)" can be
-            .replacen("node_modules/", "", 1)
-            .replace("/package.json", "")
-            .into(),
-    ))
+    Ok(Vc::cell(dependency_path_to_root.path.clone()))
 }
 
 pub fn get_client_resolved_map(

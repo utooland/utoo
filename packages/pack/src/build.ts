@@ -10,6 +10,7 @@ import {
   createDefineEnv,
   formatIssue,
   isRelevantWarning,
+  getPackPath,
 } from "./util";
 import { compatOptionsFromWebpack, WebpackConfig } from "./webpackCompat";
 import { xcodeProfilingReady } from "./xcodeProfile";
@@ -72,6 +73,7 @@ async function buildInternal(
       },
       projectPath: projectPath || process.cwd(),
       rootPath: rootPath || projectPath || process.cwd(),
+      packPath: getPackPath(),
     },
     {
       persistentCaching: false,

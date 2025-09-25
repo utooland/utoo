@@ -6,7 +6,7 @@ import type webpack from "webpack";
 import ws from "ws";
 import { projectFactory } from "./project";
 import { BundleOptions, Project, Update as TurbopackUpdate } from "./types";
-import { createDefineEnv, debounce, processIssues } from "./util";
+import { createDefineEnv, debounce, getPackPath, processIssues } from "./util";
 
 const wsServer = new ws.Server({ noServer: true });
 
@@ -142,6 +142,7 @@ export async function createHotReloader(
       },
       projectPath: projectPath || process.cwd(),
       rootPath: rootPath || projectPath || process.cwd(),
+      packPath: getPackPath(),
     },
     {
       persistentCaching: true,

@@ -113,6 +113,8 @@ pub struct NapiProjectOptions {
 
     /// The build id.
     pub build_id: String,
+
+    pub pack_path: String,
 }
 
 /// [NapiProjectOptions] with all fields optional.
@@ -148,6 +150,8 @@ pub struct NapiPartialProjectOptions {
     /// local names for variables, functions etc., which can be useful for
     /// debugging/profiling purposes.
     pub no_mangling: Option<bool>,
+
+    pub pack_path: Option<String>,
 }
 
 #[napi(object)]
@@ -195,6 +199,7 @@ impl From<NapiProjectOptions> for ProjectOptions {
             define_env: val.define_env.into(),
             dev: val.dev,
             build_id: val.build_id.into(),
+            pack_path: val.pack_path.into(),
         }
     }
 }
@@ -213,6 +218,7 @@ impl From<NapiPartialProjectOptions> for PartialProjectOptions {
             }),
             define_env: val.define_env.map(|env| env.into()),
             build_id: val.build_id.map(From::from),
+            pack_path: val.pack_path.map(From::from),
         }
     }
 }

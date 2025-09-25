@@ -243,6 +243,11 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
         watch: WatchOptions::default(),
         dev: !is_production,
         build_id: "test".into(),
+        pack_path: std::path::Path::new(&*REPO_ROOT)
+            .join("node_modules/@utoo/pack")
+            .to_string_lossy()
+            .to_string()
+            .into(),
     };
 
     let relative_path = test_path.strip_prefix(&*REPO_ROOT)?;
