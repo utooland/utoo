@@ -11,7 +11,7 @@ use turbopack_node::transforms::webpack::WebpackLoaderItem;
 use crate::import_map::get_utoopack_dependency_package;
 
 pub async fn get_less_loader_rules(
-    project_path: FileSystemPath,
+    pack_path: FileSystemPath,
     less_options: Vc<JsonValue>,
 ) -> Result<Vec<(RcStr, LoaderRuleItem)>> {
     let less_options = less_options.await?;
@@ -28,7 +28,7 @@ pub async fn get_less_loader_rules(
 
     let less_loader = WebpackLoaderItem {
         #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-        loader: get_utoopack_dependency_package(project_path.clone(), rcstr!("less-loader"))
+        loader: get_utoopack_dependency_package(pack_path.clone(), rcstr!("less-loader"))
             .owned()
             .await?,
         #[cfg(all(target_family = "wasm", target_os = "unknown"))]

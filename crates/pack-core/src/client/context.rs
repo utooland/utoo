@@ -157,10 +157,16 @@ pub async fn get_client_runtime_entries(
     config: Vc<Config>,
     execution_context: Vc<ExecutionContext>,
     watch: Vc<bool>,
+    pack_path: FileSystemPath,
 ) -> Result<Vc<RuntimeEntries>> {
     let mut runtime_entries = vec![];
-    let resolve_options_context =
-        get_client_resolve_options_context(project_root.clone(), mode, config, execution_context);
+    let resolve_options_context = get_client_resolve_options_context(
+        project_root.clone(),
+        mode,
+        config,
+        execution_context,
+        pack_path,
+    );
 
     let watch = *watch.await?;
 
@@ -202,12 +208,18 @@ pub async fn get_client_module_options_context(
     config: Vc<Config>,
     dynamic_import_to_require: Vc<bool>,
     watch: Vc<bool>,
+    pack_path: FileSystemPath,
 ) -> Result<Vc<ModuleOptionsContext>> {
     let mode_ref = mode.await?;
 
     // resolve context
-    let resolve_options_context =
-        get_client_resolve_options_context(project_path.clone(), mode, config, *execution_context);
+    let resolve_options_context = get_client_resolve_options_context(
+        project_path.clone(),
+        mode,
+        config,
+        *execution_context,
+        pack_path.clone(),
+    );
 
     let tsconfig = get_typescript_transform_options(project_path.clone())
         .to_resolved()
@@ -235,12 +247,22 @@ pub async fn get_client_module_options_context(
     let mut foreign_conditions = loader_conditions.clone();
     foreign_conditions.insert(WebpackLoaderBuiltinCondition::Foreign);
 
-    let foreign_enable_webpack_loaders =
-        *webpack_loader_options(project_path.clone(), config, foreign_conditions).await?;
+    let foreign_enable_webpack_loaders = *webpack_loader_options(
+        project_path.clone(),
+        config,
+        foreign_conditions,
+        pack_path.clone(),
+    )
+    .await?;
 
     // Now creates a webpack rules that applies to all codes.
-    let enable_webpack_loaders =
-        *webpack_loader_options(project_path.clone(), config, loader_conditions).await?;
+    let enable_webpack_loaders = *webpack_loader_options(
+        project_path.clone(),
+        config,
+        loader_conditions,
+        pack_path.clone(),
+    )
+    .await?;
 
     let tree_shaking_mode_for_user_code = *config
         .tree_shaking_mode_for_user_code(mode_ref.is_development())
@@ -276,7 +298,7 @@ pub async fn get_client_module_options_context(
         #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
         {
             Some(
-                get_postcss_package_mapping(project_path.clone())
+                get_postcss_package_mapping(pack_path.clone())
                     .to_resolved()
                     .await?,
             )
@@ -399,10 +421,12 @@ pub async fn get_client_resolve_options_context(
     mode: Vc<Mode>,
     config: Vc<Config>,
     execution_context: Vc<ExecutionContext>,
+    pack_path: FileSystemPath,
 ) -> Result<Vc<ResolveOptionsContext>> {
-    let client_import_map = get_client_import_map(project_path.clone(), config, execution_context)
-        .to_resolved()
-        .await?;
+    let client_import_map =
+        get_client_import_map(project_path.clone(), config, execution_context, pack_path)
+            .to_resolved()
+            .await?;
     let client_fallback_import_map = get_client_fallback_import_map().to_resolved().await?;
     let client_resolved_map =
         get_client_resolved_map(project_path.clone(), project_path.clone(), *mode.await?)

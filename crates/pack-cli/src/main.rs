@@ -153,6 +153,7 @@ fn main() {
                 },
                 build_id: partial_project_options.build_id.unwrap_or_default(),
                 dev,
+                pack_path: partial_project_options.pack_path.unwrap_or_default(),
             };
 
             if watch {

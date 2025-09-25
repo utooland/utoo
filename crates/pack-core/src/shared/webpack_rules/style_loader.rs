@@ -11,7 +11,7 @@ use turbopack::module_options::LoaderRuleItem;
 use crate::{config::OptionalJsonValue, import_map::get_utoopack_dependency_package};
 
 pub async fn get_style_loader_rules(
-    project_path: FileSystemPath,
+    pack_path: FileSystemPath,
     inline_css: Vc<OptionalJsonValue>,
 ) -> Result<Vec<(RcStr, LoaderRuleItem)>> {
     let mut rules = Vec::new();
@@ -24,7 +24,7 @@ pub async fn get_style_loader_rules(
     };
 
     let style_loader = WebpackLoaderItem {
-        loader: get_utoopack_dependency_package(project_path.clone(), rcstr!("@utoo/style-loader"))
+        loader: get_utoopack_dependency_package(pack_path.clone(), rcstr!("@utoo/style-loader"))
             .owned()
             .await?,
         options: take(
