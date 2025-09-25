@@ -671,7 +671,6 @@ impl Project {
     pub async fn project_path(self: Vc<Self>) -> Result<Vc<FileSystemPath>> {
         let this = self.await?;
         let root = self.project_root().await?;
-        dbg!(&this.project_path);
         let project_relative = this.project_path.strip_prefix(&*this.root_path).unwrap();
         let project_relative = project_relative
             .strip_prefix(MAIN_SEPARATOR)
@@ -690,8 +689,6 @@ impl Project {
         } else {
             this.pack_path.as_str().into()
         };
-        // dbg!(&project_relative);
-        // dbg!(&root);
         Ok(root.join(&project_relative)?.cell())
     }
 

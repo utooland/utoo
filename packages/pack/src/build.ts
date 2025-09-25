@@ -9,8 +9,8 @@ import {
   blockStdout,
   createDefineEnv,
   formatIssue,
-  isRelevantWarning,
   getPackPath,
+  isRelevantWarning,
 } from "./util";
 import { compatOptionsFromWebpack, WebpackConfig } from "./webpackCompat";
 import { xcodeProfilingReady } from "./xcodeProfile";

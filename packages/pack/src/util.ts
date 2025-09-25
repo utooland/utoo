@@ -1,13 +1,12 @@
 import { codeFrameColumns } from "@babel/code-frame";
+import path from "path";
 import { bold, green, magenta, red } from "picocolors";
-
 import { NapiIssue } from "./binding";
 import {
   decodeMagicIdentifier,
   MAGIC_IDENTIFIER_REGEX,
 } from "./magicIdentifier";
 import { ConfigComplete, DefineEnv, RustifiedEnv, StyledString } from "./types";
-import path from 'path';
 
 export class ModuleBuildError extends Error {
   name = "ModuleBuildError";
@@ -306,7 +305,6 @@ export function blockStdout() {
   }
 }
 
-
 export function getPackPath() {
-  return path.resolve(__dirname, '..')
+  return path.resolve(__dirname, "..");
 }

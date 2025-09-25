@@ -279,7 +279,7 @@ export interface ProjectOptions {
   buildId?: string;
 
   /**
-   * Absolute path for `@utoo/pack`. 
+   * Absolute path for `@utoo/pack`.
    */
   packPath?: string;
 }
