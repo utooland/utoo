@@ -9,6 +9,7 @@ import {
   blockStdout,
   createDefineEnv,
   formatIssue,
+  getPackPath,
   isRelevantWarning,
 } from "./util";
 import { compatOptionsFromWebpack, WebpackConfig } from "./webpackCompat";
@@ -72,6 +73,7 @@ async function buildInternal(
       },
       projectPath: projectPath || process.cwd(),
       rootPath: rootPath || projectPath || process.cwd(),
+      packPath: getPackPath(),
     },
     {
       persistentCaching: false,

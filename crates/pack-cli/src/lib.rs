@@ -66,6 +66,9 @@ pub struct PartialProjectOptions {
 
     /// The build id.
     pub build_id: Option<RcStr>,
+
+    /// Absolute path for `@utoo/pack`.
+    pub pack_path: Option<RcStr>,
 }
 
 pub async fn initialize_project_container(

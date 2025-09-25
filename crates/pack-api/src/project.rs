@@ -131,6 +131,9 @@ pub struct ProjectOptions {
 
     /// The build id.
     pub build_id: RcStr,
+
+    /// Absolute path for `@utoo/pack`.
+    pub pack_path: RcStr,
 }
 
 #[derive(
@@ -170,6 +173,9 @@ pub struct PartialProjectOptions {
 
     /// The build id.
     pub build_id: Option<RcStr>,
+
+    /// Absolute path for `@utoo/pack`.
+    pub pack_path: Option<RcStr>,
 }
 
 #[derive(
@@ -268,6 +274,7 @@ impl ProjectContainer {
             define_env,
             watch,
             build_id,
+            pack_path,
         } = options;
 
         let this = self.await?;
@@ -299,6 +306,10 @@ impl ProjectContainer {
 
         if let Some(build_id) = build_id {
             new_options.build_id = build_id;
+        }
+
+        if let Some(pack_path) = pack_path {
+            new_options.pack_path = pack_path;
         }
 
         // TODO: Handle mode switch, should prevent mode being switched.
@@ -355,6 +366,7 @@ impl ProjectContainer {
         let project_path;
         let watch;
         let build_id;
+        let pack_path;
         {
             let options = self.options_state.get();
             let options = options
@@ -373,6 +385,7 @@ impl ProjectContainer {
             project_path = options.project_path.clone();
             watch = options.watch;
             build_id = options.build_id.clone();
+            pack_path = options.pack_path.clone();
         }
 
         Ok(Project {
@@ -384,6 +397,7 @@ impl ProjectContainer {
             define_env: define_env.to_resolved().await?,
             versioned_content_map: self.versioned_content_map,
             build_id,
+            pack_path,
         }
         .cell())
     }
@@ -441,6 +455,9 @@ pub struct Project {
     versioned_content_map: Option<ResolvedVc<VersionedContentMap>>,
 
     build_id: RcStr,
+
+    /// Absolute path for `@utoo/pack`.
+    pack_path: RcStr,
 }
 
 // TODO: This may be not needed.
@@ -659,6 +676,19 @@ impl Project {
             .unwrap_or(project_relative)
             .replace(MAIN_SEPARATOR, "/");
         Ok(root.join(&project_relative)?.cell())
+    }
+
+    #[turbo_tasks::function]
+    pub async fn pack_path(self: Vc<Self>) -> Result<Vc<FileSystemPath>> {
+        let this = self.await?;
+        let root = self.project_root().await?;
+
+        let project_relative = if this.pack_path.starts_with(&*this.root_path) {
+            this.pack_path.strip_prefix(&*this.root_path).unwrap()
+        } else {
+            this.pack_path.as_str()
+        };
+        Ok(root.join(project_relative)?.cell())
     }
 
     #[turbo_tasks::function]

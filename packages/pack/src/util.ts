@@ -1,6 +1,6 @@
 import { codeFrameColumns } from "@babel/code-frame";
+import path from "path";
 import { bold, green, magenta, red } from "picocolors";
-
 import { NapiIssue } from "./binding";
 import {
   decodeMagicIdentifier,
@@ -303,4 +303,8 @@ export function blockStdout() {
   if ((process.stderr as any)._handle != null) {
     (process.stderr as any)._handle.setBlocking(true);
   }
+}
+
+export function getPackPath() {
+  return path.resolve(__dirname, "..");
 }
