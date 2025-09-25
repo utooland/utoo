@@ -22,6 +22,8 @@ use turbopack_node::execution_context::ExecutionContext;
 
 use crate::{config::Config, embed_js, mode::Mode, util::convert_to_project_relative};
 
+pub const UTOO_STYLE_LOADER: &str = "@utoo/style-loader";
+
 pub fn mdx_import_source_file() -> RcStr {
     unreachable!()
 }
@@ -104,6 +106,10 @@ async fn insert_shared_aliases(
         import_map.insert_singleton_alias(
             "react-refresh",
             pack_path.join("node_modules/react-refresh")?,
+        );
+        import_map.insert_singleton_alias(
+            UTOO_STYLE_LOADER,
+            pack_path.join(&format!("node_modules/{UTOO_STYLE_LOADER}"))?,
         );
     }
     // import_map.insert_singleton_alias("styled-jsx", pack_package.clone());

@@ -8,7 +8,10 @@ use turbopack_node::transforms::webpack::WebpackLoaderItem;
 use turbo_tasks::{ResolvedVc, Vc};
 use turbopack::module_options::LoaderRuleItem;
 
-use crate::{config::OptionalJsonValue, import_map::get_utoopack_dependency_package};
+use crate::{
+    config::OptionalJsonValue,
+    import_map::{UTOO_STYLE_LOADER, get_utoopack_dependency_package},
+};
 
 pub async fn get_style_loader_rules(
     pack_path: FileSystemPath,
@@ -24,7 +27,7 @@ pub async fn get_style_loader_rules(
     };
 
     let style_loader = WebpackLoaderItem {
-        loader: get_utoopack_dependency_package(pack_path.clone(), rcstr!("@utoo/style-loader"))
+        loader: get_utoopack_dependency_package(pack_path.clone(), rcstr!(UTOO_STYLE_LOADER))
             .owned()
             .await?,
         options: take(
