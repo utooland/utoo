@@ -514,18 +514,7 @@ async fn get_dep_types() -> Vec<(&'static str, bool)> {
 
 /// Convert serialized packages Value to HashMap for PackageLock
 fn convert_packages_to_hashmap(packages: Value) -> Result<HashMap<String, Package>> {
-    match packages {
-        Value::Object(map) => {
-            let mut result = HashMap::new();
-            for (key, value) in map {
-                let package: Package = serde_json::from_value(value)
-                    .with_context(|| format!("Failed to parse package for key: {key}"))?;
-                result.insert(key, package);
-            }
-            Ok(result)
-        }
-        _ => Err(anyhow::anyhow!("Expected packages to be an object")),
-    }
+    serde_json::from_value(packages).with_context(|| "Failed to parse packages")
 }
 
 /// Build ideal tree and return PackageLock, optionally write to disk asynchronously
