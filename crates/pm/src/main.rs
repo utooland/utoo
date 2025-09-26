@@ -392,9 +392,9 @@ async fn async_main() -> Result<()> {
             let cwd = std::env::current_dir()?;
             let root_path = update_cwd_to_root(&cwd).await?;
             let result = if workspace_only {
-                build_workspace(&root_path).await
+                build_workspace(&root_path).await.map(|_| ())
             } else {
-                build_deps(&root_path).await
+                build_deps(&root_path).await.map(|_| ()) // Ignore returned PackageLock for CLI command
             };
 
             if let Err(e) = result {

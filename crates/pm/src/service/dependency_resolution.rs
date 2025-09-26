@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use crate::helper::lock::{serialize_tree_to_packages, write_ideal_tree_to_lock_file};
+use crate::helper::lock::{
+    PackageLock, build_ideal_tree_to_package_lock, serialize_tree_to_packages,
+};
 use crate::helper::ruborist::Ruborist;
 use crate::service::workspace::WorkspaceService;
 use crate::util::json::load_package_json_from_path;
@@ -11,7 +13,7 @@ use crate::util::logger::log_verbose;
 pub struct DependencyResolutionService;
 
 impl DependencyResolutionService {
-    pub async fn build_deps(cwd: &Path) -> Result<()> {
+    pub async fn build_deps(cwd: &Path) -> Result<PackageLock> {
         let mut ruborist = Ruborist::new(cwd);
         ruborist.build_ideal_tree().await?;
 
@@ -64,9 +66,10 @@ impl DependencyResolutionService {
         }
 
         let tree = ruborist.ideal_tree.unwrap();
-        write_ideal_tree_to_lock_file(cwd, &tree).await?;
+        // Return PackageLock directly and write to disk asynchronously
+        let package_lock = build_ideal_tree_to_package_lock(cwd, &tree, true).await?;
 
-        Ok(())
+        Ok(package_lock)
     }
 
     pub async fn build_workspace(cwd: &Path) -> Result<()> {
