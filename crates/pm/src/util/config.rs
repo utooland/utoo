@@ -5,8 +5,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 
 pub type ConfigResult<T> = Result<T>;
 
@@ -141,6 +140,18 @@ impl<T: Clone + Debug + 'static> ConfigValue<T> {
 
         self.default.clone()
     }
+
+    fn get_sync(&self) -> T
+    where
+        Self: ConfigValueParser<T>,
+    {
+        if let Some(value) = self.value.get() {
+            return value.clone();
+        }
+
+        // If not set, return the default value
+        self.default.clone()
+    }
 }
 
 impl ConfigValueParser<String> for ConfigValue<String> {
@@ -161,10 +172,11 @@ static REGISTRY: LazyLock<ConfigValue<String>> =
 static LEGACY_PEER_DEPS: LazyLock<ConfigValue<bool>> =
     LazyLock::new(|| ConfigValue::new("legacy-peer-deps", true));
 
-static IS_NPM_REGISTRY: LazyLock<bool> = LazyLock::new(|| {
-    // Default to true for npm registry
-    true
-});
+static IS_NPM_REGISTRY: OnceLock<bool> = OnceLock::new();
+
+fn is_npm_registry_url(url: &str) -> bool {
+    url.contains("registry.npmjs.org") || url.contains("npmjs.org")
+}
 
 pub fn set_registry(registry: Option<String>) {
     // Priority: CLI argument > UTOO_REGISTRY env > config
@@ -173,11 +185,18 @@ pub fn set_registry(registry: Option<String>) {
             .ok()
             .filter(|s| !s.is_empty())
     });
+
+    // Determine if this is npm registry and set the global flag
+    let registry_url = final_registry
+        .as_deref()
+        .unwrap_or("https://registry.npmmirror.com");
+    let _ = IS_NPM_REGISTRY.set(is_npm_registry_url(registry_url));
+
     REGISTRY.set(final_registry);
 }
 
-pub async fn get_registry() -> String {
-    REGISTRY.get().await
+pub fn get_registry() -> String {
+    REGISTRY.get_sync()
 }
 
 pub fn set_legacy_peer_deps(value: Option<bool>) {
@@ -188,10 +207,14 @@ pub async fn get_legacy_peer_deps() -> bool {
     LEGACY_PEER_DEPS.get().await
 }
 
+fn ensure_is_npm_registry_initialized() -> bool {
+    *IS_NPM_REGISTRY.get_or_init(|| false)
+}
+
 pub fn get_registry_support_abbr() -> bool {
-    !*IS_NPM_REGISTRY
+    !ensure_is_npm_registry_initialized()
 }
 
 pub fn get_registry_support_semver() -> bool {
-    !*IS_NPM_REGISTRY
+    !ensure_is_npm_registry_initialized()
 }

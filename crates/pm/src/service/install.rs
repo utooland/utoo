@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
-use std::string::String;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
@@ -176,14 +175,11 @@ async fn clean_unused_packages(
     Ok(())
 }
 
-async fn clean_deps(
-    groups: &HashMap<usize, Vec<(Arc<String>, Arc<Package>)>>,
-    cwd: &Path,
-) -> Result<()> {
+async fn clean_deps(groups: &HashMap<usize, Vec<(String, Package)>>, cwd: &Path) -> Result<()> {
     let mut valid_packages = std::collections::HashSet::new();
     for packages in groups.values() {
         for (path, _) in packages {
-            valid_packages.insert(path.to_string());
+            valid_packages.insert(path.clone());
         }
     }
 
@@ -212,7 +208,7 @@ async fn clean_deps(
 }
 
 pub async fn install_packages(
-    groups: &HashMap<usize, Vec<(Arc<String>, Arc<Package>)>>,
+    groups: &HashMap<usize, Vec<(std::string::String, Package)>>,
     cache_dir: &Path,
     cwd: &Path,
     semaphore: Arc<Semaphore>,
@@ -222,26 +218,23 @@ pub async fn install_packages(
 
     let mut depths: Vec<_> = groups.keys().cloned().collect();
     depths.sort_unstable();
-    let cwd_arc = Arc::new(cwd.to_path_buf());
 
     for depth in depths.iter() {
         if let Some(packages) = groups.get(depth) {
             let mut tasks: Vec<tokio::task::JoinHandle<Result<()>>> = Vec::new();
-            for (path_arc, package_arc) in packages.iter() {
-                if let Some(resolved) = package_arc.resolved.clone() {
-                    let path = Arc::clone(path_arc);
-                    let package = Arc::clone(package_arc);
-                    let cwd_clone = Arc::clone(&cwd_arc);
-
+            for (path, package) in packages.iter() {
+                let path = path.clone();
+                let package = package.clone();
+                if let Some(resolved) = package.resolved {
                     if package.link.is_some() {
-                        let link_name = extract_package_name(path.as_str());
+                        let link_name = extract_package_name(&path);
                         if link_name.is_empty() {
                             PROGRESS_BAR.inc(1);
                             log_verbose(&format!("Link skipped due to empty package name: {path}"));
                             continue;
                         }
                         log_verbose(&format!("Attempting to link from {resolved} to {path}"));
-                        if let Err(e) = link(Path::new(&resolved), Path::new(path.as_str())).await {
+                        if let Err(e) = link(Path::new(&resolved), Path::new(&path)).await {
                             log_verbose(&format!(
                                 "Link failed: source={resolved}, target={path}, error={e}"
                             ));
@@ -252,26 +245,23 @@ pub async fn install_packages(
                     }
 
                     // skip when cpu or os is not compatible
-                    if package.cpu.is_some() && !is_cpu_compatible(&package.cpu.as_ref().unwrap()) {
+                    if package.cpu.is_some() && !is_cpu_compatible(&package.cpu.unwrap()) {
                         PROGRESS_BAR.inc(1);
-                        log_verbose(&format!("cpu skipped: {}", path));
+                        log_verbose(&format!("cpu skipped: {}", &path));
                         continue;
                     }
 
-                    if package.os.is_some() && !is_os_compatible(&package.os.as_ref().unwrap()) {
+                    if package.os.is_some() && !is_os_compatible(&package.os.unwrap()) {
                         PROGRESS_BAR.inc(1);
-                        log_verbose(&format!("os skipped: {}", path));
+                        log_verbose(&format!("os skipped: {}", &path));
                         continue;
                     }
 
-                    let name = package
-                        .name
-                        .as_ref()
-                        .map(|s| s.clone())
-                        .unwrap_or_else(|| extract_package_name(path.as_str()));
+                    let name = package.name.unwrap_or_else(|| extract_package_name(&path));
                     let version = package.version.as_ref().unwrap();
                     let cache_path = cache_dir.join(format!("{name}/{version}"));
                     let cache_flag_path = cache_dir.join(format!("{name}/{version}/_resolved"));
+                    let cwd_clone = cwd.to_path_buf();
                     let should_resolve = !tokio::fs::try_exists(&cache_flag_path).await?;
                     let semaphore = Arc::clone(&semaphore);
 
@@ -302,19 +292,18 @@ pub async fn install_packages(
                         }
 
                         log_verbose(&format!("{name} clone"));
-                        match clone(&cache_path, &cwd_clone.join(path.as_str()), true).await {
+                        match clone(&cache_path, &cwd_clone.join(&path), true).await {
                             Ok(_) => {
                                 log_verbose(&format!("{name} resolved"));
                                 PROGRESS_BAR.inc(1);
                                 log_progress(&format!("{name} resolved"));
-                                update_package_binary(&cwd_clone.join(path.as_str()), &name)
-                                    .await?;
+                                update_package_binary(&cwd_clone.join(&path), &name).await?;
                                 Ok(())
                             }
                             Err(e) => Err(anyhow::anyhow!(
                                 "Copy failed {} to {}: {}",
                                 cache_path.display(),
-                                cwd_clone.join(path.as_str()).display(),
+                                cwd_clone.join(&path).display(),
                                 e
                             )),
                         }
@@ -322,7 +311,7 @@ pub async fn install_packages(
                     tasks.push(task);
                 } else {
                     PROGRESS_BAR.inc(1);
-                    log_verbose(&format!("{} no resolved info skipped", path_arc));
+                    log_verbose(&format!("{path} no resolved info skipped"));
                 }
             }
 

@@ -230,16 +230,7 @@ enum Commands {
 }
 
 fn main() -> Result<()> {
-    use std::{cell::RefCell, time::Instant};
-
-    // Minimize worker threads for package management operations
-    // Use only 2 threads regardless of CPU count to minimize overhead
-    let worker_threads = 10;
-
-    thread_local! {
-        static LAST_SWC_ATOM_GC_TIME: RefCell<Option<Instant>> = const { RefCell::new(None) };
-    }
-
+    let worker_threads = 20;
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .worker_threads(worker_threads)

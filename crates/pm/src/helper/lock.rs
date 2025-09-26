@@ -39,14 +39,14 @@ pub struct Package {
 
 pub fn group_by_depth(
     packages: &HashMap<String, Package>,
-) -> HashMap<usize, Vec<(Arc<String>, Arc<Package>)>> {
+) -> HashMap<usize, Vec<(String, Package)>> {
     let mut groups = HashMap::new();
     for (path, package) in packages {
         let depth = path.matches("node_modules").count();
         groups
             .entry(depth)
             .or_insert_with(Vec::new)
-            .push((Arc::new(path.clone()), Arc::new(package.clone())));
+            .push((path.clone(), package.clone()));
     }
     groups
 }
