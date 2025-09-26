@@ -1,11 +1,11 @@
 use anyhow::Result;
-use once_cell::sync::Lazy;
 use reqwest;
+use std::sync::OnceLock;
 use std::time::Instant;
 use tokio_retry::RetryIf;
 
 use crate::model::manifest::{FullManifest, VersionManifest};
-use crate::util::config::get_registry_support_abbr;
+use crate::util::config::{get_registry, get_registry_support_abbr};
 use crate::util::logger::{log_error, log_verbose};
 use crate::util::retry::{RetryableError, build_dns_cached_client, create_retry_strategy};
 
@@ -14,15 +14,19 @@ pub struct RegistryHttpClient {
     base_url: String,
 }
 
-static REGISTRY_CLIENT: Lazy<RegistryHttpClient> = Lazy::new(|| {
-    let client = build_dns_cached_client();
-    let base_url = "https://registry.npmjs.org".to_string(); // Default registry
-    log_verbose(&format!(
-        "Initialized HTTP client with base URL: {base_url}"
-    ));
+static REGISTRY_CLIENT: OnceLock<RegistryHttpClient> = OnceLock::new();
 
-    RegistryHttpClient { client, base_url }
-});
+fn get_registry_client() -> &'static RegistryHttpClient {
+    REGISTRY_CLIENT.get_or_init(|| {
+        let client = build_dns_cached_client();
+        let base_url = get_registry();
+        log_verbose(&format!(
+            "Initialized HTTP client with base URL: {base_url}"
+        ));
+
+        RegistryHttpClient { client, base_url }
+    })
+}
 
 impl RegistryHttpClient {
     /// Build URL for package or version requests
@@ -209,12 +213,14 @@ pub async fn fetch_full_manifest(
     name: &str,
     etag: Option<&str>,
 ) -> Result<(FullManifest, Option<String>)> {
-    REGISTRY_CLIENT.fetch_full_manifest(name, etag).await
+    get_registry_client().fetch_full_manifest(name, etag).await
 }
 
 /// Fetch specific version manifest via HTTP
 pub async fn fetch_version_manifest(name: &str, version: &str) -> Result<VersionManifest> {
-    REGISTRY_CLIENT.fetch_version_manifest(name, version).await
+    get_registry_client()
+        .fetch_version_manifest(name, version)
+        .await
 }
 
 #[cfg(test)]

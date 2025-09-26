@@ -14,7 +14,7 @@ static CONFIG: OnceCell<Value> = OnceCell::const_new();
 async fn load_config() -> Result<&'static Value> {
     CONFIG
         .get_or_try_init(|| async {
-            let registry = get_registry().await;
+            let registry = get_registry();
             let url = format!("{registry}/binary-mirror-config/latest");
             let response = reqwest::get(&url)
                 .await
