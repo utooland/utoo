@@ -178,13 +178,21 @@ fn is_npm_registry_url(url: &str) -> bool {
     url.contains("registry.npmjs.org") || url.contains("npmjs.org")
 }
 
-pub fn set_registry(registry: Option<String>) {
-    // Priority: CLI argument > UTOO_REGISTRY env > config
-    let final_registry = registry.or_else(|| {
-        std::env::var("UTOO_REGISTRY")
+pub async fn set_registry(registry: Option<String>) {
+    // Priority: CLI argument > UTOO_REGISTRY env > config > default
+    let final_registry = if let Some(reg) = registry {
+        Some(reg)
+    } else if let Ok(env_reg) = std::env::var("UTOO_REGISTRY")
+        && !env_reg.is_empty()
+    {
+        Some(env_reg)
+    } else {
+        // Read from config file if no CLI arg or env var
+        Config::load(false)
+            .await
             .ok()
-            .filter(|s| !s.is_empty())
-    });
+            .and_then(|config| config.get("registry").ok().flatten())
+    };
 
     // Determine if this is npm registry and set the global flag
     let registry_url = final_registry

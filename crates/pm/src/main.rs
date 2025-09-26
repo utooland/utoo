@@ -267,7 +267,7 @@ async fn async_main() -> Result<()> {
     set_verbose(cli.verbose);
 
     // global registry
-    set_registry(cli.registry);
+    set_registry(cli.registry).await;
 
     // set legacy_peer_deps when set --legacy
     if cli.legacy_peer_deps == Some(true) {
