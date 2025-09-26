@@ -230,15 +230,7 @@ enum Commands {
 }
 
 fn main() -> Result<()> {
-    use std::{cell::RefCell, time::Instant};
-
-    // cpu * number * 2
     let worker_threads = 20;
-
-    thread_local! {
-        static LAST_SWC_ATOM_GC_TIME: RefCell<Option<Instant>> = const { RefCell::new(None) };
-    }
-
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .worker_threads(worker_threads)
