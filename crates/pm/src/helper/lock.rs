@@ -561,16 +561,19 @@ pub async fn build_ideal_tree_to_package_lock(
                 "packages": packages,
             });
 
+            let lock_file_content = match serde_json::to_string_pretty(&lock_file) {
+                Ok(content) => content,
+                Err(e) => {
+                    log_verbose(&format!("Failed to serialize package-lock.json: {e}"));
+                    return;
+                }
+            };
+
             // Write to temporary file first, then atomically move to target location
             let temp_path = path_clone.join("package-lock.json.tmp");
             let target_path = path_clone.join("package-lock.json");
 
-            if let Err(e) = tokio::fs::write(
-                &temp_path,
-                serde_json::to_string_pretty(&lock_file).unwrap(),
-            )
-            .await
-            {
+            if let Err(e) = tokio::fs::write(&temp_path, lock_file_content).await {
                 log_verbose(&format!("Failed to write package-lock.json: {e}"));
                 return;
             }
