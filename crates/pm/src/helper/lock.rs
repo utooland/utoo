@@ -99,11 +99,8 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
 
         // Load existing package-lock.json only when it's valid and up-to-date
         log_info("Loading package-lock.json from current project for dependency download");
-        let package_lock_content = tokio::fs::read_to_string(root_path.join("package-lock.json"))
-            .await
-            .context("Failed to read package-lock.json")?;
-        let package_lock: PackageLock = serde_json::from_str(&package_lock_content)
-            .map_err(|e| anyhow!("Failed to parse package-lock.json: {}", e))?;
+        let package_lock: PackageLock =
+            crate::util::json::read_json_file(&root_path.join("package-lock.json")).await?;
 
         Ok(package_lock)
     }
