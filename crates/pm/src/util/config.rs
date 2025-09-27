@@ -175,7 +175,7 @@ static LEGACY_PEER_DEPS: LazyLock<ConfigValue<bool>> =
 static IS_NPM_REGISTRY: OnceLock<bool> = OnceLock::new();
 
 fn is_npm_registry_url(url: &str) -> bool {
-    url.contains("registry.npmjs.org") || url.contains("npmjs.org")
+    url.contains("registry.npmjs.org") || url.contains("registry.npmjs.com")
 }
 
 pub async fn set_registry(registry: Option<String>) {

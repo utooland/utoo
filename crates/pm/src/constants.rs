@@ -9,7 +9,7 @@ pub mod cmd {
 
     pub const DEPS_NAME: &str = "deps";
     pub const DEPS_ALIAS: &str = "d";
-    pub const DEPS_ABOUT: &str = "List and analyze project dependencies";
+    pub const DEPS_ABOUT: &str = "Generate package-lock.json only";
 
     pub const UPDATE_NAME: &str = "update";
     pub const UPDATE_ALIAS: &str = "u";
@@ -32,7 +32,10 @@ pub mod cmd {
     pub const EXECUTE_ABOUT: &str = "Run a command from a local or remote npm package";
 
     pub const VIEW_NAME: &str = "view";
-    pub const VIEW_ALIAS: &str = "vw";
+    pub const VIEW_ALIAS: &str = "v";
+    pub const VIEW_ALIAS_INFO: &str = "info";
+    pub const VIEW_ALIAS_SHOW: &str = "show";
+    pub const VIEW_ALIASES: &str = "v, info, show";
     pub const VIEW_ABOUT: &str = "View package information";
 
     pub const LIST_NAME: &str = "list";

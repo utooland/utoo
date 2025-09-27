@@ -111,6 +111,18 @@ pub fn log_info(text: &str) {
         logs.push(format!("[{}][INFO] {}", Timer::format_datetime(), text));
     }
 }
+pub fn log_command(cmd: &str, args: &str) {
+    if let Ok(mut logs) = VERBOSE_LOGS.lock() {
+        logs.push(format!(
+            "[{}][CMD] {} {}",
+            Timer::format_datetime(),
+            cmd,
+            args
+        ));
+    }
+    println!("> {cmd} {args}");
+    println!();
+}
 
 pub fn log_progress(text: &str) {
     PROGRESS_BAR.set_message(text.to_string());

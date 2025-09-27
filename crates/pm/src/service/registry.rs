@@ -4,9 +4,10 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use super::cache::{PACKAGE_CACHE, VersionsInfo};
-use super::http_client::{fetch_full_manifest, fetch_version_manifest};
+use super::http_client::fetch_full_manifest;
 use crate::model::manifest::{FullManifest, VersionManifest};
 use crate::model::node::EdgeType;
+use crate::service::http_client::fetch_version_manifest;
 use crate::util::config::get_registry_support_semver;
 use crate::util::logger::log_verbose;
 use crate::util::semver;
@@ -85,7 +86,7 @@ impl RegistryService {
         log_verbose(&format!("Loaded etag from disk for {name}: {etag:?}"));
 
         // 4. Network request with etag for 304 validation
-        match fetch_full_manifest(name, etag.as_deref()).await {
+        match fetch_full_manifest(name, etag.as_deref(), true).await {
             Ok((full_manifest, new_etag)) => {
                 log_verbose(&format!("Received fresh full manifest for: {name}"));
 

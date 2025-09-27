@@ -36,10 +36,9 @@ use crate::constants::cmd::{
     INSTALL_ALIAS, INSTALL_NAME, LINK_ABOUT, LINK_ALIAS, LINK_NAME, LIST_ALIAS, LIST_NAME,
     REBUILD_ABOUT, REBUILD_ALIAS, REBUILD_NAME, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT,
     UNINSTALL_ALIAS, UNINSTALL_NAME, UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT,
-    VIEW_ALIAS, VIEW_NAME,
+    VIEW_ALIAS, VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME,
 };
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
-use crate::helper::cli::parse_script_and_args;
 use crate::helper::workspace::update_cwd_to_root;
 
 #[derive(Parser)]
@@ -76,6 +75,10 @@ struct Cli {
     workspaces: bool,
 
     script_name: Option<String>,
+
+    /// Arguments to pass to the script when running without explicit subcommand
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    script_args: Vec<String>,
 }
 
 #[derive(Subcommand)]
@@ -192,6 +195,10 @@ enum Commands {
         /// Run script in all workspaces with topological ordering
         #[arg(long)]
         workspaces: bool,
+
+        /// Arguments to pass to the script
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
 
     /// Execute packages similar to npx
@@ -206,6 +213,7 @@ enum Commands {
     },
 
     #[command(name = VIEW_NAME, alias = VIEW_ALIAS, about = VIEW_ABOUT)]
+    #[command(aliases = [VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW])]
     View {
         /// Package name to view
         package: String,
@@ -433,14 +441,9 @@ async fn async_main() -> Result<()> {
             script,
             workspace,
             workspaces,
+            args,
         }) => {
-            let args = std::env::args().skip(2).collect::<Vec<String>>();
-            let script_args = parse_script_and_args(&args);
-            let script_args_owned = script_args.map(|args| {
-                args.into_iter()
-                    .map(|s| s.to_string())
-                    .collect::<Vec<String>>()
-            });
+            let script_args_owned = if args.is_empty() { None } else { Some(args) };
 
             if let Err(e) = run(&script, workspace.as_deref(), workspaces, script_args_owned).await
             {
@@ -507,32 +510,27 @@ async fn async_main() -> Result<()> {
             }
         },
         None => {
-            // Check if the first argument is a script name
-            if let Some(script_name) = std::env::args().nth(1) {
+            // Check if there's a script name provided
+            if let Some(script_name) = &cli.script_name {
                 // First check if there's a custom command configured for this script name
                 let config = crate::util::config::Config::load(false).await?;
                 let config_service = crate::service::config::ConfigService::new(config);
                 // Check if there's a custom command available
-                if let Ok(Some(_)) = config_service.get_available_cmd(&script_name) {
+                if let Ok(Some(_)) = config_service.get_available_cmd(script_name) {
                     // Execute the custom command
-                    config_service.execute_command(
-                        &script_name,
-                        &std::env::args().skip(2).collect::<Vec<String>>(),
-                    )?;
+                    config_service.execute_command(script_name, &cli.script_args)?;
                     return Ok(());
                 }
 
                 // If no custom command found, try to run as script
-                let args = std::env::args().skip(1).collect::<Vec<String>>();
-                let script_args = parse_script_and_args(&args);
-                let script_args_owned = script_args.map(|args| {
-                    args.into_iter()
-                        .map(|s| s.to_string())
-                        .collect::<Vec<String>>()
-                });
+                let script_args_owned = if cli.script_args.is_empty() {
+                    None
+                } else {
+                    Some(cli.script_args)
+                };
 
                 if let Err(e) = run(
-                    &script_name,
+                    script_name,
                     cli.workspace.as_deref(),
                     cli.workspaces,
                     script_args_owned,
