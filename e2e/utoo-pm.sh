@@ -17,7 +17,7 @@ echo -e "node path: $(node -e 'console.log(process.arch)')"
 ut config set registry https://registry.npmjs.org --global
 
 # Case 1: Clone and install ant-design-x (next)
-echo -e "${YELLOW}Case 2: Clone and install ant-design-x (next)${NC}"
+echo -e "${YELLOW}Case 1: Clone and install ant-design-x (next)${NC}"
 cd e2e/pm/ant-design-x
 if [ ! -d "ant-design-x" ]; then
   git clone --branch next --single-branch https://github.com/ant-design/x.git ant-design-x
@@ -31,7 +31,7 @@ echo -e "${GREEN}PASS: ant-design-x (next) cloned and installed${NC}"
 cd ../../
 
 # Case 2: Clone and install ant-design
-echo -e "${YELLOW}Case 1: Clone and install ant-design${NC}"
+echo -e "${YELLOW}Case 2: Clone and install ant-design${NC}"
 cd ant-design
 if [ ! -d "ant-design" ]; then
   git clone --depth=1 --single-branch https://github.com/ant-design/ant-design.git

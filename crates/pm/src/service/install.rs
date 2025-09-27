@@ -11,8 +11,8 @@ use tokio::sync::Semaphore;
 use crate::cmd::rebuild::rebuild;
 use crate::helper::global_bin::get_global_bin_dir;
 use crate::helper::lock::{
-    Package, PackageLock, ensure_package_lock, extract_package_name, group_by_depth,
-    path_to_pkg_name, prepare_global_package_json, update_package_json,
+    Package, ensure_package_lock, extract_package_name, group_by_depth, path_to_pkg_name,
+    prepare_global_package_json, update_package_json,
 };
 use crate::helper::workspace;
 use crate::helper::{is_cpu_compatible, is_os_compatible};
@@ -363,7 +363,7 @@ impl InstallService {
             .await
             .context("Failed to update package.json")?;
 
-        // Rebuild Deps
+        // Rebuild dependencies - the result will be used by install() via ensure_package_lock()
         crate::cmd::deps::build_deps(&root_path)
             .await
             .context("Failed to build package-lock.json")?;
@@ -376,15 +376,8 @@ impl InstallService {
     }
 
     pub async fn install(ignore_scripts: bool, root_path: &Path) -> Result<()> {
-        // Package lock prerequisite check
-        ensure_package_lock(root_path).await?;
-
-        // load package-lock.json
-        let package_lock_content = tokio::fs::read_to_string(root_path.join("package-lock.json"))
-            .await
-            .context("Failed to read package-lock.json")?;
-        let package_lock: PackageLock = serde_json::from_str(&package_lock_content)
-            .map_err(|e| anyhow::anyhow!("Failed to parse package-lock.json: {}", e))?;
+        // Get PackageLock directly, avoiding redundant disk read/parse operations
+        let package_lock = ensure_package_lock(root_path).await?;
 
         let cache_dir = get_cache_dir();
 
@@ -397,7 +390,7 @@ impl InstallService {
             PROGRESS_BAR.set_length(package_lock.packages.len() as u64);
         }
 
-        // Get the number of logical CPU cores of the system and set it to twice the number of CPU cores
+        // Set concurrent limit for package installation
         log_verbose(&format!("Setting concurrent limit to {CONCURRENT_LIMIT}"));
         let semaphore = Arc::new(Semaphore::new(CONCURRENT_LIMIT));
 
