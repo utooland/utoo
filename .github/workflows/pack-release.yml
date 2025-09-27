@@ -93,8 +93,8 @@ jobs:
         with:
           toolchain: nightly-2025-06-04
           targets: ${{ matrix.settings.target }}
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+      # - name: Cache cargo
+      #   uses: Swatinem/rust-cache@v2
       - name: Setup toolchain
         run: ${{ matrix.settings.setup }}
         if: ${{ matrix.settings.setup }}
