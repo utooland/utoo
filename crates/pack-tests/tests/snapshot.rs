@@ -14,12 +14,15 @@ use pack_api::{
     project::{DefineEnv, ProjectContainer, ProjectOptions, WatchOptions},
 };
 use rustc_hash::FxHashSet;
-use std::{collections::VecDeque, fs, io, path::PathBuf};
+use std::{
+    collections::VecDeque,
+    fs, io,
+    path::{Path, PathBuf},
+};
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{ResolvedVc, TurboTasks, ValueToString, Vc, apply_effects};
 use turbo_tasks_backend::{BackendOptions, TurboTasksBackend, noop_backing_storage};
 use turbo_tasks_fs::FileSystemPath;
-use turbo_unix_path::sys_to_unix;
 use turbopack_core::{asset::Asset, issue::CollectibleIssuesExt, output::OutputAsset};
 use turbopack_test_utils::snapshot::{UPDATE, diff, expected, matches_expected, snapshot_issues};
 
@@ -96,7 +99,7 @@ fn test(resource: PathBuf) {
     run(resource).unwrap();
 }
 
-#[tokio::main(flavor = "current_thread")]
+#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn run(resource: PathBuf) -> Result<()> {
     let tt = TurboTasks::new(TurboTasksBackend::new(
         BackendOptions {
@@ -108,26 +111,29 @@ async fn run(resource: PathBuf) -> Result<()> {
         },
         noop_backing_storage(),
     ));
-    tt.spawn_once_task(async move {
-        let emit_op = run_inner_options(resource.to_str().unwrap().into());
-        emit_op.read_strongly_consistent().await?;
-        apply_effects(emit_op).await?;
-        Ok(Vc::<()>::default())
-    });
+    match tt
+        .run(async move {
+            let emit_op = run_inner_options(resource.to_str().unwrap().into());
+            emit_op.read_strongly_consistent().await?;
+            apply_effects(emit_op).await?;
+
+            Ok(())
+        })
+        .await
+    {
+        Ok(()) => {}
+        Err(e) => return Err(e.into()),
+    }
 
     Ok(())
 }
 
 #[turbo_tasks::function(operation)]
 async fn run_inner_options(resource: RcStr) -> Result<()> {
-    let output_op = run_test_operation(resource);
-    let out_vc = output_op
-        .resolve_strongly_consistent()
-        .await?
-        .owned()
-        .await?;
-    let captured_issues = output_op.peek_issues().await?;
+    let out_op = run_test_operation(resource);
+    let out_vc = out_op.resolve_strongly_consistent().await?.owned().await?;
 
+    let captured_issues = out_op.peek_issues().await?;
     let plain_issues = captured_issues.get_plain_issues().await?;
 
     snapshot_issues(plain_issues, out_vc.join("issues")?, &REPO_ROOT)
@@ -243,27 +249,21 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
         watch: WatchOptions::default(),
         dev: !is_production,
         build_id: "test".into(),
-        pack_path: std::path::Path::new(&*REPO_ROOT)
+        pack_path: Path::new(&*REPO_ROOT)
             .join("node_modules/@utoo/pack")
             .to_string_lossy()
             .to_string()
             .into(),
     };
 
-    let relative_path = test_path.strip_prefix(&*REPO_ROOT)?;
-    let relative_path: RcStr = sys_to_unix(relative_path.to_str().unwrap()).into();
-    let _project_path = project_path.join(relative_path);
-
     // Initialize project container
-    let project_container_vc = ProjectContainer::new(rcstr!("project"), project_options.dev);
-    let project_container_resolved = project_container_vc.to_resolved().await?;
-    project_container_resolved
-        .initialize(project_options)
-        .await?;
+    let project_container = ProjectContainer::new(rcstr!("project"), project_options.dev);
+    let project_container = project_container.to_resolved().await?;
+    project_container.initialize(project_options).await?;
 
     // Run bundling operation using the same pattern as build.rs
     let entrypoints_with_issues_op =
-        get_all_written_entrypoints_with_issues_operation(project_container_resolved);
+        get_all_written_entrypoints_with_issues_operation(project_container);
     let EntrypointsWithIssues {
         entrypoints: _,
         issues: _,
@@ -277,13 +277,13 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
     effects.apply().await?;
 
     // Get output assets and walk through them
-    let project = project_container_vc.project();
+    let project = project_container.project();
     let output_path = project.dist_root().owned().await?;
 
     // Get expected output files from the output directory
     let expected_paths = expected(output_path.clone()).await?;
 
-    let output_assets = all_output_assets_operation(project_container_resolved)
+    let output_assets = all_output_assets_operation(project_container)
         .connect()
         .await?;
 
