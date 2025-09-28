@@ -37,15 +37,6 @@ impl RegistryHttpClient {
         format!("{}/{}/{}", self.base_url, name, spec)
     }
 
-    /// Fetch complete package information via HTTP (no caching) with full data for view command
-    pub async fn fetch_full_manifest_for_view(
-        &self,
-        name: &str,
-        etag: Option<&str>,
-    ) -> Result<(FullManifest, Option<String>)> {
-        self.fetch_full_manifest(name, etag, true).await
-    }
-
     /// Fetch complete package information via HTTP (no caching)
     pub async fn fetch_full_manifest(
         &self,
