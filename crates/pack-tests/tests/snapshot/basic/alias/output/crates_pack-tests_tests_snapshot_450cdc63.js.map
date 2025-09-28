@@ -1,0 +1,8 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/basic/alias/input/a.ts"],"sourcesContent":["export const foo = \"foo\";\nexport const bar = \"bar\";"],"names":[],"mappings":";;;;;;AAAO,MAAM,MAAM;AACZ,MAAM,MAAM"}},
+    {"offset": {"line": 16, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/node_modules/alias-pkg/index.js"],"sourcesContent":["// import { a } from '@@/a';\n\n// console.log('this is in node_modules', a);\n\nconst aliasPkg = 'alias-pkg';\n\nexport { a, aliasPkg }"],"names":[],"mappings":"AAAA,4BAA4B;AAE5B,6CAA6C;;;;;;;AAE7C,MAAM,WAAW","ignoreList":[0]}},
+    {"offset": {"line": 30, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/basic/alias/input/index.ts"],"sourcesContent":["import { foo } from 'hello-a';\nimport { aliasPkg } from \"alias-pkg\";\nimport { bar } from '@@/a';\n\nconsole.log(foo, aliasPkg, bar);\n\nconsole.log('xxxx');"],"names":[],"mappings":";AAAA;AACA;;;;AAGA,QAAQ,GAAG,CAAC,0CAAG,EAAE,+CAAQ,EAAE,0CAAG;AAE9B,QAAQ,GAAG,CAAC"}}]
+}

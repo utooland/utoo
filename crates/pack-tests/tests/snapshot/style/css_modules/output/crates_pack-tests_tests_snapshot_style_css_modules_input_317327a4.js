@@ -18,7 +18,7 @@ __turbopack_context__.v({
   "card": "style-sass__YRuz8a__card",
 });
 }),
-808, ((__turbopack_context__) => {
+910, ((__turbopack_context__) => {
 
 __turbopack_context__.v({
   "header": "style-scss__ijVZ3q__header",
@@ -63,7 +63,7 @@ __turbopack_context__.s([]);
 var __TURBOPACK__imported__module__350__ = __turbopack_context__.i(350);
 var __TURBOPACK__imported__module__415__ = __turbopack_context__.i(415);
 var __TURBOPACK__imported__module__197__ = __turbopack_context__.i(197);
-var __TURBOPACK__imported__module__808__ = __turbopack_context__.i(808);
+var __TURBOPACK__imported__module__910__ = __turbopack_context__.i(910);
 var __TURBOPACK__imported__module__650__ = __turbopack_context__.i(650);
 // normal css modules
 var __TURBOPACK__imported__module__654__ = __turbopack_context__.i(654);
@@ -77,7 +77,7 @@ var __TURBOPACK__imported__module__351__ = __turbopack_context__.i(351);
 console.log('CSS styles:', __TURBOPACK__imported__module__350__["default"]);
 console.log('LESS styles:', __TURBOPACK__imported__module__415__["default"]);
 console.log('SASS styles:', __TURBOPACK__imported__module__197__["default"]);
-console.log('SCSS styles:', __TURBOPACK__imported__module__808__["default"]);
+console.log('SCSS styles:', __TURBOPACK__imported__module__910__["default"]);
 ;
 console.log('Existing modules:', __TURBOPACK__imported__module__650__["default"]);
 ;

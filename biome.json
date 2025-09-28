@@ -17,7 +17,10 @@
       "crates/pack-core/js/**/*.ts",
       "!**/examples/multi-entries-heavy/*",
       "!**/packages/**/binding.*",
-      "!next.js/**"
+      "!next.js/**",
+      "!crates/pack-tests/**/package.json",
+      "!**/dist",
+      "!**/.turbopack"
     ]
   },
   "formatter": {

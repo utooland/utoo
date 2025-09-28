@@ -260,7 +260,7 @@ pub async fn get_utoopack_dependency_package(
         .await?
         .context(format!("package {dependency} not found"))?;
 
-    let dependency_path_to_root = &source.ident().path().owned().await?;
+    let dependency_path_to_root = &source.ident().path().owned().await?.parent();
 
     Ok(Vc::cell(
         dependency_path_to_root
@@ -269,7 +269,6 @@ pub async fn get_utoopack_dependency_package(
             // for example: require("node_modules/.pnpm/loader-runner@4.3.0/node_modules/loader-runner/lib/LoaderRunner.js") can't be resolve,
             // but require(".pnpm/loader-runner@4.3.0/node_modules/loader-runner/lib/LoaderRunner.js)" can be
             .replacen("node_modules/", "", 1)
-            .replace("/package.json", "")
             .into(),
     ))
 }
