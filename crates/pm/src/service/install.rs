@@ -8,7 +8,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
-use crate::cmd::rebuild::rebuild;
 use crate::helper::global_bin::get_global_bin_dir;
 use crate::helper::lock::{
     Package, ensure_package_lock, extract_package_name, group_by_depth, path_to_pkg_name,
@@ -17,6 +16,7 @@ use crate::helper::lock::{
 use crate::helper::workspace;
 use crate::helper::{is_cpu_compatible, is_os_compatible};
 use crate::model::package::PackageInfo;
+use crate::service::rebuild::RebuildService;
 use crate::util::cache::get_cache_dir;
 use crate::util::cloner::clone;
 use crate::util::downloader::download;
@@ -400,19 +400,21 @@ impl InstallService {
 
         finish_progress_bar("node_modules cloned");
 
+        // Execute rebuild operations based on ignore_scripts parameter
         if !ignore_scripts {
             log_info(
                 "Starting to execute dependency hook scripts, you can add --ignore-scripts to skip",
             );
-            rebuild(root_path).await?;
+            RebuildService::rebuild(&package_lock, root_path, false).await?;
             log_info("💫 All dependencies installed successfully");
-            Ok(())
         } else {
+            log_info("Processing binary files...");
+            RebuildService::rebuild(&package_lock, root_path, true).await?;
             log_info(
-                "💫 All dependencies installed successfully (you can run 'utoo rebuild' to trigger dependency hooks)",
+                "💫 All dependencies installed successfully (scripts skipped, binaries linked)",
             );
-            Ok(())
         }
+        Ok(())
     }
 
     pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Result<()> {
