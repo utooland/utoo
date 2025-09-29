@@ -6,7 +6,7 @@ use crate::model::package::{PackageInfo, Scripts};
 use crate::service::script::ScriptService;
 use crate::service::workspace::WorkspaceService;
 use crate::util::json::load_package_json_from_path;
-use crate::util::logger::log_info;
+use crate::util::logger::{log_command, log_info};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use tokio::task::JoinSet;
@@ -93,10 +93,12 @@ pub async fn run_script(
     // Execute pre script if exists
     let pre_script_name = format!("pre{script_name}");
     if let Some(Value::String(pre_script)) = scripts.get(&pre_script_name) {
-        log_info(&format!("Executing pre script: {pre_script_name}"));
+        log_command(pre_script, "");
         ScriptService::execute_custom_script(&package, &pre_script_name, pre_script)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to execute pre script: {}", e))?;
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to execute pre script {}: {}", pre_script_name, e)
+            })?;
     }
 
     // Execute main script
@@ -106,8 +108,8 @@ pub async fn run_script(
         anyhow::bail!("Script '{}' not found in package.json", script_name);
     };
 
-    log_info(&format!("Executing script: {script_name}"));
     let script_args = script_args.unwrap_or_default();
+    log_command(script_content, &script_args.join(" "));
     ScriptService::execute_custom_script_with_args(
         &package,
         script_name,
@@ -115,15 +117,17 @@ pub async fn run_script(
         script_args,
     )
     .await
-    .map_err(|e| anyhow::anyhow!("Failed to execute script: {}", e))?;
+    .map_err(|e| anyhow::anyhow!("Failed to execute script {}: {}", script_name, e))?;
 
     // Execute post script if exists
     let post_script_name = format!("post{script_name}");
     if let Some(Value::String(post_script)) = scripts.get(&post_script_name) {
-        log_info(&format!("Executing post script: {post_script_name}"));
+        log_command(post_script, "");
         ScriptService::execute_custom_script(&package, &post_script_name, post_script)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to execute post script: {}", e))?;
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to execute post script {}: {}", post_script_name, e)
+            })?;
     }
 
     Ok(())

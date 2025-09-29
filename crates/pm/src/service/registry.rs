@@ -4,9 +4,10 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use super::cache::{PACKAGE_CACHE, VersionsInfo};
-use super::http_client::{fetch_full_manifest, fetch_version_manifest};
+use super::http_client::fetch_full_manifest;
 use crate::model::manifest::{FullManifest, VersionManifest};
 use crate::model::node::EdgeType;
+use crate::service::http_client::fetch_version_manifest;
 use crate::util::config::get_registry_support_semver;
 use crate::util::logger::log_verbose;
 use crate::util::semver;

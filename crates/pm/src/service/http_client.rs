@@ -42,6 +42,7 @@ impl RegistryHttpClient {
         &self,
         name: &str,
         etag: Option<&str>,
+        use_abbreviated: bool,
     ) -> Result<(FullManifest, Option<String>)> {
         let url = format!("{}/{}", self.base_url, name);
         log_verbose(&format!("Fetching full manifest for {name} from {url}"));
@@ -50,7 +51,13 @@ impl RegistryHttpClient {
         let result = RetryIf::spawn(
             create_retry_strategy(),
             || async {
-                let mut request = self.client.get(&url).header("Accept", "application/json");
+                let accept_header = if use_abbreviated {
+                    "application/vnd.npm.install-v1+json"
+                } else {
+                    "application/json"
+                };
+
+                let mut request = self.client.get(&url).header("Accept", accept_header);
 
                 // Add If-None-Match header if etag provided
                 if let Some(etag_value) = etag {
@@ -208,12 +215,24 @@ impl RegistryHttpClient {
 
 // Global HTTP client access functions - pure HTTP operations only
 
+/// Fetch complete package information via HTTP with full data for view command
+pub async fn fetch_full_manifest_for_view(
+    name: &str,
+    etag: Option<&str>,
+) -> Result<(FullManifest, Option<String>)> {
+    get_registry_client()
+        .fetch_full_manifest(name, etag, false)
+        .await
+}
+
 /// Fetch complete package information via HTTP
 pub async fn fetch_full_manifest(
     name: &str,
     etag: Option<&str>,
 ) -> Result<(FullManifest, Option<String>)> {
-    get_registry_client().fetch_full_manifest(name, etag).await
+    get_registry_client()
+        .fetch_full_manifest(name, etag, true)
+        .await
 }
 
 /// Fetch specific version manifest via HTTP

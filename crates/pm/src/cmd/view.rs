@@ -1,10 +1,11 @@
-use crate::model::manifest::PackageManifest;
+use crate::helper::package::parse_package_spec;
+use crate::model::manifest::{FullManifest, VersionManifest};
+use crate::service::http_client::fetch_full_manifest_for_view;
 use crate::util::format_print::print_grid;
 use crate::util::logger::log_verbose;
 use crate::util::registry::resolve;
-use crate::{helper::package::parse_package_spec, service::http_client::fetch_full_manifest};
 use anyhow::{Result, anyhow};
-use chrono::{TimeZone, Utc};
+use chrono::Utc;
 use owo_colors::OwoColorize;
 
 /// View package information from registry, similar to npm view
@@ -16,57 +17,75 @@ pub async fn view(package_spec: &str) -> Result<()> {
 
     log_verbose(&format!("Resolved package: {name} (spec: {version_spec})"));
 
-    // Get complete package information (like npm view)
-    let package_info = fetch_full_manifest(name, None).await.map_err(|e| {
-        anyhow!(
-            "Failed to fetch package info for {}, reason: {}",
-            package_spec,
-            e
-        )
-    })?;
+    // Get complete package information (like npm view) - use full JSON format for complete data
+    let (full_manifest, _etag) = fetch_full_manifest_for_view(name, None)
+        .await
+        .map_err(|e| {
+            anyhow!(
+                "Failed to fetch package info for {}, reason: {}",
+                package_spec,
+                e
+            )
+        })?;
+
+    log_verbose(&format!("Fetched package info: {full_manifest:?}"));
 
     // Get the specific version manifest if a version was specified
     let resolved_package = resolve(name, version_spec).await?;
-    let version_manifest = resolved_package.manifest;
+    let version_manifest_value = resolved_package.manifest;
 
-    // Create PackageManifest from the raw data
-    let package_info_value = serde_json::to_value(&package_info)?;
-    let package_manifest = PackageManifest::from_package_info_and_manifest(
-        &package_info_value,
-        name,
-        &version_manifest,
-    );
+    // Parse version manifest to strong type
+    let version_manifest: VersionManifest = serde_json::from_value(version_manifest_value)?;
 
     // Print package information in npm view format
-    print_package_info(&package_manifest)?;
+    print_package_info(&full_manifest, &version_manifest)?;
 
     Ok(())
 }
 
-/// Print package information in npm view style format
-fn print_package_info(package_manifest: &PackageManifest) -> Result<()> {
-    log_verbose(&format!("Target version: {}", package_manifest.version));
+/// Print package information in npm view style format using strong types
+fn print_package_info(
+    full_manifest: &FullManifest,
+    version_manifest: &VersionManifest,
+) -> Result<()> {
+    log_verbose(&format!("Target version: {}", version_manifest.version));
 
-    print_package_header(package_manifest);
-    print_package_description(package_manifest);
-    print_keywords(package_manifest);
-    print_dist_info(package_manifest);
-    print_author_info(package_manifest);
-    print_repository_info(package_manifest);
-    print_bugs_info(package_manifest);
-    print_dependencies(package_manifest);
-    print_maintainers(package_manifest);
-    print_dist_tags(package_manifest);
-    print_publish_info(package_manifest);
+    print_package_header(full_manifest, version_manifest);
+    print_package_description(full_manifest, version_manifest);
+    print_keywords(full_manifest, version_manifest);
+    print_dist_info(version_manifest);
+    print_author_info(full_manifest, version_manifest);
+    print_repository_info(full_manifest, version_manifest);
+    print_bugs_info(full_manifest, version_manifest);
+    print_dependencies(version_manifest);
+    print_maintainers(full_manifest);
+    print_dist_tags(full_manifest);
+    print_publish_info(full_manifest, version_manifest);
 
     Ok(())
 }
 
-fn print_package_header(package_manifest: &PackageManifest) {
-    let description = package_manifest.description.as_deref().unwrap_or("");
-    let license = package_manifest.license.as_deref().unwrap_or("UNLICENSED");
-    let deps_count = package_manifest.dependencies_count();
-    let versions_count = package_manifest.versions_count;
+fn print_package_header(full_manifest: &FullManifest, version_manifest: &VersionManifest) {
+    // Use description from version manifest or fallback to full manifest
+    let description = version_manifest
+        .description
+        .as_deref()
+        .or(full_manifest.description.as_deref())
+        .unwrap_or("");
+
+    // Use license from version manifest or fallback to full manifest
+    let license = version_manifest
+        .license
+        .as_deref()
+        .or(full_manifest.license.as_deref())
+        .unwrap_or("UNLICENSED");
+
+    let deps_count = version_manifest
+        .dependencies
+        .as_ref()
+        .map(|d| d.len())
+        .unwrap_or(0);
+    let versions_count = full_manifest.versions.len();
 
     let deps_str = if deps_count == 0 {
         "none".to_string()
@@ -76,8 +95,8 @@ fn print_package_header(package_manifest: &PackageManifest) {
 
     println!(
         "\n{}@{} | {} | deps: {} | versions: {}",
-        package_manifest.name.bright_blue().bold(),
-        package_manifest.version.bright_green(),
+        version_manifest.name.bright_blue().bold(),
+        version_manifest.version.bright_green(),
         license.yellow(),
         deps_str.cyan(),
         versions_count.magenta()
@@ -88,49 +107,65 @@ fn print_package_header(package_manifest: &PackageManifest) {
     }
 }
 
-fn print_package_description(package_manifest: &PackageManifest) {
-    if let Some(homepage) = &package_manifest.homepage {
+fn print_package_description(full_manifest: &FullManifest, version_manifest: &VersionManifest) {
+    // Use homepage from version manifest or fallback to full manifest
+    let homepage = version_manifest
+        .homepage
+        .as_ref()
+        .or(full_manifest.homepage.as_ref());
+
+    if let Some(homepage) = homepage {
         println!("{}", homepage.blue().underline());
     }
     println!();
 }
 
-fn print_keywords(package_manifest: &PackageManifest) {
-    if let Some(keywords) = package_manifest.keywords.as_ref().filter(|k| !k.is_empty()) {
+fn print_keywords(full_manifest: &FullManifest, version_manifest: &VersionManifest) {
+    // Use keywords from version manifest or fallback to full manifest
+    let keywords = version_manifest
+        .keywords
+        .as_ref()
+        .or(full_manifest.keywords.as_ref())
+        .filter(|k| !k.is_empty());
+
+    if let Some(keywords) = keywords {
         let keyword_str = keywords.join(", ");
         println!("{} {}", "keywords:".bright_cyan(), keyword_str.white());
     }
 }
 
-fn print_dist_info(package_manifest: &PackageManifest) {
-    if let Some(dist) = package_manifest.dist.as_ref() {
+fn print_dist_info(version_manifest: &VersionManifest) {
+    if let Some(tarball) = &version_manifest.dist.tarball {
         println!("\n{}", "dist".bright_yellow().bold());
+        println!("{} {}", ".tarball:".cyan(), tarball.blue().underline());
+    }
 
-        if let Some(tarball) = &dist.tarball {
-            println!("{} {}", ".tarball:".cyan(), tarball.blue().underline());
-        }
+    if let Some(shasum) = &version_manifest.dist.shasum {
+        println!("{} {}", ".shasum:".cyan(), shasum.green());
+    }
 
-        if let Some(shasum) = &dist.shasum {
-            println!("{} {}", ".shasum:".cyan(), shasum.green());
-        }
+    if let Some(integrity) = &version_manifest.dist.integrity {
+        println!("{} {}", ".integrity:".cyan(), integrity.green());
+    }
 
-        if let Some(integrity) = &dist.integrity {
-            println!("{} {}", ".integrity:".cyan(), integrity.green());
-        }
-
-        if let Some(unpacked_size) = dist.unpacked_size {
-            let size_mb = unpacked_size as f64 / 1024.0 / 1024.0;
-            println!(
-                "{} {} MB",
-                ".unpackedSize:".cyan(),
-                format!("{size_mb:.1}").yellow()
-            );
-        }
+    if let Some(unpacked_size) = version_manifest.dist.unpacked_size {
+        let size_mb = unpacked_size as f64 / 1024.0 / 1024.0;
+        println!(
+            "{} {} MB",
+            ".unpackedSize:".cyan(),
+            format!("{size_mb:.1}").yellow()
+        );
     }
 }
 
-fn print_author_info(package_manifest: &PackageManifest) {
-    if let Some(author) = package_manifest.author.as_ref() {
+fn print_author_info(full_manifest: &FullManifest, version_manifest: &VersionManifest) {
+    // Use author from version manifest or fallback to full manifest
+    let author = version_manifest
+        .author
+        .as_ref()
+        .or(full_manifest.author.as_ref());
+
+    if let Some(author) = author {
         let author_line = match &author.email {
             Some(email) => format!(
                 "\n{} {} <{}>",
@@ -144,8 +179,14 @@ fn print_author_info(package_manifest: &PackageManifest) {
     }
 }
 
-fn print_repository_info(package_manifest: &PackageManifest) {
-    if let Some(repo) = package_manifest.repository.as_ref() {
+fn print_repository_info(full_manifest: &FullManifest, version_manifest: &VersionManifest) {
+    // Use repository from version manifest or fallback to full manifest
+    let repository = version_manifest
+        .repository
+        .as_ref()
+        .or(full_manifest.repository.as_ref());
+
+    if let Some(repo) = repository {
         println!(
             "{} {}:{}",
             "repository:".bright_magenta(),
@@ -155,8 +196,14 @@ fn print_repository_info(package_manifest: &PackageManifest) {
     }
 }
 
-fn print_bugs_info(package_manifest: &PackageManifest) {
-    if let Some(bugs) = package_manifest.bugs.as_ref() {
+fn print_bugs_info(full_manifest: &FullManifest, version_manifest: &VersionManifest) {
+    // Use bugs from version manifest or fallback to full manifest
+    let bugs = version_manifest
+        .bugs
+        .as_ref()
+        .or(full_manifest.bugs.as_ref());
+
+    if let Some(bugs) = bugs {
         println!(
             "{} {}",
             "bugs:".bright_magenta(),
@@ -165,8 +212,8 @@ fn print_bugs_info(package_manifest: &PackageManifest) {
     }
 }
 
-fn print_dependencies(package_manifest: &PackageManifest) {
-    if let Some(dependencies) = package_manifest
+fn print_dependencies(version_manifest: &VersionManifest) {
+    if let Some(dependencies) = version_manifest
         .dependencies
         .as_ref()
         .filter(|d| !d.is_empty())
@@ -195,12 +242,8 @@ fn print_dependencies(package_manifest: &PackageManifest) {
     }
 }
 
-fn print_maintainers(package_manifest: &PackageManifest) {
-    if let Some(maintainers) = package_manifest
-        .maintainers
-        .as_ref()
-        .filter(|m| !m.is_empty())
-    {
+fn print_maintainers(full_manifest: &FullManifest) {
+    if let Some(maintainers) = full_manifest.maintainers.as_ref().filter(|m| !m.is_empty()) {
         println!("\n{}", "maintainers:".bright_yellow().bold());
 
         for maintainer in maintainers {
@@ -213,15 +256,12 @@ fn print_maintainers(package_manifest: &PackageManifest) {
     }
 }
 
-fn print_dist_tags(package_manifest: &PackageManifest) {
-    if let Some(dist_tags) = package_manifest
-        .dist_tags
-        .as_ref()
-        .filter(|d| !d.is_empty())
-    {
+fn print_dist_tags(full_manifest: &FullManifest) {
+    if !full_manifest.dist_tags.is_empty() {
         println!("\n{}", "dist-tags:".bright_yellow().bold());
 
-        let tags: Vec<String> = dist_tags
+        let tags: Vec<String> = full_manifest
+            .dist_tags
             .iter()
             .map(|(tag, version)| format!("{}: {}", tag.blue(), version))
             .collect();
@@ -230,13 +270,13 @@ fn print_dist_tags(package_manifest: &PackageManifest) {
     }
 }
 
-fn print_publish_info(package_manifest: &PackageManifest) {
-    if let Some(publish_time) = package_manifest.get_publish_time(&package_manifest.version)
-        && let Some(published_time) = Utc.timestamp_opt(publish_time as i64 / 1000, 0).single()
+fn print_publish_info(full_manifest: &FullManifest, version_manifest: &VersionManifest) {
+    // Get publish time from time info
+    if let Some(time_str) = full_manifest.time.get(&version_manifest.version)
+        && let Ok(published_time) = chrono::DateTime::parse_from_rfc3339(time_str)
     {
-        let time_str = format_time_ago(published_time);
-        let publish_line = format_publish_line(&time_str, package_manifest);
-
+        let time_str = format_time_ago(published_time.with_timezone(&Utc));
+        let publish_line = format_publish_line(&time_str, version_manifest);
         println!("\n{publish_line}");
     }
 }
@@ -256,8 +296,8 @@ fn format_time_ago(published_time: chrono::DateTime<Utc>) -> String {
     }
 }
 
-fn format_publish_line(time_str: &str, package_manifest: &PackageManifest) -> String {
-    match package_manifest.get_npm_user(&package_manifest.version) {
+fn format_publish_line(time_str: &str, version_manifest: &VersionManifest) -> String {
+    match &version_manifest.npm_user {
         Some(npm_user) => match &npm_user.email {
             Some(email) => format!(
                 "{} {} by {} <{}>",
@@ -280,40 +320,27 @@ fn format_publish_line(time_str: &str, package_manifest: &PackageManifest) -> St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::manifest::{Author, PackageManifest};
-    use std::collections::HashMap;
+    use crate::model::manifest::Dist;
 
     #[test]
     fn test_print_package_info() {
-        // Create a test PackageManifest
-        let package_manifest = PackageManifest {
+        // Create test data
+        let full_manifest = FullManifest {
+            name: "test-package".to_string(),
+            maintainers: Some(vec![]),
+            ..Default::default()
+        };
+
+        let version_manifest = VersionManifest {
             name: "test-package".to_string(),
             version: "1.0.0".to_string(),
             description: Some("A test package".to_string()),
-            homepage: Some("https://example.com".to_string()),
-            license: Some("MIT".to_string()),
-            keywords: Some(vec!["test".to_string(), "package".to_string()]),
-            dependencies: {
-                let mut deps = HashMap::new();
-                deps.insert("lodash".to_string(), "^4.17.21".to_string());
-                Some(deps)
-            },
-            author: Some(Author {
-                name: "Test Author".to_string(),
-                email: Some("test@example.com".to_string()),
-                url: None,
-            }),
-            repository: None,
-            bugs: None,
-            dist: None,
-            maintainers: None,
-            dist_tags: None,
-            versions: None,
-            versions_count: 1,
+            dist: Dist::default(),
+            ..Default::default()
         };
 
         // This test just ensures the function doesn't panic
-        let result = print_package_info(&package_manifest);
+        let result = print_package_info(&full_manifest, &version_manifest);
         assert!(result.is_ok());
     }
 }
