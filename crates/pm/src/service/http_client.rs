@@ -221,7 +221,7 @@ pub async fn fetch_full_manifest_for_view(
     etag: Option<&str>,
 ) -> Result<(FullManifest, Option<String>)> {
     get_registry_client()
-        .fetch_full_manifest_for_view(name, etag)
+        .fetch_full_manifest(name, etag, false)
         .await
 }
 
@@ -229,10 +229,9 @@ pub async fn fetch_full_manifest_for_view(
 pub async fn fetch_full_manifest(
     name: &str,
     etag: Option<&str>,
-    use_abbreviated: bool,
 ) -> Result<(FullManifest, Option<String>)> {
     get_registry_client()
-        .fetch_full_manifest(name, etag, use_abbreviated)
+        .fetch_full_manifest(name, etag, true)
         .await
 }
 

@@ -86,7 +86,7 @@ impl RegistryService {
         log_verbose(&format!("Loaded etag from disk for {name}: {etag:?}"));
 
         // 4. Network request with etag for 304 validation
-        match fetch_full_manifest(name, etag.as_deref(), true).await {
+        match fetch_full_manifest(name, etag.as_deref()).await {
             Ok((full_manifest, new_etag)) => {
                 log_verbose(&format!("Received fresh full manifest for: {name}"));
 
