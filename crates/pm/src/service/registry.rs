@@ -237,11 +237,13 @@ impl RegistryService {
                 let version_clone = version.to_string();
                 let manifest_clone = manifest.clone();
 
-                tokio::spawn(async move {
-                    PACKAGE_CACHE
-                        .set_version_manifest_to_disk(&name_clone, &version_clone, &manifest_clone)
-                        .await;
-                });
+                if !get_registry_support_semver() {
+                    tokio::spawn(async move {
+                        PACKAGE_CACHE
+                            .set_version_manifest_to_disk(&name_clone, &version_clone, &manifest_clone)
+                            .await;
+                    });
+                }
 
                 Ok(manifest)
             }

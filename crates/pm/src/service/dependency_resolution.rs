@@ -339,9 +339,6 @@ impl DependencyResolutionService {
 
         let mut current_level = Self::collect_root_dependencies(cwd).await?;
         let mut resolved_deps: HashMap<String, ResolvedDependency> = HashMap::new();
-        let mut total_resolved = 0;
-        let mut total_skipped = 0;
-        let mut total_failed = 0;
         let mut level = 1;
 
         start_progress_bar();
@@ -375,15 +372,12 @@ impl DependencyResolutionService {
                     ResolutionResult::Success { resolved, children } => {
                         resolved_deps.insert(resolved.name.clone(), resolved);
                         next_level.extend(children);
-                        total_resolved += 1;
                     }
                     ResolutionResult::Skipped { name, spec, reason } => {
                         log_verbose(&format!("Skipped {}@{}: {}", name, spec, reason));
-                        total_skipped += 1;
                     }
                     ResolutionResult::Failed { name, spec, error } => {
                         log_verbose(&format!("Failed to resolve {}@{}: {}", name, spec, error));
-                        total_failed += 1;
                     }
                 }
                 PROGRESS_BAR.inc(1);
@@ -411,13 +405,7 @@ impl DependencyResolutionService {
                 .context("Failed to store preload cache");
         });
 
-        finish_progress_bar(&format!(
-            "Preloaded {} dependencies (resolved: {}, skipped: {}, failed: {})",
-            total_resolved + total_skipped + total_failed,
-            total_resolved,
-            total_skipped,
-            total_failed
-        ));
+        finish_progress_bar(&format!("manifests preloaded"));
 
         Ok(())
     }
