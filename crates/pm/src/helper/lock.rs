@@ -89,12 +89,12 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
     {
         log_info("Resolving dependencies");
         // Return PackageLock directly from build_deps, avoiding disk read
-        return build_deps(root_path).await;
+        return build_deps(root_path, None).await;
     } else {
         // Validate dependencies to ensure package-lock.json is in sync with package.json
         if is_pkg_lock_outdated(root_path).await? {
             // Return PackageLock directly from build_deps, avoiding disk read
-            return build_deps(root_path).await;
+            return build_deps(root_path, None).await;
         }
 
         // Load existing package-lock.json only when it's valid and up-to-date

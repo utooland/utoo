@@ -2,11 +2,16 @@ use anyhow::Result;
 use std::path::Path;
 
 use crate::helper::lock::PackageLock;
-use crate::service::dependency_resolution::DependencyResolutionService;
+use crate::service::dependency_resolution::{DependencyResolutionService, set_concurrency};
 
-pub async fn build_deps(cwd: &Path) -> Result<PackageLock> {
-    // Dispatch to service - now returns PackageLock directly
-    DependencyResolutionService::build_deps(cwd).await
+pub async fn build_deps(cwd: &Path, con: Option<usize>) -> Result<PackageLock> {
+    // Set concurrency if provided
+    if let Some(concurrency) = con {
+        set_concurrency(concurrency);
+    }
+    DependencyResolutionService::preload(cwd).await?;
+    let package_lock = DependencyResolutionService::build_deps(cwd).await?;
+    Ok(package_lock)
 }
 
 pub async fn build_workspace(cwd: &Path) -> Result<()> {

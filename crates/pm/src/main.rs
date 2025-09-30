@@ -5,7 +5,7 @@ use std::process;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd::config::{handle_config_get, handle_config_list, handle_config_set};
-use cmd::deps::build_deps;
+use cmd::deps::build_workspace;
 use cmd::execute::execute;
 use cmd::install::{install, install_global_package, update_packages};
 use cmd::link::{link_current_to_global, link_global_to_local};
@@ -14,7 +14,7 @@ use cmd::rebuild::rebuild;
 use cmd::run::run;
 use cmd::update::update;
 use cmd::view::view;
-use cmd::{clean::clean, deps::build_workspace};
+use cmd::{clean::clean};
 use helper::auto_update::init_auto_update;
 use util::config::{set_legacy_peer_deps, set_registry};
 use util::logger::{
@@ -30,6 +30,7 @@ mod model;
 mod service;
 mod util;
 
+use crate::cmd::deps::build_deps;
 use crate::constants::cmd::{
     CLEAN_ABOUT, CLEAN_ALIAS, CLEAN_NAME, CONFIG_ABOUT, CONFIG_ALIAS, CONFIG_NAME, DEPS_ABOUT,
     DEPS_ALIAS, DEPS_NAME, EXECUTE_ABOUT, EXECUTE_ALIAS, EXECUTE_NAME, INSTALL_ABOUT,
@@ -169,6 +170,8 @@ enum Commands {
     Deps {
         #[arg(long)]
         workspace_only: bool,
+        #[arg(long, help = "Set concurrency limit for dependency resolution (default: 15)")]
+        con: Option<usize>,
     },
 
     #[command(name = UPDATE_NAME, alias = UPDATE_ALIAS, about = UPDATE_ABOUT)]
@@ -396,13 +399,15 @@ async fn async_main() -> Result<()> {
             }
             log_time_end("All packages rebuilt");
         }
-        Some(Commands::Deps { workspace_only }) => {
+        Some(Commands::Deps { workspace_only, con }) => {
             let cwd = std::env::current_dir()?;
             let root_path = update_cwd_to_root(&cwd).await?;
+
             let result = if workspace_only {
                 build_workspace(&root_path).await.map(|_| ())
             } else {
-                build_deps(&root_path).await.map(|_| ()) // Ignore returned PackageLock for CLI command
+                // Always use preload mode for better performance
+                build_deps(&root_path, con).await.map(|_| ())
             };
 
             if let Err(e) = result {

@@ -364,7 +364,7 @@ impl InstallService {
             .context("Failed to update package.json")?;
 
         // Rebuild dependencies - the result will be used by install() via ensure_package_lock()
-        crate::cmd::deps::build_deps(&root_path)
+        crate::cmd::deps::build_deps(&root_path, None)
             .await
             .context("Failed to build package-lock.json")?;
 
