@@ -8,6 +8,7 @@ use std::sync::Arc;
 use crate::helper::workspace::find_workspaces;
 use crate::model::node::{EdgeType, Node};
 use crate::model::override_rule::Overrides;
+use crate::model::package_lock::LockPackage;
 use crate::util::config::get_legacy_peer_deps;
 use crate::util::json::{load_package_json_from_path, load_package_lock_json_from_path};
 use crate::util::logger::{log_verbose, log_warning};
@@ -20,22 +21,14 @@ use crate::{cmd::deps::build_deps, util::logger::log_info};
 
 use super::workspace::find_workspace_path;
 
+// Use the model's LockPackage but create a simplified PackageLock for helper functions
 #[derive(Deserialize, Serialize, Clone)]
 pub struct PackageLock {
-    pub packages: HashMap<String, Package>,
+    pub packages: HashMap<String, LockPackage>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
-#[serde(rename_all = "snake_case")]
-pub struct Package {
-    pub name: Option<String>,
-    pub version: Option<String>,
-    pub resolved: Option<String>,
-    pub link: Option<bool>,
-    pub cpu: Option<Value>,
-    pub os: Option<Value>,
-    pub has_install_script: Option<bool>,
-}
+// Type alias for backward compatibility
+pub type Package = LockPackage;
 
 pub fn group_by_depth(
     packages: &HashMap<String, Package>,

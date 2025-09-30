@@ -1,13 +1,13 @@
 use crate::helper::compatibility::{is_cpu_compatible, is_os_compatible};
+use crate::helper::lock::PackageLock;
 use crate::helper::package::parse_package_name;
 use crate::model::package::{PackageInfo, Scripts};
-use crate::util::json::{load_package_json_from_path, load_package_lock_json_from_path};
+use crate::util::json::load_package_json_from_path;
 use crate::util::logger::{
     PROGRESS_BAR, finish_progress_bar, log_info, log_progress, log_verbose, start_progress_bar,
 };
 use anyhow::{Context, Result};
 use futures;
-use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 use super::script::ScriptService;
@@ -98,153 +98,6 @@ impl PackageService {
         Ok(())
     }
 
-    pub async fn collect_packages(root_path: &Path) -> Result<Vec<PackageInfo>> {
-        log_verbose("Collecting packages...");
-        let lock_data = load_package_lock_json_from_path(root_path).await?;
-
-        let mut packages = Vec::new();
-        if let Some(deps) = lock_data.get("packages").and_then(|v| v.as_object()) {
-            for (path, info) in deps {
-                if path.is_empty() {
-                    continue;
-                }
-                if let Some(package) =
-                    Self::process_package_info(&format!("{}/{}", root_path.display(), path), info)
-                        .await?
-                {
-                    packages.push(package);
-                }
-            }
-        }
-        Ok(packages)
-    }
-
-    pub fn create_execution_queues(packages: Vec<PackageInfo>) -> Result<Vec<Vec<PackageInfo>>> {
-        log_verbose("Prepareing execute queues...");
-        let mut queues = vec![Vec::new(); 5];
-
-        // create queues, and we will check if there is a cache first
-        // if there is a cache, we will not execute the scripts related tasks
-        for package in packages {
-            let has_cached = Self::has_cached(&package);
-            if has_cached {
-                log_verbose(&format!(
-                    "Package {} is cached, skipping execution",
-                    package.fullname
-                ));
-                queues[0].push(package.clone());
-            }
-            if package.scripts.preinstall.is_some() && !has_cached {
-                log_verbose(&format!(
-                    "Adding {} to preinstall queue",
-                    package.path.display()
-                ));
-                queues[1].push(package.clone());
-            }
-            if !package.bin_files.is_empty() {
-                log_verbose(&format!(
-                    "Adding {} to bin linking queue",
-                    package.path.display()
-                ));
-                queues[2].push(package.clone());
-            }
-            if package.scripts.install.is_some() && !has_cached {
-                log_verbose(&format!(
-                    "Adding {} to install queue",
-                    package.path.display()
-                ));
-                queues[3].push(package.clone());
-            }
-            if package.scripts.postinstall.is_some() && !has_cached {
-                log_verbose(&format!(
-                    "Adding {} to postinstall queue",
-                    package.path.display()
-                ));
-                queues[4].push(package.clone());
-            }
-        }
-
-        log_verbose(&format!(
-            "Queue creation completed, {} tasks pending",
-            queues.iter().map(|q| q.len()).sum::<usize>()
-        ));
-
-        Ok(queues)
-    }
-
-    pub async fn process_package_info(path: &str, info: &Value) -> Result<Option<PackageInfo>> {
-        let info = match info.as_object() {
-            Some(obj) => obj,
-            None => return Ok(None),
-        };
-
-        // check if there is an install script or bin files
-        let has_install_script = info
-            .get("hasInstallScript")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-
-        let has_bin = info.get("bin").is_some();
-
-        if !has_install_script && !has_bin {
-            return Ok(None);
-        }
-
-        // check if the package is compatible with current platform
-        let is_compatible = if let Some(cpu) = info.get("cpu") {
-            is_cpu_compatible(cpu)
-        } else {
-            true
-        } && if let Some(os) = info.get("os") {
-            is_os_compatible(os)
-        } else {
-            true
-        };
-
-        if !is_compatible {
-            log_verbose(&format!(
-                "Package {path} is not compatible with current platform"
-            ));
-            return Ok(None);
-        }
-
-        // parse package name
-        let (scope, name, fullname) = parse_package_name(path);
-
-        // parse bin files
-        let bin_files = Self::parse_bin_files(info.get("bin"), &name);
-
-        // parse scripts
-        let scripts = Self::read_package_scripts(Path::new(path))
-            .await
-            .context(format!("Failed to read scripts for package: {path}"))?;
-
-        Ok(Some(PackageInfo {
-            path: PathBuf::from(path),
-            bin_files,
-            scripts,
-            name,
-            fullname,
-            version: info
-                .get("version")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string(),
-            scope,
-        }))
-    }
-
-    fn parse_bin_files(bin: Option<&Value>, package_name: &str) -> Vec<(String, String)> {
-        match bin {
-            Some(Value::Object(obj)) => obj
-                .iter()
-                .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string()))
-                .collect(),
-            Some(Value::String(s)) => vec![(package_name.to_string(), s.clone())],
-            _ => Vec::new(),
-        }
-    }
-
     fn has_cached(_package: &PackageInfo) -> bool {
         // TODO: implement cache check
         false
@@ -291,27 +144,211 @@ impl PackageService {
         })
     }
 
-    pub async fn execute_queues(queues: Vec<Vec<PackageInfo>>) -> Result<()> {
-        let total_scripts = queues[1].len() + queues[3].len() + queues[4].len();
-        if total_scripts > 0 {
-            start_progress_bar();
-            PROGRESS_BAR.set_length(total_scripts as u64);
+    /// Collect packages from memory PackageLock object with early filtering
+    pub async fn collect_packages_from_lock(
+        package_lock: &PackageLock,
+        root_path: &Path,
+        ignore_scripts: bool,
+    ) -> Result<Vec<PackageInfo>> {
+        log_verbose("Collecting packages from memory lock...");
+
+        let mut packages = Vec::new();
+        for (path, lock_package) in &package_lock.packages {
+            if path.is_empty() {
+                continue;
+            }
+
+            // Early filtering based on ignore_scripts parameter
+            let has_scripts = lock_package.has_install_scripts();
+            let package_name = lock_package.get_name(path);
+            let bin_files = lock_package.parse_bin_files(&package_name);
+            let has_bin = !bin_files.is_empty();
+
+            // Skip packages that don't meet the filter criteria
+            if ignore_scripts && !has_bin {
+                continue; // ignore_scripts mode: only process packages with binaries
+            }
+            if !ignore_scripts && !has_scripts && !has_bin {
+                continue; // full mode: process packages with scripts or binaries
+            }
+
+            // Check platform compatibility
+            let is_compatible = if let Some(cpu) = &lock_package.cpu {
+                is_cpu_compatible(cpu)
+            } else {
+                true
+            } && if let Some(os) = &lock_package.os {
+                is_os_compatible(os)
+            } else {
+                true
+            };
+
+            if !is_compatible {
+                log_verbose(&format!(
+                    "Package {path} is not compatible with current platform"
+                ));
+                continue;
+            }
+
+            // Parse package name and create PackageInfo without reading package.json
+            let (scope, name, fullname) = parse_package_name(path);
+            let package_path = PathBuf::from(format!("{}/{}", root_path.display(), path));
+
+            // Read scripts from package.json only if needed
+            let scripts = if has_scripts || !ignore_scripts {
+                Self::read_package_scripts(&package_path)
+                    .await
+                    .context(format!("Failed to read scripts for package: {path}"))?
+            } else {
+                // Create empty scripts for ignore_scripts mode
+                Scripts {
+                    preinstall: None,
+                    install: None,
+                    postinstall: None,
+                    prepare: None,
+                    preprepare: None,
+                    postprepare: None,
+                    prepublish: None,
+                }
+            };
+
+            let package_info = PackageInfo {
+                path: package_path,
+                bin_files,
+                scripts,
+                name,
+                fullname,
+                version: lock_package.get_version(),
+                scope,
+            };
+
+            packages.push(package_info);
+        }
+        Ok(packages)
+    }
+
+    /// Create execution queues with bins_only parameter support
+    pub fn create_execution_queues_with_options(
+        packages: Vec<PackageInfo>,
+        ignore_scripts: bool,
+    ) -> Result<Vec<Vec<PackageInfo>>> {
+        log_verbose("Creating execution queues with options...");
+        let mut queues = vec![Vec::new(); 5];
+
+        for package in packages {
+            let has_cached = Self::has_cached(&package);
+
+            if has_cached {
+                log_verbose(&format!(
+                    "Package {} is cached, skipping execution",
+                    package.fullname
+                ));
+                queues[0].push(package.clone());
+            }
+
+            // Script queues - skip in bins_only mode
+            if !ignore_scripts && !has_cached {
+                if package.scripts.preinstall.is_some() {
+                    log_verbose(&format!(
+                        "Adding {} to preinstall queue",
+                        package.path.display()
+                    ));
+                    queues[1].push(package.clone());
+                }
+                if package.scripts.install.is_some() {
+                    log_verbose(&format!(
+                        "Adding {} to install queue",
+                        package.path.display()
+                    ));
+                    queues[3].push(package.clone());
+                }
+                if package.scripts.postinstall.is_some() {
+                    log_verbose(&format!(
+                        "Adding {} to postinstall queue",
+                        package.path.display()
+                    ));
+                    queues[4].push(package.clone());
+                }
+            }
+
+            // Binary linking queue - always process if package has bin files
+            if !package.bin_files.is_empty() {
+                log_verbose(&format!(
+                    "Adding {} to bin linking queue",
+                    package.path.display()
+                ));
+                queues[2].push(package.clone());
+            }
         }
 
-        // Execute preinstall scripts in parallel
-        let preinstall_tasks: Vec<_> = queues[1]
+        log_verbose(&format!(
+            "Queue creation completed, {} tasks pending",
+            queues.iter().map(|q| q.len()).sum::<usize>()
+        ));
+
+        Ok(queues)
+    }
+
+    /// Execute queues with bins_only parameter support
+    pub async fn execute_queues_with_options(
+        queues: Vec<Vec<PackageInfo>>,
+        ignore_scripts: bool,
+    ) -> Result<()> {
+        if ignore_scripts {
+            // Binary-only mode: only execute binary linking
+            Self::execute_binary_linking(&queues[2]).await?;
+        } else {
+            // Full mode: execute all queues in sequence
+            let total_scripts = queues[1].len() + queues[3].len() + queues[4].len();
+            if total_scripts > 0 {
+                start_progress_bar();
+                PROGRESS_BAR.set_length(total_scripts as u64);
+            }
+
+            // Execute preinstall scripts in parallel
+            Self::execute_script_queue(&queues[1], "preinstall").await?;
+
+            // Link binary files
+            Self::execute_binary_linking(&queues[2]).await?;
+
+            // Execute install scripts in parallel
+            Self::execute_script_queue(&queues[3], "install").await?;
+
+            // Execute postinstall scripts in parallel
+            Self::execute_script_queue(&queues[4], "postinstall").await?;
+
+            if total_scripts > 0 {
+                finish_progress_bar("scripts executed");
+            }
+        }
+        Ok(())
+    }
+
+    /// Execute script queue for a specific script type
+    async fn execute_script_queue(queue: &[PackageInfo], script_name: &str) -> Result<()> {
+        use futures;
+
+        let script_tasks: Vec<_> = queue
             .iter()
             .filter_map(|package| {
-                package.scripts.preinstall.as_ref().map(|script| {
+                let script_option = match script_name {
+                    "preinstall" => &package.scripts.preinstall,
+                    "install" => &package.scripts.install,
+                    "postinstall" => &package.scripts.postinstall,
+                    _ => return None,
+                };
+
+                script_option.as_ref().map(|script| {
                     let package = package.clone();
                     let script = script.clone();
                     async move {
-                        log_progress(&format!("{} preinstall", package.fullname));
-                        let result = ScriptService::execute_script(&package, "preinstall", false)
+                        log_progress(&format!("{} {}", package.fullname, script_name));
+                        let result = ScriptService::execute_script(&package, script_name, false)
                             .await
                             .map_err(|e| {
                                 anyhow::anyhow!(
-                                    "Failed to execute preinstall script for {} (command: {}): {}",
+                                    "Failed to execute {} script for {} (command: {}): {}",
+                                    script_name,
                                     package.fullname,
                                     script,
                                     e
@@ -324,14 +361,18 @@ impl PackageService {
             })
             .collect();
 
-        // Wait for all preinstall tasks to complete
-        let preinstall_results: Vec<Result<()>> = futures::future::join_all(preinstall_tasks).await;
-        for result in preinstall_results {
+        // Wait for all script tasks to complete
+        let script_results: Vec<Result<()>> = futures::future::join_all(script_tasks).await;
+        for result in script_results {
             result?;
         }
 
-        // Link binary files
-        for package in &queues[2] {
+        Ok(())
+    }
+
+    /// Execute binary file linking for packages
+    async fn execute_binary_linking(queue: &[PackageInfo]) -> Result<()> {
+        for package in queue {
             if !package.bin_files.is_empty() {
                 log_verbose(&format!("Linking binary files for {}", package.fullname));
                 for (bin_name, relative_path) in &package.bin_files {
@@ -376,73 +417,6 @@ impl PackageService {
                 ));
             }
         }
-
-        // Execute install scripts in parallel
-        let install_tasks: Vec<_> = queues[3]
-            .iter()
-            .filter_map(|package| {
-                package.scripts.install.as_ref().map(|script| {
-                    let package = package.clone();
-                    let script = script.clone();
-                    async move {
-                        log_progress(&format!("{} install", package.fullname));
-                        let result = ScriptService::execute_script(&package, "install", false)
-                            .await
-                            .map_err(|e| {
-                                anyhow::anyhow!(
-                                    "Failed to execute install script for {} (command: {}): {}",
-                                    package.fullname,
-                                    script,
-                                    e
-                                )
-                            });
-                        PROGRESS_BAR.inc(1);
-                        result
-                    }
-                })
-            })
-            .collect();
-
-        // Wait for all install tasks to complete
-        let install_results: Vec<Result<()>> = futures::future::join_all(install_tasks).await;
-        for result in install_results {
-            result?;
-        }
-
-        // Execute postinstall scripts in parallel
-        let postinstall_tasks: Vec<_> = queues[4]
-            .iter()
-            .filter_map(|package| {
-                package.scripts.postinstall.as_ref().map(|script| {
-                    let package = package.clone();
-                    let script = script.clone();
-                    async move {
-                        log_progress(&format!("{} postinstall", package.fullname));
-                        let result = ScriptService::execute_script(&package, "postinstall", false)
-                            .await
-                            .map_err(|e| {
-                                anyhow::anyhow!(
-                                    "Failed to execute postinstall script for {} (command: {}): {}",
-                                    package.fullname,
-                                    script,
-                                    e
-                                )
-                            });
-                        PROGRESS_BAR.inc(1);
-                        result
-                    }
-                })
-            })
-            .collect();
-
-        // Wait for all postinstall tasks to complete
-        let postinstall_results: Vec<Result<()>> =
-            futures::future::join_all(postinstall_tasks).await;
-        for result in postinstall_results {
-            result?;
-        }
-
-        finish_progress_bar("scripts executed");
         Ok(())
     }
 }
@@ -821,7 +795,191 @@ mod tests {
         queues[2].push(package_info);
 
         // Should not panic or error, even though the bin file does not exist
-        let result = PackageService::execute_queues(queues).await;
+        let result = PackageService::execute_queues_with_options(queues, false).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_collect_packages_from_lock_with_ignore_scripts() {
+        use crate::helper::lock::PackageLock;
+        use crate::model::package_lock::LockPackage;
+        use serde_json::json;
+        use std::collections::HashMap;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create test packages in memory
+        let mut packages = HashMap::new();
+
+        // Package with both scripts and binaries
+        packages.insert(
+            "node_modules/full-package".to_string(),
+            LockPackage {
+                name: Some("full-package".to_string()),
+                version: Some("1.0.0".to_string()),
+                resolved: Some("registry-url".to_string()),
+                bin: Some(json!({"cli": "bin/cli.js"})),
+                has_install_script: Some(true),
+                ..LockPackage::default()
+            },
+        );
+
+        // Package with only binaries
+        packages.insert(
+            "node_modules/bin-only".to_string(),
+            LockPackage {
+                name: Some("bin-only".to_string()),
+                version: Some("2.0.0".to_string()),
+                resolved: Some("registry-url".to_string()),
+                bin: Some(json!({"tool": "index.js"})),
+                has_install_script: Some(false),
+                ..LockPackage::default()
+            },
+        );
+
+        // Package with only scripts
+        packages.insert(
+            "node_modules/script-only".to_string(),
+            LockPackage {
+                name: Some("script-only".to_string()),
+                version: Some("3.0.0".to_string()),
+                resolved: Some("registry-url".to_string()),
+                has_install_script: Some(true),
+                ..LockPackage::default()
+            },
+        );
+
+        // Package with neither scripts nor binaries
+        packages.insert(
+            "node_modules/no-hooks".to_string(),
+            LockPackage {
+                name: Some("no-hooks".to_string()),
+                version: Some("4.0.0".to_string()),
+                resolved: Some("registry-url".to_string()),
+                has_install_script: Some(false),
+                ..LockPackage::default()
+            },
+        );
+
+        let package_lock = PackageLock { packages };
+
+        // Create minimal package.json files for testing
+        let node_modules = temp_dir.path().join("node_modules");
+        std::fs::create_dir_all(&node_modules).unwrap();
+
+        for package_name in &["full-package", "bin-only", "script-only", "no-hooks"] {
+            let package_dir = node_modules.join(package_name);
+            std::fs::create_dir_all(&package_dir).unwrap();
+
+            let package_json = json!({
+                "name": package_name,
+                "version": "1.0.0",
+                "scripts": {
+                    "postinstall": "echo postinstall"
+                }
+            });
+            std::fs::write(
+                package_dir.join("package.json"),
+                serde_json::to_string_pretty(&package_json).unwrap(),
+            )
+            .unwrap();
+        }
+
+        // Test ignore_scripts = false (should collect packages with scripts or binaries)
+        let result =
+            PackageService::collect_packages_from_lock(&package_lock, temp_dir.path(), false).await;
+        assert!(result.is_ok());
+        let packages_full = result.unwrap();
+        assert_eq!(packages_full.len(), 3); // full-package, bin-only, script-only (no-hooks excluded)
+
+        // Test ignore_scripts = true (should only collect packages with binaries)
+        let result =
+            PackageService::collect_packages_from_lock(&package_lock, temp_dir.path(), true).await;
+        assert!(result.is_ok());
+        let packages_bins_only = result.unwrap();
+        assert_eq!(packages_bins_only.len(), 2); // full-package, bin-only (script-only and no-hooks excluded)
+
+        // Verify the collected packages have correct bin_files
+        for package_info in &packages_bins_only {
+            assert!(
+                !package_info.bin_files.is_empty(),
+                "Package {} should have bin_files in ignore_scripts mode",
+                package_info.fullname
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_collect_packages_from_lock_platform_compatibility() {
+        use crate::helper::lock::PackageLock;
+        use crate::model::package_lock::LockPackage;
+        use serde_json::json;
+        use std::collections::HashMap;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+
+        let mut packages = HashMap::new();
+
+        // Package with incompatible OS
+        packages.insert(
+            "node_modules/win-only".to_string(),
+            LockPackage {
+                name: Some("win-only".to_string()),
+                version: Some("1.0.0".to_string()),
+                resolved: Some("registry-url".to_string()),
+                bin: Some(json!({"tool": "tool.exe"})),
+                has_install_script: Some(false),
+                os: Some(json!(["win32"])), // Only Windows
+                ..LockPackage::default()
+            },
+        );
+
+        // Package with compatible platform
+        packages.insert(
+            "node_modules/cross-platform".to_string(),
+            LockPackage {
+                name: Some("cross-platform".to_string()),
+                version: Some("1.0.0".to_string()),
+                resolved: Some("registry-url".to_string()),
+                bin: Some(json!({"tool": "tool.js"})),
+                has_install_script: Some(false),
+                ..LockPackage::default()
+            },
+        );
+
+        let package_lock = PackageLock { packages };
+
+        // Create minimal package.json files
+        let node_modules = temp_dir.path().join("node_modules");
+        std::fs::create_dir_all(&node_modules).unwrap();
+
+        {
+            let package_name = &"cross-platform";
+            // Only create compatible package
+            let package_dir = node_modules.join(package_name);
+            std::fs::create_dir_all(&package_dir).unwrap();
+
+            let package_json = json!({
+                "name": package_name,
+                "version": "1.0.0"
+            });
+            std::fs::write(
+                package_dir.join("package.json"),
+                serde_json::to_string_pretty(&package_json).unwrap(),
+            )
+            .unwrap();
+        }
+
+        // Test that only compatible packages are collected
+        let result =
+            PackageService::collect_packages_from_lock(&package_lock, temp_dir.path(), true).await;
+        assert!(result.is_ok());
+        let packages_collected = result.unwrap();
+
+        // Should only collect the cross-platform package (win-only filtered out by platform check)
+        assert_eq!(packages_collected.len(), 1);
+        assert_eq!(packages_collected[0].fullname, "cross-platform");
     }
 }

@@ -5,12 +5,13 @@ use std::fs;
 use std::path::Path;
 
 use crate::{
+    helper::lock::path_to_pkg_name,
     service::dependency_graph::{DependencyGraphService, DependencyType, PackageNode},
     util::logger::log_verbose,
 };
 
 /// Represents package information in package-lock.json
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LockPackage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -51,6 +52,13 @@ pub struct LockPackage {
     pub has_install_script: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspaces: Option<Vec<String>>,
+    // Additional fields from helper/lock.rs Package
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub link: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub os: Option<serde_json::Value>,
 }
 
 impl LockPackage {
@@ -61,8 +69,10 @@ impl LockPackage {
         } else if path.is_empty() {
             "root".to_string()
         } else {
-            // Extract package name from path
-            path.split('/').next_back().unwrap_or("unknown").to_string()
+            // Use existing path_to_pkg_name helper function
+            path_to_pkg_name(path)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "unknown".to_string())
         }
     }
 
@@ -71,6 +81,23 @@ impl LockPackage {
         self.version
             .clone()
             .unwrap_or_else(|| "unknown".to_string())
+    }
+
+    /// Parse and cache bin files from the bin field
+    pub fn parse_bin_files(&self, package_name: &str) -> Vec<(String, String)> {
+        match &self.bin {
+            Some(serde_json::Value::Object(obj)) => obj
+                .iter()
+                .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string()))
+                .collect(),
+            Some(serde_json::Value::String(s)) => vec![(package_name.to_string(), s.clone())],
+            _ => Vec::new(),
+        }
+    }
+
+    /// Check if package has install scripts
+    pub fn has_install_scripts(&self) -> bool {
+        self.has_install_script.unwrap_or(false)
     }
 
     /// Convert to PackageNode
@@ -256,5 +283,104 @@ mod tests {
         assert_eq!(package_lock.version, "1.0.0");
         assert_eq!(package_lock.lockfile_version, 3);
         assert_eq!(package_lock.packages.len(), 3);
+    }
+
+    #[test]
+    fn test_lock_package_parse_bin_files() {
+        // Test with object-style bin
+        let mut package = LockPackage {
+            name: Some("test-package".to_string()),
+            version: Some("1.0.0".to_string()),
+            bin: Some(serde_json::json!({"cli": "bin/cli.js", "tool": "bin/tool.js"})),
+            ..LockPackage::default()
+        };
+
+        let bin_files = package.parse_bin_files("test-package");
+        assert_eq!(bin_files.len(), 2);
+        assert!(bin_files.contains(&("cli".to_string(), "bin/cli.js".to_string())));
+        assert!(bin_files.contains(&("tool".to_string(), "bin/tool.js".to_string())));
+
+        // Test with string-style bin
+        package.bin = Some(serde_json::json!("index.js"));
+        let bin_files = package.parse_bin_files("test-package");
+        assert_eq!(bin_files.len(), 1);
+        assert_eq!(
+            bin_files[0],
+            ("test-package".to_string(), "index.js".to_string())
+        );
+
+        // Test with no bin
+        package.bin = None;
+        let bin_files = package.parse_bin_files("test-package");
+        assert_eq!(bin_files.len(), 0);
+
+        // Test with invalid bin value
+        package.bin = Some(serde_json::json!(123));
+        let bin_files = package.parse_bin_files("test-package");
+        assert_eq!(bin_files.len(), 0);
+    }
+
+    #[test]
+    fn test_lock_package_has_install_scripts() {
+        let mut package = LockPackage {
+            name: Some("test-package".to_string()),
+            version: Some("1.0.0".to_string()),
+            has_install_script: Some(true),
+            ..LockPackage::default()
+        };
+
+        assert!(package.has_install_scripts());
+
+        package.has_install_script = Some(false);
+        assert!(!package.has_install_scripts());
+
+        package.has_install_script = None;
+        assert!(!package.has_install_scripts());
+    }
+
+    #[test]
+    fn test_lock_package_get_name() {
+        let mut package = LockPackage {
+            name: Some("test-package".to_string()),
+            version: Some("1.0.0".to_string()),
+            ..LockPackage::default()
+        };
+
+        // Test with explicit name
+        assert_eq!(
+            package.get_name("node_modules/some-package"),
+            "test-package"
+        );
+
+        // Test without name (infer from path)
+        package.name = None;
+        assert_eq!(package.get_name("node_modules/lodash"), "lodash");
+        assert_eq!(
+            package.get_name("node_modules/@scope/package"),
+            "@scope/package"
+        );
+
+        // Test with empty path
+        assert_eq!(package.get_name(""), "root");
+
+        // Test with complex path
+        assert_eq!(
+            package.get_name("node_modules/parent/node_modules/child"),
+            "child"
+        );
+    }
+
+    #[test]
+    fn test_lock_package_get_version() {
+        let mut package = LockPackage {
+            name: Some("test-package".to_string()),
+            version: Some("1.2.3".to_string()),
+            ..LockPackage::default()
+        };
+
+        assert_eq!(package.get_version(), "1.2.3");
+
+        package.version = None;
+        assert_eq!(package.get_version(), "unknown");
     }
 }
