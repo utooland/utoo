@@ -24,7 +24,10 @@ if [ ! -d "ant-design-x" ]; then
 fi
 cd ant-design-x
 echo "Installing dependencies for ant-design-x (next)..."
-utoo deps --con 48|| { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
+
+utoo deps --con 40 || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
+rm -rf ~/.cache/utoo && rm -rf ./node_modules || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
+utoo deps --con 30 || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
 utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
 utoo rebuild || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
 echo -e "${GREEN}PASS: ant-design-x (next) cloned and installed${NC}"
