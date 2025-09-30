@@ -21,7 +21,7 @@ use crate::util::registry::store_cache;
 use crate::util::semver::matches;
 
 // avoid 422 warning
-static CONCURRENCY_LIMITER: Lazy<Arc<Mutex<Arc<Semaphore>>>> = Lazy::new(|| Arc::new(Mutex::new(Arc::new(Semaphore::new(15)))));
+static CONCURRENCY_LIMITER: Lazy<Arc<Mutex<Arc<Semaphore>>>> = Lazy::new(|| Arc::new(Mutex::new(Arc::new(Semaphore::new(58)))));
 
 /// Set the concurrency limit for dependency resolution
 pub fn set_concurrency(limit: usize) {

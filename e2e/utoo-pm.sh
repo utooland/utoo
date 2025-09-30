@@ -24,29 +24,7 @@ if [ ! -d "ant-design-x" ]; then
 fi
 cd ant-design-x
 echo "Installing dependencies for ant-design-x (next)..."
-
-echo "con 55"
-utoo deps --con 55 || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
-rm -rf ~/.cache/nm || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
-
-echo "con 56"
-utoo deps --con 56 || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
-rm -rf ~/.cache/nm || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
-
-echo "con 57"
-utoo deps --con 57 || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
-rm -rf ~/.cache/nm || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
-
-echo "con 58"
-utoo deps --con 58 || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
-rm -rf ~/.cache/nm || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
-
-echo "con 59"
-utoo deps --con 59 || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
-rm -rf ~/.cache/nm || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
-
-utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
-utoo rebuild || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
+utoo install || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
 echo -e "${GREEN}PASS: ant-design-x (next) cloned and installed${NC}"
 cd ../../
 
