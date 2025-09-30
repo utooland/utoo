@@ -536,41 +536,39 @@ pub async fn build_ideal_tree_to_package_lock(
     };
 
     if write_to_disk {
-        // Spawn asynchronous disk writing task
         let path_clone = path.to_path_buf();
         let ideal_tree_name = ideal_tree.name.clone();
         let ideal_tree_version = ideal_tree.version.clone();
 
-        tokio::spawn(async move {
-            let lock_file = json!({
-                "name": ideal_tree_name,
-                "version": ideal_tree_version,
-                "lockfileVersion": 3,
-                "requires": true,
-                "packages": packages,
-            });
-
-            let lock_file_content = match serde_json::to_string_pretty(&lock_file) {
-                Ok(content) => content,
-                Err(e) => {
-                    log_verbose(&format!("Failed to serialize package-lock.json: {e}"));
-                    return;
-                }
-            };
-
-            // Write to temporary file first, then atomically move to target location
-            let temp_path = path_clone.join("package-lock.json.tmp");
-            let target_path = path_clone.join("package-lock.json");
-
-            if let Err(e) = tokio::fs::write(&temp_path, lock_file_content).await {
-                log_verbose(&format!("Failed to write package-lock.json: {e}"));
-                return;
-            }
-
-            if let Err(e) = tokio::fs::rename(temp_path, target_path).await {
-                log_verbose(&format!("Failed to rename package-lock.json: {e}"));
-            }
+        let lock_file = json!({
+            "name": ideal_tree_name,
+            "version": ideal_tree_version,
+            "lockfileVersion": 3,
+            "requires": true,
+            "packages": packages,
         });
+
+        let lock_file_content = match serde_json::to_string_pretty(&lock_file) {
+            Ok(content) => content,
+            Err(e) => {
+                log_verbose(&format!("Failed to serialize package-lock.json: {e}"));
+                return Err(anyhow!("Failed to serialize package-lock.json: {e}"));
+            }
+        };
+
+        // Write to temporary file first, then atomically move to target location
+        let temp_path = path_clone.join("package-lock.json.tmp");
+        let target_path = path_clone.join("package-lock.json");
+
+        if let Err(e) = tokio::fs::write(&temp_path, lock_file_content).await {
+            log_verbose(&format!("Failed to write package-lock.json: {e}"));
+            return Err(anyhow!("Failed to write package-lock.json: {e}"));
+        }
+
+        if let Err(e) = tokio::fs::rename(temp_path, target_path).await {
+            log_verbose(&format!("Failed to rename package-lock.json: {e}"));
+            return Err(anyhow!("Failed to rename package-lock.json: {e}"));
+        }
     }
 
     Ok(package_lock)
