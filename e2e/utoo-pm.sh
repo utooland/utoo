@@ -25,24 +25,24 @@ fi
 cd ant-design-x
 echo "Installing dependencies for ant-design-x (next)..."
 
-echo "con 45"
-utoo deps --con 45 || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
-rm -rf ~/.cache/nm || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
-
-echo "con 50"
-utoo deps --con 50 || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
-rm -rf ~/.cache/nm || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
-
 echo "con 55"
 utoo deps --con 55 || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
 rm -rf ~/.cache/nm || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
 
-echo "con 60"
-utoo deps --con 60 || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
+echo "con 56"
+utoo deps --con 56 || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
 rm -rf ~/.cache/nm || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
 
-echo "con 65"
-utoo deps --con 65 || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
+echo "con 57"
+utoo deps --con 57 || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
+rm -rf ~/.cache/nm || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
+
+echo "con 58"
+utoo deps --con 58 || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
+rm -rf ~/.cache/nm || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
+
+echo "con 59"
+utoo deps --con 59 || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
 rm -rf ~/.cache/nm || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
 
 utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
