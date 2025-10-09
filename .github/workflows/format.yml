@@ -15,12 +15,12 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2025-06-04
+          toolchain: nightly-2025-09-21
           override: true
           components: rustfmt
       - name: Check formatting
         uses: actions-rs/cargo@v1
         with:
           command: fmt
-          toolchain: nightly-2025-06-04
+          toolchain: nightly-2025-09-21
           args: --check
