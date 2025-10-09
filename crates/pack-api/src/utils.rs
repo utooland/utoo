@@ -73,7 +73,7 @@ pub async fn strongly_consistent_catch_collectables<R: VcValueType + Send>(
 }
 
 pub async fn get_issues<T: Send>(source: OperationVc<T>) -> Result<Arc<Vec<ReadRef<PlainIssue>>>> {
-    let issues = source.peek_issues().await?;
+    let issues = source.peek_issues();
     Ok(Arc::new(issues.get_plain_issues().await?))
 }
 
