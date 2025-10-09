@@ -30,7 +30,7 @@ jobs:
         run: |
           npm install
           npm install binaryen@123.0.0 --global
-          cargo install -f wasm-bindgen-cli --version 0.2.101
+          cargo install -f wasm-bindgen-cli --version 0.2.104
           rustup target add wasm32-unknown-unknown
           rustup component add rust-src --toolchain nightly-2025-09-21-x86_64-unknown-linux-gnu
       - name: Install rust
