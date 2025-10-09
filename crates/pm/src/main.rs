@@ -1,5 +1,3 @@
-#![feature(let_chains)]
-
 use std::process;
 
 use anyhow::Result;

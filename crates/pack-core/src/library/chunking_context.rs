@@ -499,6 +499,7 @@ impl ChunkingContext for LibraryChunkingContext {
 
             let MakeChunkGroupResult {
                 chunks,
+                referenced_output_assets,
                 availability_info,
             } = make_chunk_group(
                 entries,
@@ -529,6 +530,7 @@ impl ChunkingContext for LibraryChunkingContext {
 
             Ok(ChunkGroupResult {
                 assets: ResolvedVc::cell(assets),
+                referenced_assets: ResolvedVc::cell(referenced_output_assets),
                 availability_info,
             }
             .cell())
@@ -544,6 +546,7 @@ impl ChunkingContext for LibraryChunkingContext {
         _evaluatable_assets: Vc<EvaluatableAssets>,
         _module_graph: Vc<ModuleGraph>,
         _extra_chunks: Vc<OutputAssets>,
+        _extra_referenced_assets: Vc<OutputAssets>,
         _availability_info: AvailabilityInfo,
     ) -> Result<Vc<EntryChunkGroupResult>> {
         bail!("Library chunking context does not support entry chunk groups")
@@ -593,6 +596,13 @@ impl ChunkingContext for LibraryChunkingContext {
     #[turbo_tasks::function]
     fn is_module_merging_enabled(&self) -> Vc<bool> {
         Vc::cell(self.enable_module_merging)
+    }
+
+    // TODO: debug_ids import from: https://github.com/vercel/next.js/pull/84319
+    // it seems useless to utoopack now.
+    #[turbo_tasks::function]
+    fn debug_ids_enabled(self: Vc<Self>) -> Result<Vc<bool>> {
+        Ok(Vc::cell(false))
     }
 }
 

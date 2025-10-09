@@ -19,7 +19,7 @@ use crate::{client::react_refresh::assert_can_resolve_react_refresh, config::Con
 async fn get_typescript_options(
     project_path: FileSystemPath,
 ) -> Result<Option<Vec<(Vc<FileJsonContent>, ResolvedVc<Box<dyn Source>>)>>> {
-    let tsconfig = find_context_file(project_path, tsconfig());
+    let tsconfig = find_context_file(project_path, tsconfig(), false);
     Ok(match tsconfig.await.ok().as_deref() {
         Some(FindContextFileResult::Found(path, _)) => read_tsconfigs(
             path.read(),

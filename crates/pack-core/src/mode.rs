@@ -5,17 +5,12 @@ use crate::shared::webpack_rules::WebpackLoaderBuiltinCondition;
 
 /// The mode in which Next.js is running.
 #[turbo_tasks::value(shared)]
-#[derive(Debug, Copy, Clone, Ord, PartialOrd, Hash, OperationValue)]
+#[derive(Debug, Copy, Clone, Ord, PartialOrd, Hash, OperationValue, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum Mode {
     Development,
+    #[default]
     Production,
-}
-
-impl Default for Mode {
-    fn default() -> Self {
-        Self::Production
-    }
 }
 
 impl Mode {
