@@ -61,6 +61,9 @@ impl JsAst {
                 jsx,
                 decorators: true,
                 decorators_before_export: true,
+                // temporarily parse import xx.json with { type: "json" }
+                // e.g. https://github.com/zen-fs/core/blob/80d32c4807df4a0e887f5c33afae82fde8e62191/src/index.ts#L19
+                import_attributes: true,
                 ..Default::default()
             })
         };

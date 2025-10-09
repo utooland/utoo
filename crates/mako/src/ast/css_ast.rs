@@ -43,6 +43,7 @@ impl CssAst {
         let config = parser::parser::ParserConfig {
             css_modules,
             legacy_ie: true,
+            legacy_nesting: true,
             ..Default::default()
         };
 
