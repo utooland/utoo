@@ -1,3 +1,15 @@
+## 0.11.14
+
+`2025-10-09`
+
+- fix: import with { type: json } and css module parse by [xusd320](https://github.com/xusd320) in [#2234](https://github.com/umijs/mako/pull/2234)
+- feat: support inline-source-map devtool option by [hanzebang](https://github.com/hanzebang) in [#1965](https://github.com/umijs/mako/pull/1965)
+- chore: update examples/multiple-entries-heavy by [xusd320](https://github.com/xusd320)
+- chore: remove codecov by [xusd320](https://github.com/xusd320)
+- chore: update changelog for v0.11.13 by [xusd320](https://github.com/xusd320)
+- release: [umijs/mako@0.11.13 by @xusd320](https://github.com/umijs/mako@0.11.13 by @xusd320)
+
+
 ## 0.11.13
 
 `2025-05-26`

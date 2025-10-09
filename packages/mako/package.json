@@ -1,6 +1,6 @@
 {
   "name": "@umijs/mako",
-  "version": "0.11.13",
+  "version": "0.11.14",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
@@ -84,14 +84,14 @@
     "version": "napi version"
   },
   "optionalDependencies": {
-    "@umijs/mako-darwin-arm64": "0.11.13",
-    "@umijs/mako-linux-arm64-gnu": "0.11.13",
-    "@umijs/mako-linux-arm64-musl": "0.11.13",
-    "@umijs/mako-win32-ia32-msvc": "0.11.13",
-    "@umijs/mako-darwin-x64": "0.11.13",
-    "@umijs/mako-win32-x64-msvc": "0.11.13",
-    "@umijs/mako-linux-x64-gnu": "0.11.13",
-    "@umijs/mako-linux-x64-musl": "0.11.13"
+    "@umijs/mako-darwin-arm64": "0.11.14",
+    "@umijs/mako-linux-arm64-gnu": "0.11.14",
+    "@umijs/mako-linux-arm64-musl": "0.11.14",
+    "@umijs/mako-win32-ia32-msvc": "0.11.14",
+    "@umijs/mako-darwin-x64": "0.11.14",
+    "@umijs/mako-win32-x64-msvc": "0.11.14",
+    "@umijs/mako-linux-x64-gnu": "0.11.14",
+    "@umijs/mako-linux-x64-musl": "0.11.14"
   },
   "publishConfig": {
     "access": "public"
