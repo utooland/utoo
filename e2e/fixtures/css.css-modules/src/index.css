@@ -1,3 +1,7 @@
 .container {
   padding-top: 80px;
+
+  h1 {
+    font-size: 18px;
+  }
 }

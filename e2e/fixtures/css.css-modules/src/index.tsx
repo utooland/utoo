@@ -1,6 +1,7 @@
 import styles from "./index.css";
 console.log(styles);
-
+import pkg from "../mako.config.json" with { type: "json"};
+console.log(pkg);
 import('./a.css');
 require('./b.css');
 import "./c.css";
