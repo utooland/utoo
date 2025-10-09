@@ -11,7 +11,7 @@
     "@types/react-dom": "^18.3.0"
   },
   "devDependencies": {
-    "@umijs/mako": "^0.11.13",
+    "@umijs/mako": "^0.11.14",
     "typescript": "^4.5.4"
   }
 }
