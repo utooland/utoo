@@ -68,8 +68,8 @@ impl EcmascriptLibraryEvaluateChunk {
         } else {
             bail!(
                 "chunk path {} is not in output root {}",
-                chunk_path.to_string(),
-                output_root.to_string()
+                chunk_path,
+                output_root
             );
         };
 

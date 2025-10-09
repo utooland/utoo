@@ -305,6 +305,7 @@ pub struct Directories {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
+#[allow(dead_code)]
 pub struct PackageManifest {
     pub name: String,
     pub version: String,
@@ -372,6 +373,7 @@ pub struct PackageManifest {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct VersionInfo {
     pub publish_time: Option<u64>,
     #[serde(rename = "_npmUser")]
