@@ -111,19 +111,14 @@ async fn run(resource: PathBuf) -> Result<()> {
         },
         noop_backing_storage(),
     ));
-    match tt
-        .run(async move {
-            let emit_op = run_inner_options(resource.to_str().unwrap().into());
-            emit_op.read_strongly_consistent().await?;
-            apply_effects(emit_op).await?;
+    tt.run_once(async move {
+        let emit_op = run_inner_options(resource.to_str().unwrap().into());
+        emit_op.read_strongly_consistent().await?;
+        apply_effects(emit_op).await?;
 
-            Ok(())
-        })
-        .await
-    {
-        Ok(()) => {}
-        Err(e) => return Err(e.into()),
-    }
+        Ok(())
+    })
+    .await?;
 
     Ok(())
 }

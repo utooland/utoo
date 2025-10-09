@@ -445,6 +445,10 @@ pub async fn get_client_resolve_options_context(
 
     let custom_conditions = vec![mode.await?.condition().into()];
     let resolve_options_context = ResolveOptionsContext {
+        enable_typescript: true,
+        enable_react: true,
+        enable_mjs_extension: true,
+        custom_extensions: config.resolve_extension().owned().await?,
         enable_node_modules: Some(project_path.root().owned().await?),
         custom_conditions,
         import_map: Some(client_import_map),
@@ -457,10 +461,6 @@ pub async fn get_client_resolve_options_context(
         ..Default::default()
     };
     Ok(ResolveOptionsContext {
-        enable_typescript: true,
-        enable_react: true,
-        enable_mjs_extension: true,
-        custom_extensions: config.resolve_extension().owned().await?,
         rules: vec![(
             foreign_code_context_condition(config).await?,
             resolve_options_context.clone().resolved_cell(),
