@@ -20,9 +20,15 @@ type CacheMap = HashMap<String, (SpecMap, VersionMap)>; // name -> (specs, versi
 // Lightweight versions info stored in versions.json
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VersionsInfo {
-    pub versions: Value, // versions object from npm registry
+    pub versions: Versions,
     pub etag: Option<String>,
     pub last_updated: u64, // Unix timestamp
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Versions {
+    pub version_list: Vec<String>,
+    pub dist_tags: HashMap<String, String>,
 }
 
 // Individual version manifest stored in manifests/version.json
@@ -38,7 +44,7 @@ struct CachedFullManifest {
     manifest: Arc<FullManifest>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct CachedVersionsInfo {
     info: Arc<VersionsInfo>,
 }
@@ -110,13 +116,8 @@ impl PackageCache {
     }
 
     /// Set versions info in memory cache (sync)
-    pub fn set_versions(&self, name: &str, versions: &VersionsInfo, etag: Option<String>) {
-        let mut versions_with_etag = versions.clone();
-        versions_with_etag.etag = etag;
-
-        let cached = CachedVersionsInfo {
-            info: Arc::new(versions_with_etag),
-        };
+    pub fn set_versions(&self, name: &str, versions: Arc<VersionsInfo>) {
+        let cached = CachedVersionsInfo { info: versions };
         self.versions_info.insert(name.to_string(), cached);
         log_verbose(&format!("Cached versions info in memory: {name}"));
     }
