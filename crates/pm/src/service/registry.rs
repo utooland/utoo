@@ -13,6 +13,7 @@ use crate::util::logger::log_verbose;
 use crate::util::semver;
 
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct PackageManifest {
     pub name: String,
     pub version: String,
