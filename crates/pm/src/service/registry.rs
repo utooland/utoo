@@ -149,8 +149,7 @@ impl RegistryService {
         let version_list = full_manifest.versions.keys().collect::<Vec<_>>();
 
         // Extract essential data for versions.json
-        versions_data["version_list"] =
-            serde_json::json!(version_list);
+        versions_data["version_list"] = serde_json::json!(version_list);
         versions_data["dist-tags"] =
             serde_json::to_value(&full_manifest.dist_tags).unwrap_or(serde_json::json!({}));
         versions_data["time"] =
@@ -166,7 +165,6 @@ impl RegistryService {
                 .as_secs(),
         }
     }
-
 
     /// Resolve specific version manifest with three-tier caching
     /// Priority: memory > disk > network
@@ -309,16 +307,20 @@ impl RegistryService {
 
             let target_version = match dist_tags.get(spec) {
                 Some(version) => version.to_string(),
-                None => match semver::max_satisfying(version_list.iter().map(|s| s.as_str()), spec) {
+                None => match semver::max_satisfying(version_list.iter().map(|s| s.as_str()), spec)
+                {
                     Some(version) => version.to_string(),
                     None => {
                         log_verbose(&format!(
                             "No matching version found for {}@{} from {} available versions",
-                            name, spec, version_list.len()
+                            name,
+                            spec,
+                            version_list.len()
                         ));
                         return Err(anyhow::anyhow!(
                             "No matching version found for {}@{}",
-                            name, spec
+                            name,
+                            spec
                         ));
                     }
                 },
@@ -407,7 +409,7 @@ pub async fn resolve(name: &str, spec: &str) -> Result<ResolvedPackage> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::service::cache::{VersionsInfo, Versions};
+    use crate::service::cache::{Versions, VersionsInfo};
     use std::collections::HashMap;
 
     /// Test dist-tags matching logic
@@ -455,7 +457,10 @@ mod tests {
             match result {
                 Ok(resolved) => {
                     assert_eq!(resolved.version, expected_version);
-                    println!("✓ {}@{} resolved to {}", "test-package", spec, resolved.version);
+                    println!(
+                        "✓ {}@{} resolved to {}",
+                        "test-package", spec, resolved.version
+                    );
                 }
                 Err(e) => {
                     panic!("Failed to resolve {}@{}: {}", "test-package", spec, e);
@@ -480,7 +485,8 @@ mod tests {
         };
 
         // Should fall back to semver matching
-        let result = test_resolve_with_dist_tags(&versions_info_empty, "test-package", "^1.0.0").await;
+        let result =
+            test_resolve_with_dist_tags(&versions_info_empty, "test-package", "^1.0.0").await;
         match result {
             Ok(resolved) => {
                 assert_eq!(resolved.version, "1.1.0"); // Should match highest semver
@@ -511,7 +517,10 @@ mod tests {
         match result {
             Ok(resolved) => {
                 assert_eq!(resolved.version, "1.1.0"); // Should match highest semver
-                println!("✓ Non-existent dist-tag fallback to semver: {}", resolved.version);
+                println!(
+                    "✓ Non-existent dist-tag fallback to semver: {}",
+                    resolved.version
+                );
             }
             Err(e) => {
                 panic!("Failed to resolve with non-existent dist-tag: {}", e);
@@ -540,10 +549,10 @@ mod tests {
         };
 
         let test_cases = vec![
-            ("^1.0.0", "1.2.0"), // Should match highest 1.x
-            ("~1.1.0", "1.1.0"), // Should match exact 1.1.x
+            ("^1.0.0", "1.2.0"),         // Should match highest 1.x
+            ("~1.1.0", "1.1.0"),         // Should match exact 1.1.x
             (">=1.0.0 <2.0.0", "1.2.0"), // Should match highest in range
-            ("2.x", "2.1.0"), // Should match highest 2.x
+            ("2.x", "2.1.0"),            // Should match highest 2.x
         ];
 
         for (spec, expected_version) in test_cases {
@@ -551,7 +560,10 @@ mod tests {
             match result {
                 Ok(resolved) => {
                     assert_eq!(resolved.version, expected_version);
-                    println!("✓ Semver fallback {}@{} resolved to {}", "test-package", spec, resolved.version);
+                    println!(
+                        "✓ Semver fallback {}@{} resolved to {}",
+                        "test-package", spec, resolved.version
+                    );
                 }
                 Err(e) => {
                     panic!("Failed to resolve {}@{}: {}", "test-package", spec, e);
@@ -591,7 +603,8 @@ mod tests {
             last_updated: 1234567890,
         };
 
-        let result = test_resolve_with_dist_tags(&empty_versions_info, "test-package", "^1.0.0").await;
+        let result =
+            test_resolve_with_dist_tags(&empty_versions_info, "test-package", "^1.0.0").await;
         assert!(result.is_err(), "Should fail for empty version list");
         println!("✓ Correctly failed for empty version list");
     }
@@ -617,7 +630,8 @@ mod tests {
                 None => {
                     return Err(anyhow::anyhow!(
                         "No matching version found for {}@{}",
-                        name, spec
+                        name,
+                        spec
                     ));
                 }
             },
