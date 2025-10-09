@@ -28,6 +28,7 @@ pub struct VersionsInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Versions {
     pub version_list: Vec<String>,
+    #[serde(rename = "dist-tags")]
     pub dist_tags: HashMap<String, String>,
 }
 

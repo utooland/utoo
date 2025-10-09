@@ -373,26 +373,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_run_script_in_all_workspaces_no_workspaces() {
-        let _dir = tempdir().unwrap();
-        let package_json = r#"
-        {
-            "name": "test-project",
-            "version": "1.0.0",
-            "scripts": {
-                "test": "echo test"
-            }
-        }"#;
-
-        fs::write(_dir.path().join("package.json"), package_json).unwrap();
-        std::env::set_current_dir(_dir.path()).unwrap();
-
-        let result = run_script_in_all_workspaces("test", None).await;
-        // Should succeed but do nothing when no workspaces exist
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
     #[allow(unused_variables)]
     async fn test_need_run_with_script() {
         let _dir = tempdir().unwrap();

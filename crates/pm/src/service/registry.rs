@@ -403,6 +403,238 @@ pub async fn resolve(name: &str, spec: &str) -> Result<ResolvedPackage> {
     result
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::service::cache::{VersionsInfo, Versions};
+    use std::collections::HashMap;
+
+    /// Test dist-tags matching logic
+    #[tokio::test]
+    async fn test_dist_tags_matching() {
+        // Create test data with dist-tags
+        let mut dist_tags = HashMap::new();
+        dist_tags.insert("latest".to_string(), "1.2.3".to_string());
+        dist_tags.insert("beta".to_string(), "2.0.0-beta.1".to_string());
+        dist_tags.insert("alpha".to_string(), "2.0.0-alpha.1".to_string());
+        dist_tags.insert("next".to_string(), "1.3.0".to_string());
+
+        let versions = Versions {
+            version_list: vec![
+                "1.0.0".to_string(),
+                "1.1.0".to_string(),
+                "1.2.3".to_string(),
+                "1.3.0".to_string(),
+                "2.0.0-alpha.1".to_string(),
+                "2.0.0-beta.1".to_string(),
+            ],
+            dist_tags,
+        };
+
+        let versions_info = VersionsInfo {
+            versions,
+            etag: Some("test-etag".to_string()),
+            last_updated: 1234567890,
+        };
+
+        // Test cases for dist-tags matching
+        let test_cases = vec![
+            ("latest", "1.2.3"),
+            ("beta", "2.0.0-beta.1"),
+            ("alpha", "2.0.0-alpha.1"),
+            ("next", "1.3.0"),
+            // Test semver fallback when dist-tag doesn't exist
+            ("^1.0.0", "1.3.0"), // Should match highest semver (1.3.0 is higher than 1.2.3)
+            ("~1.1.0", "1.1.0"), // Should match exact semver
+            ("1.0.0", "1.0.0"),  // Should match exact version
+        ];
+
+        for (spec, expected_version) in test_cases {
+            let result = test_resolve_with_dist_tags(&versions_info, "test-package", spec).await;
+            match result {
+                Ok(resolved) => {
+                    assert_eq!(resolved.version, expected_version);
+                    println!("✓ {}@{} resolved to {}", "test-package", spec, resolved.version);
+                }
+                Err(e) => {
+                    panic!("Failed to resolve {}@{}: {}", "test-package", spec, e);
+                }
+            }
+        }
+    }
+
+    /// Test edge cases for dist-tags matching
+    #[tokio::test]
+    async fn test_dist_tags_edge_cases() {
+        // Test with empty dist-tags
+        let versions_empty_dist_tags = Versions {
+            version_list: vec!["1.0.0".to_string(), "1.1.0".to_string()],
+            dist_tags: HashMap::new(),
+        };
+
+        let versions_info_empty = VersionsInfo {
+            versions: versions_empty_dist_tags,
+            etag: Some("test-etag".to_string()),
+            last_updated: 1234567890,
+        };
+
+        // Should fall back to semver matching
+        let result = test_resolve_with_dist_tags(&versions_info_empty, "test-package", "^1.0.0").await;
+        match result {
+            Ok(resolved) => {
+                assert_eq!(resolved.version, "1.1.0"); // Should match highest semver
+                println!("✓ Empty dist-tags fallback to semver: {}", resolved.version);
+            }
+            Err(e) => {
+                panic!("Failed to resolve with empty dist-tags: {}", e);
+            }
+        }
+
+        // Test with invalid dist-tag
+        let mut dist_tags = HashMap::new();
+        dist_tags.insert("invalid-tag".to_string(), "1.0.0".to_string());
+
+        let versions = Versions {
+            version_list: vec!["1.0.0".to_string(), "1.1.0".to_string()],
+            dist_tags,
+        };
+
+        let versions_info = VersionsInfo {
+            versions,
+            etag: Some("test-etag".to_string()),
+            last_updated: 1234567890,
+        };
+
+        // Should fall back to semver matching for non-existent dist-tag
+        let result = test_resolve_with_dist_tags(&versions_info, "test-package", "^1.0.0").await;
+        match result {
+            Ok(resolved) => {
+                assert_eq!(resolved.version, "1.1.0"); // Should match highest semver
+                println!("✓ Non-existent dist-tag fallback to semver: {}", resolved.version);
+            }
+            Err(e) => {
+                panic!("Failed to resolve with non-existent dist-tag: {}", e);
+            }
+        }
+    }
+
+    /// Test semver matching fallback
+    #[tokio::test]
+    async fn test_semver_fallback() {
+        let versions = Versions {
+            version_list: vec![
+                "1.0.0".to_string(),
+                "1.1.0".to_string(),
+                "1.2.0".to_string(),
+                "2.0.0".to_string(),
+                "2.1.0".to_string(),
+            ],
+            dist_tags: HashMap::new(),
+        };
+
+        let versions_info = VersionsInfo {
+            versions,
+            etag: Some("test-etag".to_string()),
+            last_updated: 1234567890,
+        };
+
+        let test_cases = vec![
+            ("^1.0.0", "1.2.0"), // Should match highest 1.x
+            ("~1.1.0", "1.1.0"), // Should match exact 1.1.x
+            (">=1.0.0 <2.0.0", "1.2.0"), // Should match highest in range
+            ("2.x", "2.1.0"), // Should match highest 2.x
+        ];
+
+        for (spec, expected_version) in test_cases {
+            let result = test_resolve_with_dist_tags(&versions_info, "test-package", spec).await;
+            match result {
+                Ok(resolved) => {
+                    assert_eq!(resolved.version, expected_version);
+                    println!("✓ Semver fallback {}@{} resolved to {}", "test-package", spec, resolved.version);
+                }
+                Err(e) => {
+                    panic!("Failed to resolve {}@{}: {}", "test-package", spec, e);
+                }
+            }
+        }
+    }
+
+    /// Test error cases
+    #[tokio::test]
+    async fn test_resolve_errors() {
+        let versions = Versions {
+            version_list: vec!["1.0.0".to_string()],
+            dist_tags: HashMap::new(),
+        };
+
+        let versions_info = VersionsInfo {
+            versions,
+            etag: Some("test-etag".to_string()),
+            last_updated: 1234567890,
+        };
+
+        // Test with invalid semver that should fail
+        let result = test_resolve_with_dist_tags(&versions_info, "test-package", "^2.0.0").await;
+        assert!(result.is_err(), "Should fail for incompatible semver range");
+        println!("✓ Correctly failed for incompatible semver range");
+
+        // Test with empty version list
+        let empty_versions = Versions {
+            version_list: vec![],
+            dist_tags: HashMap::new(),
+        };
+
+        let empty_versions_info = VersionsInfo {
+            versions: empty_versions,
+            etag: Some("test-etag".to_string()),
+            last_updated: 1234567890,
+        };
+
+        let result = test_resolve_with_dist_tags(&empty_versions_info, "test-package", "^1.0.0").await;
+        assert!(result.is_err(), "Should fail for empty version list");
+        println!("✓ Correctly failed for empty version list");
+    }
+
+    /// Helper function to test dist-tags matching logic
+    /// This simulates the logic from RegistryService::resolve_package
+    async fn test_resolve_with_dist_tags(
+        versions_info: &VersionsInfo,
+        name: &str,
+        spec: &str,
+    ) -> Result<ResolvedPackage> {
+        let dist_tags = &versions_info.versions.dist_tags;
+        let version_list = &versions_info.versions.version_list;
+
+        if version_list.is_empty() {
+            return Err(anyhow::anyhow!("No versions found for package: {}", name));
+        }
+
+        let target_version = match dist_tags.get(spec) {
+            Some(version) => version.to_string(),
+            None => match semver::max_satisfying(version_list.iter().map(|s| s.as_str()), spec) {
+                Some(version) => version.to_string(),
+                None => {
+                    return Err(anyhow::anyhow!(
+                        "No matching version found for {}@{}",
+                        name, spec
+                    ));
+                }
+            },
+        };
+
+        // Create a mock resolved package
+        Ok(ResolvedPackage {
+            name: name.to_string(),
+            version: target_version.clone(),
+            manifest: serde_json::json!({
+                "name": name,
+                "version": target_version,
+                "dependencies": {}
+            }),
+        })
+    }
+}
+
 // Public registry API with caching
 
 pub async fn resolve_dependency(

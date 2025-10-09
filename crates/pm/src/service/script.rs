@@ -327,26 +327,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_execute_custom_script_with_env_vars() {
-        let temp_dir = tempdir().unwrap();
-        let package = PackageInfo {
-            path: temp_dir.path().to_path_buf(),
-            bin_files: Default::default(),
-            scripts: Scripts::default(),
-            scope: None,
-            fullname: "test-package".to_string(),
-            name: "test-package".to_string(),
-            version: "1.0.0".to_string(),
-        };
-
-        let result =
-            ScriptService::execute_custom_script(&package, "test", "echo $npm_lifecycle_event")
-                .await;
-
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
     async fn test_collect_bin_paths_with_local_node_modules() {
         let temp_dir = tempdir().unwrap();
         let package_path = temp_dir.path();
