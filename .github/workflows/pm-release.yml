@@ -101,20 +101,6 @@ jobs:
         if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
         run: rustup target add aarch64-unknown-linux-gnu
 
-      - name: Install aarch64 cross toolchain on Linux
-        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          # Enable arm64 multiarch and install cross toolchain + ssl dev for target
-          dpkg --add-architecture arm64 || true
-          apt-get update && apt-get install -y \
-            gcc-aarch64-linux-gnu \
-            g++-aarch64-linux-gnu \
-            binutils-aarch64-linux-gnu \
-            libc6-dev-arm64-cross \
-            libssl-dev:arm64 || true
-
       - name: Add SSH private keys for submodule repositories
         uses: webfactory/ssh-agent@v0.7.0
         with:
@@ -122,21 +108,6 @@ jobs:
             ${{ secrets.CI_SUBMODULE }}
       - name: Init git submodules
         run: git submodule update --init
-
-      - name: Configure cross linker for aarch64
-        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
-        run: |
-          # Ensure cargo uses the aarch64 cross gcc as linker and set cross envs
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-          echo "CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++" >> $GITHUB_ENV
-          echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
-          echo "PKG_CONFIG_SYSROOT_DIR=/usr/aarch64-linux-gnu" >> $GITHUB_ENV
-          echo "CFLAGS_aarch64_unknown_linux_gnu=--sysroot=/usr/aarch64-linux-gnu" >> $GITHUB_ENV
-          echo "AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar" >> $GITHUB_ENV
-          echo "RANLIB_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ranlib" >> $GITHUB_ENV
-          # Help pkg-config find target libs if installed under /usr/aarch64-linux-gnu
-          echo "PKG_CONFIG_PATH=/usr/aarch64-linux-gnu/lib/pkgconfig:/usr/aarch64-linux-gnu/usr/lib/pkgconfig" >> $GITHUB_ENV
 
       - name: Build
         uses: actions-rs/cargo@v1
