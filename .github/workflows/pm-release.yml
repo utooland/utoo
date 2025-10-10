@@ -26,6 +26,12 @@ jobs:
             platform_os: darwin
             platform_cpu: arm64
 
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            platform_os: linux
+            platform_cpu: arm64
+            container: ubuntu:20.04
+
     runs-on: ${{ matrix.os }}
     container:
       image: ${{ matrix.container }}
@@ -90,6 +96,21 @@ jobs:
       - name: Add cross-compilation target for x86_64 on macOS
         if: ${{ matrix.target == 'x86_64-apple-darwin' }}
         run: rustup target add x86_64-apple-darwin
+
+      - name: Add cross-compilation target for aarch64 on Linux
+        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
+        run: rustup target add aarch64-unknown-linux-gnu
+
+      - name: Install aarch64 cross toolchain on Linux
+        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update && apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu \
+            libc6-dev-arm64-cross || true
 
       - name: Add SSH private keys for submodule repositories
         uses: webfactory/ssh-agent@v0.7.0
