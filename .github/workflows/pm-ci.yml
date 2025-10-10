@@ -25,7 +25,8 @@ jobs:
             target: x86_64-unknown-linux-gnu
             test: |
               cargo test -p utoo-pm --target x86_64-unknown-linux-gnu --  --nocapture
-          - host: ubuntu-20.04-arm
+
+          - host: ubuntu-latest-arm64
             target: aarch64-unknown-linux-gnu
             test: |
               cargo test -p utoo-pm --target aarch64-unknown-linux-gnu --  --nocapture
