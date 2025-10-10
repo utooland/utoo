@@ -20,11 +20,7 @@ pub async fn view(package_spec: &str) -> Result<()> {
     // Get complete package information (like npm view) - use full JSON format for complete data
     let (full_manifest, _etag) = fetch_full_manifest_for_view(name, None)
         .await
-        .map_err(|e| {
-            anyhow!(
-                "Failed to fetch package info for {package_spec}, reason: {e}"
-            )
-        })?;
+        .map_err(|e| anyhow!("Failed to fetch package info for {package_spec}, reason: {e}"))?;
 
     log_verbose(&format!("Fetched package info: {full_manifest:?}"));
 

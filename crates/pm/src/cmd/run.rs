@@ -96,9 +96,7 @@ pub async fn run_script(
         log_command(pre_script, "");
         ScriptService::execute_custom_script(&package, &pre_script_name, pre_script)
             .await
-            .map_err(|e| {
-                anyhow::anyhow!("Failed to execute pre script {pre_script_name}: {e}")
-            })?;
+            .map_err(|e| anyhow::anyhow!("Failed to execute pre script {pre_script_name}: {e}"))?;
     }
 
     // Execute main script

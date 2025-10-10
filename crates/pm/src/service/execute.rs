@@ -46,9 +46,7 @@ pub async fn execute_package(command: &str, args: Vec<String>) -> Result<()> {
             log_info(
                 "The package might not provide any executables, or the bin directory might be empty",
             );
-            Err(anyhow!(
-                "No executable found for package '{package_name}'"
-            ))
+            Err(anyhow!("No executable found for package '{package_name}'"))
         }
         Err(e) => {
             log_error(&format!(

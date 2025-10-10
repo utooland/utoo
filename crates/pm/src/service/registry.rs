@@ -497,9 +497,7 @@ mod tests {
             match result {
                 Ok(resolved) => {
                     assert_eq!(resolved.version, expected_version);
-                    println!(
-                        "✓ test-package@{} resolved to {}", spec, resolved.version
-                    );
+                    println!("✓ test-package@{} resolved to {}", spec, resolved.version);
                 }
                 Err(e) => {
                     panic!("Failed to resolve {}@{}: {}", "test-package", spec, e);
@@ -600,7 +598,8 @@ mod tests {
                 Ok(resolved) => {
                     assert_eq!(resolved.version, expected_version);
                     println!(
-                        "✓ Semver fallback test-package@{} resolved to {}", spec, resolved.version
+                        "✓ Semver fallback test-package@{} resolved to {}",
+                        spec, resolved.version
                     );
                 }
                 Err(e) => {

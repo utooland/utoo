@@ -34,9 +34,7 @@ pub async fn get_node_from_root_by_path(root: &Arc<Node>, pkg_path: &str) -> Res
         };
 
         if !found {
-            return Err(anyhow::anyhow!(
-                "Could not find package at path {pkg_path}"
-            ));
+            return Err(anyhow::anyhow!("Could not find package at path {pkg_path}"));
         }
 
         current_node = next_node.unwrap();
