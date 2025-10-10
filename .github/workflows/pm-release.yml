@@ -8,7 +8,7 @@ on: [ push ]
 
 jobs:
   build-and-publish-binary:
-    if: startsWith(github.event.release.tag_name, 'utoo-')
+    # if: startsWith(github.event.release.tag_name, 'utoo-')
     strategy:
       matrix:
         include:
