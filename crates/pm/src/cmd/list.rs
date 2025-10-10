@@ -22,13 +22,13 @@ pub async fn list_dependencies(cwd: &Path, package_name: &str) -> Result<()> {
     // Load package-lock.json
     log_verbose("Loading package-lock.json...");
     let package_lock = PackageLock::from_lock_file(&lock_file_path)
-        .map_err(|e| anyhow::anyhow!("Failed to parse package-lock.json: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to parse package-lock.json: {e}"))?;
 
     // Build dependency graph
     log_verbose("Building dependency graph...");
     let graph = package_lock
         .build_dependency_graph()
-        .map_err(|e| anyhow::anyhow!("Failed to build_dependency_graph {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to build_dependency_graph {e}"))?;
 
     show_package_dependencies(&graph, package_name)?;
 

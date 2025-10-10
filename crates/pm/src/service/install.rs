@@ -396,7 +396,7 @@ impl InstallService {
 
         install_packages(&groups, &cache_dir, root_path, semaphore)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to install packages: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to install packages: {e}"))?;
 
         finish_progress_bar("node_modules cloned");
 
@@ -421,14 +421,14 @@ impl InstallService {
         // Prepare global package directory and package.json
         let package_path = prepare_global_package_json(npm_spec, prefix)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to prepare global package.json: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to prepare global package.json: {e}"))?;
 
         log_verbose(&format!("Installing global package: {npm_spec}"));
 
         // Install dependencies
         Self::install(false, &package_path)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to install global package dependencies: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to install global package dependencies: {e}"))?;
 
         // Create package info from path
         let package_info = PackageInfo::from_path(&package_path)

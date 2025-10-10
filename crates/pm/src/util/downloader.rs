@@ -208,8 +208,7 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
                                     e
                                 ));
                                 return Err(anyhow::anyhow!(
-                                    "Failed to create parent directory: {}",
-                                    e
+                                    "Failed to create parent directory: {e}"
                                 )
                                 .context(format!("Parent directory: {}", parent_path.display())));
                             }
@@ -225,7 +224,7 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
                             entry.path.display(),
                             e
                         ));
-                        return Err(anyhow::anyhow!("Write failed: {}", e)
+                        return Err(anyhow::anyhow!("Write failed: {e}")
                             .context(format!("File path: {}", entry.path.display())));
                     }
 

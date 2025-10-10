@@ -37,8 +37,7 @@ impl DependencyResolutionService {
 
             if retry_count >= MAX_RETRIES {
                 return Err(anyhow::anyhow!(
-                    "Failed to fix dependencies after {} retries",
-                    MAX_RETRIES
+                    "Failed to fix dependencies after {MAX_RETRIES} retries"
                 ));
             }
 
@@ -53,7 +52,7 @@ impl DependencyResolutionService {
                     .await
                 {
                     log_verbose(&format!("Failed to fix dependency: {e}"));
-                    return Err(anyhow::anyhow!("Failed to fix dependency: {}", e));
+                    return Err(anyhow::anyhow!("Failed to fix dependency: {e}"));
                 } else {
                     log_verbose(&format!(
                         "Fixed dependency: {}/{}",

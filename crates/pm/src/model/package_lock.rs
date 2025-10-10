@@ -147,7 +147,7 @@ impl PackageLock {
             fs::read_to_string(path.as_ref()).context("Failed to read package-lock.json file")?;
 
         let package_lock: PackageLock = serde_json::from_str(&content)
-            .map_err(|e| anyhow::anyhow!("Failed to parse package-lock.json: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to parse package-lock.json: {e}"))?;
 
         Ok(package_lock)
     }

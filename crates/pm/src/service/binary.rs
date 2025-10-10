@@ -27,7 +27,7 @@ async fn load_config() -> Result<&'static Value> {
             response
                 .json()
                 .await
-                .map_err(|e| anyhow::anyhow!("Failed to parse binary mirror config: {}", e))
+                .map_err(|e| anyhow::anyhow!("Failed to parse binary mirror config: {e}"))
         })
         .await
 }
