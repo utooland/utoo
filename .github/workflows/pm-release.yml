@@ -26,11 +26,10 @@ jobs:
             platform_os: darwin
             platform_cpu: arm64
 
-          - os: ubuntu-latest
+          - os: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
             platform_os: linux
             platform_cpu: arm64
-            container: ubuntu:20.04
 
     runs-on: ${{ matrix.os }}
     container:
