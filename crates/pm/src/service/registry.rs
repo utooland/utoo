@@ -81,29 +81,30 @@ impl RegistryService {
                 let versions_info =
                     Self::extract_versions_info_from_full_manifest(&full_manifest, new_etag);
 
-                // Store in memory caches (sync) - accept ownership to avoid clone
+                // Store in memory caches (sync) - take ownership, zero clone
+                // set_* methods return Arc, no unwrap needed!
                 PACKAGE_CACHE.set_full_manifest(name.to_string(), full_manifest);
-                PACKAGE_CACHE.set_versions(name.to_string(), versions_info.clone());
+                let versions_arc = PACKAGE_CACHE.set_versions(name.to_string(), versions_info);
 
-                // Async disk update
+                // Async disk update - Arc clone is cheap
                 let name_for_disk = name.to_string();
-                let versions_info_for_disk = versions_info.clone();
+                let versions_arc_for_disk = Arc::clone(&versions_arc);
                 tokio::spawn(async move {
                     PACKAGE_CACHE
-                        .set_versions_to_disk(&name_for_disk, &versions_info_for_disk)
+                        .set_versions_to_disk(&name_for_disk, &versions_arc_for_disk)
                         .await;
                 });
 
-                // Return Arc from cache (just set)
-                Ok(PACKAGE_CACHE.get_versions(name).unwrap())
+                // Return Arc (zero-cost)
+                Ok(versions_arc)
             }
             Err(e) if e.to_string().contains("Not modified") => {
                 log_verbose(&format!("304 Not Modified for {name}, using disk cache"));
 
                 // 304 response means our disk versions.json is valid
                 if let Some(versions_info) = disk_versions {
-                    PACKAGE_CACHE.set_versions(name.to_string(), versions_info);
-                    Ok(PACKAGE_CACHE.get_versions(name).unwrap())
+                    let versions_arc = PACKAGE_CACHE.set_versions(name.to_string(), versions_info);
+                    Ok(versions_arc)
                 } else {
                     Err(anyhow::anyhow!(
                         "Received 304 Not Modified but no disk cache available for {name}"
@@ -148,7 +149,11 @@ impl RegistryService {
 
     /// Resolve specific version manifest with three-tier caching
     /// Priority: memory > disk > network
-    pub async fn resolve_version_manifest(name: &str, version: &str) -> Result<VersionManifest> {
+    /// Returns Arc<VersionManifest> for efficient sharing without cloning
+    pub async fn resolve_version_manifest(
+        name: &str,
+        version: &str,
+    ) -> Result<Arc<VersionManifest>> {
         log_verbose(&format!("Resolving version manifest for: {name}@{version}"));
 
         // 1. Check memory cache (sync, highest performance)
@@ -156,31 +161,37 @@ impl RegistryService {
             log_verbose(&format!(
                 "Memory cache hit for version manifest: {name}@{version}"
             ));
-            return Ok((*cached_manifest_arc).clone());
+            return Ok(cached_manifest_arc);
         }
 
         // 2. Check memory by full_manifest cache (already 304 verified)
         if let Some(full_manifest_arc) = PACKAGE_CACHE.get_full_manifest(name) {
             log_verbose(&format!("Using cached versions info for: {name}"));
-            let manifest_res = full_manifest_arc.versions.get(version).cloned();
-            if let Some(manifest) = manifest_res {
-                // Update memory cache - async disk write (non-blocking)
-                let name_clone = name.to_string();
-                let version_clone = version.to_string();
-                let manifest_clone = manifest.clone();
-
-                PACKAGE_CACHE.set_version_manifest(
+            if let Some(manifest) = full_manifest_arc.versions.get(version) {
+                // Update memory cache (takes ownership via clone from HashMap)
+                // set_version_manifest returns Arc, no unwrap needed!
+                let manifest_arc = PACKAGE_CACHE.set_version_manifest(
                     name.to_string(),
                     version.to_string(),
-                    manifest.clone(),
+                    manifest.clone(), // Clone from HashMap value
                 );
+                let name_for_disk = name.to_string();
+                let version_for_disk = version.to_string();
+                let manifest_arc_for_disk = Arc::clone(&manifest_arc);
 
+                // Async disk write (non-blocking)
                 tokio::spawn(async move {
                     PACKAGE_CACHE
-                        .set_version_manifest_to_disk(&name_clone, &version_clone, &manifest_clone)
+                        .set_version_manifest_to_disk(
+                            &name_for_disk,
+                            &version_for_disk,
+                            &manifest_arc_for_disk,
+                        )
                         .await;
                 });
-                return Ok(manifest);
+
+                // Return Arc (zero-cost)
+                return Ok(manifest_arc);
             }
         }
 
@@ -193,13 +204,16 @@ impl RegistryService {
                 "Disk cache hit for version manifest: {name}@{version}"
             ));
 
-            // Update memory cache immediately (sync)
-            PACKAGE_CACHE.set_version_manifest(
+            // Update memory cache immediately (takes ownership)
+            // set_version_manifest returns Arc, no unwrap needed!
+            let manifest_arc = PACKAGE_CACHE.set_version_manifest(
                 name.to_string(),
                 version.to_string(),
-                cached_manifest.clone(),
+                cached_manifest,
             );
-            return Ok(cached_manifest);
+
+            // Return Arc (zero-cost)
+            return Ok(manifest_arc);
         }
 
         // 4. Network request as last resort
@@ -216,25 +230,30 @@ impl RegistryService {
                     "Successfully fetched version manifest: {name}@{version}"
                 ));
 
-                // 1. Update memory cache immediately (sync)
-                PACKAGE_CACHE.set_version_manifest(
+                // Update memory cache (takes ownership, zero clone)
+                // set_version_manifest returns Arc, no unwrap needed!
+                let manifest_arc = PACKAGE_CACHE.set_version_manifest(
                     name.to_string(),
                     version.to_string(),
-                    manifest.clone(),
+                    manifest,
                 );
+                let name_for_disk = name.to_string();
+                let version_for_disk = version.to_string();
+                let manifest_arc_for_disk = Arc::clone(&manifest_arc);
 
-                // 2. Async disk write (non-blocking)
-                let name_clone = name.to_string();
-                let version_clone = version.to_string();
-                let manifest_clone = manifest.clone();
-
+                // Async disk write (non-blocking)
                 tokio::spawn(async move {
                     PACKAGE_CACHE
-                        .set_version_manifest_to_disk(&name_clone, &version_clone, &manifest_clone)
+                        .set_version_manifest_to_disk(
+                            &name_for_disk,
+                            &version_for_disk,
+                            &manifest_arc_for_disk,
+                        )
                         .await;
                 });
 
-                Ok(manifest)
+                // Return Arc (zero-cost)
+                Ok(manifest_arc)
             }
             Err(e) => {
                 log_verbose(&format!(

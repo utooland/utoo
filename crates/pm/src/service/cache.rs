@@ -77,10 +77,12 @@ impl PackageCache {
     }
 
     /// Set full manifest in memory cache (sync)
-    /// Accepts ownership to avoid clone
-    pub fn set_full_manifest(&self, name: String, manifest: FullManifest) {
-        self.full_manifests.insert(name.clone(), Arc::new(manifest));
+    /// Accepts ownership to avoid clone, returns Arc for immediate use
+    pub fn set_full_manifest(&self, name: String, manifest: FullManifest) -> Arc<FullManifest> {
+        let arc = Arc::new(manifest);
+        self.full_manifests.insert(name.clone(), Arc::clone(&arc));
         log_verbose(&format!("Cached full manifest in memory: {name}"));
+        arc
     }
 
     /// Get versions info from memory cache (sync)
@@ -93,10 +95,12 @@ impl PackageCache {
     }
 
     /// Set versions info in memory cache (sync)
-    /// Accepts ownership to avoid clone
-    pub fn set_versions(&self, name: String, info: VersionsInfo) {
-        self.versions_info.insert(name.clone(), Arc::new(info));
+    /// Accepts ownership to avoid clone, returns Arc for immediate use
+    pub fn set_versions(&self, name: String, info: VersionsInfo) -> Arc<VersionsInfo> {
+        let arc = Arc::new(info);
+        self.versions_info.insert(name.clone(), Arc::clone(&arc));
         log_verbose(&format!("Cached versions info in memory: {name}"));
+        arc
     }
 
     /// Get version manifest from memory cache (sync)
@@ -116,17 +120,18 @@ impl PackageCache {
     }
 
     /// Set version manifest in memory cache (sync)
-    /// Accepts ownership to avoid clone
+    /// Accepts ownership to avoid clone, returns Arc for immediate use
     pub fn set_version_manifest(
         &self,
         name: String,
         version: String,
         manifest: ModelVersionManifest,
-    ) {
+    ) -> Arc<ModelVersionManifest> {
         let key = format!("{name}@{version}");
-        self.version_manifests
-            .insert(key.clone(), Arc::new(manifest));
+        let arc = Arc::new(manifest);
+        self.version_manifests.insert(key.clone(), Arc::clone(&arc));
         log_verbose(&format!("Cached version manifest in memory: {key}"));
+        arc
     }
 
     // === Async disk operations ===
