@@ -32,14 +32,6 @@ pub struct ResolvedPackage {
     pub version: String,
 }
 
-/// Result types for new caching architecture
-#[derive(Debug, Clone)]
-pub enum PackageVersionsResult {
-    /// From memory cache, already 304 verified
-    Cached(VersionsInfo),
-    /// New network data (200 response)
-    Fresh(VersionsInfo),
-}
 
 pub struct RegistryService;
 
@@ -66,61 +58,53 @@ impl RegistryService {
     }
 
     /// Resolve package versions with smart caching strategy
-    /// Priority: memory full-manifest > memory versions > disk versions.json > network
-    pub async fn resolve_package_versions(name: &str) -> Result<PackageVersionsResult> {
+    /// Priority: memory versions > disk versions.json > network
+    /// Returns Arc<VersionsInfo> for efficient sharing without cloning
+    pub async fn resolve_package_versions(name: &str) -> Result<Arc<VersionsInfo>> {
         log_verbose(&format!("Resolving package versions for: {name}"));
 
-        // 1. Check memory full-manifest cache (highest priority, already 304 verified)
-        if let Some((_etag, versions_info)) = PACKAGE_CACHE.get_versions(name) {
-            log_verbose(&format!("Using cached full manifest for versions: {name}"));
-            return Ok(PackageVersionsResult::Fresh(versions_info));
-        }
-
-        // 2. Check memory versions cache (already 304 verified)
-        if let Some((_etag, cached_versions)) = PACKAGE_CACHE.get_versions(name) {
+        // 1. Check memory versions cache (already 304 verified)
+        if let Some(versions_info_arc) = PACKAGE_CACHE.get_versions(name) {
             log_verbose(&format!("Using cached versions info for: {name}"));
-            return Ok(PackageVersionsResult::Cached(cached_versions));
+            return Ok(versions_info_arc);
         }
 
-        // 3. Load from disk and make network request with etag
+        // 2. Load from disk and make network request with etag
         let (etag, disk_versions) = PACKAGE_CACHE.get_versions_from_disk(name).await;
         log_verbose(&format!("Loaded etag from disk for {name}: {etag:?}"));
 
-        // 4. Network request with etag for 304 validation
+        // 3. Network request with etag for 304 validation
         match fetch_full_manifest(name, etag.as_deref()).await {
             Ok((full_manifest, new_etag)) => {
                 log_verbose(&format!("Received fresh full manifest for: {name}"));
-
-                // Store in memory full-manifest cache (sync)
-                // For version_manifest fetch
-                PACKAGE_CACHE.set_full_manifest(name, &full_manifest);
 
                 // Convert full manifest to versions info for disk cache
                 let versions_info =
                     Self::extract_versions_info_from_full_manifest(&full_manifest, new_etag);
 
-                let versions_arc = Arc::new(versions_info.clone());
-                PACKAGE_CACHE.set_versions(name, versions_arc);
+                // Store in memory caches (sync) - accept ownership to avoid clone
+                PACKAGE_CACHE.set_full_manifest(name.to_string(), full_manifest);
+                PACKAGE_CACHE.set_versions(name.to_string(), versions_info.clone());
 
                 // Async disk update
-                let versions_info_for_disk = versions_info.clone();
                 let name_for_disk = name.to_string();
+                let versions_info_for_disk = versions_info.clone();
                 tokio::spawn(async move {
                     PACKAGE_CACHE
                         .set_versions_to_disk(&name_for_disk, &versions_info_for_disk)
                         .await;
                 });
 
-                Ok(PackageVersionsResult::Fresh(versions_info))
+                // Return Arc from cache (just set)
+                Ok(PACKAGE_CACHE.get_versions(name).unwrap())
             }
             Err(e) if e.to_string().contains("Not modified") => {
                 log_verbose(&format!("304 Not Modified for {name}, using disk cache"));
 
                 // 304 response means our disk versions.json is valid
                 if let Some(versions_info) = disk_versions {
-                    let versions_arc = Arc::new(versions_info.clone());
-                    PACKAGE_CACHE.set_versions(name, versions_arc);
-                    Ok(PackageVersionsResult::Cached(versions_info))
+                    PACKAGE_CACHE.set_versions(name.to_string(), versions_info);
+                    Ok(PACKAGE_CACHE.get_versions(name).unwrap())
                 } else {
                     Err(anyhow::anyhow!(
                         "Received 304 Not Modified but no disk cache available for {name}"
@@ -169,23 +153,24 @@ impl RegistryService {
         log_verbose(&format!("Resolving version manifest for: {name}@{version}"));
 
         // 1. Check memory cache (sync, highest performance)
-        if let Some(cached_manifest) = PACKAGE_CACHE.get_version_manifest(name, version) {
+        if let Some(cached_manifest_arc) = PACKAGE_CACHE.get_version_manifest(name, version) {
             log_verbose(&format!(
                 "Memory cache hit for version manifest: {name}@{version}"
             ));
-            return Ok(cached_manifest);
+            return Ok((*cached_manifest_arc).clone());
         }
 
         // 2. Check memory by full_manifest cache (already 304 verified)
-        if let Some(full_manifest) = PACKAGE_CACHE.get_full_manifest(name) {
+        if let Some(full_manifest_arc) = PACKAGE_CACHE.get_full_manifest(name) {
             log_verbose(&format!("Using cached versions info for: {name}"));
-            let manifest_res = full_manifest.versions.get(version).cloned();
+            let manifest_res = full_manifest_arc.versions.get(version).cloned();
             if let Some(manifest) = manifest_res {
-                PACKAGE_CACHE.set_version_manifest(name, version, &manifest);
-                // Async disk write (non-blocking)
+                // Update memory cache - async disk write (non-blocking)
                 let name_clone = name.to_string();
                 let version_clone = version.to_string();
                 let manifest_clone = manifest.clone();
+
+                PACKAGE_CACHE.set_version_manifest(name.to_string(), version.to_string(), manifest.clone());
 
                 tokio::spawn(async move {
                     PACKAGE_CACHE
@@ -206,7 +191,7 @@ impl RegistryService {
             ));
 
             // Update memory cache immediately (sync)
-            PACKAGE_CACHE.set_version_manifest(name, version, &cached_manifest);
+            PACKAGE_CACHE.set_version_manifest(name.to_string(), version.to_string(), cached_manifest.clone());
             return Ok(cached_manifest);
         }
 
@@ -225,7 +210,7 @@ impl RegistryService {
                 ));
 
                 // 1. Update memory cache immediately (sync)
-                PACKAGE_CACHE.set_version_manifest(name, version, &manifest);
+                PACKAGE_CACHE.set_version_manifest(name.to_string(), version.to_string(), manifest.clone());
 
                 // 2. Async disk write (non-blocking)
                 let name_clone = name.to_string();
@@ -288,16 +273,11 @@ impl RegistryService {
             log_verbose(&format!("Using non-semver registry for: {name}@{spec}"));
 
             // 2. Resolve package versions using new caching architecture
-            let package_versions_result = Self::resolve_package_versions(name).await?;
+            let versions_info_arc = Self::resolve_package_versions(name).await?;
 
-            let versions_info = match package_versions_result {
-                PackageVersionsResult::Cached(versions_info) => versions_info,
-                PackageVersionsResult::Fresh(versions_info) => versions_info,
-            };
-
-            // 3. Check dist-tags
-            let dist_tags = versions_info.versions.dist_tags;
-            let version_list = versions_info.versions.version_list;
+            // 3. Check dist-tags (Arc auto-derefs)
+            let dist_tags = &versions_info_arc.versions.dist_tags;
+            let version_list = &versions_info_arc.versions.version_list;
 
             let target_version = match dist_tags.get(spec) {
                 Some(version) => version.to_string(),
