@@ -1,12 +1,10 @@
 name: utoopm-release
 
-on:
-  release:
-    types: [published]
-  push:
-    branches: ['linux-arm64']
+# on:
+#   release:
+#     types: [published]
 
-# on: [ push ]
+on: [ push ]
 
 jobs:
   build-and-publish-binary:
