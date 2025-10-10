@@ -421,10 +421,7 @@ impl ChunkingContext for LibraryChunkingContext {
         Ok(Vc::cell(
             format!(
                 "{}{}",
-                self.asset_base_path
-                    .as_ref()
-                    .map(|s| s.as_str())
-                    .unwrap_or(""),
+                self.asset_base_path.as_deref().unwrap_or(""),
                 asset_path
             )
             .into(),

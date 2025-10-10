@@ -1348,13 +1348,13 @@ impl Config {
 
     #[turbo_tasks::function]
     pub async fn remove_unused_exports(&self, mode: Vc<Mode>) -> Result<Vc<bool>> {
-        let remove_unused_exports = self.optimization.as_ref().map(|op| {
-            op.remove_unused_exports
-                .is_none_or(|remove_unused_exports| remove_unused_exports)
-        });
-        Ok(Vc::cell(
-            remove_unused_exports.unwrap_or(matches!(*mode.await?, Mode::Production)),
-        ))
+        let is_prod = matches!(*mode.await?, Mode::Production);
+        let remove_unused_exports = self
+            .optimization
+            .as_ref()
+            .and_then(|op| op.remove_unused_exports)
+            .unwrap_or(is_prod);
+        Ok(Vc::cell(remove_unused_exports))
     }
 
     #[turbo_tasks::function]
