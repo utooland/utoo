@@ -110,7 +110,7 @@ pub fn compute_topological_layers(node_list: &[Node], edges: &[Edge]) -> Result<
         Ok(sorted) => sorted,
         Err(e) => {
             log_warning("Failed to perform topological sort");
-            return Err(anyhow!("Topological sort failed: {:?}", e));
+            return Err(anyhow!("Topological sort failed: {e:?}"));
         }
     };
 

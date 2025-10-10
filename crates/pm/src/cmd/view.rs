@@ -22,9 +22,7 @@ pub async fn view(package_spec: &str) -> Result<()> {
         .await
         .map_err(|e| {
             anyhow!(
-                "Failed to fetch package info for {}, reason: {}",
-                package_spec,
-                e
+                "Failed to fetch package info for {package_spec}, reason: {e}"
             )
         })?;
 

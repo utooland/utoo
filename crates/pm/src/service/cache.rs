@@ -371,7 +371,7 @@ pub async fn load_cache(path: &Path) -> Result<()> {
         .await
         .context("Failed to read cache file")?;
     let cache_data: CacheData = serde_json::from_str(&cache_str)
-        .map_err(|e| anyhow::anyhow!("Failed to parse cache data: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to parse cache data: {e}"))?;
 
     PACKAGE_CACHE.import_data(cache_data).await;
     log_verbose(&format!("Project cache loaded from {}", path.display()));

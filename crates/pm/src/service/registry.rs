@@ -123,17 +123,14 @@ impl RegistryService {
                     Ok(PackageVersionsResult::Cached((*versions_arc).clone()))
                 } else {
                     Err(anyhow::anyhow!(
-                        "Received 304 Not Modified but no disk cache available for {}",
-                        name
+                        "Received 304 Not Modified but no disk cache available for {name}"
                     ))
                 }
             }
             Err(e) => {
                 log_verbose(&format!("Network request failed for {name}: {e}"));
                 Err(anyhow::anyhow!(
-                    "Failed to resolve package versions for {}: {}",
-                    name,
-                    e
+                    "Failed to resolve package versions for {name}: {e}"
                 ))
             }
         }
@@ -248,10 +245,7 @@ impl RegistryService {
                     "Failed to fetch version manifest for {name}@{version}: {e}"
                 ));
                 Err(anyhow::anyhow!(
-                    "Failed to resolve version manifest for {}@{}: {}",
-                    name,
-                    version,
-                    e
+                    "Failed to resolve version manifest for {name}@{version}: {e}"
                 ))
             }
         }
@@ -318,9 +312,7 @@ impl RegistryService {
                             version_list.len()
                         ));
                         return Err(anyhow::anyhow!(
-                            "No matching version found for {}@{}",
-                            name,
-                            spec
+                            "No matching version found for {name}@{spec}"
                         ));
                     }
                 },
@@ -406,6 +398,54 @@ pub async fn resolve(name: &str, spec: &str) -> Result<ResolvedPackage> {
     result
 }
 
+// Public registry API with caching
+
+pub async fn resolve_dependency(
+    name: &str,
+    spec: &str,
+    edge_type: &EdgeType,
+) -> Result<Option<ResolvedPackage>> {
+    let start_time = std::time::Instant::now();
+    log_verbose(&format!(
+        "Starting resolve_dependency for {}@{} ({})",
+        name,
+        spec,
+        match edge_type {
+            EdgeType::Prod => "prod",
+            EdgeType::Dev => "dev",
+            EdgeType::Peer => "peer",
+            EdgeType::Optional => "optional",
+        }
+    ));
+
+    match resolve(name, spec).await {
+        Ok(resolved) => {
+            log_verbose(&format!(
+                "resolve_dependency completed for {}@{} => {} in {:?}",
+                name,
+                spec,
+                resolved.version,
+                start_time.elapsed()
+            ));
+            Ok(Some(resolved))
+        }
+        Err(e) => {
+            let elapsed = start_time.elapsed();
+            if *edge_type == EdgeType::Optional {
+                log_verbose(&format!(
+                    "skipping optional dependency {name}@{spec} due to resolve error after {elapsed:?}: {e}"
+                ));
+                Ok(None)
+            } else {
+                log_verbose(&format!(
+                    "resolve_dependency FAILED for {name}@{spec} after {elapsed:?}: {e}"
+                ));
+                Err(e)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -458,8 +498,7 @@ mod tests {
                 Ok(resolved) => {
                     assert_eq!(resolved.version, expected_version);
                     println!(
-                        "✓ {}@{} resolved to {}",
-                        "test-package", spec, resolved.version
+                        "✓ test-package@{} resolved to {}", spec, resolved.version
                     );
                 }
                 Err(e) => {
@@ -493,7 +532,7 @@ mod tests {
                 println!("✓ Empty dist-tags fallback to semver: {}", resolved.version);
             }
             Err(e) => {
-                panic!("Failed to resolve with empty dist-tags: {}", e);
+                panic!("Failed to resolve with empty dist-tags: {e}");
             }
         }
 
@@ -523,7 +562,7 @@ mod tests {
                 );
             }
             Err(e) => {
-                panic!("Failed to resolve with non-existent dist-tag: {}", e);
+                panic!("Failed to resolve with non-existent dist-tag: {e}");
             }
         }
     }
@@ -561,8 +600,7 @@ mod tests {
                 Ok(resolved) => {
                     assert_eq!(resolved.version, expected_version);
                     println!(
-                        "✓ Semver fallback {}@{} resolved to {}",
-                        "test-package", spec, resolved.version
+                        "✓ Semver fallback test-package@{} resolved to {}", spec, resolved.version
                     );
                 }
                 Err(e) => {
@@ -620,7 +658,7 @@ mod tests {
         let version_list = &versions_info.versions.version_list;
 
         if version_list.is_empty() {
-            return Err(anyhow::anyhow!("No versions found for package: {}", name));
+            return Err(anyhow::anyhow!("No versions found for package: {name}"));
         }
 
         let target_version = match dist_tags.get(spec) {
@@ -629,9 +667,7 @@ mod tests {
                 Some(version) => version.to_string(),
                 None => {
                     return Err(anyhow::anyhow!(
-                        "No matching version found for {}@{}",
-                        name,
-                        spec
+                        "No matching version found for {name}@{spec}"
                     ));
                 }
             },
@@ -647,53 +683,5 @@ mod tests {
                 "dependencies": {}
             }),
         })
-    }
-}
-
-// Public registry API with caching
-
-pub async fn resolve_dependency(
-    name: &str,
-    spec: &str,
-    edge_type: &EdgeType,
-) -> Result<Option<ResolvedPackage>> {
-    let start_time = std::time::Instant::now();
-    log_verbose(&format!(
-        "Starting resolve_dependency for {}@{} ({})",
-        name,
-        spec,
-        match edge_type {
-            EdgeType::Prod => "prod",
-            EdgeType::Dev => "dev",
-            EdgeType::Peer => "peer",
-            EdgeType::Optional => "optional",
-        }
-    ));
-
-    match resolve(name, spec).await {
-        Ok(resolved) => {
-            log_verbose(&format!(
-                "resolve_dependency completed for {}@{} => {} in {:?}",
-                name,
-                spec,
-                resolved.version,
-                start_time.elapsed()
-            ));
-            Ok(Some(resolved))
-        }
-        Err(e) => {
-            let elapsed = start_time.elapsed();
-            if *edge_type == EdgeType::Optional {
-                log_verbose(&format!(
-                    "skipping optional dependency {name}@{spec} due to resolve error after {elapsed:?}: {e}"
-                ));
-                Ok(None)
-            } else {
-                log_verbose(&format!(
-                    "resolve_dependency FAILED for {name}@{spec} after {elapsed:?}: {e}"
-                ));
-                Err(e)
-            }
-        }
     }
 }

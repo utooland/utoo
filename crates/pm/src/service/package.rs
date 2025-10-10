@@ -90,7 +90,7 @@ impl PackageService {
                 ScriptService::execute_script(&package_info, hook, true)
                     .await
                     .map_err(|e| {
-                        anyhow::anyhow!("Failed to execute project hook {}: {}", hook, e)
+                        anyhow::anyhow!("Failed to execute project hook {hook}: {e}")
                     })?;
             }
         }

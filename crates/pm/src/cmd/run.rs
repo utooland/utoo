@@ -46,7 +46,7 @@ pub async fn run_script(
             workspace_name,
         )
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to find workspace path: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to find workspace path: {e}"))?;
         log_info(&format!(
             "Using workspace: {} at path: {}",
             workspace_name,
@@ -67,7 +67,7 @@ pub async fn run_script(
                 workspace_name,
             )
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to find workspace path: {}", e))?
+            .map_err(|e| anyhow::anyhow!("Failed to find workspace path: {e}"))?
         } else {
             std::env::current_dir().context("Failed to get current directory")?
         },
@@ -97,7 +97,7 @@ pub async fn run_script(
         ScriptService::execute_custom_script(&package, &pre_script_name, pre_script)
             .await
             .map_err(|e| {
-                anyhow::anyhow!("Failed to execute pre script {}: {}", pre_script_name, e)
+                anyhow::anyhow!("Failed to execute pre script {pre_script_name}: {e}")
             })?;
     }
 
@@ -105,7 +105,7 @@ pub async fn run_script(
     let script_content = if let Some(Value::String(content)) = scripts.get(script_name) {
         content
     } else {
-        anyhow::bail!("Script '{}' not found in package.json", script_name);
+        anyhow::bail!("Script '{script_name}' not found in package.json");
     };
 
     let script_args = script_args.unwrap_or_default();
@@ -117,7 +117,7 @@ pub async fn run_script(
         script_args,
     )
     .await
-    .map_err(|e| anyhow::anyhow!("Failed to execute script {}: {}", script_name, e))?;
+    .map_err(|e| anyhow::anyhow!("Failed to execute script {script_name}: {e}"))?;
 
     // Execute post script if exists
     let post_script_name = format!("post{script_name}");
@@ -126,7 +126,7 @@ pub async fn run_script(
         ScriptService::execute_custom_script(&package, &post_script_name, post_script)
             .await
             .map_err(|e| {
-                anyhow::anyhow!("Failed to execute post script {}: {}", post_script_name, e)
+                anyhow::anyhow!("Failed to execute post script {post_script_name}: {e}")
             })?;
     }
 
@@ -263,7 +263,7 @@ pub async fn run_script_in_all_workspaces(
             match result {
                 Ok(task_result) => results.push(task_result),
                 Err(join_error) => {
-                    return Err(anyhow::anyhow!("Task join error: {}", join_error));
+                    return Err(anyhow::anyhow!("Task join error: {join_error}"));
                 }
             }
         }

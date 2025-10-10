@@ -23,7 +23,7 @@ pub async fn link_current_to_global(prefix: Option<&str>) -> Result<()> {
 
     // Install dependencies
     install(false, &project_path).await.map_err(|e| {
-        anyhow::anyhow!("Failed to prepare dependencies for package to link: {}", e)
+        anyhow::anyhow!("Failed to prepare dependencies for package to link: {e}")
     })?;
 
     let global_package_path = get_global_package_dir(prefix)?.join(&package_info.name);

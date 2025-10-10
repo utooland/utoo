@@ -341,7 +341,7 @@ pub async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
     let real_src = if find_real {
         find_real_src(src)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Cannot find valid source directory in {:?}", src))?
+            .ok_or_else(|| anyhow::anyhow!("Cannot find valid source directory in {src:?}"))?
     } else {
         src.to_path_buf()
     };

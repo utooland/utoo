@@ -131,7 +131,7 @@ async fn execute_update(version: &str) -> Result<()> {
         Ok(())
     } else {
         log_error("Auto update failed, please update manually");
-        anyhow::bail!("Auto update failed, please execute manually {}", status)
+        anyhow::bail!("Auto update failed, please execute manually {status}")
     }
 }
 
@@ -152,7 +152,7 @@ async fn check_remote_version_fast() -> Result<VersionCache> {
     let package_info = response
         .json::<serde_json::Value>()
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to parse package info: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to parse package info: {e}"))?;
 
     let version = package_info["version"]
         .as_str()
@@ -184,7 +184,7 @@ fn read_version_cache() -> Result<VersionCache> {
     let content =
         fs::read_to_string(get_cache_path()).context("Failed to read version cache file")?;
     serde_json::from_str(&content)
-        .map_err(|e| anyhow::anyhow!("Failed to parse version cache: {}", e))
+        .map_err(|e| anyhow::anyhow!("Failed to parse version cache: {e}"))
 }
 
 fn save_version_cache(cache: &VersionCache) -> Result<()> {
