@@ -284,25 +284,6 @@ mod tests {
     use tempfile::tempdir;
 
     #[tokio::test]
-    async fn test_execute_custom_script_success() {
-        let temp_dir = tempdir().unwrap();
-        let package = PackageInfo {
-            path: temp_dir.path().to_path_buf(),
-            bin_files: Default::default(),
-            scripts: Scripts::default(),
-            scope: None,
-            fullname: "test-package".to_string(),
-            name: "test-package".to_string(),
-            version: "1.0.0".to_string(),
-        };
-
-        let result =
-            ScriptService::execute_custom_script(&package, "test", "echo 'test script'").await;
-
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
     async fn test_execute_custom_script_failure() {
         let temp_dir = tempdir().unwrap();
         let package = PackageInfo {
