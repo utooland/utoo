@@ -99,11 +99,11 @@ impl RegistryService {
                 let versions_info =
                     Self::extract_versions_info_from_full_manifest(&full_manifest, new_etag);
 
-                let versions_arc = Arc::new(versions_info);
-                PACKAGE_CACHE.set_versions(name, versions_arc.clone());
+                let versions_arc = Arc::new(versions_info.clone());
+                PACKAGE_CACHE.set_versions(name, versions_arc);
 
                 // Async disk update
-                let versions_info_for_disk = (*versions_arc).clone();
+                let versions_info_for_disk = versions_info.clone();
                 let name_for_disk = name.to_string();
                 tokio::spawn(async move {
                     PACKAGE_CACHE
@@ -111,16 +111,16 @@ impl RegistryService {
                         .await;
                 });
 
-                Ok(PackageVersionsResult::Fresh((*versions_arc).clone()))
+                Ok(PackageVersionsResult::Fresh(versions_info))
             }
             Err(e) if e.to_string().contains("Not modified") => {
                 log_verbose(&format!("304 Not Modified for {name}, using disk cache"));
 
                 // 304 response means our disk versions.json is valid
                 if let Some(versions_info) = disk_versions {
-                    let versions_arc = Arc::new(versions_info);
-                    PACKAGE_CACHE.set_versions(name, versions_arc.clone());
-                    Ok(PackageVersionsResult::Cached((*versions_arc).clone()))
+                    let versions_arc = Arc::new(versions_info.clone());
+                    PACKAGE_CACHE.set_versions(name, versions_arc);
+                    Ok(PackageVersionsResult::Cached(versions_info))
                 } else {
                     Err(anyhow::anyhow!(
                         "Received 304 Not Modified but no disk cache available for {name}"
