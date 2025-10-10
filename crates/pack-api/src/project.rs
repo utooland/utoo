@@ -1,7 +1,9 @@
 use anyhow::{Context, Result, bail};
 use pack_core::{
     all_assets_from_entries,
-    client::context::{get_client_chunking_context, get_client_compile_time_info},
+    client::context::{
+        ClientChunkingContextOptions, get_client_chunking_context, get_client_compile_time_info,
+    },
     config::{Config, ModuleIds as ModuleIdStrategyConfig},
     emit_assets,
     mode::Mode,
@@ -46,6 +48,7 @@ use turbopack_core::{
     module_graph::{
         GraphEntries, ModuleGraph, SingleModuleGraph, VisitedModules,
         chunk_group_info::ChunkGroupEntry,
+        export_usage::{OptionExportUsageInfo, compute_export_usage_info},
     },
     output::{OutputAsset, OutputAssets},
     raw_output::RawOutput,
@@ -892,17 +895,18 @@ impl Project {
 
     #[turbo_tasks::function]
     pub async fn client_chunking_context(self: Vc<Self>) -> Result<Vc<Box<dyn ChunkingContext>>> {
-        Ok(get_client_chunking_context(
-            self.project_root().owned().await?,
-            self.client_root().owned().await?,
-            rcstr!("/ROOT"),
-            Some(self.dist_dir().owned().await?),
-            self.client_compile_time_info().environment(),
-            self.mode(),
-            self.module_ids(),
-            self.no_mangling(),
-            self.config(),
-        ))
+        Ok(get_client_chunking_context(ClientChunkingContextOptions {
+            mode: self.mode(),
+            root_path: self.project_root().owned().await?,
+            output_root: self.client_root().owned().await?,
+            output_root_to_root_path: rcstr!("/ROOT"),
+            chunk_base_path: Some(self.dist_dir().owned().await?),
+            environment: self.client_compile_time_info().environment(),
+            module_id_strategy: self.module_ids(),
+            no_mangling: self.no_mangling(),
+            config: self.config(),
+            export_usage: self.export_usage(),
+        }))
     }
 
     #[turbo_tasks::function]
@@ -1158,6 +1162,21 @@ impl Project {
                     *module_graphs.full,
                 )))
             }
+        }
+    }
+
+    /// Computed the used exports for each module.
+    #[turbo_tasks::function]
+    pub async fn export_usage(self: Vc<Self>) -> Result<Vc<OptionExportUsageInfo>> {
+        if *self.config().remove_unused_exports(self.mode()).await? {
+            let module_graphs = self.whole_app_module_graphs().await?;
+            Ok(Vc::cell(Some(
+                compute_export_usage_info(module_graphs.full)
+                    .resolve_strongly_consistent()
+                    .await?,
+            )))
+        } else {
+            Ok(Vc::cell(None))
         }
     }
 

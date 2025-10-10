@@ -1,8 +1,11 @@
 use std::{collections::BTreeSet, str::FromStr};
 
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use turbo_rcstr::{RcStr, rcstr};
-use turbo_tasks::{FxIndexMap, ResolvedVc, TryJoinIterExt, ValueToString, Vc};
+use turbo_tasks::{
+    FxIndexMap, ResolvedVc, TaskInput, TryJoinIterExt, ValueToString, Vc, trace::TraceRawVcs,
+};
 use turbo_tasks_env::EnvMap;
 use turbo_tasks_fs::FileSystemPath;
 use turbopack::{
@@ -26,6 +29,7 @@ use turbopack_core::{
     environment::{BrowserEnvironment, Environment, ExecutionEnvironment},
     file_source::FileSource,
     free_var_references,
+    module_graph::export_usage::OptionExportUsageInfo,
 };
 use turbopack_ecmascript::{TypeofWindow, chunk::EcmascriptChunkType};
 use turbopack_node::{
@@ -470,18 +474,37 @@ pub async fn get_client_resolve_options_context(
     .cell())
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash, TaskInput, TraceRawVcs, Serialize, Deserialize)]
+pub struct ClientChunkingContextOptions {
+    pub mode: Vc<Mode>,
+    pub root_path: FileSystemPath,
+    pub output_root: FileSystemPath,
+    pub output_root_to_root_path: RcStr,
+    pub chunk_base_path: Option<RcStr>,
+    pub environment: Vc<Environment>,
+    pub module_id_strategy: Vc<Box<dyn ModuleIdStrategy>>,
+    pub no_mangling: Vc<bool>,
+    pub config: Vc<Config>,
+    pub export_usage: Vc<OptionExportUsageInfo>,
+}
+
 #[turbo_tasks::function]
 pub async fn get_client_chunking_context(
-    root_path: FileSystemPath,
-    output_root: FileSystemPath,
-    output_root_to_root_path: RcStr,
-    chunk_base_path: Option<RcStr>,
-    environment: ResolvedVc<Environment>,
-    mode: Vc<Mode>,
-    module_id_strategy: ResolvedVc<Box<dyn ModuleIdStrategy>>,
-    no_mangling: Vc<bool>,
-    config: ResolvedVc<Config>,
+    options: ClientChunkingContextOptions,
 ) -> Result<Vc<Box<dyn ChunkingContext>>> {
+    let ClientChunkingContextOptions {
+        mode,
+        root_path,
+        output_root,
+        output_root_to_root_path,
+        chunk_base_path,
+        environment,
+        module_id_strategy,
+        no_mangling,
+        config,
+        export_usage,
+    } = options;
+
     let minify = config.minify(mode);
     let concatenate_modules = config.concatenate_modules(mode);
     let mode = mode.await?;
@@ -509,7 +532,7 @@ pub async fn get_client_chunking_context(
         output_root.clone(),
         output_root.clone(),
         output_root,
-        environment,
+        environment.to_resolved().await?,
         runtime_type,
     )
     .minify_type(if mode.is_production() && *minify.await? {
@@ -526,9 +549,12 @@ pub async fn get_client_chunking_context(
     })
     .chunk_base_path(chunk_base_path)
     .current_chunk_method(CurrentChunkMethod::DocumentCurrentScript)
-    .module_id_strategy(module_id_strategy);
+    .export_usage(*export_usage.await?)
+    .module_id_strategy(module_id_strategy.to_resolved().await?);
 
     let output = config.output().await?;
+
+    builder = builder.asset_base_path(output.asset_prefix.clone());
 
     if !mode.is_development() {
         if let Some(filename) = &output.filename {

@@ -134,6 +134,11 @@ impl LibraryChunkingContextBuilder {
         self
     }
 
+    pub fn asset_base_path(mut self, asset_base_path: Option<RcStr>) -> Self {
+        self.chunking_context.asset_base_path = asset_base_path;
+        self
+    }
+
     pub fn build(self) -> Vc<LibraryChunkingContext> {
         LibraryChunkingContext::cell(self.chunking_context)
     }
@@ -161,6 +166,8 @@ pub struct LibraryChunkingContext {
     output_root: FileSystemPath,
     /// The relative path from the output_root to the root_path.
     output_root_to_root_path: RcStr,
+    /// URL prefix that will be prepended to all static asset URLs when loading them.
+    asset_base_path: Option<RcStr>,
     /// The environment chunks will be evaluated in.
     environment: ResolvedVc<Environment>,
     /// Enable module merging
@@ -198,6 +205,7 @@ impl LibraryChunkingContext {
                 output_root,
                 output_root_to_root_path,
                 should_use_file_source_map_uris: false,
+                asset_base_path: None,
                 environment,
                 runtime_type,
                 minify_type: MinifyType::NoMinify,
@@ -410,7 +418,14 @@ impl ChunkingContext for LibraryChunkingContext {
     async fn asset_url(&self, ident: FileSystemPath) -> Result<Vc<RcStr>> {
         let asset_path = ident.to_string();
 
-        Ok(Vc::cell(asset_path.into()))
+        Ok(Vc::cell(
+            format!(
+                "{}{}",
+                self.asset_base_path.as_deref().unwrap_or(""),
+                asset_path
+            )
+            .into(),
+        ))
     }
 
     #[turbo_tasks::function]

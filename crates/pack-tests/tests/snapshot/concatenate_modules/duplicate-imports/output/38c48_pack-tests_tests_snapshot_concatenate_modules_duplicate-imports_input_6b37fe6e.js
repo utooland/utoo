@@ -8,7 +8,6 @@ module.exports = 'shared';
 
 // MERGED MODULE: [project]/crates/pack-tests/tests/snapshot/concatenate_modules/duplicate-imports/input/index.js [client] (ecmascript)
 ;
-__turbopack_context__.s([], 17);
 // MERGED MODULE: [project]/crates/pack-tests/tests/snapshot/concatenate_modules/duplicate-imports/input/c.js [client] (ecmascript)
 ;
 // MERGED MODULE: [project]/crates/pack-tests/tests/snapshot/concatenate_modules/duplicate-imports/input/b.js [client] (ecmascript)
@@ -27,6 +26,7 @@ var __TURBOPACK__imported__module__6__2 = __TURBOPACK__imported__module__6__;
 ;
 console.log('c', __TURBOPACK__imported__module__6__2["default"]);
 ;
+__turbopack_context__.s([], 17);
 }),
 ]);
 

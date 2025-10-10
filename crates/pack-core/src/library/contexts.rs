@@ -1,6 +1,7 @@
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use turbo_rcstr::RcStr;
-use turbo_tasks::{ResolvedVc, Vc};
+use turbo_tasks::{TaskInput, Vc, trace::TraceRawVcs};
 use turbo_tasks_fs::FileSystemPath;
 use turbopack_core::{
     chunk::{
@@ -8,25 +9,45 @@ use turbopack_core::{
         module_id_strategies::ModuleIdStrategy,
     },
     environment::Environment,
+    module_graph::export_usage::OptionExportUsageInfo,
 };
 
 use crate::{config::Config, mode::Mode};
 
 use super::LibraryChunkingContext;
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash, TaskInput, TraceRawVcs, Serialize, Deserialize)]
+pub struct LibraryChunkingContextOptions {
+    pub mode: Vc<Mode>,
+    pub root_path: FileSystemPath,
+    pub output_root: FileSystemPath,
+    pub output_root_to_root_path: RcStr,
+    pub environment: Vc<Environment>,
+    pub module_id_strategy: Vc<Box<dyn ModuleIdStrategy>>,
+    pub no_mangling: Vc<bool>,
+    pub runtime_root: Vc<Option<RcStr>>,
+    pub runtime_export: Vc<Vec<RcStr>>,
+    pub config: Vc<Config>,
+    pub export_usage: Vc<OptionExportUsageInfo>,
+}
+
 #[turbo_tasks::function]
 pub async fn get_library_chunking_context(
-    root_path: FileSystemPath,
-    output_root: FileSystemPath,
-    output_root_to_root_path: RcStr,
-    environment: ResolvedVc<Environment>,
-    mode: Vc<Mode>,
-    module_id_strategy: ResolvedVc<Box<dyn ModuleIdStrategy>>,
-    no_mangling: Vc<bool>,
-    runtime_root: Vc<Option<RcStr>>,
-    runtime_export: Vc<Vec<RcStr>>,
-    config: ResolvedVc<Config>,
+    options: LibraryChunkingContextOptions,
 ) -> Result<Vc<Box<dyn ChunkingContext>>> {
+    let LibraryChunkingContextOptions {
+        mode,
+        root_path,
+        output_root,
+        output_root_to_root_path,
+        environment,
+        module_id_strategy,
+        no_mangling,
+        runtime_root,
+        runtime_export,
+        config,
+        export_usage,
+    } = options;
     let minify = config.minify(mode);
     let concatenate_modules = config.concatenate_modules(mode);
     let mode = mode.await?;
@@ -47,11 +68,13 @@ pub async fn get_library_chunking_context(
         }
     };
 
+    let output = config.output().await?;
+
     let mut builder = LibraryChunkingContext::builder(
         root_path,
         output_root,
         output_root_to_root_path,
-        environment,
+        environment.to_resolved().await?,
         runtime_type,
         (*runtime_root.await?).clone(),
         (*runtime_export.await?).clone(),
@@ -68,10 +91,12 @@ pub async fn get_library_chunking_context(
     } else {
         SourceMapsType::None
     })
-    .module_id_strategy(module_id_strategy);
+    .asset_base_path(output.asset_prefix.clone())
+    .module_id_strategy(module_id_strategy.to_resolved().await?)
+    .export_usage(*export_usage.await?);
 
     if !mode.is_development()
-        && let Some(filename) = &config.output().await?.filename
+        && let Some(filename) = &output.filename
     {
         builder = builder.filename(filename.clone());
     }
