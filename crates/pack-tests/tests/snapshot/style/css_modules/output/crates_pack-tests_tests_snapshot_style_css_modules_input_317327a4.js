@@ -59,7 +59,6 @@ __turbopack_context__.v({
 "use strict";
 
 // auto css modules
-__turbopack_context__.s([]);
 var __TURBOPACK__imported__module__350__ = __turbopack_context__.i(350);
 var __TURBOPACK__imported__module__415__ = __turbopack_context__.i(415);
 var __TURBOPACK__imported__module__197__ = __turbopack_context__.i(197);
@@ -88,5 +87,6 @@ console.log('CSS styles2:', __TURBOPACK__imported__module__654__["default"]);
 console.log('LESS styles2:', __TURBOPACK__imported__module__49__["default"]);
 console.log('SASS styles2:', __TURBOPACK__imported__module__565__["default"]);
 console.log('SCSS styles2:', __TURBOPACK__imported__module__351__["default"]);
+__turbopack_context__.s([]);
 }),
 ]);

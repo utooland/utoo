@@ -4,7 +4,7 @@ use pack_core::{
         get_client_module_options_context, get_client_resolve_options_context,
         get_client_runtime_entries,
     },
-    library::contexts::get_library_chunking_context,
+    library::contexts::{LibraryChunkingContextOptions, get_library_chunking_context},
     util::convert_to_project_relative,
 };
 use qstring::QString;
@@ -238,17 +238,21 @@ impl LibraryEndpoint {
         runtime_export: Vc<Vec<RcStr>>,
     ) -> Result<Vc<Box<dyn ChunkingContext>>> {
         let project = self.project();
+
         Ok(get_library_chunking_context(
-            project.project_root().owned().await?,
-            project.dist_root().owned().await?,
-            rcstr!("/ROOT"),
-            project.client_compile_time_info().environment(),
-            project.mode(),
-            project.module_ids(),
-            project.no_mangling(),
-            runtime_root,
-            runtime_export,
-            project.config(),
+            LibraryChunkingContextOptions {
+                mode: project.mode(),
+                root_path: project.project_root().owned().await?,
+                output_root: project.dist_root().owned().await?,
+                output_root_to_root_path: rcstr!("/ROOT"),
+                environment: project.client_compile_time_info().environment(),
+                module_id_strategy: project.module_ids(),
+                no_mangling: project.no_mangling(),
+                runtime_root,
+                runtime_export,
+                config: project.config(),
+                export_usage: project.export_usage(),
+            },
         ))
     }
 

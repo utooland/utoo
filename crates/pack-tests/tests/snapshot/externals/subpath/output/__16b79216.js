@@ -37,7 +37,6 @@ __turbopack_context__.v(mod);
 712, ((__turbopack_context__) => {
 "use strict";
 
-__turbopack_context__.s([]);
 var __TURBOPACK__imported__module__657__ = __turbopack_context__.i(657);
 var __TURBOPACK__imported__module__82__ = __turbopack_context__.i(82);
 var __TURBOPACK__imported__module__699__ = __turbopack_context__.i(699);
@@ -54,6 +53,7 @@ console.log(__TURBOPACK__imported__module__657__["default"]);
 console.log(__TURBOPACK__imported__module__82__["default"], __TURBOPACK__imported__module__699__["default"]);
 console.log(__TURBOPACK__imported__module__138__["default"]);
 console.log(__TURBOPACK__imported__module__99__["default"], void 0, void 0);
+__turbopack_context__.s([]);
 }),
 ]);
 

@@ -12,7 +12,6 @@ console.log("shared2");
 
 // MERGED MODULE: [project]/crates/pack-tests/tests/snapshot/concatenate_modules/side-effects-import/input/b.js [client] (ecmascript)
 ;
-__turbopack_context__.s([], 799);
 // MERGED MODULE: [project]/crates/pack-tests/tests/snapshot/concatenate_modules/side-effects-import/input/b1.js [client] (ecmascript)
 ;
 var __TURBOPACK__imported__module__635__ = __turbopack_context__.i(635);
@@ -25,6 +24,7 @@ var __TURBOPACK__imported__module__517__ = __turbopack_context__.i(517);
 console.log("b2");
 ;
 ;
+__turbopack_context__.s([], 799);
 }),
 ]);
 

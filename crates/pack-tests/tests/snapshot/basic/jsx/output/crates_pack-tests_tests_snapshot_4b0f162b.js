@@ -2,27 +2,21 @@
 3, ((__turbopack_context__) => {
 "use strict";
 
-__turbopack_context__.s([
-    "jsx",
-    ()=>jsx,
-    "jsxs",
-    ()=>jsxs
-]);
 function jsx() {
     return 'purposefully empty stub for @emotion/react/jsx-runtime.js';
 }
 function jsxs() {
     return 'purposefully empty stub for @emotion/react/jsx-runtime.js';
 }
+__turbopack_context__.s([
+    "jsx",
+    ()=>jsx
+]);
 }),
 15, ((__turbopack_context__) => {
 "use strict";
 
-/** @jsxImportSource @emotion/react */ __turbopack_context__.s([
-    "default",
-    ()=>__TURBOPACK__default__export__
-]);
-var __TURBOPACK__imported__module__3__ = __turbopack_context__.i(3);
+/** @jsxImportSource @emotion/react */ var __TURBOPACK__imported__module__3__ = __turbopack_context__.i(3);
 ;
 function App(props) {
     // @ts-ignore make lsp happy.
@@ -31,6 +25,11 @@ function App(props) {
     });
 }
 const __TURBOPACK__default__export__ = App;
+__turbopack_context__.s([
+    "default",
+    0,
+    __TURBOPACK__default__export__
+]);
 }),
 ]);
 
