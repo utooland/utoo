@@ -5,18 +5,16 @@
 16: ((__turbopack_context__) => {
 "use strict";
 
-__turbopack_context__.s([
-    "jsx",
-    ()=>jsx,
-    "jsxs",
-    ()=>jsxs
-]);
 function jsx() {
     return 'purposefully empty stub for react/jsx-runtime.js';
 }
 function jsxs() {
     return 'purposefully empty stub for react/jsx-runtime.js';
 }
+__turbopack_context__.s([
+    "jsx",
+    ()=>jsx
+]);
 }),
 11: ((__turbopack_context__) => {
 "use strict";
@@ -28,16 +26,16 @@ __turbopack_context__.v(mod);
 86: ((__turbopack_context__) => {
 "use strict";
 
+const a = "aaa";
 __turbopack_context__.s([
     "a",
-    ()=>a
+    0,
+    a
 ]);
-const a = "aaa";
 }),
 27: ((__turbopack_context__) => {
 "use strict";
 
-__turbopack_context__.s([]);
 var __TURBOPACK__imported__module__16__ = __turbopack_context__.i(16);
 // @ts-ignore
 var __TURBOPACK__imported__module__11__ = __turbopack_context__.i(11);
@@ -58,6 +56,7 @@ const root = __TURBOPACK__imported__module__11__["default"].createRoot(document.
 root.render(/*#__PURE__*/ (0, __TURBOPACK__imported__module__16__["jsx"])(App, {
     content: 'hello'
 }));
+__turbopack_context__.s([]);
 }),
 },
 {"otherChunks":[],"runtimeModuleIds":[27]},

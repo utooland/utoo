@@ -2,18 +2,16 @@
 81, ((__turbopack_context__) => {
 "use strict";
 
-__turbopack_context__.s([
-    "jsx",
-    ()=>jsx,
-    "jsxs",
-    ()=>jsxs
-]);
 function jsx() {
     return 'purposefully empty stub for react/jsx-runtime.js';
 }
 function jsxs() {
     return 'purposefully empty stub for react/jsx-runtime.js';
 }
+__turbopack_context__.s([
+    "jsx",
+    ()=>jsx
+]);
 }),
 6, ((__turbopack_context__, module, exports) => {
 
@@ -22,10 +20,6 @@ module.exports = "Got a buffer of 11 bytes";
 23, ((__turbopack_context__) => {
 "use strict";
 
-__turbopack_context__.s([
-    "default",
-    ()=>App
-]);
 var __TURBOPACK__imported__module__81__ = __turbopack_context__.i(81);
 var __TURBOPACK__imported__module__6__ = __turbopack_context__.i(6);
 ;
@@ -35,6 +29,10 @@ function App() {
         children: __TURBOPACK__imported__module__6__["default"]
     });
 }
+__turbopack_context__.s([
+    "default",
+    ()=>App
+]);
 }),
 ]);
 

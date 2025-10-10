@@ -306,6 +306,8 @@ pub struct OptimizationConfig {
     /// improving caching.
     #[serde(default)]
     pub concatenate_modules: Option<bool>,
+    /// Defaults to false in development mode, true in production mode.
+    pub remove_unused_exports: Option<bool>,
 }
 
 #[derive(
@@ -328,6 +330,8 @@ pub struct OutputConfig {
     pub r#type: Option<OutputType>,
     pub clean: Option<bool>,
     pub copy: Option<Vec<CopyItem>>,
+    /// URL prefix that will be prepended to all static asset URLs when loading them.
+    pub asset_prefix: Option<RcStr>,
 }
 
 #[derive(
@@ -1340,6 +1344,17 @@ impl Config {
             None => Some(TreeShakingMode::ReexportsOnly),
         })
         .cell()
+    }
+
+    #[turbo_tasks::function]
+    pub async fn remove_unused_exports(&self, mode: Vc<Mode>) -> Result<Vc<bool>> {
+        let is_prod = matches!(*mode.await?, Mode::Production);
+        let remove_unused_exports = self
+            .optimization
+            .as_ref()
+            .and_then(|op| op.remove_unused_exports)
+            .unwrap_or(is_prod);
+        Ok(Vc::cell(remove_unused_exports))
     }
 
     #[turbo_tasks::function]

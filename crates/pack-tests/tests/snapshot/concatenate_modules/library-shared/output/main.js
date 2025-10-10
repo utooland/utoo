@@ -7,10 +7,6 @@
 
 // MERGED MODULE: [project]/crates/pack-tests/tests/snapshot/concatenate_modules/library-shared/input/big/index.js [library] (ecmascript)
 ;
-__turbopack_context__.s([
-    "default",
-    ()=>__TURBOPACK__default__export__1
-], 2);
 // MERGED MODULE: [project]/crates/pack-tests/tests/snapshot/concatenate_modules/library-shared/input/big/other.js [library] (ecmascript)
 ;
 const __TURBOPACK__default__export__ = `
@@ -69,14 +65,19 @@ FG6adF1kPdxcnQ9rUk0b1jaemDjUwXJRycSSrmUPKiA6MTt8YVMx3Xf4NTZvmTugEE9pXSLyFeQQzEx3
 `;
 ;
 const __TURBOPACK__default__export__1 = __TURBOPACK__default__export__.length;
+__turbopack_context__.s([
+    "default",
+    0,
+    __TURBOPACK__default__export__1
+], 2);
 }),
 345: ((__turbopack_context__) => {
 "use strict";
 
-__turbopack_context__.s([]);
 var __TURBOPACK__imported__module__2__ = __turbopack_context__.i(2);
 ;
 console.log('x', __TURBOPACK__imported__module__2__["default"]);
+__turbopack_context__.s([]);
 }),
 523: ((__turbopack_context__, module, exports) => {
 
@@ -87,13 +88,13 @@ setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.r(345)), 500);
 
 // MERGED MODULE: [project]/crates/pack-tests/tests/snapshot/concatenate_modules/library-shared/input/y/middle.js [library] (ecmascript)
 ;
-__turbopack_context__.s([], 999);
 // MERGED MODULE: [project]/crates/pack-tests/tests/snapshot/concatenate_modules/library-shared/input/y/inner.js [library] (ecmascript)
 ;
 var __TURBOPACK__imported__module__2__ = __turbopack_context__.i(2);
 ;
 console.log('y', __TURBOPACK__imported__module__2__["default"]);
 ;
+__turbopack_context__.s([], 999);
 }),
 798: ((__turbopack_context__, module, exports) => {
 
@@ -102,11 +103,11 @@ setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.r(999)), 1000);
 324: ((__turbopack_context__) => {
 "use strict";
 
-__turbopack_context__.s([]);
 var __TURBOPACK__imported__module__523__ = __turbopack_context__.i(523);
 var __TURBOPACK__imported__module__798__ = __turbopack_context__.i(798);
 ;
 ;
+__turbopack_context__.s([]);
 }),
 },
 {"otherChunks":[],"runtimeModuleIds":[324]},

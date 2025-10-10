@@ -2,14 +2,14 @@
 15, ((__turbopack_context__) => {
 "use strict";
 
-__turbopack_context__.s([
-    "main",
-    ()=>main
-]);
 function main() {
     ;
     console.error("ERROR MSG");
 }
+__turbopack_context__.s([
+    "main",
+    ()=>main
+]);
 }),
 ]);
 
