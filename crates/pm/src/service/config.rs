@@ -175,9 +175,7 @@ impl ConfigService {
 
         if cmd_parts.is_empty() {
             return Err(anyhow!(
-                "Invalid command alias for '{}': '{}'",
-                command,
-                cmd_string
+                "Invalid command alias for '{command}': '{cmd_string}'"
             ));
         }
 

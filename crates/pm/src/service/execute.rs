@@ -46,10 +46,7 @@ pub async fn execute_package(command: &str, args: Vec<String>) -> Result<()> {
             log_info(
                 "The package might not provide any executables, or the bin directory might be empty",
             );
-            Err(anyhow!(
-                "No executable found for package '{}'",
-                package_name
-            ))
+            Err(anyhow!("No executable found for package '{package_name}'"))
         }
         Err(e) => {
             log_error(&format!(
@@ -74,6 +71,6 @@ async fn execute_binary(binary_path: &Path, args: Vec<String>) -> Result<()> {
         Ok(())
     } else {
         let exit_code = status.code().unwrap_or(-1);
-        Err(anyhow!("Command failed with exit code: {}", exit_code))
+        Err(anyhow!("Command failed with exit code: {exit_code}"))
     }
 }

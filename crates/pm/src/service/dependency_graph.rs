@@ -232,7 +232,7 @@ impl DependencyGraphService {
         let package_indices = self.find_package_indices_by_name(package_name);
 
         if package_indices.is_empty() {
-            return Err(anyhow::anyhow!("Package '{}' not found", package_name));
+            return Err(anyhow::anyhow!("Package '{package_name}' not found"));
         }
 
         let mut all_paths = Vec::new();

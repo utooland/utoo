@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use super::cache::{PACKAGE_CACHE, VersionsInfo};
 use super::http_client::fetch_full_manifest;
@@ -31,15 +32,6 @@ pub struct ResolvedPackage {
     pub version: String,
 }
 
-/// Result types for new caching architecture
-#[derive(Debug, Clone)]
-pub enum PackageVersionsResult {
-    /// From memory cache, already 304 verified
-    Cached(VersionsInfo),
-    /// New network data (200 response)
-    Fresh(Vec<String>),
-}
-
 pub struct RegistryService;
 
 impl RegistryService {
@@ -65,74 +57,64 @@ impl RegistryService {
     }
 
     /// Resolve package versions with smart caching strategy
-    /// Priority: memory full-manifest > memory versions > disk versions.json > network
-    pub async fn resolve_package_versions(name: &str) -> Result<PackageVersionsResult> {
+    /// Priority: memory versions > disk versions.json > network
+    /// Returns Arc<VersionsInfo> for efficient sharing without cloning
+    pub async fn resolve_package_versions(name: &str) -> Result<Arc<VersionsInfo>> {
         log_verbose(&format!("Resolving package versions for: {name}"));
 
-        // 1. Check memory full-manifest cache (highest priority, already 304 verified)
-        if let Some(cached_full) = PACKAGE_CACHE.get_full_manifest(name) {
-            log_verbose(&format!("Using cached full manifest for versions: {name}"));
-            let version_list: Vec<String> = cached_full.versions.keys().cloned().collect();
-            return Ok(PackageVersionsResult::Fresh(version_list));
-        }
-
-        // 2. Check memory versions cache (already 304 verified)
-        if let Some((_etag, cached_versions)) = PACKAGE_CACHE.get_versions(name) {
+        // 1. Check memory versions cache (already 304 verified)
+        if let Some(versions_info_arc) = PACKAGE_CACHE.get_versions(name) {
             log_verbose(&format!("Using cached versions info for: {name}"));
-            return Ok(PackageVersionsResult::Cached(cached_versions));
+            return Ok(versions_info_arc);
         }
 
-        // 3. Load from disk and make network request with etag
+        // 2. Load from disk and make network request with etag
         let (etag, disk_versions) = PACKAGE_CACHE.get_versions_from_disk(name).await;
         log_verbose(&format!("Loaded etag from disk for {name}: {etag:?}"));
 
-        // 4. Network request with etag for 304 validation
+        // 3. Network request with etag for 304 validation
         match fetch_full_manifest(name, etag.as_deref()).await {
             Ok((full_manifest, new_etag)) => {
                 log_verbose(&format!("Received fresh full manifest for: {name}"));
-
-                // Store in memory full-manifest cache (sync)
-                PACKAGE_CACHE.set_full_manifest(name, &full_manifest);
-
-                // Extract version list from full manifest
-                let version_list: Vec<String> = full_manifest.versions.keys().cloned().collect();
 
                 // Convert full manifest to versions info for disk cache
                 let versions_info =
                     Self::extract_versions_info_from_full_manifest(&full_manifest, new_etag);
 
-                // Async disk update
-                let name_clone = name.to_string();
-                let versions_info_clone = versions_info.clone();
+                // Store in memory caches (sync) - take ownership, zero clone
+                // set_* methods return Arc, no unwrap needed!
+                PACKAGE_CACHE.set_full_manifest(name.to_string(), full_manifest);
+                let versions_arc = PACKAGE_CACHE.set_versions(name.to_string(), versions_info);
+
+                // Async disk update - Arc clone is cheap
+                let name_for_disk = name.to_string();
+                let versions_arc_for_disk = Arc::clone(&versions_arc);
                 tokio::spawn(async move {
                     PACKAGE_CACHE
-                        .set_versions_to_disk(&name_clone, &versions_info_clone)
+                        .set_versions_to_disk(&name_for_disk, &versions_arc_for_disk)
                         .await;
                 });
 
-                Ok(PackageVersionsResult::Fresh(version_list))
+                // Return Arc (zero-cost)
+                Ok(versions_arc)
             }
             Err(e) if e.to_string().contains("Not modified") => {
                 log_verbose(&format!("304 Not Modified for {name}, using disk cache"));
 
                 // 304 response means our disk versions.json is valid
                 if let Some(versions_info) = disk_versions {
-                    // Upgrade to memory cache (sync)
-                    PACKAGE_CACHE.set_versions(name, &versions_info, etag);
-                    Ok(PackageVersionsResult::Cached(versions_info))
+                    let versions_arc = PACKAGE_CACHE.set_versions(name.to_string(), versions_info);
+                    Ok(versions_arc)
                 } else {
                     Err(anyhow::anyhow!(
-                        "Received 304 Not Modified but no disk cache available for {}",
-                        name
+                        "Received 304 Not Modified but no disk cache available for {name}"
                     ))
                 }
             }
             Err(e) => {
                 log_verbose(&format!("Network request failed for {name}: {e}"));
                 Err(anyhow::anyhow!(
-                    "Failed to resolve package versions for {}: {}",
-                    name,
-                    e
+                    "Failed to resolve package versions for {name}: {e}"
                 ))
             }
         }
@@ -145,9 +127,10 @@ impl RegistryService {
     ) -> VersionsInfo {
         let mut versions_data = serde_json::json!({});
 
+        let version_list = full_manifest.versions.keys().collect::<Vec<_>>();
+
         // Extract essential data for versions.json
-        versions_data["version_list"] =
-            serde_json::json!(full_manifest.versions.keys().collect::<Vec<_>>());
+        versions_data["version_list"] = serde_json::json!(version_list);
         versions_data["dist-tags"] =
             serde_json::to_value(&full_manifest.dist_tags).unwrap_or(serde_json::json!({}));
         versions_data["time"] =
@@ -155,7 +138,7 @@ impl RegistryService {
         versions_data["name"] = serde_json::json!(full_manifest.name);
 
         VersionsInfo {
-            versions: versions_data,
+            versions: serde_json::from_value(versions_data).unwrap(),
             etag,
             last_updated: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -164,45 +147,55 @@ impl RegistryService {
         }
     }
 
-    /// Get versions list from PackageVersionsResult for max_satisfying_version
-    pub fn get_versions_from_result(result: &PackageVersionsResult) -> Vec<String> {
-        match result {
-            PackageVersionsResult::Fresh(version_list) => version_list.clone(),
-            PackageVersionsResult::Cached(versions_info) => {
-                // Extract version list from versions.json format
-                if let Some(version_list) = versions_info
-                    .versions
-                    .get("version_list")
-                    .and_then(|v| v.as_array())
-                {
-                    version_list
-                        .iter()
-                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                        .collect()
-                } else {
-                    log_verbose(&format!(
-                        "No version list found in cached versions info {versions_info:?}"
-                    ));
-                    Vec::new()
-                }
-            }
-        }
-    }
-
     /// Resolve specific version manifest with three-tier caching
     /// Priority: memory > disk > network
-    pub async fn resolve_version_manifest(name: &str, version: &str) -> Result<VersionManifest> {
+    /// Returns Arc<VersionManifest> for efficient sharing without cloning
+    pub async fn resolve_version_manifest(
+        name: &str,
+        version: &str,
+    ) -> Result<Arc<VersionManifest>> {
         log_verbose(&format!("Resolving version manifest for: {name}@{version}"));
 
         // 1. Check memory cache (sync, highest performance)
-        if let Some(cached_manifest) = PACKAGE_CACHE.get_version_manifest(name, version) {
+        if let Some(cached_manifest_arc) = PACKAGE_CACHE.get_version_manifest(name, version) {
             log_verbose(&format!(
                 "Memory cache hit for version manifest: {name}@{version}"
             ));
-            return Ok(cached_manifest);
+            return Ok(cached_manifest_arc);
         }
 
-        // 2. Check disk cache
+        // 2. Check memory by full_manifest cache (already 304 verified)
+        if let Some(full_manifest_arc) = PACKAGE_CACHE.get_full_manifest(name) {
+            log_verbose(&format!("Using cached versions info for: {name}"));
+            if let Some(manifest) = full_manifest_arc.versions.get(version) {
+                // Update memory cache (takes ownership via clone from HashMap)
+                // set_version_manifest returns Arc, no unwrap needed!
+                let manifest_arc = PACKAGE_CACHE.set_version_manifest(
+                    name.to_string(),
+                    version.to_string(),
+                    manifest.clone(), // Clone from HashMap value
+                );
+                let name_for_disk = name.to_string();
+                let version_for_disk = version.to_string();
+                let manifest_arc_for_disk = Arc::clone(&manifest_arc);
+
+                // Async disk write (non-blocking)
+                tokio::spawn(async move {
+                    PACKAGE_CACHE
+                        .set_version_manifest_to_disk(
+                            &name_for_disk,
+                            &version_for_disk,
+                            &manifest_arc_for_disk,
+                        )
+                        .await;
+                });
+
+                // Return Arc (zero-cost)
+                return Ok(manifest_arc);
+            }
+        }
+
+        // 3. Check disk cache
         if let Some(cached_manifest) = PACKAGE_CACHE
             .get_version_manifest_from_disk(name, version)
             .await
@@ -211,12 +204,19 @@ impl RegistryService {
                 "Disk cache hit for version manifest: {name}@{version}"
             ));
 
-            // Update memory cache immediately (sync)
-            PACKAGE_CACHE.set_version_manifest(name, version, &cached_manifest);
-            return Ok(cached_manifest);
+            // Update memory cache immediately (takes ownership)
+            // set_version_manifest returns Arc, no unwrap needed!
+            let manifest_arc = PACKAGE_CACHE.set_version_manifest(
+                name.to_string(),
+                version.to_string(),
+                cached_manifest,
+            );
+
+            // Return Arc (zero-cost)
+            return Ok(manifest_arc);
         }
 
-        // 3. Network request as last resort
+        // 4. Network request as last resort
         log_verbose(&format!(
             "Cache miss, fetching from network: {name}@{version}"
         ));
@@ -230,31 +230,37 @@ impl RegistryService {
                     "Successfully fetched version manifest: {name}@{version}"
                 ));
 
-                // 1. Update memory cache immediately (sync)
-                PACKAGE_CACHE.set_version_manifest(name, version, &manifest);
+                // Update memory cache (takes ownership, zero clone)
+                // set_version_manifest returns Arc, no unwrap needed!
+                let manifest_arc = PACKAGE_CACHE.set_version_manifest(
+                    name.to_string(),
+                    version.to_string(),
+                    manifest,
+                );
+                let name_for_disk = name.to_string();
+                let version_for_disk = version.to_string();
+                let manifest_arc_for_disk = Arc::clone(&manifest_arc);
 
-                // 2. Async disk write (non-blocking)
-                let name_clone = name.to_string();
-                let version_clone = version.to_string();
-                let manifest_clone = manifest.clone();
-
+                // Async disk write (non-blocking)
                 tokio::spawn(async move {
                     PACKAGE_CACHE
-                        .set_version_manifest_to_disk(&name_clone, &version_clone, &manifest_clone)
+                        .set_version_manifest_to_disk(
+                            &name_for_disk,
+                            &version_for_disk,
+                            &manifest_arc_for_disk,
+                        )
                         .await;
                 });
 
-                Ok(manifest)
+                // Return Arc (zero-cost)
+                Ok(manifest_arc)
             }
             Err(e) => {
                 log_verbose(&format!(
                     "Failed to fetch version manifest for {name}@{version}: {e}"
                 ));
                 Err(anyhow::anyhow!(
-                    "Failed to resolve version manifest for {}@{}: {}",
-                    name,
-                    version,
-                    e
+                    "Failed to resolve version manifest for {name}@{version}: {e}"
                 ))
             }
         }
@@ -297,17 +303,16 @@ impl RegistryService {
             log_verbose(&format!("Using non-semver registry for: {name}@{spec}"));
 
             // 2. Resolve package versions using new caching architecture
-            let package_versions_result = Self::resolve_package_versions(name).await?;
+            let versions_info_arc = Self::resolve_package_versions(name).await?;
 
-            // 3. Extract version list and perform semver matching
-            let version_list = Self::get_versions_from_result(&package_versions_result);
-            if version_list.is_empty() {
-                return Err(anyhow::anyhow!("No versions found for package: {}", name));
-            }
+            // 3. Check dist-tags (Arc auto-derefs)
+            let dist_tags = &versions_info_arc.versions.dist_tags;
+            let version_list = &versions_info_arc.versions.version_list;
 
-            // 4. Find target version using existing max_satisfying logic
-            let target_version =
-                match semver::max_satisfying(version_list.iter().map(|s| s.as_str()), spec) {
+            let target_version = match dist_tags.get(spec) {
+                Some(version) => version.to_string(),
+                None => match semver::max_satisfying(version_list.iter().map(|s| s.as_str()), spec)
+                {
                     Some(version) => version.to_string(),
                     None => {
                         log_verbose(&format!(
@@ -317,12 +322,11 @@ impl RegistryService {
                             version_list.len()
                         ));
                         return Err(anyhow::anyhow!(
-                            "No matching version found for {}@{}",
-                            name,
-                            spec
+                            "No matching version found for {name}@{spec}"
                         ));
                     }
-                };
+                },
+            };
 
             log_verbose(&format!(
                 "Resolved target version for {name}@{spec}: {target_version}"
@@ -449,5 +453,244 @@ pub async fn resolve_dependency(
                 Err(e)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::service::cache::{Versions, VersionsInfo};
+    use std::collections::HashMap;
+
+    /// Test dist-tags matching logic
+    #[tokio::test]
+    async fn test_dist_tags_matching() {
+        // Create test data with dist-tags
+        let mut dist_tags = HashMap::new();
+        dist_tags.insert("latest".to_string(), "1.2.3".to_string());
+        dist_tags.insert("beta".to_string(), "2.0.0-beta.1".to_string());
+        dist_tags.insert("alpha".to_string(), "2.0.0-alpha.1".to_string());
+        dist_tags.insert("next".to_string(), "1.3.0".to_string());
+
+        let versions = Versions {
+            version_list: vec![
+                "1.0.0".to_string(),
+                "1.1.0".to_string(),
+                "1.2.3".to_string(),
+                "1.3.0".to_string(),
+                "2.0.0-alpha.1".to_string(),
+                "2.0.0-beta.1".to_string(),
+            ],
+            dist_tags,
+        };
+
+        let versions_info = VersionsInfo {
+            versions,
+            etag: Some("test-etag".to_string()),
+            last_updated: 1234567890,
+        };
+
+        // Test cases for dist-tags matching
+        let test_cases = vec![
+            ("latest", "1.2.3"),
+            ("beta", "2.0.0-beta.1"),
+            ("alpha", "2.0.0-alpha.1"),
+            ("next", "1.3.0"),
+            // Test semver fallback when dist-tag doesn't exist
+            ("^1.0.0", "1.3.0"), // Should match highest semver (1.3.0 is higher than 1.2.3)
+            ("~1.1.0", "1.1.0"), // Should match exact semver
+            ("1.0.0", "1.0.0"),  // Should match exact version
+        ];
+
+        for (spec, expected_version) in test_cases {
+            let result = test_resolve_with_dist_tags(&versions_info, "test-package", spec).await;
+            match result {
+                Ok(resolved) => {
+                    assert_eq!(resolved.version, expected_version);
+                    println!("✓ test-package@{} resolved to {}", spec, resolved.version);
+                }
+                Err(e) => {
+                    panic!("Failed to resolve {}@{}: {}", "test-package", spec, e);
+                }
+            }
+        }
+    }
+
+    /// Test edge cases for dist-tags matching
+    #[tokio::test]
+    async fn test_dist_tags_edge_cases() {
+        // Test with empty dist-tags
+        let versions_empty_dist_tags = Versions {
+            version_list: vec!["1.0.0".to_string(), "1.1.0".to_string()],
+            dist_tags: HashMap::new(),
+        };
+
+        let versions_info_empty = VersionsInfo {
+            versions: versions_empty_dist_tags,
+            etag: Some("test-etag".to_string()),
+            last_updated: 1234567890,
+        };
+
+        // Should fall back to semver matching
+        let result =
+            test_resolve_with_dist_tags(&versions_info_empty, "test-package", "^1.0.0").await;
+        match result {
+            Ok(resolved) => {
+                assert_eq!(resolved.version, "1.1.0"); // Should match highest semver
+                println!("✓ Empty dist-tags fallback to semver: {}", resolved.version);
+            }
+            Err(e) => {
+                panic!("Failed to resolve with empty dist-tags: {e}");
+            }
+        }
+
+        // Test with invalid dist-tag
+        let mut dist_tags = HashMap::new();
+        dist_tags.insert("invalid-tag".to_string(), "1.0.0".to_string());
+
+        let versions = Versions {
+            version_list: vec!["1.0.0".to_string(), "1.1.0".to_string()],
+            dist_tags,
+        };
+
+        let versions_info = VersionsInfo {
+            versions,
+            etag: Some("test-etag".to_string()),
+            last_updated: 1234567890,
+        };
+
+        // Should fall back to semver matching for non-existent dist-tag
+        let result = test_resolve_with_dist_tags(&versions_info, "test-package", "^1.0.0").await;
+        match result {
+            Ok(resolved) => {
+                assert_eq!(resolved.version, "1.1.0"); // Should match highest semver
+                println!(
+                    "✓ Non-existent dist-tag fallback to semver: {}",
+                    resolved.version
+                );
+            }
+            Err(e) => {
+                panic!("Failed to resolve with non-existent dist-tag: {e}");
+            }
+        }
+    }
+
+    /// Test semver matching fallback
+    #[tokio::test]
+    async fn test_semver_fallback() {
+        let versions = Versions {
+            version_list: vec![
+                "1.0.0".to_string(),
+                "1.1.0".to_string(),
+                "1.2.0".to_string(),
+                "2.0.0".to_string(),
+                "2.1.0".to_string(),
+            ],
+            dist_tags: HashMap::new(),
+        };
+
+        let versions_info = VersionsInfo {
+            versions,
+            etag: Some("test-etag".to_string()),
+            last_updated: 1234567890,
+        };
+
+        let test_cases = vec![
+            ("^1.0.0", "1.2.0"),         // Should match highest 1.x
+            ("~1.1.0", "1.1.0"),         // Should match exact 1.1.x
+            (">=1.0.0 <2.0.0", "1.2.0"), // Should match highest in range
+            ("2.x", "2.1.0"),            // Should match highest 2.x
+        ];
+
+        for (spec, expected_version) in test_cases {
+            let result = test_resolve_with_dist_tags(&versions_info, "test-package", spec).await;
+            match result {
+                Ok(resolved) => {
+                    assert_eq!(resolved.version, expected_version);
+                    println!(
+                        "✓ Semver fallback test-package@{} resolved to {}",
+                        spec, resolved.version
+                    );
+                }
+                Err(e) => {
+                    panic!("Failed to resolve {}@{}: {}", "test-package", spec, e);
+                }
+            }
+        }
+    }
+
+    /// Test error cases
+    #[tokio::test]
+    async fn test_resolve_errors() {
+        let versions = Versions {
+            version_list: vec!["1.0.0".to_string()],
+            dist_tags: HashMap::new(),
+        };
+
+        let versions_info = VersionsInfo {
+            versions,
+            etag: Some("test-etag".to_string()),
+            last_updated: 1234567890,
+        };
+
+        // Test with invalid semver that should fail
+        let result = test_resolve_with_dist_tags(&versions_info, "test-package", "^2.0.0").await;
+        assert!(result.is_err(), "Should fail for incompatible semver range");
+        println!("✓ Correctly failed for incompatible semver range");
+
+        // Test with empty version list
+        let empty_versions = Versions {
+            version_list: vec![],
+            dist_tags: HashMap::new(),
+        };
+
+        let empty_versions_info = VersionsInfo {
+            versions: empty_versions,
+            etag: Some("test-etag".to_string()),
+            last_updated: 1234567890,
+        };
+
+        let result =
+            test_resolve_with_dist_tags(&empty_versions_info, "test-package", "^1.0.0").await;
+        assert!(result.is_err(), "Should fail for empty version list");
+        println!("✓ Correctly failed for empty version list");
+    }
+
+    /// Helper function to test dist-tags matching logic
+    /// This simulates the logic from RegistryService::resolve_package
+    async fn test_resolve_with_dist_tags(
+        versions_info: &VersionsInfo,
+        name: &str,
+        spec: &str,
+    ) -> Result<ResolvedPackage> {
+        let dist_tags = &versions_info.versions.dist_tags;
+        let version_list = &versions_info.versions.version_list;
+
+        if version_list.is_empty() {
+            return Err(anyhow::anyhow!("No versions found for package: {name}"));
+        }
+
+        let target_version = match dist_tags.get(spec) {
+            Some(version) => version.to_string(),
+            None => match semver::max_satisfying(version_list.iter().map(|s| s.as_str()), spec) {
+                Some(version) => version.to_string(),
+                None => {
+                    return Err(anyhow::anyhow!(
+                        "No matching version found for {name}@{spec}"
+                    ));
+                }
+            },
+        };
+
+        // Create a mock resolved package
+        Ok(ResolvedPackage {
+            name: name.to_string(),
+            version: target_version.clone(),
+            manifest: serde_json::json!({
+                "name": name,
+                "version": target_version,
+                "dependencies": {}
+            }),
+        })
     }
 }

@@ -94,7 +94,7 @@ pub async fn find_workspace_path(cwd: &Path, workspace: &str) -> Result<PathBuf>
             return Ok(path);
         }
     }
-    anyhow::bail!("Workspace '{}' not found", workspace)
+    anyhow::bail!("Workspace '{workspace}' not found")
 }
 
 /// Check if a directory is a workspace root by examining its package.json

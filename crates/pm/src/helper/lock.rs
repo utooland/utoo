@@ -115,7 +115,7 @@ pub async fn update_package_json(
     let target_dir = if let Some(ws) = workspace {
         find_workspace_path(cwd, ws)
             .await
-            .map_err(|e| anyhow!("Failed to find workspace path: {}", e))?
+            .map_err(|e| anyhow!("Failed to find workspace path: {e}"))?
     } else {
         cwd.to_path_buf()
     };
@@ -227,7 +227,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
         ));
         download(tarball_url, &cache_path)
             .await
-            .map_err(|e| anyhow!("Failed to download package: {}", e))?;
+            .map_err(|e| anyhow!("Failed to download package: {e}"))?;
 
         // If the package has install scripts, create a flag file
         // in linux, we can use hardlink when FICLONE is not supported
@@ -246,7 +246,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
     ));
     clone(&cache_path, &package_path, true)
         .await
-        .map_err(|e| anyhow!("Failed to clone package: {}", e))?;
+        .map_err(|e| anyhow!("Failed to clone package: {e}"))?;
 
     // Remove devDependencies from package.json
     let package_json_path = package_path.join("package.json");

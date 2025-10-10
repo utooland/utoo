@@ -153,7 +153,7 @@ impl PackageInfo {
             // Ensure target file is executable
             ScriptService::ensure_executable(&target_path)
                 .await
-                .map_err(|e| anyhow::anyhow!("Failed to ensure binary is executable: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to ensure binary is executable: {e}"))?;
 
             // Create symbolic link
             link(&target_path, &link_path)
