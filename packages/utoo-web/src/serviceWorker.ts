@@ -25,12 +25,12 @@ self.addEventListener("message", (event) => {
 });
 
 self.addEventListener("fetch", async (event: FetchEvent) => {
+  await _promise;
   const { url, referrer } = event.request;
   if (
     new URL(url).pathname.startsWith(_serviceWorkerScope) ||
     (referrer && new URL(referrer).pathname.startsWith(_serviceWorkerScope))
   ) {
-    await _promise;
     const projectPath =
       "." + new URL(url).pathname.replace(_serviceWorkerScope, "");
     event.respondWith(readFileFromProject(projectPath));
