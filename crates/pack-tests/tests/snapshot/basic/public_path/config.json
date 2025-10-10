@@ -1,0 +1,19 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "output": {
+      "path": "output",
+      "publicPath": "https://cdn.example.com/assets/"
+    },
+    "optimization": {
+      "minify": false
+    }
+  },
+  "runtimeType": "Production"
+}
+

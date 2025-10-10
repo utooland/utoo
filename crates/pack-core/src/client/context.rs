@@ -547,14 +547,13 @@ pub async fn get_client_chunking_context(
     } else {
         SourceMapsType::None
     })
-    .chunk_base_path(chunk_base_path)
+    .chunk_base_path(chunk_base_path.clone())
+    .asset_base_path(chunk_base_path)
     .current_chunk_method(CurrentChunkMethod::DocumentCurrentScript)
     .export_usage(*export_usage.await?)
     .module_id_strategy(module_id_strategy.to_resolved().await?);
 
     let output = config.output().await?;
-
-    builder = builder.asset_base_path(output.asset_prefix.clone());
 
     if !mode.is_development() {
         if let Some(filename) = &output.filename {

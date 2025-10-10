@@ -895,12 +895,13 @@ impl Project {
 
     #[turbo_tasks::function]
     pub async fn client_chunking_context(self: Vc<Self>) -> Result<Vc<Box<dyn ChunkingContext>>> {
+        let public_path = self.config().output().await?.public_path.clone();
         Ok(get_client_chunking_context(ClientChunkingContextOptions {
             mode: self.mode(),
             root_path: self.project_root().owned().await?,
             output_root: self.client_root().owned().await?,
             output_root_to_root_path: rcstr!("/ROOT"),
-            chunk_base_path: Some(self.dist_dir().owned().await?),
+            chunk_base_path: public_path,
             environment: self.client_compile_time_info().environment(),
             module_id_strategy: self.module_ids(),
             no_mangling: self.no_mangling(),

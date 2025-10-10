@@ -1,16 +1,16 @@
 (globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["crates_pack-tests_tests_snapshot_runtime_app_build_runtime_input_index_4caede21.js"],"runtimeModuleIds":[41]}
+    {"otherChunks":["crates_pack-tests_tests_snapshot_basic_public_path_input_4bf7ccdf.js"],"runtimeModuleIds":[33]}
 ]);
 (() => {
 if (!Array.isArray(globalThis.TURBOPACK)) {
     return;
 }
 
-const CHUNK_BASE_PATH = "";
+const CHUNK_BASE_PATH = "https://cdn.example.com/assets/";
 const CHUNK_SUFFIX_PATH = "";
 const RELATIVE_ROOT_PATH = "/ROOT";
-const RUNTIME_PUBLIC_PATH = "";
+const RUNTIME_PUBLIC_PATH = "https://cdn.example.com/assets/";
 /**
  * This file contains runtime types and functions that are shared between all
  * TurboPack ECMAScript runtimes.
