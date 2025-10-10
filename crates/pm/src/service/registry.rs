@@ -32,7 +32,6 @@ pub struct ResolvedPackage {
     pub version: String,
 }
 
-
 pub struct RegistryService;
 
 impl RegistryService {
@@ -170,7 +169,11 @@ impl RegistryService {
                 let version_clone = version.to_string();
                 let manifest_clone = manifest.clone();
 
-                PACKAGE_CACHE.set_version_manifest(name.to_string(), version.to_string(), manifest.clone());
+                PACKAGE_CACHE.set_version_manifest(
+                    name.to_string(),
+                    version.to_string(),
+                    manifest.clone(),
+                );
 
                 tokio::spawn(async move {
                     PACKAGE_CACHE
@@ -191,7 +194,11 @@ impl RegistryService {
             ));
 
             // Update memory cache immediately (sync)
-            PACKAGE_CACHE.set_version_manifest(name.to_string(), version.to_string(), cached_manifest.clone());
+            PACKAGE_CACHE.set_version_manifest(
+                name.to_string(),
+                version.to_string(),
+                cached_manifest.clone(),
+            );
             return Ok(cached_manifest);
         }
 
@@ -210,7 +217,11 @@ impl RegistryService {
                 ));
 
                 // 1. Update memory cache immediately (sync)
-                PACKAGE_CACHE.set_version_manifest(name.to_string(), version.to_string(), manifest.clone());
+                PACKAGE_CACHE.set_version_manifest(
+                    name.to_string(),
+                    version.to_string(),
+                    manifest.clone(),
+                );
 
                 // 2. Async disk write (non-blocking)
                 let name_clone = name.to_string();

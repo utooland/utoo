@@ -31,7 +31,6 @@ pub struct Versions {
     pub dist_tags: HashMap<String, String>,
 }
 
-
 pub static PACKAGE_CACHE: Lazy<PackageCache> = Lazy::new(PackageCache::new);
 
 #[derive(Debug)]
@@ -102,7 +101,11 @@ impl PackageCache {
 
     /// Get version manifest from memory cache (sync)
     /// Returns Arc for efficient sharing
-    pub fn get_version_manifest(&self, name: &str, version: &str) -> Option<Arc<ModelVersionManifest>> {
+    pub fn get_version_manifest(
+        &self,
+        name: &str,
+        version: &str,
+    ) -> Option<Arc<ModelVersionManifest>> {
         let key = format!("{name}@{version}");
         self.version_manifests.get(&key).map(|entry| {
             log_verbose(&format!(
@@ -114,12 +117,16 @@ impl PackageCache {
 
     /// Set version manifest in memory cache (sync)
     /// Accepts ownership to avoid clone
-    pub fn set_version_manifest(&self, name: String, version: String, manifest: ModelVersionManifest) {
+    pub fn set_version_manifest(
+        &self,
+        name: String,
+        version: String,
+        manifest: ModelVersionManifest,
+    ) {
         let key = format!("{name}@{version}");
-        self.version_manifests.insert(key.clone(), Arc::new(manifest));
-        log_verbose(&format!(
-            "Cached version manifest in memory: {key}"
-        ));
+        self.version_manifests
+            .insert(key.clone(), Arc::new(manifest));
+        log_verbose(&format!("Cached version manifest in memory: {key}"));
     }
 
     // === Async disk operations ===
