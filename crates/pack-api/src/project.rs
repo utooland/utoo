@@ -900,12 +900,13 @@ impl Project {
             root_path: self.project_root().owned().await?,
             output_root: self.client_root().owned().await?,
             output_root_to_root_path: rcstr!("/ROOT"),
-            chunk_base_path: Some(self.dist_dir().owned().await?),
+            public_path: self.config().computed_public_path(),
             environment: self.client_compile_time_info().environment(),
             module_id_strategy: self.module_ids(),
             no_mangling: self.no_mangling(),
             config: self.config(),
             export_usage: self.export_usage(),
+            dist_dir: self.dist_dir().owned().await?,
         }))
     }
 

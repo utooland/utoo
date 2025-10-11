@@ -98,7 +98,7 @@
         },
         {
           "featureLevel2": "`publicPath`",
-          "featureStatus": "🟠",
+          "featureStatus": "✅",
           "featureDetails": "[Webpack `output.publicPath`](https://webpack.js.org/configuration/output/#outputpublicpath)",
           "remarks": ""
         },
