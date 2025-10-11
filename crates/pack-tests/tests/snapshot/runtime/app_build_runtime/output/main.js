@@ -7,10 +7,10 @@ if (!Array.isArray(globalThis.TURBOPACK)) {
     return;
 }
 
-const CHUNK_BASE_PATH = "output";
+const CHUNK_BASE_PATH = "/";
 const CHUNK_SUFFIX_PATH = "";
 const RELATIVE_ROOT_PATH = "/ROOT";
-const RUNTIME_PUBLIC_PATH = "output";
+const RUNTIME_PUBLIC_PATH = "/";
 /**
  * This file contains runtime types and functions that are shared between all
  * TurboPack ECMAScript runtimes.
@@ -500,18 +500,6 @@ function applyModuleFactoryName(factory) {
  */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="../base/globals.d.ts" />
 /// <reference path="../../../shared/runtime-utils.ts" />
 // Used in WebWorkers to tell the runtime about the chunk base path
-function normalizeChunkPath(path) {
-    if (path.startsWith('/')) {
-        path = path.substring(1);
-    } else if (path.startsWith('./')) {
-        path = path.substring(2);
-    }
-    if (!path.endsWith('/')) {
-        path += '/';
-    }
-    return path;
-}
-const NORMALIZED_CHUNK_BASE_PATH = normalizeChunkPath(CHUNK_BASE_PATH);
 const browserContextPrototype = Context.prototype;
 var SourceType = /*#__PURE__*/ function(SourceType) {
     /**
@@ -678,8 +666,8 @@ browserContextPrototype.P = resolveAbsolutePath;
     // It is important to reverse the array so when bootstrapping we can infer what chunk is being
     // evaluated by poping urls off of this array.  See `getPathFromScript`
     let bootstrap = `self.TURBOPACK_WORKER_LOCATION = ${JSON.stringify(location.origin)};
-self.TURBOPACK_NEXT_CHUNK_URLS = ${JSON.stringify(chunks.reverse(), null, 2)};
-importScripts(...self.TURBOPACK_NEXT_CHUNK_URLS.map(c => self.TURBOPACK_WORKER_LOCATION + "/" + c).reverse());`;
+self.TURBOPACK_NEXT_CHUNK_URLS = ${JSON.stringify(chunks.reverse().map(getChunkRelativeUrl), null, 2)};
+importScripts(...self.TURBOPACK_NEXT_CHUNK_URLS.map(c => self.TURBOPACK_WORKER_LOCATION + c).reverse());`;
     let blob = new Blob([
         bootstrap
     ], {
@@ -696,20 +684,15 @@ browserContextPrototype.b = getWorkerBlobURL;
 /**
  * Returns the URL relative to the origin where a chunk can be fetched from.
  */ function getChunkRelativeUrl(chunkPath) {
-    return `${NORMALIZED_CHUNK_BASE_PATH}${chunkPath.split('/').map((p)=>encodeURIComponent(p)).join('/')}${CHUNK_SUFFIX_PATH}`;
+    return `${CHUNK_BASE_PATH}${chunkPath.split('/').map((p)=>encodeURIComponent(p)).join('/')}${CHUNK_SUFFIX_PATH}`;
 }
 function getPathFromScript(chunkScript) {
     if (typeof chunkScript === 'string') {
         return chunkScript;
     }
-    let chunkUrl = typeof TURBOPACK_NEXT_CHUNK_URLS !== 'undefined' ? TURBOPACK_NEXT_CHUNK_URLS.pop() : chunkScript.getAttribute('src');
-    if (chunkUrl.startsWith('/')) {
-        chunkUrl = chunkUrl.substring(1);
-    } else if (chunkUrl.startsWith('./')) {
-        chunkUrl = chunkUrl.substring(2);
-    }
+    const chunkUrl = typeof TURBOPACK_NEXT_CHUNK_URLS !== 'undefined' ? TURBOPACK_NEXT_CHUNK_URLS.pop() : chunkScript.getAttribute('src');
     const src = decodeURIComponent(chunkUrl.replace(/[?#].*$/, ''));
-    const path = src.startsWith(NORMALIZED_CHUNK_BASE_PATH) ? src.slice(NORMALIZED_CHUNK_BASE_PATH.length) : src;
+    const path = src.startsWith(CHUNK_BASE_PATH) ? src.slice(CHUNK_BASE_PATH.length) : src;
     return path;
 }
 const regexJsUrl = /\.js(?:\?[^#]*)?(?:#.*)?$/;

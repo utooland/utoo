@@ -480,13 +480,12 @@ pub struct ClientChunkingContextOptions {
     pub root_path: FileSystemPath,
     pub output_root: FileSystemPath,
     pub output_root_to_root_path: RcStr,
-    pub public_path: Vc<Option<RcStr>>,
+    pub public_path: Vc<RcStr>,
     pub environment: Vc<Environment>,
     pub module_id_strategy: Vc<Box<dyn ModuleIdStrategy>>,
     pub no_mangling: Vc<bool>,
     pub config: Vc<Config>,
     pub export_usage: Vc<OptionExportUsageInfo>,
-    pub dist_dir: RcStr,
 }
 
 #[turbo_tasks::function]
@@ -504,7 +503,6 @@ pub async fn get_client_chunking_context(
         no_mangling,
         config,
         export_usage,
-        dist_dir,
     } = options;
 
     let minify = config.minify(mode);
@@ -550,8 +548,8 @@ pub async fn get_client_chunking_context(
     } else {
         SourceMapsType::None
     })
-    .chunk_base_path(Some(dist_dir))
-    .asset_base_path(public_path)
+    .chunk_base_path(Some(public_path.clone()))
+    .asset_base_path(Some(public_path))
     .current_chunk_method(CurrentChunkMethod::DocumentCurrentScript)
     .export_usage(*export_usage.await?)
     .module_id_strategy(module_id_strategy.to_resolved().await?);

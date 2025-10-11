@@ -1415,11 +1415,16 @@ impl Config {
     }
 
     // TODO: extend this function.
+    // publicPath 要写成 "/", 用于运行时 chunkPath 的替换
     #[turbo_tasks::function]
-    pub async fn computed_public_path(self: Vc<Self>) -> Result<Vc<Option<RcStr>>> {
+    pub async fn computed_public_path(self: Vc<Self>) -> Result<Vc<RcStr>> {
         let this = self.await?;
 
-        let public_path = this.output.as_ref().and_then(|o| o.public_path.clone());
+        let public_path = this
+            .output
+            .as_ref()
+            .and_then(|o| o.public_path.clone())
+            .unwrap_or("/".into());
 
         Ok(Vc::cell(public_path))
     }
