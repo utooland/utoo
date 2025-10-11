@@ -131,6 +131,7 @@ export interface ConfigComplete {
       from: string;
       to: string;
     }>;
+    publicPath?: string;
   };
   target?: string;
   sourceMaps?: boolean;
@@ -166,6 +167,7 @@ export interface ConfigComplete {
           exclude?: string[];
         };
     concatenateModules?: boolean;
+    removeUnusedExports?: boolean;
   };
   styles?: {
     less?: {
