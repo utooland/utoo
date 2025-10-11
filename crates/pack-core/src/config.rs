@@ -1424,9 +1424,11 @@ impl Config {
             .output
             .as_ref()
             .and_then(|o| o.public_path.clone())
-            .unwrap_or("/".into());
+            .unwrap_or("".into());
 
-        Ok(Vc::cell(public_path))
+        Ok(Vc::cell(
+            format!("{}/", public_path.trim_end_matches("/")).into(),
+        ))
     }
 }
 
