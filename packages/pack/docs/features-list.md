@@ -17,7 +17,7 @@
 |  | `extensions` | ✅ | [Webpack `resolve.extensions`](https://webpack.js.org/configuration/resolve/#resolveextensions) |  |
 | Externals |  | ✅ | [Webpack `externals` configuration](https://webpack.js.org/configuration/externals/#root) |  |
 | Output | `path` | ✅ | [Webpack `output.path`](https://webpack.js.org/configuration/output/#outputpath) |  |
-|  | `publicPath` | 🟠 | [Webpack `output.publicPath`](https://webpack.js.org/configuration/output/#outputpublicpath) |  |
+|  | `publicPath` | ✅ | [Webpack `output.publicPath`](https://webpack.js.org/configuration/output/#outputpublicpath) |  |
 |  | `clean` | ✅ | [Webpack `output.clean`](https://webpack.js.org/configuration/output/#outputclean) |  |
 |  | `filename` | ✅ | [Webpack `output.filename`](https://webpack.js.org/configuration/output/#outputfilename) |  |
 |  | `chunkFilename` | ✅ | [Webpack `output.filename`](https://webpack.js.org/configuration/output/#outputchunkfilename) |  |

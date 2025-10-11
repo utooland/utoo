@@ -91,7 +91,6 @@ pub async fn get_library_chunking_context(
     } else {
         SourceMapsType::None
     })
-    .asset_base_path(output.asset_prefix.clone())
     .module_id_strategy(module_id_strategy.to_resolved().await?)
     .export_usage(*export_usage.await?);
 

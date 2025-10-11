@@ -330,8 +330,12 @@ pub struct OutputConfig {
     pub r#type: Option<OutputType>,
     pub clean: Option<bool>,
     pub copy: Option<Vec<CopyItem>>,
-    /// URL prefix that will be prepended to all static asset URLs when loading them.
-    pub asset_prefix: Option<RcStr>,
+    /// URL prefix that will be prepended to all chunk and asset URLs when loading them.
+    /// This is used to configure CDN URLs or serve assets from a different path.
+    /// Examples: "/", "/assets/", "https://cdn.example.com/"
+    /// Note: This path will not appear in chunk paths or chunk data on disk,
+    /// it only affects the URLs used by the browser to fetch resources.
+    pub public_path: Option<RcStr>,
 }
 
 #[derive(
@@ -1408,6 +1412,16 @@ impl Config {
     #[turbo_tasks::function]
     pub fn stats(&self) -> Vc<bool> {
         Vc::cell(self.stats.unwrap_or(false))
+    }
+
+    // TODO: extend this function.
+    #[turbo_tasks::function]
+    pub async fn computed_public_path(self: Vc<Self>) -> Result<Vc<Option<RcStr>>> {
+        let this = self.await?;
+
+        let public_path = this.output.as_ref().and_then(|o| o.public_path.clone());
+
+        Ok(Vc::cell(public_path))
     }
 }
 
