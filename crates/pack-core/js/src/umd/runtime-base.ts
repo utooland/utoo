@@ -21,22 +21,6 @@ declare var TURBOPACK_NEXT_CHUNK_URLS: ChunkUrl[] | undefined;
 declare var CHUNK_BASE_PATH: string;
 declare var CHUNK_SUFFIX_PATH: string;
 
-function normalizeChunkPath(path: string) {
-  if (path.startsWith("/")) {
-    path = path.substring(1);
-  } else if (path.startsWith("./")) {
-    path = path.substring(2);
-  }
-
-  if (!path.endsWith("/")) {
-    path += "/";
-  }
-
-  return path;
-}
-
-const NORMALIZED_CHUNK_BASE_PATH = normalizeChunkPath(CHUNK_BASE_PATH);
-
 interface TurbopackBrowserBaseContext<M> extends TurbopackBaseContext<M> {
   R: ResolvePathFromModule;
 }
@@ -242,7 +226,7 @@ function instantiateRuntimeModule(
  * Returns the URL relative to the origin where a chunk can be fetched from.
  */
 function getChunkRelativeUrl(chunkPath: ChunkPath | ChunkListPath): ChunkUrl {
-  return `${NORMALIZED_CHUNK_BASE_PATH}${chunkPath
+  return `${CHUNK_BASE_PATH}${chunkPath
     .split("/")
     .map((p) => encodeURIComponent(p))
     .join("/")}${CHUNK_SUFFIX_PATH}` as ChunkUrl;

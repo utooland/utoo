@@ -1,0 +1,20 @@
+{
+    "config": {
+      "entry": [
+        {
+          "import": "input/index.js",
+          "name": "main"
+        }
+      ],
+      "output": {
+        "path": "output",
+        "publicPath": "runtime"
+      },
+      "optimization": {
+        "minify": false
+      }
+    },
+    "runtimeType": "Production"
+  }
+  
+  

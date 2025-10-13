@@ -1426,6 +1426,12 @@ impl Config {
             .and_then(|o| o.public_path.clone())
             .unwrap_or("".into());
 
+        // Special handling for "runtime" value - return a marker that will be
+        // replaced at runtime with window.publicPath
+        if public_path.as_str() == "runtime" {
+            return Ok(Vc::cell("__RUNTIME_PUBLIC_PATH__".into()));
+        }
+
         Ok(Vc::cell(
             format!("{}/", public_path.trim_end_matches("/")).into(),
         ))

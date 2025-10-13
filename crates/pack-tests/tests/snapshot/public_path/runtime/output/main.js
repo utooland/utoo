@@ -1,16 +1,16 @@
 (globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["crates_pack-tests_tests_snapshot_basic_public_path_input_4bf7ccdf.js"],"runtimeModuleIds":[33]}
+    {"otherChunks":["crates_pack-tests_tests_snapshot_public_path_runtime_input_1245d45e.js"],"runtimeModuleIds":[13]}
 ]);
 (() => {
 if (!Array.isArray(globalThis.TURBOPACK)) {
     return;
 }
 
-const CHUNK_BASE_PATH = "https://cdn.example.com/assets/";
+const CHUNK_BASE_PATH = "__RUNTIME_PUBLIC_PATH__";
 const CHUNK_SUFFIX_PATH = "";
 const RELATIVE_ROOT_PATH = "/ROOT";
-const RUNTIME_PUBLIC_PATH = "https://cdn.example.com/assets/";
+const RUNTIME_PUBLIC_PATH = "__RUNTIME_PUBLIC_PATH__";
 /**
  * This file contains runtime types and functions that are shared between all
  * TurboPack ECMAScript runtimes.
@@ -485,6 +485,17 @@ contextPrototype.U = relativeURL;
 contextPrototype.z = requireStub;
 // Make `globalThis` available to the module in a way that cannot be shadowed by a local variable.
 contextPrototype.g = globalThis;
+/**
+ * Gets the public path for runtime assets.
+ * Checks globalThis.publicPath and falls back to empty string.
+ */ function getPublicPath() {
+    if (typeof globalThis !== 'undefined' && typeof globalThis.publicPath === "string") {
+        const publicPath = globalThis.publicPath;
+        return publicPath.endsWith('/') ? publicPath : `${publicPath}/`;
+    }
+    return '';
+}
+contextPrototype.p = getPublicPath;
 function applyModuleFactoryName(factory) {
     // Give the module factory a nice name to improve stack traces.
     Object.defineProperty(factory, 'name', {
@@ -500,6 +511,13 @@ function applyModuleFactoryName(factory) {
  */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="../base/globals.d.ts" />
 /// <reference path="../../../shared/runtime-utils.ts" />
 // Used in WebWorkers to tell the runtime about the chunk base path
+// Support runtime public path from window.publicPath
+function getRuntimeChunkBasePath() {
+    if (CHUNK_BASE_PATH === "__RUNTIME_PUBLIC_PATH__") {
+        return contextPrototype.p();
+    }
+    return CHUNK_BASE_PATH;
+}
 const browserContextPrototype = Context.prototype;
 var SourceType = /*#__PURE__*/ function(SourceType) {
     /**
@@ -684,7 +702,7 @@ browserContextPrototype.b = getWorkerBlobURL;
 /**
  * Returns the URL relative to the origin where a chunk can be fetched from.
  */ function getChunkRelativeUrl(chunkPath) {
-    return `${CHUNK_BASE_PATH}${chunkPath.split('/').map((p)=>encodeURIComponent(p)).join('/')}${CHUNK_SUFFIX_PATH}`;
+    return `${getRuntimeChunkBasePath()}${chunkPath.split('/').map((p)=>encodeURIComponent(p)).join('/')}${CHUNK_SUFFIX_PATH}`;
 }
 function getPathFromScript(chunkScript) {
     if (typeof chunkScript === 'string') {
@@ -692,7 +710,8 @@ function getPathFromScript(chunkScript) {
     }
     const chunkUrl = typeof TURBOPACK_NEXT_CHUNK_URLS !== 'undefined' ? TURBOPACK_NEXT_CHUNK_URLS.pop() : chunkScript.getAttribute('src');
     const src = decodeURIComponent(chunkUrl.replace(/[?#].*$/, ''));
-    const path = src.startsWith(CHUNK_BASE_PATH) ? src.slice(CHUNK_BASE_PATH.length) : src;
+    const runtimeBasePath = getRuntimeChunkBasePath();
+    const path = src.startsWith(runtimeBasePath) ? src.slice(runtimeBasePath.length) : src;
     return path;
 }
 const regexJsUrl = /\.js(?:\?[^#]*)?(?:#.*)?$/;
