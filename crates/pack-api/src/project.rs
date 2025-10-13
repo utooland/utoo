@@ -906,7 +906,6 @@ impl Project {
             no_mangling: self.no_mangling(),
             config: self.config(),
             export_usage: self.export_usage(),
-            dist_dir: self.dist_dir().owned().await?,
         }))
     }
 
