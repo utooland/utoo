@@ -389,11 +389,19 @@ function compatOutput(
   ) {
     throw "non string output chunkFilename not supported yet";
   }
+
+  if (
+    webpackOutput?.publicPath &&
+    typeof webpackOutput.publicPath !== "string"
+  ) {
+    throw "non string output publicPath not supported yet";
+  }
   return {
     path: webpackOutput?.path,
     filename: webpackOutput?.filename as string | undefined,
     chunkFilename: webpackOutput?.chunkFilename as string | undefined,
     clean: !!webpackOutput?.clean,
+    publicPath: webpackOutput?.publicPath as string | undefined,
   };
 }
 

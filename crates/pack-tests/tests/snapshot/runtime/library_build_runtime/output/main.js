@@ -417,18 +417,6 @@ contextPrototype.z = requireStub;
  */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="./globals.d.ts" />
 /// <reference path="./runtime-utils.ts" />
 // Used in WebWorkers to tell the runtime about the chunk base path
-function normalizeChunkPath(path) {
-    if (path.startsWith("/")) {
-        path = path.substring(1);
-    } else if (path.startsWith("./")) {
-        path = path.substring(2);
-    }
-    if (!path.endsWith("/")) {
-        path += "/";
-    }
-    return path;
-}
-const NORMALIZED_CHUNK_BASE_PATH = normalizeChunkPath(CHUNK_BASE_PATH);
 const browserContextPrototype = Context.prototype;
 var SourceType = /*#__PURE__*/ function(SourceType) {
     /**
@@ -531,7 +519,7 @@ browserContextPrototype.P = resolveAbsolutePath;
 /**
  * Returns the URL relative to the origin where a chunk can be fetched from.
  */ function getChunkRelativeUrl(chunkPath) {
-    return `${NORMALIZED_CHUNK_BASE_PATH}${chunkPath.split("/").map((p)=>encodeURIComponent(p)).join("/")}${CHUNK_SUFFIX_PATH}`;
+    return `${CHUNK_BASE_PATH}${chunkPath.split("/").map((p)=>encodeURIComponent(p)).join("/")}${CHUNK_SUFFIX_PATH}`;
 }
 function getPathFromScript(chunkScript) {
     if (typeof chunkScript === "string") {
