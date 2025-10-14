@@ -22,7 +22,8 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "comlink": "^4.4.2"
+    "comlink": "^4.4.2",
+    "@utoo/pack-shared": "^0.0.4"
   },
   "devDependencies": {
     "typescript": "^5.8.3"

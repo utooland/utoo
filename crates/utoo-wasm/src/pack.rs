@@ -120,6 +120,7 @@ pub fn create_turbo_tasks() -> Result<BundlerTurboTasks> {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Issue {
     pub severity: String,
     pub stage: String,

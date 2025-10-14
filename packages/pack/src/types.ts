@@ -345,25 +345,3 @@ export interface Endpoint {
     includeIssues: boolean,
   ): Promise<AsyncIterableIterator<TurbopackResult>>;
 }
-
-export type StyledString =
-  | {
-      type: "text";
-      value: string;
-    }
-  | {
-      type: "code";
-      value: string;
-    }
-  | {
-      type: "strong";
-      value: string;
-    }
-  | {
-      type: "stack";
-      value: StyledString[];
-    }
-  | {
-      type: "line";
-      value: StyledString[];
-    };

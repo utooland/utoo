@@ -76,7 +76,13 @@ impl Project {
             .map_or_else(
                 |e| Err(PrettyPrintError(&e).to_string()),
                 |turbopack_result| {
-                    serde_wasm_bindgen::to_value(&turbopack_result).map_err(|e| e.to_string())
+                    use serde::Serialize;
+
+                    (&turbopack_result)
+                        .serialize(
+                            &serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true),
+                        )
+                        .map_err(|e| e.to_string())
                 },
             )
     }

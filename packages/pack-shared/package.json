@@ -1,0 +1,26 @@
+{
+  "name": "@utoo/pack-shared",
+  "version": "0.0.4",
+  "module": "esm/index.js",
+  "types": "esm/index.d.ts",
+  "files": [
+    "esm/*"
+  ],
+  "scripts": {
+    "build": "rm -rf esm && tsc -p ./tsconfig.json"
+  },
+  "dependencies": {
+    "@babel/code-frame": "7.22.5",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "@types/babel__code-frame": "7.0.2"
+  },
+  "engines": {
+    "node": ">= 20"
+  },
+  "author": "xusd320",
+  "license": "MIT",
+  "repository": "git@github.com:utooland/utoo.git"
+}

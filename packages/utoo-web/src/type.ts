@@ -1,3 +1,4 @@
+import { Issue } from "@utoo/pack-shared";
 import { DirEntryType } from "./utoo";
 
 export interface RawDirent {
@@ -21,9 +22,13 @@ export class Dirent {
   }
 }
 
+export interface BuildOutput {
+  issues: Issue[];
+}
+
 export interface ProjectEndpoint {
   install: (packageLock: string) => Promise<void>;
-  build: () => Promise<void>;
+  build: () => Promise<BuildOutput>;
   readFile(path: string): Promise<Uint8Array>;
   readFile(path: string, encoding?: "utf8"): Promise<string>;
   writeFile(

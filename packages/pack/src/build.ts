@@ -1,3 +1,4 @@
+import { handleIssues } from "@utoo/pack-shared";
 import { spawn } from "child_process";
 import { existsSync } from "fs";
 import { nanoid } from "nanoid";
@@ -5,13 +6,7 @@ import { join } from "path";
 import { findRootDir } from "./find-root";
 import { projectFactory } from "./project";
 import { BundleOptions } from "./types";
-import {
-  blockStdout,
-  createDefineEnv,
-  formatIssue,
-  getPackPath,
-  isRelevantWarning,
-} from "./util";
+import { blockStdout, createDefineEnv, getPackPath } from "./util";
 import { compatOptionsFromWebpack, WebpackConfig } from "./webpackCompat";
 import { xcodeProfilingReady } from "./xcodeProfile";
 
@@ -82,31 +77,7 @@ async function buildInternal(
 
   const entrypoints = await project.writeAllEntrypointsToDisk();
 
-  const topLevelErrors = [];
-  const topLevelWarnings = [];
-  for (const issue of entrypoints.issues) {
-    if (issue.severity === "error" || issue.severity === "fatal") {
-      topLevelErrors.push(formatIssue(issue));
-    } else if (isRelevantWarning(issue)) {
-      topLevelWarnings.push(formatIssue(issue));
-    }
-  }
-
-  if (topLevelWarnings.length > 0) {
-    console.warn(
-      `Utoopack build encountered ${
-        topLevelWarnings.length
-      } warnings:\n${topLevelWarnings.join("\n")}`,
-    );
-  }
-
-  if (topLevelErrors.length > 0) {
-    throw new Error(
-      `Utoopack build failed with ${
-        topLevelErrors.length
-      } errors:\n${topLevelErrors.join("\n")}`,
-    );
-  }
+  handleIssues(entrypoints.issues);
 
   await project.shutdown();
 
