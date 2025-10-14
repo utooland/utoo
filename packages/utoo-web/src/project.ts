@@ -1,8 +1,10 @@
+import { handleIssues } from "@utoo/pack-shared";
 import * as comlink from "comlink";
 import { ForkedProject } from "./forkedProject";
 import { installServiceWorker } from "./installServiceWorker";
 import { Fork, HandShake } from "./message";
 import {
+  BuildOutput,
   Dirent,
   ProjectEndpoint,
   ProjectOptions,
@@ -84,9 +86,11 @@ export class Project implements ProjectEndpoint {
     return await this.remote.install(packageLock);
   }
 
-  public async build(): Promise<void> {
+  public async build(): Promise<BuildOutput> {
     await this.#mount;
-    return await this.remote.build();
+    const res = await this.remote.build();
+    handleIssues(res.issues, false);
+    return res;
   }
 
   public async readFile(path: string, encoding?: "utf8") {

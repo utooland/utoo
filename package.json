@@ -16,6 +16,7 @@
   },
   "workspaces": [
     "packages/pack",
+    "packages/pack-shared",
     "packages/pack-cli",
     "packages/style-loader",
     "packages/utoo-web",

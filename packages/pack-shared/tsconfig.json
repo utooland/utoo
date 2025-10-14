@@ -3,12 +3,7 @@
     "rootDir": "./src",
     "outDir": "./esm",
     "target": "ES2018",
-    "lib": [
-      "DOM",
-      "WebWorker",
-      "ESNext",
-    ],
-    "allowJs": true,
+    "lib": ["dom", "dom.iterable", "esnext"],
     "esModuleInterop": true,
     "moduleResolution": "bundler",
     "module": "esnext",
