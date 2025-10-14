@@ -13,6 +13,7 @@
     "bindgen-dev": "wasm-bindgen ../../target/wasm32-unknown-unknown/wasm-dev/utoo_wasm.wasm --out-dir src/utoo --out-name index --target web --debug --keep-debug --no-demangle",
     "bindgen-build": "wasm-bindgen ../../target/wasm32-unknown-unknown/release/utoo_wasm.wasm --out-dir src/utoo --out-name index --target web",
     "bindgen-build:local": "wasm-bindgen ../../target/wasm32-unknown-unknown/release-local/utoo_wasm.wasm --out-dir src/utoo --out-name index --target web",
+    "pretsc": "npm run build --workspace @utoo/pack-shared",
     "tsc": "rm -rf esm && tsc -p ./tsconfig.json",
     "dev": "npm run build-wasm -- --profile wasm-dev && npm run bindgen-dev && npm run tsc && cp src/utoo/index_bg.wasm esm/utoo",
     "dev:pm": "npm run build-wasm:pm -- --profile wasm-dev && npm run bindgen-dev && npm run tsc && cp src/utoo/index_bg.wasm esm/utoo",
