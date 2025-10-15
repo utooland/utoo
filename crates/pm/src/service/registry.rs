@@ -175,20 +175,25 @@ impl RegistryService {
                     version.to_string(),
                     manifest.clone(), // Clone from HashMap value
                 );
-                let name_for_disk = name.to_string();
-                let version_for_disk = version.to_string();
-                let manifest_arc_for_disk = Arc::clone(&manifest_arc);
 
-                // Async disk write (non-blocking)
-                tokio::spawn(async move {
-                    PACKAGE_CACHE
-                        .set_version_manifest_to_disk(
-                            &name_for_disk,
-                            &version_for_disk,
-                            &manifest_arc_for_disk,
-                        )
-                        .await;
-                });
+                // Only write to disk cache if registry doesn't support semver
+                // When registry supports semver, the registry itself acts as the cache
+                if !get_registry_support_semver() {
+                    let name_for_disk = name.to_string();
+                    let version_for_disk = version.to_string();
+                    let manifest_arc_for_disk = Arc::clone(&manifest_arc);
+
+                    // Async disk write (non-blocking)
+                    tokio::spawn(async move {
+                        PACKAGE_CACHE
+                            .set_version_manifest_to_disk(
+                                &name_for_disk,
+                                &version_for_disk,
+                                &manifest_arc_for_disk,
+                            )
+                            .await;
+                    });
+                }
 
                 // Return Arc (zero-cost)
                 return Ok(manifest_arc);
@@ -237,20 +242,25 @@ impl RegistryService {
                     version.to_string(),
                     manifest,
                 );
-                let name_for_disk = name.to_string();
-                let version_for_disk = version.to_string();
-                let manifest_arc_for_disk = Arc::clone(&manifest_arc);
 
-                // Async disk write (non-blocking)
-                tokio::spawn(async move {
-                    PACKAGE_CACHE
-                        .set_version_manifest_to_disk(
-                            &name_for_disk,
-                            &version_for_disk,
-                            &manifest_arc_for_disk,
-                        )
-                        .await;
-                });
+                // Only write to disk cache if registry doesn't support semver
+                // When registry supports semver, the registry itself acts as the cache
+                if !get_registry_support_semver() {
+                    let name_for_disk = name.to_string();
+                    let version_for_disk = version.to_string();
+                    let manifest_arc_for_disk = Arc::clone(&manifest_arc);
+
+                    // Async disk write (non-blocking)
+                    tokio::spawn(async move {
+                        PACKAGE_CACHE
+                            .set_version_manifest_to_disk(
+                                &name_for_disk,
+                                &version_for_disk,
+                                &manifest_arc_for_disk,
+                            )
+                            .await;
+                    });
+                }
 
                 // Return Arc (zero-cost)
                 Ok(manifest_arc)

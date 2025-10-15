@@ -91,7 +91,7 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
             let _ = save_package_lock(&path, &lock_clone).await;
         });
 
-        return Ok(package_lock);
+        Ok(package_lock)
     } else {
         // Validate dependencies to ensure package-lock.json is in sync with package.json
         if is_pkg_lock_outdated(root_path).await? {
@@ -651,6 +651,10 @@ fn create_root_package_info(node: &Arc<Node>) -> Value {
 
     if let Some(engines) = node.package.get("engines") {
         info["engines"] = engines.clone();
+    }
+
+    if let Some(workspaces) = node.package.get("workspaces") {
+        info["workspaces"] = workspaces.clone();
     }
 
     info
