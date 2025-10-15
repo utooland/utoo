@@ -184,6 +184,8 @@ impl RegistryService {
                     let manifest_arc_for_disk = Arc::clone(&manifest_arc);
 
                     // Async disk write (non-blocking)
+                    // Send and forget. no result validation is performed;
+                    // disk-cache are accessed only in later executions.
                     tokio::spawn(async move {
                         PACKAGE_CACHE
                             .set_version_manifest_to_disk(
@@ -251,6 +253,8 @@ impl RegistryService {
                     let manifest_arc_for_disk = Arc::clone(&manifest_arc);
 
                     // Async disk write (non-blocking)
+                    // Send and forget. no result validation is performed;
+                    // disk-cache are accessed only in later executions.
                     tokio::spawn(async move {
                         PACKAGE_CACHE
                             .set_version_manifest_to_disk(
