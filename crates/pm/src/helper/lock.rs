@@ -9,15 +9,15 @@ use crate::helper::workspace::find_workspaces;
 use crate::model::node::{EdgeType, Node};
 use crate::model::override_rule::Overrides;
 use crate::model::package_lock::LockPackage;
+use crate::service::dependency_resolution::DependencyResolutionService;
 use crate::util::config::get_legacy_peer_deps;
 use crate::util::json::{load_package_json_from_path, load_package_lock_json_from_path};
-use crate::util::logger::{log_verbose, log_warning};
+use crate::util::logger::{log_info, log_verbose, log_warning};
 use crate::util::registry::{resolve, resolve_dependency};
 use crate::util::relative_path::to_relative_path;
 use crate::util::save_type::{PackageAction, SaveType};
 use crate::util::semver;
 use crate::util::{cache::parse_pattern, cloner::clone, downloader::download};
-use crate::{cmd::deps::build_deps, util::logger::log_info};
 
 use super::workspace::find_workspace_path;
 
@@ -81,13 +81,32 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
         .is_err()
     {
         log_info("Resolving dependencies");
-        // Return PackageLock directly from build_deps, avoiding disk read
-        return build_deps(root_path).await;
+        // Build dependencies using service layer
+        let package_lock = DependencyResolutionService::build_deps(root_path).await?;
+
+        // Write to disk asynchronously in background
+        let path = root_path.to_path_buf();
+        let lock_clone = package_lock.clone();
+        tokio::spawn(async move {
+            let _ = save_package_lock(&path, &lock_clone).await;
+        });
+
+        return Ok(package_lock);
     } else {
         // Validate dependencies to ensure package-lock.json is in sync with package.json
         if is_pkg_lock_outdated(root_path).await? {
-            // Return PackageLock directly from build_deps, avoiding disk read
-            return build_deps(root_path).await;
+            log_info("Resolving dependencies");
+            // Build dependencies using service layer
+            let package_lock = DependencyResolutionService::build_deps(root_path).await?;
+
+            // Write to disk asynchronously in background
+            let path = root_path.to_path_buf();
+            let lock_clone = package_lock.clone();
+            tokio::spawn(async move {
+                let _ = save_package_lock(&path, &lock_clone).await;
+            });
+
+            return Ok(package_lock);
         }
 
         // Load existing package-lock.json only when it's valid and up-to-date
@@ -507,11 +526,10 @@ fn convert_packages_to_hashmap(packages: Value) -> Result<HashMap<String, Packag
     serde_json::from_value(packages).with_context(|| "Failed to parse packages")
 }
 
-/// Build ideal tree and return PackageLock, optionally write to disk asynchronously
+/// Build ideal tree and return PackageLock
 pub async fn build_ideal_tree_to_package_lock(
     path: &Path,
     ideal_tree: &Arc<Node>,
-    write_to_disk: bool,
 ) -> Result<PackageLock> {
     let (packages, total_packages) = serialize_tree_to_packages(ideal_tree, path);
 
@@ -520,50 +538,46 @@ pub async fn build_ideal_tree_to_package_lock(
     ));
 
     // Convert packages Value to HashMap for PackageLock
-    let packages_map = convert_packages_to_hashmap(packages.clone())?;
-    let package_lock = PackageLock {
+    let packages_map = convert_packages_to_hashmap(packages)?;
+    Ok(PackageLock {
         packages: packages_map,
-    };
+    })
+}
 
-    if write_to_disk {
-        // Spawn asynchronous disk writing task
-        let path_clone = path.to_path_buf();
-        let ideal_tree_name = ideal_tree.name.clone();
-        let ideal_tree_version = ideal_tree.version.clone();
+/// Save PackageLock to disk synchronously
+pub async fn save_package_lock(path: &Path, package_lock: &PackageLock) -> Result<()> {
+    // Get name and version from root package
+    let (name, version) = package_lock
+        .packages
+        .get("")
+        .map(|p| {
+            (
+                p.name.as_ref().unwrap_or(&String::new()).clone(),
+                p.version.as_ref().unwrap_or(&String::new()).clone(),
+            )
+        })
+        .unwrap_or_else(|| (String::new(), String::new()));
 
-        tokio::spawn(async move {
-            let lock_file = json!({
-                "name": ideal_tree_name,
-                "version": ideal_tree_version,
-                "lockfileVersion": 3,
-                "requires": true,
-                "packages": packages,
-            });
+    let lock_file = json!({
+        "name": name,
+        "version": version,
+        "lockfileVersion": 3,
+        "requires": true,
+        "packages": package_lock.packages,
+    });
 
-            let lock_file_content = match serde_json::to_string_pretty(&lock_file) {
-                Ok(content) => content,
-                Err(e) => {
-                    log_verbose(&format!("Failed to serialize package-lock.json: {e}"));
-                    return;
-                }
-            };
+    let temp_path = path.join("package-lock.json.tmp");
+    let target_path = path.join("package-lock.json");
 
-            // Write to temporary file first, then atomically move to target location
-            let temp_path = path_clone.join("package-lock.json.tmp");
-            let target_path = path_clone.join("package-lock.json");
+    let content = serde_json::to_string_pretty(&lock_file)?;
+    tokio::fs::write(&temp_path, content)
+        .await
+        .context("Failed to write temporary package-lock.json")?;
+    tokio::fs::rename(temp_path, target_path)
+        .await
+        .context("Failed to rename package-lock.json")?;
 
-            if let Err(e) = tokio::fs::write(&temp_path, lock_file_content).await {
-                log_verbose(&format!("Failed to write package-lock.json: {e}"));
-                return;
-            }
-
-            if let Err(e) = tokio::fs::rename(temp_path, target_path).await {
-                log_verbose(&format!("Failed to rename package-lock.json: {e}"));
-            }
-        });
-    }
-
-    Ok(package_lock)
+    Ok(())
 }
 
 pub fn serialize_tree_to_packages(node: &Arc<Node>, path: &Path) -> (Value, i32) {
@@ -932,8 +946,8 @@ mod tests {
             }),
         );
 
-        // Test building PackageLock from ideal tree with disk write
-        let result = build_ideal_tree_to_package_lock(temp_path, &root, true).await;
+        // Test building PackageLock from ideal tree
+        let result = build_ideal_tree_to_package_lock(temp_path, &root).await;
         assert!(result.is_ok());
 
         let package_lock = result.unwrap();
@@ -941,8 +955,8 @@ mod tests {
         // Verify PackageLock structure
         assert!(package_lock.packages.contains_key(""));
 
-        // Give the async task time to write to disk
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        // Save to disk synchronously
+        save_package_lock(temp_path, &package_lock).await.unwrap();
 
         // Verify the lock file was created on disk
         let lock_file_path = temp_path.join("package-lock.json");

@@ -65,8 +65,8 @@ impl DependencyResolutionService {
         }
 
         let tree = ruborist.ideal_tree.unwrap();
-        // Return PackageLock directly and write to disk asynchronously
-        let package_lock = build_ideal_tree_to_package_lock(cwd, &tree, true).await?;
+        // Return PackageLock directly, no disk write here
+        let package_lock = build_ideal_tree_to_package_lock(cwd, &tree).await?;
 
         Ok(package_lock)
     }
