@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "comlink": "^4.4.2",
-    "@utoo/pack-shared": "^0.0.4"
+    "@utoo/pack-shared": "^0.0.5"
   },
   "devDependencies": {
     "typescript": "^5.8.3"

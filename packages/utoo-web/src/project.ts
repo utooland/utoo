@@ -89,7 +89,7 @@ export class Project implements ProjectEndpoint {
   public async build(): Promise<BuildOutput> {
     await this.#mount;
     const res = await this.remote.build();
-    handleIssues(res.issues, false);
+    handleIssues(res.issues, false, false);
     return res;
   }
 
