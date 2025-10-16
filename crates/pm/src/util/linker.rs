@@ -27,12 +27,11 @@ pub async fn link(src: &Path, dst: &Path) -> Result<()> {
     // Check if destination exists or is a broken symlink
     if fs::symlink_metadata(&abs_dst).await.is_ok() {
         // Check if it's already pointing to the correct source
-        if let Ok(target) = fs::read_link(&abs_dst).await {
-            if target == abs_src {
+        if let Ok(target) = fs::read_link(&abs_dst).await
+            && target == abs_src {
                 // Already correctly linked, nothing to do
                 return Ok(());
             }
-        }
 
         // Remove existing file/symlink
         fs::remove_file(&abs_dst).await.context(format!(
