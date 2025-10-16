@@ -96,7 +96,11 @@ export function formatIssue(issue: Issue, forceColor = true) {
   return message;
 }
 
-export function handleIssues(issues: Issue[], forceColor = true) {
+export function handleIssues(
+  issues: Issue[],
+  throwErrors = true,
+  forceColor = true,
+) {
   const topLevelErrors = new Set();
   const topLevelWarnings = new Set();
   for (const issue of issues) {
@@ -108,21 +112,18 @@ export function handleIssues(issues: Issue[], forceColor = true) {
   }
 
   if (topLevelWarnings.size !== 0) {
-    console.warn(
-      `Utoopack build encountered ${topLevelWarnings.size} warnings:\n${[...topLevelWarnings].join("\n")}`,
-    );
+    const warnMsg = `Utoopack build encountered ${topLevelWarnings.size} warnings:\n${[...topLevelWarnings].join("\n")}`;
+    console.warn(warnMsg);
   }
 
   if (topLevelErrors.size !== 0) {
-    console.error(
-      `Utoopack build failed with ${topLevelErrors.size} errors:\n${[...topLevelErrors].join("\n")}`,
-    );
+    const errMsg = `Utoopack build failed with ${topLevelErrors.size} errors:\n${[...topLevelErrors].join("\n")}`;
+    if (throwErrors) {
+      throw new Error(errMsg);
+    } else {
+      console.error(errMsg);
+    }
   }
-
-  return {
-    errors: [...topLevelErrors],
-    warnings: [...topLevelWarnings],
-  };
 }
 
 function isRelevantWarning(issue: Issue): boolean {
