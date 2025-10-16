@@ -7,8 +7,7 @@ fn to_absolute(path: &Path) -> Result<PathBuf> {
     if path.is_absolute() {
         Ok(path.to_path_buf())
     } else {
-        let cwd = std::env::current_dir()
-            .context("Failed to get current working directory")?;
+        let cwd = std::env::current_dir().context("Failed to get current working directory")?;
         Ok(cwd.join(path))
     }
 }
@@ -34,12 +33,11 @@ pub async fn link(src: &Path, dst: &Path) -> Result<()> {
     // Check if destination already exists
     if let Ok(metadata) = fs::symlink_metadata(&abs_dst).await {
         // If it's already a symlink pointing to the correct source, nothing to do
-        if metadata.is_symlink() {
-            if let Ok(target) = fs::read_link(&abs_dst).await {
-                if target == abs_src {
-                    return Ok(());
-                }
-            }
+        if metadata.is_symlink()
+            && let Ok(target) = fs::read_link(&abs_dst).await
+            && target == abs_src
+        {
+            return Ok(());
         }
 
         // Remove existing file/symlink/directory (like ln -sf)
@@ -48,19 +46,20 @@ pub async fn link(src: &Path, dst: &Path) -> Result<()> {
         } else {
             fs::remove_file(&abs_dst).await
         }
-        .context(format!("Failed to remove existing path: {}", abs_dst.display()))?;
+        .context(format!(
+            "Failed to remove existing path: {}",
+            abs_dst.display()
+        ))?;
     }
 
-    fs::symlink(&abs_src, &abs_dst)
-        .await
-        .map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to create symbolic link from {} to {}: {}",
-                abs_src.display(),
-                abs_dst.display(),
-                e
-            )
-        })?;
+    fs::symlink(&abs_src, &abs_dst).await.map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to create symbolic link from {} to {}: {}",
+            abs_src.display(),
+            abs_dst.display(),
+            e
+        )
+    })?;
 
     Ok(())
 }

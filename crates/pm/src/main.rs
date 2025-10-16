@@ -464,7 +464,7 @@ async fn async_main() -> Result<()> {
                     let res = link_current_to_global(prefix.as_deref()).await;
                     match res {
                         Ok(package_name) => {
-                            log_time_end(&format!("{} linked", package_name));
+                            log_time_end(&format!("{package_name} linked"));
                         }
                         Err(e) => {
                             log_error(&e.to_string());
