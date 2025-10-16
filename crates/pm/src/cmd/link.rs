@@ -7,7 +7,7 @@ use crate::util::logger::log_verbose;
 use anyhow::{Context, Result};
 
 /// Link current package to global (equivalent to npm link without args)
-pub async fn link_current_to_global(prefix: Option<&str>) -> Result<()> {
+pub async fn link_current_to_global(prefix: Option<&str>) -> Result<String> {
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
     let project_path = update_cwd_to_project(&cwd).await?;
 
@@ -48,7 +48,7 @@ pub async fn link_current_to_global(prefix: Option<&str>) -> Result<()> {
             })?;
     }
 
-    Ok(())
+    Ok(package_info.name)
 }
 
 /// Link a global package to local node_modules (equivalent to npm link pkg_name)
