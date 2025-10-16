@@ -31,20 +31,24 @@ pub async fn link(src: &Path, dst: &Path) -> Result<()> {
         ))?;
     }
 
-    // Check if destination exists or is a broken symlink
-    if fs::symlink_metadata(&abs_dst).await.is_ok() {
-        // Check if it's already pointing to the correct source
-        if let Ok(target) = fs::read_link(&abs_dst).await
-            && target == abs_src {
-                // Already correctly linked, nothing to do
-                return Ok(());
+    // Check if destination already exists
+    if let Ok(metadata) = fs::symlink_metadata(&abs_dst).await {
+        // If it's already a symlink pointing to the correct source, nothing to do
+        if metadata.is_symlink() {
+            if let Ok(target) = fs::read_link(&abs_dst).await {
+                if target == abs_src {
+                    return Ok(());
+                }
             }
+        }
 
-        // Remove existing file/symlink
-        fs::remove_file(&abs_dst).await.context(format!(
-            "Failed to remove existing file: {}",
-            abs_dst.display()
-        ))?;
+        // Remove existing file/symlink/directory (like ln -sf)
+        if metadata.is_dir() {
+            fs::remove_dir_all(&abs_dst).await
+        } else {
+            fs::remove_file(&abs_dst).await
+        }
+        .context(format!("Failed to remove existing path: {}", abs_dst.display()))?;
     }
 
     fs::symlink(&abs_src, &abs_dst)
@@ -137,5 +141,25 @@ mod tests {
         let result = link(&src2_path, &dst_path);
         assert!(result.await.is_ok());
         assert_eq!(fs::read_to_string(&dst_path).unwrap(), "test2");
+    }
+
+    #[tokio::test]
+    async fn test_link_replaces_existing_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path();
+
+        let src_path = temp_path.join("source5.txt");
+        fs::write(&src_path, "test").unwrap();
+
+        let dst_path = temp_path.join("dest5_dir");
+        // Create a directory at destination
+        fs::create_dir_all(&dst_path).unwrap();
+        fs::write(dst_path.join("file.txt"), "content").unwrap();
+
+        env::set_current_dir(temp_path).unwrap();
+        let result = link(&src_path, &dst_path).await;
+        assert!(result.is_ok());
+        assert!(dst_path.is_symlink());
+        assert_eq!(fs::read_to_string(&dst_path).unwrap(), "test");
     }
 }
