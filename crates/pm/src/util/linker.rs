@@ -40,12 +40,16 @@ pub async fn link(src: &Path, dst: &Path) -> Result<()> {
         ))?;
     }
 
-    // Create the symlink
-    fs::symlink(&abs_src, &abs_dst).await.context(format!(
-        "Failed to create symbolic link from {} to {}",
-        abs_src.display(),
-        abs_dst.display()
-    ))?;
+    fs::symlink(&abs_src, &abs_dst)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to create symbolic link from {} to {}: {}",
+                abs_src.display(),
+                abs_dst.display(),
+                e
+            )
+        })?;
 
     Ok(())
 }
