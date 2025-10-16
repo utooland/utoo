@@ -1,46 +1,73 @@
-use anyhow::{Context, Result, bail};
-use std::os::unix::fs::symlink;
-use std::path::Path;
-use std::{env, fs};
+use anyhow::{Context, Result};
+use std::path::{Path, PathBuf};
+use tokio::fs;
+
+/// Convert a path to absolute path
+fn to_absolute(path: &Path) -> Result<PathBuf> {
+    if path.is_absolute() {
+        Ok(path.to_path_buf())
+    } else {
+        let cwd = std::env::current_dir().context("Failed to get current working directory")?;
+        Ok(cwd.join(path))
+    }
+}
 
 pub async fn link(src: &Path, dst: &Path) -> Result<()> {
-    // get current working directory as prefix
-    let cwd = env::current_dir().context("Failed to get current working directory")?;
-    // ensure the destination directory exists
-    if let Some(parent) = dst.parent() {
-        fs::create_dir_all(parent).context(format!(
+    // Convert to absolute paths
+    let abs_src = to_absolute(src)?;
+    let abs_dst = to_absolute(dst)?;
+
+    // Check if source exists
+    if !fs::try_exists(&abs_src).await? {
+        anyhow::bail!("Source file does not exist: {}", abs_src.display());
+    }
+
+    // Ensure the destination directory exists
+    if let Some(parent) = abs_dst.parent() {
+        fs::create_dir_all(parent).await.context(format!(
             "Failed to create parent directory: {}",
             parent.display()
         ))?;
     }
 
-    let abs_src = cwd.join(src);
-    let abs_dst = cwd.join(dst);
+    // Check if destination already exists
+    if let Ok(metadata) = fs::symlink_metadata(&abs_dst).await {
+        // If it's already a symlink pointing to the correct source, nothing to do
+        if metadata.is_symlink()
+            && let Ok(target) = fs::read_link(&abs_dst).await
+            && target == abs_src
+        {
+            return Ok(());
+        }
 
-    // Check if source exists
-    if !tokio::fs::try_exists(&abs_src).await? {
-        bail!("Source file does not exist: {}", abs_src.display());
-    }
-
-    // Check if destination exists or is a broken symlink
-    if fs::symlink_metadata(&abs_dst).is_ok() {
-        fs::remove_file(&abs_dst).context(format!(
-            "Failed to remove existing file: {}",
+        // Remove existing file/symlink/directory (like ln -sf)
+        if metadata.is_dir() {
+            fs::remove_dir_all(&abs_dst).await
+        } else {
+            fs::remove_file(&abs_dst).await
+        }
+        .context(format!(
+            "Failed to remove existing path: {}",
             abs_dst.display()
         ))?;
     }
 
-    symlink(&abs_src, &abs_dst).context(format!(
-        "Failed to create symbolic link from {} to {}",
-        abs_src.display(),
-        abs_dst.display()
-    ))
+    fs::symlink(&abs_src, &abs_dst).await.map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to create symbolic link from {} to {}: {}",
+            abs_src.display(),
+            abs_dst.display(),
+            e
+        )
+    })?;
+
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use std::{env, fs};
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -113,5 +140,25 @@ mod tests {
         let result = link(&src2_path, &dst_path);
         assert!(result.await.is_ok());
         assert_eq!(fs::read_to_string(&dst_path).unwrap(), "test2");
+    }
+
+    #[tokio::test]
+    async fn test_link_replaces_existing_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path();
+
+        let src_path = temp_path.join("source5.txt");
+        fs::write(&src_path, "test").unwrap();
+
+        let dst_path = temp_path.join("dest5_dir");
+        // Create a directory at destination
+        fs::create_dir_all(&dst_path).unwrap();
+        fs::write(dst_path.join("file.txt"), "content").unwrap();
+
+        env::set_current_dir(temp_path).unwrap();
+        let result = link(&src_path, &dst_path).await;
+        assert!(result.is_ok());
+        assert!(dst_path.is_symlink());
+        assert_eq!(fs::read_to_string(&dst_path).unwrap(), "test");
     }
 }

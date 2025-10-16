@@ -37,10 +37,14 @@ pub fn get_global_bin_dir(prefix: Option<&str>) -> Result<PathBuf> {
     }
 }
 
+// exp: /usr/local/lib/node_modules
 pub fn get_global_package_dir(prefix: Option<&str>) -> Result<PathBuf> {
     let base_path = match prefix {
         Some(prefix) => PathBuf::from(prefix),
-        None => get_current_exe_dir()?,
+        None => get_current_exe_dir()?
+            .parent()
+            .context("Failed to get parent directory")?
+            .to_path_buf(),
     };
 
     Ok(base_path.join("lib/node_modules"))

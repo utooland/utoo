@@ -461,12 +461,17 @@ async fn async_main() -> Result<()> {
             match packages {
                 None => {
                     // Link current package to global
-                    if let Err(e) = link_current_to_global(prefix.as_deref()).await {
-                        log_error(&e.to_string());
-                        let _ = write_verbose_logs_to_file().await;
-                        process::exit(1);
+                    let res = link_current_to_global(prefix.as_deref()).await;
+                    match res {
+                        Ok(package_name) => {
+                            log_time_end(&format!("{package_name} linked"));
+                        }
+                        Err(e) => {
+                            log_error(&e.to_string());
+                            let _ = write_verbose_logs_to_file().await;
+                            process::exit(1);
+                        }
                     }
-                    log_time_end("package linked");
                 }
                 Some(packages) => {
                     for package in packages.iter() {
