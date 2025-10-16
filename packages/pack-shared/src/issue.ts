@@ -114,10 +114,15 @@ export function handleIssues(issues: Issue[], forceColor = true) {
   }
 
   if (topLevelErrors.size !== 0) {
-    throw new Error(
+    console.error(
       `Utoopack build failed with ${topLevelErrors.size} errors:\n${[...topLevelErrors].join("\n")}`,
     );
   }
+
+  return {
+    errors: [...topLevelErrors],
+    warnings: [...topLevelWarnings],
+  };
 }
 
 function isRelevantWarning(issue: Issue): boolean {
