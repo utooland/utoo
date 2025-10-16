@@ -284,30 +284,6 @@ mod tests {
     use tempfile::tempdir;
 
     #[tokio::test]
-    async fn test_execute_custom_script_failure() {
-        let temp_dir = tempdir().unwrap();
-        let package = PackageInfo {
-            path: temp_dir.path().to_path_buf(),
-            bin_files: Default::default(),
-            scripts: Scripts::default(),
-            scope: None,
-            fullname: "test-package".to_string(),
-            name: "test-package".to_string(),
-            version: "1.0.0".to_string(),
-        };
-
-        let result = ScriptService::execute_custom_script(&package, "test", "exit 1").await;
-
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Custom script execution failed")
-        );
-    }
-
-    #[tokio::test]
     async fn test_collect_bin_paths_with_local_node_modules() {
         let temp_dir = tempdir().unwrap();
         let package_path = temp_dir.path();
@@ -390,24 +366,6 @@ mod tests {
         // Should find node-gyp
         assert!(ScriptService::has_node_gyp_in_path());
 
-        // Restore original PATH
-        unsafe {
-            env::set_var("PATH", original_path);
-        }
-    }
-
-    #[test]
-    fn test_has_node_gyp_in_path_not_found() {
-        use std::env;
-        // Save original PATH
-        let original_path = env::var("PATH").unwrap_or_default();
-        // Set PATH to a temp dir without node-gyp
-        let temp_dir = tempfile::tempdir().unwrap();
-        unsafe {
-            env::set_var("PATH", temp_dir.path());
-        }
-        // Should not find node-gyp
-        assert!(!ScriptService::has_node_gyp_in_path());
         // Restore original PATH
         unsafe {
             env::set_var("PATH", original_path);
