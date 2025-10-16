@@ -1,46 +1,60 @@
-use anyhow::{Context, Result, bail};
-use std::os::unix::fs::symlink;
+use anyhow::{Context, Result};
 use std::path::Path;
-use std::{env, fs};
+use tokio::fs;
 
 pub async fn link(src: &Path, dst: &Path) -> Result<()> {
-    // get current working directory as prefix
-    let cwd = env::current_dir().context("Failed to get current working directory")?;
-    // ensure the destination directory exists
-    if let Some(parent) = dst.parent() {
-        fs::create_dir_all(parent).context(format!(
+    // Canonicalize source path (must exist)
+    let abs_src = std::fs::canonicalize(src)
+        .context(format!("Source file does not exist: {}", src.display()))?;
+
+    // Convert destination to absolute path
+    let abs_dst = if dst.is_absolute() {
+        dst.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .context("Failed to get current working directory")?
+            .join(dst)
+    };
+
+    // Ensure the destination directory exists
+    if let Some(parent) = abs_dst.parent() {
+        fs::create_dir_all(parent).await.context(format!(
             "Failed to create parent directory: {}",
             parent.display()
         ))?;
     }
 
-    let abs_src = cwd.join(src);
-    let abs_dst = cwd.join(dst);
-
-    // Check if source exists
-    if !tokio::fs::try_exists(&abs_src).await? {
-        bail!("Source file does not exist: {}", abs_src.display());
-    }
-
     // Check if destination exists or is a broken symlink
-    if fs::symlink_metadata(&abs_dst).is_ok() {
-        fs::remove_file(&abs_dst).context(format!(
+    if fs::symlink_metadata(&abs_dst).await.is_ok() {
+        // Check if it's already pointing to the correct source
+        if let Ok(target) = fs::read_link(&abs_dst).await {
+            if target == abs_src {
+                // Already correctly linked, nothing to do
+                return Ok(());
+            }
+        }
+
+        // Remove existing file/symlink
+        fs::remove_file(&abs_dst).await.context(format!(
             "Failed to remove existing file: {}",
             abs_dst.display()
         ))?;
     }
 
-    symlink(&abs_src, &abs_dst).context(format!(
+    // Create the symlink
+    fs::symlink(&abs_src, &abs_dst).await.context(format!(
         "Failed to create symbolic link from {} to {}",
         abs_src.display(),
         abs_dst.display()
-    ))
+    ))?;
+
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use std::{env, fs};
     use tempfile::TempDir;
 
     #[tokio::test]

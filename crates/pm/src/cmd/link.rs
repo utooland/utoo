@@ -30,13 +30,8 @@ pub async fn link_current_to_global(prefix: Option<&str>) -> Result<()> {
     // link local project to global package
     link(&project_path, &global_package_path)
         .await
-        .with_context(|| {
-            format!(
-                "Failed to link local project to global package: {} -> {}",
-                project_path.display(),
-                global_package_path.display()
-            )
-        })?;
+        .map_err(|e| anyhow::anyhow!("Failed to link {project_path:?} => {global_package_path:?}: {e}"))?;
+
     // If the package has binary files, also link them to global bin directory
     if package_info.has_bin_files() {
         let global_bin_dir = global_package_path.join("bin");
@@ -75,13 +70,7 @@ pub async fn link_global_to_local(package_name: &str, prefix: Option<&str>) -> R
     let local_link_path = project_path.join("node_modules/").join(package_name);
     link(&global_package_path, &local_link_path)
         .await
-        .with_context(|| {
-            format!(
-                "Failed to link global package to local: {} -> {}",
-                global_package_path.display(),
-                local_link_path.display()
-            )
-        })?;
+        .map_err(|e| anyhow::anyhow!("Failed to link {global_package_path:?} => {local_link_path:?}: {e}"))?;
 
     log_verbose(&format!(
         "link global package to local: {} -> {}",
