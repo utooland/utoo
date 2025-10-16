@@ -1,20 +1,27 @@
 use anyhow::{Context, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::fs;
 
-pub async fn link(src: &Path, dst: &Path) -> Result<()> {
-    // Canonicalize source path (must exist)
-    let abs_src = std::fs::canonicalize(src)
-        .context(format!("Source file does not exist: {}", src.display()))?;
-
-    // Convert destination to absolute path
-    let abs_dst = if dst.is_absolute() {
-        dst.to_path_buf()
+/// Convert a path to absolute path
+fn to_absolute(path: &Path) -> Result<PathBuf> {
+    if path.is_absolute() {
+        Ok(path.to_path_buf())
     } else {
-        std::env::current_dir()
-            .context("Failed to get current working directory")?
-            .join(dst)
-    };
+        let cwd = std::env::current_dir()
+            .context("Failed to get current working directory")?;
+        Ok(cwd.join(path))
+    }
+}
+
+pub async fn link(src: &Path, dst: &Path) -> Result<()> {
+    // Convert to absolute paths
+    let abs_src = to_absolute(src)?;
+    let abs_dst = to_absolute(dst)?;
+
+    // Check if source exists
+    if !fs::try_exists(&abs_src).await? {
+        anyhow::bail!("Source file does not exist: {}", abs_src.display());
+    }
 
     // Ensure the destination directory exists
     if let Some(parent) = abs_dst.parent() {
