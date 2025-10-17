@@ -12,7 +12,6 @@ use crate::model::package_lock::LockPackage;
 use crate::service::dependency_resolution::DependencyResolutionService;
 use crate::util::config::get_legacy_peer_deps;
 use crate::util::json::{load_package_json_from_path, load_package_lock_json_from_path};
-use crate::util::logger::{log_info, log_verbose, log_warning};
 use crate::util::registry::{resolve, resolve_dependency};
 use crate::util::relative_path::to_relative_path;
 use crate::util::save_type::{PackageAction, SaveType};
@@ -80,7 +79,7 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
         .await
         .is_err()
     {
-        log_info("Resolving dependencies");
+        tracing::debug!("Resolving dependencies");
         // Build dependencies using service layer
         let package_lock = DependencyResolutionService::build_deps(root_path).await?;
 
@@ -95,7 +94,7 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
     } else {
         // Validate dependencies to ensure package-lock.json is in sync with package.json
         if is_pkg_lock_outdated(root_path).await? {
-            log_info("Resolving dependencies");
+            tracing::debug!("Resolving dependencies");
             // Build dependencies using service layer
             let package_lock = DependencyResolutionService::build_deps(root_path).await?;
 
@@ -110,7 +109,7 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
         }
 
         // Load existing package-lock.json only when it's valid and up-to-date
-        log_info("Loading package-lock.json from current project for dependency download");
+        tracing::debug!("Loading package-lock.json from current project for dependency download");
         let package_lock: PackageLock =
             crate::util::json::read_json_file(&root_path.join("package-lock.json")).await?;
 
@@ -134,7 +133,7 @@ pub async fn update_package_json(
     let target_dir = if let Some(ws) = workspace {
         find_workspace_path(cwd, ws)
             .await
-            .map_err(|e| anyhow!("Failed to find workspace path: {e}"))?
+            .context("Failed to find workspace path")?
     } else {
         cwd.to_path_buf()
     };
@@ -218,7 +217,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
         }
     };
 
-    log_verbose(&format!("lib_path: {}", lib_path.to_string_lossy()));
+    tracing::debug!("lib_path: {}", lib_path.to_string_lossy());
 
     // Create global package directory
     let package_path = lib_path.join(&name);
@@ -239,14 +238,10 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
 
     // Download if not cached
     if !tokio::fs::try_exists(&cache_flag_path).await? {
-        log_verbose(&format!(
-            "Downloading {} to {}",
-            tarball_url,
-            cache_path.display()
-        ));
+        tracing::debug!("Downloading {} to {}", tarball_url, cache_path.display());
         download(tarball_url, &cache_path)
             .await
-            .map_err(|e| anyhow!("Failed to download package: {e}"))?;
+            .context("Failed to download package")?;
 
         // If the package has install scripts, create a flag file
         // in linux, we can use hardlink when FICLONE is not supported
@@ -258,14 +253,14 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
     }
 
     // Clone to package directory
-    log_verbose(&format!(
+    tracing::debug!(
         "Cloning {} to {}",
         cache_path.display(),
         package_path.display()
-    ));
+    );
     clone(&cache_path, &package_path, true)
         .await
-        .map_err(|e| anyhow!("Failed to clone package: {e}"))?;
+        .context("Failed to clone package")?;
 
     // Remove devDependencies from package.json
     let package_json_path = package_path.join("package.json");
@@ -291,7 +286,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
     )
     .await?;
 
-    log_verbose(&format!("package_path: {}", package_path.to_string_lossy()));
+    tracing::debug!("package_path: {}", package_path.to_string_lossy());
     Ok(package_path)
 }
 
@@ -343,9 +338,7 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
             Some(lock) => lock,
             None => {
                 let name = if path.is_empty() { "root" } else { &path };
-                log_warning(&format!(
-                    "package-lock.json is outdated, new workspace {name} not found"
-                ));
+                tracing::warn!("package-lock.json is outdated, new workspace {name} not found");
                 return Ok(true);
             }
         };
@@ -354,16 +347,14 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
         for (dep_field, _is_optional) in get_dep_types().await {
             if !deps_fields_equal(pkg.get(dep_field), lock.get(dep_field)) {
                 let name = if path.is_empty() { "root" } else { &path };
-                log_warning(&format!(
-                    "package-lock.json is outdated, {name} {dep_field} changed"
-                ));
+                tracing::warn!("package-lock.json is outdated, {name} {dep_field} changed");
                 return Ok(true);
             }
         }
 
         // only check engines for root workspace
         if path.is_empty() && pkg.get("engines") != lock.get("engines") {
-            log_warning("package-lock.json is outdated, engines changed");
+            tracing::warn!("package-lock.json is outdated, engines changed");
             return Ok(true);
         }
     }
@@ -470,24 +461,24 @@ pub async fn validate_deps(
                                 .await?
                                     && resolved_dep.version == actual_version
                                 {
-                                    log_verbose(&format!(
+                                    tracing::debug!(
                                         "Package {pkg_path} {dep_field} dependency {dep_name} (required version: {req_version_str}, effective version: {effective_req_version}) hit bug-version {current_path}@{actual_version}"
-                                    ));
+                                    );
                                     continue;
                                 }
 
-                                log_verbose(&format!(
+                                tracing::debug!(
                                     "Package {pkg_path} {dep_field} dependency {dep_name} (required version: {req_version_str}, effective version: {effective_req_version}) does not match actual version {current_path}@{actual_version}"
-                                ));
+                                );
                                 invalid_deps.push(InvalidDependency {
                                     package_path: pkg_path.to_string(),
                                     dependency_name: dep_name.to_string(),
                                 });
                             }
                         } else if !is_optional {
-                            log_verbose(&format!(
+                            tracing::debug!(
                                 "pkg_path {pkg_path} dep_field {dep_field} dep_name {dep_name} not found"
-                            ));
+                            );
                             invalid_deps.push(InvalidDependency {
                                 package_path: pkg_path.to_string(),
                                 dependency_name: dep_name.to_string(),
@@ -533,9 +524,7 @@ pub async fn build_ideal_tree_to_package_lock(
 ) -> Result<PackageLock> {
     let (packages, total_packages) = serialize_tree_to_packages(ideal_tree, path);
 
-    log_info(&format!(
-        "Total {total_packages} dependencies after merging"
-    ));
+    tracing::debug!("Total {total_packages} dependencies after merging");
 
     // Convert packages Value to HashMap for PackageLock
     let packages_map = convert_packages_to_hashmap(packages)?;
@@ -620,10 +609,12 @@ fn check_duplicate_dependencies(node: &Arc<Node>) {
 
     for (name, count) in name_count {
         if count > 1 {
-            log_warning(&format!(
+            tracing::warn!(
                 "Found {} duplicate dependencies named '{}' under '{}'",
-                count, name, node.name
-            ));
+                count,
+                name,
+                node.name
+            );
         }
     }
 }

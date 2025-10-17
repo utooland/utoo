@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 use std::path::Path;
@@ -7,10 +7,10 @@ use std::path::Path;
 pub async fn read_json_file<T: DeserializeOwned>(path: &Path) -> Result<T> {
     let content = tokio::fs::read_to_string(path)
         .await
-        .map_err(|e| anyhow!("Failed to read file {}: {}", path.display(), e))?;
+        .with_context(|| format!("Failed to read file {}", path.display()))?;
 
     serde_json::from_str(&content)
-        .map_err(|e| anyhow!("Failed to parse JSON from {}: {}", path.display(), e))
+        .with_context(|| format!("Failed to parse JSON from {}", path.display()))
 }
 
 /// Read and parse a JSON file into a serde_json::Value

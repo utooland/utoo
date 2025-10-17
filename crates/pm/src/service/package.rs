@@ -3,9 +3,7 @@ use crate::helper::lock::PackageLock;
 use crate::helper::package::parse_package_name;
 use crate::model::package::{PackageInfo, Scripts};
 use crate::util::json::load_package_json_from_path;
-use crate::util::logger::{
-    PROGRESS_BAR, finish_progress_bar, log_info, log_progress, log_verbose, start_progress_bar,
-};
+use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
 use anyhow::{Context, Result};
 use futures;
 use std::path::{Path, PathBuf};
@@ -86,10 +84,10 @@ impl PackageService {
 
         for hook in hooks {
             if scripts.get(hook).and_then(|s| s.as_str()).is_some() {
-                log_info(&format!("Executing project hook: {hook}"));
+                tracing::debug!("Executing project hook: {hook}");
                 ScriptService::execute_script(&package_info, hook, true)
                     .await
-                    .map_err(|e| anyhow::anyhow!("Failed to execute project hook {hook}: {e}"))?;
+                    .with_context(|| format!("Failed to execute project hook {hook}"))?;
             }
         }
 
@@ -148,7 +146,7 @@ impl PackageService {
         root_path: &Path,
         ignore_scripts: bool,
     ) -> Result<Vec<PackageInfo>> {
-        log_verbose("Collecting packages from memory lock...");
+        tracing::debug!("Collecting packages from memory lock...");
 
         let mut packages = Vec::new();
         for (path, lock_package) in &package_lock.packages {
@@ -182,9 +180,7 @@ impl PackageService {
             };
 
             if !is_compatible {
-                log_verbose(&format!(
-                    "Package {path} is not compatible with current platform"
-                ));
+                tracing::debug!("Package {path} is not compatible with current platform");
                 continue;
             }
 
@@ -230,59 +226,44 @@ impl PackageService {
         packages: Vec<PackageInfo>,
         ignore_scripts: bool,
     ) -> Result<Vec<Vec<PackageInfo>>> {
-        log_verbose("Creating execution queues with options...");
+        tracing::debug!("Creating execution queues with options...");
         let mut queues = vec![Vec::new(); 5];
 
         for package in packages {
             let has_cached = Self::has_cached(&package);
 
             if has_cached {
-                log_verbose(&format!(
-                    "Package {} is cached, skipping execution",
-                    package.fullname
-                ));
+                tracing::debug!("Package {} is cached, skipping execution", package.fullname);
                 queues[0].push(package.clone());
             }
 
             // Script queues - skip in bins_only mode
             if !ignore_scripts && !has_cached {
                 if package.scripts.preinstall.is_some() {
-                    log_verbose(&format!(
-                        "Adding {} to preinstall queue",
-                        package.path.display()
-                    ));
+                    tracing::debug!("Adding {} to preinstall queue", package.path.display());
                     queues[1].push(package.clone());
                 }
                 if package.scripts.install.is_some() {
-                    log_verbose(&format!(
-                        "Adding {} to install queue",
-                        package.path.display()
-                    ));
+                    tracing::debug!("Adding {} to install queue", package.path.display());
                     queues[3].push(package.clone());
                 }
                 if package.scripts.postinstall.is_some() {
-                    log_verbose(&format!(
-                        "Adding {} to postinstall queue",
-                        package.path.display()
-                    ));
+                    tracing::debug!("Adding {} to postinstall queue", package.path.display());
                     queues[4].push(package.clone());
                 }
             }
 
             // Binary linking queue - always process if package has bin files
             if !package.bin_files.is_empty() {
-                log_verbose(&format!(
-                    "Adding {} to bin linking queue",
-                    package.path.display()
-                ));
+                tracing::debug!("Adding {} to bin linking queue", package.path.display());
                 queues[2].push(package.clone());
             }
         }
 
-        log_verbose(&format!(
+        tracing::debug!(
             "Queue creation completed, {} tasks pending",
             queues.iter().map(|q| q.len()).sum::<usize>()
-        ));
+        );
 
         Ok(queues)
     }
@@ -343,13 +324,10 @@ impl PackageService {
                         log_progress(&format!("{} {}", package.fullname, script_name));
                         let result = ScriptService::execute_script(&package, script_name, false)
                             .await
-                            .map_err(|e| {
-                                anyhow::anyhow!(
-                                    "Failed to execute {} script for {} (command: {}): {}",
-                                    script_name,
-                                    package.fullname,
-                                    script,
-                                    e
+                            .with_context(|| {
+                                format!(
+                                    "Failed to execute {} script for {} (command: {})",
+                                    script_name, package.fullname, script
                                 )
                             });
                         PROGRESS_BAR.inc(1);
@@ -372,14 +350,14 @@ impl PackageService {
     async fn execute_binary_linking(queue: &[PackageInfo]) -> Result<()> {
         for package in queue {
             if !package.bin_files.is_empty() {
-                log_verbose(&format!("Linking binary files for {}", package.fullname));
+                tracing::debug!("Linking binary files for {}", package.fullname);
                 for (bin_name, relative_path) in &package.bin_files {
                     let target_path = package.path.join(relative_path);
                     if !tokio::fs::try_exists(&target_path).await? {
-                        log_verbose(&format!(
+                        tracing::debug!(
                             "Binary file {} does not exist, skipping",
                             target_path.display()
-                        ));
+                        );
                         continue;
                     }
 
@@ -391,12 +369,11 @@ impl PackageService {
 
                     ScriptService::ensure_executable(&target_path)
                         .await
-                        .map_err(|e| {
-                            anyhow::anyhow!(
-                                "Failed to ensure binary is executable for {} (path: {}): {}",
+                        .with_context(|| {
+                            format!(
+                                "Failed to ensure binary is executable for {} (path: {})",
                                 package.fullname,
-                                target_path.display(),
-                                e
+                                target_path.display()
                             )
                         })?;
 
@@ -409,10 +386,7 @@ impl PackageService {
                             link_path.display()
                         ))?;
                 }
-                log_verbose(&format!(
-                    "Linking binary files for {} successfully",
-                    package.fullname
-                ));
+                tracing::debug!("Linking binary files for {} successfully", package.fullname);
             }
         }
         Ok(())

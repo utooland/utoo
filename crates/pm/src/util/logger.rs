@@ -1,15 +1,16 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::env;
+use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tokio::fs::OpenOptions;
-use tokio::io::AsyncWriteExt;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use once_cell::sync::{Lazy, OnceCell};
 use owo_colors::OwoColorize;
 
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::{
+    EnvFilter, Layer, Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt,
+};
 
 pub static PROGRESS_BAR: Lazy<ProgressBar> = Lazy::new(|| {
     let pb = ProgressBar::new(0).with_style(
@@ -20,6 +21,70 @@ pub static PROGRESS_BAR: Lazy<ProgressBar> = Lazy::new(|| {
     pb.set_draw_target(indicatif::ProgressDrawTarget::hidden());
     pb
 });
+
+// Global state for tracing
+static LOG_FILE_PATH: OnceCell<PathBuf> = OnceCell::new();
+
+/// Initialize tracing subscriber with console and file output
+/// Returns (log_path, guard) - the guard must be kept alive for the duration of the program
+pub fn init_tracing(verbose: bool) -> Result<(PathBuf, WorkerGuard)> {
+    // 1. Build environment filters
+    // Note: Binary name is "utoo", so module paths start with "utoo::" not "utoo_pm::"
+
+    // Console filter: verbose mode shows debug, otherwise show info+
+    let console_level = if verbose { "debug" } else { "info" };
+    let console_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(format!("utoo={console_level}")));
+
+    // File filter: always capture debug+ for troubleshooting
+    let file_filter = EnvFilter::new("utoo=debug");
+
+    // 2. Create log file
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let log_path = env::temp_dir().join(format!("utoo-{timestamp}.log"));
+    let file_appender =
+        tracing_appender::rolling::never(env::temp_dir(), format!("utoo-{timestamp}.log"));
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+
+    // Store log path for error reporting
+    LOG_FILE_PATH.set(log_path.clone()).ok();
+
+    // 3. Detect if stdout is a TTY (terminal) to decide on colors
+    let is_tty = atty::is(atty::Stream::Stdout);
+
+    // 4. Build subscriber with different filters for console and file
+    Registry::default()
+        .with(
+            fmt::layer()
+                .with_writer(std::io::stdout)
+                .with_target(verbose) // Show module path only in verbose mode
+                .without_time() // No timestamp on console
+                .compact()
+                .with_ansi(is_tty) // Enable colors only when output is to terminal
+                .with_filter(console_filter),
+        )
+        .with(
+            // File layer: always capture debug+ logs for troubleshooting
+            fmt::layer()
+                .with_writer(non_blocking)
+                .with_target(true)
+                .with_line_number(true)
+                .with_thread_ids(true)
+                .with_ansi(false) // Never use colors in log files
+                .with_filter(file_filter),
+        )
+        .init();
+
+    Ok((log_path, guard))
+}
+
+/// Get the path to the current log file
+pub fn get_log_file_path() -> Option<&'static PathBuf> {
+    LOG_FILE_PATH.get()
+}
 
 pub fn finish_progress_bar(msg: &str) {
     // If progress bar length is 0, just hide and return
@@ -35,12 +100,6 @@ pub fn finish_progress_bar(msg: &str) {
     println!("\x1b[0m");
 }
 
-pub fn abort_progress_bar() {
-    PROGRESS_BAR.set_style(ProgressStyle::with_template("").unwrap());
-    PROGRESS_BAR.finish_with_message("aborted".to_string());
-    PROGRESS_BAR.set_draw_target(indicatif::ProgressDrawTarget::hidden());
-}
-
 pub fn start_progress_bar() {
     PROGRESS_BAR.reset();
     PROGRESS_BAR.set_style(
@@ -52,111 +111,8 @@ pub fn start_progress_bar() {
     PROGRESS_BAR.enable_steady_tick(Duration::from_millis(100));
 }
 
-// add a global variable to store the verbose mode
-static VERBOSE: AtomicBool = AtomicBool::new(false);
-
-pub fn set_verbose(verbose: bool) {
-    VERBOSE.store(verbose, Ordering::Relaxed);
-    log_verbose("verbose mode enabled");
-}
-
-// temp log in memory
-static VERBOSE_LOGS: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::new()));
-
-use crate::util::timer::Timer;
-
-pub fn log_verbose(msg: &str) {
-    if VERBOSE.load(Ordering::Relaxed) {
-        println!("🔍 {msg}");
-    }
-    if let Ok(mut logs) = VERBOSE_LOGS.lock() {
-        logs.push(format!("[{}][VERBOSE] {}", Timer::format_datetime(), msg));
-    }
-}
-
-pub fn get_verbose_logs() -> Vec<String> {
-    VERBOSE_LOGS
-        .lock()
-        .map(|logs| logs.clone())
-        .unwrap_or_default()
-}
-
-pub fn log_warning(text: &str) {
-    if VERBOSE.load(Ordering::Relaxed) {
-        PROGRESS_BAR.suspend(|| println!("[WARN] {text}"));
-    } else {
-        PROGRESS_BAR.suspend(|| println!("{} {}", " WARN ".on_yellow(), text));
-    }
-    if let Ok(mut logs) = VERBOSE_LOGS.lock() {
-        logs.push(format!("[{}][WARN] {}", Timer::format_datetime(), text));
-    }
-}
-
-pub fn log_error(text: &str) {
-    if VERBOSE.load(Ordering::Relaxed) {
-        PROGRESS_BAR.suspend(|| println!("[ERROR] {text}"));
-    } else {
-        PROGRESS_BAR.suspend(|| println!("{} {}", " ERROR ".on_red(), text));
-    }
-    if let Ok(mut logs) = VERBOSE_LOGS.lock() {
-        logs.push(format!("[{}][ERROR] {}", Timer::format_datetime(), text));
-    }
-}
-
-pub fn log_info(text: &str) {
-    if VERBOSE.load(Ordering::Relaxed) {
-        PROGRESS_BAR.suspend(|| println!("[INFO] {text}"));
-    }
-    if let Ok(mut logs) = VERBOSE_LOGS.lock() {
-        logs.push(format!("[{}][INFO] {}", Timer::format_datetime(), text));
-    }
-}
-pub fn log_command(cmd: &str, args: &str) {
-    if let Ok(mut logs) = VERBOSE_LOGS.lock() {
-        logs.push(format!(
-            "[{}][CMD] {} {}",
-            Timer::format_datetime(),
-            cmd,
-            args
-        ));
-    }
-    println!("> {cmd} {args}");
-    println!();
-}
-
 pub fn log_progress(text: &str) {
     PROGRESS_BAR.set_message(text.to_string());
-    // log_verbose(text);
-}
-
-pub async fn write_verbose_logs_to_file() -> Result<String> {
-    abort_progress_bar();
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    let log_file = env::temp_dir()
-        .join(format!("utoo-{timestamp}.log"))
-        .to_string_lossy()
-        .to_string();
-
-    let logs = get_verbose_logs();
-    if !logs.is_empty() {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&log_file)
-            .await
-            .context("Failed to open log file")?;
-
-        file.write_all(logs.join("\n").as_bytes())
-            .await
-            .context("Failed to write logs to file")?;
-
-        log_error(&format!("Verbose logs have been saved to {log_file}"));
-    }
-    Ok(log_file)
 }
 
 // Global timer for log_time/log_time_end
@@ -204,34 +160,6 @@ pub fn log_time_end(msg: &str) {
 mod tests {
     use super::*;
     use std::time::Duration;
-
-    #[test]
-    fn test_set_verbose_true() {
-        set_verbose(true);
-        assert!(VERBOSE.load(Ordering::Relaxed));
-    }
-
-    #[test]
-    fn test_set_verbose_false() {
-        set_verbose(false);
-        assert!(!VERBOSE.load(Ordering::Relaxed));
-    }
-
-    #[tokio::test]
-    async fn test_write_verbose_logs_to_file() -> Result<()> {
-        set_verbose(true);
-        log_verbose("Test verbose message");
-        log_warning("Test warning message");
-        log_error("Test error message");
-        log_info("Test info message");
-
-        let log_file = write_verbose_logs_to_file().await?;
-        assert!(std::path::Path::new(&log_file).exists());
-
-        // Clean up
-        tokio::fs::remove_file(log_file).await?;
-        Ok(())
-    }
 
     #[test]
     fn test_format_elapsed_time() {

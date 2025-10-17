@@ -43,7 +43,7 @@ thiserror           = "1.0"
 tokio               = { version = "1.47.1" }
 toml                = "0.8"
 tracing             = "0.1.41"
-tracing-subscriber  = "0.3.19"
+tracing-subscriber  = { version = "0.3.19", features = ["env-filter", "fmt"] }
 
 # SWC crates
 modularize_imports = "0.98.0"

@@ -3,10 +3,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 use crate::util::json::load_package_json_from_path;
-use crate::{
-    service::script::ScriptService,
-    util::{linker::link, logger::log_verbose},
-};
+use crate::{service::script::ScriptService, util::linker::link};
 
 #[derive(Debug, Default, Clone)]
 pub struct Scripts {
@@ -146,14 +143,12 @@ impl PackageInfo {
             let target_path = self.path.join(relative_path);
             let link_path = target_bin_dir.join(bin_name);
 
-            log_verbose(&format!(
-                "Linking global binary: {bin_name} -> {relative_path}"
-            ));
+            tracing::debug!("Linking global binary: {bin_name} -> {relative_path}");
 
             // Ensure target file is executable
             ScriptService::ensure_executable(&target_path)
                 .await
-                .map_err(|e| anyhow::anyhow!("Failed to ensure binary is executable: {e}"))?;
+                .context("Failed to ensure binary is executable")?;
 
             // Create symbolic link
             link(&target_path, &link_path)
@@ -173,7 +168,7 @@ impl PackageInfo {
             if !current_path.contains(&global_bin_str) {
                 let new_path = format!("{global_bin_str}:{current_path}");
                 unsafe { env::set_var("PATH", new_path) };
-                log_verbose("Updated PATH environment variable");
+                tracing::debug!("Updated PATH environment variable");
             }
         }
 

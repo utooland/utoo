@@ -1,8 +1,6 @@
 use deno_semver::{Version, VersionReq};
 use tokio::time::Instant;
 
-use crate::util::logger::log_verbose;
-
 // check npm version, with npm: prefix & tag logic
 pub fn matches(range: &str, version: &str) -> bool {
     let range = if range.starts_with("npm:") {
@@ -50,7 +48,7 @@ pub fn max_satisfying<'a>(versions: impl Iterator<Item = &'a str>, range: &str) 
             let res = versions
                 .filter_map(|v| Version::parse_from_npm(v).ok())
                 .max();
-            log_verbose(&format!("* max_satisfying took {:?}", start.elapsed()));
+            tracing::debug!("* max_satisfying took {:?}", start.elapsed());
             res
         }
         _ => {
@@ -58,7 +56,7 @@ pub fn max_satisfying<'a>(versions: impl Iterator<Item = &'a str>, range: &str) 
                 .filter_map(|v| Version::parse_from_npm(v).ok())
                 .filter(|v| req.matches(v))
                 .max();
-            log_verbose(&format!("max_satisfying took {:?}", start.elapsed()));
+            tracing::debug!("max_satisfying took {:?}", start.elapsed());
             res
         }
     }

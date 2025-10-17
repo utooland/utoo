@@ -3,7 +3,6 @@ use crate::helper::global_bin::get_global_package_dir;
 use crate::helper::workspace::update_cwd_to_project;
 use crate::model::package::PackageInfo;
 use crate::util::linker::link;
-use crate::util::logger::log_verbose;
 use anyhow::{Context, Result};
 
 /// Link current package to global (equivalent to npm link without args)
@@ -24,15 +23,13 @@ pub async fn link_current_to_global(prefix: Option<&str>) -> Result<String> {
     // Install dependencies
     install(false, &project_path)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to prepare dependencies for package to link: {e}"))?;
+        .context("Failed to prepare dependencies for package to link")?;
 
     let global_package_path = get_global_package_dir(prefix)?.join(&package_info.name);
     // link local project to global package
     link(&project_path, &global_package_path)
         .await
-        .map_err(|e| {
-            anyhow::anyhow!("Failed to link {project_path:?} => {global_package_path:?}: {e}")
-        })?;
+        .with_context(|| format!("Failed to link {project_path:?} => {global_package_path:?}"))?;
 
     // If the package has binary files, also link them to global bin directory
     if package_info.has_bin_files() {
@@ -72,22 +69,22 @@ pub async fn link_global_to_local(package_name: &str, prefix: Option<&str>) -> R
     let local_link_path = project_path.join("node_modules/").join(package_name);
     link(&global_package_path, &local_link_path)
         .await
-        .map_err(|e| {
-            anyhow::anyhow!("Failed to link {global_package_path:?} => {local_link_path:?}: {e}")
+        .with_context(|| {
+            format!("Failed to link {global_package_path:?} => {local_link_path:?}")
         })?;
 
-    log_verbose(&format!(
+    tracing::debug!(
         "link global package to local: {} -> {}",
         global_package_path.display(),
         project_path.display()
-    ));
+    );
 
     // If the package has binary files, also link them to target project bin directory
     if package_info.has_bin_files() {
-        log_verbose(&format!(
+        tracing::debug!(
             "Linking binary files to project bin directory: {}",
             &package_info.name
-        ));
+        );
         let bin_dir = project_path.join("node_modules/.bin");
         package_info
             .link_to_target(&bin_dir)

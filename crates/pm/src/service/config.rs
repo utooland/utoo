@@ -1,6 +1,5 @@
 use crate::constants::cmd;
 use crate::util::config::{Config, ConfigResult};
-use crate::util::logger::log_verbose;
 use anyhow::anyhow;
 use colored::*;
 use std::cmp::max;
@@ -167,7 +166,7 @@ impl ConfigService {
     }
 
     pub fn execute_command(&self, command: &str, args: &[String]) -> ConfigResult<()> {
-        log_verbose(&format!("Executing command: {command} with args: {args:?}"));
+        tracing::debug!("Executing command: {command} with args: {args:?}");
 
         let cmd_alias = self.config.get(&format!("{command}.cmd"))?;
         let cmd_string = cmd_alias.as_deref().unwrap_or(command);

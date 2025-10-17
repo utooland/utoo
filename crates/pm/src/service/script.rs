@@ -1,5 +1,4 @@
 use crate::model::package::PackageInfo;
-use crate::util::logger::log_verbose;
 use anyhow::{Context, Result};
 use std::env;
 use std::os::unix::fs::PermissionsExt;
@@ -30,7 +29,7 @@ impl ScriptService {
         let has_node_gyp = Self::has_node_gyp_in_path();
 
         if !has_node_gyp {
-            log_verbose("node-gyp not found in PATH, installing globally");
+            tracing::debug!("node-gyp not found in PATH, installing globally");
             // Install node-gyp globally, ignore stdout but keep stderr
             let status = Command::new("ut")
                 .args(["i", "-g", "node-gyp"])
@@ -39,7 +38,7 @@ impl ScriptService {
                 .status()
                 .context("Failed to install node-gyp globally")?;
             if !status.success() {
-                log_verbose(&format!("Failed to install node-gyp globally: {status}"));
+                tracing::debug!("Failed to install node-gyp globally: {status}");
                 anyhow::bail!("Failed to install node-gyp globally");
             }
             return Ok(true);
@@ -60,12 +59,18 @@ impl ScriptService {
         let script = package.scripts.get_script(script_type);
 
         if let Some(script) = script {
-            log_verbose(&format!(
+            tracing::debug!(
                 "Executing {} script for {}: {}",
                 script_type,
                 package.path.display(),
                 script
-            ));
+            );
+
+            // Print command if show_output is true (for project hooks)
+            if show_output {
+                println!("> {script}");
+                println!();
+            }
 
             if Self::is_node_gyp_pkg(package) {
                 Self::ensure_node_gyp().await?;
@@ -92,7 +97,8 @@ impl ScriptService {
                     package.path.join("package.json").display().to_string(),
                 )
                 .env("npm_config_prefix", "")
-                .env("npm_config_global", "false");
+                .env("npm_config_global", "false")
+                .env("FORCE_COLOR", "1"); // Enable color output for npm/yarn/etc
 
             if let Some(envs) = get_envs().await {
                 for (key, value) in envs {
@@ -101,30 +107,52 @@ impl ScriptService {
                     }
                 }
             }
-            log_verbose(&format!("Executing command: {cmd:?}"));
+            tracing::debug!("Executing command: {cmd:?}");
 
-            let output = tokio::process::Command::from(cmd)
-                .output()
-                .await
-                .context("Failed to execute script")?;
+            if show_output {
+                // Use inherit for stdio to preserve colors when showing output
+                cmd.stdin(std::process::Stdio::inherit())
+                    .stdout(std::process::Stdio::inherit())
+                    .stderr(std::process::Stdio::inherit());
 
-            if show_output && !output.stdout.is_empty() {
-                println!("{}", String::from_utf8_lossy(&output.stdout));
-            }
+                let status = tokio::process::Command::from(cmd)
+                    .status()
+                    .await
+                    .context("Failed to execute script")?;
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let exit_code = output.status.code().unwrap_or(-1);
-                anyhow::bail!(
-                    "Script execution failed for {} in {}:\nCommand: {}\nExit code: {}\nStderr: {}\nStdout: {}",
-                    script_type,
-                    package.path.display(),
-                    script,
-                    exit_code,
-                    stderr,
-                    stdout
-                );
+                if !status.success() {
+                    anyhow::bail!(
+                        "Script execution failed for {} in {}: exit code {}",
+                        script_type,
+                        package.path.display(),
+                        status.code().unwrap_or(-1)
+                    );
+                }
+            } else {
+                // Use piped stdio to capture output for error messages
+                let output = tokio::process::Command::from(cmd)
+                    .output()
+                    .await
+                    .context("Failed to execute script")?;
+
+                if !output.status.success() {
+                    // Print captured output when script fails
+                    if !output.stdout.is_empty() {
+                        println!("{}", String::from_utf8_lossy(&output.stdout));
+                    }
+                    if !output.stderr.is_empty() {
+                        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+                    }
+
+                    let exit_code = output.status.code().unwrap_or(-1);
+                    anyhow::bail!(
+                        "Script execution failed for {} in {}:\nCommand: {}\nExit code: {}",
+                        script_type,
+                        package.path.display(),
+                        script,
+                        exit_code
+                    );
+                }
             }
         }
 
@@ -216,11 +244,11 @@ impl ScriptService {
         script_content: &str,
         script_args: Vec<&str>,
     ) -> Result<()> {
-        log_verbose(&format!(
+        tracing::debug!(
             "Executing custom script for {}: {}",
             package.path.display(),
             script_name
-        ));
+        );
 
         let bin_paths = Self::collect_bin_paths(package).await?;
         let env_path = Self::build_path_env(&bin_paths);
@@ -249,6 +277,7 @@ impl ScriptService {
             )
             .env("npm_config_prefix", "")
             .env("npm_config_global", "false")
+            .env("FORCE_COLOR", "1") // Enable color output for npm/yarn/etc
             .stdin(std::process::Stdio::inherit())
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit());

@@ -21,9 +21,7 @@ use crate::util::cache::get_cache_dir;
 use crate::util::cloner::clone;
 use crate::util::downloader::download;
 use crate::util::linker::link;
-use crate::util::logger::{
-    PROGRESS_BAR, finish_progress_bar, log_info, log_progress, log_verbose, start_progress_bar,
-};
+use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
 use crate::util::save_type::{PackageAction, SaveType};
 
 use super::binary::update_package_binary;
@@ -55,13 +53,9 @@ async fn clean_node_modules_dir(
 
 /// Clean up a symlink
 async fn clean_symlink(path: &Path) -> Result<()> {
-    log_verbose(&format!("Removing symlink: {}", path.display()));
+    tracing::debug!("Removing symlink: {}", path.display());
     if let Err(e) = tokio::fs::remove_file(path).await {
-        log_verbose(&format!(
-            "Failed to remove symlink {}: {}",
-            path.display(),
-            e
-        ));
+        tracing::debug!("Failed to remove symlink {}: {}", path.display(), e);
     }
     Ok(())
 }
@@ -86,16 +80,13 @@ async fn clean_scoped_package(path: &Path) -> Result<()> {
         while let Ok(Some(scope_entry)) = scope_entries.next_entry().await {
             let scope_path = scope_entry.path();
             if scope_path.is_symlink() {
-                log_verbose(&format!(
-                    "Removing scoped symlink: {}",
-                    scope_path.display()
-                ));
+                tracing::debug!("Removing scoped symlink: {}", scope_path.display());
                 if let Err(e) = tokio::fs::remove_file(&scope_path).await {
-                    log_verbose(&format!(
+                    tracing::debug!(
                         "Failed to remove scoped symlink {}: {}",
                         scope_path.display(),
                         e
-                    ));
+                    );
                 }
             }
         }
@@ -107,13 +98,9 @@ async fn clean_scoped_package(path: &Path) -> Result<()> {
 async fn clean_legacy_npminstall_package(path: &Path, name: &str) -> Result<()> {
     let at_count = name.matches('@').count();
     if name.starts_with('_') && (at_count == 2 || at_count == 4) {
-        log_verbose(&format!("Removing legacy package: {}", path.display()));
+        tracing::debug!("Removing legacy package: {}", path.display());
         if let Err(e) = tokio::fs::remove_dir_all(path).await {
-            log_verbose(&format!(
-                "Failed to remove legacy package {}: {}",
-                path.display(),
-                e
-            ));
+            tracing::debug!("Failed to remove legacy package {}: {}", path.display(), e);
         }
     }
     Ok(())
@@ -155,9 +142,9 @@ async fn clean_unused_packages(
                             )
                         })?;
                         if !valid_packages.contains(pkg_path.to_string_lossy().as_ref()) {
-                            log_verbose(&format!("Cleaning unused package: {pkg_name}"));
+                            tracing::debug!("Cleaning unused package: {pkg_name}");
                             if let Err(e) = tokio::fs::remove_dir_all(pkg_dir).await {
-                                log_verbose(&format!("Failed to remove {pkg_name}: {e}"));
+                                tracing::debug!("Failed to remove {pkg_name}: {e}");
                             }
                         }
                     }
@@ -183,7 +170,7 @@ async fn clean_deps(groups: &HashMap<usize, Vec<(String, Package)>>, cwd: &Path)
         }
     }
 
-    log_verbose(&format!("Valid packages: {valid_packages:?}"));
+    tracing::debug!("Valid packages: {valid_packages:?}");
 
     let mut node_modules_dirs = vec![cwd.join("node_modules")];
 
@@ -192,10 +179,10 @@ async fn clean_deps(groups: &HashMap<usize, Vec<(String, Package)>>, cwd: &Path)
         let workspace_node_modules = path.join("node_modules");
         if tokio::fs::try_exists(&workspace_node_modules).await? {
             node_modules_dirs.push(workspace_node_modules.clone());
-            log_verbose(&format!(
+            tracing::debug!(
                 "add workspace node_modules: {:?}",
                 workspace_node_modules.display()
-            ));
+            );
         }
     }
 
@@ -230,14 +217,14 @@ pub async fn install_packages(
                         let link_name = extract_package_name(&path);
                         if link_name.is_empty() {
                             PROGRESS_BAR.inc(1);
-                            log_verbose(&format!("Link skipped due to empty package name: {path}"));
+                            tracing::debug!("Link skipped due to empty package name: {path}");
                             continue;
                         }
-                        log_verbose(&format!("Attempting to link from {resolved} to {path}"));
+                        tracing::debug!("Attempting to link from {resolved} to {path}");
                         if let Err(e) = link(Path::new(&resolved), Path::new(&path)).await {
-                            log_verbose(&format!(
+                            tracing::debug!(
                                 "Link failed: source={resolved}, target={path}, error={e}"
-                            ));
+                            );
                             return Err(anyhow::anyhow!("Link failed: {e}"));
                         }
                         PROGRESS_BAR.inc(1);
@@ -247,13 +234,13 @@ pub async fn install_packages(
                     // skip when cpu or os is not compatible
                     if package.cpu.is_some() && !is_cpu_compatible(&package.cpu.unwrap()) {
                         PROGRESS_BAR.inc(1);
-                        log_verbose(&format!("cpu skipped: {}", &path));
+                        tracing::debug!("cpu skipped: {}", &path);
                         continue;
                     }
 
                     if package.os.is_some() && !is_os_compatible(&package.os.unwrap()) {
                         PROGRESS_BAR.inc(1);
-                        log_verbose(&format!("os skipped: {}", &path));
+                        tracing::debug!("os skipped: {}", &path);
                         continue;
                     }
 
@@ -268,33 +255,33 @@ pub async fn install_packages(
                     let task = tokio::spawn(async move {
                         let _permit = semaphore.acquire().await.unwrap();
                         if should_resolve {
-                            log_verbose(&format!("Downloading {path} to {name}"));
+                            tracing::debug!("Downloading {path} to {name}");
                             match download(&resolved, &cache_path).await {
                                 Ok(_) => {
                                     log_progress(&format!("{name} downloaded"));
                                     if package.has_install_script.is_some() {
-                                        log_verbose(&format!("{name} has install script"));
+                                        tracing::debug!("{name} has install script");
                                         let has_install_script_flag_path =
                                             cache_path.join("_hasInstallScript");
                                         tokio::fs::write(has_install_script_flag_path, "").await?;
                                     }
                                 }
                                 Err(e) => {
-                                    log_verbose(&format!(
+                                    tracing::debug!(
                                         "Download failed: source={}, target={}, error={}",
                                         resolved,
                                         cache_path.display(),
                                         e
-                                    ));
+                                    );
                                     return Err(anyhow::anyhow!("{name} download failed: {e}"));
                                 }
                             }
                         }
 
-                        log_verbose(&format!("{name} clone"));
+                        tracing::debug!("{name} clone");
                         match clone(&cache_path, &cwd_clone.join(&path), true).await {
                             Ok(_) => {
-                                log_verbose(&format!("{name} resolved"));
+                                tracing::debug!("{name} resolved");
                                 PROGRESS_BAR.inc(1);
                                 log_progress(&format!("{name} resolved"));
                                 update_package_binary(&cwd_clone.join(&path), &name).await?;
@@ -311,7 +298,7 @@ pub async fn install_packages(
                     tasks.push(task);
                 } else {
                     PROGRESS_BAR.inc(1);
-                    log_verbose(&format!("{path} no resolved info skipped"));
+                    tracing::debug!("{path} no resolved info skipped");
                 }
             }
 
@@ -319,11 +306,11 @@ pub async fn install_packages(
                 match task.await {
                     Ok(Ok(())) => continue,
                     Ok(Err(e)) => {
-                        log_verbose(&format!("Task execution error: {e}"));
+                        tracing::debug!("Task execution error: {e}");
                         return Err(anyhow::anyhow!("Error during installation: {e}"));
                     }
                     Err(e) => {
-                        log_verbose(&format!("Task join error: {e}"));
+                        tracing::debug!("Task join error: {e}");
                         return Err(anyhow::anyhow!("Task execution failed: {e}"));
                     }
                 }
@@ -344,10 +331,13 @@ impl InstallService {
         ignore_scripts: bool,
         save_type: SaveType,
     ) -> Result<()> {
-        log_verbose(&format!(
+        tracing::debug!(
             "update packages: {:?} {:?} {:?} {:?}",
-            action, specs, &workspace, ignore_scripts
-        ));
+            action,
+            specs,
+            &workspace,
+            ignore_scripts
+        );
 
         if specs.is_empty() {
             return Err(anyhow::anyhow!("No package specifications provided"));
@@ -391,29 +381,16 @@ impl InstallService {
         }
 
         // Set concurrent limit for package installation
-        log_verbose(&format!("Setting concurrent limit to {CONCURRENT_LIMIT}"));
+        tracing::debug!("Setting concurrent limit to {CONCURRENT_LIMIT}");
         let semaphore = Arc::new(Semaphore::new(CONCURRENT_LIMIT));
 
         install_packages(&groups, &cache_dir, root_path, semaphore)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to install packages: {e}"))?;
+            .context("Failed to install packages")?;
 
         finish_progress_bar("node_modules cloned");
 
-        // Execute rebuild operations based on ignore_scripts parameter
-        if !ignore_scripts {
-            log_info(
-                "Starting to execute dependency hook scripts, you can add --ignore-scripts to skip",
-            );
-            RebuildService::rebuild(&package_lock, root_path, false).await?;
-            log_info("💫 All dependencies installed successfully");
-        } else {
-            log_info("Processing binary files...");
-            RebuildService::rebuild(&package_lock, root_path, true).await?;
-            log_info(
-                "💫 All dependencies installed successfully (scripts skipped, binaries linked)",
-            );
-        }
+        RebuildService::rebuild(&package_lock, root_path, ignore_scripts).await?;
         Ok(())
     }
 
@@ -421,14 +398,14 @@ impl InstallService {
         // Prepare global package directory and package.json
         let package_path = prepare_global_package_json(npm_spec, prefix)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to prepare global package.json: {e}"))?;
+            .context("Failed to prepare global package.json")?;
 
-        log_verbose(&format!("Installing global package: {npm_spec}"));
+        tracing::debug!("Installing global package: {npm_spec}");
 
         // Install dependencies
         Self::install(false, &package_path)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to install global package dependencies: {e}"))?;
+            .context("Failed to install global package dependencies")?;
 
         // Create package info from path
         let package_info = PackageInfo::from_path(&package_path)
@@ -440,10 +417,10 @@ impl InstallService {
             get_global_bin_dir(prefix).context("Failed to get global bin directory")?;
 
         // Link binary files to global
-        log_verbose(&format!(
+        tracing::debug!(
             "Linking binary files to global... {}",
             target_bin_dir.display()
-        ));
+        );
         package_info
             .link_to_global(&target_bin_dir)
             .await

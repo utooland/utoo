@@ -6,7 +6,6 @@ use crate::model::package::{PackageInfo, Scripts};
 use crate::service::script::ScriptService;
 use crate::service::workspace::WorkspaceService;
 use crate::util::json::load_package_json_from_path;
-use crate::util::logger::{log_command, log_info};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use tokio::task::JoinSet;
@@ -46,12 +45,12 @@ pub async fn run_script(
             workspace_name,
         )
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to find workspace path: {e}"))?;
-        log_info(&format!(
+        .context("Failed to find workspace path")?;
+        tracing::debug!(
             "Using workspace: {} at path: {}",
             workspace_name,
             workspace_dir.display()
-        ));
+        );
         load_package_json_from_path(&workspace_dir).await?
     } else {
         load_package_json_from_path(&updated_cwd).await?
@@ -67,7 +66,7 @@ pub async fn run_script(
                 workspace_name,
             )
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to find workspace path: {e}"))?
+            .context("Failed to find workspace path")?
         } else {
             std::env::current_dir().context("Failed to get current directory")?
         },
@@ -93,10 +92,12 @@ pub async fn run_script(
     // Execute pre script if exists
     let pre_script_name = format!("pre{script_name}");
     if let Some(Value::String(pre_script)) = scripts.get(&pre_script_name) {
-        log_command(pre_script, "");
+        tracing::debug!(cmd = %pre_script, args = "", "Executing command");
+        println!("> {pre_script} ");
+        println!();
         ScriptService::execute_custom_script(&package, &pre_script_name, pre_script)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to execute pre script {pre_script_name}: {e}"))?;
+            .with_context(|| format!("Failed to execute pre script {pre_script_name}"))?;
     }
 
     // Execute main script
@@ -107,7 +108,10 @@ pub async fn run_script(
     };
 
     let script_args = script_args.unwrap_or_default();
-    log_command(script_content, &script_args.join(" "));
+    let script_args_str = script_args.join(" ");
+    tracing::debug!(cmd = %script_content, args = %script_args_str, "Executing command");
+    println!("> {script_content} {script_args_str}");
+    println!();
     ScriptService::execute_custom_script_with_args(
         &package,
         script_name,
@@ -115,17 +119,17 @@ pub async fn run_script(
         script_args,
     )
     .await
-    .map_err(|e| anyhow::anyhow!("Failed to execute script {script_name}: {e}"))?;
+    .with_context(|| format!("Failed to execute script {script_name}"))?;
 
     // Execute post script if exists
     let post_script_name = format!("post{script_name}");
     if let Some(Value::String(post_script)) = scripts.get(&post_script_name) {
-        log_command(post_script, "");
+        tracing::debug!(cmd = %post_script, args = "", "Executing command");
+        println!("> {post_script} ");
+        println!();
         ScriptService::execute_custom_script(&package, &post_script_name, post_script)
             .await
-            .map_err(|e| {
-                anyhow::anyhow!("Failed to execute post script {post_script_name}: {e}")
-            })?;
+            .with_context(|| format!("Failed to execute post script {post_script_name}"))?;
     }
 
     Ok(())
@@ -137,7 +141,7 @@ async fn need_run(cwd: &Path, workspace_name: &str, script_name: &str) -> Result
     let workspace_dir = match find_workspace_path(cwd, workspace_name).await {
         Ok(path) => path,
         Err(_) => {
-            log_info(&format!("Workspace '{workspace_name}' not found, skipping"));
+            tracing::debug!("Workspace '{workspace_name}' not found, skipping");
             return Ok(false);
         }
     };
@@ -146,9 +150,7 @@ async fn need_run(cwd: &Path, workspace_name: &str, script_name: &str) -> Result
     let pkg = match load_package_json_from_path(&workspace_dir).await {
         Ok(pkg) => pkg,
         Err(_) => {
-            log_info(&format!(
-                "No package.json found in workspace '{workspace_name}', skipping"
-            ));
+            tracing::debug!("No package.json found in workspace '{workspace_name}', skipping");
             return Ok(false);
         }
     };
@@ -157,15 +159,13 @@ async fn need_run(cwd: &Path, workspace_name: &str, script_name: &str) -> Result
     if let Some(Value::Object(scripts)) = pkg.get("scripts") {
         let has_script = scripts.contains_key(script_name);
         if !has_script {
-            log_info(&format!(
+            tracing::debug!(
                 "Script '{script_name}' not found in workspace '{workspace_name}', skipping"
-            ));
+            );
         }
         Ok(has_script)
     } else {
-        log_info(&format!(
-            "No scripts section found in workspace '{workspace_name}', skipping"
-        ));
+        tracing::debug!("No scripts section found in workspace '{workspace_name}', skipping");
         Ok(false)
     }
 }
@@ -178,19 +178,17 @@ pub async fn run_script_in_all_workspaces(
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
     let updated_cwd = update_cwd_to_project(&cwd).await?;
 
-    log_info(&format!(
-        "Getting workspace topology for script: {script_name}"
-    ));
+    tracing::debug!("Getting workspace topology for script: {script_name}");
 
     // Get topological ordering of workspaces
     let topology = WorkspaceService::get_workspace_topology(&updated_cwd).await?;
 
     if topology.is_empty() {
-        log_info("No workspaces found or no valid topology");
+        tracing::debug!("No workspaces found or no valid topology");
         return Ok(());
     }
 
-    log_info(&format!("Found {} topological layers", topology.len()));
+    tracing::debug!("Found {} topological layers", topology.len());
 
     // Execute scripts layer by layer (dependencies first)
     for (layer_index, layer) in topology.iter().enumerate() {
@@ -207,20 +205,20 @@ pub async fn run_script_in_all_workspaces(
         }
 
         if workspaces_to_run.is_empty() {
-            log_info(&format!(
+            tracing::debug!(
                 "Layer {}: No workspaces have script '{}', skipping layer",
                 layer_index + 1,
                 script_name
-            ));
+            );
             continue;
         }
 
-        log_info(&format!(
+        tracing::debug!(
             "Executing layer {}: {} workspaces (out of {} total)",
             layer_index + 1,
             workspaces_to_run.len(),
             layer.len()
-        ));
+        );
 
         // Create a JoinSet for concurrent execution within the same layer
         let mut join_set = JoinSet::new();
@@ -231,24 +229,24 @@ pub async fn run_script_in_all_workspaces(
 
             // Spawn concurrent task for each workspace in the layer
             join_set.spawn(async move {
-                log_info(&format!(
+                tracing::debug!(
                     "Running script '{script_name}' in workspace '{workspace_name}'"
-                ));
+                );
 
                 let script_args_refs = script_args
                     .as_ref()
                     .map(|args| args.iter().map(|s| s.as_str()).collect::<Vec<&str>>());
                 match run_script(&script_name, Some(&workspace_name), script_args_refs).await {
                     Ok(()) => {
-                        log_info(&format!(
+                        tracing::debug!(
                             "Successfully completed script '{script_name}' in workspace '{workspace_name}'"
-                        ));
+                        );
                         Ok(workspace_name)
                     }
                     Err(e) => {
-                        log_info(&format!(
+                        tracing::debug!(
                             "Failed to run script '{script_name}' in workspace '{workspace_name}': {e}"
-                        ));
+                        );
                         Err((workspace_name, e))
                     }
                 }
@@ -293,12 +291,10 @@ pub async fn run_script_in_all_workspaces(
             ));
         }
 
-        log_info(&format!("Layer {} completed successfully", layer_index + 1));
+        tracing::debug!("Layer {} completed successfully", layer_index + 1);
     }
 
-    log_info(&format!(
-        "Successfully completed script '{script_name}' in all workspaces"
-    ));
+    tracing::debug!("Successfully completed script '{script_name}' in all workspaces");
     Ok(())
 }
 

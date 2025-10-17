@@ -1,15 +1,14 @@
 use crate::service::dependency_graph::DependencyGraphService;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use petgraph::graph::NodeIndex;
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::model::package_lock::PackageLock;
-use crate::util::logger::{log_info, log_verbose};
 
 /// List dependency information, similar to npm list
 pub async fn list_dependencies(cwd: &Path, package_name: &str) -> Result<()> {
-    log_verbose("Starting dependency listing...");
+    tracing::debug!("Starting dependency listing...");
 
     // Find package-lock.json file
     let lock_file_path = cwd.join("package-lock.json");
@@ -20,15 +19,15 @@ pub async fn list_dependencies(cwd: &Path, package_name: &str) -> Result<()> {
     }
 
     // Load package-lock.json
-    log_verbose("Loading package-lock.json...");
+    tracing::debug!("Loading package-lock.json...");
     let package_lock = PackageLock::from_lock_file(&lock_file_path)
-        .map_err(|e| anyhow::anyhow!("Failed to parse package-lock.json: {e}"))?;
+        .context("Failed to parse package-lock.json")?;
 
     // Build dependency graph
-    log_verbose("Building dependency graph...");
+    tracing::debug!("Building dependency graph...");
     let graph = package_lock
         .build_dependency_graph()
-        .map_err(|e| anyhow::anyhow!("Failed to build_dependency_graph {e}"))?;
+        .context("Failed to build dependency graph")?;
 
     show_package_dependencies(&graph, package_name)?;
 
@@ -39,7 +38,7 @@ pub async fn list_dependencies(cwd: &Path, package_name: &str) -> Result<()> {
 fn show_package_dependencies(graph: &DependencyGraphService, package_name: &str) -> Result<()> {
     let node_paths = graph.find_paths_to_root(package_name)?;
     if node_paths.is_empty() {
-        log_info("No paths to root found");
+        tracing::debug!("No paths to root found");
         return Ok(());
     }
     let tree = build_dep_tree(&node_paths);
