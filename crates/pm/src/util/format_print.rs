@@ -1,20 +1,17 @@
-use crate::util::logger::log_verbose;
 use term_size;
 
 pub fn print_grid(items: Vec<String>) {
     let terminal_width = term_size::dimensions().map(|(w, _)| w).unwrap_or(80); // default width if unable to get terminal size
-    log_verbose(&format!("Terminal size: {terminal_width}"));
+    tracing::debug!("Terminal size: {terminal_width}");
 
     let max_len = items.iter().map(|s| s.len()).max().unwrap_or(1);
-    log_verbose(&format!("Max item length: {max_len}"));
+    tracing::debug!("Max item length: {max_len}");
 
     let cols = find_optimal_columns(terminal_width, max_len);
     let rows = items.len().div_ceil(cols);
     let col_len = terminal_width / cols;
 
-    log_verbose(&format!(
-        "Using {cols} columns, {rows} rows, column length {col_len}"
-    ));
+    tracing::debug!("Using {cols} columns, {rows} rows, column length {col_len}");
 
     for row in 0..rows {
         let line = build_row_line(&items, row, cols, col_len);

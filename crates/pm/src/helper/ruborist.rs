@@ -12,9 +12,7 @@ use crate::helper::workspace::find_workspaces;
 use crate::model::node::{Edge, EdgeType, Node};
 use crate::util::config::get_legacy_peer_deps;
 use crate::util::json::load_package_json_from_path;
-use crate::util::logger::{
-    PROGRESS_BAR, finish_progress_bar, log_progress, log_verbose, start_progress_bar,
-};
+use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
 use crate::util::node_search::get_node_from_root_by_path;
 use crate::util::registry::{ResolvedPackage, load_cache, resolve_dependency, store_cache};
 use crate::util::semver::matches;
@@ -31,18 +29,14 @@ static CONCURRENCY_LIMITER: Lazy<Arc<Semaphore>> = Lazy::new(|| Arc::new(Semapho
 
 pub async fn build_deps(root: Arc<Node>) -> Result<()> {
     let legacy_peer_deps = get_legacy_peer_deps().await;
-    log_verbose(&format!(
-        "going to build deps for {root}, legacy_peer_deps: {legacy_peer_deps}"
-    ));
+    tracing::debug!("going to build deps for {root}, legacy_peer_deps: {legacy_peer_deps}");
     let current_level = Arc::new(Mutex::new(vec![root.clone()]));
     // Track processed workspace nodes to prevent cycles
     let processed_workspace_nodes = Arc::new(Mutex::new(std::collections::HashSet::new()));
 
     while !current_level.lock().unwrap().is_empty() {
         let level_count = current_level.lock().unwrap().len();
-        log_verbose(&format!(
-            "Starting new dependency level with {level_count} nodes"
-        ));
+        tracing::debug!("Starting new dependency level with {level_count} nodes");
 
         let next_level = Arc::new(Mutex::new(Vec::new()));
         let nodes = current_level.lock().unwrap().clone();
@@ -62,14 +56,14 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                 let processed_workspace_nodes = processed_workspace_nodes.clone();
 
                 tasks.push(async move {
-                    log_verbose(&format!("Task for {}@{} acquiring concurrency permit (available: {})",
-                        edge.name, edge.spec, CONCURRENCY_LIMITER.available_permits()));
+                    tracing::debug!("Task for {}@{} acquiring concurrency permit (available: {})",
+                        edge.name, edge.spec, CONCURRENCY_LIMITER.available_permits());
                     let _permit = CONCURRENCY_LIMITER.acquire().await.unwrap();
-                    log_verbose(&format!("Task for {}@{} acquired concurrency permit (remaining: {})",
-                        edge.name, edge.spec, CONCURRENCY_LIMITER.available_permits()));
+                    tracing::debug!("Task for {}@{} acquired concurrency permit (remaining: {})",
+                        edge.name, edge.spec, CONCURRENCY_LIMITER.available_permits());
 
                     if *edge.valid.read().unwrap() {
-                        log_verbose(&format!("deps {}@{} already resolved", edge.name, edge.spec));
+                        tracing::debug!("deps {}@{} already resolved", edge.name, edge.spec);
 
                         // Only process workspace nodes from root to avoid cycles
                         if !edge.from.is_root() {
@@ -92,18 +86,18 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                         return Ok(());
                     }
 
-                    log_verbose(&format!("going to build deps {}@{} from [{}]", edge.name, edge.spec, edge.from));
+                    tracing::debug!("going to build deps {}@{} from [{}]", edge.name, edge.spec, edge.from);
 
                     // Add debug logs to track progress
                     let start_time = std::time::Instant::now();
-                    log_verbose(&format!("Starting dependency resolution for {}@{}", edge.name, edge.spec));
+                    tracing::debug!("Starting dependency resolution for {}@{}", edge.name, edge.spec);
 
                     match find_compatible_node(&edge.from, &edge.name, &edge.spec) {
                         FindResult::Reuse(existing_node) => {
-                            log_verbose(&format!(
+                            tracing::debug!(
                                 "resolved deps {}@{} => {} (reuse) took {:?}",
                                 edge.name, &edge.spec, existing_node.version, start_time.elapsed()
-                            ));
+                            );
                             {
                                 let mut to = edge.to.write().unwrap();
                                 *to = Some(existing_node.clone());
@@ -116,22 +110,22 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                             existing_node.update_type();
                         }
                         FindResult::Conflict(conflict_node) => {
-                            log_verbose(&format!("Conflict found for {}@{}, resolving...", edge.name, edge.spec));
+                            tracing::debug!("Conflict found for {}@{}, resolving...", edge.name, edge.spec);
                             let resolved = match resolve_dependency(&edge.name, &edge.spec, &edge.edge_type).await? {
                                 Some(resolved) => {
-                                    log_verbose(&format!("Resolved dependency {}@{} => {}", edge.name, edge.spec, resolved.version));
+                                    tracing::debug!("Resolved dependency {}@{} => {}", edge.name, edge.spec, resolved.version);
                                     resolved
                                 },
                                 None => {
-                                    log_verbose(&format!("No resolution found for {}@{}", edge.name, edge.spec));
+                                    tracing::debug!("No resolution found for {}@{}", edge.name, edge.spec);
                                     return Ok(());
                                 },
                             };
                             PROGRESS_BAR.inc(1);
-                            log_verbose(&format!(
+                            tracing::debug!(
                                 "resolved deps {}@{} => {} (conflict), need to fork, conflict_node: {}",
                                 edge.name, &edge.spec, resolved.version, conflict_node
-                            ));
+                            );
                             // process conflict node
                             let install_parent = conflict_node;
                             let new_node = place_deps(edge.name.clone(), resolved, &install_parent)
@@ -170,39 +164,39 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                             for (field, edge_type) in dep_types {
                                 if let Some(deps) = new_node.package.get(field)
                                     && let Some(deps) = deps.as_object() {
-                                        log_verbose(&format!("Processing {} dependencies for {}", field, new_node.name));
+                                        tracing::debug!("Processing {} dependencies for {}", field, new_node.name);
                                         for (name, version) in deps {
                                             let version_spec = version.as_str().unwrap_or("").to_string();
                                             let dep_edge = Edge::new(new_node.clone(), edge_type.clone(), name.clone(), version_spec);
-                                            log_verbose(&format!(
+                                            tracing::debug!(
                                                 "add edge {}@{} for {}",
                                                 name, version, new_node.name
-                                            ));
+                                            );
                                             new_node.add_edge(dep_edge).await;
                                         }
-                                        log_verbose(&format!("Finished processing {} dependencies for {}", field, new_node.name));
+                                        tracing::debug!("Finished processing {} dependencies for {}", field, new_node.name);
                                     }
                             }
 
                             next_level.lock().unwrap().push(new_node);
                         }
                         FindResult::New(install_location) => {
-                            log_verbose(&format!("New installation needed for {}@{}, resolving dependency...", edge.name, edge.spec));
+                            tracing::debug!("New installation needed for {}@{}, resolving dependency...", edge.name, edge.spec);
                             let resolved = match resolve_dependency(&edge.name, &edge.spec, &edge.edge_type).await? {
                                 Some(resolved) => {
-                                    log_verbose(&format!("Dependency resolved {}@{} => {}", edge.name, edge.spec, resolved.version));
+                                    tracing::debug!("Dependency resolved {}@{} => {}", edge.name, edge.spec, resolved.version);
                                     resolved
                                 },
                                 None => {
-                                    log_verbose(&format!("No resolution found for {}@{}", edge.name, edge.spec));
+                                    tracing::debug!("No resolution found for {}@{}", edge.name, edge.spec);
                                     return Ok(());
                                 },
                             };
                             PROGRESS_BAR.inc(1);
-                            log_verbose(&format!(
+                            tracing::debug!(
                                 "resolved deps {}@{} => {} (new) took {:?}",
                                 edge.name, &edge.spec, resolved.version, start_time.elapsed()
-                            ));
+                            );
                             let new_node = place_deps(edge.name.clone(), resolved, &install_location)
                                 .with_context(|| format!("Failed to place dependencies for {}@{} in new case", edge.name, edge.spec))?;
                             let root_node = install_location.clone();
@@ -237,7 +231,7 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                         }
                     }
 
-                    log_verbose(&format!("Task for {}@{} completed, releasing concurrency permit", edge.name, edge.spec));
+                    tracing::debug!("Task for {}@{} completed, releasing concurrency permit", edge.name, edge.spec);
                     Ok::<_, anyhow::Error>(())
                 });
             }
@@ -246,9 +240,7 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
 
         // waiting for all tasks in this level to finish
         let level_task_count = level_tasks.len();
-        log_verbose(&format!(
-            "Waiting for {level_task_count} level tasks to complete"
-        ));
+        tracing::debug!("Waiting for {level_task_count} level tasks to complete");
 
         futures::future::try_join_all(level_tasks)
             .await
@@ -261,7 +253,7 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
                 anyhow::anyhow!(err_msg)
             })?;
 
-        log_verbose(&format!("All {level_task_count} level tasks completed"));
+        tracing::debug!("All {level_task_count} level tasks completed");
 
         // continue to next level
         *current_level.lock().unwrap() = next_level.lock().unwrap().clone();
@@ -274,12 +266,14 @@ pub async fn build_deps(root: Arc<Node>) -> Result<()> {
 fn place_deps(name: String, pkg: ResolvedPackage, parent: &Arc<Node>) -> Result<Arc<Node>> {
     let new_node = Node::new(name, parent.path.clone(), pkg.manifest);
 
-    log_verbose(&format!(
+    tracing::debug!(
         "\nInstalling {}@{} under parent chain: {}",
-        new_node.name, new_node.version, parent
-    ));
-    // log_verbose(&print_parent_chain(parent));
-    log_verbose("");
+        new_node.name,
+        new_node.version,
+        parent
+    );
+    // tracing::debug!(&print_parent_chain(parent));
+    tracing::debug!("");
 
     Ok(new_node)
 }
@@ -303,16 +297,22 @@ fn find_compatible_node(from: &Arc<Node>, name: &str, version_spec: &str) -> Fin
         for child in children.iter() {
             if child.name == name {
                 if matches(version_spec, &child.version) {
-                    log_verbose(&format!(
+                    tracing::debug!(
                         "found existing deps {}@{} got {}, place {}",
-                        name, version_spec, child.version, child
-                    ));
+                        name,
+                        version_spec,
+                        child.version,
+                        child
+                    );
                     return FindResult::Reuse(child.clone());
                 } else {
-                    log_verbose(&format!(
+                    tracing::debug!(
                         "found conflict deps {}@{} got {}, place {}",
-                        name, version_spec, child.version, child
-                    ));
+                        name,
+                        version_spec,
+                        child.version,
+                        child
+                    );
                     return FindResult::Conflict(current.clone());
                 }
             }
@@ -361,7 +361,7 @@ impl Ruborist {
             self.path.clone(),
             pkg.clone(),
         );
-        log_verbose(&format!("root node: {root:?}"));
+        tracing::debug!("root node: {root:?}");
 
         self.init_runtime(root.clone()).await?;
         self.init_workspaces(root.clone()).await?;
@@ -389,7 +389,7 @@ impl Ruborist {
                 && let Some(deps) = deps.as_object()
             {
                 for (name, version) in deps {
-                    log_verbose(&format!("{name}: {version}"));
+                    tracing::debug!("{name}: {version}");
                     let version_spec = version.as_str().unwrap_or("").to_string();
 
                     // create edge
@@ -400,7 +400,7 @@ impl Ruborist {
                         version_spec,
                     );
 
-                    log_verbose(&format!("add edge {}@{}", edge.name, edge.spec));
+                    tracing::debug!("add edge {}@{}", edge.name, edge.spec);
                     root.add_edge(edge).await;
                 }
             }
@@ -459,10 +459,7 @@ impl Ruborist {
             // Add dependency edge
             root.add_edge(dep_edge).await;
 
-            log_verbose(&format!(
-                "Added workspace: {} {:?}",
-                name, workspace_node.path
-            ));
+            tracing::debug!("Added workspace: {} {:?}", name, workspace_node.path);
 
             // Process workspace dependencies
             let legacy_peer_deps = get_legacy_peer_deps().await;
@@ -493,10 +490,12 @@ impl Ruborist {
                             name.clone(),
                             version_spec,
                         );
-                        log_verbose(&format!(
+                        tracing::debug!(
                             "add edge {}@{} for {}",
-                            name, version, workspace_node.name
-                        ));
+                            name,
+                            version,
+                            workspace_node.name
+                        );
                         workspace_node.add_edge(dep_edge).await;
                     }
                 }
@@ -560,10 +559,11 @@ impl Ruborist {
                     let mut valid = edge.valid.write().unwrap();
                     *valid = true;
 
-                    log_verbose(&format!(
+                    tracing::debug!(
                         "Workspace dependency: {} -> {}",
-                        workspace.name, dep_workspace.name
-                    ));
+                        workspace.name,
+                        dep_workspace.name
+                    );
                 }
             }
             PROGRESS_BAR.inc(1);
@@ -628,7 +628,7 @@ impl Ruborist {
     }
 
     pub async fn replace_deps(&self, node: Arc<Node>) -> Result<()> {
-        log_verbose(&format!("going to replace node {node}"));
+        tracing::debug!("going to replace node {node}");
         // 1. remove from parent node
         if let Some(parent) = node.parent.read().unwrap().as_ref() {
             let mut parent_children = parent.children.write().unwrap();
@@ -689,10 +689,12 @@ impl Ruborist {
                 let to_guard = edge.to.read().unwrap();
                 to_guard.as_ref().unwrap().clone()
             };
-            log_verbose(&format!(
+            tracing::debug!(
                 "Fixing dependency: {}, from: {}, to: {}",
-                edge.name, edge.from, to_node
-            ));
+                edge.name,
+                edge.from,
+                to_node
+            );
             *edge.valid.write().unwrap() = false;
             build_deps(current_node.clone()).await?;
         }
@@ -708,7 +710,7 @@ async fn add_dependency_edge(node: &Arc<Node>, field: &str, edge_type: EdgeType)
         for (name, version) in deps {
             let version_spec = version.as_str().unwrap_or("").to_string();
             let dep_edge = Edge::new(node.clone(), edge_type.clone(), name.clone(), version_spec);
-            log_verbose(&format!("add edge {}@{} for {}", name, version, node.name));
+            tracing::debug!("add edge {}@{} for {}", name, version, node.name);
             node.add_edge(dep_edge).await;
         }
     }

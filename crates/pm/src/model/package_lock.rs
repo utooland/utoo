@@ -7,7 +7,6 @@ use std::path::Path;
 use crate::{
     helper::lock::path_to_pkg_name,
     service::dependency_graph::{DependencyGraphService, DependencyType, PackageNode},
-    util::logger::log_verbose,
 };
 
 /// Represents package information in package-lock.json
@@ -146,8 +145,8 @@ impl PackageLock {
         let content =
             fs::read_to_string(path.as_ref()).context("Failed to read package-lock.json file")?;
 
-        let package_lock: PackageLock = serde_json::from_str(&content)
-            .map_err(|e| anyhow::anyhow!("Failed to parse package-lock.json: {e}"))?;
+        let package_lock: PackageLock =
+            serde_json::from_str(&content).context("Failed to parse package-lock.json")?;
 
         Ok(package_lock)
     }
@@ -159,7 +158,7 @@ impl PackageLock {
         // First add all package nodes
         for (path, package) in &self.packages {
             let package_node = package.to_package_node(path);
-            log_verbose(&format!("Adding package: {package_node:?}"));
+            tracing::debug!("Adding package: {package_node:?}");
             graph.add_package(package_node)?;
         }
 
@@ -179,9 +178,9 @@ impl PackageLock {
                         DependencyType::Production,
                         dep_version.clone(),
                     ) {
-                        log_verbose(&format!(
+                        tracing::debug!(
                             "Warning: Failed to add production dependency {dep_name} for {from_package_name}: {e}"
-                        ));
+                        );
                     }
                 }
             }
@@ -196,9 +195,9 @@ impl PackageLock {
                         DependencyType::Development,
                         dep_version.clone(),
                     ) {
-                        log_verbose(&format!(
+                        tracing::debug!(
                             "Warning: Failed to add dev dependency {dep_name} for {from_package_name}: {e}"
-                        ));
+                        );
                     }
                 }
             }
@@ -213,9 +212,9 @@ impl PackageLock {
                         DependencyType::Optional,
                         dep_version.clone(),
                     ) {
-                        log_verbose(&format!(
+                        tracing::debug!(
                             "Warning: Failed to add optional dependency {dep_name} for {from_package_name}: {e}"
-                        ));
+                        );
                     }
                 }
             }
@@ -230,9 +229,9 @@ impl PackageLock {
                         DependencyType::Peer,
                         dep_version.clone(),
                     ) {
-                        log_verbose(&format!(
+                        tracing::debug!(
                             "Warning: Failed to add peer dependency {dep_name} for {from_package_name}: {e}"
-                        ));
+                        );
                     }
                 }
             }

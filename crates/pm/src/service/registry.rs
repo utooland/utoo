@@ -10,7 +10,6 @@ use crate::model::manifest::{FullManifest, VersionManifest};
 use crate::model::node::EdgeType;
 use crate::service::http_client::fetch_version_manifest;
 use crate::util::config::get_registry_support_semver;
-use crate::util::logger::log_verbose;
 use crate::util::semver;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -60,22 +59,22 @@ impl RegistryService {
     /// Priority: memory versions > disk versions.json > network
     /// Returns Arc<VersionsInfo> for efficient sharing without cloning
     pub async fn resolve_package_versions(name: &str) -> Result<Arc<VersionsInfo>> {
-        log_verbose(&format!("Resolving package versions for: {name}"));
+        tracing::debug!("Resolving package versions for: {name}");
 
         // 1. Check memory versions cache (already 304 verified)
         if let Some(versions_info_arc) = PACKAGE_CACHE.get_versions(name) {
-            log_verbose(&format!("Using cached versions info for: {name}"));
+            tracing::debug!("Using cached versions info for: {name}");
             return Ok(versions_info_arc);
         }
 
         // 2. Load from disk and make network request with etag
         let (etag, disk_versions) = PACKAGE_CACHE.get_versions_from_disk(name).await;
-        log_verbose(&format!("Loaded etag from disk for {name}: {etag:?}"));
+        tracing::debug!("Loaded etag from disk for {name}: {etag:?}");
 
         // 3. Network request with etag for 304 validation
         match fetch_full_manifest(name, etag.as_deref()).await {
             Ok((full_manifest, new_etag)) => {
-                log_verbose(&format!("Received fresh full manifest for: {name}"));
+                tracing::debug!("Received fresh full manifest for: {name}");
 
                 // Convert full manifest to versions info for disk cache
                 let versions_info =
@@ -99,7 +98,7 @@ impl RegistryService {
                 Ok(versions_arc)
             }
             Err(e) if e.to_string().contains("Not modified") => {
-                log_verbose(&format!("304 Not Modified for {name}, using disk cache"));
+                tracing::debug!("304 Not Modified for {name}, using disk cache");
 
                 // 304 response means our disk versions.json is valid
                 if let Some(versions_info) = disk_versions {
@@ -112,7 +111,7 @@ impl RegistryService {
                 }
             }
             Err(e) => {
-                log_verbose(&format!("Network request failed for {name}: {e}"));
+                tracing::debug!("Network request failed for {name}: {e}");
                 Err(anyhow::anyhow!(
                     "Failed to resolve package versions for {name}: {e}"
                 ))
@@ -154,19 +153,17 @@ impl RegistryService {
         name: &str,
         version: &str,
     ) -> Result<Arc<VersionManifest>> {
-        log_verbose(&format!("Resolving version manifest for: {name}@{version}"));
+        tracing::debug!("Resolving version manifest for: {name}@{version}");
 
         // 1. Check memory cache (sync, highest performance)
         if let Some(cached_manifest_arc) = PACKAGE_CACHE.get_version_manifest(name, version) {
-            log_verbose(&format!(
-                "Memory cache hit for version manifest: {name}@{version}"
-            ));
+            tracing::debug!("Memory cache hit for version manifest: {name}@{version}");
             return Ok(cached_manifest_arc);
         }
 
         // 2. Check memory by full_manifest cache (already 304 verified)
         if let Some(full_manifest_arc) = PACKAGE_CACHE.get_full_manifest(name) {
-            log_verbose(&format!("Using cached versions info for: {name}"));
+            tracing::debug!("Using cached versions info for: {name}");
             if let Some(manifest) = full_manifest_arc.versions.get(version) {
                 // Update memory cache (takes ownership via clone from HashMap)
                 // set_version_manifest returns Arc, no unwrap needed!
@@ -207,9 +204,7 @@ impl RegistryService {
             .get_version_manifest_from_disk(name, version)
             .await
         {
-            log_verbose(&format!(
-                "Disk cache hit for version manifest: {name}@{version}"
-            ));
+            tracing::debug!("Disk cache hit for version manifest: {name}@{version}");
 
             // Update memory cache immediately (takes ownership)
             // set_version_manifest returns Arc, no unwrap needed!
@@ -224,18 +219,14 @@ impl RegistryService {
         }
 
         // 4. Network request as last resort
-        log_verbose(&format!(
-            "Cache miss, fetching from network: {name}@{version}"
-        ));
+        tracing::debug!("Cache miss, fetching from network: {name}@{version}");
 
         // Normalize version for HTTP request
         let (normalized_name, normalized_version) = Self::normalize_for_http(name, version);
 
         match fetch_version_manifest(&normalized_name, &normalized_version).await {
             Ok(manifest) => {
-                log_verbose(&format!(
-                    "Successfully fetched version manifest: {name}@{version}"
-                ));
+                tracing::debug!("Successfully fetched version manifest: {name}@{version}");
 
                 // Update memory cache (takes ownership, zero clone)
                 // set_version_manifest returns Arc, no unwrap needed!
@@ -270,9 +261,7 @@ impl RegistryService {
                 Ok(manifest_arc)
             }
             Err(e) => {
-                log_verbose(&format!(
-                    "Failed to fetch version manifest for {name}@{version}: {e}"
-                ));
+                tracing::debug!("Failed to fetch version manifest for {name}@{version}: {e}");
                 Err(anyhow::anyhow!(
                     "Failed to resolve version manifest for {name}@{version}: {e}"
                 ))
@@ -286,7 +275,7 @@ impl RegistryService {
     // - get_version_manifest_by_cache: gets manifest from cache or network
     /// Main package resolution coordinator with clean caching architecture
     pub async fn resolve_package(name: &str, spec: &str) -> Result<ResolvedPackage> {
-        log_verbose(&format!("Starting package resolution for: {name}@{spec}"));
+        tracing::debug!("Starting package resolution for: {name}@{spec}");
 
         // 1. Check project-level cache first (unchanged)
         if let Some(cached_version) = PACKAGE_CACHE.get_version_in_project_cache(name, spec).await
@@ -294,9 +283,7 @@ impl RegistryService {
                 .get_manifest_in_project_cache(name, spec, &cached_version)
                 .await
         {
-            log_verbose(&format!(
-                "Project cache hit for: {name}@{spec} => {cached_version}"
-            ));
+            tracing::debug!("Project cache hit for: {name}@{spec} => {cached_version}");
             return Ok(ResolvedPackage {
                 name: name.to_string(),
                 version: cached_version,
@@ -305,16 +292,14 @@ impl RegistryService {
         }
 
         let (version, mut manifest) = if get_registry_support_semver() {
-            log_verbose(&format!(
-                "Using semver-supporting registry for: {name}@{spec}"
-            ));
+            tracing::debug!("Using semver-supporting registry for: {name}@{spec}");
 
             let version_manifest = Self::resolve_version_manifest(name, spec).await?;
             let version = version_manifest.version.clone();
             let manifest = serde_json::to_value(&version_manifest)?;
             (version, manifest)
         } else {
-            log_verbose(&format!("Using non-semver registry for: {name}@{spec}"));
+            tracing::debug!("Using non-semver registry for: {name}@{spec}");
 
             // 2. Resolve package versions using new caching architecture
             let versions_info_arc = Self::resolve_package_versions(name).await?;
@@ -329,12 +314,12 @@ impl RegistryService {
                 {
                     Some(version) => version.to_string(),
                     None => {
-                        log_verbose(&format!(
+                        tracing::debug!(
                             "No matching version found for {}@{} from {} available versions",
                             name,
                             spec,
                             version_list.len()
-                        ));
+                        );
                         return Err(anyhow::anyhow!(
                             "No matching version found for {name}@{spec}"
                         ));
@@ -342,9 +327,7 @@ impl RegistryService {
                 },
             };
 
-            log_verbose(&format!(
-                "Resolved target version for {name}@{spec}: {target_version}"
-            ));
+            tracing::debug!("Resolved target version for {name}@{spec}: {target_version}");
 
             // 5. Get specific version manifest using three-tier caching
             let version_manifest = Self::resolve_version_manifest(name, &target_version).await?;
@@ -377,9 +360,7 @@ impl RegistryService {
             .set_manifest_in_project_cache(name, spec, &version, manifest.clone())
             .await;
 
-        log_verbose(&format!(
-            "Successfully resolved package: {name}@{spec} => {version}"
-        ));
+        tracing::debug!("Successfully resolved package: {name}@{spec} => {version}");
 
         Ok(ResolvedPackage {
             name: name.to_string(),
@@ -392,7 +373,7 @@ impl RegistryService {
 // Global resolve function
 pub async fn resolve(name: &str, spec: &str) -> Result<ResolvedPackage> {
     let start_time = std::time::Instant::now();
-    log_verbose(&format!("Starting resolve for {name}@{spec}"));
+    tracing::debug!("Starting resolve for {name}@{spec}");
 
     let (normalized_name, normalized_version) = RegistryService::normalize_for_http(name, spec);
 
@@ -400,22 +381,22 @@ pub async fn resolve(name: &str, spec: &str) -> Result<ResolvedPackage> {
 
     match &result {
         Ok(resolved) => {
-            log_verbose(&format!(
+            tracing::debug!(
                 "resolve completed for {}@{} => {} in {:?}",
                 name,
                 spec,
                 resolved.version,
                 start_time.elapsed()
-            ));
+            );
         }
         Err(e) => {
-            log_verbose(&format!(
+            tracing::debug!(
                 "resolve FAILED for {}@{} in {:?}: {}",
                 name,
                 spec,
                 start_time.elapsed(),
                 e
-            ));
+            );
         }
     }
 
@@ -430,7 +411,7 @@ pub async fn resolve_dependency(
     edge_type: &EdgeType,
 ) -> Result<Option<ResolvedPackage>> {
     let start_time = std::time::Instant::now();
-    log_verbose(&format!(
+    tracing::debug!(
         "Starting resolve_dependency for {}@{} ({})",
         name,
         spec,
@@ -440,30 +421,30 @@ pub async fn resolve_dependency(
             EdgeType::Peer => "peer",
             EdgeType::Optional => "optional",
         }
-    ));
+    );
 
     match resolve(name, spec).await {
         Ok(resolved) => {
-            log_verbose(&format!(
+            tracing::debug!(
                 "resolve_dependency completed for {}@{} => {} in {:?}",
                 name,
                 spec,
                 resolved.version,
                 start_time.elapsed()
-            ));
+            );
             Ok(Some(resolved))
         }
         Err(e) => {
             let elapsed = start_time.elapsed();
             if *edge_type == EdgeType::Optional {
-                log_verbose(&format!(
+                tracing::debug!(
                     "skipping optional dependency {name}@{spec} due to resolve error after {elapsed:?}: {e}"
-                ));
+                );
                 Ok(None)
             } else {
-                log_verbose(&format!(
+                tracing::debug!(
                     "resolve_dependency FAILED for {name}@{spec} after {elapsed:?}: {e}"
-                ));
+                );
                 Err(e)
             }
         }

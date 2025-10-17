@@ -4,8 +4,6 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::util::logger::log_verbose;
-
 /// Represents a package information in package-lock.json
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageNode {
@@ -186,9 +184,9 @@ impl DependencyGraphService {
             _version_spec: version_spec,
         };
 
-        log_verbose(&format!(
+        tracing::debug!(
             "Adding dependency edge: {from_index:?} {from_package_name} -> {to_index:?} {to_package_name}"
-        ));
+        );
         self.graph.add_edge(to_index, *from_index, edge);
         Ok(())
     }

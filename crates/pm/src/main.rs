@@ -1,6 +1,6 @@
 use std::process;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use cmd::config::{handle_config_get, handle_config_list, handle_config_set};
 use cmd::deps::build_deps;
@@ -15,10 +15,7 @@ use cmd::view::view;
 use cmd::{clean::clean, deps::build_workspace};
 use helper::auto_update::init_auto_update;
 use util::config::{set_legacy_peer_deps, set_registry};
-use util::logger::{
-    log_error, log_time, log_time_end, log_verbose, log_warning, set_verbose,
-    write_verbose_logs_to_file,
-};
+use util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
 use util::save_type::{PackageAction, SaveType, parse_save_type};
 
 mod cmd;
@@ -235,9 +232,9 @@ enum Commands {
     },
 }
 
-fn main() -> Result<()> {
+fn main() {
     let worker_threads = 20;
-    tokio::runtime::Builder::new_multi_thread()
+    let result = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .worker_threads(worker_threads)
         .max_blocking_threads(4) // Limit blocking threads for file operations
@@ -246,7 +243,15 @@ fn main() -> Result<()> {
         .on_thread_park(|| {})
         .build()
         .unwrap()
-        .block_on(async_main())
+        .block_on(async_main());
+
+    if let Err(e) = result {
+        tracing::error!("{:#}", e);
+        if let Some(log_path) = get_log_file_path() {
+            eprintln!("Full logs saved to: {}", log_path.display());
+        }
+        process::exit(1);
+    }
 }
 
 async fn async_main() -> Result<()> {
@@ -269,8 +274,14 @@ async fn async_main() -> Result<()> {
         return Ok(());
     }
 
-    // global verbose
-    set_verbose(cli.verbose);
+    // Initialize tracing (replaces set_verbose)
+    let log_file = init_tracing(cli.verbose).context("Failed to initialize logging")?;
+
+    tracing::debug!(
+        log_file = %log_file.display(),
+        verbose = cli.verbose,
+        "Logger initialized"
+    );
 
     // global registry
     set_registry(cli.registry).await;
@@ -282,18 +293,13 @@ async fn async_main() -> Result<()> {
 
     // Initialize auto update with immediate check and background monitoring
     if let Err(_e) = init_auto_update().await {
-        log_warning("Auto update cancelled");
+        tracing::warn!("Auto update cancelled");
     }
 
     match cli.command {
         Some(Commands::Clean { pattern }) => {
-            if let Err(e) = clean(&pattern).await {
-                log_error(&e.to_string());
-                let _ = write_verbose_logs_to_file().await;
-                process::exit(1);
-            } else {
-                log_time_end(&format!("{pattern} cleaned"));
-            }
+            clean(&pattern).await?;
+            log_time_end(&format!("{pattern} cleaned"));
         }
         Some(Commands::Install {
             specs,
@@ -309,11 +315,7 @@ async fn async_main() -> Result<()> {
                 if global {
                     // For global installs, process packages one by one
                     for spec in specs.iter() {
-                        if let Err(e) = install_global_package(spec, prefix.as_deref()).await {
-                            log_error(&e.to_string());
-                            let _ = write_verbose_logs_to_file().await;
-                            process::exit(1);
-                        }
+                        install_global_package(spec, prefix.as_deref()).await?;
                     }
                     log_time_end(&format!(
                         "{} package{} installed",
@@ -323,19 +325,14 @@ async fn async_main() -> Result<()> {
                 } else {
                     let save_type = parse_save_type(save_dev, save_peer, save_optional);
                     let spec_refs: Vec<&str> = specs.iter().map(|s| s.as_str()).collect();
-                    if let Err(e) = update_packages(
+                    update_packages(
                         PackageAction::Add,
                         &spec_refs,
                         workspace.clone(),
                         ignore_scripts,
                         save_type,
                     )
-                    .await
-                    {
-                        log_error(&e.to_string());
-                        let _ = write_verbose_logs_to_file().await;
-                        process::exit(1);
-                    }
+                    .await?;
                     // Log install result with correct singular/plural form in one line
                     log_time_end(&format!(
                         "{} package{} installed",
@@ -346,11 +343,7 @@ async fn async_main() -> Result<()> {
             } else {
                 let cwd = std::env::current_dir()?;
                 let root_path = update_cwd_to_root(&cwd).await?;
-                if let Err(e) = install(ignore_scripts, &root_path).await {
-                    log_error(&e.to_string());
-                    let _ = write_verbose_logs_to_file().await;
-                    process::exit(1);
-                }
+                install(ignore_scripts, &root_path).await?;
                 log_time_end("All packages installed");
             }
         }
@@ -361,19 +354,14 @@ async fn async_main() -> Result<()> {
         }) => {
             if !specs.is_empty() {
                 let spec_refs: Vec<&str> = specs.iter().map(|s| s.as_str()).collect();
-                if let Err(e) = update_packages(
+                update_packages(
                     PackageAction::Remove,
                     &spec_refs,
                     workspace.clone(),
                     ignore_scripts,
                     SaveType::Prod,
                 )
-                .await
-                {
-                    log_error(&e.to_string());
-                    let _ = write_verbose_logs_to_file().await;
-                    process::exit(1);
-                }
+                .await?;
                 log_time_end(&format!(
                     "{} package{} uninstalled",
                     specs.len(),
@@ -387,53 +375,29 @@ async fn async_main() -> Result<()> {
         }
         Some(Commands::Rebuild) => {
             let cwd = std::env::current_dir()?;
-            if let Err(e) = rebuild(&cwd).await {
-                log_error(&e.to_string());
-                let _ = write_verbose_logs_to_file().await;
-                process::exit(1);
-            }
+            rebuild(&cwd).await?;
             log_time_end("All packages rebuilt");
         }
         Some(Commands::Deps { workspace_only }) => {
             let cwd = std::env::current_dir()?;
             let root_path = update_cwd_to_root(&cwd).await?;
-            let result = if workspace_only {
-                build_workspace(&root_path).await.map(|_| ())
+            if workspace_only {
+                build_workspace(&root_path).await.map(|_| ())?
             } else {
-                build_deps(&root_path).await.map(|_| ()) // Ignore returned PackageLock for CLI command
+                build_deps(&root_path).await.map(|_| ())? // Ignore returned PackageLock for CLI command
             };
-
-            if let Err(e) = result {
-                log_error(&e.to_string());
-                let _ = write_verbose_logs_to_file().await;
-                process::exit(1);
-            } else {
-                log_time_end("deps resolved");
-            }
+            log_time_end("deps resolved");
         }
         Some(Commands::Update) => {
-            if let Err(e) = update(false).await {
-                log_error(&e.to_string());
-                let _ = write_verbose_logs_to_file().await;
-                process::exit(1);
-            }
+            update(false).await?;
             log_time_end("All packages updated");
         }
         Some(Commands::List { package }) => {
             let cwd = std::env::current_dir()?;
-
-            if let Err(e) = list_dependencies(&cwd, &package).await {
-                log_error(&e.to_string());
-                let _ = write_verbose_logs_to_file().await;
-                process::exit(1);
-            }
+            list_dependencies(&cwd, &package).await?;
         }
         Some(Commands::Execute { command, args }) => {
-            if let Err(e) = execute(&command, args).await {
-                log_error(&e.to_string());
-                let _ = write_verbose_logs_to_file().await;
-                process::exit(1);
-            }
+            execute(&command, args).await?;
         }
         Some(Commands::Run {
             script,
@@ -442,44 +406,21 @@ async fn async_main() -> Result<()> {
             args,
         }) => {
             let script_args_owned = if args.is_empty() { None } else { Some(args) };
-
-            if let Err(e) = run(&script, workspace.as_deref(), workspaces, script_args_owned).await
-            {
-                log_error(&e.to_string());
-                let _ = write_verbose_logs_to_file().await;
-                process::exit(1);
-            }
+            run(&script, workspace.as_deref(), workspaces, script_args_owned).await?;
         }
         Some(Commands::View { package }) => {
-            if let Err(e) = view(&package).await {
-                log_error(&e.to_string());
-                let _ = write_verbose_logs_to_file().await;
-                process::exit(1);
-            }
+            view(&package).await?;
         }
         Some(Commands::Link { packages, prefix }) => {
             match packages {
                 None => {
                     // Link current package to global
-                    let res = link_current_to_global(prefix.as_deref()).await;
-                    match res {
-                        Ok(package_name) => {
-                            log_time_end(&format!("{package_name} linked"));
-                        }
-                        Err(e) => {
-                            log_error(&e.to_string());
-                            let _ = write_verbose_logs_to_file().await;
-                            process::exit(1);
-                        }
-                    }
+                    let package_name = link_current_to_global(prefix.as_deref()).await?;
+                    log_time_end(&format!("{package_name} linked"));
                 }
                 Some(packages) => {
                     for package in packages.iter() {
-                        if let Err(e) = link_global_to_local(package, prefix.as_deref()).await {
-                            log_error(&e.to_string());
-                            let _ = write_verbose_logs_to_file().await;
-                            process::exit(1);
-                        }
+                        link_global_to_local(package, prefix.as_deref()).await?;
                     }
                     log_time_end(&format!("'{}' linked to local", packages.join(", ")));
                 }
@@ -487,29 +428,17 @@ async fn async_main() -> Result<()> {
         }
         Some(Commands::Config { command }) => match command {
             ConfigCommands::Set { key, value, global } => {
-                if let Err(e) = handle_config_set(key, value, global).await {
-                    log_error(&e.to_string());
-                    let _ = write_verbose_logs_to_file().await;
-                    process::exit(1);
-                }
+                handle_config_set(key, value, global).await?;
             }
             ConfigCommands::Get {
                 key,
                 global,
                 override_values,
             } => {
-                if let Err(e) = handle_config_get(key, global, override_values).await {
-                    log_error(&e.to_string());
-                    let _ = write_verbose_logs_to_file().await;
-                    process::exit(1);
-                }
+                handle_config_get(key, global, override_values).await?;
             }
             ConfigCommands::List { global } => {
-                if let Err(e) = handle_config_list(global).await {
-                    log_error(&e.to_string());
-                    let _ = write_verbose_logs_to_file().await;
-                    process::exit(1);
-                }
+                handle_config_list(global).await?;
             }
         },
         None => {
@@ -532,27 +461,18 @@ async fn async_main() -> Result<()> {
                     Some(cli.script_args)
                 };
 
-                if let Err(e) = run(
+                run(
                     script_name,
                     cli.workspace.as_deref(),
                     cli.workspaces,
                     script_args_owned,
                 )
-                .await
-                {
-                    log_error(&e.to_string());
-                    let _ = write_verbose_logs_to_file().await;
-                    process::exit(1);
-                }
+                .await?;
             } else {
                 // Default to install if no arguments
                 let cwd = std::env::current_dir()?;
                 let root_path = update_cwd_to_root(&cwd).await?;
-                if let Err(e) = install(cli.ignore_scripts, &root_path).await {
-                    log_error(&e.to_string());
-                    let _ = write_verbose_logs_to_file().await;
-                    process::exit(1);
-                }
+                install(cli.ignore_scripts, &root_path).await?;
                 log_time_end("All packages installed");
             }
         }
@@ -560,7 +480,7 @@ async fn async_main() -> Result<()> {
 
     // Flush cache to disk before exit
     if let Err(e) = crate::util::registry::flush_cache_to_disk().await {
-        log_verbose(&format!("Failed to flush cache to disk: {e}"));
+        tracing::debug!("Failed to flush cache to disk: {e}");
     }
 
     Ok(())

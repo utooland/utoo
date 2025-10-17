@@ -14,10 +14,7 @@ use tokio_tar::Archive;
 use tokio_util::io::StreamReader;
 
 use super::retry::build_dns_cached_client;
-use super::{
-    logger::log_verbose,
-    retry::{RetryableError, create_retry_strategy},
-};
+use super::retry::{RetryableError, create_retry_strategy};
 
 use dashmap::DashMap;
 use std::collections::hash_map::DefaultHasher;
@@ -48,10 +45,7 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
 
     let resolved_path = dest.join("_resolved");
     if tokio::fs::try_exists(&resolved_path).await? {
-        log_verbose(&format!(
-            "Download skipped, already resolved: {}",
-            dest.display()
-        ));
+        tracing::debug!("Download skipped, already resolved: {}", dest.display());
         return Ok(());
     }
 
@@ -68,11 +62,7 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
             match response.status() {
                 StatusCode::OK => {
                     if let Err(e) = try_unpack_stream_direct(response, dest).await {
-                        log_verbose(&format!(
-                            "Stream unpacking failed {}: {}",
-                            dest.display(),
-                            e
-                        ));
+                        tracing::debug!("Stream unpacking failed {}: {}", dest.display(), e);
                         return Err(RetryableError::Temporary(format!(
                             "Network error during streaming: {e}"
                         )));
@@ -80,11 +70,11 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
                     Ok(())
                 }
                 StatusCode::NOT_FOUND => {
-                    log_verbose(&format!("URL not found {url}"));
+                    tracing::debug!("URL not found {url}");
                     Err(RetryableError::Permanent(format!("URL not found {url}")))
                 }
                 status => {
-                    log_verbose(&format!("Error: {status}, url: {url}, retrying"));
+                    tracing::debug!("Error: {status}, url: {url}, retrying");
                     Err(RetryableError::Temporary(format!(
                         "HTTP error: {status}, url: {url}"
                     )))
@@ -97,7 +87,7 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
     .context("Download failed after retries")?;
 
     let duration = start.elapsed();
-    log_verbose(&format!("Download task took: {duration:?}, url: {url:?}"));
+    tracing::debug!("Download task took: {duration:?}, url: {url:?}");
     Ok(())
 }
 
@@ -202,11 +192,11 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
                         // Check cache first to avoid duplicate directory creation
                         if !created_dirs.contains(&parent_path) {
                             if let Err(e) = tokio::fs::create_dir_all(&parent_path).await {
-                                log_verbose(&format!(
+                                tracing::debug!(
                                     "Failed to create parent dir {}: {}",
                                     parent_path.display(),
                                     e
-                                ));
+                                );
                                 return Err(anyhow::anyhow!(
                                     "Failed to create parent directory: {e}"
                                 )
@@ -219,11 +209,7 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
 
                     // Write file content
                     if let Err(e) = tokio::fs::write(&entry.path, &entry.content).await {
-                        log_verbose(&format!(
-                            "Failed to write file {}: {}",
-                            entry.path.display(),
-                            e
-                        ));
+                        tracing::debug!("Failed to write file {}: {}", entry.path.display(), e);
                         return Err(anyhow::anyhow!("Write failed: {e}")
                             .context(format!("File path: {}", entry.path.display())));
                     }
@@ -231,11 +217,11 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
                     // Set original file permissions from tar entry
                     let permissions = Permissions::from_mode(entry.mode);
                     if let Err(e) = tokio::fs::set_permissions(&entry.path, permissions).await {
-                        log_verbose(&format!(
+                        tracing::debug!(
                             "Failed to set permissions {}: {}",
                             entry.path.display(),
                             e
-                        ));
+                        );
                     }
 
                     Ok::<(), anyhow::Error>(())

@@ -1,22 +1,21 @@
 use crate::service::package_management::PackageManagementService;
 use crate::util::binary_resolver;
-use crate::util::logger::{log_error, log_info, log_verbose};
 use anyhow::{Result, anyhow};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
 /// Execute a package binary
 pub async fn execute_package(command: &str, args: Vec<String>) -> Result<()> {
-    log_verbose(&format!("Executing command: {command} with args: {args:?}"));
+    tracing::debug!("Executing command: {command} with args: {args:?}");
 
     // First, try to find the binary in local node_modules/.bin directories
     if let Some(binary_path) = binary_resolver::find_binary(command).await? {
-        log_verbose(&format!("Found binary at: {}", binary_path.display()));
+        tracing::debug!("Found binary at: {}", binary_path.display());
         return execute_binary(&binary_path, args).await;
     }
 
     // If not found locally, try to install the package to cache
-    log_verbose(&format!("Command '{command}' not found locally"));
+    tracing::debug!("Command '{command}' not found locally");
 
     // For now, assume the package name is the same as the command
     // This can be enhanced later to handle more complex package/command mappings
@@ -33,25 +32,18 @@ pub async fn execute_package(command: &str, args: Vec<String>) -> Result<()> {
     // utoo -x @modelcontextprotocol/create-server create-mcp-server --version
     match binary_resolver::find_binary_in_cache(&package_cache_dir).await {
         Ok(Some(binary_path)) => {
-            log_verbose(&format!(
-                "Found binary in cache at: {}",
-                binary_path.display()
-            ));
+            tracing::debug!("Found binary in cache at: {}", binary_path.display());
             execute_binary(&binary_path, args).await
         }
         Ok(None) => {
-            log_error(&format!(
-                "No executable found in bin directory for package '{package_name}'"
-            ));
-            log_info(
+            tracing::error!("No executable found in bin directory for package '{package_name}'");
+            tracing::debug!(
                 "The package might not provide any executables, or the bin directory might be empty",
             );
             Err(anyhow!("No executable found for package '{package_name}'"))
         }
         Err(e) => {
-            log_error(&format!(
-                "Error finding binary for package '{package_name}': {e}"
-            ));
+            tracing::error!("Error finding binary for package '{package_name}': {e}");
             Err(e)
         }
     }

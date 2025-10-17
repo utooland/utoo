@@ -7,7 +7,6 @@ use crate::helper::lock::{
 use crate::helper::ruborist::Ruborist;
 use crate::service::workspace::WorkspaceService;
 use crate::util::json::load_package_json_from_path;
-use crate::util::logger::log_verbose;
 
 /// Dependency resolution service
 pub struct DependencyResolutionService;
@@ -31,7 +30,7 @@ impl DependencyResolutionService {
             let invalid_deps = Self::validate_deps(&pkg_file, &pkgs_in_tree).await?;
 
             if invalid_deps.is_empty() {
-                log_verbose("No invalid dependencies found");
+                tracing::debug!("No invalid dependencies found");
                 break;
             }
 
@@ -42,22 +41,24 @@ impl DependencyResolutionService {
             }
 
             for dep in invalid_deps {
-                log_verbose(&format!(
+                tracing::debug!(
                     "Fixing dependency: {}/{}",
-                    dep.package_path, dep.dependency_name
-                ));
+                    dep.package_path,
+                    dep.dependency_name
+                );
                 // Try to fix the dependency
                 if let Err(e) = ruborist
                     .fix_dep_path(&dep.package_path, &dep.dependency_name)
                     .await
                 {
-                    log_verbose(&format!("Failed to fix dependency: {e}"));
+                    tracing::debug!("Failed to fix dependency: {e}");
                     return Err(anyhow::anyhow!("Failed to fix dependency: {e}"));
                 } else {
-                    log_verbose(&format!(
+                    tracing::debug!(
                         "Fixed dependency: {}/{}",
-                        dep.package_path, dep.dependency_name
-                    ));
+                        dep.package_path,
+                        dep.dependency_name
+                    );
                 }
             }
 

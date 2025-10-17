@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use crate::model::manifest::{FullManifest, VersionManifest as ModelVersionManifest};
 use crate::util::cache::{get_package_manifest_cache_file, get_package_versions_cache_file};
-use crate::util::logger::log_verbose;
 
 // Project-level cache for resolved packages
 type VersionMap = HashMap<String, Value>;
@@ -71,7 +70,7 @@ impl PackageCache {
     /// Returns Arc for efficient sharing, auto-derefs for reading
     pub fn get_full_manifest(&self, name: &str) -> Option<Arc<FullManifest>> {
         self.full_manifests.get(name).map(|entry| {
-            log_verbose(&format!("Memory cache hit for full manifest: {name}"));
+            tracing::debug!("Memory cache hit for full manifest: {name}");
             Arc::clone(entry.value())
         })
     }
@@ -81,7 +80,7 @@ impl PackageCache {
     pub fn set_full_manifest(&self, name: String, manifest: FullManifest) -> Arc<FullManifest> {
         let arc = Arc::new(manifest);
         self.full_manifests.insert(name.clone(), Arc::clone(&arc));
-        log_verbose(&format!("Cached full manifest in memory: {name}"));
+        tracing::debug!("Cached full manifest in memory: {name}");
         arc
     }
 
@@ -89,7 +88,7 @@ impl PackageCache {
     /// Returns Arc for efficient sharing
     pub fn get_versions(&self, name: &str) -> Option<Arc<VersionsInfo>> {
         self.versions_info.get(name).map(|entry| {
-            log_verbose(&format!("Memory cache hit for versions: {name}"));
+            tracing::debug!("Memory cache hit for versions: {name}");
             Arc::clone(entry.value())
         })
     }
@@ -99,7 +98,7 @@ impl PackageCache {
     pub fn set_versions(&self, name: String, info: VersionsInfo) -> Arc<VersionsInfo> {
         let arc = Arc::new(info);
         self.versions_info.insert(name.clone(), Arc::clone(&arc));
-        log_verbose(&format!("Cached versions info in memory: {name}"));
+        tracing::debug!("Cached versions info in memory: {name}");
         arc
     }
 
@@ -112,9 +111,7 @@ impl PackageCache {
     ) -> Option<Arc<ModelVersionManifest>> {
         let key = format!("{name}@{version}");
         self.version_manifests.get(&key).map(|entry| {
-            log_verbose(&format!(
-                "Memory cache hit for version manifest: {name}@{version}"
-            ));
+            tracing::debug!("Memory cache hit for version manifest: {name}@{version}");
             Arc::clone(entry.value())
         })
     }
@@ -130,7 +127,7 @@ impl PackageCache {
         let key = format!("{name}@{version}");
         let arc = Arc::new(manifest);
         self.version_manifests.insert(key.clone(), Arc::clone(&arc));
-        log_verbose(&format!("Cached version manifest in memory: {key}"));
+        tracing::debug!("Cached version manifest in memory: {key}");
         arc
     }
 
@@ -144,24 +141,24 @@ impl PackageCache {
         let versions_file = get_package_versions_cache_file(name);
 
         if !tokio::fs::try_exists(&versions_file).await.unwrap_or(false) {
-            log_verbose(&format!("No versions file found for package: {name}"));
+            tracing::debug!("No versions file found for package: {name}");
             return (None, None);
         }
 
         match tokio::fs::read_to_string(&versions_file).await {
             Ok(content) => match serde_json::from_str::<VersionsInfo>(&content) {
                 Ok(versions_info) => {
-                    log_verbose(&format!("Loaded versions from disk: {name}"));
+                    tracing::debug!("Loaded versions from disk: {name}");
                     let etag = versions_info.etag.clone();
                     (etag, Some(versions_info))
                 }
                 Err(e) => {
-                    log_verbose(&format!("Failed to parse versions file for {name}: {e}"));
+                    tracing::debug!("Failed to parse versions file for {name}: {e}");
                     (None, None)
                 }
             },
             Err(e) => {
-                log_verbose(&format!("Failed to read versions file for {name}: {e}"));
+                tracing::debug!("Failed to read versions file for {name}: {e}");
                 (None, None)
             }
         }
@@ -179,13 +176,13 @@ impl PackageCache {
         match serde_json::to_string_pretty(versions) {
             Ok(content) => {
                 if let Err(e) = tokio::fs::write(&versions_file, content).await {
-                    log_verbose(&format!("Failed to write versions file for {name}: {e}"));
+                    tracing::debug!("Failed to write versions file for {name}: {e}");
                 } else {
-                    log_verbose(&format!("Wrote versions to disk: {name}"));
+                    tracing::debug!("Wrote versions to disk: {name}");
                 }
             }
             Err(e) => {
-                log_verbose(&format!("Failed to serialize versions for {name}: {e}"));
+                tracing::debug!("Failed to serialize versions for {name}: {e}");
             }
         }
     }
@@ -199,27 +196,23 @@ impl PackageCache {
         let manifest_file = get_package_manifest_cache_file(name, version);
 
         if !tokio::fs::try_exists(&manifest_file).await.unwrap_or(false) {
-            log_verbose(&format!("No manifest file found for {name}@{version}"));
+            tracing::debug!("No manifest file found for {name}@{version}");
             return None;
         }
 
         match tokio::fs::read_to_string(&manifest_file).await {
             Ok(content) => match serde_json::from_str::<ModelVersionManifest>(&content) {
                 Ok(manifest) => {
-                    log_verbose(&format!("Loaded manifest from disk: {name}@{version}"));
+                    tracing::debug!("Loaded manifest from disk: {name}@{version}");
                     Some(manifest)
                 }
                 Err(e) => {
-                    log_verbose(&format!(
-                        "Failed to parse manifest file for {name}@{version}: {e}"
-                    ));
+                    tracing::debug!("Failed to parse manifest file for {name}@{version}: {e}");
                     None
                 }
             },
             Err(e) => {
-                log_verbose(&format!(
-                    "Failed to read manifest file for {name}@{version}: {e}"
-                ));
+                tracing::debug!("Failed to read manifest file for {name}@{version}: {e}");
                 None
             }
         }
@@ -242,24 +235,20 @@ impl PackageCache {
         match serde_json::to_string_pretty(manifest) {
             Ok(content) => {
                 if let Err(e) = tokio::fs::write(&manifest_file, content).await {
-                    log_verbose(&format!(
-                        "Failed to write manifest file for {name}@{version}: {e}"
-                    ));
+                    tracing::debug!("Failed to write manifest file for {name}@{version}: {e}");
                 } else {
-                    log_verbose(&format!("Wrote manifest to disk: {name}@{version}"));
+                    tracing::debug!("Wrote manifest to disk: {name}@{version}");
                 }
             }
             Err(e) => {
-                log_verbose(&format!(
-                    "Failed to serialize manifest for {name}@{version}: {e}"
-                ));
+                tracing::debug!("Failed to serialize manifest for {name}@{version}: {e}");
             }
         }
     }
 
     /// Manually flush cache to disk (for graceful shutdown)
     pub async fn flush_to_disk(&self) -> Result<()> {
-        log_verbose("Cache flush: Per-package manifests are written asynchronously");
+        tracing::debug!("Cache flush: Per-package manifests are written asynchronously");
         Ok(())
     }
 
@@ -325,18 +314,18 @@ pub async fn load_cache(path: &Path) -> Result<()> {
         .await
         .context("Failed to check cache file existence")?
     {
-        log_verbose(&format!("Project cache file not found: {}", path.display()));
+        tracing::debug!("Project cache file not found: {}", path.display());
         return Ok(());
     }
 
     let cache_str = tokio::fs::read_to_string(path)
         .await
         .context("Failed to read cache file")?;
-    let cache_data: CacheData = serde_json::from_str(&cache_str)
-        .map_err(|e| anyhow::anyhow!("Failed to parse cache data: {e}"))?;
+    let cache_data: CacheData =
+        serde_json::from_str(&cache_str).context("Failed to parse cache data")?;
 
     PACKAGE_CACHE.import_data(cache_data).await;
-    log_verbose(&format!("Project cache loaded from {}", path.display()));
+    tracing::debug!("Project cache loaded from {}", path.display());
     Ok(())
 }
 
@@ -353,7 +342,7 @@ pub async fn store_cache(path: &Path) -> Result<()> {
     tokio::fs::write(path, cache_str)
         .await
         .context("Failed to write cache file")?;
-    log_verbose(&format!("Project cache stored to {}", path.display()));
+    tracing::debug!("Project cache stored to {}", path.display());
     Ok(())
 }
 

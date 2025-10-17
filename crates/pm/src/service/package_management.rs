@@ -1,8 +1,6 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
-use crate::util::logger::{log_info, log_verbose};
-
 /// Package management service for handling package installation and caching
 pub struct PackageManagementService;
 
@@ -39,21 +37,21 @@ impl PackageManagementService {
 
         // Maybe the package is already installed
         if tokio::fs::try_exists(&package_cache_dir.join("bin")).await? {
-            log_verbose(&format!(
+            tracing::debug!(
                 "Package {} already cached at {}",
                 name,
                 package_cache_dir.display()
-            ));
+            );
             return Ok(package_cache_dir);
         }
 
-        log_info(&format!("Installing package {name} to cache using utoo..."));
+        tracing::debug!("Installing package {name} to cache using utoo...");
         crate::cmd::install::install_global_package(
             package_name,
             Some(package_cache_dir.to_string_lossy().to_string().as_str()),
         )
         .await?;
-        log_info(&format!("Package {name} installed successfully using utoo"));
+        tracing::debug!("Package {name} installed successfully using utoo");
 
         Ok(package_cache_dir)
     }

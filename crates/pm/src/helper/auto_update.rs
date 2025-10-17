@@ -1,6 +1,5 @@
 use crate::constants::APP_VERSION;
 use crate::util::config::get_registry;
-use crate::util::logger::{log_error, log_info, log_verbose};
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -42,7 +41,7 @@ pub async fn init_auto_update() -> Result<()> {
     // Then start background task for future checks
     tokio::spawn(async {
         if let Err(e) = background_version_check().await {
-            log_verbose(&format!("Background version check failed: {e}"));
+            tracing::debug!("Background version check failed: {e}");
         }
     });
 
@@ -55,11 +54,11 @@ pub async fn check_and_force_update() -> Result<()> {
     if UPDATE_AVAILABLE.load(Ordering::Relaxed) {
         let version = UPDATE_VERSION.read().await;
         if let Some(ref new_version) = *version {
-            log_info(&format!(
+            tracing::debug!(
                 "New version found: {} (current version: {}), updating automatically...",
                 new_version,
                 env!("CARGO_PKG_VERSION")
-            ));
+            );
 
             // Execute forced update
             execute_update(new_version).await?;
@@ -87,7 +86,7 @@ async fn background_version_check() -> Result<()> {
                     new_cache
                 } else {
                     // Use expired cache on network failure
-                    log_verbose("Using cached version due to network error");
+                    tracing::debug!("Using cached version due to network error");
                     cache
                 }
             } else {
@@ -108,10 +107,11 @@ async fn background_version_check() -> Result<()> {
         let mut version = UPDATE_VERSION.write().await;
         *version = Some(cache.version.clone());
 
-        log_verbose(&format!(
+        tracing::debug!(
             "Update available: {} (current: {})",
-            cache.version, current_version
-        ));
+            cache.version,
+            current_version
+        );
     }
 
     Ok(())
@@ -127,10 +127,10 @@ async fn execute_update(version: &str) -> Result<()> {
         .context("Failed to execute update command")?;
 
     if status.success() {
-        log_info("Update completed, please restart");
+        tracing::debug!("Update completed, please restart");
         Ok(())
     } else {
-        log_error("Auto update failed, please update manually");
+        tracing::error!("Auto update failed, please update manually");
         anyhow::bail!("Auto update failed, please execute manually {status}")
     }
 }
@@ -152,7 +152,7 @@ async fn check_remote_version_fast() -> Result<VersionCache> {
     let package_info = response
         .json::<serde_json::Value>()
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to parse package info: {e}"))?;
+        .context("Failed to parse package info")?;
 
     let version = package_info["version"]
         .as_str()
@@ -169,7 +169,7 @@ async fn check_remote_version_fast() -> Result<VersionCache> {
 
     // Save cache asynchronously, don't block main flow
     if let Err(e) = save_version_cache(&cache) {
-        log_verbose(&format!("Failed to save version cache: {e}"));
+        tracing::debug!("Failed to save version cache: {e}");
     }
 
     Ok(cache)
@@ -183,8 +183,7 @@ fn get_cache_path() -> PathBuf {
 fn read_version_cache() -> Result<VersionCache> {
     let content =
         fs::read_to_string(get_cache_path()).context("Failed to read version cache file")?;
-    serde_json::from_str(&content)
-        .map_err(|e| anyhow::anyhow!("Failed to parse version cache: {e}"))
+    serde_json::from_str(&content).context("Failed to parse version cache")
 }
 
 fn save_version_cache(cache: &VersionCache) -> Result<()> {

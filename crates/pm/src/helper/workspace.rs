@@ -4,10 +4,7 @@ use serde_json::Value;
 use std::env;
 use std::path::{Path, PathBuf};
 
-use crate::util::{
-    json::{load_package_json_from_path, read_json_file},
-    logger::{log_info, log_verbose},
-};
+use crate::util::json::{load_package_json_from_path, read_json_file};
 
 pub async fn find_workspaces(root_path: &Path) -> Result<Vec<(String, PathBuf, Value)>> {
     let mut workspaces = Vec::new();
@@ -56,16 +53,16 @@ pub async fn find_workspaces(root_path: &Path) -> Result<Vec<(String, PathBuf, V
                                         })?
                                         .to_path_buf();
 
-                                    log_verbose(&format!("Found workspace: {name} {path:?}"));
+                                    tracing::debug!("Found workspace: {name} {path:?}");
                                     workspaces.push((name, workspace_path, workspace_pkg));
                                 }
-                                Err(e) => log_verbose(&format!("Error processing workspace: {e}")),
+                                Err(e) => tracing::debug!("Error processing workspace: {e}"),
                             }
                         }
                     }
                 }
             }
-            _ => log_verbose("Workspaces field is not an array"),
+            _ => tracing::debug!("Workspaces field is not an array"),
         }
     }
 
@@ -128,11 +125,10 @@ async fn find_closest_parent_pkg(start_dir: &Path) -> Result<Option<(PathBuf, Va
         if tokio::fs::try_exists(&package_json_path).await? {
             let pkg = read_json_file::<Value>(&package_json_path)
                 .await
-                .map_err(|e| {
-                    anyhow::anyhow!(
-                        "Failed to read package.json at {}: {}",
-                        package_json_path.display(),
-                        e
+                .with_context(|| {
+                    format!(
+                        "Failed to read package.json at {}",
+                        package_json_path.display()
                     )
                 })?;
             return Ok(Some((parent.to_path_buf(), pkg)));
@@ -181,10 +177,7 @@ pub async fn find_root_path(cwd: &Path) -> Result<PathBuf> {
             None => continue,
         };
         if is_in_workspace(&project_path, &parent_project_dir, pattern_str).await? {
-            log_verbose(&format!(
-                "Found workspace root at: {}",
-                parent_project_dir.display()
-            ));
+            tracing::debug!("Found workspace root at: {}", parent_project_dir.display());
             return Ok(parent_project_dir);
         }
     }
@@ -195,10 +188,10 @@ pub async fn find_root_path(cwd: &Path) -> Result<PathBuf> {
 pub async fn update_cwd_to_root(cwd: &Path) -> Result<PathBuf> {
     let root_dir = find_root_path(cwd).await?;
     if !compare_paths(cwd, &root_dir) {
-        log_info(&format!(
+        tracing::debug!(
             "Changing directory to workspace root: {}",
             root_dir.display()
-        ));
+        );
         env::set_current_dir(&root_dir).context("Failed to change to root directory")?;
     }
     Ok(root_dir)
@@ -208,10 +201,7 @@ pub async fn update_cwd_to_root(cwd: &Path) -> Result<PathBuf> {
 pub async fn update_cwd_to_project(cwd: &Path) -> Result<PathBuf> {
     let project_dir = find_project_path(cwd).await?;
     if !compare_paths(cwd, &project_dir) {
-        log_info(&format!(
-            "Changing directory to project: {}",
-            project_dir.display()
-        ));
+        tracing::debug!("Changing directory to project: {}", project_dir.display());
         env::set_current_dir(&project_dir).context("Failed to change to project directory")?;
     }
     Ok(project_dir)

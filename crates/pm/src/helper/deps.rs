@@ -3,7 +3,6 @@ use petgraph::algo::{is_cyclic_directed, toposort};
 use petgraph::prelude::*;
 use std::collections::HashMap;
 
-use crate::util::logger::log_warning;
 use anyhow::{Result, anyhow};
 
 /// Represents a node in the dependency graph
@@ -109,7 +108,7 @@ pub fn compute_topological_layers(node_list: &[Node], edges: &[Edge]) -> Result<
     let topo_sort = match toposort(&graph, None) {
         Ok(sorted) => sorted,
         Err(e) => {
-            log_warning("Failed to perform topological sort");
+            tracing::warn!("Failed to perform topological sort");
             return Err(anyhow!("Topological sort failed: {e:?}"));
         }
     };

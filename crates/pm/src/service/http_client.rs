@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use reqwest;
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -6,7 +6,6 @@ use tokio_retry::RetryIf;
 
 use crate::model::manifest::{FullManifest, VersionManifest};
 use crate::util::config::{get_registry, get_registry_support_abbr};
-use crate::util::logger::{log_error, log_verbose};
 use crate::util::retry::{RetryableError, build_dns_cached_client, create_retry_strategy};
 
 pub struct RegistryHttpClient {
@@ -20,9 +19,7 @@ fn get_registry_client() -> &'static RegistryHttpClient {
     REGISTRY_CLIENT.get_or_init(|| {
         let client = build_dns_cached_client();
         let base_url = get_registry();
-        log_verbose(&format!(
-            "Initialized HTTP client with base URL: {base_url}"
-        ));
+        tracing::debug!("Initialized HTTP client with base URL: {base_url}");
 
         RegistryHttpClient { client, base_url }
     })
@@ -45,7 +42,7 @@ impl RegistryHttpClient {
         use_abbreviated: bool,
     ) -> Result<(FullManifest, Option<String>)> {
         let url = format!("{}/{}", self.base_url, name);
-        log_verbose(&format!("Fetching full manifest for {name} from {url}"));
+        tracing::debug!("Fetching full manifest for {name} from {url}");
 
         let start = Instant::now();
         let result = RetryIf::spawn(
@@ -94,12 +91,12 @@ impl RegistryHttpClient {
 
                     // Try to parse as FullManifest, with fallback for problematic responses
                     let data: FullManifest = serde_json::from_str(&json_text).map_err(|e| {
-                        log_error(&format!("Failed to parse full manifest for {name}: {e}"));
-                        log_verbose(&format!(
+                        tracing::error!("Failed to parse full manifest for {name}: {e}");
+                        tracing::debug!(
                             "JSON text length: {}, first 500 chars: {}",
                             json_text.len(),
                             &json_text.chars().take(500).collect::<String>()
-                        ));
+                        );
                         RetryableError::Temporary(format!("Failed to parse JSON response: {e}"))
                     })?;
 
@@ -112,7 +109,7 @@ impl RegistryHttpClient {
                         "Package {name} not found"
                     )))
                 } else {
-                    log_error(&format!("HTTP error: {response:?}, url: {url}"));
+                    tracing::error!("HTTP error: {response:?}, url: {url}");
                     Err(RetryableError::Temporary(format!(
                         "HTTP error: status={}, url={}",
                         response.status(),
@@ -125,10 +122,10 @@ impl RegistryHttpClient {
 
         match result.await {
             Ok((data, etag)) => {
-                log_verbose(&format!(
+                tracing::debug!(
                     "Successfully fetched full manifest for {name} in {:?}",
                     start.elapsed()
-                ));
+                );
                 Ok((data, etag))
             }
             Err(e) => {
@@ -150,7 +147,7 @@ impl RegistryHttpClient {
         version: &str,
     ) -> Result<VersionManifest> {
         let url = self.build_url(name, version);
-        log_verbose(&format!("Fetching {name}@{version} manifest from {url}"));
+        tracing::debug!("Fetching {name}@{version} manifest from {url}");
 
         let manifest: VersionManifest = RetryIf::spawn(
             create_retry_strategy(),
@@ -191,7 +188,7 @@ impl RegistryHttpClient {
                         "Version {version} not found for package {name}"
                     )))
                 } else {
-                    log_error(&format!("HTTP error: {response:?}, url: {url}"));
+                    tracing::error!("HTTP error: {response:?}, url: {url}");
                     Err(RetryableError::Temporary(format!(
                         "HTTP error: status={}, url={}",
                         response.status(),
@@ -202,7 +199,7 @@ impl RegistryHttpClient {
             |err: &RetryableError| matches!(err, RetryableError::Temporary(_)),
         )
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to fetch version manifest after retries: {e}"))?;
+        .context("Failed to fetch version manifest after retries")?;
 
         Ok(manifest)
     }

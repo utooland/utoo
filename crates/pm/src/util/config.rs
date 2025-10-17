@@ -1,4 +1,3 @@
-use super::logger::log_verbose;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -114,7 +113,7 @@ impl<T: Clone + Debug + 'static> ConfigValue<T> {
 
     fn set(&self, new_value: Option<T>) {
         if let Some(value) = new_value {
-            log_verbose(&format!("set {}: {:?}", self.key, value));
+            tracing::debug!("set {}: {:?}", self.key, value);
             let _ = self.value.set(value);
         }
     }

@@ -1,11 +1,10 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
 use tokio::fs;
 use tokio_retry::Retry;
 
 use super::retry::create_retry_strategy;
-use crate::util::logger::{log_verbose, log_warning};
 
 #[cfg(target_os = "macos")]
 use libc::clonefile;
@@ -16,8 +15,7 @@ use std::os::unix::ffi::OsStrExt;
 
 #[cfg(target_os = "linux")]
 mod linux_clone {
-    use crate::util::logger::log_verbose;
-    use anyhow::Result;
+    use anyhow::{Context, Result};
     use std::os::unix::io::AsRawFd;
     use std::path::Path;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -110,7 +108,7 @@ mod linux_clone {
             match copy_file_with_ficlone(src, dst).await {
                 Ok(_) => return Ok(()),
                 Err(e) => {
-                    log_verbose(&format!("FICLONE failed: {e}, trying copy_file_range"));
+                    tracing::debug!("FICLONE failed: {e}, trying copy_file_range");
                 }
             }
         }
@@ -120,15 +118,19 @@ mod linux_clone {
             match copy_file_with_range(src, dst).await {
                 Ok(_) => return Ok(()),
                 Err(e) => {
-                    log_verbose(&format!("copy_file_range failed: {e}, using regular copy"));
+                    tracing::debug!("copy_file_range failed: {e}, using regular copy");
                 }
             }
         }
 
         // Fallback to regular copy
-        tokio::fs::copy(src, dst)
-            .await
-            .map_err(anyhow::Error::from)?;
+        tokio::fs::copy(src, dst).await.with_context(|| {
+            format!(
+                "Failed to copy file from {} to {}",
+                src.display(),
+                dst.display()
+            )
+        })?;
         Ok(())
     }
 
@@ -174,11 +176,11 @@ mod linux_clone {
 
         // Check if the package has install scripts
         if has_install_script(src).await {
-            log_verbose(&format!(
+            tracing::debug!(
                 "Package has install scripts, using fast copy for directory {} to {}",
                 src.display(),
                 dst.display()
-            ));
+            );
             return fast_copy(src, dst).await;
         }
 
@@ -194,12 +196,12 @@ mod linux_clone {
             } else {
                 // Try hardlink first for files in packages without install scripts
                 if let Err(e) = fs::hard_link(&entry_path, &target_path).await {
-                    log_verbose(&format!(
+                    tracing::debug!(
                         "Failed to create hardlink for file from {} to {}: {}, trying fast copy",
                         entry_path.display(),
                         target_path.display(),
                         e
-                    ));
+                    );
                     // If hardlink fails, fallback to fast copy
                     fast_copy_file(&entry_path, &target_path).await?;
                 }
@@ -216,7 +218,7 @@ pub async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
     }
 
     if !fs::metadata(src).await?.is_dir() || !fs::metadata(dst).await?.is_dir() {
-        log_verbose("validating failed, since it's not a directory");
+        tracing::debug!("validating failed, since it's not a directory");
         return Ok(false);
     }
 
@@ -231,7 +233,7 @@ pub async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
         let mut entries = Vec::new();
         let mut read_dir = fs::read_dir(dir)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to read directory {}: {}", dir.display(), e))?;
+            .with_context(|| format!("Failed to read directory {}", dir.display()))?;
 
         while let Some(entry) = read_dir.next_entry().await? {
             if let Some(ignore_list) = ignore
@@ -241,12 +243,8 @@ pub async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
                 continue;
             }
 
-            let metadata = entry.metadata().await.map_err(|e| {
-                anyhow::anyhow!(
-                    "Failed to get metadata for {}: {}",
-                    entry.path().display(),
-                    e
-                )
+            let metadata = entry.metadata().await.with_context(|| {
+                format!("Failed to get metadata for {}", entry.path().display())
             })?;
             entries.push(EntryInfo {
                 path: entry.path(),
@@ -263,16 +261,16 @@ pub async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
 
     let mut src_entries = collect_entries(src, Some(&["node_modules"]))
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to collect entries for {}: {}", src.display(), e))?;
+        .with_context(|| format!("Failed to collect entries for {}", src.display()))?;
     let mut dst_entries = collect_entries(dst, Some(&["node_modules"]))
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to collect entries for {}: {}", dst.display(), e))?;
+        .with_context(|| format!("Failed to collect entries for {}", dst.display()))?;
 
     src_entries.sort_by_key(|e| e.path.clone());
     dst_entries.sort_by_key(|e| e.path.clone());
 
     if src_entries.len() != dst_entries.len() {
-        log_verbose(&format!(
+        tracing::debug!(
             "validating failed {}:{} to {}:{}, since entries length is not equal\nsrc entries: {:?}\ndst entries: {:?}",
             src.display(),
             src_entries.len(),
@@ -286,7 +284,7 @@ pub async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
                 .iter()
                 .map(|e| e.path.file_name().unwrap_or_default())
                 .collect::<Vec<_>>()
-        ));
+        );
         return Ok(false);
     }
 
@@ -298,23 +296,23 @@ pub async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
             }
         } else if !src_entry.is_dir && !dst_entry.is_dir {
             if src_entry.size != dst_entry.size {
-                log_verbose(&format!(
+                tracing::debug!(
                     "validating failed {}:{} to {}:{}, since diff size",
                     src_entry.path.display(),
                     src_entry.size,
                     dst_entry.path.display(),
                     dst_entry.size
-                ));
+                );
                 return Ok(false);
             }
         } else {
-            log_verbose(&format!(
+            tracing::debug!(
                 "validating failed {}:{} to {}:{}, since diff size",
                 src_entry.path.display(),
                 src_entry.size,
                 dst_entry.path.display(),
                 dst_entry.size
-            ));
+            );
             return Ok(false);
         }
     }
@@ -350,27 +348,21 @@ pub async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
         let is_valid = validate_directory(&real_src, dst)
             .await
             .unwrap_or_else(|e| {
-                log_warning(&format!(
-                    "validate_directory error: {e}, will override target directory"
-                ));
+                tracing::warn!("validate_directory error: {e}, will override target directory");
                 false
             });
 
         if is_valid {
-            log_verbose(&format!(
+            tracing::debug!(
                 "Target directory {} already exists and validation passed, skipping clone",
                 dst.display()
-            ));
+            );
             return Ok(());
         }
 
-        log_verbose(&format!("{real_src:?} --> {dst:?} overrides"));
+        tracing::debug!("{real_src:?} --> {dst:?} overrides");
         if let Err(e) = fs::remove_dir_all(dst).await {
-            log_warning(&format!(
-                "Failed to clean target directory {}: {}",
-                dst.display(),
-                e
-            ));
+            tracing::warn!("Failed to clean target directory {}: {}", dst.display(), e);
         }
     }
 
@@ -386,20 +378,16 @@ pub async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
         Retry::spawn(create_retry_strategy(), || async {
             match unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) } {
                 0 => {
-                    log_verbose(&format!(
-                        "clone {} to {} success",
-                        real_src.display(),
-                        dst.display()
-                    ));
+                    tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
                     Ok(())
                 }
                 _ => {
                     let _ = fs::remove_dir_all(dst).await.map_err(|e| {
-                        log_verbose(&format!(
+                        tracing::debug!(
                             "Failed to clean target directory {}: {}",
                             dst.display(),
                             e
-                        ));
+                        );
                     });
                     Err(anyhow::anyhow!(
                         "Failed to clone file: {}",
@@ -415,11 +403,7 @@ pub async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
     {
         Retry::spawn(create_retry_strategy(), || async {
             linux_clone::clone_dir(&real_src, dst).await?;
-            log_verbose(&format!(
-                "clone {} to {} success",
-                real_src.display(),
-                dst.display()
-            ));
+            tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
             Ok(())
         })
         .await

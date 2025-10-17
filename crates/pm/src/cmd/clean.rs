@@ -2,10 +2,7 @@ use anyhow::{Context, Result};
 use std::io::{self, Write};
 use tokio::fs;
 
-use crate::util::{
-    cache::{collect_matching_versions, matches_pattern, parse_pattern},
-    logger::{log_error, log_info, log_verbose},
-};
+use crate::util::cache::{collect_matching_versions, matches_pattern, parse_pattern};
 
 pub async fn clean(pattern: &str) -> Result<()> {
     let cache_dir = dirs::home_dir()
@@ -29,9 +26,7 @@ pub async fn clean(pattern: &str) -> Result<()> {
                 let full_pkg_name = format!("{}/{}", name_str, pkg_name.to_string_lossy());
 
                 if matches_pattern(&full_pkg_name, &pkg_pattern) {
-                    log_verbose(&format!(
-                        "full pkg name {full_pkg_name}, pkg_pattern {pkg_pattern}"
-                    ));
+                    tracing::debug!("full pkg name {full_pkg_name}, pkg_pattern {pkg_pattern}");
                     collect_matching_versions(
                         &pkg_entry.path(),
                         full_pkg_name,
@@ -56,7 +51,7 @@ pub async fn clean(pattern: &str) -> Result<()> {
     }
 
     if to_delete.is_empty() {
-        log_info("No matching cache files found");
+        tracing::debug!("No matching cache files found");
         return Ok(());
     }
 
@@ -76,7 +71,7 @@ pub async fn clean(pattern: &str) -> Result<()> {
     }
 
     println!();
-    log_info(
+    tracing::debug!(
         "Note: This will only delete caches from global storage and won't affect dependencies in the current project. If you need to reinstall project dependencies, please run 'utoo update'",
     );
     print!(
@@ -91,12 +86,12 @@ pub async fn clean(pattern: &str) -> Result<()> {
     if input.trim().to_lowercase() == "y" {
         for (pkg, version, path) in to_delete {
             if let Err(e) = fs::remove_dir_all(&path).await {
-                log_error(&format!("Failed to delete {pkg}@{version}: {e}"));
+                tracing::error!("Failed to delete {pkg}@{version}: {e}");
             } else {
-                log_verbose(&format!("Deleted {pkg}@{version}"));
+                tracing::debug!("Deleted {pkg}@{version}");
             }
         }
-        log_info("Cleanup completed");
+        tracing::debug!("Cleanup completed");
     }
 
     Ok(())

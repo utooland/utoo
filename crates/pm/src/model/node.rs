@@ -2,8 +2,6 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use super::super::util::logger::log_verbose;
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum EdgeType {
     Prod,     // Production dependency
@@ -199,10 +197,12 @@ impl Node {
                     .await
                 {
                     if let Some(edge_mut) = Arc::get_mut(&mut edge) {
-                        log_verbose(&format!(
+                        tracing::debug!(
                             "Override rule applied {}@{} => {}",
-                            rule.name, rule.spec, rule.target_spec
-                        ));
+                            rule.name,
+                            rule.spec,
+                            rule.target_spec
+                        );
                         edge_mut.spec = rule.target_spec.clone();
                     }
                     break;
@@ -288,10 +288,12 @@ impl Node {
 
         // Propagate changes
         if changed {
-            log_verbose(&format!(
+            tracing::debug!(
                 "{}@{} type changed [all_optional {}]",
-                &self.name, &self.version, all_optional
-            ));
+                &self.name,
+                &self.version,
+                all_optional
+            );
 
             let edges_out = self.edges_out.read().unwrap();
             for edge in edges_out.iter() {

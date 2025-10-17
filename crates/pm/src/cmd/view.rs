@@ -2,27 +2,26 @@ use crate::helper::package::parse_package_spec;
 use crate::model::manifest::{FullManifest, VersionManifest};
 use crate::service::http_client::fetch_full_manifest_for_view;
 use crate::util::format_print::print_grid;
-use crate::util::logger::log_verbose;
 use crate::util::registry::resolve;
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result};
 use chrono::Utc;
 use owo_colors::OwoColorize;
 
 /// View package information from registry, similar to npm view
 pub async fn view(package_spec: &str) -> Result<()> {
-    log_verbose(&format!("Viewing package: {package_spec}"));
+    tracing::debug!("Viewing package: {package_spec}");
 
     // Parse package specification
     let (name, version_spec) = parse_package_spec(package_spec);
 
-    log_verbose(&format!("Resolved package: {name} (spec: {version_spec})"));
+    tracing::debug!("Resolved package: {name} (spec: {version_spec})");
 
     // Get complete package information (like npm view) - use full JSON format for complete data
     let (full_manifest, _etag) = fetch_full_manifest_for_view(name, None)
         .await
-        .map_err(|e| anyhow!("Failed to fetch package info for {package_spec}, reason: {e}"))?;
+        .with_context(|| format!("Failed to fetch package info for {package_spec}"))?;
 
-    log_verbose(&format!("Fetched package info: {full_manifest:?}"));
+    tracing::debug!("Fetched package info: {full_manifest:?}");
 
     // Get the specific version manifest if a version was specified
     let resolved_package = resolve(name, version_spec).await?;
@@ -42,7 +41,7 @@ fn print_package_info(
     full_manifest: &FullManifest,
     version_manifest: &VersionManifest,
 ) -> Result<()> {
-    log_verbose(&format!("Target version: {}", version_manifest.version));
+    tracing::debug!("Target version: {}", version_manifest.version);
 
     print_package_header(full_manifest, version_manifest);
     print_package_description(full_manifest, version_manifest);
