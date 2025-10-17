@@ -24,10 +24,10 @@ pub static PROGRESS_BAR: Lazy<ProgressBar> = Lazy::new(|| {
 
 // Global state for tracing
 static LOG_FILE_PATH: OnceCell<PathBuf> = OnceCell::new();
-static _LOG_GUARD: OnceCell<WorkerGuard> = OnceCell::new();
 
 /// Initialize tracing subscriber with console and file output
-pub fn init_tracing(verbose: bool) -> Result<PathBuf> {
+/// Returns (log_path, guard) - the guard must be kept alive for the duration of the program
+pub fn init_tracing(verbose: bool) -> Result<(PathBuf, WorkerGuard)> {
     // 1. Build environment filters
     // Note: Binary name is "utoo", so module paths start with "utoo::" not "utoo_pm::"
 
@@ -49,8 +49,7 @@ pub fn init_tracing(verbose: bool) -> Result<PathBuf> {
         tracing_appender::rolling::never(env::temp_dir(), format!("utoo-{timestamp}.log"));
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
-    // Store guard to prevent it from being dropped
-    _LOG_GUARD.set(guard).ok();
+    // Store log path for error reporting
     LOG_FILE_PATH.set(log_path.clone()).ok();
 
     // 3. Detect if stdout is a TTY (terminal) to decide on colors
@@ -79,7 +78,7 @@ pub fn init_tracing(verbose: bool) -> Result<PathBuf> {
         )
         .init();
 
-    Ok(log_path)
+    Ok((log_path, guard))
 }
 
 /// Get the path to the current log file

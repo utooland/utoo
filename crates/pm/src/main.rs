@@ -275,7 +275,7 @@ async fn async_main() -> Result<()> {
     }
 
     // Initialize tracing (replaces set_verbose)
-    let log_file = init_tracing(cli.verbose).context("Failed to initialize logging")?;
+    let (log_file, _guard) = init_tracing(cli.verbose).context("Failed to initialize logging")?;
 
     tracing::debug!(
         log_file = %log_file.display(),
