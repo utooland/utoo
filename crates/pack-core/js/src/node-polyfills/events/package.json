@@ -1,0 +1,6 @@
+{
+  "name": "events",
+  "main": "events.js",
+  "author": "Irakli Gozalishvili <rfobic@gmail.com> (http://jeditoolkit.com)",
+  "license": "MIT"
+}

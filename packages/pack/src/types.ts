@@ -198,6 +198,7 @@ export interface ConfigComplete {
   experimental?: ExperimentalConfig;
   persistentCaching?: boolean;
   cacheHandler?: string;
+  nodePolyfill?: boolean;
 }
 
 export interface StyledComponentsConfig {

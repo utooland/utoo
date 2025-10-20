@@ -9,6 +9,7 @@ ignore-vcs = true
 extend-exclude = [
     "next.js/",
     "crates/pack-tests/tests/snapshot/**/output/",
+    "crates/pack-core/js/src/node-polyfills"
 ]
 
 [type.sourcemap]

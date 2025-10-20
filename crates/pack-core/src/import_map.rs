@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::LazyLock};
 
 use anyhow::{Context, Result};
 use rustc_hash::FxHashMap;
@@ -24,6 +24,101 @@ use crate::{config::Config, embed_js, mode::Mode, util::convert_to_project_relat
 
 pub const UTOO_STYLE_LOADER: &str = "@utoo/style-loader";
 
+/// Node.js module to polyfill mapping
+/// These polyfills are located in pack-core/js/src/node-polyfills/
+static NODE_POLYFILL_ALIASES: LazyLock<[(RcStr, RcStr); 22]> = LazyLock::new(|| {
+    [
+        (
+            rcstr!("assert"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/assert/assert.js"),
+        ),
+        (
+            rcstr!("buffer"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/buffer/index.js"),
+        ),
+        (
+            rcstr!("constants"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/constants-browserify/constants.json"),
+        ),
+        (
+            rcstr!("crypto"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/crypto-browserify/index.js"),
+        ),
+        (
+            rcstr!("domain"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/domain-browser/index.js"),
+        ),
+        (
+            rcstr!("events"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/events/events.js"),
+        ),
+        (
+            rcstr!("http"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/stream-http/index.js"),
+        ),
+        (
+            rcstr!("https"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/https-browserify/index.js"),
+        ),
+        (
+            rcstr!("os"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/os-browserify/browser.js"),
+        ),
+        (
+            rcstr!("path"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/path-browserify/index.js"),
+        ),
+        (
+            rcstr!("process"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/process/browser.js"),
+        ),
+        (
+            rcstr!("punycode"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/punycode/punycode.js"),
+        ),
+        (
+            rcstr!("querystring"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/querystring-es3/index.js"),
+        ),
+        (
+            rcstr!("stream"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/stream-browserify/index.js"),
+        ),
+        (
+            rcstr!("string_decoder"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/string_decoder/string_decoder.js"),
+        ),
+        (
+            rcstr!("timers"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/timers-browserify/main.js"),
+        ),
+        (
+            rcstr!("tty"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/tty-browserify/index.js"),
+        ),
+        (
+            rcstr!("url"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/native-url/index.js"),
+        ),
+        (
+            rcstr!("util"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/util/util.js"),
+        ),
+        (
+            rcstr!("vm"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/vm-browserify/index.js"),
+        ),
+        (
+            rcstr!("zlib"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/browserify-zlib/index.js"),
+        ),
+        (
+            rcstr!("setimmediate"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/setimmediate/setImmediate.js"),
+        ),
+    ]
+});
+
 pub fn mdx_import_source_file() -> RcStr {
     unreachable!()
 }
@@ -42,20 +137,25 @@ pub async fn get_postcss_package_mapping(pack_path: FileSystemPath) -> Result<Vc
     )
 }
 
-/// Computes the  client fallback import map, which provides
+/// Computes the client fallback import map, which provides
 /// polyfills to Node.js externals.
 #[turbo_tasks::function]
-pub async fn get_client_fallback_import_map() -> Result<Vc<ImportMap>> {
-    let import_map = ImportMap::empty();
+pub async fn get_client_fallback_import_map(
+    project_path: FileSystemPath,
+    config: Vc<Config>,
+) -> Result<Vc<ImportMap>> {
+    let mut import_map = ImportMap::empty();
 
-    // insert_package_alias(
-    //     &mut import_map,
-    //     "@utoo/turbopack-ecmascript-runtime/",
-    //     turbopack_ecmascript_runtime::embed_fs()
-    //         .root()
-    //         .to_resolved()
-    //         .await?,
-    // );
+    // If nodePolyfill is true, add polyfills for Node.js built-in modules
+    let node_polyfill = *config.node_polyfill().await?;
+    if node_polyfill {
+        for (original, alias) in NODE_POLYFILL_ALIASES.iter() {
+            import_map.insert_exact_alias(
+                original.clone(),
+                request_to_import_mapping(project_path.clone(), alias),
+            );
+        }
+    }
 
     Ok(import_map.cell())
 }
@@ -198,9 +298,10 @@ fn insert_exact_alias_map(
     map: FxIndexMap<&'static str, String>,
 ) {
     for (pattern, request) in map {
+        let request_rcstr: RcStr = request.into();
         import_map.insert_exact_alias(
             pattern,
-            request_to_import_mapping(project_path.clone(), &request),
+            request_to_import_mapping(project_path.clone(), &request_rcstr),
         );
     }
 }
@@ -212,9 +313,10 @@ fn insert_wildcard_alias_map(
     map: FxIndexMap<&'static str, String>,
 ) {
     for (pattern, request) in map {
+        let request_rcstr: RcStr = request.into();
         import_map.insert_wildcard_alias(
             pattern,
-            request_to_import_mapping(project_path.clone(), &request),
+            request_to_import_mapping(project_path.clone(), &request_rcstr),
         );
     }
 }
@@ -287,12 +389,11 @@ pub fn get_client_resolved_map(
 
 /// Creates a direct import mapping to the result of resolving a request
 /// in a context.
-#[allow(dead_code)]
 fn request_to_import_mapping(
     context_path: FileSystemPath,
-    request: &str,
+    request: &RcStr,
 ) -> ResolvedVc<ImportMapping> {
-    ImportMapping::PrimaryAlternative(request.into(), Some(context_path)).resolved_cell()
+    ImportMapping::PrimaryAlternative(request.clone(), Some(context_path)).resolved_cell()
 }
 
 /// Creates a direct import mapping to the result of resolving an external
