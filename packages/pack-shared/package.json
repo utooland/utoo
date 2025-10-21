@@ -1,13 +1,27 @@
 {
   "name": "@utoo/pack-shared",
-  "version": "0.0.5",
+  "version": "0.0.7",
+  "main": "cjs/index.js",
   "module": "esm/index.js",
-  "types": "esm/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./esm/index.js",
+      "require": "./cjs/index.js"
+    },
+    "./cjs/*": "./cjs/*",
+    "./esm/*": "./esm/*",
+    "./package.json": "./package.json"
+  },
   "files": [
-    "esm/*"
+    "./cjs/*.js",
+    "./cjs/*.d.ts",
+    "./esm/*.js",
+    "./esm/*.d.ts"
   ],
   "scripts": {
-    "build": "rm -rf esm && tsc -p ./tsconfig.json"
+    "build:cjs": "rm -rf cjs && tsc -p ./tsconfig.json  --module commonjs --outDir cjs",
+    "build:esm": "rm -rf esm && tsc -p ./tsconfig.json  --module esnext --outDir esm",
+    "build": "npm run build:cjs && npm run build:esm"
   },
   "dependencies": {
     "@babel/code-frame": "7.22.5",

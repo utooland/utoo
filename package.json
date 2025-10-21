@@ -18,7 +18,6 @@
     "packages/pack",
     "packages/pack-shared",
     "packages/pack-cli",
-    "packages/style-loader",
     "packages/utoo-web",
     "crates/pack-core/js",
     "crates/pack/js",

@@ -5,7 +5,7 @@
     "target": "ES2018",
     "lib": ["dom", "dom.iterable", "esnext"],
     "esModuleInterop": true,
-    "moduleResolution": "bundler",
+    "moduleResolution": "node",
     "module": "esnext",
     "declaration": true,
     "strict": true,
