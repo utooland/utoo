@@ -7,7 +7,6 @@ pub mod format_print;
 pub mod json;
 pub mod linker;
 pub mod logger;
-pub mod node_search;
 pub mod registry;
 pub mod relative_path;
 pub mod retry;

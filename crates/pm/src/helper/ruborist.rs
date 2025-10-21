@@ -1,337 +1,22 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::sync::Mutex;
-use tokio::sync::Semaphore;
 
+use crate::helper::graph_builder::build_deps;
 use crate::helper::install_runtime::install_runtime;
 use crate::helper::workspace::find_workspaces;
-use crate::model::node::{Edge, EdgeType, Node};
+use crate::model::graph::{DependencyGraph, PackageNode};
+use crate::model::node::EdgeType;
 use crate::util::config::get_legacy_peer_deps;
 use crate::util::json::load_package_json_from_path;
-use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
-use crate::util::node_search::get_node_from_root_by_path;
-use crate::util::registry::{ResolvedPackage, load_cache, resolve_dependency, store_cache};
-use crate::util::semver::matches;
+use crate::util::logger::{finish_progress_bar, start_progress_bar};
+use crate::util::registry::{load_cache, store_cache};
 
+/// Ruborist - manages dependency graph building
 pub struct Ruborist {
     path: PathBuf,
-    pub ideal_tree: Option<Arc<Node>>,
-}
-
-use once_cell::sync::Lazy;
-
-// concurrency limit default to 100
-static CONCURRENCY_LIMITER: Lazy<Arc<Semaphore>> = Lazy::new(|| Arc::new(Semaphore::new(100)));
-
-pub async fn build_deps(root: Arc<Node>) -> Result<()> {
-    let legacy_peer_deps = get_legacy_peer_deps().await;
-    tracing::debug!("going to build deps for {root}, legacy_peer_deps: {legacy_peer_deps}");
-    let current_level = Arc::new(Mutex::new(vec![root.clone()]));
-    // Track processed workspace nodes to prevent cycles
-    let processed_workspace_nodes = Arc::new(Mutex::new(std::collections::HashSet::new()));
-
-    while !current_level.lock().unwrap().is_empty() {
-        let level_count = current_level.lock().unwrap().len();
-        tracing::debug!("Starting new dependency level with {level_count} nodes");
-
-        let next_level = Arc::new(Mutex::new(Vec::new()));
-        let nodes = current_level.lock().unwrap().clone();
-        let mut level_tasks = Vec::new();
-
-        for node in nodes {
-            let edges = node.edges_out.read().unwrap();
-            let total_deps = edges.len();
-            PROGRESS_BAR.inc_length(total_deps as u64);
-            log_progress(&format!("resolving {}", node.name));
-
-            let mut tasks = Vec::new();
-
-            for edge in edges.iter() {
-                let edge = edge.clone();
-                let next_level = next_level.clone();
-                let processed_workspace_nodes = processed_workspace_nodes.clone();
-
-                tasks.push(async move {
-                    tracing::debug!("Task for {}@{} acquiring concurrency permit (available: {})",
-                        edge.name, edge.spec, CONCURRENCY_LIMITER.available_permits());
-                    let _permit = CONCURRENCY_LIMITER.acquire().await.unwrap();
-                    tracing::debug!("Task for {}@{} acquired concurrency permit (remaining: {})",
-                        edge.name, edge.spec, CONCURRENCY_LIMITER.available_permits());
-
-                    if *edge.valid.read().unwrap() {
-                        tracing::debug!("deps {}@{} already resolved", edge.name, edge.spec);
-
-                        // Only process workspace nodes from root to avoid cycles
-                        if !edge.from.is_root() {
-                            return Ok(());
-                        }
-
-                        // Add workspace node to next level if not processed before
-                        if let Some(new_node) = edge.to.read().unwrap().as_ref().cloned() {
-                            if !new_node.is_workspace() {
-                                return Ok(());
-                            }
-
-                            let mut processed = processed_workspace_nodes.lock().unwrap();
-                            if !processed.contains(&new_node.name) {
-                                processed.insert(new_node.name.clone());
-                                next_level.lock().unwrap().push(new_node);
-                            }
-                        }
-
-                        return Ok(());
-                    }
-
-                    tracing::debug!("going to build deps {}@{} from [{}]", edge.name, edge.spec, edge.from);
-
-                    // Add debug logs to track progress
-                    let start_time = std::time::Instant::now();
-                    tracing::debug!("Starting dependency resolution for {}@{}", edge.name, edge.spec);
-
-                    match find_compatible_node(&edge.from, &edge.name, &edge.spec) {
-                        FindResult::Reuse(existing_node) => {
-                            tracing::debug!(
-                                "resolved deps {}@{} => {} (reuse) took {:?}",
-                                edge.name, &edge.spec, existing_node.version, start_time.elapsed()
-                            );
-                            {
-                                let mut to = edge.to.write().unwrap();
-                                *to = Some(existing_node.clone());
-                                let mut valid = edge.valid.write().unwrap();
-                                *valid = true;
-                            }
-
-                            // update node type by edges
-                            existing_node.add_invoke(&edge);
-                            existing_node.update_type();
-                        }
-                        FindResult::Conflict(conflict_node) => {
-                            tracing::debug!("Conflict found for {}@{}, resolving...", edge.name, edge.spec);
-                            let resolved = match resolve_dependency(&edge.name, &edge.spec, &edge.edge_type).await? {
-                                Some(resolved) => {
-                                    tracing::debug!("Resolved dependency {}@{} => {}", edge.name, edge.spec, resolved.version);
-                                    resolved
-                                },
-                                None => {
-                                    tracing::debug!("No resolution found for {}@{}", edge.name, edge.spec);
-                                    return Ok(());
-                                },
-                            };
-                            PROGRESS_BAR.inc(1);
-                            tracing::debug!(
-                                "resolved deps {}@{} => {} (conflict), need to fork, conflict_node: {}",
-                                edge.name, &edge.spec, resolved.version, conflict_node
-                            );
-                            // process conflict node
-                            let install_parent = conflict_node;
-                            let new_node = place_deps(edge.name.clone(), resolved, &install_parent)
-                                .with_context(|| format!("Failed to place dependencies for {}@{} in conflict case", edge.name, edge.spec))?;
-
-
-                            {
-                                let mut parent = new_node.parent.write().unwrap();
-                                *parent = Some(install_parent.clone());
-                                let mut children = install_parent.children.write().unwrap();
-                                children.push(new_node.clone());
-
-
-                                let mut to = edge.to.write().unwrap();
-                                *to = Some(new_node.clone());
-                                let mut valid = edge.valid.write().unwrap();
-                                *valid = true;
-                                // update node type
-                                new_node.add_invoke(&edge);
-                                new_node.update_type();
-                            }
-
-                            let dep_types = if legacy_peer_deps {
-                                vec![
-                                    ("dependencies", EdgeType::Prod),
-                                    ("optionalDependencies", EdgeType::Optional),
-                                ]
-                            } else {
-                                vec![
-                                    ("dependencies", EdgeType::Prod),
-                                    ("peerDependencies", EdgeType::Peer),
-                                    ("optionalDependencies", EdgeType::Optional),
-                                ]
-                            };
-
-                            for (field, edge_type) in dep_types {
-                                if let Some(deps) = new_node.package.get(field)
-                                    && let Some(deps) = deps.as_object() {
-                                        tracing::debug!("Processing {} dependencies for {}", field, new_node.name);
-                                        for (name, version) in deps {
-                                            let version_spec = version.as_str().unwrap_or("").to_string();
-                                            let dep_edge = Edge::new(new_node.clone(), edge_type.clone(), name.clone(), version_spec);
-                                            tracing::debug!(
-                                                "add edge {}@{} for {}",
-                                                name, version, new_node.name
-                                            );
-                                            new_node.add_edge(dep_edge).await;
-                                        }
-                                        tracing::debug!("Finished processing {} dependencies for {}", field, new_node.name);
-                                    }
-                            }
-
-                            next_level.lock().unwrap().push(new_node);
-                        }
-                        FindResult::New(install_location) => {
-                            tracing::debug!("New installation needed for {}@{}, resolving dependency...", edge.name, edge.spec);
-                            let resolved = match resolve_dependency(&edge.name, &edge.spec, &edge.edge_type).await? {
-                                Some(resolved) => {
-                                    tracing::debug!("Dependency resolved {}@{} => {}", edge.name, edge.spec, resolved.version);
-                                    resolved
-                                },
-                                None => {
-                                    tracing::debug!("No resolution found for {}@{}", edge.name, edge.spec);
-                                    return Ok(());
-                                },
-                            };
-                            PROGRESS_BAR.inc(1);
-                            tracing::debug!(
-                                "resolved deps {}@{} => {} (new) took {:?}",
-                                edge.name, &edge.spec, resolved.version, start_time.elapsed()
-                            );
-                            let new_node = place_deps(edge.name.clone(), resolved, &install_location)
-                                .with_context(|| format!("Failed to place dependencies for {}@{} in new case", edge.name, edge.spec))?;
-                            let root_node = install_location.clone();
-
-                            {
-                                let mut parent = new_node.parent.write().unwrap();
-                                *parent = Some(root_node.clone());
-                            }
-                            {
-                                let mut children = root_node.children.write().unwrap();
-                                children.push(new_node.clone());
-                            }
-                            {
-                                let mut to = edge.to.write().unwrap();
-                                *to = Some(new_node.clone());
-                                let mut valid = edge.valid.write().unwrap();
-                                *valid = true;
-                                // update node type
-                                new_node.add_invoke(&edge);
-                                new_node.update_type();
-                            }
-
-                            add_dependency_edge(&new_node, "dependencies", EdgeType::Prod).await;
-
-                            if !legacy_peer_deps {
-                                add_dependency_edge(&new_node, "peerDependencies", EdgeType::Peer).await;
-                            }
-
-                            add_dependency_edge(&new_node, "optionalDependencies", EdgeType::Optional).await;
-
-                            next_level.lock().unwrap().push(new_node);
-                        }
-                    }
-
-                    tracing::debug!("Task for {}@{} completed, releasing concurrency permit", edge.name, edge.spec);
-                    Ok::<_, anyhow::Error>(())
-                });
-            }
-            level_tasks.push(futures::future::try_join_all(tasks));
-        }
-
-        // waiting for all tasks in this level to finish
-        let level_task_count = level_tasks.len();
-        tracing::debug!("Waiting for {level_task_count} level tasks to complete");
-
-        futures::future::try_join_all(level_tasks)
-            .await
-            .map_err(|e| {
-                let err_msg = e
-                    .chain()
-                    .map(|err| format!("  {err}"))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                anyhow::anyhow!(err_msg)
-            })?;
-
-        tracing::debug!("All {level_task_count} level tasks completed");
-
-        // continue to next level
-        *current_level.lock().unwrap() = next_level.lock().unwrap().clone();
-    }
-
-    Ok(())
-}
-
-// create a new node under parent
-fn place_deps(name: String, pkg: ResolvedPackage, parent: &Arc<Node>) -> Result<Arc<Node>> {
-    let new_node = Node::new(name, parent.path.clone(), pkg.manifest);
-
-    tracing::debug!(
-        "\nInstalling {}@{} under parent chain: {}",
-        new_node.name,
-        new_node.version,
-        parent
-    );
-    // tracing::debug!(&print_parent_chain(parent));
-    tracing::debug!("");
-
-    Ok(new_node)
-}
-
-#[derive(Debug)]
-pub enum FindResult {
-    Reuse(Arc<Node>),    // can reuse
-    Conflict(Arc<Node>), // conflict, return parent node
-    New(Arc<Node>),      // need to install under root node
-}
-
-fn find_compatible_node(from: &Arc<Node>, name: &str, version_spec: &str) -> FindResult {
-    fn find_in_node(
-        node: &Arc<Node>,
-        name: &str,
-        version_spec: &str,
-        current: &Arc<Node>,
-    ) -> FindResult {
-        let children = node.children.read().unwrap();
-
-        for child in children.iter() {
-            if child.name == name {
-                if matches(version_spec, &child.version) {
-                    tracing::debug!(
-                        "found existing deps {}@{} got {}, place {}",
-                        name,
-                        version_spec,
-                        child.version,
-                        child
-                    );
-                    return FindResult::Reuse(child.clone());
-                } else {
-                    tracing::debug!(
-                        "found conflict deps {}@{} got {}, place {}",
-                        name,
-                        version_spec,
-                        child.version,
-                        child
-                    );
-                    return FindResult::Conflict(current.clone());
-                }
-            }
-        }
-
-        // find in parent
-        if let Some(parent) = node.parent.read().unwrap().as_ref() {
-            find_in_node(parent, name, version_spec, current)
-        } else {
-            // not found, return new
-            FindResult::New(node.clone())
-        }
-    }
-
-    if let Some(parent) = from.parent.read().unwrap().as_ref() {
-        find_in_node(parent, name, version_spec, from)
-    } else {
-        find_in_node(from, name, version_spec, from)
-    }
+    pub ideal_tree: Option<DependencyGraph>,
 }
 
 impl Ruborist {
@@ -342,31 +27,30 @@ impl Ruborist {
         }
     }
 
-    async fn init_runtime(&mut self, root: Arc<Node>) -> Result<()> {
-        let deps = install_runtime(root.package.get("engines").unwrap_or(&Value::Null))?;
+    async fn init_runtime(&self, graph: &mut DependencyGraph) -> Result<()> {
+        let root_node = graph.get_node(graph.root_index).unwrap();
+        let deps = install_runtime(root_node.package.get("engines").unwrap_or(&Value::Null))?;
         for (name, version) in deps {
-            let edge = Edge::new(root.clone(), EdgeType::Optional, name, version);
-            root.add_edge(edge).await;
+            graph.add_dependency_edge(graph.root_index, name, version, EdgeType::Optional);
         }
         Ok(())
     }
 
-    async fn init_tree(&mut self) -> Result<Arc<Node>> {
-        // load package.json
+    async fn init_tree(&self) -> Result<DependencyGraph> {
+        // Load package.json
         let pkg = load_package_json_from_path(&self.path).await?;
 
-        // create root node
-        let root = Node::new_root(
-            pkg["name"].as_str().unwrap_or("root").to_string(),
-            self.path.clone(),
-            pkg.clone(),
-        );
-        tracing::debug!("root node: {root:?}");
+        // Create dependency graph with root node
+        let mut graph = DependencyGraph::new(self.path.clone(), pkg.clone());
+        tracing::debug!("root node created at {:?}", graph.root_index);
 
-        self.init_runtime(root.clone()).await?;
-        self.init_workspaces(root.clone()).await?;
+        // Initialize runtime dependencies
+        self.init_runtime(&mut graph).await?;
 
-        // collect deps type
+        // Initialize workspaces
+        self.init_workspaces(&mut graph).await?;
+
+        // Collect dependency types
         let legacy_peer_deps = get_legacy_peer_deps().await;
         let dep_types = if legacy_peer_deps {
             vec![
@@ -383,33 +67,27 @@ impl Ruborist {
             ]
         };
 
-        // process deps in root
+        // Add root dependencies
         for (field, dep_type) in dep_types {
-            if let Some(deps) = pkg.get(field)
-                && let Some(deps) = deps.as_object()
-            {
+            if let Some(deps) = pkg.get(field).and_then(|v| v.as_object()) {
                 for (name, version) in deps {
                     tracing::debug!("{name}: {version}");
                     let version_spec = version.as_str().unwrap_or("").to_string();
-
-                    // create edge
-                    let edge = Edge::new(
-                        root.clone(), // need clone Arc<Node>
-                        dep_type.clone(),
+                    graph.add_dependency_edge(
+                        graph.root_index,
                         name.clone(),
                         version_spec,
+                        dep_type.clone(),
                     );
-
-                    tracing::debug!("add edge {}@{}", edge.name, edge.spec);
-                    root.add_edge(edge).await;
+                    tracing::debug!("add edge {}@{}", name, version);
                 }
             }
         }
 
-        Ok(root)
+        Ok(graph)
     }
 
-    pub async fn init_workspaces(&mut self, root: Arc<Node>) -> Result<()> {
+    async fn init_workspaces(&self, graph: &mut DependencyGraph) -> Result<()> {
         let workspaces = find_workspaces(&self.path).await.map_err(|e| {
             let err_msg = e
                 .chain()
@@ -424,42 +102,29 @@ impl Ruborist {
             let version = pkg["version"].as_str().unwrap_or("").to_string();
 
             // Create workspace node
-            let workspace_node = Node::new_workspace(name.clone(), path, pkg.clone());
+            let workspace_node =
+                PackageNode::new_workspace(name.clone(), path.clone(), pkg.clone());
+            let workspace_index = graph.add_node(workspace_node);
 
             // Create link node
-            let link_node = Node::new_link(name.clone(), workspace_node.clone());
+            let link_node =
+                PackageNode::new_link(name.clone(), path.clone(), pkg.clone(), version.clone());
+            let link_index = graph.add_node(link_node);
 
-            // Create dependency edge
-            let dep_edge = Edge::new(root.clone(), EdgeType::Prod, name.clone(), version);
+            // Add physical edges
+            graph.add_physical_edge(graph.root_index, workspace_index);
+            graph.add_physical_edge(graph.root_index, link_index);
 
-            // Set target node and validity for dependency edge
-            {
-                let mut valid = dep_edge.valid.write().unwrap();
-                *valid = true;
+            // Create and mark dependency edge as resolved
+            let dep_edge_id = graph.add_dependency_edge(
+                graph.root_index,
+                name.clone(),
+                version.clone(),
+                EdgeType::Prod,
+            );
+            graph.mark_dependency_resolved(dep_edge_id, workspace_index);
 
-                let mut to = dep_edge.to.write().unwrap();
-                *to = Some(workspace_node.clone());
-            }
-
-            // Update parent relationships
-            {
-                let mut parent = workspace_node.parent.write().unwrap();
-                *parent = Some(root.clone());
-            }
-            {
-                let mut parent = link_node.parent.write().unwrap();
-                *parent = Some(root.clone());
-            }
-            {
-                let mut children = root.children.write().unwrap();
-                children.push(workspace_node.clone());
-                children.push(link_node);
-            }
-
-            // Add dependency edge
-            root.add_edge(dep_edge).await;
-
-            tracing::debug!("Added workspace: {} {:?}", name, workspace_node.path);
+            tracing::debug!("Added workspace: {} {:?}", name, path);
 
             // Process workspace dependencies
             let legacy_peer_deps = get_legacy_peer_deps().await;
@@ -479,29 +144,78 @@ impl Ruborist {
             };
 
             for (field, edge_type) in dep_types {
-                if let Some(deps) = workspace_node.package.get(field)
-                    && let Some(deps) = deps.as_object()
-                {
-                    for (name, version) in deps {
+                if let Some(deps) = pkg.get(field).and_then(|v| v.as_object()) {
+                    for (dep_name, version) in deps {
                         let version_spec = version.as_str().unwrap_or("").to_string();
-                        let dep_edge = Edge::new(
-                            workspace_node.clone(),
-                            edge_type.clone(),
-                            name.clone(),
+                        graph.add_dependency_edge(
+                            workspace_index,
+                            dep_name.clone(),
                             version_spec,
+                            edge_type.clone(),
                         );
-                        tracing::debug!(
-                            "add edge {}@{} for {}",
-                            name,
-                            version,
-                            workspace_node.name
-                        );
-                        workspace_node.add_edge(dep_edge).await;
+                        tracing::debug!("add edge {}@{} for {}", dep_name, version, name);
                     }
                 }
             }
         }
 
+        Ok(())
+    }
+
+    /// Build workspace tree (only resolves workspace dependencies, not external packages)
+    pub async fn build_workspace_tree(&mut self) -> Result<()> {
+        let mut graph = self.init_tree().await?;
+
+        start_progress_bar();
+
+        // Build a map of workspace nodes for quick lookup
+        let mut workspace_map = std::collections::HashMap::new();
+        for node_idx in graph.graph.node_indices() {
+            let node = graph.get_node(node_idx).unwrap();
+            if node.is_workspace() {
+                workspace_map.insert(node.name.clone(), node_idx);
+            }
+        }
+
+        // Collect all workspace dependency resolutions first
+        let mut resolutions = Vec::new();
+
+        for node_idx in graph.graph.node_indices() {
+            // Check if this is a workspace node (not link)
+            let (is_link, is_workspace, node_name) = {
+                let node = graph.get_node(node_idx).unwrap();
+                (node.is_link(), node.is_workspace(), node.name.clone())
+            };
+
+            if is_link || !is_workspace {
+                continue;
+            }
+
+            // Get dependency edges for this workspace
+            let dep_edges: Vec<_> = graph.get_dependency_edges(node_idx);
+
+            for (edge_id, dep_edge) in dep_edges {
+                // Check if this dependency is another workspace
+                if let Some(&dep_workspace_idx) = workspace_map.get(&dep_edge.name) {
+                    resolutions.push((
+                        edge_id,
+                        dep_workspace_idx,
+                        node_name.clone(),
+                        dep_edge.name.clone(),
+                    ));
+                }
+            }
+        }
+
+        // Now apply all resolutions
+        for (edge_id, dep_workspace_idx, from_name, to_name) in resolutions {
+            graph.mark_dependency_resolved(edge_id, dep_workspace_idx);
+
+            tracing::debug!("Workspace dependency: {} -> {}", from_name, to_name);
+        }
+
+        finish_progress_bar("workspace resolved");
+        self.ideal_tree = Some(graph);
         Ok(())
     }
 
@@ -510,393 +224,75 @@ impl Ruborist {
         load_cache(&cache_path)
             .await
             .context("Failed to load cache")?;
-        let root = self.init_tree().await?;
+
+        let mut graph = self.init_tree().await?;
+
+        // Check if project cache exists
+        let project_cache_path = self.path.join("node_modules/.utoo-manifest.json");
+        let has_project_cache = tokio::fs::try_exists(&project_cache_path)
+            .await
+            .unwrap_or(false);
+
+        // Only preload if project cache doesn't exist
+        if !has_project_cache {
+            let legacy_peer_deps = get_legacy_peer_deps().await;
+            let mut all_deps = std::collections::HashSet::new();
+
+            // Collect root dependencies
+            let root_node = graph.get_node(graph.root_index).unwrap();
+            let root_deps = crate::service::preload::PreloadService::collect_root_dependencies(
+                &root_node.package,
+                legacy_peer_deps,
+            );
+            for dep in root_deps {
+                all_deps.insert(dep);
+            }
+
+            // Collect workspace dependencies
+            for node_index in graph.graph.node_indices() {
+                let node = graph.get_node(node_index).unwrap();
+                if node.is_workspace() {
+                    let workspace_deps =
+                        crate::service::preload::PreloadService::collect_root_dependencies(
+                            &node.package,
+                            legacy_peer_deps,
+                        );
+                    for dep in workspace_deps {
+                        all_deps.insert(dep);
+                    }
+                }
+            }
+
+            let initial_deps: Vec<_> = all_deps.into_iter().collect();
+
+            tracing::info!(
+                "No project cache found, preloading {} dependencies (root + workspaces)",
+                initial_deps.len()
+            );
+            if let Err(e) =
+                crate::service::preload::PreloadService::preload(initial_deps, true).await
+            {
+                tracing::warn!("Preload failed, continuing with normal resolution: {}", e);
+            }
+        } else {
+            tracing::info!(
+                "Project cache found at {}, skipping preload",
+                project_cache_path.display()
+            );
+        }
 
         start_progress_bar();
-        build_deps(root.clone()).await?;
+        build_deps(&mut graph).await?;
 
-        let res = self.get_dup_deps(root.clone());
-        for dup_node in res {
-            self.replace_deps(dup_node).await?;
-        }
+        // TODO: Implement dedup_deps for graph
+        // self.dedup_deps(&mut graph).await?;
 
         store_cache(&cache_path)
             .await
             .context("Failed to store cache")?;
         finish_progress_bar("package-lock.json resolved");
-        self.ideal_tree = Some(root);
+
+        self.ideal_tree = Some(graph);
         Ok(())
-    }
-
-    pub async fn build_workspace_tree(&mut self) -> Result<()> {
-        let root = self.init_tree().await?;
-
-        start_progress_bar();
-
-        // init_tree has already loaded all workspace
-        let children = root.children.read().unwrap();
-
-        // build a map of workspace nodes
-        let mut workspace_map = HashMap::new();
-        for workspace in children.iter() {
-            if workspace.is_workspace() {
-                workspace_map.insert(workspace.name.clone(), workspace.clone());
-            }
-        }
-
-        // find the deps between workspace
-        for workspace in children.iter() {
-            if workspace.is_link() {
-                continue;
-            }
-            PROGRESS_BAR.inc_length(1);
-            let edges = workspace.edges_out.read().unwrap();
-            for edge in edges.iter() {
-                if let Some(dep_workspace) = workspace_map.get(&edge.name) {
-                    // find edges_out for workspace
-                    let mut to = edge.to.write().unwrap();
-                    *to = Some(dep_workspace.clone());
-                    let mut valid = edge.valid.write().unwrap();
-                    *valid = true;
-
-                    tracing::debug!(
-                        "Workspace dependency: {} -> {}",
-                        workspace.name,
-                        dep_workspace.name
-                    );
-                }
-            }
-            PROGRESS_BAR.inc(1);
-        }
-
-        finish_progress_bar("workspace resolved");
-        self.ideal_tree = Some(root.clone());
-        Ok(())
-    }
-
-    pub fn get_dup_deps(&self, root: Arc<Node>) -> Vec<Arc<Node>> {
-        let mut duplicates = Vec::new();
-
-        fn process_node(node: &Arc<Node>, duplicates: &mut Vec<Arc<Node>>) {
-            let children = node.children.read().unwrap();
-            let mut name_map: HashMap<String, Vec<Arc<Node>>> = HashMap::new();
-
-            // find duplicate deps
-            for child in children.iter() {
-                if child.is_workspace() {
-                    continue;
-                }
-                name_map
-                    .entry(child.name.clone())
-                    .or_default()
-                    .push(child.clone());
-            }
-
-            // handle dup node
-            for (_, nodes) in name_map {
-                if nodes.len() > 1 {
-                    // find max edges_in node to save the cost
-                    let mut max_edges = 0;
-                    let mut primary_node = None;
-
-                    for node in &nodes {
-                        let edges_count = node.edges_in.read().unwrap().len();
-                        if edges_count > max_edges {
-                            max_edges = edges_count;
-                            primary_node = Some(node.clone());
-                        }
-                    }
-
-                    // add to duplicates
-                    if let Some(primary) = primary_node {
-                        for node in nodes {
-                            if !Arc::ptr_eq(&node, &primary) {
-                                duplicates.push(node);
-                            }
-                        }
-                    }
-                }
-            }
-
-            for child in children.iter() {
-                process_node(child, duplicates);
-            }
-        }
-
-        process_node(&root, &mut duplicates);
-        duplicates
-    }
-
-    pub async fn replace_deps(&self, node: Arc<Node>) -> Result<()> {
-        tracing::debug!("going to replace node {node}");
-        // 1. remove from parent node
-        if let Some(parent) = node.parent.read().unwrap().as_ref() {
-            let mut parent_children = parent.children.write().unwrap();
-            parent_children.retain(|child| !Arc::ptr_eq(child, &node));
-        }
-
-        // 2. clean edges_out
-        {
-            let mut edges_out = node.edges_out.write().unwrap();
-            edges_out.clear();
-        }
-
-        // 3. clean edges_in
-        let edges_from = {
-            let edges_in = node.edges_in.read().unwrap();
-            edges_in
-                .iter()
-                .map(|edge| {
-                    let mut valid = edge.valid.write().unwrap();
-                    *valid = false;
-
-                    let mut to = edge.to.write().unwrap();
-                    *to = None;
-
-                    edge.from.clone()
-                })
-                .collect::<Vec<_>>()
-        };
-
-        // 4. rebuild deps
-        for from_node in edges_from {
-            build_deps(from_node).await?;
-        }
-
-        Ok(())
-    }
-
-    pub async fn fix_dep_path(&self, pkg_path: &str, pkg_name: &str) -> Result<()> {
-        let root = self
-            .ideal_tree
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Ideal tree not initialized"))?;
-
-        let current_node = get_node_from_root_by_path(root, pkg_path).await?;
-
-        // Now we have the target node, find and fix the dependency
-        let edges_to_fix = {
-            let edges = current_node.edges_out.read().unwrap();
-            edges
-                .iter()
-                .filter(|edge| edge.name == pkg_name)
-                .cloned()
-                .collect::<Vec<_>>()
-        };
-
-        for edge in edges_to_fix {
-            let to_node = {
-                let to_guard = edge.to.read().unwrap();
-                to_guard.as_ref().unwrap().clone()
-            };
-            tracing::debug!(
-                "Fixing dependency: {}, from: {}, to: {}",
-                edge.name,
-                edge.from,
-                to_node
-            );
-            *edge.valid.write().unwrap() = false;
-            build_deps(current_node.clone()).await?;
-        }
-
-        Ok(())
-    }
-}
-
-async fn add_dependency_edge(node: &Arc<Node>, field: &str, edge_type: EdgeType) {
-    if let Some(deps) = node.package.get(field)
-        && let Some(deps) = deps.as_object()
-    {
-        for (name, version) in deps {
-            let version_spec = version.as_str().unwrap_or("").to_string();
-            let dep_edge = Edge::new(node.clone(), edge_type.clone(), name.clone(), version_spec);
-            tracing::debug!("add edge {}@{} for {}", name, version, node.name);
-            node.add_edge(dep_edge).await;
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-    use std::path::PathBuf;
-
-    use super::*;
-    use crate::model::node::Node;
-
-    #[tokio::test]
-    async fn test_fix_dep_path() {
-        // Create a mock root node
-        let root = Node::new_root(
-            "test-package".to_string(),
-            PathBuf::from("."),
-            json!({
-                "name": "test-package",
-                "version": "1.0.0",
-                "dependencies": {
-                    "lodash": "^4.17.20"
-                }
-            }),
-        );
-
-        // Create a child node
-        let child = Node::new(
-            "lodash".to_string(),
-            PathBuf::from("node_modules/lodash"),
-            json!({
-                "name": "lodash",
-                "version": "4.17.20"
-            }),
-        );
-
-        // Add child to root
-        {
-            let mut children = root.children.write().unwrap();
-            children.push(child.clone());
-        }
-
-        // Create Ruborist instance
-        let mut ruborist = Ruborist::new(PathBuf::from("."));
-        ruborist.ideal_tree = Some(root.clone());
-
-        // Test fixing dependency path
-        let result = ruborist.fix_dep_path("", "lodash").await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_fix_dep_path_with_invalid_path() {
-        // Create a mock root node
-        let root = Node::new_root(
-            "test-package".to_string(),
-            PathBuf::from("."),
-            json!({
-                "name": "test-package",
-                "version": "1.0.0"
-            }),
-        );
-
-        // Create Ruborist instance
-        let mut ruborist = Ruborist::new(PathBuf::from("."));
-        ruborist.ideal_tree = Some(root.clone());
-
-        // Test fixing non-existent dependency path
-        let result = ruborist.fix_dep_path("invalid/path", "lodash").await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_fix_dep_path_without_ideal_tree() {
-        // Create Ruborist instance without ideal tree
-        let ruborist = Ruborist::new(PathBuf::from("."));
-
-        // Test fixing dependency path without ideal tree
-        let result = ruborist.fix_dep_path("", "lodash").await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_build_deps_with_workspace_cycle() {
-        // Create a mock root node
-        let root = Node::new_root(
-            "test-monorepo".to_string(),
-            PathBuf::from("."),
-            json!({
-                "name": "test-monorepo",
-                "version": "1.0.0",
-                "workspaces": ["packages/*"]
-            }),
-        );
-
-        // Create workspace A
-        let workspace_a = Node::new_workspace(
-            "workspace-a".to_string(),
-            PathBuf::from("packages/workspace-a"),
-            json!({
-                "name": "workspace-a",
-                "version": "1.0.0",
-                "dependencies": {
-                    "workspace-b": "1.0.0"
-                }
-            }),
-        );
-
-        // Create workspace B
-        let workspace_b = Node::new_workspace(
-            "workspace-b".to_string(),
-            PathBuf::from("packages/workspace-b"),
-            json!({
-                "name": "workspace-b",
-                "version": "1.0.0",
-                "dependencies": {
-                    "workspace-a": "1.0.0"
-                }
-            }),
-        );
-
-        // Add workspaces to root
-        {
-            let mut children = root.children.write().unwrap();
-            children.push(workspace_a.clone());
-            children.push(workspace_b.clone());
-        }
-
-        // Create dependency edges
-        let edge_a_to_b = Edge::new(
-            workspace_a.clone(),
-            EdgeType::Prod,
-            "workspace-b".to_string(),
-            "1.0.0".to_string(),
-        );
-        let edge_b_to_a = Edge::new(
-            workspace_b.clone(),
-            EdgeType::Prod,
-            "workspace-a".to_string(),
-            "1.0.0".to_string(),
-        );
-
-        // Add edges to workspaces
-        workspace_a.add_edge(edge_a_to_b).await;
-        workspace_b.add_edge(edge_b_to_a).await;
-
-        // Test build_deps
-        let result = build_deps(root.clone()).await;
-        assert!(
-            result.is_ok(),
-            "build_deps should handle workspace cycles successfully"
-        );
-
-        // Verify that both workspaces are processed exactly once
-        let mut processed_workspaces = std::collections::HashSet::new();
-        let mut stack = vec![root];
-
-        while let Some(node) = stack.pop() {
-            let children = node.children.read().unwrap();
-            for child in children.iter() {
-                if child.is_workspace() {
-                    assert!(
-                        !processed_workspaces.contains(&child.name),
-                        "Workspace {} should only be processed once",
-                        child.name
-                    );
-                    processed_workspaces.insert(child.name.clone());
-                }
-                stack.push(child.clone());
-            }
-        }
-
-        assert_eq!(
-            processed_workspaces.len(),
-            2,
-            "Should process exactly 2 workspaces"
-        );
-        assert!(
-            processed_workspaces.contains("workspace-a"),
-            "Should process workspace-a"
-        );
-        assert!(
-            processed_workspaces.contains("workspace-b"),
-            "Should process workspace-b"
-        );
     }
 }

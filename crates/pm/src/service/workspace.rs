@@ -23,18 +23,20 @@ impl WorkspaceService {
         let mut ruborist = Ruborist::new(cwd);
         ruborist.build_workspace_tree().await?;
 
-        if let Some(ideal_tree) = &ruborist.ideal_tree {
+        if let Some(graph) = &ruborist.ideal_tree {
             let mut node_list = Vec::new();
             let mut node_json_list = Vec::new();
             let mut edges = Vec::new();
             let mut workspace_names = HashSet::new();
 
+            // Get all workspace nodes (excluding links)
+            let workspace_nodes = graph.get_workspace_nodes();
+
             // Collect workspace nodes
-            for child in ideal_tree.children.read().unwrap().iter() {
-                let name = child.name.clone();
-                if child.is_link() {
-                    continue;
-                }
+            for node_idx in &workspace_nodes {
+                let node = graph.get_node(*node_idx).unwrap();
+                let name = node.name.clone();
+
                 workspace_names.insert(name.clone());
 
                 // Create Node struct for the helper function
@@ -43,19 +45,22 @@ impl WorkspaceService {
                 // Create JSON for output file
                 node_json_list.push(json!({
                     "name": name,
-                    "path": to_relative_path(&child.path, cwd),
+                    "path": to_relative_path(&node.path, cwd),
                 }));
             }
 
-            // Collect dependency edges
-            for child in ideal_tree.children.read().unwrap().iter() {
-                for edge in child.edges_out.read().unwrap().iter() {
-                    if *edge.valid.read().unwrap()
-                        && let Some(to_node) = edge.to.read().unwrap().as_ref()
-                    {
+            // Collect dependency edges between workspaces
+            for node_idx in &workspace_nodes {
+                let node = graph.get_node(*node_idx).unwrap();
+                let resolved_deps = graph.get_resolved_dependencies(*node_idx);
+
+                for (_dep_name, target_idx) in resolved_deps {
+                    let target_node = graph.get_node(target_idx).unwrap();
+                    // Only include workspace-to-workspace dependencies
+                    if workspace_names.contains(&target_node.name) {
                         // Create Edge struct: format is [to, from] meaning "to depends on from"
-                        // So from=edge.from.name (dependency), to=to_node.name (dependent)
-                        edges.push(Edge::new(to_node.name.clone(), edge.from.name.clone()));
+                        // So from=dep_name (dependency), to=node.name (dependent)
+                        edges.push(Edge::new(target_node.name.clone(), node.name.clone()));
                     }
                 }
             }
