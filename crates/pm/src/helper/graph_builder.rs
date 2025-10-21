@@ -170,7 +170,7 @@ pub async fn build_deps(graph: &mut DependencyGraph) -> Result<()> {
 
                         // Create new node
                         let new_node =
-                            place_deps(&edge_info.name, resolved.clone(), conflict_parent, graph);
+                            place_deps(&edge_info.name, &resolved, conflict_parent, graph);
                         let new_index = graph.add_node(new_node);
 
                         // Add physical edge
@@ -213,7 +213,7 @@ pub async fn build_deps(graph: &mut DependencyGraph) -> Result<()> {
 /// Create a new package node
 fn place_deps(
     name: &str,
-    pkg: ResolvedPackage,
+    pkg: &ResolvedPackage,
     parent: NodeIndex,
     graph: &DependencyGraph,
 ) -> PackageNode {
@@ -226,7 +226,7 @@ fn place_deps(
         parent_node.path.join(format!("node_modules/{name}"))
     };
 
-    let new_node = PackageNode::new(name.to_string(), path, pkg.manifest);
+    let new_node = PackageNode::new(name.to_string(), path, pkg.manifest.clone());
 
     tracing::debug!(
         "\nInstalling {}@{} under parent {:?}",
@@ -377,7 +377,7 @@ mod tests {
             manifest: json!({"name": "lodash", "version": "4.17.21"}),
         };
 
-        let new_node = place_deps("lodash", resolved, graph.root_index, &graph);
+        let new_node = place_deps("lodash", &resolved, graph.root_index, &graph);
 
         assert_eq!(new_node.name, "lodash");
         assert_eq!(new_node.version, "4.17.21");
