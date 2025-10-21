@@ -1,5 +1,5 @@
 /// Edge type in dependency graph
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EdgeType {
     Prod,     // Production dependency
     Dev,      // Development dependency

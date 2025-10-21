@@ -77,7 +77,7 @@ impl Ruborist {
                         graph.root_index,
                         name.clone(),
                         version_spec,
-                        dep_type.clone(),
+                        dep_type,
                     );
                     tracing::debug!("add edge {}@{}", name, version);
                 }
@@ -151,7 +151,7 @@ impl Ruborist {
                             workspace_index,
                             dep_name.clone(),
                             version_spec,
-                            edge_type.clone(),
+                            edge_type,
                         );
                         tracing::debug!("add edge {}@{} for {}", dep_name, version, name);
                     }

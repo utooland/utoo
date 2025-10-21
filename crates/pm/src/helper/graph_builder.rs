@@ -7,7 +7,8 @@ use crate::util::config::get_legacy_peer_deps;
 use crate::util::logger::{PROGRESS_BAR, log_progress};
 use crate::util::registry::{ResolvedPackage, resolve_dependency};
 
-/// Represents dependency edge information extracted from the graph
+/// Represents UNRESOLVED dependency edge information extracted from the graph
+/// Only used for edges that need to be resolved (is_valid = false)
 /// This structure improves readability compared to using tuples
 #[derive(Debug, Clone)]
 struct DependencyEdgeInfo {
@@ -15,8 +16,6 @@ struct DependencyEdgeInfo {
     name: String,
     spec: String,
     edge_type: EdgeType,
-    is_valid: bool,
-    target: Option<NodeIndex>,
 }
 
 /// Represents node type information for dependency propagation
@@ -29,7 +28,8 @@ struct NodeTypeInfo {
     is_optional: bool,
 }
 
-/// Collect dependency edges from a node and convert to structured info
+/// Collect ONLY unresolved dependency edges from a node
+/// This optimization avoids cloning name/spec for already-resolved edges (workspace edges, etc.)
 /// This helper function improves code readability by avoiding complex tuple destructuring
 fn collect_dependency_edges(
     graph: &DependencyGraph,
@@ -38,13 +38,12 @@ fn collect_dependency_edges(
     let dep_edges = graph.get_dependency_edges(node_index);
     dep_edges
         .into_iter()
+        .filter(|(_, dep)| !dep.valid) // Only collect unresolved edges
         .map(|(edge_id, dep)| DependencyEdgeInfo {
             edge_id,
             name: dep.name.clone(),
             spec: dep.spec.clone(),
-            edge_type: dep.edge_type.clone(),
-            is_valid: dep.valid,
-            target: dep.to,
+            edge_type: dep.edge_type, // EdgeType is Copy, no need to clone
         })
         .collect()
 }
@@ -63,35 +62,31 @@ pub async fn build_deps(graph: &mut DependencyGraph) -> Result<()> {
         let mut next_level = Vec::new();
 
         for node_index in current_level {
-            // Collect all dependency edges from this node (both valid and invalid)
-            // We extract edge info into a dedicated struct to avoid borrow conflicts
-            // and improve code readability
-            let dependency_edges = collect_dependency_edges(graph, node_index);
+            // Handle resolved edges first (no need to clone name/spec)
+            let resolved_edges: Vec<_> = graph
+                .get_dependency_edges(node_index)
+                .into_iter()
+                .filter_map(|(_, dep)| if dep.valid { dep.to } else { None })
+                .collect();
 
-            // Count unresolved edges for progress bar tracking
-            let unresolved_count = dependency_edges
-                .iter()
-                .filter(|edge| !edge.is_valid)
-                .count();
-            PROGRESS_BAR.inc_length(unresolved_count as u64);
+            for target_idx in resolved_edges {
+                let target_node = graph.get_node(target_idx).unwrap();
+                // Only add workspace nodes to next level when from root
+                if target_node.is_workspace() && node_index == graph.root_index {
+                    next_level.push(target_idx);
+                }
+            }
+
+            // Collect only unresolved edges (these need name/spec cloned)
+            let unresolved_edges = collect_dependency_edges(graph, node_index);
+
+            PROGRESS_BAR.inc_length(unresolved_edges.len() as u64);
             log_progress(&format!(
                 "resolving {}",
                 graph.get_node(node_index).unwrap().name
             ));
 
-            for edge_info in dependency_edges {
-                // Handle already resolved edges (e.g., workspace edges)
-                if edge_info.is_valid {
-                    if let Some(target_idx) = edge_info.target {
-                        let target_node = graph.get_node(target_idx).unwrap();
-                        // Only add workspace nodes to next level when from root
-                        if target_node.is_workspace() && node_index == graph.root_index {
-                            next_level.push(target_idx);
-                        }
-                    }
-                    continue;
-                }
-
+            for edge_info in unresolved_edges {
                 tracing::debug!(
                     "going to build deps {}@{} from [{:?}]",
                     edge_info.name,
@@ -131,14 +126,15 @@ pub async fn build_deps(graph: &mut DependencyGraph) -> Result<()> {
                         );
 
                         // Check if there's an override for this dependency
-                        let effective_spec = graph
-                            .check_override(node_index, &edge_info.name, &edge_info.spec)
-                            .unwrap_or_else(|| edge_info.spec.clone());
+                        let override_spec =
+                            graph.check_override(node_index, &edge_info.name, &edge_info.spec);
+                        let effective_spec: &str =
+                            override_spec.as_deref().unwrap_or(&edge_info.spec);
 
                         // Resolve dependency from registry with effective spec
                         let resolved = match resolve_dependency(
                             &edge_info.name,
-                            &effective_spec,
+                            effective_spec,
                             &edge_info.edge_type,
                         )
                         .await?
@@ -173,12 +169,8 @@ pub async fn build_deps(graph: &mut DependencyGraph) -> Result<()> {
                         );
 
                         // Create new node
-                        let new_node = place_deps(
-                            edge_info.name.clone(),
-                            resolved.clone(),
-                            conflict_parent,
-                            graph,
-                        );
+                        let new_node =
+                            place_deps(&edge_info.name, resolved.clone(), conflict_parent, graph);
                         let new_index = graph.add_node(new_node);
 
                         // Add physical edge
@@ -220,7 +212,7 @@ pub async fn build_deps(graph: &mut DependencyGraph) -> Result<()> {
 
 /// Create a new package node
 fn place_deps(
-    name: String,
+    name: &str,
     pkg: ResolvedPackage,
     parent: NodeIndex,
     graph: &DependencyGraph,
@@ -234,7 +226,7 @@ fn place_deps(
         parent_node.path.join(format!("node_modules/{name}"))
     };
 
-    let new_node = PackageNode::new(name.clone(), path, pkg.manifest);
+    let new_node = PackageNode::new(name.to_string(), path, pkg.manifest);
 
     tracing::debug!(
         "\nInstalling {}@{} under parent {:?}",
@@ -275,12 +267,7 @@ async fn add_dependency_edges(
             );
             for (name, version) in deps {
                 let version_spec = version.as_str().unwrap_or("").to_string();
-                graph.add_dependency_edge(
-                    node_index,
-                    name.clone(),
-                    version_spec,
-                    edge_type.clone(),
-                );
+                graph.add_dependency_edge(node_index, name.clone(), version_spec, edge_type);
                 tracing::debug!(
                     "add edge {}@{} for {}",
                     name,
@@ -390,7 +377,7 @@ mod tests {
             manifest: json!({"name": "lodash", "version": "4.17.21"}),
         };
 
-        let new_node = place_deps("lodash".to_string(), resolved, graph.root_index, &graph);
+        let new_node = place_deps("lodash", resolved, graph.root_index, &graph);
 
         assert_eq!(new_node.name, "lodash");
         assert_eq!(new_node.version, "4.17.21");
