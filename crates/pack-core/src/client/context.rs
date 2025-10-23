@@ -277,7 +277,15 @@ pub async fn get_client_module_options_context(
     let target_browsers = env.runtime_versions();
 
     let mut client_rules = get_client_transforms_rules(config).await?;
-    let foreign_client_rules = get_client_transforms_rules(config).await?;
+    let mut foreign_client_rules = get_client_transforms_rules(config).await?;
+
+    // Ignore .d.ts files - they are TypeScript declaration files and should not be bundled
+    let ignore_dts_rule = ModuleRule::new(
+        turbopack::module_options::RuleCondition::ResourcePathEndsWith(".d.ts".to_string()),
+        vec![turbopack::module_options::ModuleRuleEffect::Ignore],
+    );
+    client_rules.push(ignore_dts_rule.clone());
+    foreign_client_rules.push(ignore_dts_rule);
 
     client_rules.push(get_auto_css_modules_rule());
 
