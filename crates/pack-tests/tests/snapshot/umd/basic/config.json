@@ -17,6 +17,10 @@
       "react-dom": {
         "root": "ReactDOM",
         "commonjs": "react-dom"
+      },
+      "@emotion/styled": {
+        "root": "EmotionStyled",
+        "commonjs": "emotion-styled"
       }
     },
     "optimization": {

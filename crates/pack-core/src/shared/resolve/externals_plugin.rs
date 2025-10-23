@@ -134,11 +134,11 @@ impl ExternalsPlugin {
 #[turbo_tasks::value_impl]
 impl BeforeResolvePlugin for ExternalsPlugin {
     #[turbo_tasks::function]
-    fn before_resolve_condition(&self) -> Vc<BeforeResolvePluginCondition> {
-        BeforeResolvePluginCondition::from_request_glob(Glob::new(
-            rcstr!("*"),
-            GlobOptions::default(),
-        ))
+    async fn before_resolve_condition(&self) -> Result<Vc<BeforeResolvePluginCondition>> {
+        let externals_config = self.externals_config.await?;
+        Ok(BeforeResolvePluginCondition::from_modules(Vc::cell(
+            externals_config.keys().cloned().collect(),
+        )))
     }
 
     #[turbo_tasks::function]
@@ -151,20 +151,35 @@ impl BeforeResolvePlugin for ExternalsPlugin {
         let externals_config = self.externals_config.await?;
         let request_value = request.await?;
 
-        // get request module name
-        let module_name = match &*request_value {
+        // get request module name and check if it has a subpath
+        let (module_name, has_subpath) = match &*request_value {
             Request::Module {
                 module: Pattern::Constant(name),
+                path,
                 ..
-            } => name,
+            } => {
+                // Check if this request has a non-empty subpath
+                let has_path = !matches!(path, Pattern::Constant(p) if p.is_empty());
+                (name, has_path)
+            }
             Request::Raw {
                 path: Pattern::Constant(name),
                 ..
-            } => name,
+            } => (name, false),
             _ => return Ok(ResolveResultOption::none()),
         };
 
-        tracing::debug!("before_resolve: checking module: {}", module_name);
+        // Skip all requests with subpath:
+        // - With Advanced config + subPath rules → after_resolve handles (e.g., antd/es/button)
+        // - Without subPath rules → normal resolution (e.g., react/jsx-runtime)
+        if has_subpath {
+            tracing::debug!(
+                "before_resolve: skipping {}/{:?} - has subpath",
+                module_name,
+                request_value
+            );
+            return Ok(ResolveResultOption::none());
+        }
 
         // check if the module exists in externals config.
         if let Some(external_config) = externals_config.get(module_name) {
