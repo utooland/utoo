@@ -136,7 +136,7 @@ impl BeforeResolvePlugin for ExternalsPlugin {
     #[turbo_tasks::function]
     fn before_resolve_condition(&self) -> Vc<BeforeResolvePluginCondition> {
         BeforeResolvePluginCondition::from_request_glob(Glob::new(
-            rcstr!("*"),
+            rcstr!("**"),
             GlobOptions::default(),
         ))
     }
