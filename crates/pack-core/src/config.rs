@@ -119,6 +119,7 @@ pub struct Config {
     experimental: ExperimentalConfig,
     persistent_caching: Option<bool>,
     cache_handler: Option<RcStr>,
+    node_polyfill: Option<bool>,
     #[cfg(feature = "test")]
     #[serde(rename = "runtimeType")]
     runtime_type: Option<RcStr>,
@@ -1123,6 +1124,11 @@ impl Config {
             return Vc::cell(None);
         };
         Vc::cell(Some(resolve_extensions.clone()))
+    }
+
+    #[turbo_tasks::function]
+    pub fn node_polyfill(&self) -> Vc<bool> {
+        Vc::cell(self.node_polyfill.unwrap_or(false))
     }
 
     #[turbo_tasks::function]

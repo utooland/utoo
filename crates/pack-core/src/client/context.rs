@@ -439,7 +439,9 @@ pub async fn get_client_resolve_options_context(
         get_client_import_map(project_path.clone(), config, execution_context, pack_path)
             .to_resolved()
             .await?;
-    let client_fallback_import_map = get_client_fallback_import_map().to_resolved().await?;
+    let client_fallback_import_map = get_client_fallback_import_map(project_path.clone(), config)
+        .to_resolved()
+        .await?;
     let client_resolved_map =
         get_client_resolved_map(project_path.clone(), project_path.clone(), *mode.await?)
             .to_resolved()

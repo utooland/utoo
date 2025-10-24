@@ -101,6 +101,11 @@ pub struct SchemaConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Cache handler configuration")]
     pub cache_handler: Option<String>,
+
+    /// Enable Node.js polyfills for browser builds
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Enable Node.js polyfills for browser builds")]
+    pub node_polyfill: Option<bool>,
 }
 
 /// Entry point configuration

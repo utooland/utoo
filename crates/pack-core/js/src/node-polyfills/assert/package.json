@@ -1,0 +1,5 @@
+{
+  "name": "assert",
+  "main": "assert.js",
+  "license": "MIT"
+}
