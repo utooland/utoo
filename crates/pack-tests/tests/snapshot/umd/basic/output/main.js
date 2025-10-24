@@ -23,6 +23,13 @@ let mod; if (typeof exports === 'object' && typeof module === 'object') { mod = 
 
 __turbopack_context__.v(mod);
 }),
+32: ((__turbopack_context__) => {
+"use strict";
+
+let mod; if (typeof exports === 'object' && typeof module === 'object') { mod = __turbopack_context__.x("emotion-styled", () => require("emotion-styled")); } else { mod = globalThis["EmotionStyled"] }
+
+__turbopack_context__.v(mod);
+}),
 86: ((__turbopack_context__) => {
 "use strict";
 
@@ -39,10 +46,13 @@ __turbopack_context__.s([
 var __TURBOPACK__imported__module__16__ = __turbopack_context__.i(16);
 // @ts-ignore
 var __TURBOPACK__imported__module__11__ = __turbopack_context__.i(11);
+var __TURBOPACK__imported__module__32__ = __turbopack_context__.i(32);
 var __TURBOPACK__imported__module__86__ = __turbopack_context__.i(86);
 ;
 console.log('hello here');
 ;
+;
+console.log(__TURBOPACK__imported__module__32__["styled"]);
 ;
 console.log(__TURBOPACK__imported__module__86__["a"]);
 function App({ content }) {

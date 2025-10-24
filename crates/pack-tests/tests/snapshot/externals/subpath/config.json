@@ -38,7 +38,8 @@
             }
           ]
         }
-      }
+      },
+      "@emotion/react": "emotionReact"
     }
   }
 }

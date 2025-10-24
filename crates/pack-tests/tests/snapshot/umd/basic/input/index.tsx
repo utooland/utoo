@@ -8,6 +8,10 @@ import ReactDOM from 'react-dom';
 /** @jsxImportSource @emotion/react */
 import { jsx } from '@emotion/react'
 
+import { styled } from '@emotion/styled';
+
+console.log(styled);
+
 import { a } from './a.ts';
 
 console.log(a);
