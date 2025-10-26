@@ -439,6 +439,17 @@
       ]
     },
     {
+      "featureLevel1": "Node Polyfill",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack Node Polyfill Plugin](https://github.com/Richienb/node-polyfill-webpack-plugin)",
+          "remarks": "Automatically polyfills Node.js built-in modules for browser builds"
+        }
+      ]
+    },
+    {
       "featureLevel1": "CSR",
       "children": [
         {
