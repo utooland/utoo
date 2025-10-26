@@ -59,6 +59,7 @@
 | Dev Server |  | ✅ |  |  |
 | Lazy Compiling |  | 🟠 |  |  |
 | Webpack partitially compatible mode |  | ✅ | [Webpack compat example](https://github.com/utooland/utoo/tree/next/examples/webpack-compat) | Made it easy to migrate from webpack-based projects |
+| Node Polyfill |  | ✅ | [Webpack Node Polyfill Plugin](https://github.com/Richienb/node-polyfill-webpack-plugin) | Automatically polyfills Node.js built-in modules for browser builds |
 | CSR |  | ✅ |  |  |
 | SSR |  | ❓ |  |  |
 | RSC |  | ❓ |  |  |
