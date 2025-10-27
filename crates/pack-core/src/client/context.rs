@@ -483,7 +483,7 @@ pub async fn get_client_resolve_options_context(
         ]),
         ..resolve_options_context.clone()
     };
-    
+
     Ok(ResolveOptionsContext {
         enable_typescript: true,
         enable_react: true,
