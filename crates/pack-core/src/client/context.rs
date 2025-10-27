@@ -459,10 +459,6 @@ pub async fn get_client_resolve_options_context(
 
     let custom_conditions = vec![mode.await?.condition().into()];
     let resolve_options_context = ResolveOptionsContext {
-        enable_typescript: true,
-        enable_react: true,
-        enable_mjs_extension: true,
-        custom_extensions: config.resolve_extension().owned().await?,
         enable_node_modules: Some(project_path.root().owned().await?),
         custom_conditions,
         import_map: Some(client_import_map),
@@ -474,10 +470,28 @@ pub async fn get_client_resolve_options_context(
         after_resolve_plugins: vec![ResolvedVc::upcast(externals_plugin)],
         ..Default::default()
     };
+
+    // For node_modules: manually specify extensions to avoid parsing their tsconfig.json
+    let foreign_resolve_options = ResolveOptionsContext {
+        custom_extensions: Some(vec![
+            rcstr!(".tsx"),
+            rcstr!(".ts"),
+            rcstr!(".jsx"),
+            rcstr!(".js"),
+            rcstr!(".mjs"),
+            rcstr!(".json"),
+        ]),
+        ..resolve_options_context.clone()
+    };
+    
     Ok(ResolveOptionsContext {
+        enable_typescript: true,
+        enable_react: true,
+        enable_mjs_extension: true,
+        custom_extensions: config.resolve_extension().owned().await?,
         rules: vec![(
             foreign_code_context_condition(config).await?,
-            resolve_options_context.clone().resolved_cell(),
+            foreign_resolve_options.resolved_cell(),
         )],
         ..resolve_options_context
     }
