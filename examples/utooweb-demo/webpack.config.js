@@ -1,6 +1,7 @@
 const path = require("path");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
+const { DefinePlugin } = require("webpack");
 
 module.exports = [
   {
@@ -42,6 +43,12 @@ module.exports = [
       extensions: [".tsx", ".ts", ".js"],
     },
     plugins: [
+      new DefinePlugin({
+        process: {},
+        "process.env": JSON.stringify({
+          NODE_ENV: process.env.NODE_ENV || "production",
+        }),
+      }),
       new HtmlWebpackPlugin({
         template: "./index.html",
         title: "Utooweb demo",

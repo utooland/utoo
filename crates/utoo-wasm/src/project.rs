@@ -100,20 +100,7 @@ impl Project {
             };
             let project_path: RcStr = partial_options.project_path.into();
 
-            let mode = "production";
-
-            let config = partial_options.config.map_or(
-                anyhow::Result::<RcStr>::Ok(format!(r#"{{ "mode": {mode}}}"#).into()),
-                |config| {
-                    use std::str::FromStr;
-
-                    let mut val = serde_json::value::Value::from_str(&config)?;
-                    if let serde_json::value::Value::Object(map) = &mut val {
-                        map.insert("mode".to_string(), mode.into());
-                    }
-                    Ok(val.to_string().into())
-                },
-            )?;
+            let config = partial_options.config.unwrap_or("{}".to_string()).into();
             let options = ProjectOptions {
                 root_path: project_path.clone(),
                 project_path: project_path.clone(),

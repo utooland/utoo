@@ -1,4 +1,5 @@
 {
+  "mode": "development",
   "entry": [
     {
       "import": "./src/index.tsx",
