@@ -1,11 +1,11 @@
 {
-    "config": {
-      "entry": [
-        {
-          "import": "input/index.ts",
-          "name": "main"
-        }
-      ],
-      "sourceMaps": false
-    }
-  } 
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.ts",
+        "name": "main"
+      }
+    ],
+    "sourceMaps": false
+  }
+}
