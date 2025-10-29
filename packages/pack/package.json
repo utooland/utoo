@@ -57,7 +57,6 @@
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0",
-    "@swc/helpers": "^0.5.15",
     "@types/babel__code-frame": "7.0.2",
     "@types/node": "^20.3.0",
     "styled-jsx": "^5.1.6",
