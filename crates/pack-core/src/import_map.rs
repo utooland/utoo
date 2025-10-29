@@ -199,19 +199,11 @@ async fn insert_shared_aliases(
     _config: Vc<Config>,
     pack_path: &FileSystemPath,
 ) -> Result<()> {
-    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-    {
-        import_map
-            .insert_singleton_alias("@swc/helpers", pack_path.join("node_modules/@swc/helpers")?);
-        import_map.insert_singleton_alias(
-            "react-refresh",
-            pack_path.join("node_modules/react-refresh")?,
-        );
-        import_map.insert_singleton_alias(
-            UTOO_STYLE_LOADER,
-            pack_path.join(&format!("node_modules/{UTOO_STYLE_LOADER}"))?,
-        );
-    }
+    import_map.insert_singleton_alias("@swc/helpers", pack_path.join("node_modules/@swc/helpers")?);
+    import_map.insert_singleton_alias(
+        UTOO_STYLE_LOADER,
+        pack_path.join(&format!("node_modules/{UTOO_STYLE_LOADER}"))?,
+    );
     // import_map.insert_singleton_alias("styled-jsx", pack_package.clone());
     import_map.insert_singleton_alias("react", project_path.clone());
     import_map.insert_singleton_alias("react-dom", project_path.clone());

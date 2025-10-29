@@ -1,5 +1,8 @@
 {
   "mode": "development",
+  "output": {
+    "publicPath": "/dist"
+  },
   "entry": [
     {
       "import": "./src/index.tsx",

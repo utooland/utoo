@@ -39,7 +39,6 @@
   "dependencies": {
     "@utoo/style-loader": "^1.0.0",
     "@utoo/pack-shared": "^0.0.7",
-    "react-refresh": "^0.12.0",
     "@babel/code-frame": "7.22.5",
     "@swc/helpers": "0.5.15",
     "find-up": "4.1.0",
