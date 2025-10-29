@@ -356,15 +356,25 @@ pub async fn get_utoopack_dependency_package(
 
     let dependency_path_to_root = &source.ident().path().owned().await?.parent();
 
-    Ok(Vc::cell(
-        dependency_path_to_root
-            .path
-            // This is a hack for special node_modules structure like pnpm
-            // for example: require("node_modules/.pnpm/loader-runner@4.3.0/node_modules/loader-runner/lib/LoaderRunner.js") can't be resolve,
-            // but require(".pnpm/loader-runner@4.3.0/node_modules/loader-runner/lib/LoaderRunner.js)" can be
-            .replacen("node_modules/", "", 1)
-            .into(),
-    ))
+    #[cfg(not(feature = "test"))]
+    {
+        let project_root = pack_path.root().owned().await?;
+        let relative_path = match project_root.get_relative_path_to(dependency_path_to_root) {
+            Some(relative) => relative,
+            None => dependency_path_to_root.path.clone(),
+        };
+        Ok(Vc::cell(relative_path.into()))
+    }
+    #[cfg(feature = "test")]
+    {
+        Ok(Vc::cell(
+            dependency_path_to_root
+                .path
+                .clone()
+                .replacen("node_modules/", "", 1)
+                .into(),
+        ))
+    }
 }
 
 pub fn get_client_resolved_map(

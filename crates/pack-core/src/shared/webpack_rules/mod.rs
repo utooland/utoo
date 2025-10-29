@@ -9,11 +9,9 @@ use turbopack::module_options::{
     WebpackLoaderBuiltinConditionSet, WebpackLoaderBuiltinConditionSetMatch, WebpackLoadersOptions,
 };
 use turbopack_core::resolve::{ExternalTraced, ExternalType, options::ImportMapping};
-use turbopack_core::resolve::{ResolveResult, ResolveResultItem};
 
 use crate::{
     config::Config,
-    import_map::get_utoopack_dependency_package,
     shared::webpack_rules::{
         less::get_less_loader_rules, sass::get_sass_loader_rules,
         style_loader::get_style_loader_rules,
@@ -168,14 +166,11 @@ pub async fn webpack_loader_options(
 
 #[turbo_tasks::function]
 async fn loader_runner_package_mapping(pack_path: FileSystemPath) -> Result<Vc<ImportMapping>> {
-    Ok(
-        ImportMapping::Direct(ResolveResult::primary(ResolveResultItem::External {
-            name: get_utoopack_dependency_package(pack_path, rcstr!("loader-runner"))
-                .owned()
-                .await?,
-            ty: ExternalType::CommonJs,
-            traced: ExternalTraced::Untraced,
-        }))
-        .cell(),
-    )
+    Ok(ImportMapping::PrimaryAlternativeExternal {
+        name: Some(rcstr!("loader-runner")),
+        ty: ExternalType::CommonJs,
+        traced: ExternalTraced::Untraced,
+        lookup_dir: pack_path,
+    }
+    .cell())
 }
