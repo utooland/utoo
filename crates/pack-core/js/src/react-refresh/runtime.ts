@@ -1,5 +1,5 @@
-import RefreshRuntime from "react-refresh/runtime";
 import RefreshHelpers from "./internal/helpers";
+import RefreshRuntime from "./internal/react-refresh-runtime.development";
 
 export type RefreshRuntimeGlobals = {
   $RefreshReg$: (type: unknown, id: string) => void;

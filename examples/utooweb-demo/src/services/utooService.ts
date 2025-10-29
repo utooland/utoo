@@ -1,5 +1,4 @@
 import { Project as UtooProject } from "@utoo/web";
-import { packageLock } from "../packageLock";
 import { demoFiles } from "../demoFiles";
 
 const projectName = "/utooweb-demo";
@@ -29,7 +28,9 @@ const installDependencies = async (project: UtooProject): Promise<void> => {
         "color: green",
     );
     const start = performance.now();
-    await project.install(JSON.stringify(packageLock));
+
+    const packageLock = await project.readFile("package-lock.json", 'utf8');
+    await project.install(packageLock);
     console.log(
         `%cOPFS Project:%c Finished to install dependencies in ${Math.round(performance.now() - start)} ms.`,
         "color: blue;",

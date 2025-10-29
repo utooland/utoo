@@ -27,7 +27,7 @@
 //
 // https://github.com/facebook/metro/blob/d6b9685c730d0d63577db40f41369157f28dfa3a/packages/metro/src/lib/polyfills/require.js
 
-import RefreshRuntime from "react-refresh/runtime";
+import RefreshRuntime from "./react-refresh-runtime.development";
 
 type ModuleHotStatus =
   | "idle"
