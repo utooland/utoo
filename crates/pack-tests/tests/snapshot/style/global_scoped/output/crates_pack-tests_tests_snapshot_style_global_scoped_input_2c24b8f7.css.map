@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["turbopack:///turbopack:///[project]/crates/pack-tests/tests/snapshot/style/global_scoped/input/style.less"],"sourcesContent":["\n.check-box {\n    :global(.ant-checkbox-wrapper) {\n        color: rgb(0 0 0 / 85%);\n        font-weight: 400;\n        font-size: 14px;\n    }\n}\n\n.polestar-tooltip-container {\n    ::-webkit-scrollbar-thumb {\n        background: #464646;\n    }\n\n    ::-webkit-scrollbar-track {\n        background-color: rgba(255, 255, 255, 0.65);\n    }\n\n    ::-webkit-scrollbar-thumb:window-inactive {\n        background: rgba(250, 250, 250, 0.25);\n    }\n\n    ::-webkit-scrollbar-thumb:hover {\n        background: #ddd;\n    }\n}\n\n:global ::-webkit-scrollbar {\n    width: 8px;\n    height: 4px;\n}"],"names":[],"mappings":"AACA;;;;;;AAQA;;;;AAAA;;;;AAAA;;;;AAAA;;;;AAkBA"}}]
+}
