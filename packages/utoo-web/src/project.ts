@@ -30,7 +30,14 @@ export class Project implements ProjectEndpoint {
   >;
 
   constructor(options: ProjectOptions) {
-    const { cwd, workerUrl, wasmUrl, threadWorkerUrl, serviceWorker, logFilter } = options;
+    const {
+      cwd,
+      workerUrl,
+      wasmUrl,
+      threadWorkerUrl,
+      serviceWorker,
+      logFilter,
+    } = options;
 
     this.serviceWorkerOptions = serviceWorker;
 

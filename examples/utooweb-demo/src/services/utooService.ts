@@ -12,7 +12,7 @@ export const initializeProject = async () => {
             url: "http://localhost:8081/serviceWorker.js",
             scope: serviceWorkerScope,
         },
-        logFilter: "trace",
+        logFilter: "info",
     });
 
     await projectInstance.installServiceWorker();

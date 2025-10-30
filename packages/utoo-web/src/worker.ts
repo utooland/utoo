@@ -27,7 +27,15 @@ const projectEndpoint: ProjectEndpoint & {
     this.wasmInit ??= initWasm(wasmUrl);
     await this.wasmInit!;
 
-    this.projectInternal = new ProjectInternal(cwd, threadWorkerUrl);
+    // Pass logFilter to thread worker via URL query string
+    let finalThreadWorkerUrl = threadWorkerUrl;
+    if (logFilter) {
+      const url = new URL(threadWorkerUrl, self.location.href);
+      url.searchParams.set("logFilter", logFilter);
+      finalThreadWorkerUrl = url.toString();
+    }
+
+    this.projectInternal = new ProjectInternal(cwd, finalThreadWorkerUrl);
     return;
   },
 
