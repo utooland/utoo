@@ -33,7 +33,7 @@ fn init_pack() {
     panic::set_hook(Box::new(console_error_panic_hook::hook));
 
     let log_filter = get_global_log_filter()
-        .unwrap_or_else(|| vec!["pack_core=info", "pack_api=info", "utoo_wasm=info"].join(","));
+        .unwrap_or_else(|| "pack_core=info,pack_api=info,utoo_wasm=info".to_string());
 
     let fmt_layer = fmt::layer()
         .without_time()
