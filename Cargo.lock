@@ -3384,7 +3384,7 @@ checksum = "0c6639b70a7ce854b79c70d7e83f16b5dc0137cc914f3d7d03803b513ecc67ac"
 [[package]]
 name = "lightningcss"
 version = "1.0.0-alpha.68"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#5a3ffb1c9a226e0fbfce8c38f0bd111ed601e2e0"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#3edd8b07a27939f5d06647ea7474aab2c4d1c0f2"
 dependencies = [
  "ahash 0.8.12",
  "bitflags 2.9.4",
@@ -3413,7 +3413,7 @@ dependencies = [
 [[package]]
 name = "lightningcss-derive"
 version = "1.0.0-alpha.43"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#5a3ffb1c9a226e0fbfce8c38f0bd111ed601e2e0"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#3edd8b07a27939f5d06647ea7474aab2c4d1c0f2"
 dependencies = [
  "convert_case 0.6.0",
  "proc-macro2",
@@ -4366,7 +4366,7 @@ dependencies = [
 [[package]]
 name = "parcel_selectors"
 version = "0.28.2"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#5a3ffb1c9a226e0fbfce8c38f0bd111ed601e2e0"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#3edd8b07a27939f5d06647ea7474aab2c4d1c0f2"
 dependencies = [
  "bitflags 2.9.4",
  "cssparser",
@@ -6267,7 +6267,7 @@ dependencies = [
 [[package]]
 name = "static-self"
 version = "0.1.2"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#5a3ffb1c9a226e0fbfce8c38f0bd111ed601e2e0"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#3edd8b07a27939f5d06647ea7474aab2c4d1c0f2"
 dependencies = [
  "indexmap 2.11.4",
  "smallvec",
@@ -6277,7 +6277,7 @@ dependencies = [
 [[package]]
 name = "static-self-derive"
 version = "0.1.1"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#5a3ffb1c9a226e0fbfce8c38f0bd111ed601e2e0"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#3edd8b07a27939f5d06647ea7474aab2c4d1c0f2"
 dependencies = [
  "proc-macro2",
  "quote",
