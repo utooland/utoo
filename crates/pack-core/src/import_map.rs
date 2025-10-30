@@ -26,7 +26,7 @@ pub const UTOO_STYLE_LOADER: &str = "@utoo/style-loader";
 
 /// Node.js module to polyfill mapping
 /// These polyfills are located in pack-core/js/src/node-polyfills/
-static NODE_POLYFILL_ALIASES: LazyLock<[(RcStr, RcStr); 22]> = LazyLock::new(|| {
+static NODE_POLYFILL_ALIASES: LazyLock<[(RcStr, RcStr); 23]> = LazyLock::new(|| {
     [
         (
             rcstr!("assert"),
@@ -115,6 +115,10 @@ static NODE_POLYFILL_ALIASES: LazyLock<[(RcStr, RcStr); 22]> = LazyLock::new(|| 
         (
             rcstr!("setimmediate"),
             rcstr!("@utoo/pack-runtime/node-polyfills/setimmediate/setImmediate.js"),
+        ),
+        (
+            rcstr!("fs"),
+            rcstr!("@utoo/pack-runtime/node-polyfills/empty/empty.js"),
         ),
     ]
 });
