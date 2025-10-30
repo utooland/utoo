@@ -359,11 +359,18 @@ pub async fn get_utoopack_dependency_package(
     #[cfg(not(feature = "test"))]
     {
         let project_root = pack_path.root().owned().await?;
-        let relative_path = match project_root.get_relative_path_to(dependency_path_to_root) {
-            Some(relative) => relative,
-            None => dependency_path_to_root.path.clone(),
+        let path = if dependency == "loader-runner" {
+            dependency_path_to_root
+                .path
+                .clone()
+                .replacen("node_modules/", "", 1)
+                .into()
+        } else {
+            project_root
+                .get_relative_path_to(dependency_path_to_root)
+                .unwrap_or_else(|| dependency_path_to_root.path.clone())
         };
-        Ok(Vc::cell(relative_path.into()))
+        Ok(Vc::cell(path))
     }
     #[cfg(feature = "test")]
     {
