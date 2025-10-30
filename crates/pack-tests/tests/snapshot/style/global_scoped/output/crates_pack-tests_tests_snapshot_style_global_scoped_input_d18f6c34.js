@@ -2,6 +2,8 @@
 1, ((__turbopack_context__) => {
 
 __turbopack_context__.v({
+  "img": "style-module-less-module__vEa6AG__img",
+  "list": "style-module-less-module__vEa6AG__list",
 });
 }),
 98, ((__turbopack_context__) => {
