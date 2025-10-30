@@ -47,7 +47,8 @@ impl Project {
     pub async fn install(&self, package_lock: String) -> Result<(), String> {
         opfs_project::package_manager::install_deps(&package_lock)
             .await
-            .map_err(|e| e.to_string())?;
+            // format anyhow backtrace for better error display in JS
+            .map_err(|e| format!("{:#?}", e))?;
         Ok(())
     }
 

@@ -15,8 +15,8 @@ export const initializeProject = async () => {
     });
 
     await projectInstance.installServiceWorker();
-    await installDependencies(projectInstance);
     await initUtooProject(projectInstance);
+    await installDependencies(projectInstance);
 
     return projectInstance;
 };
@@ -30,7 +30,12 @@ const installDependencies = async (project: UtooProject): Promise<void> => {
     const start = performance.now();
 
     const packageLock = await project.readFile("package-lock.json", 'utf8');
-    await project.install(packageLock);
+    try {
+        await project.install(packageLock);
+    } catch (e) {
+        console.error("Failed to install dependencies:", e);
+        throw e;
+    }
     console.log(
         `%cOPFS Project:%c Finished to install dependencies in ${Math.round(performance.now() - start)} ms.`,
         "color: blue;",
