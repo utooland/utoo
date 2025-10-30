@@ -49,6 +49,7 @@ export interface ProjectOptions {
   threadWorkerUrl: string;
   wasmUrl?: string;
   serviceWorker?: ServiceWorkerOptions;
+  logFilter?: string;
 }
 
 export interface ServiceWorkerOptions {
