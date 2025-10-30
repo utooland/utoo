@@ -17,9 +17,16 @@ const projectEndpoint: ProjectEndpoint & {
 
   // This should be called only once
   async mount(opt) {
-    const { cwd, wasmUrl, threadWorkerUrl } = opt;
+    const { cwd, wasmUrl, threadWorkerUrl, logFilter } = opt;
+
+    // Set global log filter before wasm init
+    if (logFilter) {
+      (globalThis as any).__UTOO_LOG_FILTER__ = logFilter;
+    }
+
     this.wasmInit ??= initWasm(wasmUrl);
     await this.wasmInit!;
+
     this.projectInternal = new ProjectInternal(cwd, threadWorkerUrl);
     return;
   },
