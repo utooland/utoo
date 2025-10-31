@@ -3,6 +3,10 @@ import buffer from 'buffer';
 const stream = require('stream');
 import { process } from 'browser-polyfill';
 
+const fs = require('fs');
+
+fs;
+
 console.log(assert, buffer, process);
 
 console.log(stream);

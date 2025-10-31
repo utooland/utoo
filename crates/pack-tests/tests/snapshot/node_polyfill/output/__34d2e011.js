@@ -10600,6 +10600,10 @@ __turbopack_context__.s([
     module.exports = r;
 })();
 }),
+"[@utoo/pack-runtime]/node-polyfills/empty/empty.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+
+module.exports = {};
+}),
 "[project]/crates/pack-tests/tests/snapshot/node_polyfill/input/index.ts [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
@@ -10610,10 +10614,12 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$crates$2f$pack$2d$tests$2f$t
 ;
 const stream = __turbopack_context__.r("[@utoo/pack-runtime]/node-polyfills/stream-browserify/index.js [client] (ecmascript)");
 ;
+const fs = __turbopack_context__.r("[@utoo/pack-runtime]/node-polyfills/empty/empty.js [client] (ecmascript)");
+fs;
 console.log(__TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$node$2d$polyfills$2f$assert$2f$assert$2e$js__$5b$client$5d$__$28$ecmascript$29$__["default"], __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$node$2d$polyfills$2f$buffer$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__["default"], __TURBOPACK__imported__module__$5b$project$5d2f$crates$2f$pack$2d$tests$2f$tests$2f$snapshot$2f$node_modules$2f$browser$2d$polyfill$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__["process"]);
 console.log(stream);
 __turbopack_context__.s([]);
 }),
 ]);
 
-//# sourceMappingURL=__0273a385.js.map
+//# sourceMappingURL=__34d2e011.js.map
