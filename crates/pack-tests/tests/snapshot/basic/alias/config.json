@@ -9,7 +9,7 @@
     "resolve": {
       "alias": {
         "hello-a": "./input/a.ts",
-        "@@/": "./input/"
+        "@@": "./input"
       }
     },
     "optimization": {

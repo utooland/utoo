@@ -8,8 +8,8 @@ use turbo_tasks_fs::{FileSystem, FileSystemPath};
 use turbopack_core::{
     reference_type::{CommonJsReferenceSubType, ReferenceType},
     resolve::{
-        ExternalTraced, ExternalType, ResolveAliasMap, ResolveResult, ResolveResultItem,
-        SubpathValue,
+        AliasPattern, ExternalTraced, ExternalType, ResolveAliasMap, ResolveResult,
+        ResolveResultItem, SubpathValue,
         node::node_cjs_resolve_options,
         options::{ConditionValue, ImportMap, ImportMapping, ResolvedMap},
         parse::Request,
@@ -238,8 +238,58 @@ pub async fn insert_alias_option<const N: usize>(
 ) -> Result<()> {
     let conditions = BTreeMap::from(conditions.map(|c| (c.into(), ConditionValue::Set)));
     for (alias, value) in &alias_options.await? {
+        // If exact alias points to a directory, convert to wildcard pattern
+        if let AliasPattern::Exact(ref key) = alias {
+            let mut result = Vec::new();
+            value.add_results(
+                &conditions,
+                &ConditionValue::Unset,
+                &mut FxHashMap::default(),
+                &mut result,
+            );
+            if !result.is_empty() {
+                let path = result[0].0.split('?').next().unwrap_or(result[0].0);
+                let is_file = path
+                    .rsplit('/')
+                    .next()
+                    .map(|n| n.contains('.'))
+                    .unwrap_or(false);
+
+                if !is_file {
+                    // For directory aliases, modify the mapping to include '*' for wildcard replacement
+                    let mut result_for_mapping = Vec::new();
+                    value.add_results(
+                        &conditions,
+                        &ConditionValue::Unset,
+                        &mut FxHashMap::default(),
+                        &mut result_for_mapping,
+                    );
+                    if !result_for_mapping.is_empty() {
+                        let mut path_with_wildcard = result_for_mapping[0].0.to_string();
+                        if !path_with_wildcard.ends_with('*') {
+                            path_with_wildcard.push('*');
+                        }
+                        let relative_import =
+                            convert_to_project_relative(&path_with_wildcard, &project_path.path)
+                                .ok();
+                        if let Some(relative_import) = relative_import {
+                            import_map.insert_wildcard_alias(
+                                key.clone(),
+                                ImportMapping::PrimaryAlternative(
+                                    relative_import,
+                                    Some(project_path.clone()),
+                                )
+                                .resolved_cell(),
+                            );
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
         if let Some(mapping) = export_value_to_import_mapping(value, &conditions, project_path) {
-            import_map.insert_alias(alias, mapping);
+            import_map.insert_alias(alias.clone(), mapping);
         }
     }
     Ok(())

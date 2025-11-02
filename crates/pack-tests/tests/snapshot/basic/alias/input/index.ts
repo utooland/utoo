@@ -1,6 +1,6 @@
 import { foo } from 'hello-a';
 import { aliasPkg, aliasA } from "alias-pkg";
-import { bar } from '@@/a';
+import { bar } from '@@/a.ts';
 import { aliasB } from '@@/b';
 
 console.log(foo, aliasPkg, bar);
