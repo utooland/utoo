@@ -118,7 +118,18 @@ pub fn convert_to_project_relative(project_inside_path: &str, project_path: &str
             Err(anyhow::Error::msg(
                 r#"path: "{project_inside_path}" is out of project: "{project_path}"#,
             )),
-            |p| Ok(p.to_string_lossy().to_string().into()),
+            |p| {
+                // keep prefix './' for relative path
+                let path_str = p.to_string_lossy().to_string();
+                // Ensure the path starts with ./ prefix if it's not already ../ or ./
+                let path_with_prefix = if path_str.starts_with("../") || path_str.starts_with("./")
+                {
+                    path_str
+                } else {
+                    format!("./{path_str}")
+                };
+                Ok(path_with_prefix.into())
+            },
         )
     } else {
         Ok(project_inside_path.into())
