@@ -437,7 +437,7 @@ dependencies = [
  "bitflags 2.9.4",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -4125,9 +4125,9 @@ dependencies = [
 
 [[package]]
 name = "opfs-project"
-version = "0.1.11"
+version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ad1863b6274189918b3e76270eb7211c1e5c8567b019a17238bc174a71b69cc"
+checksum = "637556b3a97d2018f65c66dbe4621685864b61ffc0a2c1fbb3d9e3745d94b3be"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
