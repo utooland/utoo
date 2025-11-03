@@ -5610,6 +5610,488 @@ __turbopack_context__.s([
     ()=>process
 ]);
 }),
+"[@utoo/pack-runtime]/node-polyfills/querystring-es3/index.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+
+(function() {
+    "use strict";
+    var e = {
+        815: function(e) {
+            function hasOwnProperty(e, r) {
+                return Object.prototype.hasOwnProperty.call(e, r);
+            }
+            e.exports = function(e, n, t, o) {
+                n = n || "&";
+                t = t || "=";
+                var a = {};
+                if (typeof e !== "string" || e.length === 0) {
+                    return a;
+                }
+                var i = /\+/g;
+                e = e.split(n);
+                var u = 1e3;
+                if (o && typeof o.maxKeys === "number") {
+                    u = o.maxKeys;
+                }
+                var c = e.length;
+                if (u > 0 && c > u) {
+                    c = u;
+                }
+                for(var p = 0; p < c; ++p){
+                    var f = e[p].replace(i, "%20"), s = f.indexOf(t), _, l, y, d;
+                    if (s >= 0) {
+                        _ = f.substr(0, s);
+                        l = f.substr(s + 1);
+                    } else {
+                        _ = f;
+                        l = "";
+                    }
+                    y = decodeURIComponent(_);
+                    d = decodeURIComponent(l);
+                    if (!hasOwnProperty(a, y)) {
+                        a[y] = d;
+                    } else if (r(a[y])) {
+                        a[y].push(d);
+                    } else {
+                        a[y] = [
+                            a[y],
+                            d
+                        ];
+                    }
+                }
+                return a;
+            };
+            var r = Array.isArray || function(e) {
+                return Object.prototype.toString.call(e) === "[object Array]";
+            };
+        },
+        577: function(e) {
+            var stringifyPrimitive = function(e) {
+                switch(typeof e){
+                    case "string":
+                        return e;
+                    case "boolean":
+                        return e ? "true" : "false";
+                    case "number":
+                        return isFinite(e) ? e : "";
+                    default:
+                        return "";
+                }
+            };
+            e.exports = function(e, t, o, a) {
+                t = t || "&";
+                o = o || "=";
+                if (e === null) {
+                    e = undefined;
+                }
+                if (typeof e === "object") {
+                    return map(n(e), function(n) {
+                        var a = encodeURIComponent(stringifyPrimitive(n)) + o;
+                        if (r(e[n])) {
+                            return map(e[n], function(e) {
+                                return a + encodeURIComponent(stringifyPrimitive(e));
+                            }).join(t);
+                        } else {
+                            return a + encodeURIComponent(stringifyPrimitive(e[n]));
+                        }
+                    }).join(t);
+                }
+                if (!a) return "";
+                return encodeURIComponent(stringifyPrimitive(a)) + o + encodeURIComponent(stringifyPrimitive(e));
+            };
+            var r = Array.isArray || function(e) {
+                return Object.prototype.toString.call(e) === "[object Array]";
+            };
+            function map(e, r) {
+                if (e.map) return e.map(r);
+                var n = [];
+                for(var t = 0; t < e.length; t++){
+                    n.push(r(e[t], t));
+                }
+                return n;
+            }
+            var n = Object.keys || function(e) {
+                var r = [];
+                for(var n in e){
+                    if (Object.prototype.hasOwnProperty.call(e, n)) r.push(n);
+                }
+                return r;
+            };
+        }
+    };
+    var r = {};
+    function __nccwpck_require__(n) {
+        var t = r[n];
+        if (t !== undefined) {
+            return t.exports;
+        }
+        var o = r[n] = {
+            exports: {}
+        };
+        var a = true;
+        try {
+            e[n](o, o.exports, __nccwpck_require__);
+            a = false;
+        } finally{
+            if (a) delete r[n];
+        }
+        return o.exports;
+    }
+    if (typeof __nccwpck_require__ !== "undefined") __nccwpck_require__.ab = ("TURBOPACK compile-time value", "/ROOT/node-polyfills/querystring-es3") + "/";
+    var n = {};
+    !function() {
+        var e = n;
+        e.decode = e.parse = __nccwpck_require__(815);
+        e.encode = e.stringify = __nccwpck_require__(577);
+    }();
+    module.exports = n;
+})();
+}),
+"[@utoo/pack-runtime]/node-polyfills/native-url/index.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+
+(function() {
+    var e = {
+        452: function(e) {
+            "use strict";
+            e.exports = __turbopack_context__.r("[@utoo/pack-runtime]/node-polyfills/querystring-es3/index.js [client] (ecmascript)");
+        }
+    };
+    var t = {};
+    function __nccwpck_require__(o) {
+        var a = t[o];
+        if (a !== undefined) {
+            return a.exports;
+        }
+        var s = t[o] = {
+            exports: {}
+        };
+        var n = true;
+        try {
+            e[o](s, s.exports, __nccwpck_require__);
+            n = false;
+        } finally{
+            if (n) delete t[o];
+        }
+        return s.exports;
+    }
+    if (typeof __nccwpck_require__ !== "undefined") __nccwpck_require__.ab = ("TURBOPACK compile-time value", "/ROOT/node-polyfills/native-url") + "/";
+    var o = {};
+    !function() {
+        var e = o;
+        var t, a = (t = __nccwpck_require__(452)) && "object" == typeof t && "default" in t ? t.default : t, s = /https?|ftp|gopher|file/;
+        function r(e) {
+            "string" == typeof e && (e = d(e));
+            var t = function(e, t, o) {
+                var a = e.auth, s = e.hostname, n = e.protocol || "", p = e.pathname || "", c = e.hash || "", i = e.query || "", u = !1;
+                a = a ? encodeURIComponent(a).replace(/%3A/i, ":") + "@" : "", e.host ? u = a + e.host : s && (u = a + (~s.indexOf(":") ? "[" + s + "]" : s), e.port && (u += ":" + e.port)), i && "object" == typeof i && (i = t.encode(i));
+                var f = e.search || i && "?" + i || "";
+                return n && ":" !== n.substr(-1) && (n += ":"), e.slashes || (!n || o.test(n)) && !1 !== u ? (u = "//" + (u || ""), p && "/" !== p[0] && (p = "/" + p)) : u || (u = ""), c && "#" !== c[0] && (c = "#" + c), f && "?" !== f[0] && (f = "?" + f), {
+                    protocol: n,
+                    host: u,
+                    pathname: p = p.replace(/[?#]/g, encodeURIComponent),
+                    search: f = f.replace("#", "%23"),
+                    hash: c
+                };
+            }(e, a, s);
+            return "" + t.protocol + t.host + t.pathname + t.search + t.hash;
+        }
+        var n = "http://", p = "w.w", c = n + p, i = /^([a-z0-9.+-]*:\/\/\/)([a-z0-9.+-]:\/*)?/i, u = /https?|ftp|gopher|file/;
+        function h(e, t) {
+            var o = "string" == typeof e ? d(e) : e;
+            e = "object" == typeof e ? r(e) : e;
+            var a = d(t), s = "";
+            o.protocol && !o.slashes && (s = o.protocol, e = e.replace(o.protocol, ""), s += "/" === t[0] || "/" === e[0] ? "/" : ""), s && a.protocol && (s = "", a.slashes || (s = a.protocol, t = t.replace(a.protocol, "")));
+            var p = e.match(i);
+            p && !a.protocol && (e = e.substr((s = p[1] + (p[2] || "")).length), /^\/\/[^/]/.test(t) && (s = s.slice(0, -1)));
+            var f = new URL(e, c + "/"), m = new URL(t, f).toString().replace(c, ""), v = a.protocol || o.protocol;
+            return v += o.slashes || a.slashes ? "//" : "", !s && v ? m = m.replace(n, v) : s && (m = m.replace(n, "")), u.test(m) || ~t.indexOf(".") || "/" === e.slice(-1) || "/" === t.slice(-1) || "/" !== m.slice(-1) || (m = m.slice(0, -1)), s && (m = s + ("/" === m[0] ? m.substr(1) : m)), m;
+        }
+        function l() {}
+        l.prototype.parse = d, l.prototype.format = r, l.prototype.resolve = h, l.prototype.resolveObject = h;
+        var f = /^https?|ftp|gopher|file/, m = /^(.*?)([#?].*)/, v = /^([a-z0-9.+-]*:)(\/{0,3})(.*)/i, _ = /^([a-z0-9.+-]*:)?\/\/\/*/i, b = /^([a-z0-9.+-]*:)(\/{0,2})\[(.*)\]$/i;
+        function d(e, t, o) {
+            if (void 0 === t && (t = !1), void 0 === o && (o = !1), e && "object" == typeof e && e instanceof l) return e;
+            var s = (e = e.trim()).match(m);
+            e = s ? s[1].replace(/\\/g, "/") + s[2] : e.replace(/\\/g, "/"), b.test(e) && "/" !== e.slice(-1) && (e += "/");
+            var n = !/(^javascript)/.test(e) && e.match(v), i = _.test(e), u = "";
+            n && (f.test(n[1]) || (u = n[1].toLowerCase(), e = "" + n[2] + n[3]), n[2] || (i = !1, f.test(n[1]) ? (u = n[1], e = "" + n[3]) : e = "//" + n[3]), 3 !== n[2].length && 1 !== n[2].length || (u = n[1], e = "/" + n[3]));
+            var g, y = (s ? s[1] : e).match(/^https?:\/\/[^/]+(:[0-9]+)(?=\/|$)/), w = y && y[1], x = new l, C = "", U = "";
+            try {
+                g = new URL(e);
+            } catch (t) {
+                C = t, u || o || !/^\/\//.test(e) || /^\/\/.+[@.]/.test(e) || (U = "/", e = e.substr(1));
+                try {
+                    g = new URL(e, c);
+                } catch (e) {
+                    return x.protocol = u, x.href = u, x;
+                }
+            }
+            x.slashes = i && !U, x.host = g.host === p ? "" : g.host, x.hostname = g.hostname === p ? "" : g.hostname.replace(/(\[|\])/g, ""), x.protocol = C ? u || null : g.protocol, x.search = g.search.replace(/\\/g, "%5C"), x.hash = g.hash.replace(/\\/g, "%5C");
+            var j = e.split("#");
+            !x.search && ~j[0].indexOf("?") && (x.search = "?"), x.hash || "" !== j[1] || (x.hash = "#"), x.query = t ? a.decode(g.search.substr(1)) : x.search.substr(1), x.pathname = U + (n ? function(e) {
+                return e.replace(/['^|`]/g, function(e) {
+                    return "%" + e.charCodeAt().toString(16).toUpperCase();
+                }).replace(/((?:%[0-9A-F]{2})+)/g, function(e, t) {
+                    try {
+                        return decodeURIComponent(t).split("").map(function(e) {
+                            var t = e.charCodeAt();
+                            return t > 256 || /^[a-z0-9]$/i.test(e) ? e : "%" + t.toString(16).toUpperCase();
+                        }).join("");
+                    } catch (e) {
+                        return t;
+                    }
+                });
+            }(g.pathname) : g.pathname), "about:" === x.protocol && "blank" === x.pathname && (x.protocol = "", x.pathname = ""), C && "/" !== e[0] && (x.pathname = x.pathname.substr(1)), u && !f.test(u) && "/" !== e.slice(-1) && "/" === x.pathname && (x.pathname = ""), x.path = x.pathname + x.search, x.auth = [
+                g.username,
+                g.password
+            ].map(decodeURIComponent).filter(Boolean).join(":"), x.port = g.port, w && !x.host.endsWith(w) && (x.host += w, x.port = w.slice(1)), x.href = U ? "" + x.pathname + x.search + x.hash : r(x);
+            var q = /^(file)/.test(x.href) ? [
+                "host",
+                "hostname"
+            ] : [];
+            return Object.keys(x).forEach(function(e) {
+                ~q.indexOf(e) || (x[e] = x[e] || null);
+            }), x;
+        }
+        e.parse = d, e.format = r, e.resolve = h, e.resolveObject = function(e, t) {
+            return d(h(e, t));
+        }, e.Url = l;
+    }();
+    module.exports = o;
+})();
+}),
+"[@utoo/pack-runtime]/node-polyfills/setimmediate/setImmediate.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+
+(function() {
+    var e = {
+        189: function() {
+            (function(e, t) {
+                "use strict";
+                if (e.setImmediate) {
+                    return;
+                }
+                var n = 1;
+                var a = {};
+                var s = false;
+                var i = e.document;
+                var r;
+                function setImmediate(e) {
+                    if (typeof e !== "function") {
+                        e = new Function("" + e);
+                    }
+                    var t = new Array(arguments.length - 1);
+                    for(var s = 0; s < t.length; s++){
+                        t[s] = arguments[s + 1];
+                    }
+                    var i = {
+                        callback: e,
+                        args: t
+                    };
+                    a[n] = i;
+                    r(n);
+                    return n++;
+                }
+                function clearImmediate(e) {
+                    delete a[e];
+                }
+                function run(e) {
+                    var n = e.callback;
+                    var a = e.args;
+                    switch(a.length){
+                        case 0:
+                            n();
+                            break;
+                        case 1:
+                            n(a[0]);
+                            break;
+                        case 2:
+                            n(a[0], a[1]);
+                            break;
+                        case 3:
+                            n(a[0], a[1], a[2]);
+                            break;
+                        default:
+                            n.apply(t, a);
+                            break;
+                    }
+                }
+                function runIfPresent(e) {
+                    if (s) {
+                        setTimeout(runIfPresent, 0, e);
+                    } else {
+                        var t = a[e];
+                        if (t) {
+                            s = true;
+                            try {
+                                run(t);
+                            } finally{
+                                clearImmediate(e);
+                                s = false;
+                            }
+                        }
+                    }
+                }
+                function installNextTickImplementation() {
+                    r = function(e) {
+                        process.nextTick(function() {
+                            runIfPresent(e);
+                        });
+                    };
+                }
+                function canUsePostMessage() {
+                    if (e.postMessage && !e.importScripts) {
+                        var t = true;
+                        var n = e.onmessage;
+                        e.onmessage = function() {
+                            t = false;
+                        };
+                        e.postMessage("", "*");
+                        e.onmessage = n;
+                        return t;
+                    }
+                }
+                function installPostMessageImplementation() {
+                    var t = "setImmediate$" + Math.random() + "$";
+                    var onGlobalMessage = function(n) {
+                        if (n.source === e && typeof n.data === "string" && n.data.indexOf(t) === 0) {
+                            runIfPresent(+n.data.slice(t.length));
+                        }
+                    };
+                    if (e.addEventListener) {
+                        e.addEventListener("message", onGlobalMessage, false);
+                    } else {
+                        e.attachEvent("onmessage", onGlobalMessage);
+                    }
+                    r = function(n) {
+                        e.postMessage(t + n, "*");
+                    };
+                }
+                function installMessageChannelImplementation() {
+                    var e = new MessageChannel;
+                    e.port1.onmessage = function(e) {
+                        var t = e.data;
+                        runIfPresent(t);
+                    };
+                    r = function(t) {
+                        e.port2.postMessage(t);
+                    };
+                }
+                function installReadyStateChangeImplementation() {
+                    var e = i.documentElement;
+                    r = function(t) {
+                        var n = i.createElement("script");
+                        n.onreadystatechange = function() {
+                            runIfPresent(t);
+                            n.onreadystatechange = null;
+                            e.removeChild(n);
+                            n = null;
+                        };
+                        e.appendChild(n);
+                    };
+                }
+                function installSetTimeoutImplementation() {
+                    r = function(e) {
+                        setTimeout(runIfPresent, 0, e);
+                    };
+                }
+                var o = Object.getPrototypeOf && Object.getPrototypeOf(e);
+                o = o && o.setTimeout ? o : e;
+                if (({}).toString.call(e.process) === "[object process]") {
+                    installNextTickImplementation();
+                } else if (canUsePostMessage()) {
+                    installPostMessageImplementation();
+                } else if (e.MessageChannel) {
+                    installMessageChannelImplementation();
+                } else if (i && "onreadystatechange" in i.createElement("script")) {
+                    installReadyStateChangeImplementation();
+                } else {
+                    installSetTimeoutImplementation();
+                }
+                o.setImmediate = setImmediate;
+                o.clearImmediate = clearImmediate;
+            })(typeof self === "undefined" ? ("TURBOPACK compile-time falsy", 0) ? "TURBOPACK unreachable" : /*TURBOPACK member replacement*/ __turbopack_context__.g : self);
+        }
+    };
+    if (typeof __nccwpck_require__ !== "undefined") __nccwpck_require__.ab = ("TURBOPACK compile-time value", "/ROOT/node-polyfills/setimmediate") + "/";
+    var t = {};
+    e[189]();
+    module.exports = t;
+})();
+}),
+"[@utoo/pack-runtime]/node-polyfills/timers-browserify/main.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+
+(function() {
+    var e = {
+        845: function(e, t, i) {
+            var o = ("TURBOPACK compile-time value", "object") !== "undefined" && /*TURBOPACK member replacement*/ __turbopack_context__.g || typeof self !== "undefined" && self || window;
+            var n = Function.prototype.apply;
+            t.setTimeout = function() {
+                return new Timeout(n.call(setTimeout, o, arguments), clearTimeout);
+            };
+            t.setInterval = function() {
+                return new Timeout(n.call(setInterval, o, arguments), clearInterval);
+            };
+            t.clearTimeout = t.clearInterval = function(e) {
+                if (e) {
+                    e.close();
+                }
+            };
+            function Timeout(e, t) {
+                this._id = e;
+                this._clearFn = t;
+            }
+            Timeout.prototype.unref = Timeout.prototype.ref = function() {};
+            Timeout.prototype.close = function() {
+                this._clearFn.call(o, this._id);
+            };
+            t.enroll = function(e, t) {
+                clearTimeout(e._idleTimeoutId);
+                e._idleTimeout = t;
+            };
+            t.unenroll = function(e) {
+                clearTimeout(e._idleTimeoutId);
+                e._idleTimeout = -1;
+            };
+            t._unrefActive = t.active = function(e) {
+                clearTimeout(e._idleTimeoutId);
+                var t = e._idleTimeout;
+                if (t >= 0) {
+                    e._idleTimeoutId = setTimeout(function onTimeout() {
+                        if (e._onTimeout) e._onTimeout();
+                    }, t);
+                }
+            };
+            i(505);
+            t.setImmediate = typeof self !== "undefined" && self.setImmediate || ("TURBOPACK compile-time value", "object") !== "undefined" && /*TURBOPACK member replacement*/ __turbopack_context__.g.setImmediate || this && this.setImmediate;
+            t.clearImmediate = typeof self !== "undefined" && self.clearImmediate || ("TURBOPACK compile-time value", "object") !== "undefined" && /*TURBOPACK member replacement*/ __turbopack_context__.g.clearImmediate || this && this.clearImmediate;
+        },
+        505: function(e) {
+            "use strict";
+            e.exports = __turbopack_context__.r("[@utoo/pack-runtime]/node-polyfills/setimmediate/setImmediate.js [client] (ecmascript)");
+        }
+    };
+    var t = {};
+    function __nccwpck_require__(i) {
+        var o = t[i];
+        if (o !== undefined) {
+            return o.exports;
+        }
+        var n = t[i] = {
+            exports: {}
+        };
+        var r = true;
+        try {
+            e[i].call(n.exports, n, n.exports, __nccwpck_require__);
+            r = false;
+        } finally{
+            if (r) delete t[i];
+        }
+        return n.exports;
+    }
+    if (typeof __nccwpck_require__ !== "undefined") __nccwpck_require__.ab = ("TURBOPACK compile-time value", "/ROOT/node-polyfills/timers-browserify") + "/";
+    var i = __nccwpck_require__(845);
+    module.exports = i;
+})();
+}),
 "[@utoo/pack-runtime]/node-polyfills/events/events.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
 
 (function() {
@@ -10610,10 +11092,16 @@ module.exports = {};
 var __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$node$2d$polyfills$2f$assert$2f$assert$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[@utoo/pack-runtime]/node-polyfills/assert/assert.js [client] (ecmascript)");
 var __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$node$2d$polyfills$2f$buffer$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[@utoo/pack-runtime]/node-polyfills/buffer/index.js [client] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$crates$2f$pack$2d$tests$2f$tests$2f$snapshot$2f$node_modules$2f$browser$2d$polyfill$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/crates/pack-tests/tests/snapshot/node_modules/browser-polyfill/index.js [client] (ecmascript)");
+var __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$node$2d$polyfills$2f$native$2d$url$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[@utoo/pack-runtime]/node-polyfills/native-url/index.js [client] (ecmascript)");
+var __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$node$2d$polyfills$2f$timers$2d$browserify$2f$main$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[@utoo/pack-runtime]/node-polyfills/timers-browserify/main.js [client] (ecmascript)");
 ;
 ;
 const stream = __turbopack_context__.r("[@utoo/pack-runtime]/node-polyfills/stream-browserify/index.js [client] (ecmascript)");
 ;
+;
+;
+__TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$node$2d$polyfills$2f$native$2d$url$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__["urlToHttpOptions"];
+__TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$node$2d$polyfills$2f$timers$2d$browserify$2f$main$2e$js__$5b$client$5d$__$28$ecmascript$29$__["default"];
 const fs = __turbopack_context__.r("[@utoo/pack-runtime]/node-polyfills/empty/empty.js [client] (ecmascript)");
 fs;
 console.log(__TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$node$2d$polyfills$2f$assert$2f$assert$2e$js__$5b$client$5d$__$28$ecmascript$29$__["default"], __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$node$2d$polyfills$2f$buffer$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__["default"], __TURBOPACK__imported__module__$5b$project$5d2f$crates$2f$pack$2d$tests$2f$tests$2f$snapshot$2f$node_modules$2f$browser$2d$polyfill$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__["process"]);
@@ -10622,4 +11110,4 @@ __turbopack_context__.s([]);
 }),
 ]);
 
-//# sourceMappingURL=__34d2e011.js.map
+//# sourceMappingURL=__b8798b63.js.map
