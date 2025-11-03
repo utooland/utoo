@@ -118,7 +118,21 @@ pub fn convert_to_project_relative(project_inside_path: &str, project_path: &str
             Err(anyhow::Error::msg(
                 r#"path: "{project_inside_path}" is out of project: "{project_path}"#,
             )),
-            |p| Ok(p.to_string_lossy().to_string().into()),
+            |p| {
+                use std::path::Component;
+
+                if p.as_os_str().is_empty() {
+                    return Ok(".".into());
+                }
+
+                // Prepend "./" to relative paths that don't already have a relative prefix.
+                let path_with_prefix = match p.components().next() {
+                    Some(Component::Normal(_)) => format!("./{}", p.display()),
+                    _ => p.to_string_lossy().to_string(),
+                };
+
+                Ok(path_with_prefix.into())
+            },
         )
     } else {
         Ok(project_inside_path.into())
