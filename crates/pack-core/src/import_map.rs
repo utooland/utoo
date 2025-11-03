@@ -363,7 +363,7 @@ pub async fn get_utoopack_dependency_package(
     #[cfg(not(feature = "test"))]
     {
         let project_root = pack_path.root().owned().await?;
-        let path = if dependency == "loader-runner" {
+        let path = if dependency == "loader-runner" || dependency == "postcss" {
             dependency_path_to_root
                 .path
                 .clone()
