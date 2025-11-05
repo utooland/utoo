@@ -35,7 +35,9 @@ self.addEventListener("fetch", async (event: FetchEvent) => {
       "." + new URL(url).pathname.replace(_serviceWorkerScope, "");
     event.respondWith(readFileFromProject(projectPath));
   } else {
-    event.respondWith(fetch(event.request));
+    event.respondWith(
+      fetch(event.request, { mode: "cors", credentials: "same-origin" }),
+    );
   }
 });
 
