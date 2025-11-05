@@ -36,7 +36,7 @@ self.addEventListener("fetch", async (event: FetchEvent) => {
     event.respondWith(readFileFromProject(projectPath));
   } else {
     event.respondWith(
-      fetch(event.request, { mode: "cors", credentials: "same-origin" }),
+      fetch(new Request(event.request, { mode: "cors", credentials: "same-origin" }))
     );
   }
 });
