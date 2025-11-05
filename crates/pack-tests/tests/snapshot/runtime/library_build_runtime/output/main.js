@@ -527,7 +527,10 @@ function getPathFromScript(chunkScript) {
     }
     const chunkUrl = typeof TURBOPACK_NEXT_CHUNK_URLS !== "undefined" ? TURBOPACK_NEXT_CHUNK_URLS.pop() : chunkScript.getAttribute("src");
     const src = decodeURIComponent(chunkUrl.replace(/[?#].*$/, ""));
-    const path = src.startsWith(CHUNK_BASE_PATH) ? src.slice(CHUNK_BASE_PATH.length) : src;
+    let path = src.startsWith(CHUNK_BASE_PATH) ? src.slice(CHUNK_BASE_PATH.length) : src;
+    if (path.startsWith("/")) {
+        path = path.slice(1);
+    }
     return path;
 }
 function registerCompressedModuleFactory(moduleId, moduleFactory) {
