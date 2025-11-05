@@ -711,7 +711,10 @@ function getPathFromScript(chunkScript) {
     const chunkUrl = typeof TURBOPACK_NEXT_CHUNK_URLS !== 'undefined' ? TURBOPACK_NEXT_CHUNK_URLS.pop() : chunkScript.getAttribute('src');
     const src = decodeURIComponent(chunkUrl.replace(/[?#].*$/, ''));
     const runtimeBasePath = getRuntimeChunkBasePath();
-    const path = src.startsWith(runtimeBasePath) ? src.slice(runtimeBasePath.length) : src;
+    let path = src.startsWith(runtimeBasePath) ? src.slice(runtimeBasePath.length) : src;
+    if (path.startsWith('/')) {
+        path = path.slice(1);
+    }
     return path;
 }
 const regexJsUrl = /\.js(?:\?[^#]*)?(?:#.*)?$/;

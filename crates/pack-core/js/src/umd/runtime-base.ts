@@ -250,9 +250,12 @@ function getPathFromScript(
       ? TURBOPACK_NEXT_CHUNK_URLS.pop()!
       : chunkScript.getAttribute("src")!;
   const src = decodeURIComponent(chunkUrl.replace(/[?#].*$/, ""));
-  const path = src.startsWith(CHUNK_BASE_PATH)
+  let path = src.startsWith(CHUNK_BASE_PATH)
     ? src.slice(CHUNK_BASE_PATH.length)
     : src;
+  if (path.startsWith("/")) {
+    path = path.slice(1);
+  }
   return path as ChunkPath | ChunkListPath;
 }
 
