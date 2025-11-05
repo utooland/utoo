@@ -4125,18 +4125,21 @@ dependencies = [
 
 [[package]]
 name = "opfs-project"
-version = "0.1.12"
+version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "637556b3a97d2018f65c66dbe4621685864b61ffc0a2c1fbb3d9e3745d94b3be"
+checksum = "dee5c582c581c1c6801f73b25e8671d0606b763113afbbfc1d3333499a7da2b7"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
+ "data-encoding",
  "flate2",
  "futures",
  "futures-util",
  "reqwest 0.12.23",
  "serde",
  "serde_json",
+ "sha1",
+ "sha2",
  "tar",
  "tokio-fs-ext",
  "tracing",
