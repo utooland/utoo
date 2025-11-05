@@ -39,9 +39,9 @@ const projectEndpoint: ProjectEndpoint & {
     return;
   },
 
-  async install(packageLock: string) {
+  async install(packageLock: string, maxConcurrentDownloads?: number) {
     await this.wasmInit!;
-    await this.projectInternal!.install(packageLock);
+    await this.projectInternal!.install(packageLock, maxConcurrentDownloads);
     return;
   },
 
