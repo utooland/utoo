@@ -27,7 +27,10 @@ export interface BuildOutput {
 }
 
 export interface ProjectEndpoint {
-  install: (packageLock: string) => Promise<void>;
+  install: (
+    packageLock: string,
+    maxConcurrentDownloads?: number,
+  ) => Promise<void>;
   build: () => Promise<BuildOutput>;
   readFile(path: string): Promise<Uint8Array>;
   readFile(path: string, encoding?: "utf8"): Promise<string>;

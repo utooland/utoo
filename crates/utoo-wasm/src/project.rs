@@ -44,8 +44,14 @@ impl Project {
     }
 
     #[wasm_bindgen]
-    pub async fn install(&self, package_lock: String) -> Result<(), String> {
-        opfs_project::package_manager::install_deps(&package_lock)
+    pub async fn install(
+        &self,
+        package_lock: String,
+        max_concurrent_downloads: Option<usize>,
+    ) -> Result<(), String> {
+        const DEFAULT_MAX_CONCURRENT_DOWNLOADS: usize = 10;
+        let max_concurrent = max_concurrent_downloads.unwrap_or(DEFAULT_MAX_CONCURRENT_DOWNLOADS);
+        opfs_project::package_manager::install_deps(&package_lock, max_concurrent)
             .await
             // format anyhow backtrace for better error display in JS
             .map_err(|e| format!("{:#?}", e))?;
