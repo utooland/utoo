@@ -4,3 +4,4 @@ target
 .DS_Store
 *.trace
 rustc-ice*.txt
+.turbopack

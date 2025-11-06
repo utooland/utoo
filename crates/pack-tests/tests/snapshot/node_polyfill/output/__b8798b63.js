@@ -11100,6 +11100,7 @@ const stream = __turbopack_context__.r("[@utoo/pack-runtime]/node-polyfills/stre
 ;
 ;
 ;
+confirm;
 __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$node$2d$polyfills$2f$native$2d$url$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__["urlToHttpOptions"];
 __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$node$2d$polyfills$2f$timers$2d$browserify$2f$main$2e$js__$5b$client$5d$__$28$ecmascript$29$__["default"];
 const fs = __turbopack_context__.r("[@utoo/pack-runtime]/node-polyfills/empty/empty.js [client] (ecmascript)");

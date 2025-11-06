@@ -635,7 +635,7 @@ impl Project {
 
     #[turbo_tasks::function]
     pub async fn node_root(self: Vc<Self>) -> Result<Vc<FileSystemPath>> {
-        Ok(self.output_fs().root().await?.join(".turbopack")?.cell())
+        Ok(self.pack_path().await?.join(".turbopack")?.cell())
     }
 
     #[turbo_tasks::function]
@@ -661,11 +661,11 @@ impl Project {
     #[turbo_tasks::function]
     pub async fn node_root_to_root_path(self: Vc<Self>) -> Result<Vc<RcStr>> {
         let output_root_to_root_path = self
-            .project_path()
+            .pack_path()
             .await?
             .join(".turbopack")?
             .get_relative_path_to(&*self.project_root().await?)
-            .context("Project path need to be in root path")?;
+            .context("Pack path need to be in root path")?;
         Ok(Vc::cell(output_root_to_root_path))
     }
 

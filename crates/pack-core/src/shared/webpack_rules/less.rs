@@ -4,14 +4,10 @@ use anyhow::{Result, bail};
 use serde_json::Value as JsonValue;
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{ResolvedVc, Vc};
-use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::LoaderRuleItem;
 use turbopack_node::transforms::webpack::WebpackLoaderItem;
 
-use crate::import_map::get_utoopack_dependency_package;
-
 pub async fn get_less_loader_rules(
-    pack_path: FileSystemPath,
     less_options: Vc<JsonValue>,
 ) -> Result<Vec<(RcStr, LoaderRuleItem)>> {
     let less_options = less_options.await?;
@@ -27,11 +23,6 @@ pub async fn get_less_loader_rules(
         .or(Some(&empty_additional_data)));
 
     let less_loader = WebpackLoaderItem {
-        #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-        loader: get_utoopack_dependency_package(pack_path.clone(), rcstr!("less-loader"))
-            .owned()
-            .await?,
-        #[cfg(all(target_family = "wasm", target_os = "unknown"))]
         loader: rcstr!("less-loader"),
         options: take(
             serde_json::json!({

@@ -5,6 +5,8 @@ import { process } from 'browser-polyfill';
 import { urlToHttpOptions } from 'url';
 import timers from 'timers';
 
+confirm;
+
 urlToHttpOptions;
 timers;
 

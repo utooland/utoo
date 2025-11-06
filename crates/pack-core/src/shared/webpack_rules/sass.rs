@@ -4,14 +4,10 @@ use anyhow::{Result, bail};
 use serde_json::Value as JsonValue;
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{ResolvedVc, Vc};
-use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::LoaderRuleItem;
 use turbopack_node::transforms::webpack::WebpackLoaderItem;
 
-use crate::import_map::get_utoopack_dependency_package;
-
 pub async fn get_sass_loader_rules(
-    pack_path: FileSystemPath,
     sass_options: Vc<JsonValue>,
 ) -> Result<Vec<(RcStr, LoaderRuleItem)>> {
     let sass_options = sass_options.await?;
@@ -36,11 +32,6 @@ pub async fn get_sass_loader_rules(
         .or(Some(&empty_additional_data));
 
     let sass_loader = WebpackLoaderItem {
-        #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-        loader: get_utoopack_dependency_package(pack_path.clone(), rcstr!("sass-loader"))
-            .owned()
-            .await?,
-        #[cfg(all(target_family = "wasm", target_os = "unknown"))]
         loader: rcstr!("sass-loader"),
         options: take(
             serde_json::json!({
@@ -54,11 +45,6 @@ pub async fn get_sass_loader_rules(
         ),
     };
     let resolve_url_loader = WebpackLoaderItem {
-        #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-        loader: get_utoopack_dependency_package(pack_path.clone(), rcstr!("resolve-url-loader"))
-            .owned()
-            .await?,
-        #[cfg(all(target_family = "wasm", target_os = "unknown"))]
         loader: rcstr!("resolve-url-loader"),
         options: take(
             serde_json::json!({
