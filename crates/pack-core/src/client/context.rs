@@ -339,6 +339,10 @@ pub async fn get_client_module_options_context(
                 SourceMapsType::None
             },
             import_externals: *config.import_externals().await?,
+            enable_typescript_transform: Some(
+                TypescriptTransformOptions::default().resolved_cell(),
+            ),
+            enable_jsx: Some(JsxTransformOptions::default().resolved_cell()),
             ..Default::default()
         },
         css: CssOptionsContext {
@@ -373,10 +377,6 @@ pub async fn get_client_module_options_context(
 
     let internal_context = ModuleOptionsContext {
         ecmascript: EcmascriptOptionsContext {
-            enable_typescript_transform: Some(
-                TypescriptTransformOptions::default().resolved_cell(),
-            ),
-            enable_jsx: Some(JsxTransformOptions::default().resolved_cell()),
             ..module_options_context.ecmascript.clone()
         },
         enable_postcss_transform: None,
