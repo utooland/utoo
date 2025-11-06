@@ -91,7 +91,7 @@ impl Plugin for WasmRuntimePlugin {
                 ));
 
                 wasm_import_object_code.push_str(&format!(
-                    "\"{module}\": {{ {names} }}",
+                    "\"{module}\": {{ {names} }},",
                     module = key,
                     names = value
                         .iter()
