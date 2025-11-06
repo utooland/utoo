@@ -1,22 +1,13 @@
 use std::{collections::BTreeMap, sync::LazyLock};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rustc_hash::FxHashMap;
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{FxIndexMap, ResolvedVc, Vc};
 use turbo_tasks_fs::{FileSystem, FileSystemPath};
-use turbopack_core::{
-    reference_type::{CommonJsReferenceSubType, ReferenceType},
-    resolve::{
-        ExternalTraced, ExternalType, ResolveAliasMap, ResolveResult, ResolveResultItem,
-        SubpathValue,
-        node::node_cjs_resolve_options,
-        options::{ConditionValue, ImportMap, ImportMapping, ResolvedMap},
-        parse::Request,
-        pattern::Pattern,
-        resolve,
-    },
-    source::Source,
+use turbopack_core::resolve::{
+    ExternalTraced, ExternalType, ResolveAliasMap, ResolveResult, ResolveResultItem, SubpathValue,
+    options::{ConditionValue, ImportMap, ImportMapping, ResolvedMap},
 };
 use turbopack_node::execution_context::ExecutionContext;
 
@@ -128,12 +119,10 @@ pub fn mdx_import_source_file() -> RcStr {
 }
 
 #[turbo_tasks::function]
-pub async fn get_postcss_package_mapping(pack_path: FileSystemPath) -> Result<Vc<ImportMapping>> {
+pub async fn get_postcss_package_mapping() -> Result<Vc<ImportMapping>> {
     Ok(
         ImportMapping::Direct(ResolveResult::primary(ResolveResultItem::External {
-            name: get_utoopack_dependency_package(pack_path, rcstr!("postcss"))
-                .owned()
-                .await?,
+            name: rcstr!("postcss"),
             ty: ExternalType::CommonJs,
             traced: ExternalTraced::Untraced,
         }))
@@ -337,55 +326,6 @@ fn insert_package_alias(import_map: &mut ImportMap, prefix: RcStr, package_root:
         prefix,
         ImportMapping::PrimaryAlternative(rcstr!("./*"), Some(package_root)).resolved_cell(),
     );
-}
-
-#[turbo_tasks::function]
-pub async fn get_utoopack_dependency_package(
-    pack_path: FileSystemPath,
-    dependency: RcStr,
-) -> Result<Vc<RcStr>> {
-    let result = resolve(
-        pack_path.clone(),
-        ReferenceType::CommonJs(CommonJsReferenceSubType::Undefined),
-        Request::parse(Pattern::Constant(
-            format!("{dependency}/package.json").into(),
-        )),
-        node_cjs_resolve_options(pack_path.root().owned().await?),
-    );
-
-    let source = result
-        .first_source()
-        .await?
-        .context(format!("package {dependency} not found"))?;
-
-    let dependency_path_to_root = &source.ident().path().owned().await?.parent();
-
-    #[cfg(not(feature = "test"))]
-    {
-        let project_root = pack_path.root().owned().await?;
-        let path = if dependency == "loader-runner" || dependency == "postcss" {
-            dependency_path_to_root
-                .path
-                .clone()
-                .replacen("node_modules/", "", 1)
-                .into()
-        } else {
-            project_root
-                .get_relative_path_to(dependency_path_to_root)
-                .unwrap_or_else(|| dependency_path_to_root.path.clone())
-        };
-        Ok(Vc::cell(path))
-    }
-    #[cfg(feature = "test")]
-    {
-        Ok(Vc::cell(
-            dependency_path_to_root
-                .path
-                .clone()
-                .replacen("node_modules/", "", 1)
-                .into(),
-        ))
-    }
 }
 
 pub fn get_client_resolved_map(

@@ -2,19 +2,14 @@ use std::mem::take;
 
 use anyhow::{Result, bail};
 use turbo_rcstr::{RcStr, rcstr};
-use turbo_tasks_fs::FileSystemPath;
 use turbopack_node::transforms::webpack::WebpackLoaderItem;
 
 use turbo_tasks::{ResolvedVc, Vc};
 use turbopack::module_options::LoaderRuleItem;
 
-use crate::{
-    config::OptionalJsonValue,
-    import_map::{UTOO_STYLE_LOADER, get_utoopack_dependency_package},
-};
+use crate::{config::OptionalJsonValue, import_map::UTOO_STYLE_LOADER};
 
 pub async fn get_style_loader_rules(
-    pack_path: FileSystemPath,
     inline_css: Vc<OptionalJsonValue>,
 ) -> Result<Vec<(RcStr, LoaderRuleItem)>> {
     let mut rules = Vec::new();
@@ -27,9 +22,7 @@ pub async fn get_style_loader_rules(
     };
 
     let style_loader = WebpackLoaderItem {
-        loader: get_utoopack_dependency_package(pack_path.clone(), rcstr!(UTOO_STYLE_LOADER))
-            .owned()
-            .await?,
+        loader: rcstr!(UTOO_STYLE_LOADER),
         options: take(
             serde_json::json!({
                 "insert": inline_css_options.get("insert"),

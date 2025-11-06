@@ -251,22 +251,12 @@ pub async fn get_client_module_options_context(
     let mut foreign_conditions = loader_conditions.clone();
     foreign_conditions.insert(WebpackLoaderBuiltinCondition::Foreign);
 
-    let foreign_enable_webpack_loaders = *webpack_loader_options(
-        project_path.clone(),
-        config,
-        foreign_conditions,
-        pack_path.clone(),
-    )
-    .await?;
+    let foreign_enable_webpack_loaders =
+        *webpack_loader_options(project_path.clone(), config, foreign_conditions).await?;
 
     // Now creates a webpack rules that applies to all codes.
-    let enable_webpack_loaders = *webpack_loader_options(
-        project_path.clone(),
-        config,
-        loader_conditions,
-        pack_path.clone(),
-    )
-    .await?;
+    let enable_webpack_loaders =
+        *webpack_loader_options(project_path.clone(), config, loader_conditions).await?;
 
     let tree_shaking_mode_for_user_code = *config
         .tree_shaking_mode_for_user_code(mode_ref.is_development())
@@ -309,11 +299,7 @@ pub async fn get_client_module_options_context(
     let postcss_package = {
         #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
         {
-            Some(
-                get_postcss_package_mapping(pack_path.clone())
-                    .to_resolved()
-                    .await?,
-            )
+            Some(get_postcss_package_mapping().to_resolved().await?)
         }
         #[cfg(all(target_family = "wasm", target_os = "unknown"))]
         {
