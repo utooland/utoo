@@ -1,3 +1,12 @@
+## 0.11.15
+
+`2025-11-06`
+
+- fix: invalid wasm runtime export object by [xusd320](https://github.com/xusd320) in [#2297](https://github.com/umijs/mako/pull/2297)
+- fix: pnpm-lock by [xusd320](https://github.com/xusd320)
+- release: [umijs/mako@0.11.14 by @xusd320](https://github.com/umijs/mako@0.11.14 by @xusd320)
+
+
 ## 0.11.14
 
 `2025-10-09`
