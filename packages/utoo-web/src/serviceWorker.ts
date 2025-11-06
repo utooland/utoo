@@ -39,7 +39,7 @@ self.addEventListener("fetch", async (event: FetchEvent) => {
       fetch(
         new Request(event.request, {
           mode: "cors",
-          credentials: "same-origin",
+          credentials: "include",
         }),
       ),
     );
