@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/basic/imports/input/a.ts"],"sourcesContent":["export const a = \"a\";"],"names":[],"mappings":"AAAO,MAAM,IAAI"}},
+    {"offset": {"line": 14, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/basic/imports/input/index.ts"],"sourcesContent":["import { a, a } from './a';\n\nconsole.log(a);"],"names":[],"mappings":"AAAA;;AAEA,QAAQ,GAAG,CAAC,wCAAC"}}]
+}

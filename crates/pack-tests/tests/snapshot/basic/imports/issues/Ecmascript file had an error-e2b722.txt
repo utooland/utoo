@@ -1,0 +1,8 @@
+warning - [analysis] /crates/pack-tests/tests/snapshot/basic/imports/input/index.ts:1:12  Ecmascript file had an error
+         +             v
+       1 + import { a, a } from './a';
+         +             ^
+       2 | 
+       3 | console.log(a);
+  
+  the name `a` is defined multiple times
