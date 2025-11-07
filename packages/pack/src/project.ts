@@ -1,4 +1,5 @@
 import { nanoid } from "nanoid";
+import { Piscina as Pool } from "piscina";
 import { isDeepStrictEqual } from "util";
 import type {
   HmrIdentifiers,
@@ -387,6 +388,31 @@ export function projectFactory() {
     options: Required<ProjectOptions>,
     turboEngineOptions: binding.NapiTurboEngineOptions,
   ) {
+    let loaderPool: Pool;
+    binding.setExecutionTsfn((_this, buffer: Uint8Array) => {
+      const msg = JSON.parse(new TextDecoder().decode(buffer));
+      switch (msg.type) {
+        case "startup":
+          loaderPool = new Pool({
+            filename: msg.entrypoint,
+          });
+          break;
+        case "evaluate":
+          loaderPool.run(msg.args, { name: "evaluate" });
+        case "result":
+          loaderPool.run(
+            {
+              id: msg.id,
+              error: msg.error,
+              data: msg.data,
+            },
+            { name: "result" },
+          );
+        default:
+          console.log(JSON.stringify(msg));
+          break;
+      }
+    });
     return new ProjectImpl(
       await binding.projectNew(
         await rustifyProjectOptions(options),

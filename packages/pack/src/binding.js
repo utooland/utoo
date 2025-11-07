@@ -310,8 +310,10 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { endpointWriteToDisk, endpointServerChangedSubscribe, endpointClientChangedSubscribe, projectNew, projectUpdate, projectOnExit, projectShutdown, projectWriteAllEntrypointsToDisk, projectEntrypointsSubscribe, projectHmrEvents, projectHmrIdentifiersSubscribe, projectUpdateInfoSubscribe, projectTraceSource, projectGetSourceForAsset, projectGetSourceMap, projectGetSourceMapSync, rootTaskDispose, initCustomTraceSubscriber, teardownTraceSubscriber } = nativeBinding
+const { setExecutionTsfn, sendToRust, endpointWriteToDisk, endpointServerChangedSubscribe, endpointClientChangedSubscribe, projectNew, projectUpdate, projectOnExit, projectShutdown, projectWriteAllEntrypointsToDisk, projectEntrypointsSubscribe, projectHmrEvents, projectHmrIdentifiersSubscribe, projectUpdateInfoSubscribe, projectTraceSource, projectGetSourceForAsset, projectGetSourceMap, projectGetSourceMapSync, rootTaskDispose, initCustomTraceSubscriber, teardownTraceSubscriber } = nativeBinding
 
+module.exports.setExecutionTsfn = setExecutionTsfn
+module.exports.sendToRust = sendToRust
 module.exports.endpointWriteToDisk = endpointWriteToDisk
 module.exports.endpointServerChangedSubscribe = endpointServerChangedSubscribe
 module.exports.endpointClientChangedSubscribe = endpointClientChangedSubscribe

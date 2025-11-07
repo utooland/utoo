@@ -9,6 +9,8 @@ export declare class ExternalObject<T> {
     [K: symbol]: T
   }
 }
+export declare function setExecutionTsfn(tsfn: (err: Error | null, arg: Uint8Array) => any): void
+export declare function sendToRust(buf: Array<number>): Promise<void>
 export interface NapiEndpointConfig {
   
 }
