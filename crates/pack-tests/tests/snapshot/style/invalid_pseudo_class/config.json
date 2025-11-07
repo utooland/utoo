@@ -1,0 +1,10 @@
+{
+    "config": {
+        "entry": [
+            {
+                "import": "input/index.ts",
+                "name": "main"
+            }
+        ]
+    }
+}
