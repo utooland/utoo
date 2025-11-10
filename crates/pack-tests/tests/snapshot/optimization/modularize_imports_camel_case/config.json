@@ -1,0 +1,21 @@
+{
+    "config": {
+      "entry": [
+        {
+          "import": "input/index.js",
+          "name": "main"
+        }
+      ],
+      "optimization": {
+        "modularizeImports": {
+          "antd": {
+            "transform": "antd/es/{{ member }}",
+            "preventFullImport": false,
+            "skipDefaultConversion": false
+          }
+        },
+        "moduleIds": "named",
+        "minify": false
+      }
+    }
+  }
