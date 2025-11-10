@@ -49,7 +49,12 @@ const Project = () => {
     gzipSuccess: gzipMainSuccess,
   } = useGzipMainThread(project);
 
-  const error = projectError || fileContentError || buildError || gzipError || gzipMainError;
+  const error =
+    projectError ||
+    fileContentError ||
+    buildError ||
+    gzipError ||
+    gzipMainError;
 
   const memoizedFileTree = useMemo(() => fileTree, [fileTree]);
 
@@ -82,10 +87,17 @@ const Project = () => {
         borderRadius: "0.375rem",
         border: "none",
         fontSize: "0.875rem",
-        background: isGzipping ? "#d1d5db" : gzipSuccess ? "#22c55e" : "#8b5cf6",
+        background: isGzipping
+          ? "#d1d5db"
+          : gzipSuccess
+            ? "#22c55e"
+            : "#8b5cf6",
         color: "#fff",
         fontWeight: 500,
-        cursor: isGzipping || isBuilding || isGzippingMain ? "not-allowed" : "pointer",
+        cursor:
+          isGzipping || isBuilding || isGzippingMain
+            ? "not-allowed"
+            : "pointer",
         transition: "background 0.2s",
         marginLeft: "0.5rem",
       }}
@@ -103,15 +115,26 @@ const Project = () => {
         borderRadius: "0.375rem",
         border: "none",
         fontSize: "0.875rem",
-        background: isGzippingMain ? "#d1d5db" : gzipMainSuccess ? "#10b981" : "#f59e0b",
+        background: isGzippingMain
+          ? "#d1d5db"
+          : gzipMainSuccess
+            ? "#10b981"
+            : "#f59e0b",
         color: "#fff",
         fontWeight: 500,
-        cursor: isGzippingMain || isBuilding || isGzipping ? "not-allowed" : "pointer",
+        cursor:
+          isGzippingMain || isBuilding || isGzipping
+            ? "not-allowed"
+            : "pointer",
         transition: "background 0.2s",
         marginLeft: "0.5rem",
       }}
     >
-      {isGzippingMain ? "Gzipping..." : gzipMainSuccess ? "Gzipped ✓" : "Gzip (Main)"}
+      {isGzippingMain
+        ? "Gzipping..."
+        : gzipMainSuccess
+          ? "Gzipped ✓"
+          : "Gzip (Main)"}
     </button>
   );
 

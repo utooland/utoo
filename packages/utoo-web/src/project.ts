@@ -180,9 +180,12 @@ export class Project implements ProjectEndpoint {
       this.#mainThreadWasmInit = (async () => {
         await initWasm(this.#wasmUrl);
         // Get cwd from worker
-        const cwd = await this.remote.cwd as any;
+        const cwd = (await this.remote.cwd) as any;
         // Create a Project instance in main thread
-        this.#mainThreadProject = new ProjectInternal(cwd, this.#threadWorkerUrl!);
+        this.#mainThreadProject = new ProjectInternal(
+          cwd,
+          this.#threadWorkerUrl!,
+        );
       })();
     }
     await this.#mainThreadWasmInit;
@@ -202,7 +205,9 @@ export class Project implements ProjectEndpoint {
     try {
       // Compress in main thread (no file I/O)
       const compressedBytes = this.#mainThreadProject!.gzipToBytes(files);
-      console.log(`[Main Thread] Compressed to ${compressedBytes.length} bytes`);
+      console.log(
+        `[Main Thread] Compressed to ${compressedBytes.length} bytes`,
+      );
       console.timeEnd("[Main Thread] compression time");
 
       // Write to OPFS via worker (to avoid conflicts)

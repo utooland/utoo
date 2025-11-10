@@ -107,8 +107,7 @@ impl Project {
             .map(|f| PackFile::new(f.path, f.content))
             .collect();
 
-        opfs_project::pack::gzip_to_bytes(pack_files)
-            .map_err(|e| e.to_string())
+        opfs_project::pack::gzip_to_bytes(pack_files).map_err(|e| e.to_string())
     }
 
     #[wasm_bindgen]
