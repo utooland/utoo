@@ -15,6 +15,10 @@ const projectEndpoint: ProjectEndpoint & {
   projectInternal: undefined,
   wasmInit: undefined,
 
+  get cwd(): string {
+    return this.projectInternal?.cwd || "";
+  },
+
   // This should be called only once
   async mount(opt) {
     const { cwd, wasmUrl, threadWorkerUrl, logFilter } = opt;

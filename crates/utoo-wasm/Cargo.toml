@@ -26,7 +26,7 @@ console_error_panic_hook = { version = "0.1.7" }
 flate2                   = "1.1.2"
 futures                  = { workspace = true }
 js-sys                   = "0.3.78"
-opfs-project             = { git = "https://github.com/utooland/opfs-project", branch = "pack" }
+opfs-project             = { git = "https://github.com/utooland/opfs-project", rev = "eec8fbc5ef328d2220be7fe02136587ccd4c4204" }
 petgraph                 = "0.6"
 reqwest                  = { version = "0.12.22" }
 rustc-hash               = { workspace = true }

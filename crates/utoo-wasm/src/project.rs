@@ -86,6 +86,31 @@ impl Project {
             .map_err(|e| e.to_string())
     }
 
+    /// Create a tar.gz archive and return bytes (no file I/O)
+    /// This is useful for main thread execution without OPFS access
+    #[wasm_bindgen(js_name = gzipToBytes)]
+    pub fn gzip_to_bytes(&self, files: JsValue) -> Result<Vec<u8>, String> {
+        use opfs_project::pack::PackFile;
+        use serde::Deserialize;
+
+        #[derive(Deserialize)]
+        struct JsPackFile {
+            path: String,
+            content: Vec<u8>,
+        }
+
+        let js_files: Vec<JsPackFile> = serde_wasm_bindgen::from_value(files)
+            .map_err(|e| format!("Failed to parse files: {}", e))?;
+
+        let pack_files: Vec<PackFile> = js_files
+            .into_iter()
+            .map(|f| PackFile::new(f.path, f.content))
+            .collect();
+
+        opfs_project::pack::gzip_to_bytes(pack_files)
+            .map_err(|e| e.to_string())
+    }
+
     #[wasm_bindgen]
     pub async fn install(
         &self,

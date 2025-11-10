@@ -32,6 +32,7 @@ export interface PackFile {
 }
 
 export interface ProjectEndpoint {
+  cwd: string;
   install: (
     packageLock: string,
     maxConcurrentDownloads?: number,

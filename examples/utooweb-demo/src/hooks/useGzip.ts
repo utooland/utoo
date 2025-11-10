@@ -63,9 +63,11 @@ export const useGzip = (project: UtooProject | null) => {
         content: configBytes,
       });
 
+      console.time('work gizp');
       // Create final tar.gz archive with config.json included
       await project.gzip(files, "dist.tgz");
 
+      console.timeEnd('work gizp');
       console.log(`Successfully created dist.tgz with ${files.length} files (including config.json)`);
       setGzipSuccess(true);
 

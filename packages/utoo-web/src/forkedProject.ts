@@ -7,6 +7,10 @@ export class ForkedProject implements ProjectEndpoint {
   constructor(port: MessagePort) {
     this.endpoint ??= comlink.wrap(port);
   }
+
+  get cwd(): string {
+    return (this.endpoint.cwd as any) || "";
+  }
   public async install(packageLock: string, maxConcurrentDownloads?: number) {
     return await this.endpoint.install(packageLock, maxConcurrentDownloads);
   }

@@ -4136,7 +4136,7 @@ dependencies = [
 [[package]]
 name = "opfs-project"
 version = "0.1.2"
-source = "git+https://github.com/utooland/opfs-project?branch=pack#790b5eadd6408839701c47effa1d6072997a7846"
+source = "git+https://github.com/utooland/opfs-project?rev=eec8fbc5ef328d2220be7fe02136587ccd4c4204#eec8fbc5ef328d2220be7fe02136587ccd4c4204"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
