@@ -1,0 +1,16 @@
+error - [transform] /crates/pack-tests/tests/snapshot/webpack-loaders/custom-loader/input/test.txt  Error evaluating Node.js code
+  
+  Error: Cannot find module './test-file-loader.js'
+  Require stack:
+  - WORKSPACE_ROOT/packages/pack/.turbopack/[turbopack]_runtime.js
+  - WORKSPACE_ROOT/packages/pack/.turbopack/webpack-loaders.js
+      [at Function._resolveFilename (node:internal/modules/cjs/loader:1401:15)]
+      [at Function.resolve (node:internal/modules/helpers:145:19)]
+      [at externalRequire.resolve (WORKSPACE_ROOT/packages/pack/.turbopack/[turbopack]_runtime.js:533:20)]
+      [at WORKSPACE_ROOT/packages/pack/.turbopack/__8b1e0af0.js:385:86]
+      [at <anonymous>]
+      [at WORKSPACE_ROOT/packages/pack/.turbopack/__8b1e0af0.js:384:41]
+      [at <anonymous>]
+      [at transform (WORKSPACE_ROOT/packages/pack/.turbopack/__8b1e0af0.js:133:12)]
+      [at run (WORKSPACE_ROOT/packages/pack/.turbopack/__c7ae8543.js:443:37)]
+      [at run (WORKSPACE_ROOT/packages/pack/.turbopack/__c7ae8543.js:464:25)]
