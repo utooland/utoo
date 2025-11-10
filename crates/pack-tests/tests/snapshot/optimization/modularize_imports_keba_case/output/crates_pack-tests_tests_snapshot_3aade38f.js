@@ -33,7 +33,7 @@ __turbopack_context__.s([
 const __TURBOPACK__default__export__ = "date-picker-style";
 __turbopack_context__.s([]);
 }),
-"[project]/crates/pack-tests/tests/snapshot/optimization/modularize_imports/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/crates/pack-tests/tests/snapshot/optimization/modularize_imports_keba_case/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 var __TURBOPACK__imported__module__$5b$project$5d2f$crates$2f$pack$2d$tests$2f$tests$2f$snapshot$2f$node_modules$2f$antd$2f$es$2f$button$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/crates/pack-tests/tests/snapshot/node_modules/antd/es/button/index.js [client] (ecmascript)");
@@ -50,4 +50,4 @@ __turbopack_context__.s([]);
 }),
 ]);
 
-//# sourceMappingURL=crates_pack-tests_tests_snapshot_b5b07607.js.map
+//# sourceMappingURL=crates_pack-tests_tests_snapshot_3aade38f.js.map
