@@ -6,6 +6,7 @@ import { Fork, HandShake } from "./message";
 import {
   BuildOutput,
   Dirent,
+  PackFile,
   ProjectEndpoint,
   ProjectOptions,
   RawDirent,
@@ -145,6 +146,15 @@ export class Project implements ProjectEndpoint {
   public async rmdir(path: string, options?: { recursive?: boolean }) {
     await this.#mount;
     return await this.remote.rmdir(path, options);
+  }
+
+  public async sigMd5(content: Uint8Array): Promise<string> {
+    return await this.remote.sigMd5(content);
+  }
+
+  public async gzip(files: PackFile[], dest: string): Promise<void> {
+    await this.#mount;
+    return await this.remote.gzip(files, dest);
   }
 
   public static fork(

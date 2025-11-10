@@ -26,6 +26,11 @@ export interface BuildOutput {
   issues: Issue[];
 }
 
+export interface PackFile {
+  path: string;
+  content: Uint8Array;
+}
+
 export interface ProjectEndpoint {
   install: (
     packageLock: string,
@@ -44,6 +49,8 @@ export interface ProjectEndpoint {
   rm(path: string, options?: { recursive?: boolean }): Promise<void>;
   rmdir(path: string, options?: { recursive?: boolean }): Promise<void>;
   copyFile(src: string, dst: string): Promise<void>;
+  sigMd5(content: Uint8Array): Promise<string>;
+  gzip(files: PackFile[], dest: string): Promise<void>;
 }
 
 export interface ProjectOptions {

@@ -1,5 +1,5 @@
 import * as comlink from "comlink";
-import { ProjectEndpoint } from "./type";
+import { PackFile, ProjectEndpoint } from "./type";
 
 export class ForkedProject implements ProjectEndpoint {
   private endpoint: comlink.Remote<ProjectEndpoint>;
@@ -45,5 +45,13 @@ export class ForkedProject implements ProjectEndpoint {
 
   public async rmdir(path: string, options?: { recursive?: boolean }) {
     return await this.endpoint.rmdir(path, options);
+  }
+
+  public async sigMd5(content: Uint8Array): Promise<string> {
+    return await this.endpoint.sigMd5(content);
+  }
+
+  public async gzip(files: PackFile[], dest: string): Promise<void> {
+    return await this.endpoint.gzip(files, dest);
   }
 }
