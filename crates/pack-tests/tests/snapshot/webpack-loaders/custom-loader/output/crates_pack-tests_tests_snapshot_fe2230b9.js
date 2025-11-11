@@ -15,7 +15,7 @@ __turbopack_context__.s([
 }),
 6, ((__turbopack_context__, module, exports) => {
 
-const e = new Error("Could not parse module '[project]/crates/pack-tests/tests/snapshot/webpack-loaders/custom-loader/input/test.txt.js', file not found");
+const e = new Error("Could not parse module '[project]/crates/pack-tests/tests/snapshot/webpack-loaders/custom-loader/input/test.txt.js'\n\nExpected ';', '}' or <eof>");
 e.code = 'MODULE_UNPARSABLE';
 throw e;
 }),
