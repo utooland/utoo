@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/node_modules/antd/reset.css"],"sourcesContent":[".body{\n    display: inline-block;\n    fill: currentColor;\n    vertical-align: text-bottom;\n  }"],"names":[],"mappings":"AAAA","ignoreList":[0]}},
+    {"offset": {"line": 8, "column": 0}, "map": {"version":3,"sources":["turbopack:///turbopack:///[project]/crates/pack-tests/tests/snapshot/style/less/input/index.less"],"sourcesContent":["\n@import '~antd/reset.css';"],"names":[],"mappings":""}}]
+}
