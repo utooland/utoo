@@ -9,9 +9,7 @@
     "module": {
       "rules": {
         "*.txt": {
-          "loaders": [
-            "./test-file-loader.js"
-          ],
+          "loaders": [],
           "as": "*.js"
         }
       }
