@@ -51,7 +51,7 @@ export interface ProjectEndpoint {
   rmdir(path: string, options?: { recursive?: boolean }): Promise<void>;
   copyFile(src: string, dst: string): Promise<void>;
   sigMd5(content: Uint8Array): Promise<string>;
-  gzip(files: PackFile[], dest: string): Promise<void>;
+  gzip(files: PackFile[]): Promise<Uint8Array>;
 }
 
 export interface ProjectOptions {

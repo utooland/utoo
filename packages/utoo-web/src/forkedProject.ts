@@ -55,7 +55,7 @@ export class ForkedProject implements ProjectEndpoint {
     return await this.endpoint.sigMd5(content);
   }
 
-  public async gzip(files: PackFile[], dest: string): Promise<void> {
-    return await this.endpoint.gzip(files, dest);
+  public async gzip(files: PackFile[]): Promise<Uint8Array> {
+    return await this.endpoint.gzip(files);
   }
 }

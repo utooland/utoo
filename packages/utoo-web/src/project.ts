@@ -163,11 +163,11 @@ export class Project implements ProjectEndpoint {
     return await this.remote.sigMd5(content);
   }
 
-  public async gzip(files: PackFile[], dest: string): Promise<void> {
+  public async gzip(files: PackFile[]): Promise<Uint8Array> {
     await this.#mount;
     console.log("[Worker] Executing gzip via worker/comlink");
     console.time("[Worker] total gzip time (including comlink overhead)");
-    const result = await this.remote.gzip(files, dest);
+    const result = await this.remote.gzip(files);
     console.timeEnd("[Worker] total gzip time (including comlink overhead)");
     return result;
   }
@@ -204,7 +204,7 @@ export class Project implements ProjectEndpoint {
 
     try {
       // Compress in main thread (no file I/O)
-      const compressedBytes = this.#mainThreadProject!.gzipToBytes(files);
+      const compressedBytes = this.#mainThreadProject!.gzip(files);
       console.log(
         `[Main Thread] Compressed to ${compressedBytes.length} bytes`,
       );

@@ -137,9 +137,9 @@ const projectEndpoint: ProjectEndpoint & {
     return this.projectInternal!.sigMd5(content);
   },
 
-  async gzip(files: PackFile[], dest: string) {
+  async gzip(files: PackFile[]) {
     await this.wasmInit!;
-    return await this.projectInternal!.gzip(files, dest);
+    return await this.projectInternal!.gzip(files);
   },
 };
 

@@ -49,47 +49,10 @@ impl Project {
         opfs_project::pack::sig_md5(content)
     }
 
-    /// Create a tar.gz archive from file entries (passed as JS object)
-    ///
-    /// # Arguments
-    /// * `files` - JS array of objects with `path` and `content` properties
-    /// * `dest` - Destination path for the tar.gz file
-    ///
-    /// # Example JS
-    /// ```js
-    /// await project.gzip([
-    ///   { path: "file1.txt", content: new Uint8Array([...]) },
-    ///   { path: "dir/file2.txt", content: new Uint8Array([...]) }
-    /// ], "./archive.tar.gz");
-    /// ```
-    #[wasm_bindgen]
-    pub async fn gzip(&self, files: JsValue, dest: String) -> Result<(), String> {
-        use opfs_project::pack::PackFile;
-        use serde::Deserialize;
-
-        #[derive(Deserialize)]
-        struct JsPackFile {
-            path: String,
-            content: Vec<u8>,
-        }
-
-        let js_files: Vec<JsPackFile> = serde_wasm_bindgen::from_value(files)
-            .map_err(|e| format!("Failed to parse files: {}", e))?;
-
-        let pack_files: Vec<PackFile> = js_files
-            .into_iter()
-            .map(|f| PackFile::new(f.path, f.content))
-            .collect();
-
-        opfs_project::pack::gzip(pack_files, &dest)
-            .await
-            .map_err(|e| e.to_string())
-    }
-
     /// Create a tar.gz archive and return bytes (no file I/O)
     /// This is useful for main thread execution without OPFS access
-    #[wasm_bindgen(js_name = gzipToBytes)]
-    pub fn gzip_to_bytes(&self, files: JsValue) -> Result<Vec<u8>, String> {
+    #[wasm_bindgen(js_name = gzip)]
+    pub fn gzip(&self, files: JsValue) -> Result<Vec<u8>, String> {
         use opfs_project::pack::PackFile;
         use serde::Deserialize;
 
@@ -107,7 +70,7 @@ impl Project {
             .map(|f| PackFile::new(f.path, f.content))
             .collect();
 
-        opfs_project::pack::gzip_to_bytes(pack_files).map_err(|e| e.to_string())
+        opfs_project::pack::gzip(&pack_files).map_err(|e| e.to_string())
     }
 
     #[wasm_bindgen]
