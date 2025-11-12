@@ -7,7 +7,6 @@ import { useBuild } from "./hooks/useBuild";
 import { useFileContent } from "./hooks/useFileContent";
 import { useFileTree } from "./hooks/useFileTree";
 import { useGzip } from "./hooks/useGzip";
-import { useGzipMainThread } from "./hooks/useGzipMainThread";
 import { useUtooProject } from "./hooks/useUtooProject";
 import "./styles.css";
 
@@ -42,19 +41,7 @@ const Project = () => {
     gzipSuccess,
   } = useGzip(project);
 
-  const {
-    isGzipping: isGzippingMain,
-    handleGzipMainThread,
-    error: gzipMainError,
-    gzipSuccess: gzipMainSuccess,
-  } = useGzipMainThread(project);
-
-  const error =
-    projectError ||
-    fileContentError ||
-    buildError ||
-    gzipError ||
-    gzipMainError;
+  const error = projectError || fileContentError || buildError || gzipError;
 
   const memoizedFileTree = useMemo(() => fileTree, [fileTree]);
 
@@ -106,38 +93,6 @@ const Project = () => {
     </button>
   );
 
-  const gzipMainThreadButton = (
-    <button
-      onClick={handleGzipMainThread}
-      disabled={isGzippingMain || !project || isBuilding || isGzipping}
-      style={{
-        padding: "0.25rem 0.75rem",
-        borderRadius: "0.375rem",
-        border: "none",
-        fontSize: "0.875rem",
-        background: isGzippingMain
-          ? "#d1d5db"
-          : gzipMainSuccess
-            ? "#10b981"
-            : "#f59e0b",
-        color: "#fff",
-        fontWeight: 500,
-        cursor:
-          isGzippingMain || isBuilding || isGzipping
-            ? "not-allowed"
-            : "pointer",
-        transition: "background 0.2s",
-        marginLeft: "0.5rem",
-      }}
-    >
-      {isGzippingMain
-        ? "Gzipping..."
-        : gzipMainSuccess
-          ? "Gzipped ✓"
-          : "Gzip (Main)"}
-    </button>
-  );
-
   return (
     <div
       style={{
@@ -154,7 +109,6 @@ const Project = () => {
           <>
             {buildButton}
             {gzipButton}
-            {gzipMainThreadButton}
           </>
         }
         style={{

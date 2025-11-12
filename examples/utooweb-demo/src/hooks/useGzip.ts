@@ -41,8 +41,7 @@ export const useGzip = (project: UtooProject | null) => {
       }
 
       // First, create a temporary archive to calculate its MD5
-      await project.gzip(files, "dist_temp.tgz");
-      const tempArchiveContent = await project.readFile("dist_temp.tgz");
+      const tempArchiveContent = await project.gzip(files);
       const md5Hash = await project.sigMd5(tempArchiveContent);
       console.log(`Archive MD5: ${md5Hash}`);
 
@@ -63,16 +62,13 @@ export const useGzip = (project: UtooProject | null) => {
         content: configBytes,
       });
 
-      console.time('work gizp');
-      // Create final tar.gz archive with config.json included
-      await project.gzip(files, "dist.tgz");
+      console.time('work gzip');
+      const archiveContent = await project.gzip(files);
 
-      console.timeEnd('work gizp');
+      console.timeEnd('work gzip');
       console.log(`Successfully created dist.tgz with ${files.length} files (including config.json)`);
       setGzipSuccess(true);
 
-      // Read the final archive for download
-      const archiveContent = await project.readFile("dist.tgz");
 
       // Clean up temporary file
       try {
@@ -82,7 +78,8 @@ export const useGzip = (project: UtooProject | null) => {
       }
 
       // Trigger browser download
-      const blob = new Blob([archiveContent], { type: "application/x-gzip" });
+      const uint8Array = new Uint8Array(archiveContent);
+      const blob = new Blob([uint8Array], { type: "application/gzip" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
