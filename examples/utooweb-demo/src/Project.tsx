@@ -68,7 +68,7 @@ const Project = () => {
   const gzipButton = (
     <button
       onClick={handleGzip}
-      disabled={isGzipping || !project || isBuilding || isGzippingMain}
+      disabled={isGzipping || !project || isBuilding}
       style={{
         padding: "0.25rem 0.75rem",
         borderRadius: "0.375rem",
@@ -81,10 +81,7 @@ const Project = () => {
             : "#8b5cf6",
         color: "#fff",
         fontWeight: 500,
-        cursor:
-          isGzipping || isBuilding || isGzippingMain
-            ? "not-allowed"
-            : "pointer",
+        cursor: isGzipping || isBuilding ? "not-allowed" : "pointer",
         transition: "background 0.2s",
         marginLeft: "0.5rem",
       }}
