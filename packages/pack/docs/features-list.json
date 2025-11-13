@@ -428,7 +428,7 @@
       ]
     },
     {
-      "featureLevel1": "Webpack partitially compatible mode",
+      "featureLevel1": "Webpack partially compatible mode",
       "children": [
         {
           "featureLevel2": "",
