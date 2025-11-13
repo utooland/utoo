@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use crate::helper::fuzzy_select;
 use crate::helper::package::parse_package_name;
 use crate::helper::workspace::{find_workspace_path, update_cwd_to_project};
 use crate::model::package::{PackageInfo, Scripts};
@@ -7,27 +8,54 @@ use crate::service::script::ScriptService;
 use crate::service::workspace::WorkspaceService;
 use crate::util::json::load_package_json_from_path;
 use anyhow::{Context, Result};
+use colored::Colorize;
 use serde_json::Value;
 use tokio::task::JoinSet;
 
 /// Unified run function that handles both single workspace and multi-workspace script execution
 pub async fn run(
-    script_name: &str,
+    script_name: Option<&str>,
     workspace: Option<&str>,
     workspaces: bool,
     script_args: Option<Vec<String>>,
 ) -> Result<()> {
+    let cwd = std::env::current_dir().context("Failed to get current directory")?;
+    let updated_cwd = update_cwd_to_project(&cwd).await?;
+
+    // If no script name provided, use fuzzy select
+    let (script_name, selected_workspace) = if let Some(name) = script_name {
+        (name.to_string(), workspace.map(|w| w.to_string()))
+    } else {
+        // Use fuzzy select (workspace-aware if applicable)
+        let selection = fuzzy_select::select_script(&updated_cwd, workspace).await?;
+
+        let equivalent_cmd = if let Some(ws) = &selection.workspace_name {
+            format!("utoo run {} --workspace {}", selection.script_name, ws)
+        } else {
+            format!("utoo run {}", selection.script_name)
+        };
+        println!("{} {}", ">".bright_cyan(), equivalent_cmd.bright_black());
+        println!();
+
+        (selection.script_name, selection.workspace_name)
+    };
+
     match workspaces {
         true => {
             // Run script in all workspaces with topological ordering
-            run_script_in_all_workspaces(script_name, script_args).await
+            run_script_in_all_workspaces(&script_name, script_args).await
         }
         false => {
             // Run script in specific workspace or current workspace
             let script_args_refs = script_args
                 .as_ref()
                 .map(|args| args.iter().map(|s| s.as_str()).collect::<Vec<&str>>());
-            run_script(script_name, workspace, script_args_refs).await
+            run_script(
+                &script_name,
+                selected_workspace.as_deref(),
+                script_args_refs,
+            )
+            .await
         }
     }
 }

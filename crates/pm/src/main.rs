@@ -180,8 +180,8 @@ enum Commands {
     /// Run scripts defined in package.json
     #[command(name = RUN_NAME, alias = RUN_ALIAS)]
     Run {
-        /// Script name to run
-        script: String,
+        /// Script name to run (optional, will prompt if not provided)
+        script: Option<String>,
 
         /// Workspace to run script in
         #[arg(short, long)]
@@ -406,7 +406,13 @@ async fn async_main() -> Result<()> {
             args,
         }) => {
             let script_args_owned = if args.is_empty() { None } else { Some(args) };
-            run(&script, workspace.as_deref(), workspaces, script_args_owned).await?;
+            run(
+                script.as_deref(),
+                workspace.as_deref(),
+                workspaces,
+                script_args_owned,
+            )
+            .await?;
         }
         Some(Commands::View { package }) => {
             view(&package).await?;
@@ -462,7 +468,7 @@ async fn async_main() -> Result<()> {
                 };
 
                 run(
-                    script_name,
+                    Some(script_name.as_str()),
                     cli.workspace.as_deref(),
                     cli.workspaces,
                     script_args_owned,
