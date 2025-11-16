@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 11, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/externals/with-alias/input/index.ts"],"sourcesContent":["import { Button } from \"@ant/bigfish/antd\";\n\nButton;"],"names":[],"mappings":"AAAA;;AAEA,6CAAM"}}]
+}

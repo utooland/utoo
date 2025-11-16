@@ -1,0 +1,18 @@
+{
+    "config": {
+        "entry": [
+            {
+                "import": "input/index.ts",
+                "name": "main"
+            }
+        ],
+        "resolve": {
+            "alias": {
+                "@ant/bigfish/antd": "antd"
+            }
+        },
+        "externals": {
+            "@ant/bigfish/antd": "Antd"
+        }
+    }
+}
