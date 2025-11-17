@@ -81,9 +81,8 @@ async function buildInternal(
 
   if (process.env.ANALYZE) {
     await analyzeBundle(bundleOptions.config.output?.path || "dist");
-  } else {
-    await project.shutdown();
   }
+  await project.shutdown();
 
   // TODO: Maybe run tasks in worker is a better way, see
   // https://github.com/vercel/next.js/blob/512d8283054407ab92b2583ecce3b253c3be7b85/packages/next/src/lib/worker.ts
