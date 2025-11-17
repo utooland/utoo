@@ -79,13 +79,12 @@ async function buildInternal(
 
   handleIssues(entrypoints.issues);
 
-  await project.shutdown();
-
   if (process.env.ANALYZE) {
     await analyzeBundle(
-      projectPath || process.cwd(),
       bundleOptions.config.output?.path || "dist",
     );
+  } else {
+    await project.shutdown();
   }
 
   // TODO: Maybe run tasks in worker is a better way, see
@@ -93,10 +92,9 @@ async function buildInternal(
 }
 
 async function analyzeBundle(
-  projectPath: string,
   outputPath: string,
 ): Promise<void> {
-  const statsPath = join(projectPath, outputPath, "stats.json");
+  const statsPath = join(outputPath, "stats.json");
 
   if (!existsSync(statsPath)) {
     console.warn(
