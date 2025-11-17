@@ -80,9 +80,7 @@ async function buildInternal(
   handleIssues(entrypoints.issues);
 
   if (process.env.ANALYZE) {
-    await analyzeBundle(
-      bundleOptions.config.output?.path || "dist",
-    );
+    await analyzeBundle(bundleOptions.config.output?.path || "dist");
   } else {
     await project.shutdown();
   }
@@ -91,9 +89,7 @@ async function buildInternal(
   // https://github.com/vercel/next.js/blob/512d8283054407ab92b2583ecce3b253c3be7b85/packages/next/src/lib/worker.ts
 }
 
-async function analyzeBundle(
-  outputPath: string,
-): Promise<void> {
+async function analyzeBundle(outputPath: string): Promise<void> {
   const statsPath = join(outputPath, "stats.json");
 
   if (!existsSync(statsPath)) {
