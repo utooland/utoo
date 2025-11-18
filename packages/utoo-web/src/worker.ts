@@ -15,10 +15,6 @@ const projectEndpoint: ProjectEndpoint & {
   projectInternal: undefined,
   wasmInit: undefined,
 
-  get cwd(): string {
-    return this.projectInternal?.cwd || "";
-  },
-
   // This should be called only once
   async mount(opt) {
     const { cwd, wasmUrl, threadWorkerUrl, logFilter } = opt;
@@ -132,14 +128,14 @@ const projectEndpoint: ProjectEndpoint & {
     return await this.projectInternal!.removeDir(path, !!options?.recursive);
   },
 
-  async sigMd5(content: Uint8Array): Promise<string> {
-    await this.wasmInit!;
-    return this.projectInternal!.sigMd5(content);
-  },
-
   async gzip(files: PackFile[]) {
     await this.wasmInit!;
     return await this.projectInternal!.gzip(files);
+  },
+
+  async sigMd5(content: Uint8Array) {
+    await this.wasmInit!;
+    return await this.projectInternal!.sigMd5(content);
   },
 };
 

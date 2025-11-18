@@ -32,7 +32,6 @@ export interface PackFile {
 }
 
 export interface ProjectEndpoint {
-  cwd: string;
   install: (
     packageLock: string,
     maxConcurrentDownloads?: number,
@@ -50,8 +49,8 @@ export interface ProjectEndpoint {
   rm(path: string, options?: { recursive?: boolean }): Promise<void>;
   rmdir(path: string, options?: { recursive?: boolean }): Promise<void>;
   copyFile(src: string, dst: string): Promise<void>;
-  sigMd5(content: Uint8Array): Promise<string>;
-  gzip(files: PackFile[]): Promise<Uint8Array>;
+  gzip: (files: PackFile[]) => Promise<Uint8Array>;
+  sigMd5: (content: Uint8Array) => Promise<string>;
 }
 
 export interface ProjectOptions {

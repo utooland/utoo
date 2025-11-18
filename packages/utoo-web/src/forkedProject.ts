@@ -7,10 +7,6 @@ export class ForkedProject implements ProjectEndpoint {
   constructor(port: MessagePort) {
     this.endpoint ??= comlink.wrap(port);
   }
-
-  get cwd(): string {
-    return (this.endpoint.cwd as any) || "";
-  }
   public async install(packageLock: string, maxConcurrentDownloads?: number) {
     return await this.endpoint.install(packageLock, maxConcurrentDownloads);
   }
@@ -51,11 +47,11 @@ export class ForkedProject implements ProjectEndpoint {
     return await this.endpoint.rmdir(path, options);
   }
 
-  public async sigMd5(content: Uint8Array): Promise<string> {
-    return await this.endpoint.sigMd5(content);
-  }
-
   public async gzip(files: PackFile[]): Promise<Uint8Array> {
     return await this.endpoint.gzip(files);
+  }
+
+  public async sigMd5(content: Uint8Array): Promise<string> {
+    return await this.endpoint.sigMd5(content);
   }
 }
