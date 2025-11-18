@@ -52,7 +52,7 @@ impl Project {
     /// Create a tar.gz archive and return bytes (no file I/O)
     /// This is useful for main thread execution without OPFS access
     #[wasm_bindgen(js_name = gzip)]
-    pub fn gzip(&self, files: JsValue) -> Result<Vec<u8>, String> {
+    pub fn gzip(&self, files: JsValue) -> Result<js_sys::Uint8Array, String> {
         use opfs_project::pack::PackFile;
         use serde::Deserialize;
 
@@ -70,7 +70,8 @@ impl Project {
             .map(|f| PackFile::new(f.path, f.content))
             .collect();
 
-        opfs_project::pack::gzip(&pack_files).map_err(|e| e.to_string())
+        let bytes = opfs_project::pack::gzip(&pack_files).map_err(|e| e.to_string())?;
+        Ok(js_sys::Uint8Array::from(&bytes[..]))
     }
 
     #[wasm_bindgen]
