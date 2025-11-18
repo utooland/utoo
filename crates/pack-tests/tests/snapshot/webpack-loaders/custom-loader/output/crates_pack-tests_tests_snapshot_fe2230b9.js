@@ -15,7 +15,9 @@ __turbopack_context__.s([
 }),
 6, ((__turbopack_context__, module, exports) => {
 
-module.exports = "Got a buffer of 11 bytes";
+const e = new Error("Could not parse module '[project]/crates/pack-tests/tests/snapshot/webpack-loaders/custom-loader/input/test.txt.js'\n\nExpected ';', '}' or <eof>");
+e.code = 'MODULE_UNPARSABLE';
+throw e;
 }),
 23, ((__turbopack_context__) => {
 "use strict";

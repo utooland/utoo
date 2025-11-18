@@ -20,6 +20,12 @@ use crate::util::{cache::parse_pattern, cloner::clone, downloader::download};
 
 use super::workspace::find_workspace_path;
 
+// Platform-specific line endings
+#[cfg(target_os = "windows")]
+const LINE_ENDING: &str = "\r\n";
+#[cfg(not(target_os = "windows"))]
+const LINE_ENDING: &str = "\n";
+
 // Use the model's LockPackage but create a simplified PackageLock for helper functions
 #[derive(Deserialize, Serialize, Clone)]
 pub struct PackageLock {
@@ -145,9 +151,11 @@ pub async fn update_package_json(
         package_specs.push((name, version, version_spec));
     }
 
-    // 3. Read package.json once
+    // 3. Read package.json once and detect trailing newline
     let package_json_path = target_dir.join("package.json");
     let package_json_content = tokio::fs::read_to_string(&package_json_path).await?;
+    let has_trailing_newline =
+        package_json_content.ends_with(LINE_ENDING) || package_json_content.ends_with('\n');
     let mut package_json: Value = serde_json::from_str(&package_json_content)?;
 
     let dep_field = match save_type {
@@ -184,12 +192,12 @@ pub async fn update_package_json(
         }
     }
 
-    // 6. Write back to package.json once
-    tokio::fs::write(
-        &package_json_path,
-        serde_json::to_string_pretty(&package_json)?,
-    )
-    .await?;
+    // 6. Write back to package.json preserving trailing newline
+    let mut content = serde_json::to_string_pretty(&package_json)?;
+    if has_trailing_newline {
+        content.push_str(LINE_ENDING);
+    }
+    tokio::fs::write(&package_json_path, content).await?;
 
     Ok(())
 }
@@ -1556,5 +1564,87 @@ mod tests {
 
         // Test that missing field and empty object are treated as equal
         assert!(!is_pkg_lock_outdated(temp_path).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_update_package_json_preserves_trailing_newline() {
+        use crate::util::save_type::{PackageAction, SaveType};
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let temp_path = temp_dir.path();
+
+        // Test case 1: package.json with trailing newline
+        let pkg_json_with_newline = r#"{
+  "name": "test-package",
+  "version": "1.0.0",
+  "dependencies": {}
+}
+"#;
+        fs::write(temp_path.join("package.json"), pkg_json_with_newline).unwrap();
+
+        update_package_json(
+            temp_path,
+            &PackageAction::Add,
+            &["lodash@4.17.21"],
+            &None,
+            &SaveType::Prod,
+        )
+        .await
+        .unwrap();
+
+        let content = fs::read_to_string(temp_path.join("package.json")).unwrap();
+        assert!(content.ends_with('\n'), "Should preserve trailing newline");
+
+        // Test case 2: package.json without trailing newline
+        let pkg_json_no_newline = r#"{
+  "name": "test-package",
+  "version": "1.0.0",
+  "dependencies": {}
+}"#;
+        fs::write(temp_path.join("package.json"), pkg_json_no_newline).unwrap();
+
+        update_package_json(
+            temp_path,
+            &PackageAction::Add,
+            &["react@18.0.0"],
+            &None,
+            &SaveType::Prod,
+        )
+        .await
+        .unwrap();
+
+        let content = fs::read_to_string(temp_path.join("package.json")).unwrap();
+        assert!(!content.ends_with('\n'), "Should not add trailing newline");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[tokio::test]
+    async fn test_update_package_json_preserves_crlf() {
+        use crate::util::save_type::{PackageAction, SaveType};
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let temp_path = temp_dir.path();
+
+        // package.json with CRLF line endings
+        let pkg_json_crlf = "{\r\n  \"name\": \"test-package\",\r\n  \"version\": \"1.0.0\",\r\n  \"dependencies\": {}\r\n}\r\n";
+        fs::write(temp_path.join("package.json"), pkg_json_crlf).unwrap();
+
+        update_package_json(
+            temp_path,
+            &PackageAction::Add,
+            &["lodash@4.17.21"],
+            &None,
+            &SaveType::Prod,
+        )
+        .await
+        .unwrap();
+
+        let content = fs::read_to_string(temp_path.join("package.json")).unwrap();
+        assert!(
+            content.ends_with("\r\n"),
+            "Should preserve CRLF trailing newline on Windows"
+        );
     }
 }

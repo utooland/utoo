@@ -107,6 +107,84 @@ fn to_snake_case(input: &str) -> String {
         .join("_")
 }
 
+/// Handle external config and return the appropriate resolve result
+fn handle_external_config(
+    external_config: &ExternalConfig,
+    module_name: &str,
+) -> Vc<ResolveResultOption> {
+    let (external_name, external_type) = match external_config {
+        ExternalConfig::Basic(name) => {
+            // resolve basic config like "foo" or "commonjs foo" or "esm foo" or "script https://..."
+            let name_str = name.as_str();
+            if name_str.starts_with("commonjs ") {
+                let actual_name = name_str.strip_prefix("commonjs ").unwrap_or(name_str);
+                (actual_name.into(), ExternalType::CommonJs)
+            } else if name_str.starts_with("esm ") {
+                let actual_name = name_str.strip_prefix("esm ").unwrap_or(name_str);
+                (actual_name.into(), ExternalType::EcmaScriptModule)
+            } else if name_str.starts_with("script ") {
+                let script_content = name_str.strip_prefix("script ").unwrap_or(name_str);
+                // For script type in basic config, check if script_content already contains '@' separator
+                let external_name = if script_content.contains('@') {
+                    // If already in root@script format, use it directly
+                    script_content.to_string()
+                } else {
+                    // Otherwise, concatenate module_name and script URL with '@' separator
+                    // Format: module_name@script_url
+                    format!("{module_name}@{script_content}")
+                };
+                (external_name.into(), ExternalType::Script)
+            } else {
+                // Default to Global
+                (name.clone(), ExternalType::Global)
+            }
+        }
+        ExternalConfig::Advanced(advanced) => {
+            // advanced config.
+            let external_type = match &advanced.r#type {
+                Some(crate::config::ExternalType::CommonJs) => ExternalType::CommonJs,
+                Some(crate::config::ExternalType::ESM) => ExternalType::EcmaScriptModule,
+                Some(crate::config::ExternalType::Script) => {
+                    // For script type, concatenate root and script URL with '@' separator
+                    // Format: root@script
+                    let external_name = if let Some(script_url) = &advanced.script {
+                        format!("{}@{}", advanced.root, script_url)
+                    } else {
+                        // If no script URL is provided, just use root
+                        advanced.root.to_string()
+                    };
+                    return ResolveResultOption::some(*ResolveResult::primary(
+                        ResolveResultItem::External {
+                            name: external_name.into(),
+                            ty: ExternalType::Script,
+                            traced: ExternalTraced::Traced,
+                        },
+                    ));
+                }
+                Some(crate::config::ExternalType::Global) => ExternalType::Global,
+                None => ExternalType::Global,
+            };
+            (advanced.root.clone(), external_type)
+        }
+        ExternalConfig::Umd(umd_config) => {
+            // Handle UMD config
+            let external_name = format!(
+                "root {} commonjs {}",
+                umd_config.root.as_str(),
+                umd_config.commonjs.as_str()
+            );
+
+            (external_name.into(), ExternalType::Umd)
+        }
+    };
+
+    ResolveResultOption::some(*ResolveResult::primary(ResolveResultItem::External {
+        name: external_name,
+        ty: external_type,
+        traced: ExternalTraced::Traced,
+    }))
+}
+
 #[turbo_tasks::value]
 pub struct ExternalsPlugin {
     project_path: FileSystemPath,
@@ -136,8 +214,24 @@ impl BeforeResolvePlugin for ExternalsPlugin {
     #[turbo_tasks::function]
     async fn before_resolve_condition(&self) -> Result<Vc<BeforeResolvePluginCondition>> {
         let externals_config = self.externals_config.await?;
+
+        // Extract all possible module names from external keys
+        // For "react" -> ["react"]
+        // For "@ant/bigfish/antd" -> ["@ant/bigfish/antd", "@ant/bigfish"]
+        let mut modules = Vec::new();
+        for key in externals_config.keys() {
+            modules.push(key.clone());
+            // Extract scoped package name if key contains additional path
+            if key.starts_with('@')
+                && let (Some(pos), Some(first_pos)) = (key.rfind('/'), key.find('/'))
+                && pos > first_pos
+            {
+                modules.push(key[..pos].into());
+            }
+        }
+
         Ok(BeforeResolvePluginCondition::from_modules(Vc::cell(
-            externals_config.keys().cloned().collect(),
+            modules,
         )))
     }
 
@@ -151,111 +245,32 @@ impl BeforeResolvePlugin for ExternalsPlugin {
         let externals_config = self.externals_config.await?;
         let request_value = request.await?;
 
-        // get request module name and check if it has a subpath
-        let (module_name, has_subpath) = match &*request_value {
+        let (module_name, subpath_str) = match &*request_value {
             Request::Module {
                 module: Pattern::Constant(name),
-                path,
+                path: Pattern::Constant(path),
                 ..
-            } => {
-                // Check if this request has a non-empty subpath
-                let has_path = !matches!(path, Pattern::Constant(p) if p.is_empty());
-                (name, has_path)
-            }
+            } => (name.as_str(), path.as_str()),
             Request::Raw {
                 path: Pattern::Constant(name),
                 ..
-            } => (name, false),
+            } => (name.as_str(), ""),
             _ => return Ok(ResolveResultOption::none()),
         };
 
-        // Skip all requests with subpath:
-        // - With Advanced config + subPath rules → after_resolve handles (e.g., antd/es/button)
-        // - Without subPath rules → normal resolution (e.g., react/jsx-runtime)
-        if has_subpath {
-            tracing::debug!(
-                "before_resolve: skipping {}/{:?} - has subpath",
-                module_name,
-                request_value
-            );
+        // Try full path first (e.g., "@ant/bigfish/antd" from module="@ant/bigfish" + path="/antd")
+        if !subpath_str.is_empty() {
+            let full_path = format!("{}{}", module_name, subpath_str);
+            if let Some(external_config) = externals_config.get(full_path.as_str()) {
+                return Ok(handle_external_config(external_config, &full_path));
+            }
+            // If full path not in externals, skip to let after_resolve or normal resolution handle it
             return Ok(ResolveResultOption::none());
         }
 
-        // check if the module exists in externals config.
+        // Try module name only (e.g., "react")
         if let Some(external_config) = externals_config.get(module_name) {
-            let (external_name, external_type) = match external_config {
-                ExternalConfig::Basic(name) => {
-                    // resolve basic config like "foo" or "commonjs foo" or "esm foo" or "script https://..."
-                    let name_str = name.as_str();
-                    if name_str.starts_with("commonjs ") {
-                        let actual_name = name_str.strip_prefix("commonjs ").unwrap_or(name_str);
-                        (actual_name.into(), ExternalType::CommonJs)
-                    } else if name_str.starts_with("esm ") {
-                        let actual_name = name_str.strip_prefix("esm ").unwrap_or(name_str);
-                        (actual_name.into(), ExternalType::EcmaScriptModule)
-                    } else if name_str.starts_with("script ") {
-                        let script_content = name_str.strip_prefix("script ").unwrap_or(name_str);
-                        // For script type in basic config, check if script_content already contains '@' separator
-                        let external_name = if script_content.contains('@') {
-                            // If already in root@script format, use it directly
-                            script_content.to_string()
-                        } else {
-                            // Otherwise, concatenate module_name and script URL with '@' separator
-                            // Format: module_name@script_url
-                            format!("{module_name}@{script_content}")
-                        };
-                        (external_name.into(), ExternalType::Script)
-                    } else {
-                        // Default to Global
-                        (name.clone(), ExternalType::Global)
-                    }
-                }
-                ExternalConfig::Advanced(advanced) => {
-                    // advanced config.
-                    let external_type = match &advanced.r#type {
-                        Some(crate::config::ExternalType::CommonJs) => ExternalType::CommonJs,
-                        Some(crate::config::ExternalType::ESM) => ExternalType::EcmaScriptModule,
-                        Some(crate::config::ExternalType::Script) => {
-                            // For script type, concatenate root and script URL with '@' separator
-                            // Format: root@script
-                            let external_name = if let Some(script_url) = &advanced.script {
-                                format!("{}@{}", advanced.root, script_url)
-                            } else {
-                                // If no script URL is provided, just use root
-                                advanced.root.to_string()
-                            };
-                            return Ok(ResolveResultOption::some(*ResolveResult::primary(
-                                ResolveResultItem::External {
-                                    name: external_name.into(),
-                                    ty: ExternalType::Script,
-                                    traced: ExternalTraced::Traced,
-                                },
-                            )));
-                        }
-                        Some(crate::config::ExternalType::Global) => ExternalType::Global,
-                        None => ExternalType::Global,
-                    };
-                    (advanced.root.clone(), external_type)
-                }
-                ExternalConfig::Umd(umd_config) => {
-                    // Handle UMD config
-                    let external_name = format!(
-                        "root {} commonjs {}",
-                        umd_config.root.as_str(),
-                        umd_config.commonjs.as_str()
-                    );
-
-                    (external_name.into(), ExternalType::Umd)
-                }
-            };
-
-            return Ok(ResolveResultOption::some(*ResolveResult::primary(
-                ResolveResultItem::External {
-                    name: external_name,
-                    ty: external_type,
-                    traced: ExternalTraced::Traced,
-                },
-            )));
+            return Ok(handle_external_config(external_config, module_name));
         }
 
         Ok(ResolveResultOption::none())

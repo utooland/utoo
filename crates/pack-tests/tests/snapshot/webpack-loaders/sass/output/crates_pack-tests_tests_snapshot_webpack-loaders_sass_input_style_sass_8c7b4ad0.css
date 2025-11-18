@@ -1,15 +1,15 @@
 /* [project]/crates/pack-tests/tests/snapshot/webpack-loaders/sass/input/style.sass.css [client] (css) */
-nav  ul {
+nav ul {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-nav  li {
+nav li {
   display: inline-block;
 }
 
-nav  a {
+nav a {
   padding: 6px 12px;
   text-decoration: none;
   display: block;
