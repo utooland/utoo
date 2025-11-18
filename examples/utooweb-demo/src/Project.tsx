@@ -6,6 +6,7 @@ import { Preview } from "./components/Preview";
 import { useBuild } from "./hooks/useBuild";
 import { useFileContent } from "./hooks/useFileContent";
 import { useFileTree } from "./hooks/useFileTree";
+import { useGzip } from "./hooks/useGzip";
 import { useUtooProject } from "./hooks/useUtooProject";
 import "./styles.css";
 
@@ -33,7 +34,14 @@ const Project = () => {
     }
   });
 
-  const error = projectError || fileContentError || buildError;
+  const {
+    isGzipping,
+    handleGzip,
+    error: gzipError,
+    gzipSuccess,
+  } = useGzip(project);
+
+  const error = projectError || fileContentError || buildError || gzipError;
 
   const memoizedFileTree = useMemo(() => fileTree, [fileTree]);
 
@@ -57,6 +65,31 @@ const Project = () => {
     </button>
   );
 
+  const gzipButton = (
+    <button
+      onClick={handleGzip}
+      disabled={isGzipping || !project || isBuilding}
+      style={{
+        padding: "0.25rem 0.75rem",
+        borderRadius: "0.375rem",
+        border: "none",
+        fontSize: "0.875rem",
+        background: isGzipping
+          ? "#d1d5db"
+          : gzipSuccess
+            ? "#22c55e"
+            : "#8b5cf6",
+        color: "#fff",
+        fontWeight: 500,
+        cursor: isGzipping || isBuilding ? "not-allowed" : "pointer",
+        transition: "background 0.2s",
+        marginLeft: "0.5rem",
+      }}
+    >
+      {isGzipping ? "Gzipping..." : gzipSuccess ? "Gzipped ✓" : "Gzip (Worker)"}
+    </button>
+  );
+
   return (
     <div
       style={{
@@ -69,7 +102,12 @@ const Project = () => {
     >
       <Panel
         title="Project"
-        actions={buildButton}
+        actions={
+          <>
+            {buildButton}
+            {gzipButton}
+          </>
+        }
         style={{
           width: "25%",
           minWidth: "300px",

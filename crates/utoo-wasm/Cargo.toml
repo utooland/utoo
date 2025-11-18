@@ -23,10 +23,10 @@ utoo-pack = [
 [dependencies]
 anyhow                   = { workspace = true, features = ["backtrace"] }
 console_error_panic_hook = { version = "0.1.7" }
-flate2                   = "1.1.2"
+flate2                   = "1.1.5"
 futures                  = { workspace = true }
 js-sys                   = "0.3.78"
-opfs-project             = "0.1.13"
+opfs-project             = "0.1.14"
 petgraph                 = "0.6"
 reqwest                  = { version = "0.12.22" }
 rustc-hash               = { workspace = true }

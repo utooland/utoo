@@ -1,6 +1,6 @@
 import * as comlink from "comlink";
 import { HandShake } from "./message";
-import { ProjectEndpoint, ProjectOptions, RawDirent } from "./type";
+import { PackFile, ProjectEndpoint, ProjectOptions, RawDirent } from "./type";
 import initWasm, { DirEntryType, Project as ProjectInternal } from "./utoo";
 
 declare let self: DedicatedWorkerGlobalScope;
@@ -126,6 +126,16 @@ const projectEndpoint: ProjectEndpoint & {
   async rmdir(path: string, options?: { recursive?: boolean }) {
     await this.wasmInit!;
     return await this.projectInternal!.removeDir(path, !!options?.recursive);
+  },
+
+  async gzip(files: PackFile[]) {
+    await this.wasmInit!;
+    return await this.projectInternal!.gzip(files);
+  },
+
+  async sigMd5(content: Uint8Array) {
+    await this.wasmInit!;
+    return await this.projectInternal!.sigMd5(content);
   },
 };
 
