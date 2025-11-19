@@ -11,6 +11,7 @@
         },
         "output": {
             "path": "output"
-        }
+        },
+        "stats": true
     }
 }

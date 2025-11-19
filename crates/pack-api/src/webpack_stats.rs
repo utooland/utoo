@@ -3,6 +3,7 @@ use std::sync::Arc;
 use anyhow::{Error, Result};
 use parking_lot::Mutex;
 use qstring::QString;
+use rustc_hash::FxHashSet;
 use turbo_rcstr::RcStr;
 use turbo_tasks::{FxIndexMap, FxIndexSet, ResolvedVc, TryJoinIterExt, Vc};
 use turbopack::css::chunk::CssChunk;
@@ -23,8 +24,21 @@ pub async fn generate_webpack_stats(output_assets: Vc<OutputAssets>) -> Result<V
     let entrypoints: Arc<Mutex<FxIndexMap<RcStr, WebpackStatsEntrypoint>>> =
         Arc::new(Mutex::new(FxIndexMap::default()));
 
-    let output_assets = &*output_assets.await?;
-    output_assets
+    // Collect all assets including referenced assets (async chunks)
+    let initial_assets = output_assets.await?;
+    let mut all_assets = vec![];
+    let mut visited = FxHashSet::default();
+    let mut queue: Vec<_> = initial_assets.iter().copied().collect();
+
+    while let Some(asset) = queue.pop() {
+        if visited.insert(asset) {
+            all_assets.push(asset);
+            let references = asset.references().await?;
+            queue.extend(references.iter().copied());
+        }
+    }
+
+    all_assets
         .iter()
         .map(|asset| {
             let chunks = chunks.clone();
