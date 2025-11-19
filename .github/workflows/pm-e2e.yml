@@ -2,7 +2,7 @@ name: utoopm-e2e
 
 on:
   push:
-    branches: ['next', 'e2e-pm']
+    branches: ["next", "e2e-pm"]
   pull_request:
     types: [opened, synchronize]
 
@@ -60,7 +60,7 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2025-09-21
+          toolchain: nightly-2025-10-27
           targets: ${{ matrix.settings.target }}
 
       - name: Cache cargo

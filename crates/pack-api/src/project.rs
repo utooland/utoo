@@ -1,6 +1,5 @@
 use anyhow::{Context, Result, bail};
 use pack_core::{
-    all_assets_from_entries,
     client::context::{
         ClientChunkingContextOptions, get_client_chunking_context, get_client_compile_time_info,
     },
@@ -20,9 +19,7 @@ use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{
     Completion, Completions, IntoTraitRef, NonLocalValue, OperationValue, OperationVc, ReadRef,
     ResolvedVc, State, TaskInput, TransientInstance, TryFlatJoinIterExt, TryJoinIterExt, Vc,
-    graph::{AdjacencyMap, GraphTraversal},
-    mark_root,
-    trace::TraceRawVcs,
+    mark_root, trace::TraceRawVcs,
 };
 use turbo_tasks_env::{EnvMap, ProcessEnv};
 use turbo_tasks_fs::{DiskFileSystem, FileSystem, FileSystemPath, VirtualFileSystem, invalidation};
@@ -50,8 +47,12 @@ use turbopack_core::{
         chunk_group_info::ChunkGroupEntry,
         export_usage::{OptionExportUsageInfo, compute_export_usage_info},
     },
-    output::{OutputAsset, OutputAssets},
+    output::{
+        ExpandOutputAssetsInput, ExpandedOutputAssets, OutputAsset, OutputAssets,
+        expand_output_assets,
+    },
     raw_output::RawOutput,
+    reference::all_assets_from_entries,
     source_map::OptionStringifiedSourceMap,
     version::{
         NotFoundVersion, OptionVersionedContent, Update, Version, VersionState, VersionedContent,
@@ -862,15 +863,7 @@ impl Project {
         async move {
             let module_graphs_op = whole_app_module_graph_operation(self);
             let module_graphs_vc = module_graphs_op.connect().resolve().await?;
-            let _ = module_graphs_op.take_issues();
-
-            // At this point all modules have been computed and we can get rid of the node.js
-            // process pools
-            if self.await?.watch.enable {
-                turbopack_node::evaluate::scale_down();
-            } else {
-                turbopack_node::evaluate::scale_zero();
-            }
+            let _ = module_graphs_op.peek_issues();
 
             Ok(module_graphs_vc)
         }
@@ -1007,32 +1000,13 @@ impl Project {
                     .resolve()
                     .await?;
 
-                // Also insert copy assets into the versioned content map
-                let copy_assets_op = copy_output_assets_operation(self.to_resolved().await?);
-                let _ = map
-                    .insert_output_assets(
-                        copy_assets_op,
-                        dist_root.clone(),
-                        client_root.clone(),
-                        dist_root.clone(),
-                    )
-                    .resolve()
-                    .await?;
-
                 Ok(())
             } else {
                 let all_output_assets = all_output_assets_op.connect();
-                let copy_assets = self.copy_output_assets();
-                let all_assets_combined = all_output_assets.concatenate(copy_assets);
 
-                let _ = emit_assets(
-                    all_assets_combined,
-                    dist_root.clone(),
-                    client_root,
-                    dist_root,
-                )
-                .resolve()
-                .await?;
+                let _ = emit_assets(all_output_assets, dist_root.clone(), client_root, dist_root)
+                    .resolve()
+                    .await?;
 
                 Ok(())
             }
@@ -1120,17 +1094,17 @@ impl Project {
     /// Completion when server side changes are detected in output assets
     /// referenced from the roots
     #[turbo_tasks::function]
-    pub fn server_changed(self: Vc<Self>, roots: Vc<OutputAssets>) -> Vc<Completion> {
-        let path = self.node_root();
-        any_output_changed(roots, path, true)
+    pub async fn server_changed(self: Vc<Self>, roots: Vc<OutputAssets>) -> Result<Vc<Completion>> {
+        let path = self.node_root().owned().await?;
+        Ok(any_output_changed(roots, path, true))
     }
 
     /// Completion when client side changes are detected in output assets
     /// referenced from the roots
     #[turbo_tasks::function]
-    pub fn client_changed(self: Vc<Self>, roots: Vc<OutputAssets>) -> Vc<Completion> {
-        let path = self.client_root();
-        any_output_changed(roots, path, false)
+    pub async fn client_changed(self: Vc<Self>, roots: Vc<OutputAssets>) -> Result<Vc<Completion>> {
+        let path = self.client_root().owned().await?;
+        Ok(any_output_changed(roots, path, false))
     }
 
     #[turbo_tasks::function]
@@ -1197,10 +1171,10 @@ impl Project {
 
                 let source = turbopack_core::file_source::FileSource::new(from_path);
                 let asset = RawOutput::new(to_path, Vc::upcast(source));
-                assets.push(Vc::upcast(asset));
+                assets.push(ResolvedVc::upcast(asset.to_resolved().await?));
             }
         }
-        Ok(OutputAssets::new(assets))
+        Ok(OutputAssets::concat(vec![*ResolvedVc::cell(assets)]))
     }
 }
 
@@ -1243,33 +1217,37 @@ pub struct ModuleGraphs {
 #[turbo_tasks::function]
 async fn any_output_changed(
     roots: Vc<OutputAssets>,
-    path: Vc<FileSystemPath>,
+    path: FileSystemPath,
     server: bool,
 ) -> Result<Vc<Completion>> {
-    let path = &path.await?;
-    let completions = AdjacencyMap::new()
-        .skip_duplicates()
-        .visit(roots.await?.iter().copied(), get_referenced_output_assets)
-        .await
-        .completed()?
-        .into_inner()
-        .into_postorder_topological()
-        .map(|m| async move {
-            let asset_path = m.path().await?;
-            if !asset_path.path.ends_with(".map")
-                && (!server || !asset_path.path.ends_with(".css"))
-                && asset_path.is_inside_ref(path)
-            {
-                anyhow::Ok(Some(content_changed(*ResolvedVc::upcast(m))))
-            } else {
-                Ok(None)
+    let all_assets = expand_output_assets(
+        roots
+            .await?
+            .into_iter()
+            .map(|&a| ExpandOutputAssetsInput::Asset(a)),
+        true,
+    )
+    .await?;
+    let completions = all_assets
+        .into_iter()
+        .map(|m| {
+            let path = path.clone();
+
+            async move {
+                let asset_path = m.path().await?;
+                if !asset_path.path.ends_with(".map")
+                    && (!server || !asset_path.path.ends_with(".css"))
+                    && asset_path.is_inside_ref(&path)
+                {
+                    anyhow::Ok(Some(
+                        content_changed(*ResolvedVc::upcast(m))
+                            .to_resolved()
+                            .await?,
+                    ))
+                } else {
+                    Ok(None)
+                }
             }
-        })
-        .map(|v| async move {
-            Ok(match v.await? {
-                Some(v) => Some(v.to_resolved().await?),
-                None => None,
-            })
         })
         .try_flat_join()
         .await?;
@@ -1277,39 +1255,12 @@ async fn any_output_changed(
     Ok(Vc::<Completions>::cell(completions).completed())
 }
 
-async fn get_referenced_output_assets(
-    parent: ResolvedVc<Box<dyn OutputAsset>>,
-) -> Result<impl Iterator<Item = ResolvedVc<Box<dyn OutputAsset>>> + Send> {
-    Ok(parent.references().owned().await?.into_iter())
-}
-
 #[turbo_tasks::function(operation)]
 async fn all_assets_from_entries_operation(
     operation: OperationVc<OutputAssets>,
-) -> Result<Vc<OutputAssets>> {
+) -> Result<Vc<ExpandedOutputAssets>> {
     let assets = operation.connect();
     Ok(all_assets_from_entries(assets))
-}
-
-#[turbo_tasks::function(operation)]
-async fn copy_output_assets_operation(project: ResolvedVc<Project>) -> Result<Vc<OutputAssets>> {
-    let project_path = project.project_path().owned().await?;
-    let dist_root = project.dist_root().owned().await?;
-    let output_config = project.config().output().await?;
-    let copy_config = output_config.copy.as_ref();
-
-    let mut assets = vec![];
-    if let Some(patterns) = copy_config {
-        for pattern in patterns {
-            // Resolve from_path relative to project_path, not project_root
-            let from_path = project_path.join(&pattern.from)?;
-            let to_path = dist_root.join(&pattern.to)?;
-            let source = turbopack_core::file_source::FileSource::new(from_path);
-            let asset = RawOutput::new(to_path, Vc::upcast(source));
-            assets.push(Vc::upcast(asset));
-        }
-    }
-    Ok(OutputAssets::new(assets))
 }
 
 fn clean_directory(dist_path: &Path) -> Result<()> {

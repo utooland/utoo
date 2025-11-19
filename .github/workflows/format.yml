@@ -22,5 +22,5 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: fmt
-          toolchain: nightly-2025-09-21
+          toolchain: nightly-2025-10-27
           args: --check

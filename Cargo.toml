@@ -46,9 +46,9 @@ tracing             = "0.1.41"
 tracing-subscriber  = { version = "0.3.19", features = ["env-filter", "fmt"] }
 
 # SWC crates
-modularize_imports = "0.98.0"
-remove_console     = "0.53.0"
-swc_core           = { version = "44.0.2", features = ["ecma_loader_lru", "ecma_loader_parking_lot", "parallel_rayon"] }
+modularize_imports = "0.99.0"
+remove_console     = "0.54.0"
+swc_core           = { version = "45.0.1", features = ["ecma_loader_lru", "ecma_loader_parking_lot", "parallel_rayon"] }
 testing            = "15.0.0"
 
 indoc       = "2.0.0"
@@ -85,7 +85,7 @@ turbopack-ecmascript-hmr-protocol = { path = "./next.js/turbopack/crates/turbopa
 turbopack-ecmascript-plugins      = { path = "./next.js/turbopack/crates/turbopack-ecmascript-plugins", default-features = false }
 turbopack-ecmascript-runtime      = { path = "./next.js/turbopack/crates/turbopack-ecmascript-runtime" }
 turbopack-image                   = { path = "./next.js/turbopack/crates/turbopack-image" }
-turbopack-node                    = { path = "./next.js/turbopack/crates/turbopack-node" }
+turbopack-node                    = { path = "./next.js/turbopack/crates/turbopack-node", default-features = false }
 turbopack-nodejs                  = { path = "./next.js/turbopack/crates/turbopack-nodejs" }
 turbopack-resolve                 = { path = "./next.js/turbopack/crates/turbopack-resolve" }
 turbopack-static                  = { path = "./next.js/turbopack/crates/turbopack-static" }

@@ -13,7 +13,7 @@
     "serve": "rm -rf ./dist && npm run build && node ./genHtml.js && serve ./dist"
   },
   "dependencies": {
-    "bootstrap-less-port": "^2.5.1"
+    "antd": "^4"
   },
   "devDependencies": {
     "@utoo/pack-cli": "*"

@@ -1,4 +1,3 @@
-import { nanoid } from "nanoid";
 import { isDeepStrictEqual } from "util";
 import type {
   HmrIdentifiers,
@@ -22,6 +21,7 @@ import {
   Update,
 } from "./types";
 import { rustifyEnv } from "./util";
+import { Worker } from "worker_threads";
 
 export class TurbopackInternalError extends Error {
   name = "TurbopackInternalError";
@@ -220,8 +220,33 @@ export function projectFactory() {
   class ProjectImpl implements Project {
     readonly _nativeProject: { __napiType: "Project" };
 
+    #poolCreated: Record<string, Array<Worker>> = {};
+
+    #poolScheduler?: ReturnType<typeof setInterval>;
+
     constructor(nativeProject: { __napiType: "Project" }) {
       this._nativeProject = nativeProject;
+      if (binding.recvPoolCreation) {
+        this.#poolScheduler = setInterval(() => {
+          let poolOptions = binding.recvPoolCreation();
+          if (poolOptions) {
+            const { filename, concurrency } = poolOptions;
+            if (!this.#poolCreated[filename]) {
+              const workers = [];
+              for (let i = 0; i < concurrency; i++) {
+                const worker = new Worker(filename, {
+                  workerData: {
+                    poolId: filename,
+                  },
+                });
+                worker.unref();
+                workers.push(worker);
+              }
+              this.#poolCreated[filename] = workers;
+            }
+          }
+        }, 0);
+      }
     }
 
     async update(options: Partial<ProjectOptions>) {
@@ -315,6 +340,7 @@ export function projectFactory() {
     }
 
     shutdown(): Promise<void> {
+      this.#poolScheduler && clearInterval(this.#poolScheduler);
       return binding.projectShutdown(this._nativeProject);
     }
 
@@ -395,3 +421,4 @@ export function projectFactory() {
     );
   };
 }
+

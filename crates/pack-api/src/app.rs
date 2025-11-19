@@ -214,7 +214,7 @@ impl AppEntrypoint {
                         .collect(),
                 ),
                 module_graph,
-                AvailabilityInfo::Root,
+                AvailabilityInfo::root(),
             );
 
             Ok(app_chunk_group)
@@ -347,12 +347,14 @@ impl Endpoint for AppEndpoint {
         async move {
             let this = self.await?;
             let output_assets = stream::iter(&*self.await?.entrypoints)
-                .fold(OutputAssets::new(vec![]), |acc, e| async move {
+                .fold(OutputAssets::empty(), |acc, e| async move {
                     acc.concatenate(
                         (*e).output_assets_for_entry(Vc::upcast(asset_context), runtime_entries),
                     )
                 })
                 .await;
+
+            let output_assets = output_assets.concatenate(self.project().copy_output_assets());
 
             let dist_root = self.project().dist_root().await?;
 
@@ -373,8 +375,10 @@ impl Endpoint for AppEndpoint {
                     AssetContent::file(
                         File::from(serde_json::to_string_pretty(&webpack_stats)?).into(),
                     ),
-                );
-                output_assets.concatenate(OutputAssets::new(vec![Vc::upcast(stats_output)]))
+                )
+                .to_resolved()
+                .await?;
+                output_assets.concatenate(*ResolvedVc::cell(vec![ResolvedVc::upcast(stats_output)]))
             } else {
                 output_assets
             };
