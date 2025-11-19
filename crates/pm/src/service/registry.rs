@@ -287,15 +287,17 @@ impl RegistryService {
 
         // Not a dist-tag, do semver matching
         // Check if 'latest' dist-tag satisfies the spec (npm behavior)
-        let version = if let Some(latest) = dist_tags.get("latest")
-            && semver::matches(spec, latest)
-        {
-            tracing::debug!("Using dist-tags 'latest' version {latest} for spec {spec}");
-            Some(latest.to_string())
-        } else {
-            semver::max_satisfying(version_list.iter().map(|s| s.as_str()), spec)
-                .map(|v| v.to_string())
-        };
+        let version = dist_tags
+            .get("latest")
+            .filter(|latest| semver::matches(spec, latest))
+            .map(|latest| {
+                tracing::debug!("Using dist-tags 'latest' version {latest} for spec {spec}");
+                latest.to_string()
+            })
+            .or_else(|| {
+                semver::max_satisfying(version_list.iter().map(|s| s.as_str()), spec)
+                    .map(|v| v.to_string())
+            });
 
         version.ok_or_else(|| {
             anyhow::anyhow!(
@@ -665,7 +667,9 @@ mod tests {
         match result {
             Ok(resolved) => {
                 assert_eq!(resolved.version, "1.5.0");
-                println!("✓ Latest dist-tag (1.5.0) was preferred over max_satisfying (1.9.0) for ^1.0.0");
+                println!(
+                    "✓ Latest dist-tag (1.5.0) was preferred over max_satisfying (1.9.0) for ^1.0.0"
+                );
             }
             Err(e) => {
                 panic!("Failed to resolve with latest dist-tag priority: {e}");
@@ -695,7 +699,9 @@ mod tests {
         match result2 {
             Ok(resolved) => {
                 assert_eq!(resolved.version, "2.1.0");
-                println!("✓ Latest (1.5.0) doesn't satisfy ^2.0.0, correctly used max_satisfying (2.1.0)");
+                println!(
+                    "✓ Latest (1.5.0) doesn't satisfy ^2.0.0, correctly used max_satisfying (2.1.0)"
+                );
             }
             Err(e) => {
                 panic!("Failed to resolve when latest doesn't satisfy: {e}");
@@ -778,7 +784,8 @@ mod tests {
         let version_list = &versions_info.versions.version_list;
 
         // Call the real method from RegistryService
-        let target_version = RegistryService::resolve_target_version(dist_tags, version_list, spec)?;
+        let target_version =
+            RegistryService::resolve_target_version(dist_tags, version_list, spec)?;
 
         // Create a mock resolved package
         Ok(ResolvedPackage {

@@ -9,6 +9,14 @@ use crate::{
     service::dependency_graph::{DependencyGraphService, DependencyType, PackageNode},
 };
 
+/// Represents a license field that can be either a string or an array of strings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum License {
+    String(String),
+    Array(Vec<String>),
+}
+
 /// Represents package information in package-lock.json
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LockPackage {
@@ -21,7 +29,7 @@ pub struct LockPackage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub integrity: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub license: Option<String>,
+    pub license: Option<License>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dependencies: Option<HashMap<String, String>>,
     #[serde(rename = "devDependencies", skip_serializing_if = "Option::is_none")]
@@ -381,5 +389,64 @@ mod tests {
 
         package.version = None;
         assert_eq!(package.get_version(), "unknown");
+    }
+
+    #[test]
+    fn test_license_field_parsing() {
+        // Test string license
+        let json_string = r#"{
+            "version": "1.0.0",
+            "license": "MIT"
+        }"#;
+        let package: LockPackage = serde_json::from_str(json_string).unwrap();
+        assert!(package.license.is_some());
+        match package.license.unwrap() {
+            License::String(s) => assert_eq!(s, "MIT"),
+            License::Array(_) => panic!("Expected License::String"),
+        }
+
+        // Test array license
+        let json_array = r#"{
+            "version": "1.0.0",
+            "license": ["MIT", "Apache-2.0"]
+        }"#;
+        let package: LockPackage = serde_json::from_str(json_array).unwrap();
+        assert!(package.license.is_some());
+        match package.license.unwrap() {
+            License::Array(arr) => {
+                assert_eq!(arr.len(), 2);
+                assert_eq!(arr[0], "MIT");
+                assert_eq!(arr[1], "Apache-2.0");
+            }
+            License::String(_) => panic!("Expected License::Array"),
+        }
+
+        // Test no license
+        let json_no_license = r#"{
+            "version": "1.0.0"
+        }"#;
+        let package: LockPackage = serde_json::from_str(json_no_license).unwrap();
+        assert!(package.license.is_none());
+
+        // Test serialization of string license
+        let package_with_string = LockPackage {
+            version: Some("1.0.0".to_string()),
+            license: Some(License::String("MIT".to_string())),
+            ..LockPackage::default()
+        };
+        let serialized = serde_json::to_string(&package_with_string).unwrap();
+        assert!(serialized.contains(r#""license":"MIT""#));
+
+        // Test serialization of array license
+        let package_with_array = LockPackage {
+            version: Some("1.0.0".to_string()),
+            license: Some(License::Array(vec![
+                "MIT".to_string(),
+                "Apache-2.0".to_string(),
+            ])),
+            ..LockPackage::default()
+        };
+        let serialized = serde_json::to_string(&package_with_array).unwrap();
+        assert!(serialized.contains(r#""license":["MIT","Apache-2.0"]"#));
     }
 }
