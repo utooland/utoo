@@ -269,6 +269,43 @@ impl RegistryService {
         }
     }
 
+    /// Resolve target version from dist-tags and version list
+    /// This is the core version resolution logic that matches npm's behavior
+    fn resolve_target_version(
+        dist_tags: &HashMap<String, String>,
+        version_list: &[String],
+        spec: &str,
+    ) -> Result<String> {
+        if version_list.is_empty() {
+            return Err(anyhow::anyhow!("No versions available"));
+        }
+
+        // First check if spec is a dist-tag
+        if let Some(version) = dist_tags.get(spec) {
+            return Ok(version.to_string());
+        }
+
+        // Not a dist-tag, do semver matching
+        // Check if 'latest' dist-tag satisfies the spec (npm behavior)
+        let version = if let Some(latest) = dist_tags.get("latest")
+            && semver::matches(spec, latest)
+        {
+            tracing::debug!("Using dist-tags 'latest' version {latest} for spec {spec}");
+            Some(latest.to_string())
+        } else {
+            semver::max_satisfying(version_list.iter().map(|s| s.as_str()), spec)
+                .map(|v| v.to_string())
+        };
+
+        version.ok_or_else(|| {
+            anyhow::anyhow!(
+                "No matching version found for spec '{}' from {} available versions",
+                spec,
+                version_list.len()
+            )
+        })
+    }
+
     // Note: get_version_manifest_by_full_versions has been replaced with the new cache-first architecture:
     // - get_target_version_by_cache: gets version from cache
     // - get_target_version_by_full_manifest: gets version from network
@@ -304,42 +341,11 @@ impl RegistryService {
             // 2. Resolve package versions using new caching architecture
             let versions_info_arc = Self::resolve_package_versions(name).await?;
 
-            // 3. Check dist-tags (Arc auto-derefs)
+            // 3. Resolve target version using extracted logic
             let dist_tags = &versions_info_arc.versions.dist_tags;
             let version_list = &versions_info_arc.versions.version_list;
 
-            // First check if spec is a dist-tag
-            let target_version = if let Some(version) = dist_tags.get(spec) {
-                version.to_string()
-            } else {
-                // Not a dist-tag, do semver matching
-                // Check if 'latest' dist-tag satisfies the spec (npm behavior)
-                let version = if let Some(latest) = dist_tags.get("latest")
-                    && semver::matches(spec, latest)
-                {
-                    tracing::debug!("Using dist-tags 'latest' version {latest} for {name}@{spec}");
-                    Some(latest.to_string())
-                } else {
-                    semver::max_satisfying(version_list.iter().map(|s| s.as_str()), spec)
-                        .map(|v| v.to_string())
-                };
-
-                match version {
-                    Some(v) => v,
-                    None => {
-                        tracing::debug!(
-                            "No matching version found for {}@{} from {} available versions",
-                            name,
-                            spec,
-                            version_list.len()
-                        );
-                        return Err(anyhow::anyhow!(
-                            "No matching version found for {name}@{spec}"
-                        ));
-                    }
-                }
-            };
-
+            let target_version = Self::resolve_target_version(dist_tags, version_list, spec)?;
             tracing::debug!("Resolved target version for {name}@{spec}: {target_version}");
 
             // 5. Get specific version manifest using three-tier caching
@@ -762,7 +768,7 @@ mod tests {
     }
 
     /// Helper function to test dist-tags matching logic
-    /// This simulates the logic from RegistryService::resolve_package
+    /// This directly calls the real resolve_target_version method
     async fn test_resolve_with_dist_tags(
         versions_info: &VersionsInfo,
         name: &str,
@@ -771,34 +777,8 @@ mod tests {
         let dist_tags = &versions_info.versions.dist_tags;
         let version_list = &versions_info.versions.version_list;
 
-        if version_list.is_empty() {
-            return Err(anyhow::anyhow!("No versions found for package: {name}"));
-        }
-
-        // First check if spec is a dist-tag
-        let target_version = if let Some(version) = dist_tags.get(spec) {
-            version.to_string()
-        } else {
-            // Not a dist-tag, do semver matching
-            // Check if 'latest' dist-tag satisfies the spec (npm behavior)
-            let version = if let Some(latest) = dist_tags.get("latest")
-                && semver::matches(spec, latest)
-            {
-                Some(latest.to_string())
-            } else {
-                semver::max_satisfying(version_list.iter().map(|s| s.as_str()), spec)
-                    .map(|v| v.to_string())
-            };
-
-            match version {
-                Some(v) => v,
-                None => {
-                    return Err(anyhow::anyhow!(
-                        "No matching version found for {name}@{spec}"
-                    ));
-                }
-            }
-        };
+        // Call the real method from RegistryService
+        let target_version = RegistryService::resolve_target_version(dist_tags, version_list, spec)?;
 
         // Create a mock resolved package
         Ok(ResolvedPackage {
