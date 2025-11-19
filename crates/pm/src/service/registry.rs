@@ -269,6 +269,45 @@ impl RegistryService {
         }
     }
 
+    /// Resolve target version from dist-tags and version list
+    /// This is the core version resolution logic that matches npm's behavior
+    fn resolve_target_version(
+        dist_tags: &HashMap<String, String>,
+        version_list: &[String],
+        spec: &str,
+    ) -> Result<String> {
+        if version_list.is_empty() {
+            return Err(anyhow::anyhow!("No versions available"));
+        }
+
+        // First check if spec is a dist-tag
+        if let Some(version) = dist_tags.get(spec) {
+            return Ok(version.to_string());
+        }
+
+        // Not a dist-tag, do semver matching
+        // Check if 'latest' dist-tag satisfies the spec (npm behavior)
+        let version = dist_tags
+            .get("latest")
+            .filter(|latest| semver::matches(spec, latest))
+            .map(|latest| {
+                tracing::debug!("Using dist-tags 'latest' version {latest} for spec {spec}");
+                latest.to_string()
+            })
+            .or_else(|| {
+                semver::max_satisfying(version_list.iter().map(|s| s.as_str()), spec)
+                    .map(|v| v.to_string())
+            });
+
+        version.ok_or_else(|| {
+            anyhow::anyhow!(
+                "No matching version found for spec '{}' from {} available versions",
+                spec,
+                version_list.len()
+            )
+        })
+    }
+
     // Note: get_version_manifest_by_full_versions has been replaced with the new cache-first architecture:
     // - get_target_version_by_cache: gets version from cache
     // - get_target_version_by_full_manifest: gets version from network
@@ -304,29 +343,11 @@ impl RegistryService {
             // 2. Resolve package versions using new caching architecture
             let versions_info_arc = Self::resolve_package_versions(name).await?;
 
-            // 3. Check dist-tags (Arc auto-derefs)
+            // 3. Resolve target version using extracted logic
             let dist_tags = &versions_info_arc.versions.dist_tags;
             let version_list = &versions_info_arc.versions.version_list;
 
-            let target_version = match dist_tags.get(spec) {
-                Some(version) => version.to_string(),
-                None => match semver::max_satisfying(version_list.iter().map(|s| s.as_str()), spec)
-                {
-                    Some(version) => version.to_string(),
-                    None => {
-                        tracing::debug!(
-                            "No matching version found for {}@{} from {} available versions",
-                            name,
-                            spec,
-                            version_list.len()
-                        );
-                        return Err(anyhow::anyhow!(
-                            "No matching version found for {name}@{spec}"
-                        ));
-                    }
-                },
-            };
-
+            let target_version = Self::resolve_target_version(dist_tags, version_list, spec)?;
             tracing::debug!("Resolved target version for {name}@{spec}: {target_version}");
 
             // 5. Get specific version manifest using three-tier caching
@@ -491,8 +512,8 @@ mod tests {
             ("beta", "2.0.0-beta.1"),
             ("alpha", "2.0.0-alpha.1"),
             ("next", "1.3.0"),
-            // Test semver fallback when dist-tag doesn't exist
-            ("^1.0.0", "1.3.0"), // Should match highest semver (1.3.0 is higher than 1.2.3)
+            // Test semver matching with latest priority (npm behavior)
+            ("^1.0.0", "1.2.3"), // Should use latest (1.2.3) since it satisfies ^1.0.0
             ("~1.1.0", "1.1.0"), // Should match exact semver
             ("1.0.0", "1.0.0"),  // Should match exact version
         ];
@@ -614,6 +635,107 @@ mod tests {
         }
     }
 
+    /// Test that 'latest' dist-tag is preferred when it satisfies the semver requirement
+    #[tokio::test]
+    async fn test_latest_dist_tag_priority() {
+        // Create a scenario where:
+        // - latest points to 1.5.0
+        // - version_list has 1.0.0, 1.5.0, 1.9.0
+        // - User requests ^1.0.0
+        // Expected: Should use 1.5.0 (latest) even though 1.9.0 is the max_satisfying version
+
+        let mut dist_tags = HashMap::new();
+        dist_tags.insert("latest".to_string(), "1.5.0".to_string());
+
+        let versions = Versions {
+            version_list: vec![
+                "1.0.0".to_string(),
+                "1.5.0".to_string(),
+                "1.9.0".to_string(),
+            ],
+            dist_tags: dist_tags.clone(),
+        };
+
+        let versions_info = VersionsInfo {
+            versions,
+            etag: Some("test-etag".to_string()),
+            last_updated: 1234567890,
+        };
+
+        // Test: ^1.0.0 should use latest (1.5.0) instead of max_satisfying (1.9.0)
+        let result = test_resolve_with_dist_tags(&versions_info, "test-package", "^1.0.0").await;
+        match result {
+            Ok(resolved) => {
+                assert_eq!(resolved.version, "1.5.0");
+                println!(
+                    "✓ Latest dist-tag (1.5.0) was preferred over max_satisfying (1.9.0) for ^1.0.0"
+                );
+            }
+            Err(e) => {
+                panic!("Failed to resolve with latest dist-tag priority: {e}");
+            }
+        }
+
+        // Test: ^2.0.0 should use max_satisfying since latest doesn't satisfy
+        let mut dist_tags2 = HashMap::new();
+        dist_tags2.insert("latest".to_string(), "1.5.0".to_string());
+
+        let versions2 = Versions {
+            version_list: vec![
+                "1.5.0".to_string(),
+                "2.0.0".to_string(),
+                "2.1.0".to_string(),
+            ],
+            dist_tags: dist_tags2,
+        };
+
+        let versions_info2 = VersionsInfo {
+            versions: versions2,
+            etag: Some("test-etag".to_string()),
+            last_updated: 1234567890,
+        };
+
+        let result2 = test_resolve_with_dist_tags(&versions_info2, "test-package", "^2.0.0").await;
+        match result2 {
+            Ok(resolved) => {
+                assert_eq!(resolved.version, "2.1.0");
+                println!(
+                    "✓ Latest (1.5.0) doesn't satisfy ^2.0.0, correctly used max_satisfying (2.1.0)"
+                );
+            }
+            Err(e) => {
+                panic!("Failed to resolve when latest doesn't satisfy: {e}");
+            }
+        }
+
+        // Test: No latest tag should fall back to max_satisfying
+        let versions3 = Versions {
+            version_list: vec![
+                "1.0.0".to_string(),
+                "1.5.0".to_string(),
+                "1.9.0".to_string(),
+            ],
+            dist_tags: HashMap::new(),
+        };
+
+        let versions_info3 = VersionsInfo {
+            versions: versions3,
+            etag: Some("test-etag".to_string()),
+            last_updated: 1234567890,
+        };
+
+        let result3 = test_resolve_with_dist_tags(&versions_info3, "test-package", "^1.0.0").await;
+        match result3 {
+            Ok(resolved) => {
+                assert_eq!(resolved.version, "1.9.0");
+                println!("✓ No latest tag, correctly used max_satisfying (1.9.0)");
+            }
+            Err(e) => {
+                panic!("Failed to resolve without latest tag: {e}");
+            }
+        }
+    }
+
     /// Test error cases
     #[tokio::test]
     async fn test_resolve_errors() {
@@ -652,7 +774,7 @@ mod tests {
     }
 
     /// Helper function to test dist-tags matching logic
-    /// This simulates the logic from RegistryService::resolve_package
+    /// This directly calls the real resolve_target_version method
     async fn test_resolve_with_dist_tags(
         versions_info: &VersionsInfo,
         name: &str,
@@ -661,21 +783,9 @@ mod tests {
         let dist_tags = &versions_info.versions.dist_tags;
         let version_list = &versions_info.versions.version_list;
 
-        if version_list.is_empty() {
-            return Err(anyhow::anyhow!("No versions found for package: {name}"));
-        }
-
-        let target_version = match dist_tags.get(spec) {
-            Some(version) => version.to_string(),
-            None => match semver::max_satisfying(version_list.iter().map(|s| s.as_str()), spec) {
-                Some(version) => version.to_string(),
-                None => {
-                    return Err(anyhow::anyhow!(
-                        "No matching version found for {name}@{spec}"
-                    ));
-                }
-            },
-        };
+        // Call the real method from RegistryService
+        let target_version =
+            RegistryService::resolve_target_version(dist_tags, version_list, spec)?;
 
         // Create a mock resolved package
         Ok(ResolvedPackage {
