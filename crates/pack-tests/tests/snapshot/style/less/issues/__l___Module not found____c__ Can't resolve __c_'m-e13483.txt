@@ -1,0 +1,17 @@
+error - [resolve] /crates/pack-tests/tests/snapshot/style/less/input/index.less.css:1:1  Module not found: Can't resolve 'mixins/~antd/reset.css'
+  
+         +  v
+       1 + @import 'mixins/~antd/reset.css';
+         +  ^
+       2 | @import '~antd/reset.css';
+       3 | @import 'antd/reset2.css';
+       4 | body {
+       5 |   background-color: black;
+  
+  
+  
+  | It was not possible to find the requested file.
+  | Parsed request as written in source code: module 'mixins' with subpath '/~antd/reset.css'
+  | Path where resolving has started: [project]/crates/pack-tests/tests/snapshot/style/less/input/index.less.css
+  | Type of request: css request
+  |
