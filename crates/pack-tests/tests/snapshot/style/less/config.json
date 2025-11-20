@@ -5,6 +5,11 @@
                 "import": "input/index.js",
                 "name": "main"
             }
-        ]
+        ],
+        "resolve": {
+            "alias": {
+                "~*": "*"
+            }
+        }
     }
 }
