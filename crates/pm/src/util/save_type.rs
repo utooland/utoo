@@ -23,3 +23,10 @@ pub enum PackageAction {
     Add,
     Remove,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, clap::ValueEnum)]
+pub enum OmitType {
+    Dev,
+    Optional,
+    Peer,
+}

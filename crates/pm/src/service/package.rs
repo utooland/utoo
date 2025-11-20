@@ -188,6 +188,12 @@ impl PackageService {
             let (scope, name, fullname) = parse_package_name(path);
             let package_path = PathBuf::from(format!("{}/{}", root_path.display(), path));
 
+            // Skip if package directory doesn't exist (e.g., omitted by --production/--omit)
+            if !package_path.exists() {
+                tracing::debug!("Package {path} not installed, skipping rebuild");
+                continue;
+            }
+
             // Read scripts from package.json only if needed
             let scripts = if has_scripts || !ignore_scripts {
                 Self::read_package_scripts(&package_path)

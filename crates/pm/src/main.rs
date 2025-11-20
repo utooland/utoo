@@ -14,9 +14,9 @@ use cmd::update::update;
 use cmd::view::view;
 use cmd::{clean::clean, deps::build_workspace};
 use helper::auto_update::init_auto_update;
-use util::config::{set_legacy_peer_deps, set_registry};
+use util::config::{set_legacy_peer_deps, set_omit, set_registry};
 use util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
-use util::save_type::{PackageAction, SaveType, parse_save_type};
+use util::save_type::{OmitType, PackageAction, SaveType, parse_save_type};
 
 mod cmd;
 mod constants;
@@ -135,6 +135,14 @@ enum Commands {
 
         #[arg(short, long)]
         prefix: Option<String>,
+
+        /// Only install production dependencies (omit dev and optional)
+        #[arg(long)]
+        production: bool,
+
+        /// Dependency types to omit
+        #[arg(long, value_delimiter = ',')]
+        omit: Vec<OmitType>,
     },
     /// Uninstall dependencies
     #[command(name = UNINSTALL_NAME, alias = UNINSTALL_ALIAS, about = UNINSTALL_ABOUT)]
@@ -310,7 +318,21 @@ async fn async_main() -> Result<()> {
             save_optional,
             global,
             prefix,
+            production,
+            omit,
         }) => {
+            // Build omit config: production = omit dev + optional
+            let mut omit_set: std::collections::HashSet<OmitType> = omit.into_iter().collect();
+            if production {
+                omit_set.insert(OmitType::Dev);
+                omit_set.insert(OmitType::Optional);
+            }
+            // legacy_peer_deps means omit peer
+            if cli.legacy_peer_deps == Some(true) {
+                omit_set.insert(OmitType::Peer);
+            }
+            set_omit(omit_set);
+
             if !specs.is_empty() {
                 if global {
                     // For global installs, process packages one by one

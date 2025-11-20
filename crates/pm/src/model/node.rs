@@ -226,34 +226,47 @@ impl Node {
         }
 
         let mut has_prod = false;
-        let mut all_optional = true;
-        let mut all_dev = true;
-        let mut all_peer = true;
+        let mut has_dev = false;
+        let mut has_optional = false;
+        let mut has_peer = false;
+        let mut all_dev_or_optional = true;
 
         // Analyze incoming edges
         for edge in edges_in.iter() {
             let from_node = &edge.from;
+            let from_is_prod = *from_node.is_prod.read().unwrap() == Some(true);
+            let from_is_dev = *from_node.is_dev.read().unwrap() == Some(true);
+            let from_is_optional = *from_node.is_optional.read().unwrap() == Some(true);
+            let from_is_peer = *from_node.is_peer.read().unwrap() == Some(true);
 
-            if *from_node.is_prod.read().unwrap() == Some(true) && edge.edge_type == EdgeType::Prod
-            {
+            // Check if this edge brings prod dependency
+            if from_is_prod && edge.edge_type == EdgeType::Prod {
                 has_prod = true;
-                all_optional = false;
-                all_dev = false;
-                all_peer = false;
                 break;
             }
 
-            if *from_node.is_optional.read().unwrap() != Some(true)
+            // Track dev edges
+            if from_is_dev || edge.edge_type == EdgeType::Dev {
+                has_dev = true;
+            }
+
+            // Track optional edges
+            if from_is_optional || edge.edge_type == EdgeType::Optional {
+                has_optional = true;
+            }
+
+            // Track peer edges
+            if from_is_peer || edge.edge_type == EdgeType::Peer {
+                has_peer = true;
+            }
+
+            // Check if edge is neither dev nor optional
+            if !from_is_dev
+                && edge.edge_type != EdgeType::Dev
+                && !from_is_optional
                 && edge.edge_type != EdgeType::Optional
             {
-                all_optional = false;
-            }
-            if *from_node.is_dev.read().unwrap() != Some(true) && edge.edge_type != EdgeType::Dev {
-                all_dev = false;
-            }
-            if *from_node.is_peer.read().unwrap() != Some(true) && edge.edge_type != EdgeType::Peer
-            {
-                all_peer = false;
+                all_dev_or_optional = false;
             }
         }
 
@@ -268,19 +281,29 @@ impl Node {
                 *self.is_peer.write().unwrap() = Some(false);
                 changed = true;
             }
-        } else if all_optional {
+        } else if has_dev && has_optional && all_dev_or_optional {
+            // devOptional: has both dev and optional edges, and no prod edges
+            let curr_dev = *self.is_dev.read().unwrap();
+            let curr_optional = *self.is_optional.read().unwrap();
+            if curr_dev != Some(true) || curr_optional != Some(true) {
+                *self.is_dev.write().unwrap() = Some(true);
+                *self.is_optional.write().unwrap() = Some(true);
+                *self.is_prod.write().unwrap() = Some(false);
+                changed = true;
+            }
+        } else if has_optional && !has_dev && !has_peer {
             if *self.is_optional.read().unwrap() != Some(true) {
                 *self.is_optional.write().unwrap() = Some(true);
                 *self.is_prod.write().unwrap() = Some(false);
                 changed = true;
             }
-        } else if all_dev {
+        } else if has_dev && !has_optional && !has_peer {
             if *self.is_dev.read().unwrap() != Some(true) {
                 *self.is_dev.write().unwrap() = Some(true);
                 *self.is_prod.write().unwrap() = Some(false);
                 changed = true;
             }
-        } else if all_peer && *self.is_peer.read().unwrap() != Some(true) {
+        } else if has_peer && *self.is_peer.read().unwrap() != Some(true) {
             *self.is_peer.write().unwrap() = Some(true);
             *self.is_prod.write().unwrap() = Some(false);
             changed = true;
@@ -289,10 +312,12 @@ impl Node {
         // Propagate changes
         if changed {
             tracing::debug!(
-                "{}@{} type changed [all_optional {}]",
+                "{}@{} type changed [dev:{} optional:{} peer:{}]",
                 &self.name,
                 &self.version,
-                all_optional
+                has_dev,
+                has_optional,
+                has_peer
             );
 
             let edges_out = self.edges_out.read().unwrap();
