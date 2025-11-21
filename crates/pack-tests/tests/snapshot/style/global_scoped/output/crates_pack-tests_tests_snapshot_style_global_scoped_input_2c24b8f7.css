@@ -1,6 +1,6 @@
 /* [project]/crates/pack-tests/tests/snapshot/style/global_scoped/input/style.less.css [client] (css) */
 .check-box :global(.ant-checkbox-wrapper) {
-  color: #000000d9;
+  color: #000;
   font-size: 14px;
   font-weight: 400;
 }
