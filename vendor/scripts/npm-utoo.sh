@@ -35,19 +35,34 @@ cp ../../README.md "$ENTRY_DIR/README.md"
 # create placeholder binaries
 mkdir -p "$ENTRY_DIR/bin"
 for binary in utoo ut; do
-    cat > "$ENTRY_DIR/bin/$binary" << EOF
+    # Unix 版本
+    cat > "$ENTRY_DIR/bin/$binary" << 'EOF'
 #!/bin/bash
 echo "This is a placeholder binary for $binary. The actual binary will be installed via postinstall script."
 exit 1
 EOF
     chmod +x "$ENTRY_DIR/bin/$binary"
+    
+    # Windows 版本 (.cmd)
+    cat > "$ENTRY_DIR/bin/$binary.cmd" << 'EOF'
+@echo off
+echo This is a placeholder binary for %~n0. The actual binary will be installed via postinstall script.
+exit /b 1
+EOF
 done
+
 # create utx shell script that executes utoo x
-cat > "$ENTRY_DIR/bin/utx" << EOF
+cat > "$ENTRY_DIR/bin/utx" << 'EOF'
 #!/bin/bash
-utoo x "\$@"
+utoo x "$@"
 EOF
 chmod +x "$ENTRY_DIR/bin/utx"
+
+# Windows 版本的 utx
+cat > "$ENTRY_DIR/bin/utx.cmd" << 'EOF'
+@echo off
+utoo x %*
+EOF
 
 # do publish
 cd "$ENTRY_DIR"

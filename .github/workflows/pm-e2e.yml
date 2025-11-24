@@ -18,6 +18,8 @@ jobs:
             target: x86_64-apple-darwin
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
 
     name: utoopm-e2e-${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
@@ -80,13 +82,24 @@ jobs:
       - name: Update PATH with target directory
         run: echo "${{ github.workspace }}/target/${{ matrix.settings.target }}/release" >> $GITHUB_PATH
 
-      - name: Create ut symlink for utoo
+      - name: Create ut symlink for utoo (Unix)
+        if: matrix.settings.host != 'windows-latest'
         run: ln -sf utoo $(dirname $(which utoo))/ut
 
+      - name: Create ut symlink for utoo (Windows)
+        if: matrix.settings.host == 'windows-latest'
+        shell: pwsh
+        run: |
+          $utooPath = (Get-Command utoo).Source  
+          $utDir = Split-Path $utooPath  
+          New-Item -ItemType SymbolicLink -Path "$utDir\ut.exe" -Target $utooPath -Force
+
       - name: Make script executable
+        if: matrix.settings.host != 'windows-latest'
         run: chmod +x e2e/utoo-pm.sh
 
-      - name: Run e2e tests
+      - name: Run e2e tests (Unix)
+        if: matrix.settings.host != 'windows-latest'
         run: |
           if [ "${{ matrix.settings.target }}" = "x86_64-apple-darwin" ]; then
             arch -x86_64 bash -c '
@@ -99,3 +112,10 @@ jobs:
             e2e/utoo-pm.sh
           fi
         shell: bash
+
+      - name: Run e2e tests (Windows)
+        if: matrix.settings.host == 'windows-latest'
+        shell: pwsh
+        run: |
+          git config --system core.longpaths true  
+          pwsh e2e/utoo-pm.ps1

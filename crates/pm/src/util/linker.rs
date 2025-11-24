@@ -52,13 +52,35 @@ pub async fn link(src: &Path, dst: &Path) -> Result<()> {
         ))?;
     }
 
-    fs::symlink(&abs_src, &abs_dst).await.context(format!(
-        "Failed to create symbolic link from {} to {}",
-        abs_src.display(),
-        abs_dst.display()
-    ))?;
+    // Create symlink based on platform
+    create_symlink(&abs_src, &abs_dst).await?;
 
     Ok(())
+}
+
+/// Create a symlink (cross-platform)
+#[cfg(unix)]
+async fn create_symlink(src: &Path, dst: &Path) -> Result<()> {
+    fs::symlink(src, dst).await.context(format!(
+        "Failed to create symbolic link from {} to {}",
+        src.display(),
+        dst.display()
+    ))
+}
+
+#[cfg(windows)]
+async fn create_symlink(src: &Path, dst: &Path) -> Result<()> {
+    // On Windows, we need to distinguish between file and directory symlinks
+    if src.is_dir() {
+        fs::symlink_dir(src, dst).await
+    } else {
+        fs::symlink_file(src, dst).await
+    }
+    .context(format!(
+        "Failed to create symbolic link from {} to {}",
+        src.display(),
+        dst.display()
+    ))
 }
 
 #[cfg(test)]
@@ -83,7 +105,10 @@ mod tests {
         link(&src_path, &dst_path).await.unwrap();
 
         assert!(dst_path.exists());
+
+        #[cfg(unix)]
         assert!(dst_path.is_symlink());
+
         assert_eq!(fs::read_to_string(&dst_path).unwrap(), src_content);
     }
 
@@ -101,6 +126,8 @@ mod tests {
         link(&src_path, &dst_path).await.unwrap();
 
         assert!(dst_path.exists());
+
+        #[cfg(unix)]
         assert!(dst_path.is_symlink());
     }
 
@@ -155,7 +182,10 @@ mod tests {
         env::set_current_dir(temp_path).unwrap();
         let result = link(&src_path, &dst_path).await;
         assert!(result.is_ok());
+
+        #[cfg(unix)]
         assert!(dst_path.is_symlink());
+
         assert_eq!(fs::read_to_string(&dst_path).unwrap(), "test");
     }
 }

@@ -1,7 +1,6 @@
 use crate::model::package::PackageInfo;
 use anyhow::{Context, Result};
 use std::env;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tokio::fs;
@@ -160,34 +159,35 @@ impl ScriptService {
     }
 
     pub async fn ensure_executable(target_path: &Path) -> Result<()> {
-        let permissions = tokio::fs::metadata(&target_path)
+        // 1. Ensure the file has a shebang (required for all platforms)
+        let mut content = fs::read_to_string(&target_path)
             .await
-            .context(format!(
-                "Failed to get file permissions {}",
-                target_path.display()
-            ))?
-            .permissions();
+            .context(format!("Failed to read file {}", target_path.display()))?;
 
-        let is_executable = permissions.mode() & 0o111 != 0;
-
-        if !is_executable {
-            let mut content = fs::read_to_string(&target_path)
+        if !content.starts_with("#!") {
+            content = format!("#!/usr/bin/env node\n{content}");
+            fs::write(&target_path, content)
                 .await
-                .context(format!("Failed to read file {}", target_path.display()))?;
-
-            if !content.starts_with("#!") {
-                content = format!("#!/usr/bin/env node\n{content}");
-                fs::write(&target_path, content)
-                    .await
-                    .context(format!("Failed to write shebang {}", target_path.display()))?;
-            }
+                .context(format!("Failed to write shebang {}", target_path.display()))?;
         }
 
-        let mut perms = permissions;
-        perms.set_mode(0o755);
-        fs::set_permissions(&target_path, perms)
-            .await
-            .context("Failed to set executable permissions")?;
+        // 2. Set executable permissions on Unix systems
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = tokio::fs::metadata(&target_path)
+                .await
+                .context(format!(
+                    "Failed to get file permissions {}",
+                    target_path.display()
+                ))?
+                .permissions();
+
+            perms.set_mode(0o755);
+            fs::set_permissions(&target_path, perms)
+                .await
+                .context("Failed to set executable permissions")?;
+        }
 
         Ok(())
     }
@@ -312,6 +312,9 @@ mod tests {
     use tempfile::TempDir;
     use tempfile::tempdir;
 
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     #[tokio::test]
     async fn test_collect_bin_paths_with_local_node_modules() {
         let temp_dir = tempdir().unwrap();
@@ -375,6 +378,7 @@ mod tests {
     fn test_has_node_gyp_in_path_found() {
         use std::env;
         use std::fs;
+        #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
         use tempfile::tempdir;
 
@@ -405,6 +409,7 @@ mod tests {
     async fn test_ensure_node_gyp_found() {
         use std::env;
         use std::fs;
+        #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
         // Create a temporary directory
         let temp_dir = tempfile::tempdir().unwrap();

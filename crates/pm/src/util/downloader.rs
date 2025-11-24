@@ -4,11 +4,10 @@ use futures::StreamExt;
 use once_cell::sync::Lazy;
 use reqwest::StatusCode;
 use reqwest::{Client, Response};
-use std::{fs::Permissions, os::unix::fs::PermissionsExt, path::Path};
-use tokio::{
-    fs::{File, set_permissions},
-    io::AsyncReadExt,
-};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
+use tokio::{fs::File, io::AsyncReadExt};
 use tokio_retry::RetryIf;
 use tokio_tar::Archive;
 use tokio_util::io::StreamReader;
@@ -214,15 +213,8 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
                             .context(format!("File path: {}", entry.path.display())));
                     }
 
-                    // Set original file permissions from tar entry
-                    let permissions = Permissions::from_mode(entry.mode);
-                    if let Err(e) = tokio::fs::set_permissions(&entry.path, permissions).await {
-                        tracing::debug!(
-                            "Failed to set permissions {}: {}",
-                            entry.path.display(),
-                            e
-                        );
-                    }
+                    // Set original file permissions from tar entry (Unix only)
+                    set_file_permissions(&entry.path, entry.mode).await?;
 
                     Ok::<(), anyhow::Error>(())
                 });
@@ -261,13 +253,45 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
     write_result?;
 
     // Set directory permissions and create resolution marker
-    set_permissions(&dest, Permissions::from_mode(0o755))
-        .await
-        .with_context(|| format!("Failed to set directory permissions: {}", dest.display()))?;
+    set_dir_permissions(&dest).await?;
     File::create(&dest.join("_resolved"))
         .await
         .with_context(|| format!("Failed to create resolution marker in: {}", dest.display()))?;
 
+    Ok(())
+}
+
+/// Set file permissions (cross-platform)
+#[cfg(unix)]
+async fn set_file_permissions(path: &Path, mode: u32) -> Result<()> {
+    use std::fs::Permissions;
+    let permissions = Permissions::from_mode(mode);
+    tokio::fs::set_permissions(path, permissions)
+        .await
+        .with_context(|| format!("Failed to set permissions for: {}", path.display()))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+async fn set_file_permissions(_path: &Path, _mode: u32) -> Result<()> {
+    // Windows doesn't need Unix-style permissions
+    Ok(())
+}
+
+/// Set directory permissions (cross-platform)
+#[cfg(unix)]
+async fn set_dir_permissions(path: &Path) -> Result<()> {
+    use std::fs::Permissions;
+    let permissions = Permissions::from_mode(0o755);
+    tokio::fs::set_permissions(path, permissions)
+        .await
+        .with_context(|| format!("Failed to set directory permissions: {}", path.display()))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+async fn set_dir_permissions(_path: &Path) -> Result<()> {
+    // Windows doesn't need Unix-style permissions
     Ok(())
 }
 

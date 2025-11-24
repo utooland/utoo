@@ -15,7 +15,8 @@
     "@utoo/utoo-linux-x64": "{{version}}",
     "@utoo/utoo-linux-arm64": "{{version}}",
     "@utoo/utoo-darwin-x64": "{{version}}",
-    "@utoo/utoo-darwin-arm64": "{{version}}"
+    "@utoo/utoo-darwin-arm64": "{{version}}",
+    "@utoo/utoo-win32-x64": "{{version}}"
   },
   "os": ["darwin", "linux"],
   "cpu": ["x64", "arm64"],

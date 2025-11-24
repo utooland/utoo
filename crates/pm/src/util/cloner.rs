@@ -1,10 +1,11 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-use tokio::fs;
-use tokio_retry::Retry;
-
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use super::retry::create_retry_strategy;
+use tokio::fs;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use tokio_retry::Retry;
 
 #[cfg(target_os = "macos")]
 use libc::clonefile;
@@ -396,7 +397,7 @@ pub async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
                 }
             }
         })
-        .await
+        .await?;
     }
 
     #[cfg(target_os = "linux")]
@@ -406,8 +407,38 @@ pub async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
             tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
             Ok(())
         })
-        .await
+        .await?;
     }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        // For other platforms (e.g., Windows), use standard recursive copy
+        copy_dir_all(&real_src, dst).await?;
+        tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
+    }
+
+    Ok(())
+}
+
+// Standard directory copy for non-macOS/Linux platforms
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+async fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
+    fs::create_dir_all(dst).await?;
+    let mut entries = fs::read_dir(src).await?;
+
+    while let Some(entry) = entries.next_entry().await? {
+        let ty = entry.file_type().await?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if ty.is_dir() {
+            Box::pin(copy_dir_all(&src_path, &dst_path)).await?;
+        } else {
+            fs::copy(&src_path, &dst_path).await?;
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
