@@ -5,7 +5,7 @@ use turbo_tasks::{TaskInput, Vc, trace::TraceRawVcs};
 use turbo_tasks_fs::FileSystemPath;
 use turbopack_core::{
     chunk::{
-        ChunkingContext, MangleType, MinifyType, SourceMapsType,
+        ChunkingContext, MangleType, MinifyType, SourceMapSourceType, SourceMapsType,
         module_id_strategies::ModuleIdStrategy,
     },
     environment::Environment,
@@ -101,7 +101,7 @@ pub async fn get_library_chunking_context(
     }
 
     if mode.is_development() {
-        builder = builder.use_file_source_map_uris();
+        builder = builder.source_map_source_type(SourceMapSourceType::AbsoluteFileUri);
     } else {
         builder = builder.module_merging(*concatenate_modules.await?)
     }

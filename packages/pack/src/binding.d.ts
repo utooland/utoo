@@ -9,6 +9,16 @@ export declare class ExternalObject<T> {
     [K: symbol]: T
   }
 }
+export interface PoolOptions {
+  filename: string
+  concurrency: number
+}
+export declare function recvPoolCreation(): PoolOptions | null
+export declare function recvWorkerRequest(poolId: string): Promise<string>
+export declare function recvMessageInWorker(workerId: number): Promise<string>
+export declare function notifyOneWorkerCreated(filename: string): Promise<void>
+export declare function notifyWorkerAck(taskId: string, workerId: number): Promise<void>
+export declare function sendTaskMessage(taskId: string, message: string): Promise<void>
 export interface NapiEndpointConfig {
   
 }

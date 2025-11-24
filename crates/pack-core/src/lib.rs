@@ -17,4 +17,4 @@ pub mod tracing_presets;
 pub mod transform_options;
 pub mod util;
 
-pub use emit::{all_assets_from_entries, emit_assets};
+pub use emit::emit_assets;

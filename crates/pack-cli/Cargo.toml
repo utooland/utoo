@@ -29,6 +29,7 @@ turbo-tasks-malloc   = { workspace = true }
 turbopack-cli-utils  = { workspace = true }
 turbopack-core       = { workspace = true }
 turbopack-dev-server = { workspace = true }
+turbopack-node       = { workspace = true, default-features = false, features = ["process_pool"] }
 
 [target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]
 turbopack-trace-utils = { workspace = true }

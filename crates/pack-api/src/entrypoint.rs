@@ -67,14 +67,10 @@ pub async fn all_output_assets_operation(
         .try_join()
         .await?;
 
-    let mut output_assets: FxIndexSet<ResolvedVc<Box<dyn OutputAsset>>> = endpoint_assets
+    let output_assets: FxIndexSet<ResolvedVc<Box<dyn OutputAsset>>> = endpoint_assets
         .iter()
         .flat_map(|assets| assets.iter().copied())
         .collect();
-
-    // Also include copy assets
-    let copy_assets = project.copy_output_assets().await?;
-    output_assets.extend(copy_assets.iter().copied());
 
     Ok(Vc::cell(output_assets.into_iter().collect()))
 }

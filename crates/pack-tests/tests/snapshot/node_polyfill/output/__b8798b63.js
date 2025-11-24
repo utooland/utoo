@@ -1223,7 +1223,7 @@
         176: function(e, t, r) {
             "use strict";
             function _slicedToArray(e, t) {
-                return _arrayWithHoles(e) || _iterableToArrayLimit(e, t) || _nonIterableRest();
+                return "TURBOPACK simplified expression", _arrayWithHoles(e) || _iterableToArrayLimit(e, t);
             }
             function _nonIterableRest() {
                 throw new TypeError("Invalid attempt to destructure non-iterable instance");
@@ -6022,7 +6022,7 @@ __turbopack_context__.s([
 (function() {
     var e = {
         845: function(e, t, i) {
-            var o = ("TURBOPACK compile-time value", "object") !== "undefined" && /*TURBOPACK member replacement*/ __turbopack_context__.g || typeof self !== "undefined" && self || window;
+            var o = ("TURBOPACK simplified expression", /*TURBOPACK member replacement*/ __turbopack_context__.g) || typeof self !== "undefined" && self || window;
             var n = Function.prototype.apply;
             t.setTimeout = function() {
                 return new Timeout(n.call(setTimeout, o, arguments), clearTimeout);
@@ -6061,8 +6061,8 @@ __turbopack_context__.s([
                 }
             };
             i(505);
-            t.setImmediate = typeof self !== "undefined" && self.setImmediate || ("TURBOPACK compile-time value", "object") !== "undefined" && /*TURBOPACK member replacement*/ __turbopack_context__.g.setImmediate || this && this.setImmediate;
-            t.clearImmediate = typeof self !== "undefined" && self.clearImmediate || ("TURBOPACK compile-time value", "object") !== "undefined" && /*TURBOPACK member replacement*/ __turbopack_context__.g.clearImmediate || this && this.clearImmediate;
+            t.setImmediate = typeof self !== "undefined" && self.setImmediate || ("TURBOPACK simplified expression", /*TURBOPACK member replacement*/ __turbopack_context__.g.setImmediate) || this && this.setImmediate;
+            t.clearImmediate = typeof self !== "undefined" && self.clearImmediate || ("TURBOPACK simplified expression", /*TURBOPACK member replacement*/ __turbopack_context__.g.clearImmediate) || this && this.clearImmediate;
         },
         505: function(e) {
             "use strict";

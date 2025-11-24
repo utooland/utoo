@@ -19,8 +19,8 @@ use turbopack::{
 use turbopack_browser::{BrowserChunkingContext, CurrentChunkMethod};
 use turbopack_core::{
     chunk::{
-        ChunkingConfig, ChunkingContext, MangleType, MinifyType, SourceMapsType,
-        module_id_strategies::ModuleIdStrategy,
+        ChunkingConfig, ChunkingContext, MangleType, MinifyType, SourceMapSourceType,
+        SourceMapsType, module_id_strategies::ModuleIdStrategy,
     },
     compile_time_info::{
         CompileTimeDefineValue, CompileTimeDefines, CompileTimeInfo, DefinableNameSegment,
@@ -577,7 +577,9 @@ pub async fn get_client_chunking_context(
     }
 
     if mode.is_development() {
-        builder = builder.hot_module_replacement().use_file_source_map_uris();
+        builder = builder
+            .hot_module_replacement()
+            .source_map_source_type(SourceMapSourceType::AbsoluteFileUri);
     } else {
         let split_chunks = &config.optimization().await?.split_chunks;
 

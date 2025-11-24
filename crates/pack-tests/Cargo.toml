@@ -35,7 +35,7 @@ turbopack                    = { workspace = true }
 turbopack-browser            = { workspace = true, features = ["test"] }
 turbopack-core               = { workspace = true }
 turbopack-ecmascript-plugins = { workspace = true, features = ["transform_emotion"] }
-turbopack-node               = { workspace = true }
+turbopack-node               = { workspace = true, default-features = false, features = ["process_pool"] }
 turbopack-nodejs             = { workspace = true, features = ["test"] }
 turbopack-resolve            = { workspace = true }
 turbopack-test-utils         = { workspace = true }

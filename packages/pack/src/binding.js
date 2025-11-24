@@ -310,8 +310,14 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { endpointWriteToDisk, endpointServerChangedSubscribe, endpointClientChangedSubscribe, projectNew, projectUpdate, projectOnExit, projectShutdown, projectWriteAllEntrypointsToDisk, projectEntrypointsSubscribe, projectHmrEvents, projectHmrIdentifiersSubscribe, projectUpdateInfoSubscribe, projectTraceSource, projectGetSourceForAsset, projectGetSourceMap, projectGetSourceMapSync, rootTaskDispose, initCustomTraceSubscriber, teardownTraceSubscriber } = nativeBinding
+const { recvPoolCreation, recvWorkerRequest, recvMessageInWorker, notifyOneWorkerCreated, notifyWorkerAck, sendTaskMessage, endpointWriteToDisk, endpointServerChangedSubscribe, endpointClientChangedSubscribe, projectNew, projectUpdate, projectOnExit, projectShutdown, projectWriteAllEntrypointsToDisk, projectEntrypointsSubscribe, projectHmrEvents, projectHmrIdentifiersSubscribe, projectUpdateInfoSubscribe, projectTraceSource, projectGetSourceForAsset, projectGetSourceMap, projectGetSourceMapSync, rootTaskDispose, initCustomTraceSubscriber, teardownTraceSubscriber } = nativeBinding
 
+module.exports.recvPoolCreation = recvPoolCreation
+module.exports.recvWorkerRequest = recvWorkerRequest
+module.exports.recvMessageInWorker = recvMessageInWorker
+module.exports.notifyOneWorkerCreated = notifyOneWorkerCreated
+module.exports.notifyWorkerAck = notifyWorkerAck
+module.exports.sendTaskMessage = sendTaskMessage
 module.exports.endpointWriteToDisk = endpointWriteToDisk
 module.exports.endpointServerChangedSubscribe = endpointServerChangedSubscribe
 module.exports.endpointClientChangedSubscribe = endpointClientChangedSubscribe

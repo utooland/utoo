@@ -489,7 +489,7 @@ contextPrototype.g = globalThis;
  * Gets the public path for runtime assets.
  * Checks globalThis.publicPath and falls back to empty string.
  */ function getPublicPath() {
-    if (typeof globalThis !== 'undefined' && typeof globalThis.publicPath === "string") {
+    if (typeof globalThis !== 'undefined' && typeof globalThis.publicPath === 'string') {
         const publicPath = globalThis.publicPath;
         return publicPath.endsWith('/') ? publicPath : `${publicPath}/`;
     }
@@ -499,7 +499,7 @@ contextPrototype.p = getPublicPath;
 function applyModuleFactoryName(factory) {
     // Give the module factory a nice name to improve stack traces.
     Object.defineProperty(factory, 'name', {
-        value: '__TURBOPACK__module__evaluation__'
+        value: 'module evaluation'
     });
 }
 /**
@@ -513,7 +513,7 @@ function applyModuleFactoryName(factory) {
 // Used in WebWorkers to tell the runtime about the chunk base path
 // Support runtime public path from window.publicPath
 function getRuntimeChunkBasePath() {
-    if (CHUNK_BASE_PATH === "__RUNTIME_PUBLIC_PATH__") {
+    if (CHUNK_BASE_PATH === '__RUNTIME_PUBLIC_PATH__') {
         return contextPrototype.p();
     }
     return CHUNK_BASE_PATH;
@@ -540,7 +540,7 @@ const moduleFactories = new Map();
 contextPrototype.M = moduleFactories;
 const availableModules = new Map();
 const availableModuleChunks = new Map();
-function factoryNotAvailable(moduleId, sourceType, sourceData) {
+function factoryNotAvailableMessage(moduleId, sourceType, sourceData) {
     let instantiationReason;
     switch(sourceType){
         case 0:
@@ -555,7 +555,7 @@ function factoryNotAvailable(moduleId, sourceType, sourceData) {
         default:
             invariant(sourceType, (sourceType)=>`Unknown source type: ${sourceType}`);
     }
-    throw new Error(`Module ${moduleId} was instantiated ${instantiationReason}, but the module factory is not available. It might have been deleted in an HMR update.`);
+    return `Module ${moduleId} was instantiated ${instantiationReason}, but the module factory is not available.`;
 }
 function loadChunk(chunkData) {
     return loadChunkInternal(1, this.m.id, chunkData);
@@ -776,7 +776,7 @@ function instantiateModule(id, sourceType, sourceData) {
         // This can happen if modules incorrectly handle HMR disposes/updates,
         // e.g. when they keep a `setTimeout` around which still executes old code
         // and contains e.g. a `require("something")` call.
-        factoryNotAvailable(id, sourceType, sourceData);
+        throw new Error(factoryNotAvailableMessage(id, sourceType, sourceData));
     }
     const module = createModuleObject(id);
     const exports = module.exports;
