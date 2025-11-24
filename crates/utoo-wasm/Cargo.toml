@@ -40,8 +40,8 @@ tokio-fs-ext             = { version = "0.6.4", features = ["opfs_offload", "opf
 tracing                  = { workspace = true }
 tracing-subscriber       = { workspace = true }
 tracing-web              = "0.1.3"
-wasm-bindgen             = "0.2.101"
-wasm-bindgen-futures     = "0.4.51"
+wasm-bindgen             = "0.2.104"
+wasm-bindgen-futures     = "0.4.54"
 
 ## turbpack specific - conditional on utoo-pack feature
 pack-api            = { workspace = true, optional = true }

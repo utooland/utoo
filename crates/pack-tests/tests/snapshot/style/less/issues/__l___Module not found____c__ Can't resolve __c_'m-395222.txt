@@ -14,4 +14,9 @@ error - [resolve] /crates/pack-tests/tests/snapshot/style/less/input/index.less.
   | Parsed request as written in source code: module 'mixins' with subpath '/~antd/reset.css'
   | Path where resolving has started: [project]/crates/pack-tests/tests/snapshot/style/less/input/index.less.css
   | Type of request: css request
-  |
+  | 
+  Import trace:
+    Browser:
+      ./crates/pack-tests/tests/snapshot/style/less/input/index.less.css
+      ./crates/pack-tests/tests/snapshot/style/less/input/index.less
+      ./crates/pack-tests/tests/snapshot/style/less/input/index.js

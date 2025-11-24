@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "util";
+import { Worker } from "worker_threads";
 import type {
   HmrIdentifiers,
   NapiPartialProjectOptions,
@@ -21,7 +22,6 @@ import {
   Update,
 } from "./types";
 import { rustifyEnv } from "./util";
-import { Worker } from "worker_threads";
 
 export class TurbopackInternalError extends Error {
   name = "TurbopackInternalError";
@@ -421,4 +421,3 @@ export function projectFactory() {
     );
   };
 }
-

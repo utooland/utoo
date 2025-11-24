@@ -14,26 +14,26 @@
     },
     {
       "type": "asset",
-      "name": "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js",
+      "name": "crates_pack-tests_tests_snapshot_async_chunk_input_e3c60d4f.js",
       "info": {},
       "size": 1092,
       "emitted": false,
       "compared_for_emit": false,
       "cached": false,
       "chunks": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
+        "crates_pack-tests_tests_snapshot_async_chunk_input_e3c60d4f.js"
       ]
     },
     {
       "type": "asset",
-      "name": "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js.map",
+      "name": "crates_pack-tests_tests_snapshot_async_chunk_input_e3c60d4f.js.map",
       "info": {},
       "size": 0,
       "emitted": false,
       "compared_for_emit": false,
       "cached": false,
       "chunks": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js.map"
+        "crates_pack-tests_tests_snapshot_async_chunk_input_e3c60d4f.js.map"
       ]
     },
     {
@@ -77,12 +77,12 @@
     "main": {
       "name": "main",
       "chunks": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js",
+        "crates_pack-tests_tests_snapshot_async_chunk_input_e3c60d4f.js",
         "main.js"
       ],
       "assets": [
         {
-          "name": "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
+          "name": "crates_pack-tests_tests_snapshot_async_chunk_input_e3c60d4f.js"
         },
         {
           "name": "main.js"
@@ -108,11 +108,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js",
+      "id": "crates_pack-tests_tests_snapshot_async_chunk_input_e3c60d4f.js",
       "size": 1092,
       "hash": "",
       "files": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
+        "crates_pack-tests_tests_snapshot_async_chunk_input_e3c60d4f.js"
       ]
     },
     {
@@ -141,7 +141,7 @@
       "name": "crates/pack-tests/tests/snapshot/async_chunk/input/node_modules/bar/index.js",
       "id": "crates/pack-tests/tests/snapshot/async_chunk/input/node_modules/bar/index.js",
       "chunks": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
+        "crates_pack-tests_tests_snapshot_async_chunk_input_e3c60d4f.js"
       ],
       "size": 56
     },
@@ -149,7 +149,7 @@
       "name": "crates/pack-tests/tests/snapshot/async_chunk/input/shared.js",
       "id": "crates/pack-tests/tests/snapshot/async_chunk/input/shared.js",
       "chunks": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
+        "crates_pack-tests_tests_snapshot_async_chunk_input_e3c60d4f.js"
       ],
       "size": 18
     },
@@ -157,7 +157,7 @@
       "name": "crates/pack-tests/tests/snapshot/async_chunk/input/index.js",
       "id": "crates/pack-tests/tests/snapshot/async_chunk/input/index.js",
       "chunks": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
+        "crates_pack-tests_tests_snapshot_async_chunk_input_e3c60d4f.js"
       ],
       "size": 110
     },
@@ -165,7 +165,7 @@
       "name": "crates/pack-tests/tests/snapshot/async_chunk/input/import.js",
       "id": "crates/pack-tests/tests/snapshot/async_chunk/input/import.js",
       "chunks": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
+        "crates_pack-tests_tests_snapshot_async_chunk_input_e3c60d4f.js"
       ],
       "size": 91
     },

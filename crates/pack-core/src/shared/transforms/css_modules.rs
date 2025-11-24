@@ -80,7 +80,7 @@ impl VisitMut for CssModulesImportVisitor {
 
         if has_default_import && self.should_add_modules_suffix(&source_value) {
             let new_source = format!("{source_value}?modules");
-            import_decl.src = Box::new(quote_str!(new_source));
+            *import_decl.src = quote_str!(new_source);
         }
 
         import_decl.visit_mut_children_with(self);
