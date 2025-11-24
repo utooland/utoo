@@ -282,7 +282,7 @@ Then you can bundle your application or library with utoopack:
   "scripts": {
     "build": "utoo-pack build",
     "dev": "utoo-pack dev",
-    "analyze": "utoo-pack build"
+    "analyze": "ANALYZE=true utoo-pack build"
   }
 }
 ```
