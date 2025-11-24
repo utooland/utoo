@@ -283,7 +283,7 @@ impl LibraryEndpoint {
                     .with_query(query.into()),
                 ChunkGroup::Entry(self.library_entry_modules().await?.to_vec()),
                 module_graph,
-                AvailabilityInfo::Root,
+                AvailabilityInfo::root(),
             );
 
             Ok(library_chunk_group)
@@ -320,6 +320,8 @@ impl Endpoint for LibraryEndpoint {
         async move {
             let this = self.await?;
             let output_assets = self.output_assets();
+            let output_assets = output_assets.concatenate(self.project().copy_output_assets());
+
             let dist_root = self.project().dist_root().await?;
 
             let (server_paths, client_paths) = (vec![], vec![]);

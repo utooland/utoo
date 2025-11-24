@@ -22,11 +22,45 @@ use crate::util::cloner::clone;
 use crate::util::downloader::download;
 use crate::util::linker::link;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
-use crate::util::save_type::{PackageAction, SaveType};
+use crate::util::save_type::{OmitType, PackageAction, SaveType};
 
 use super::binary::update_package_binary;
 
 static CONCURRENT_LIMIT: usize = 40;
+
+/// Check if a package should be omitted based on omit config
+fn should_omit_package(package: &Package, omit: &std::collections::HashSet<OmitType>) -> bool {
+    if omit.is_empty() {
+        return false;
+    }
+
+    let is_dev = package.dev == Some(true);
+    let is_optional = package.optional == Some(true);
+    let is_dev_optional = package.dev_optional == Some(true);
+    let is_peer = package.peer == Some(true);
+
+    // devOptional: only omit when both dev and optional are omitted
+    if is_dev_optional {
+        return omit.contains(&OmitType::Dev) && omit.contains(&OmitType::Optional);
+    }
+
+    // dev only
+    if is_dev && omit.contains(&OmitType::Dev) {
+        return true;
+    }
+
+    // optional only
+    if is_optional && omit.contains(&OmitType::Optional) {
+        return true;
+    }
+
+    // peer
+    if is_peer && omit.contains(&OmitType::Peer) {
+        return true;
+    }
+
+    false
+}
 
 /// Clean up a single node_modules directory
 async fn clean_node_modules_dir(
@@ -206,10 +240,18 @@ pub async fn install_packages(
     let mut depths: Vec<_> = groups.keys().cloned().collect();
     depths.sort_unstable();
 
+    let omit = crate::util::config::get_omit();
+
     for depth in depths.iter() {
         if let Some(packages) = groups.get(depth) {
             let mut tasks: Vec<tokio::task::JoinHandle<Result<()>>> = Vec::new();
             for (path, package) in packages.iter() {
+                // Skip packages based on omit config
+                if should_omit_package(package, &omit) {
+                    PROGRESS_BAR.inc(1);
+                    tracing::debug!("Skipping omitted dependency: {}", path);
+                    continue;
+                }
                 let path = path.clone();
                 let package = package.clone();
                 if let Some(resolved) = package.resolved {
@@ -518,5 +560,69 @@ mod tests {
             extract_package_name("node_modules/@scope/package"),
             "@scope/package"
         );
+    }
+
+    #[test]
+    fn test_should_omit_package() {
+        use std::collections::HashSet;
+
+        // Empty omit set should not omit anything
+        let empty_omit: HashSet<OmitType> = HashSet::new();
+        let dev_pkg = Package {
+            dev: Some(true),
+            ..Package::default()
+        };
+        assert!(!should_omit_package(&dev_pkg, &empty_omit));
+
+        // Omit dev packages
+        let mut omit_dev: HashSet<OmitType> = HashSet::new();
+        omit_dev.insert(OmitType::Dev);
+
+        let dev_pkg = Package {
+            dev: Some(true),
+            ..Package::default()
+        };
+        assert!(should_omit_package(&dev_pkg, &omit_dev));
+
+        let prod_pkg = Package::default();
+        assert!(!should_omit_package(&prod_pkg, &omit_dev));
+
+        // Omit optional packages
+        let mut omit_optional: HashSet<OmitType> = HashSet::new();
+        omit_optional.insert(OmitType::Optional);
+
+        let optional_pkg = Package {
+            optional: Some(true),
+            ..Package::default()
+        };
+        assert!(should_omit_package(&optional_pkg, &omit_optional));
+
+        // Omit peer packages
+        let mut omit_peer: HashSet<OmitType> = HashSet::new();
+        omit_peer.insert(OmitType::Peer);
+
+        let peer_pkg = Package {
+            peer: Some(true),
+            ..Package::default()
+        };
+        assert!(should_omit_package(&peer_pkg, &omit_peer));
+
+        // devOptional: only omit when both dev and optional are omitted
+        let dev_optional_pkg = Package {
+            dev_optional: Some(true),
+            ..Package::default()
+        };
+
+        // Only dev omitted - should NOT omit devOptional
+        assert!(!should_omit_package(&dev_optional_pkg, &omit_dev));
+
+        // Only optional omitted - should NOT omit devOptional
+        assert!(!should_omit_package(&dev_optional_pkg, &omit_optional));
+
+        // Both dev and optional omitted - should omit devOptional
+        let mut omit_dev_optional: HashSet<OmitType> = HashSet::new();
+        omit_dev_optional.insert(OmitType::Dev);
+        omit_dev_optional.insert(OmitType::Optional);
+        assert!(should_omit_package(&dev_optional_pkg, &omit_dev_optional));
     }
 }

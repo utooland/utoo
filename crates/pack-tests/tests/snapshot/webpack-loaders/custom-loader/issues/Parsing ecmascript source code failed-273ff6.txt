@@ -1,6 +1,0 @@
-error - [analysis] /crates/pack-tests/tests/snapshot/webpack-loaders/custom-loader/input/test.txt.js:1:7  Parsing ecmascript source code failed
-         +        v--v
-       1 + loader test
-         +        ^--^
-  
-  Expected ';', '}' or <eof>

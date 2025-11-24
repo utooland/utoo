@@ -88,7 +88,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2025-09-21
+          toolchain: nightly-2025-10-27
           override: true
           target: ${{ matrix.target }}
 

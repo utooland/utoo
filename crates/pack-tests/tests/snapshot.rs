@@ -23,7 +23,11 @@ use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{ResolvedVc, TurboTasks, ValueToString, Vc, apply_effects};
 use turbo_tasks_backend::{BackendOptions, TurboTasksBackend, noop_backing_storage};
 use turbo_tasks_fs::FileSystemPath;
-use turbopack_core::{asset::Asset, issue::CollectibleIssuesExt, output::OutputAsset};
+use turbopack_core::{
+    asset::Asset,
+    issue::CollectibleIssuesExt,
+    output::{OutputAsset, OutputAssetsReference},
+};
 use turbopack_test_utils::snapshot::{UPDATE, diff, expected, matches_expected, snapshot_issues};
 
 use crate::util::REPO_ROOT;
@@ -331,7 +335,7 @@ async fn walk_asset(
     seen.insert(full_path.clone());
     diff(full_path, asset.content()).await?;
 
-    queue.extend(asset.references().await?.iter().copied());
+    queue.extend(asset.references().all_assets().await?.iter().copied());
 
     Ok(())
 }

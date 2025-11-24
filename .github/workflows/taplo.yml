@@ -2,7 +2,7 @@ name: taplo
 
 on:
   push:
-    branches: ['next']
+    branches: ["next"]
   pull_request:
     types: [opened, synchronize]
 
@@ -17,11 +17,9 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2025-09-21
+          toolchain: nightly-2025-10-27
           override: true
       - name: Install Taplo
-        run:
-          cargo install taplo-cli
+        run: cargo install taplo-cli
       - name: Taplo
-        run:
-          taplo format --check
+        run: taplo format --check

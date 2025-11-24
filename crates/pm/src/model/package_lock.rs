@@ -55,6 +55,8 @@ pub struct LockPackage {
     pub dev: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub optional: Option<bool>,
+    #[serde(rename = "devOptional", skip_serializing_if = "Option::is_none")]
+    pub dev_optional: Option<bool>,
     #[serde(rename = "hasInstallScript", skip_serializing_if = "Option::is_none")]
     pub has_install_script: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -91,7 +91,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         if: ${{ !matrix.settings.docker }}
         with:
-          toolchain: nightly-2025-09-21
+          toolchain: nightly-2025-10-27
           targets: ${{ matrix.settings.target }}
       # - name: Cache cargo
       #   uses: Swatinem/rust-cache@v2

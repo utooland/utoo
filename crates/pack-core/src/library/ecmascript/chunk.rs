@@ -7,13 +7,11 @@ use turbo_tasks::{ReadRef, ResolvedVc, TryJoinIterExt, ValueToString, Vc};
 use turbo_tasks_fs::{File, FileSystemPath, rope::RopeBuilder};
 use turbopack_core::{
     asset::{Asset, AssetContent},
-    chunk::{
-        Chunk, ChunkingContext, EvaluatableAssets, MinifyType, ModuleChunkItemIdExt, ModuleId,
-    },
+    chunk::{ChunkingContext, EvaluatableAssets, MinifyType, ModuleChunkItemIdExt, ModuleId},
     code_builder::{Code, CodeBuilder},
     environment::{EdgeWorkerEnvironment, Environment, ExecutionEnvironment, NodeJsVersion},
     ident::AssetIdent,
-    output::{OutputAsset, OutputAssets},
+    output::{OutputAsset, OutputAssetsReference, OutputAssetsWithReferenced},
     source_map::{GenerateSourceMap, OptionStringifiedSourceMap, SourceMapAsset},
 };
 use turbopack_ecmascript::{
@@ -219,25 +217,34 @@ impl OutputAsset for EcmascriptLibraryEvaluateChunk {
             .chunking_context
             .chunk_path(Some(Vc::upcast(self)), ident, None, ".js".into()))
     }
+}
 
+#[turbo_tasks::value_impl]
+impl OutputAssetsReference for EcmascriptLibraryEvaluateChunk {
     #[turbo_tasks::function]
-    async fn references(self: Vc<Self>) -> Result<Vc<OutputAssets>> {
+    async fn references(self: Vc<Self>) -> Result<Vc<OutputAssetsWithReferenced>> {
         let this = self.await?;
         let chunk_references = this.chunk.references().await?;
         let include_source_map = *this
             .chunking_context
             .reference_chunk_source_maps(Vc::upcast(self))
             .await?;
-        let mut references =
-            Vec::with_capacity(chunk_references.len() + if include_source_map { 1 } else { 0 });
+        let ref_assets = chunk_references.assets.await?;
+        let mut assets =
+            Vec::with_capacity(ref_assets.len() + if include_source_map { 1 } else { 0 });
 
-        references.extend(chunk_references.iter().copied());
+        assets.extend(ref_assets.iter().copied());
 
         if include_source_map {
-            references.push(ResolvedVc::upcast(self.source_map().to_resolved().await?));
+            assets.push(ResolvedVc::upcast(self.source_map().to_resolved().await?));
         }
 
-        Ok(Vc::cell(references))
+        Ok(OutputAssetsWithReferenced {
+            assets: ResolvedVc::cell(assets),
+            referenced_assets: chunk_references.referenced_assets,
+            references: chunk_references.references,
+        }
+        .cell())
     }
 }
 

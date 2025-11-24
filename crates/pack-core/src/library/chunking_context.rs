@@ -18,7 +18,7 @@ use turbopack_core::{
     chunk::{
         Chunk, ChunkGroupResult, ChunkItem, ChunkableModule, ChunkingConfig, ChunkingConfigs,
         ChunkingContext, EntryChunkGroupResult, EvaluatableAsset, EvaluatableAssets, MinifyType,
-        ModuleId, SourceMapsType,
+        ModuleId, SourceMapSourceType, SourceMapsType,
         availability_info::AvailabilityInfo,
         chunk_group::{MakeChunkGroupResult, make_chunk_group},
         module_id_strategies::{DevModuleIdStrategy, ModuleIdStrategy},
@@ -106,13 +106,13 @@ impl LibraryChunkingContextBuilder {
         self
     }
 
-    pub fn source_maps(mut self, source_maps: SourceMapsType) -> Self {
-        self.chunking_context.source_maps_type = source_maps;
+    pub fn source_map_source_type(mut self, source_map_source_type: SourceMapSourceType) -> Self {
+        self.chunking_context.source_map_source_type = source_map_source_type;
         self
     }
 
-    pub fn use_file_source_map_uris(mut self) -> Self {
-        self.chunking_context.should_use_file_source_map_uris = true;
+    pub fn source_maps(mut self, source_maps: SourceMapsType) -> Self {
+        self.chunking_context.source_maps_type = source_maps;
         self
     }
 
@@ -161,7 +161,7 @@ pub struct LibraryChunkingContext {
     /// The root path of the project
     root_path: FileSystemPath,
     /// Whether to write file sources as file:// paths in source maps
-    should_use_file_source_map_uris: bool,
+    source_map_source_type: SourceMapSourceType,
     /// This path is used to compute the url to request chunks from
     output_root: FileSystemPath,
     /// The relative path from the output_root to the root_path.
@@ -204,7 +204,7 @@ impl LibraryChunkingContext {
                 root_path,
                 output_root,
                 output_root_to_root_path,
-                should_use_file_source_map_uris: false,
+                source_map_source_type: SourceMapSourceType::TurbopackUri,
                 asset_base_path: None,
                 environment,
                 runtime_type,
@@ -415,7 +415,7 @@ impl ChunkingContext for LibraryChunkingContext {
     }
 
     #[turbo_tasks::function]
-    async fn asset_url(&self, ident: FileSystemPath) -> Result<Vc<RcStr>> {
+    async fn asset_url(&self, ident: FileSystemPath, _tag: Option<RcStr>) -> Result<Vc<RcStr>> {
         let asset_path = ident.to_string();
 
         Ok(Vc::cell(
@@ -449,6 +449,7 @@ impl ChunkingContext for LibraryChunkingContext {
         &self,
         content_hash: RcStr,
         original_asset_ident: Vc<AssetIdent>,
+        _tag: Option<RcStr>,
     ) -> Result<Vc<FileSystemPath>> {
         let source_path = original_asset_ident.path().await?;
         let basename = source_path.file_name();
@@ -482,8 +483,8 @@ impl ChunkingContext for LibraryChunkingContext {
     }
 
     #[turbo_tasks::function]
-    fn should_use_file_source_map_uris(&self) -> Vc<bool> {
-        Vc::cell(self.should_use_file_source_map_uris)
+    fn source_map_source_type(&self) -> Vc<SourceMapSourceType> {
+        self.source_map_source_type.cell()
     }
 
     #[turbo_tasks::function]
@@ -514,6 +515,7 @@ impl ChunkingContext for LibraryChunkingContext {
 
             let MakeChunkGroupResult {
                 chunks,
+                references,
                 referenced_output_assets,
                 availability_info,
             } = make_chunk_group(
@@ -545,6 +547,7 @@ impl ChunkingContext for LibraryChunkingContext {
 
             Ok(ChunkGroupResult {
                 assets: ResolvedVc::cell(assets),
+                references: ResolvedVc::cell(references),
                 referenced_assets: ResolvedVc::cell(referenced_output_assets),
                 availability_info,
             }
