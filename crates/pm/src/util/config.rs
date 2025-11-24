@@ -1,10 +1,12 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, OnceLock};
+
+use super::save_type::OmitType;
 
 pub type ConfigResult<T> = Result<T>;
 
@@ -224,4 +226,17 @@ pub fn get_registry_support_abbr() -> bool {
 
 pub fn get_registry_support_semver() -> bool {
     !ensure_is_npm_registry_initialized()
+}
+
+static OMIT: OnceLock<HashSet<OmitType>> = OnceLock::new();
+
+pub fn set_omit(value: HashSet<OmitType>) {
+    if !value.is_empty() {
+        tracing::debug!("set omit: {:?}", value);
+        let _ = OMIT.set(value);
+    }
+}
+
+pub fn get_omit() -> HashSet<OmitType> {
+    OMIT.get().cloned().unwrap_or_default()
 }
