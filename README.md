@@ -269,12 +269,37 @@ Utoo includes a high-performance bundler that supports various build scenarios:
 
 #### 🚀 Basic Usage
 
-```bash
-# Start development server
-ut dev
+Install `@utoo/pack-cli`:
 
-# Build production version
-ut build
+```bash
+ut install @utoo/pack-cli --save-dev
+```
+
+Then you can bundle your application or library by utoopack:
+
+```json
+{
+  "scripts": {
+    "build": "utoo-pack build",
+    "dev": "utoo-pack dev",
+    "analyze": "utoo-pack build"
+  }
+}
+```
+
+Now utoopack's devServer doesn't support generate html file for preview, so you need to generate html file by yourself to preview the output assets. We will support in the future.
+
+Or you can use utoopack under framework like: [umi](https://github.com/umijs/umi). Notice your umi version is above `v4.5.0`(`v4.6.0` is much better).
+
+It's easier to enable:
+
+```ts
+// .umirc.ts
+import { defineConfig } from '@umijs/max';
+
+export default defineConfig({
+  utoopack: {}
+})
 ```
 
 #### 📚 Example Projects
