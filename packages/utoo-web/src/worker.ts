@@ -1,7 +1,11 @@
 import * as comlink from "comlink";
 import { HandShake } from "./message";
 import { PackFile, ProjectEndpoint, ProjectOptions, RawDirent } from "./type";
-import initWasm, { DirEntryType, Project as ProjectInternal } from "./utoo";
+import initWasm, {
+  DirEntryType,
+  init_log_filter,
+  Project as ProjectInternal,
+} from "./utoo";
 
 declare let self: DedicatedWorkerGlobalScope;
 
@@ -19,23 +23,14 @@ const projectEndpoint: ProjectEndpoint & {
   async mount(opt) {
     const { cwd, wasmUrl, threadWorkerUrl, logFilter } = opt;
 
-    // Set global log filter before wasm init
-    if (logFilter) {
-      (globalThis as any).__UTOO_LOG_FILTER__ = logFilter;
-    }
-
     this.wasmInit ??= initWasm(wasmUrl);
     await this.wasmInit!;
 
-    // Pass logFilter to thread worker via URL query string
-    let finalThreadWorkerUrl = threadWorkerUrl;
-    if (logFilter) {
-      const url = new URL(threadWorkerUrl, self.location.href);
-      url.searchParams.set("logFilter", logFilter);
-      finalThreadWorkerUrl = url.toString();
-    }
+    // Initialize log filter after wasm init
+    const filter = logFilter || "pack_core=info,pack_api=info,utoo_wasm=info";
+    init_log_filter(filter);
 
-    this.projectInternal = new ProjectInternal(cwd, finalThreadWorkerUrl);
+    this.projectInternal = new ProjectInternal(cwd, threadWorkerUrl);
     return;
   },
 
