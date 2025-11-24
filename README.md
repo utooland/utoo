@@ -287,7 +287,7 @@ Then you can bundle your application or library with utoopack:
 }
 ```
 
-Now utoopack's devServer doesn't support generate html file for preview, so you need to generate html file by yourself to preview the output assets. We will support in the future.
+Currently, utoopack's devServer does not support generating an HTML file for previews. You'll need to create one manually to view the output assets. We plan to add support for this in the future.
 
 Or you can use utoopack with a framework like [umi](https://github.com/umijs/umi). Note that your umi version must be `v4.5.0` or higher (`v4.6.0` or newer is recommended).
 
