@@ -275,7 +275,7 @@ Install `@utoo/pack-cli`:
 ut install @utoo/pack-cli --save-dev
 ```
 
-Then you can bundle your application or library by utoopack:
+Then you can bundle your application or library with utoopack:
 
 ```json
 {
