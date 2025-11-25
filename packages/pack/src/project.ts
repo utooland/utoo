@@ -237,6 +237,7 @@ export function projectFactory() {
                 const worker = new Worker(filename, {
                   workerData: {
                     poolId: filename,
+                    bindingPath: require.resolve("./binding.js"),
                   },
                 });
                 worker.unref();
