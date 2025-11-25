@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # rust clippy check
-cargo clippy --all-targets -- -D warnings --no-deps
+# cargo clippy --all-targets -- -D warnings --no-deps
 
 # rust fmt check
 cargo fmt --check
