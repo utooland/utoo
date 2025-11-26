@@ -14,11 +14,11 @@ export interface PoolOptions {
   concurrency: number
 }
 export declare function recvPoolCreation(): PoolOptions | null
-export declare function recvWorkerRequest(poolId: string): Promise<string>
+export declare function recvWorkerRequest(poolId: string): Promise<number>
 export declare function recvMessageInWorker(workerId: number): Promise<string>
 export declare function notifyOneWorkerCreated(filename: string): Promise<void>
-export declare function notifyWorkerAck(taskId: string, workerId: number): Promise<void>
-export declare function sendTaskMessage(taskId: string, message: string): Promise<void>
+export declare function notifyWorkerAck(taskId: number, workerId: number): Promise<void>
+export declare function sendTaskMessage(taskId: number, message: string): Promise<void>
 export interface NapiEndpointConfig {
   
 }
