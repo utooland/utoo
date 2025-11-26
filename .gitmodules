@@ -2,4 +2,3 @@
 	path = next.js
 	url = git@github.com:utooland/next.js.git
   branch = utoo
-	shallow = true

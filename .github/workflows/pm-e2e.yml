@@ -33,7 +33,7 @@ jobs:
             ${{ secrets.CI_SUBMODULE }}
 
       - name: Init git submodules
-        run: git submodule update --init
+        run: git submodule update --init --depth 1
 
       - name: Install x86_64 Node.js via nvm
         if: matrix.settings.target == 'x86_64-apple-darwin'

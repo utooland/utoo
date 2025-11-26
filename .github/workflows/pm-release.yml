@@ -106,7 +106,7 @@ jobs:
           ssh-private-key: |
             ${{ secrets.CI_SUBMODULE }}
       - name: Init git submodules
-        run: git submodule update --init
+        run: git submodule update --init --depth 1
 
       - name: Build
         uses: actions-rs/cargo@v1
