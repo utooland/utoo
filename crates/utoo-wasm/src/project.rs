@@ -52,7 +52,7 @@ impl Project {
     /// Create a tar.gz archive and return bytes (no file I/O)
     /// This is useful for main thread execution without OPFS access
     #[wasm_bindgen(js_name = gzip)]
-    pub fn gzip(&self, files: JsValue) -> Result<js_sys::Uint8Array, String> {
+    pub fn gzip(&self, files: JsValue) -> Result<js_sys::Uint8Array, JsError> {
         use opfs_project::pack::PackFile;
         use serde::Deserialize;
 
@@ -63,14 +63,15 @@ impl Project {
         }
 
         let js_files: Vec<JsPackFile> = serde_wasm_bindgen::from_value(files)
-            .map_err(|e| format!("Failed to parse files: {}", e))?;
+            .map_err(|e| JsError::new(&format!("Failed to parse files: {}", e)))?;
 
         let pack_files: Vec<PackFile> = js_files
             .into_iter()
             .map(|f| PackFile::new(f.path, f.content))
             .collect();
 
-        let bytes = opfs_project::pack::gzip(&pack_files).map_err(|e| e.to_string())?;
+        let bytes =
+            opfs_project::pack::gzip(&pack_files).map_err(|e| JsError::new(&e.to_string()))?;
         Ok(js_sys::Uint8Array::from(&bytes[..]))
     }
 
@@ -79,28 +80,28 @@ impl Project {
         &self,
         package_lock: String,
         max_concurrent_downloads: Option<usize>,
-    ) -> Result<(), String> {
+    ) -> Result<(), JsError> {
         const DEFAULT_MAX_CONCURRENT_DOWNLOADS: usize = 10;
         let max_concurrent = max_concurrent_downloads.unwrap_or(DEFAULT_MAX_CONCURRENT_DOWNLOADS);
         opfs_project::package_manager::install_deps(&package_lock, max_concurrent)
             .await
             // format anyhow backtrace for better error display in JS
-            .map_err(|e| format!("{:#?}", e))?;
+            .map_err(|e| JsError::new(&format!("{:#?}", e)))?;
         Ok(())
     }
 
     #[cfg(feature = "utoo-pack")]
     #[wasm_bindgen]
-    pub async fn build(&self) -> Result<JsValue, String> {
+    pub async fn build(&self) -> Result<JsValue, JsError> {
         use turbopack_core::error::PrettyPrintError;
 
         self.init_pack_project()
             .await
-            .map_err(|e| PrettyPrintError(&e).to_string())?;
+            .map_err(|e| JsError::new(&PrettyPrintError(&e).to_string()))?;
 
         let pack_project = match self.pack_project.read().as_ref() {
             Some(pack_project) => pack_project.clone(),
-            None => return Err("invalid pack project".to_string()),
+            None => return Err(JsError::new("invalid pack project")),
         };
 
         TOKIO_RUNTIME
@@ -110,9 +111,9 @@ impl Project {
                     .spawn(async move { pack_project.build().await })
             })
             .await
-            .map_err(|e| e.to_string())?
+            .map_err(JsError::from)?
             .map_or_else(
-                |e| Err(PrettyPrintError(&e).to_string()),
+                |e| Err(JsError::new(&PrettyPrintError(&e).to_string())),
                 |turbopack_result| {
                     use serde::Serialize;
 
@@ -120,7 +121,7 @@ impl Project {
                         .serialize(
                             &serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true),
                         )
-                        .map_err(|e| e.to_string())
+                        .map_err(JsError::from)
                 },
             )
     }
@@ -176,100 +177,96 @@ impl Project {
     }
 
     #[wasm_bindgen]
-    pub async fn read(&self, path: &str) -> Result<Vec<u8>, String> {
-        opfs_project::read(path).await.map_err(|e| e.to_string())
+    pub async fn read(&self, path: &str) -> Result<Vec<u8>, JsError> {
+        opfs_project::read(path).await.map_err(JsError::from)
     }
 
     #[wasm_bindgen(js_name = readToString)]
-    pub async fn read_to_string(&self, path: &str) -> Result<String, String> {
-        let buf = opfs_project::read(path).await.map_err(|e| e.to_string())?;
+    pub async fn read_to_string(&self, path: &str) -> Result<String, JsError> {
+        let buf = opfs_project::read(path).await.map_err(JsError::from)?;
         Ok(unsafe { String::from_utf8_unchecked(buf) })
     }
 
     #[wasm_bindgen]
-    pub async fn write(&self, path: &str, content: &[u8]) -> Result<(), String> {
+    pub async fn write(&self, path: &str, content: &[u8]) -> Result<(), JsError> {
         opfs_project::write(path, content)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(JsError::from)?;
         Ok(())
     }
 
     #[wasm_bindgen(js_name = "writeString")]
-    pub async fn write_string(&self, path: &str, content: &str) -> Result<(), String> {
+    pub async fn write_string(&self, path: &str, content: &str) -> Result<(), JsError> {
         opfs_project::write(path, content)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(JsError::from)?;
         Ok(())
     }
 
     #[wasm_bindgen(js_name = readDir)]
-    pub async fn read_dir(&self, path: &str) -> Result<Vec<DirEntry>, String> {
-        let read_dir = opfs_project::read_dir(path)
-            .await
-            .map_err(|e| e.to_string())?;
+    pub async fn read_dir(&self, path: &str) -> Result<Vec<DirEntry>, JsError> {
+        let read_dir = opfs_project::read_dir(path).await.map_err(JsError::from)?;
 
         let ret = read_dir
             .into_iter()
             .map(DirEntry::try_from)
             .collect::<Result<Vec<_>, std::io::Error>>()
-            .map_err(|e| e.to_string())?;
+            .map_err(JsError::from)?;
 
         Ok(ret)
     }
 
     #[wasm_bindgen(js_name = createDir)]
-    pub async fn create_dir(&self, path: &str) -> Result<(), String> {
+    pub async fn create_dir(&self, path: &str) -> Result<(), JsError> {
         opfs_project::create_dir(path)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(JsError::from)?;
         Ok(())
     }
 
     #[wasm_bindgen(js_name = createDirAll)]
-    pub async fn create_dir_all(&self, path: &str) -> Result<(), String> {
+    pub async fn create_dir_all(&self, path: &str) -> Result<(), JsError> {
         opfs_project::create_dir_all(path)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(JsError::from)?;
         Ok(())
     }
 
     #[wasm_bindgen(js_name = copyFile)]
-    pub async fn copy_file(&self, src: &str, dst: &str) -> Result<(), String> {
-        opfs_project::copy(src, dst)
-            .await
-            .map_err(|e| e.to_string())?;
+    pub async fn copy_file(&self, src: &str, dst: &str) -> Result<(), JsError> {
+        opfs_project::copy(src, dst).await.map_err(JsError::from)?;
         Ok(())
     }
 
     #[wasm_bindgen(js_name = removeFile)]
-    pub async fn remove_file(&self, path: &str) -> Result<(), String> {
+    pub async fn remove_file(&self, path: &str) -> Result<(), JsError> {
         opfs_project::remove_file(path)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(JsError::from)?;
         Ok(())
     }
 
     #[wasm_bindgen(js_name = removeDir)]
-    pub async fn remove_dir(&self, path: &str, recursive: bool) -> Result<(), String> {
+    pub async fn remove_dir(&self, path: &str, recursive: bool) -> Result<(), JsError> {
         if recursive {
             opfs_project::remove_dir_all(path)
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(JsError::from)?;
         } else {
             opfs_project::remove_dir(path)
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(JsError::from)?;
         }
 
         Ok(())
     }
 
     #[wasm_bindgen(js_name = metadata)]
-    pub async fn metadata(&self, path: &str) -> Result<Metadata, String> {
+    pub async fn metadata(&self, path: &str) -> Result<Metadata, JsError> {
         opfs_project::metadata(path)
             .await
             .and_then(Metadata::try_from)
-            .map_err(|e| e.to_string())
+            .map_err(JsError::from)
     }
 }
 
