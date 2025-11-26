@@ -1,0 +1,29 @@
+{
+  "name": "@utoo/web-loaders",
+  "version": "0.0.1",
+  "files": [
+    "esm/*"
+  ],
+  "scripts": {
+    "tsc": "rm -rf esm && tsc -p ./tsconfig.json",
+    "build": "npm run tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "postcss": "8.4.31",
+    "tailwindcss": "^3.4.18",
+    "autoprefixer": "^10.4.22",
+    "@utoo/web": "^1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "@vercel/ncc": "0.38.4"
+  },
+  "peerDependencies": {},
+  "engines": {
+    "node": ">= 20"
+  },
+  "author": "xusd320",
+  "license": "MIT",
+  "repository": "git@github.com:utooland/utoo.git"
+}

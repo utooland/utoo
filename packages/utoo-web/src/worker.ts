@@ -15,9 +15,16 @@ const projectEndpoint: ProjectEndpoint & {
     opt: Omit<ProjectOptions, "workerUrl" | "serviceWorker">,
   ) => Promise<void>;
   wasmInit?: ReturnType<typeof initWasm>;
+  loaderWorkers: Record<string, Array<Worker>>;
+  poolCreating?: Promise<void>;
 } = {
   projectInternal: undefined,
+
   wasmInit: undefined,
+
+  loaderWorkers: {},
+
+  poolCreating: undefined,
 
   // This should be called only once
   async mount(opt) {
@@ -41,7 +48,30 @@ const projectEndpoint: ProjectEndpoint & {
   },
 
   async build() {
-    await this.wasmInit!;
+    const binding = await this.wasmInit!;
+
+    const createOrScalePool = async () => {
+      let poolOptions = await binding.recvPoolRequest();
+      const { filename, maxConcurrency } = poolOptions;
+      const workers =
+        this.loaderWorkers[filename] || (this.loaderWorkers[filename] = []);
+      if (workers.length < maxConcurrency) {
+        for (let i = workers.length; i < maxConcurrency; i++) {
+          const workerUrl = new URL(filename);
+          workerUrl.searchParams.set("poolId", filename);
+          const worker = new Worker(workerUrl);
+          workers.push(worker);
+        }
+      } else if (workers.length > maxConcurrency) {
+        const workersToStop = workers.splice(
+          0,
+          workers.length - maxConcurrency,
+        );
+        workersToStop.forEach((worker) => worker.terminate());
+      }
+      createOrScalePool();
+    };
+
     return await this.projectInternal!.build();
   },
 

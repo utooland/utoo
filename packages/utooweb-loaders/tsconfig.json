@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./esm",
+    "target": "ES2018",
+    "lib": [
+      "DOM",
+      "WebWorker",
+      "ESNext",
+    ],
+    "esModuleInterop": true,
+    "moduleResolution": "bundler",
+    "module": "esnext",
+    "declaration": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "noImplicitReturns": true
+  }
+}

@@ -19,6 +19,7 @@
     "packages/pack-shared",
     "packages/pack-cli",
     "packages/utoo-web",
+    "packages/utooweb-loaders",
     "crates/pack-core/js",
     "crates/pack/js",
     "examples/define",

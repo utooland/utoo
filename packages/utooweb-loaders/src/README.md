@@ -1,0 +1,1 @@
+Most of codes are copied from `next.js/turbopack/crates/turbopack-node/js`, but runnable in web worker
