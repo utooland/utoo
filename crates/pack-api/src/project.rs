@@ -25,11 +25,7 @@ use turbo_tasks_env::{EnvMap, ProcessEnv};
 use turbo_tasks_fs::{DiskFileSystem, FileSystem, FileSystemPath, VirtualFileSystem, invalidation};
 use turbopack::global_module_ids::get_global_module_id_strategy;
 
-#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 use turbopack::evaluate_context::node_build_environment;
-
-#[cfg(all(target_family = "wasm", target_os = "unknown"))]
-use turbopack::evaluate_context::webworker_build_environment;
 
 use turbopack_core::{
     PROJECT_FILESYSTEM_NAME,
@@ -738,45 +734,21 @@ impl Project {
             SourceMapsType::None
         };
 
-        let execution_chunking_context = {
-            #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-            {
-                let build_environment = node_build_environment().to_resolved().await?;
-                Vc::upcast(
-                    NodeJsChunkingContext::builder(
-                        project_root,
-                        node_root.clone(),
-                        node_root_to_root_path,
-                        node_root.clone(),
-                        node_root.clone(),
-                        node_root.clone(),
-                        build_environment,
-                        mode.runtime_type(),
-                    )
-                    .source_maps(source_maps)
-                    .build(),
-                )
-            }
-            #[cfg(all(target_family = "wasm", target_os = "unknown"))]
-            {
-                use turbopack_browser::BrowserChunkingContext;
-                let build_environment = webworker_build_environment().to_resolved().await?;
-                Vc::upcast(
-                    BrowserChunkingContext::builder(
-                        project_root,
-                        node_root.clone(),
-                        node_root_to_root_path,
-                        node_root.clone(),
-                        node_root.clone(),
-                        node_root.clone(),
-                        build_environment,
-                        mode.runtime_type(),
-                    )
-                    .source_maps(source_maps)
-                    .build(),
-                )
-            }
-        };
+        let build_environment = node_build_environment().to_resolved().await?;
+        let execution_chunking_context = Vc::upcast(
+            NodeJsChunkingContext::builder(
+                project_root,
+                node_root.clone(),
+                node_root_to_root_path,
+                node_root.clone(),
+                node_root.clone(),
+                node_root.clone(),
+                build_environment,
+                mode.runtime_type(),
+            )
+            .source_maps(source_maps)
+            .build(),
+        );
 
         Ok(ExecutionContext::new(
             self.project_path().owned().await?,
