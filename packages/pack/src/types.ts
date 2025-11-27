@@ -127,10 +127,13 @@ export interface ConfigComplete {
     filename?: string;
     chunkFilename?: string;
     clean?: boolean;
-    copy?: Array<{
-      from: string;
-      to: string;
-    }>;
+    copy?: Array<
+      | {
+          from: string;
+          to?: string;
+        }
+      | string
+    >;
     publicPath?: string;
   };
   target?: string;
