@@ -16,15 +16,12 @@ const projectEndpoint: ProjectEndpoint & {
   ) => Promise<void>;
   wasmInit?: ReturnType<typeof initWasm>;
   loaderWorkers: Record<string, Array<Worker>>;
-  poolCreating?: Promise<void>;
 } = {
   projectInternal: undefined,
 
   wasmInit: undefined,
 
   loaderWorkers: {},
-
-  poolCreating: undefined,
 
   // This should be called only once
   async mount(opt) {
@@ -60,6 +57,7 @@ const projectEndpoint: ProjectEndpoint & {
           const workerUrl = new URL(filename);
           workerUrl.searchParams.set("poolId", filename);
           const worker = new Worker(workerUrl);
+          worker.postMessage([binding, binding.memory]);
           workers.push(worker);
         }
       } else if (workers.length > maxConcurrency) {
