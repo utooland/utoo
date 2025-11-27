@@ -224,7 +224,7 @@ export function projectFactory() {
     const { filename, maxConcurrency } = poolOptions;
     const workers = loaderWorkers[filename] || (loaderWorkers[filename] = []);
     if (workers.length < maxConcurrency) {
-      for (let i = 0; i < maxConcurrency; i++) {
+      for (let i = workers.length; i < maxConcurrency; i++) {
         const worker = new Worker(filename, {
           workerData: {
             poolId: filename,
