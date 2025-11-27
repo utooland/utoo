@@ -1,4 +1,4 @@
-(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([typeof document === "object" ? document.currentScript : undefined,
+(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push(["crates_pack-tests_tests_snapshot_typescript_interface_export_input_fe77d34a.js",
 "[project]/crates/pack-tests/tests/snapshot/typescript/interface_export/input/item-interface.ts [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 

@@ -1,4 +1,4 @@
-(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([typeof document === "object" ? document.currentScript : undefined,
+(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push(["__69fb64a2.js",
 45, ((__turbopack_context__) => {
 "use strict";
 

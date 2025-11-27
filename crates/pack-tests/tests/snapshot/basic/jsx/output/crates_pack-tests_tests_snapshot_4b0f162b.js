@@ -1,4 +1,4 @@
-(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([typeof document === "object" ? document.currentScript : undefined,
+(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push(["crates_pack-tests_tests_snapshot_4b0f162b.js",
 3, ((__turbopack_context__) => {
 "use strict";
 

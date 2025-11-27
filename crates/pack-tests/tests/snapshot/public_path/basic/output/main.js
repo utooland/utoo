@@ -1,5 +1,5 @@
 (globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([
-    typeof document === "object" ? document.currentScript : undefined,
+    "main.js",
     {"otherChunks":["crates_pack-tests_tests_snapshot_public_path_basic_input_e229bf21.js"],"runtimeModuleIds":[75]}
 ]);
 (() => {

@@ -1,4 +1,4 @@
-(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([typeof document === "object" ? document.currentScript : undefined,
+(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push(["75859_tests_snapshot_concatenate_modules_side-effects-import_input_7857eab4.js",
 635, ((__turbopack_context__, module, exports) => {
 
 console.log("shared1");

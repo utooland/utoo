@@ -1,4 +1,4 @@
-(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([typeof document === "object" ? document.currentScript : undefined,
+(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push(["__b8798b63.js",
 "[@utoo/pack-runtime]/node-polyfills/assert/assert.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
 
 (function() {

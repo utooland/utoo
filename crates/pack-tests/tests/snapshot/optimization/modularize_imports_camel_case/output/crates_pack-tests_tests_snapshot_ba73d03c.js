@@ -1,4 +1,4 @@
-(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([typeof document === "object" ? document.currentScript : undefined,
+(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push(["crates_pack-tests_tests_snapshot_ba73d03c.js",
 "[project]/crates/pack-tests/tests/snapshot/node_modules/antd/es/ButtonGroup/index.js [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 

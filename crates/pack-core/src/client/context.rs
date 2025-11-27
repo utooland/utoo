@@ -549,7 +549,7 @@ pub async fn get_client_chunking_context(
     })
     .chunk_base_path(Some(public_path.clone()))
     .asset_base_path(Some(public_path))
-    .current_chunk_method(CurrentChunkMethod::DocumentCurrentScript)
+    // .current_chunk_method(CurrentChunkMethod::StringLiteral)
     .export_usage(*export_usage.await?)
     .module_id_strategy(module_id_strategy.to_resolved().await?);
 

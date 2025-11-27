@@ -1,4 +1,4 @@
-(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([typeof document === "object" ? document.currentScript : undefined,
+(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push(["crates_pack-tests_tests_snapshot_public_path_runtime_input_1245d45e.js",
 37, ((__turbopack_context__) => {
 
 __turbopack_context__.v(__turbopack_context__.p() + "asset.c77b3abb.jpg");}),

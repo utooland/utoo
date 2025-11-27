@@ -16,7 +16,7 @@
       "type": "asset",
       "name": "crates_pack-tests_tests_snapshot_async_chunk_input_e3c60d4f.js",
       "info": {},
-      "size": 1092,
+      "size": 1091,
       "emitted": false,
       "compared_for_emit": false,
       "cached": false,
@@ -40,7 +40,7 @@
       "type": "asset",
       "name": "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js",
       "info": {},
-      "size": 797,
+      "size": 796,
       "emitted": false,
       "compared_for_emit": false,
       "cached": false,
@@ -109,7 +109,7 @@
       "entry": false,
       "recorded": false,
       "id": "crates_pack-tests_tests_snapshot_async_chunk_input_e3c60d4f.js",
-      "size": 1092,
+      "size": 1091,
       "hash": "",
       "files": [
         "crates_pack-tests_tests_snapshot_async_chunk_input_e3c60d4f.js"
@@ -121,7 +121,7 @@
       "entry": false,
       "recorded": false,
       "id": "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js",
-      "size": 797,
+      "size": 796,
       "hash": "",
       "files": [
         "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js"
