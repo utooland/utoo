@@ -314,10 +314,31 @@ pub struct OptimizationConfig {
 #[derive(
     Clone, Debug, PartialEq, Serialize, Deserialize, TraceRawVcs, NonLocalValue, OperationValue,
 )]
-#[serde(rename_all = "camelCase")]
-pub struct CopyItem {
-    pub from: RcStr,
-    pub to: RcStr,
+#[serde(untagged)]
+pub enum CopyItem {
+    String(RcStr),
+    Object {
+        #[serde(rename = "from")]
+        from: RcStr,
+        #[serde(rename = "to", skip_serializing_if = "Option::is_none")]
+        to: Option<RcStr>,
+    },
+}
+
+impl CopyItem {
+    pub fn from(&self) -> &RcStr {
+        match self {
+            CopyItem::String(s) => s,
+            CopyItem::Object { from, .. } => from,
+        }
+    }
+
+    pub fn to(&self) -> Option<&RcStr> {
+        match self {
+            CopyItem::String(_) => None,
+            CopyItem::Object { to, .. } => to.as_ref(),
+        }
+    }
 }
 
 #[turbo_tasks::value(eq = "manual")]
