@@ -1212,7 +1212,7 @@ async fn copy_directory_recursive_helper(
                     DirectoryEntry::File(file_path) => {
                         // Calculate relative path from the original source directory
                         let relative_path =
-                            source_dir_ref.get_path_to(&file_path).ok_or_else(|| {
+                            source_dir_ref.get_path_to(file_path).ok_or_else(|| {
                                 anyhow::anyhow!(
                                     "File path is not under source directory: {:?}",
                                     file_path
@@ -1220,9 +1220,8 @@ async fn copy_directory_recursive_helper(
                             })?;
 
                         // Always use dest_dir as base to avoid path duplication
-                        let dest_path = dest_dir.clone().join(relative_path)?;
-                        let source =
-                            turbopack_core::file_source::FileSource::new(file_path.clone());
+                        let dest_path = dest_dir.join(relative_path)?;
+                        let source = FileSource::new(file_path.clone());
                         let asset = RawOutput::new(dest_path, Vc::upcast(source));
                         assets.push(ResolvedVc::upcast(asset.to_resolved().await?));
                     }
