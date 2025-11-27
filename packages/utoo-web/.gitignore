@@ -1,2 +1,3 @@
 esm
-src/utoo
+src/utoo/*
+!src/utoo/index.d.ts
