@@ -13,7 +13,7 @@ export interface PoolOptions {
   filename: string
   concurrency: number
 }
-export declare function recvPoolCreation(): PoolOptions | null
+export declare function recvPoolCreation(): Promise<PoolOptions>
 export declare function recvWorkerRequest(poolId: string): Promise<number>
 export declare function recvMessageInWorker(workerId: number): Promise<string>
 export declare function notifyOneWorkerCreated(filename: string): Promise<void>

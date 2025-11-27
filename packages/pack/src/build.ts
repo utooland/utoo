@@ -84,6 +84,8 @@ async function buildInternal(
   }
   await project.shutdown();
 
+  process.exit(0);
+
   // TODO: Maybe run tasks in worker is a better way, see
   // https://github.com/vercel/next.js/blob/512d8283054407ab92b2583ecce3b253c3be7b85/packages/next/src/lib/worker.ts
 }
