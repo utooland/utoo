@@ -22,8 +22,12 @@ use turbo_tasks::{
     mark_root, trace::TraceRawVcs,
 };
 use turbo_tasks_env::{EnvMap, ProcessEnv};
-use turbo_tasks_fs::{DiskFileSystem, FileSystem, FileSystemPath, VirtualFileSystem, invalidation};
+use turbo_tasks_fs::{
+    DirectoryContent, DirectoryEntry, DiskFileSystem, FileSystem, FileSystemEntryType,
+    FileSystemPath, VirtualFileSystem, invalidation,
+};
 use turbopack::global_module_ids::get_global_module_id_strategy;
+use turbopack_core::file_source::FileSource;
 
 use turbopack::evaluate_context::node_build_environment;
 
@@ -1137,17 +1141,107 @@ impl Project {
         let mut assets = vec![];
         if let Some(patterns) = copy_config {
             for pattern in patterns {
-                // Resolve from_path relative to project_path, not project_root
-                let from_path = project_path.join(&pattern.from)?;
-                let to_path = dist_root.join(&pattern.to)?;
+                // Support three forms:
+                // 1. String: "path" -> copies file to root (filename only), or directory with same structure
+                // 2. Object without to: { "from": "path" } -> copies file to root (filename only), or directory with same structure
+                // 3. Object with to: { "from": "path", "to": "dest" } -> copies to specified dest
+                let from = pattern.from();
+                let from_path = project_path.join(from)?;
 
-                let source = turbopack_core::file_source::FileSource::new(from_path);
-                let asset = RawOutput::new(to_path, Vc::upcast(source));
-                assets.push(ResolvedVc::upcast(asset.to_resolved().await?));
+                // Check if source is a directory or file
+                let entry_type = from_path.get_type().await?;
+                match *entry_type {
+                    FileSystemEntryType::Directory => {
+                        if let Some(to) = pattern.to() {
+                            // If to is specified, copy directory to the specified path
+                            let to_base_path = dist_root.join(to.as_str())?;
+                            let dir_assets =
+                                copy_directory_recursive_helper(from_path, to_base_path).await?;
+                            assets.extend(dir_assets);
+                        } else {
+                            // If to is not specified, copy directory contents directly to root
+                            // (without the source directory prefix)
+                            // e.g., public/icons/ant.svg -> icons/ant.svg in dist
+                            let dir_assets =
+                                copy_directory_recursive_helper(from_path, dist_root.clone())
+                                    .await?;
+                            assets.extend(dir_assets);
+                        }
+                    }
+                    FileSystemEntryType::File => {
+                        // For files, if to is not specified, copy to root with filename only
+                        let to_path = if let Some(to) = pattern.to() {
+                            dist_root.join(to.as_str())?
+                        } else {
+                            // Extract just the filename and put it in the root
+                            let file_name = from_path.file_name();
+                            dist_root.join(file_name)?
+                        };
+                        let source = FileSource::new(from_path);
+                        let asset = RawOutput::new(to_path, Vc::upcast(source));
+                        assets.push(ResolvedVc::upcast(asset.to_resolved().await?));
+                    }
+                    _ => {
+                        return Err(anyhow::anyhow!(
+                            "Unsupported entry type for copy: {:?}",
+                            entry_type
+                        ));
+                    }
+                }
             }
         }
         Ok(OutputAssets::concat(vec![*ResolvedVc::cell(assets)]))
     }
+}
+
+/// Recursively copy all files from a source directory to a destination directory
+/// Preserves the directory structure
+async fn copy_directory_recursive_helper(
+    source_dir: FileSystemPath,
+    dest_dir: FileSystemPath,
+) -> Result<Vec<ResolvedVc<Box<dyn OutputAsset>>>> {
+    let mut assets = vec![];
+    let mut stack = vec![source_dir.clone()];
+    let source_dir_ref = &source_dir;
+
+    while let Some(src_path) = stack.pop() {
+        let dir_content = src_path.read_dir().await?;
+        if let DirectoryContent::Entries(entries) = &*dir_content {
+            for (_name, entry) in entries.iter() {
+                match entry {
+                    DirectoryEntry::File(file_path) => {
+                        // Calculate relative path from the original source directory
+                        let relative_path =
+                            source_dir_ref.get_path_to(&file_path).ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "File path is not under source directory: {:?}",
+                                    file_path
+                                )
+                            })?;
+
+                        // Always use dest_dir as base to avoid path duplication
+                        let dest_path = dest_dir.clone().join(relative_path)?;
+                        let source =
+                            turbopack_core::file_source::FileSource::new(file_path.clone());
+                        let asset = RawOutput::new(dest_path, Vc::upcast(source));
+                        assets.push(ResolvedVc::upcast(asset.to_resolved().await?));
+                    }
+                    DirectoryEntry::Directory(dir_path) => {
+                        // Just push the directory to stack for recursive processing
+                        // We don't need to track dest path since we always calculate
+                        // relative path from source_dir
+                        stack.push(dir_path.clone());
+                    }
+                    _ => {
+                        // Skip symlinks and other entry types
+                        continue;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(assets)
 }
 
 // This is a performance optimization. This function is a root aggregation function that

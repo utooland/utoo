@@ -143,16 +143,25 @@ pub struct SchemaLibraryOptions {
 }
 
 /// Copy item configuration
+/// Can be either a string (source path) or an object with from and optional to
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SchemaCopyItem {
-    /// Source path to copy from
-    #[schemars(description = "Source path to copy from")]
-    pub from: String,
-
-    /// Destination path to copy to
-    #[schemars(description = "Destination path to copy to")]
-    pub to: String,
+#[serde(untagged)]
+pub enum SchemaCopyItem {
+    /// String variant: source path (destination will be same as source)
+    String(String),
+    /// Object variant: source path and optional destination path
+    Object {
+        /// Source path to copy from
+        #[schemars(description = "Source path to copy from")]
+        #[serde(rename = "from")]
+        from: String,
+        /// Destination path to copy to (optional, defaults to same as from)
+        #[schemars(
+            description = "Destination path to copy to (optional, defaults to same as from)"
+        )]
+        #[serde(rename = "to", skip_serializing_if = "Option::is_none")]
+        to: Option<String>,
+    },
 }
 
 /// Output configuration
