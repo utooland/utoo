@@ -20,9 +20,9 @@ const ConnectedPorts = new Set<MessagePort>();
 export class Project implements ProjectEndpoint {
   #mount: Promise<void>;
 
-  public readonly serviceWorkerOptions?: ServiceWorkerOptions;
-
   public readonly cwd: string;
+
+  public readonly serviceWorkerOptions?: ServiceWorkerOptions;
 
   private remote: comlink.Remote<
     ProjectEndpoint & {
