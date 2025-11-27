@@ -9,6 +9,10 @@ import initWasm, {
 
 declare let self: DedicatedWorkerGlobalScope;
 
+let nextWorkerId = 0;
+
+const loaderWorkers: Record<string, Array<Worker & { workerId: number }>> = {};
+
 const projectEndpoint: ProjectEndpoint & {
   projectInternal?: ProjectInternal;
   mount: (
@@ -41,7 +45,51 @@ const projectEndpoint: ProjectEndpoint & {
   },
 
   async build() {
-    await this.wasmInit!;
+    const binding = await this.wasmInit!;
+
+    const createOrScalePool = async () => {
+      let poolOptions = await binding.recvPoolRequest();
+      const { filename, maxConcurrency } = poolOptions;
+      const workers = loaderWorkers[filename] || (loaderWorkers[filename] = []);
+      if (workers.length < maxConcurrency) {
+        for (let i = workers.length; i < maxConcurrency; i++) {
+          nextWorkerId += 1;
+          const workerUrl = new URL(filename);
+          workerUrl.searchParams.set("poolId", filename);
+          workerUrl.searchParams.set("workerId", nextWorkerId.toString());
+          const worker = new Worker(workerUrl);
+          worker.postMessage([binding, binding.memory]);
+          // @ts-ignore
+          worker.workerId = nextWorkerId;
+          // @ts-ignore
+          workers.push(worker);
+        }
+      } else if (workers.length > maxConcurrency) {
+        const workersToStop = workers.splice(
+          0,
+          workers.length - maxConcurrency,
+        );
+        workersToStop.forEach((worker) => worker.terminate());
+      }
+      createOrScalePool();
+    };
+
+    const waitingForWorkerTermination = async () => {
+      const { filename, workerId } = await binding.recvWorkerTermination();
+      const workers = loaderWorkers[filename];
+      const workerIdx = workers.findIndex(
+        (worker) => worker.workerId === workerId,
+      );
+      if (workerIdx > -1) {
+        const worker = workers.splice(workerIdx, 1);
+        worker[0].terminate();
+      }
+      waitingForWorkerTermination();
+    };
+
+    createOrScalePool();
+    waitingForWorkerTermination();
+
     return await this.projectInternal!.build();
   },
 
