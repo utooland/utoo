@@ -42,8 +42,8 @@ export class Project implements ProjectEndpoint {
       logFilter,
     } = options;
 
-    this.serviceWorkerOptions = serviceWorker;
     this.cwd = cwd;
+    this.serviceWorkerOptions = serviceWorker;
 
     const { port1, port2 } = new MessageChannel();
 
