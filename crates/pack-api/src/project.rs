@@ -1134,6 +1134,7 @@ impl Project {
     pub async fn copy_output_assets(self: Vc<Self>) -> Result<Vc<OutputAssets>> {
         let project_path = self.project_path().owned().await?;
         let dist_root = self.dist_root().owned().await?;
+        let project_root = self.project_root().owned().await?;
 
         let output_config = self.config().output().await?;
         let copy_config = output_config.copy.as_ref();
@@ -1142,9 +1143,9 @@ impl Project {
         if let Some(patterns) = copy_config {
             for pattern in patterns {
                 // Support three forms:
-                // 1. String: "path" -> copies file to root (filename only), or directory with same structure
-                // 2. Object without to: { "from": "path" } -> copies file to root (filename only), or directory with same structure
-                // 3. Object with to: { "from": "path", "to": "dest" } -> copies to specified dest
+                // 1. String: "path" -> copies to dist root (filename only for files, or directory with same structure)
+                // 2. Object without to: { "from": "path" } -> copies to dist root (filename only for files, or directory with same structure)
+                // 3. Object with to: { "from": "path", "to": "dest" } -> copies to specified dest relative to project root
                 let from = pattern.from();
                 let from_path = project_path.join(from)?;
 
@@ -1153,13 +1154,13 @@ impl Project {
                 match *entry_type {
                     FileSystemEntryType::Directory => {
                         if let Some(to) = pattern.to() {
-                            // If to is specified, copy directory to the specified path
-                            let to_base_path = dist_root.join(to.as_str())?;
+                            // If to is specified, copy directory to the specified path relative to project root
+                            let to_base_path = project_root.join(to.as_str())?;
                             let dir_assets =
                                 copy_directory_recursive_helper(from_path, to_base_path).await?;
                             assets.extend(dir_assets);
                         } else {
-                            // If to is not specified, copy directory contents directly to root
+                            // If to is not specified, copy directory contents directly to dist root
                             // (without the source directory prefix)
                             // e.g., public/icons/ant.svg -> icons/ant.svg in dist
                             let dir_assets =
@@ -1169,11 +1170,12 @@ impl Project {
                         }
                     }
                     FileSystemEntryType::File => {
-                        // For files, if to is not specified, copy to root with filename only
+                        // For files, if to is not specified, copy to dist root with filename only
                         let to_path = if let Some(to) = pattern.to() {
-                            dist_root.join(to.as_str())?
+                            // If to is specified, copy to the specified path relative to project root
+                            project_root.join(to.as_str())?
                         } else {
-                            // Extract just the filename and put it in the root
+                            // Extract just the filename and put it in the dist root
                             let file_name = from_path.file_name();
                             dist_root.join(file_name)?
                         };
