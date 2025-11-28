@@ -219,8 +219,11 @@ export function projectFactory() {
 
   const loaderWorkers: Record<string, Array<Worker>> = {};
 
-  const createOrScalePool = async () => {
-    let poolOptions = await binding.recvPoolRequest();
+  const createOrScalePool = () => {
+    let poolOptions = binding.recvPoolRequest();
+    if (!poolOptions) {
+      return;
+    }
     const { filename, maxConcurrency } = poolOptions;
     const workers = loaderWorkers[filename] || (loaderWorkers[filename] = []);
     if (workers.length < maxConcurrency) {
@@ -238,11 +241,14 @@ export function projectFactory() {
       const workersToStop = workers.splice(0, workers.length - maxConcurrency);
       workersToStop.forEach((worker) => worker.terminate());
     }
-    createOrScalePool();
   };
 
-  const waitingForWorkerTermination = async () => {
-    const { filename, workerId } = await binding.recvWorkerTermination();
+  const waitingForWorkerTermination = () => {
+    const termination = binding.recvWorkerTermination();
+    if (!termination) {
+      return;
+    }
+    const { filename, workerId } = termination;
     const workers = loaderWorkers[filename];
     const workerIdx = workers.findIndex(
       (worker) => worker.threadId === workerId,
@@ -251,19 +257,22 @@ export function projectFactory() {
       const worker = workers.splice(workerIdx, 1);
       worker[0].terminate();
     }
-    waitingForWorkerTermination();
   };
 
   class ProjectImpl implements Project {
     readonly _nativeProject: { __napiType: "Project" };
+    readonly cleanups: Array<() => void> = [];
 
     constructor(nativeProject: { __napiType: "Project" }) {
       this._nativeProject = nativeProject;
       if (typeof binding.recvPoolRequest === "function") {
-        createOrScalePool();
-      }
-      if (typeof binding.recvWorkerTermination === "function") {
-        waitingForWorkerTermination();
+        let interval = setInterval(() => {
+          createOrScalePool();
+          waitingForWorkerTermination();
+        }, 10);
+        this.cleanups.push(() => {
+          clearInterval(interval);
+        });
       }
     }
 
@@ -358,6 +367,7 @@ export function projectFactory() {
     }
 
     shutdown(): Promise<void> {
+      this.cleanups.forEach((f) => f());
       return binding.projectShutdown(this._nativeProject);
     }
 

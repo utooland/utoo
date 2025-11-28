@@ -17,8 +17,8 @@ export interface WorkerTermination {
   filename: string
   workerId: number
 }
-export declare function recvPoolRequest(): Promise<PoolOptions>
-export declare function recvWorkerTermination(): Promise<WorkerTermination>
+export declare function recvPoolRequest(): PoolOptions | null
+export declare function recvWorkerTermination(): WorkerTermination | null
 export declare function recvWorkerRequest(filename: string): Promise<number>
 export declare function recvMessageInWorker(workerId: number): Promise<string>
 export declare function notifyWorkerAck(taskId: number, workerId: number): Promise<void>
