@@ -220,38 +220,52 @@ export function projectFactory() {
   const loaderWorkers: Record<string, Array<Worker>> = {};
 
   const createOrScalePool = async () => {
-    let poolOptions = await binding.recvPoolRequest();
-    const { filename, maxConcurrency } = poolOptions;
-    const workers = loaderWorkers[filename] || (loaderWorkers[filename] = []);
-    if (workers.length < maxConcurrency) {
-      for (let i = workers.length; i < maxConcurrency; i++) {
-        const worker = new Worker(filename, {
-          workerData: {
-            poolId: filename,
-            bindingPath: require.resolve("./binding.js"),
-          },
-        });
-        worker.unref();
-        workers.push(worker);
+    while (true) {
+      try {
+        let poolOptions = await binding.recvPoolRequest();
+        const { filename, maxConcurrency } = poolOptions;
+        const workers =
+          loaderWorkers[filename] || (loaderWorkers[filename] = []);
+        if (workers.length < maxConcurrency) {
+          for (let i = workers.length; i < maxConcurrency; i++) {
+            const worker = new Worker(filename, {
+              workerData: {
+                poolId: filename,
+                bindingPath: require.resolve("./binding.js"),
+              },
+            });
+            worker.unref();
+            workers.push(worker);
+          }
+        } else if (workers.length > maxConcurrency) {
+          const workersToStop = workers.splice(
+            0,
+            workers.length - maxConcurrency,
+          );
+          workersToStop.forEach((worker) => worker.terminate());
+        }
+      } catch (e) {
+        return;
       }
-    } else if (workers.length > maxConcurrency) {
-      const workersToStop = workers.splice(0, workers.length - maxConcurrency);
-      workersToStop.forEach((worker) => worker.terminate());
     }
-    createOrScalePool();
   };
 
   const waitingForWorkerTermination = async () => {
-    const { filename, workerId } = await binding.recvWorkerTermination();
-    const workers = loaderWorkers[filename];
-    const workerIdx = workers.findIndex(
-      (worker) => worker.threadId === workerId,
-    );
-    if (workerIdx > -1) {
-      const worker = workers.splice(workerIdx, 1);
-      worker[0].terminate();
+    while (true) {
+      try {
+        const { filename, workerId } = await binding.recvWorkerTermination();
+        const workers = loaderWorkers[filename];
+        const workerIdx = workers.findIndex(
+          (worker) => worker.threadId === workerId,
+        );
+        if (workerIdx > -1) {
+          const worker = workers.splice(workerIdx, 1);
+          worker[0].terminate();
+        }
+      } catch (e) {
+        return;
+      }
     }
-    waitingForWorkerTermination();
   };
 
   class ProjectImpl implements Project {
