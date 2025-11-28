@@ -14,9 +14,7 @@
           "from": "./input/reset.css",
           "to": "./reset.css"
         },
-        {
-          "from": "public"
-        }
+       "public"
       ]
     }
   }
