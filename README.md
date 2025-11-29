@@ -1,4 +1,4 @@
-> ⚠️ Notice: we are working on making a better bundler on top of Turbopack, see <https://github.com/utooland/utoo/issues/1872>.
+> ⚠️ Notice: we are working on making a better bundler on top of [Turbopack](https://nextjs.org/docs/app/api-reference/turbopack), see <https://github.com/utooland/utoo/issues/1872>.
 >
 > If you encountered some critical problems when using current Mako, you can report issues at [Mako 0.x Feedback in discussions](https://github.com/utooland/utoo/discussions/categories/mako-0-x-feedback).
 
@@ -263,56 +263,6 @@ ut d
 ut deps --workspace-only
 ```
 
-### 🛠️ Bundler
-
-Utoo includes a high-performance bundler that supports various build scenarios:
-
-#### 🚀 Basic Usage
-
-Install `@utoo/pack-cli`:
-
-```bash
-ut install @utoo/pack-cli --save-dev
-```
-
-Then you can bundle your application or library with utoopack:
-
-```json
-{
-  "scripts": {
-    "build": "utoo-pack build",
-    "dev": "utoo-pack dev",
-    "analyze": "ANALYZE=true utoo-pack build"
-  }
-}
-```
-
-Currently, utoopack's devServer does not support generating an HTML file for previews. You'll need to create one manually to view the output assets. We plan to add support for this in the future.
-
-Or you can use utoopack with a framework like [umi](https://github.com/umijs/umi). Note that your umi version must be `v4.5.0` or higher (`v4.6.0` or newer is recommended).
-
-It's easier to enable:
-
-```ts
-// .umirc.ts
-import { defineConfig } from '@umijs/max';
-
-export default defineConfig({
-  utoopack: {}
-})
-```
-
-#### 📚 Example Projects
-
-We provide several example projects to demonstrate different usage scenarios:
-
-- `examples/with-antd`: Ant Design component library integration
-- `examples/with-sass`: Sass style processing
-- `examples/with-less`: Less style processing
-- `examples/with-style-loader`: CSS Modules usage
-- `examples/with-library`: Library mode build
-- `more to come ...`
-
 ### ⚙️ Common Options
 
 All commands support the following common options:
@@ -338,11 +288,64 @@ export PATH=$PATH:$(pwd)/target/release
 # Install project dependencies
 ut
 ```
+### 🛠️ Bundler
+
+Utoo includes a high-performance bundler that supports various build scenarios:
+
+#### 🚀 Basic Usage
+
+Install `@utoo/pack-cli`:
+
+```bash
+ut install @utoo/pack-cli --save-dev
+```
+
+Then you can bundle your application or library with utoopack:
+
+```json
+{
+  "scripts": {
+    "build": "utoo-pack build",
+    "dev": "utoo-pack dev",
+    "analyze": "ANALYZE=true utoo-pack build"
+  }
+}
+```
+
+### Bundler features
+You can track features supported of bundler at [packages/pack/docs/features-list.md](https://github.com/utooland/utoo/blob/next/packages/pack/docs/features-list.md)
+
+Currently, utoopack's devServer does not support generating an HTML file for previews. You'll need to create one manually to view the output assets. We plan to add support for this in the future.
+
+Or you can use utoopack with a framework like [umi](https://github.com/umijs/umi). Note that your umi version must be `v4.5.0` or higher (`v4.6.0` or newer is recommended).
+
+It's easier to enable:
+
+```ts
+// .umirc.ts
+import { defineConfig } from '@umijs/max';
+
+export default defineConfig({
+  utoopack: {}
+})
+```
+
+#### 📚 Example Projects
+
+We provide several example projects to demonstrate different usage scenarios:
+
+- `examples/with-antd`: Ant Design component library integration
+- `examples/with-sass`: Sass style processing
+- `examples/with-less`: Less style processing
+- `examples/with-style-loader`: Style loader usage
+- `examples/with-library`: Library mode build
+- `more to come ...`
 
 ### 🏃 Run Bundler
 
 ```bash
 # Build local development environment
+git submodule update --init
 cd packages/pack
 ut build:local
 
@@ -367,6 +370,7 @@ npm run dev
 │   ├── cli/         # Command line tools
 │   ├── core/        # Core functionality
 │   ├── pack-*       # Bundler related modules
+|   ├── utoo-web     # Unified ut package manager and @utoo/pack into browser WebAssembly
 ├── packages/        # Package management code
 ├── examples/        # Example projects
 └── vendor/          # Third-party dependencies
