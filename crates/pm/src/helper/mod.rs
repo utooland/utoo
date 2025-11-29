@@ -4,6 +4,7 @@ pub mod compatibility;
 pub mod deps;
 pub mod fuzzy_select;
 pub mod global_bin;
+pub mod graph_builder;
 pub mod install_runtime;
 pub mod lock;
 pub mod package;

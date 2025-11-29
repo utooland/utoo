@@ -196,7 +196,7 @@ mod linux_clone {
             } else {
                 // Try hardlink first for files in packages without install scripts
                 if let Err(e) = fs::hard_link(&entry_path, &target_path).await {
-                    tracing::debug!(
+                    eprintln!(
                         "Failed to create hardlink for file from {} to {}: {}, trying fast copy",
                         entry_path.display(),
                         target_path.display(),

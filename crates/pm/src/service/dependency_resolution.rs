@@ -1,12 +1,9 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use crate::helper::lock::{
-    PackageLock, build_ideal_tree_to_package_lock, serialize_tree_to_packages,
-};
+use crate::helper::lock::{PackageLock, build_ideal_tree_to_package_lock};
 use crate::helper::ruborist::Ruborist;
 use crate::service::workspace::WorkspaceService;
-use crate::util::json::load_package_json_from_path;
 
 /// Dependency resolution service
 pub struct DependencyResolutionService;
@@ -16,58 +13,13 @@ impl DependencyResolutionService {
         let mut ruborist = Ruborist::new(cwd);
         ruborist.build_ideal_tree().await?;
 
-        let pkg_file = load_package_json_from_path(cwd).await?;
+        let graph = ruborist.ideal_tree.as_ref().unwrap();
 
-        const MAX_RETRIES: u32 = 5;
-        let mut retry_count = 0;
+        // Serialize graph to packages
+        let (_packages, _total) = graph.serialize_to_packages(cwd);
 
-        loop {
-            let (pkgs_in_tree, _) = {
-                let to_guard = ruborist.ideal_tree.as_ref().unwrap();
-                serialize_tree_to_packages(to_guard, cwd)
-            };
-
-            let invalid_deps = Self::validate_deps(&pkg_file, &pkgs_in_tree).await?;
-
-            if invalid_deps.is_empty() {
-                tracing::debug!("No invalid dependencies found");
-                break;
-            }
-
-            if retry_count >= MAX_RETRIES {
-                return Err(anyhow::anyhow!(
-                    "Failed to fix dependencies after {MAX_RETRIES} retries"
-                ));
-            }
-
-            for dep in invalid_deps {
-                tracing::debug!(
-                    "Fixing dependency: {}/{}",
-                    dep.package_path,
-                    dep.dependency_name
-                );
-                // Try to fix the dependency
-                if let Err(e) = ruborist
-                    .fix_dep_path(&dep.package_path, &dep.dependency_name)
-                    .await
-                {
-                    tracing::debug!("Failed to fix dependency: {e}");
-                    return Err(anyhow::anyhow!("Failed to fix dependency: {e}"));
-                } else {
-                    tracing::debug!(
-                        "Fixed dependency: {}/{}",
-                        dep.package_path,
-                        dep.dependency_name
-                    );
-                }
-            }
-
-            retry_count += 1;
-        }
-
-        let tree = ruborist.ideal_tree.unwrap();
-        // Return PackageLock directly, no disk write here
-        let package_lock = build_ideal_tree_to_package_lock(cwd, &tree).await?;
+        // Build package lock from graph
+        let package_lock = build_ideal_tree_to_package_lock(cwd, graph).await?;
 
         Ok(package_lock)
     }
@@ -87,13 +39,5 @@ impl DependencyResolutionService {
             .context("Failed to rename temporary workspace.json")?;
 
         Ok(())
-    }
-
-    pub async fn validate_deps(
-        pkg_file: &serde_json::Value,
-        pkgs_in_pkg_lock: &serde_json::Value,
-    ) -> Result<Vec<crate::helper::lock::InvalidDependency>> {
-        // Use the existing implementation from helper/lock.rs
-        crate::helper::lock::validate_deps(pkg_file, pkgs_in_pkg_lock).await
     }
 }

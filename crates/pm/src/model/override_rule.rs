@@ -1,7 +1,5 @@
 use super::super::helper::package::parse_package_spec;
 use super::super::util::json::merge_json_objects;
-use super::super::util::registry::resolve;
-use super::super::util::semver::{is_valid_version, matches};
 use serde_json::Value;
 
 #[derive(Debug, Clone)]
@@ -12,7 +10,7 @@ pub struct OverrideRule {
     pub parent: Option<Box<OverrideRule>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Overrides {
     pub package: Value,
     pub rules: Vec<OverrideRule>,
@@ -106,63 +104,5 @@ impl Overrides {
             Value::String(s) => s.clone(),
             _ => String::from("*"),
         }
-    }
-
-    pub async fn matches_rule(
-        &self,
-        rule: &OverrideRule,
-        dep_name: &str,
-        dep_version: &str,
-        parent_chain: &[(String, String)],
-    ) -> bool {
-        if rule.name != dep_name {
-            return false;
-        }
-
-        if rule.spec != "*" {
-            let resolved_version = if is_valid_version(dep_version) {
-                dep_version.to_string()
-            } else {
-                match resolve(dep_name, dep_version).await {
-                    Ok(pkg) => pkg.version,
-                    Err(_) => return false,
-                }
-            };
-
-            if !matches(&rule.spec, &resolved_version) {
-                return false;
-            }
-        }
-
-        if let Some(mut current_rule) = rule.parent.as_ref() {
-            let mut parent_idx = 0;
-
-            while let Some((parent_name, parent_version)) = parent_chain.get(parent_idx) {
-                if parent_name == &current_rule.name {
-                    let matches = if current_rule.spec == "*" {
-                        true
-                    } else {
-                        matches(&current_rule.spec, parent_version)
-                    };
-
-                    if matches {
-                        if let Some(next_rule) = current_rule.parent.as_ref() {
-                            current_rule = next_rule;
-                            parent_idx += 1;
-                            continue;
-                        } else {
-                            return true;
-                        }
-                    }
-                }
-                parent_idx += 1;
-            }
-
-            if current_rule.parent.is_some() {
-                return false;
-            }
-        }
-
-        true
     }
 }

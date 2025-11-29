@@ -8,6 +8,7 @@ pub mod http_client;
 pub mod install;
 pub mod package;
 pub mod package_management;
+pub mod preload;
 pub mod rebuild;
 pub mod registry;
 pub mod script;
