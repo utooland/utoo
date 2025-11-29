@@ -200,14 +200,18 @@ impl ScriptService {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         // Read first 512 bytes to check for shebang and validate UTF-8
-        let mut file = fs::File::open(target_path).await?;
-        let mut buffer = vec![0u8; 512];
-        let n = file.read(&mut buffer).await?;
-        buffer.truncate(n);
+        // file is automatically dropped here
+        let header = {
+            let mut file = fs::File::open(target_path).await?;
+            let mut buffer = vec![0u8; 512];
+            let n = file.read(&mut buffer).await?;
+            buffer.truncate(n);
 
-        // Try to parse as UTF-8 to detect binary files early
-        let header = std::str::from_utf8(&buffer)
-            .map_err(|_| anyhow::anyhow!("File is not valid UTF-8, likely a binary file"))?;
+            // Try to parse as UTF-8 to detect binary files early
+            std::str::from_utf8(&buffer)
+                .map_err(|_| anyhow::anyhow!("File is not valid UTF-8, likely a binary file"))?
+                .to_string()
+        };
 
         // Check if already has shebang
         if header.starts_with("#!") {
@@ -215,13 +219,16 @@ impl ScriptService {
         }
 
         // Need to add shebang - read entire file now
-        drop(file);
         let content = fs::read_to_string(target_path).await?;
         let new_content = format!("#!/usr/bin/env node\n{}", content);
 
-        let mut file = fs::File::create(target_path).await?;
-        file.write_all(new_content.as_bytes()).await?;
-        file.flush().await?;
+        // Write the modified content
+        // file is automatically dropped here
+        {
+            let mut file = fs::File::create(target_path).await?;
+            file.write_all(new_content.as_bytes()).await?;
+            file.flush().await?;
+        }
 
         Ok(true)
     }
