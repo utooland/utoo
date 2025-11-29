@@ -370,7 +370,7 @@ npm run dev
 │   ├── cli/         # Command line tools
 │   ├── core/        # Core functionality
 │   ├── pack-*       # Bundler related modules
-|   ├── utoo-web     # Unified ut package manager and @utoo/pack into browser WebAssembly
+│   ├── utoo-web     # Unified ut package manager and @utoo/pack into browser WebAssembly
 ├── packages/        # Package management code
 ├── examples/        # Example projects
 └── vendor/          # Third-party dependencies
