@@ -535,11 +535,7 @@ mod tests {
 
         let result = ScriptService::check_and_add_shebang(&text_file).await;
         assert!(result.is_ok(), "Should succeed for text file");
-        assert_eq!(
-            result.unwrap(),
-            true,
-            "Should return true when shebang was added"
-        );
+        assert!(result.unwrap(), "Should return true when shebang was added");
 
         let content = fs::read_to_string(&text_file).unwrap();
         assert!(content.starts_with("#!/usr/bin/env node\n"));
@@ -555,9 +551,8 @@ mod tests {
 
         let result = ScriptService::check_and_add_shebang(&text_file).await;
         assert!(result.is_ok(), "Should succeed for file with shebang");
-        assert_eq!(
-            result.unwrap(),
-            false,
+        assert!(
+            !result.unwrap(),
             "Should return false when shebang already exists"
         );
     }
