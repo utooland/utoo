@@ -368,8 +368,10 @@ impl Endpoint for AppEndpoint {
 
             let output_assets = if *self.project().should_create_webpack_stats().await? {
                 let output_assets_vec = output_assets.await?;
+                let dist_root = self.project().dist_root().owned().await?;
                 let webpack_stats =
-                    generate_webpack_stats(output_assets_vec.iter().copied()).await?;
+                    generate_webpack_stats(output_assets_vec.iter().copied(), dist_root.clone())
+                        .await?;
                 let stats_output = VirtualOutputAsset::new(
                     dist_root.join("stats.json")?,
                     AssetContent::file(
