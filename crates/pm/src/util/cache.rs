@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use tokio::fs;
 
+use super::config;
+
 pub fn parse_pattern(pattern: &str) -> (String, String) {
     // for @scope/pkg@version
     if pattern.starts_with('@') {
@@ -83,7 +85,7 @@ pub async fn collect_matching_versions(
 }
 
 pub fn get_cache_dir() -> PathBuf {
-    dirs::home_dir().unwrap().join(".cache/nm")
+    config::get_cache_dir()
 }
 
 pub fn get_package_versions_cache_file(package_name: &str) -> PathBuf {

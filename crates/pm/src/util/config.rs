@@ -173,6 +173,15 @@ static REGISTRY: LazyLock<ConfigValue<String>> =
 static LEGACY_PEER_DEPS: LazyLock<ConfigValue<bool>> =
     LazyLock::new(|| ConfigValue::new("legacy-peer-deps", true));
 
+static CACHE_DIR: LazyLock<ConfigValue<String>> = LazyLock::new(|| {
+    let default_cache = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".cache/nm")
+        .to_string_lossy()
+        .to_string();
+    ConfigValue::new("cache-dir", default_cache)
+});
+
 static IS_NPM_REGISTRY: OnceLock<bool> = OnceLock::new();
 
 fn is_npm_registry_url(url: &str) -> bool {
@@ -239,4 +248,27 @@ pub fn set_omit(value: HashSet<OmitType>) {
 
 pub fn get_omit() -> HashSet<OmitType> {
     OMIT.get().cloned().unwrap_or_default()
+}
+
+pub async fn set_cache_dir(cache_dir: Option<String>) {
+    // Priority: CLI argument > UTOO_CACHE_DIR env > config > default
+    let final_cache_dir = if let Some(dir) = cache_dir {
+        Some(dir)
+    } else if let Ok(env_dir) = std::env::var("UTOO_CACHE_DIR")
+        && !env_dir.is_empty()
+    {
+        Some(env_dir)
+    } else {
+        // Read from config file if no CLI arg or env var
+        Config::load(false)
+            .await
+            .ok()
+            .and_then(|config| config.get("cache-dir").ok().flatten())
+    };
+
+    CACHE_DIR.set(final_cache_dir);
+}
+
+pub fn get_cache_dir() -> PathBuf {
+    PathBuf::from(CACHE_DIR.get_sync())
 }

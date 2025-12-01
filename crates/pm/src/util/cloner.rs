@@ -17,6 +17,7 @@ use std::os::unix::ffi::OsStrExt;
 mod linux_clone {
     use anyhow::{Context, Result};
     use std::os::unix::io::AsRawFd;
+    use std::os::unix::fs::OpenOptionsExt;
     use std::path::Path;
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::fs;
@@ -40,7 +41,19 @@ mod linux_clone {
     // Copy a single file using FICLONE
     async fn copy_file_with_ficlone(src: &Path, dst: &Path) -> Result<()> {
         let src_file = tokio::fs::File::open(src).await?;
-        let dst_file = tokio::fs::File::create(dst).await?;
+
+        // Get source file metadata to preserve permissions
+        let src_metadata = src_file.metadata().await?;
+        let src_mode = src_metadata.permissions().mode();
+
+        // Create destination file with the same permissions
+        let dst_file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(src_mode)
+            .open(dst)
+            .await?;
 
         let src_fd = src_file.as_raw_fd();
         let dst_fd = dst_file.as_raw_fd();
@@ -69,13 +82,23 @@ mod linux_clone {
     // Copy a single file using copy_file_range
     async fn copy_file_with_range(src: &Path, dst: &Path) -> Result<()> {
         let src_file = tokio::fs::File::open(src).await?;
-        let dst_file = tokio::fs::File::create(dst).await?;
+
+        // Get source file metadata to preserve permissions
+        let metadata = src_file.metadata().await?;
+        let file_size = metadata.len() as usize;
+        let src_mode = metadata.permissions().mode();
+
+        // Create destination file with the same permissions
+        let dst_file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(src_mode)
+            .open(dst)
+            .await?;
 
         let src_fd = src_file.as_raw_fd();
         let dst_fd = dst_file.as_raw_fd();
-
-        let metadata = src_file.metadata().await?;
-        let file_size = metadata.len() as usize;
 
         // Use spawn_blocking to avoid blocking the async runtime
         let result = tokio::task::spawn_blocking(move || {
