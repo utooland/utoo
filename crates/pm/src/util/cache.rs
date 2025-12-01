@@ -264,4 +264,73 @@ mod tests {
         assert_eq!(to_delete.len(), 0);
         Ok(())
     }
+
+    #[test]
+    fn test_get_cache_dir_uses_config() {
+        // Test that get_cache_dir delegates to config module
+        let result = get_cache_dir();
+
+        // Should return a valid path
+        assert!(result.is_absolute() || result.starts_with("~") || result.starts_with("."));
+    }
+
+    #[test]
+    fn test_get_package_versions_cache_file() {
+        let result = get_package_versions_cache_file("lodash");
+
+        // Should contain package name and versions.json
+        assert!(result.to_string_lossy().contains("lodash"));
+        assert!(result.to_string_lossy().ends_with("versions.json"));
+    }
+
+    #[test]
+    fn test_get_package_versions_cache_file_scoped() {
+        let result = get_package_versions_cache_file("@types/node");
+
+        // Should handle scoped packages correctly
+        assert!(result.to_string_lossy().contains("@types/node"));
+        assert!(result.to_string_lossy().ends_with("versions.json"));
+    }
+
+    #[test]
+    fn test_get_package_manifest_cache_file() {
+        let result = get_package_manifest_cache_file("lodash", "4.17.21");
+
+        // Should contain package name, manifests directory, and version.json
+        assert!(result.to_string_lossy().contains("lodash"));
+        assert!(result.to_string_lossy().contains("manifests"));
+        assert!(result.to_string_lossy().ends_with("4.17.21.json"));
+    }
+
+    #[test]
+    fn test_get_package_manifest_cache_file_scoped() {
+        let result = get_package_manifest_cache_file("@types/node", "18.0.0");
+
+        // Should handle scoped packages correctly
+        assert!(result.to_string_lossy().contains("@types/node"));
+        assert!(result.to_string_lossy().contains("manifests"));
+        assert!(result.to_string_lossy().ends_with("18.0.0.json"));
+    }
+
+    #[tokio::test]
+    async fn test_cache_file_structure_consistency() -> anyhow::Result<()> {
+        // Test that cache file paths are consistent
+        let pkg_name = "express";
+        let version = "4.18.2";
+
+        let versions_file = get_package_versions_cache_file(pkg_name);
+        let manifest_file = get_package_manifest_cache_file(pkg_name, version);
+
+        // Both should be under the same cache directory
+        let cache_dir = get_cache_dir();
+        assert!(versions_file.starts_with(&cache_dir));
+        assert!(manifest_file.starts_with(&cache_dir));
+
+        // Manifest should be under the same package directory as versions
+        let pkg_dir = cache_dir.join(pkg_name);
+        assert!(versions_file.starts_with(&pkg_dir));
+        assert!(manifest_file.starts_with(&pkg_dir));
+
+        Ok(())
+    }
 }

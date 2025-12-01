@@ -272,3 +272,66 @@ pub async fn set_cache_dir(cache_dir: Option<String>) {
 pub fn get_cache_dir() -> PathBuf {
     PathBuf::from(CACHE_DIR.get_sync())
 }
+
+#[cfg(test)]
+mod cache_dir_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_cache_dir_default() {
+        // Test default cache directory
+        let default_cache = dirs::home_dir()
+            .unwrap()
+            .join(".cache/nm")
+            .to_string_lossy()
+            .to_string();
+
+        // Create a fresh ConfigValue to simulate first access
+        let cache_config = ConfigValue::new("cache-dir", default_cache.clone());
+        let result = cache_config.get_sync();
+
+        assert_eq!(result, default_cache);
+    }
+
+    #[test]
+    fn test_config_value_parser_string() {
+        let config = ConfigValue::new("test-key", "default-value".to_string());
+        let parsed = config.parse_config_value("custom-value");
+        assert_eq!(parsed, "custom-value");
+    }
+
+    #[test]
+    fn test_config_value_parser_bool() {
+        let config = ConfigValue::new("test-bool", false);
+        assert!(config.parse_config_value("true"));
+        assert!(config.parse_config_value("TRUE"));
+        assert!(config.parse_config_value("True"));
+        assert!(!config.parse_config_value("false"));
+        assert!(!config.parse_config_value("anything"));
+    }
+
+    #[tokio::test]
+    async fn test_cache_dir_from_config_file() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let config_path = temp_dir.path().join("config.toml");
+
+        // Create a config file with cache-dir setting
+        let custom_path = "/tmp/config-cache-test";
+        let config_content = format!(
+            r#"
+[values]
+cache-dir = "{}"
+"#,
+            custom_path
+        );
+        std::fs::write(&config_path, config_content)?;
+
+        // Load config from file
+        let config = Config::load_from_path(&config_path).await?;
+        let cache_dir = config.get("cache-dir")?.unwrap();
+
+        assert_eq!(cache_dir, custom_path);
+        Ok(())
+    }
+}
