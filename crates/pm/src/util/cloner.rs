@@ -1,10 +1,11 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-use tokio::fs;
-use tokio_retry::Retry;
-
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use super::retry::create_retry_strategy;
+use tokio::fs;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use tokio_retry::Retry;
 
 #[cfg(target_os = "macos")]
 use libc::clonefile;
@@ -229,6 +230,111 @@ mod linux_clone {
     }
 }
 
+#[cfg(target_os = "windows")]
+mod windows_clone {
+    use anyhow::{Context, Result};
+    use std::path::Path;
+    use tokio::fs;
+
+    // Copy a single file using regular copy
+    async fn fast_copy_file(src: &Path, dst: &Path) -> Result<()> {
+        tokio::fs::copy(src, dst).await.with_context(|| {
+            format!(
+                "Failed to copy file from {} to {}",
+                src.display(),
+                dst.display()
+            )
+        })?;
+        Ok(())
+    }
+
+    // Fast copy directory using regular copy for packages with install scripts
+    async fn fast_copy(src: &Path, dst: &Path) -> Result<()> {
+        // Create destination directory
+        fs::create_dir_all(dst).await?;
+
+        // Copy all files in the directory
+        let mut read_dir = fs::read_dir(src).await?;
+        while let Some(entry) = read_dir.next_entry().await? {
+            let entry_path = entry.path();
+            let file_name = entry_path.file_name().unwrap();
+            let target_path = dst.join(file_name);
+
+            if entry.metadata().await?.is_dir() {
+                Box::pin(fast_copy(&entry_path, &target_path)).await?;
+            } else {
+                fast_copy_file(&entry_path, &target_path).await?;
+            }
+        }
+        Ok(())
+    }
+
+    // Check if the package has install scripts
+    async fn has_install_script(src: &Path) -> bool {
+        if let Some(parent) = src.parent() {
+            let flag_path = parent.join("_hasInstallScript");
+            if let Ok(metadata) = fs::metadata(&flag_path).await {
+                return metadata.is_file();
+            }
+        }
+        false
+    }
+
+    pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
+        if !fs::metadata(src).await?.is_dir() {
+            return Err(anyhow::anyhow!("Source is not a directory"));
+        }
+
+        // Create destination directory
+        fs::create_dir_all(dst).await?;
+
+        // Check if the package has install scripts
+        if has_install_script(src).await {
+            tracing::debug!(
+                "Package has install scripts, using fast copy for directory {} to {}",
+                src.display(),
+                dst.display()
+            );
+            return fast_copy(src, dst).await;
+        }
+
+        // For directories without install scripts, recursively create the directory structure
+        // and use hardlinks where possible
+        let mut read_dir = fs::read_dir(src).await?;
+        while let Some(entry) = read_dir.next_entry().await? {
+            let entry_path = entry.path();
+            let file_name = entry_path.file_name().unwrap();
+            let target_path = dst.join(file_name);
+
+            if entry.metadata().await?.is_dir() {
+                Box::pin(clone_dir(&entry_path, &target_path)).await?;
+            } else {
+                // Try hardlink first for files in packages without install scripts
+                if let Err(e) = fs::hard_link(&entry_path, &target_path).await {
+                    tracing::debug!(
+                        "Failed to create hardlink for file from {} to {}: {}, using regular copy",
+                        entry_path.display(),
+                        target_path.display(),
+                        e
+                    );
+                    // If hardlink fails, fallback to regular copy
+                    tokio::fs::copy(&entry_path, &target_path)
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "Failed to copy file from {} to {}",
+                                entry_path.display(),
+                                target_path.display()
+                            )
+                        })?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 pub async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
     if !tokio::fs::try_exists(dst).await? {
         return Ok(false);
@@ -413,7 +519,7 @@ pub async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
                 }
             }
         })
-        .await
+        .await?;
     }
 
     #[cfg(target_os = "linux")]
@@ -421,10 +527,53 @@ pub async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
         Retry::spawn(create_retry_strategy(), || async {
             linux_clone::clone_dir(&real_src, dst).await?;
             tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
-            Ok(())
+            Ok::<(), anyhow::Error>(())
         })
-        .await
+        .await?;
     }
+
+    #[cfg(target_os = "windows")]
+    {
+        use super::retry::create_retry_strategy;
+        use tokio_retry::Retry;
+
+        Retry::spawn(create_retry_strategy(), || async {
+            windows_clone::clone_dir(&real_src, dst).await?;
+            tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
+            Ok::<(), anyhow::Error>(())
+        })
+        .await?;
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        // For other platforms, use standard recursive copy
+        copy_dir_all(&real_src, dst).await?;
+        tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
+    }
+
+    Ok(())
+}
+
+// Standard directory copy for non-macOS/Linux/Windows platforms
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+async fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
+    fs::create_dir_all(dst).await?;
+    let mut entries = fs::read_dir(src).await?;
+
+    while let Some(entry) = entries.next_entry().await? {
+        let ty = entry.file_type().await?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if ty.is_dir() {
+            Box::pin(copy_dir_all(&src_path, &dst_path)).await?;
+        } else {
+            fs::copy(&src_path, &dst_path).await?;
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

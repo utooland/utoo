@@ -1,7 +1,6 @@
 use crate::model::package::PackageInfo;
 use anyhow::{Context, Result};
 use std::env;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tokio::fs;
@@ -160,18 +159,39 @@ impl ScriptService {
     }
 
     pub async fn ensure_executable(target_path: &Path) -> Result<()> {
-        let permissions = tokio::fs::metadata(&target_path)
+        // Early check for file existence (works on all platforms)
+        let metadata = tokio::fs::metadata(&target_path)
             .await
-            .context(format!(
-                "Failed to get file permissions {}",
-                target_path.display()
-            ))?
-            .permissions();
+            .context(format!("Failed to access file {}", target_path.display()))?;
 
-        let is_executable = permissions.mode() & 0o111 != 0;
+        if !metadata.is_file() {
+            anyhow::bail!("Path is not a file: {}", target_path.display());
+        }
 
-        if !is_executable {
-            // Check and add shebang only for text files
+        // Unix: Only process if not already executable
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let permissions = metadata.permissions();
+            let is_executable = permissions.mode() & 0o111 != 0;
+
+            if !is_executable {
+                match Self::check_and_add_shebang(target_path).await {
+                    Ok(added) => {
+                        if added {
+                            tracing::debug!("Added shebang to {}", target_path.display());
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!("Skipping shebang for {}: {}", target_path.display(), e);
+                    }
+                }
+            }
+        }
+
+        // Windows: Always try to add shebang (no executable bit to check)
+        #[cfg(not(unix))]
+        {
             match Self::check_and_add_shebang(target_path).await {
                 Ok(added) => {
                     if added {
@@ -179,17 +199,28 @@ impl ScriptService {
                     }
                 }
                 Err(e) => {
-                    // Binary file or non-UTF8 file - just log and continue
                     tracing::debug!("Skipping shebang for {}: {}", target_path.display(), e);
                 }
             }
         }
 
-        let mut perms = permissions;
-        perms.set_mode(0o755);
-        fs::set_permissions(&target_path, perms)
-            .await
-            .context("Failed to set executable permissions")?;
+        // Set executable permissions on Unix
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = tokio::fs::metadata(&target_path)
+                .await
+                .context(format!(
+                    "Failed to get file permissions {}",
+                    target_path.display()
+                ))?
+                .permissions();
+
+            perms.set_mode(0o755);
+            fs::set_permissions(&target_path, perms)
+                .await
+                .context("Failed to set executable permissions")?;
+        }
 
         Ok(())
     }
@@ -353,6 +384,9 @@ mod tests {
     use tempfile::TempDir;
     use tempfile::tempdir;
 
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     #[tokio::test]
     async fn test_collect_bin_paths_with_local_node_modules() {
         let temp_dir = tempdir().unwrap();
@@ -369,6 +403,7 @@ mod tests {
         // Create a dummy executable
         let dummy_bin = local_bin_dir.join("test-bin");
         fs::write(&dummy_bin, "#!/bin/sh\necho 'test'").unwrap();
+        #[cfg(unix)]
         fs::set_permissions(&dummy_bin, fs::Permissions::from_mode(0o755)).unwrap();
 
         let package = PackageInfo {
@@ -561,6 +596,7 @@ mod tests {
     fn test_has_node_gyp_in_path_found() {
         use std::env;
         use std::fs;
+        #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
         use tempfile::tempdir;
 
@@ -569,6 +605,7 @@ mod tests {
         let node_gyp_path = temp_dir.path().join("node-gyp");
         // Create a dummy node-gyp executable
         fs::write(&node_gyp_path, "#!/bin/sh\necho node-gyp").unwrap();
+        #[cfg(unix)]
         fs::set_permissions(&node_gyp_path, fs::Permissions::from_mode(0o755)).unwrap();
 
         // Save original PATH
@@ -591,12 +628,14 @@ mod tests {
     async fn test_ensure_node_gyp_found() {
         use std::env;
         use std::fs;
+        #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
         // Create a temporary directory
         let temp_dir = tempfile::tempdir().unwrap();
         let node_gyp_path = temp_dir.path().join("node-gyp");
         // Create a dummy node-gyp executable
         fs::write(&node_gyp_path, "#!/bin/sh\necho node-gyp").unwrap();
+        #[cfg(unix)]
         fs::set_permissions(&node_gyp_path, fs::Permissions::from_mode(0o755)).unwrap();
 
         // Save original PATH
