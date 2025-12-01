@@ -369,11 +369,11 @@ impl Endpoint for AppEndpoint {
             let output_assets = if *self.project().should_create_webpack_stats().await? {
                 let output_assets_vec = output_assets.await?;
                 let dist_root = self.project().dist_root().owned().await?;
-                let dist_root_clone = dist_root.clone();
                 let webpack_stats =
-                    generate_webpack_stats(output_assets_vec.iter().copied(), dist_root).await?;
+                    generate_webpack_stats(output_assets_vec.iter().copied(), dist_root.clone())
+                        .await?;
                 let stats_output = VirtualOutputAsset::new(
-                    dist_root_clone.join("stats.json")?,
+                    dist_root.join("stats.json")?,
                     AssetContent::file(
                         File::from(serde_json::to_string_pretty(&webpack_stats)?).into(),
                     ),
