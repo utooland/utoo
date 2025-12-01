@@ -15,8 +15,8 @@ use cmd::view::view;
 use cmd::{clean::clean, deps::build_workspace};
 use helper::auto_update::init_auto_update;
 use util::config::{
-    set_legacy_peer_deps, set_omit, set_preload_downloads_limit, set_preload_manifests_limit,
-    set_registry,
+    set_cache_dir, set_legacy_peer_deps, set_omit, set_preload_downloads_limit,
+    set_preload_manifests_limit, set_registry,
 };
 use util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
 use util::save_type::{OmitType, PackageAction, SaveType, parse_save_type};
@@ -60,6 +60,9 @@ struct Cli {
 
     #[arg(long, global = true)]
     registry: Option<String>,
+
+    #[arg(long, global = true)]
+    cache_dir: Option<String>,
 
     #[arg(long, global = true, action = clap::ArgAction::SetTrue)]
     legacy_peer_deps: Option<bool>,
@@ -304,6 +307,9 @@ async fn async_main() -> Result<()> {
 
     // global registry
     set_registry(cli.registry).await;
+
+    // set cache directory
+    set_cache_dir(cli.cache_dir).await;
 
     // set legacy_peer_deps when set --legacy
     if cli.legacy_peer_deps == Some(true) {

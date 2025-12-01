@@ -40,6 +40,10 @@ mod linux_clone {
     // Copy a single file using FICLONE
     async fn copy_file_with_ficlone(src: &Path, dst: &Path) -> Result<()> {
         let src_file = tokio::fs::File::open(src).await?;
+        let src_metadata = src_file.metadata().await?;
+        let src_permissions = src_metadata.permissions();
+
+        // Create destination file
         let dst_file = tokio::fs::File::create(dst).await?;
 
         let src_fd = src_file.as_raw_fd();
@@ -63,19 +67,24 @@ mod linux_clone {
             return Err(anyhow::anyhow!("FICLONE not supported: {}", e));
         }
 
+        // Preserve permissions after successful copy
+        fs::set_permissions(dst, src_permissions).await?;
+
         Ok(())
     }
 
     // Copy a single file using copy_file_range
     async fn copy_file_with_range(src: &Path, dst: &Path) -> Result<()> {
         let src_file = tokio::fs::File::open(src).await?;
+        let metadata = src_file.metadata().await?;
+        let file_size = metadata.len() as usize;
+        let src_permissions = metadata.permissions();
+
+        // Create destination file
         let dst_file = tokio::fs::File::create(dst).await?;
 
         let src_fd = src_file.as_raw_fd();
         let dst_fd = dst_file.as_raw_fd();
-
-        let metadata = src_file.metadata().await?;
-        let file_size = metadata.len() as usize;
 
         // Use spawn_blocking to avoid blocking the async runtime
         let result = tokio::task::spawn_blocking(move || {
@@ -97,6 +106,9 @@ mod linux_clone {
             COPY_FILE_RANGE_SUPPORTED.store(false, Ordering::Relaxed);
             return Err(anyhow::anyhow!("copy_file_range not supported: {}", e));
         }
+
+        // Preserve permissions after successful copy
+        fs::set_permissions(dst, src_permissions).await?;
 
         Ok(())
     }
@@ -131,6 +143,11 @@ mod linux_clone {
                 dst.display()
             )
         })?;
+
+        // Preserve permissions for regular copy fallback
+        let src_metadata = fs::metadata(src).await?;
+        fs::set_permissions(dst, src_metadata.permissions()).await?;
+
         Ok(())
     }
 
@@ -725,6 +742,136 @@ mod tests {
             let result =
                 linux_clone::clone_dir(temp.path().join("not_a_dir").as_ref(), &dst_dir).await;
             assert!(result.is_err());
+
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn test_fast_copy_preserves_permissions() -> Result<()> {
+            use std::os::unix::fs::PermissionsExt;
+
+            let temp = TempDir::new()?;
+            let src_dir = temp.path().join("src");
+            let dst_dir = temp.path().join("dst");
+
+            // Create source directory with an executable file
+            fs::create_dir(&src_dir).await?;
+            let src_file = src_dir.join("executable.sh");
+            fs::write(&src_file, b"#!/bin/bash\necho 'test'").await?;
+
+            // Set executable permissions (0o755)
+            let mut perms = fs::metadata(&src_file).await?.permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&src_file, perms).await?;
+
+            // Verify source file has correct permissions
+            let src_metadata = fs::metadata(&src_file).await?;
+            assert_eq!(src_metadata.permissions().mode() & 0o777, 0o755);
+
+            // Use clone_dir to trigger fast_copy_file path (no _hasInstallScript flag)
+            linux_clone::clone_dir(&src_dir, &dst_dir).await?;
+
+            // Verify destination file has same permissions
+            let dst_file = dst_dir.join("executable.sh");
+            let dst_metadata = fs::metadata(&dst_file).await?;
+            assert_eq!(
+                dst_metadata.permissions().mode() & 0o777,
+                0o755,
+                "Destination file should preserve executable permissions"
+            );
+
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn test_fast_copy_preserves_read_only_permissions() -> Result<()> {
+            use std::os::unix::fs::PermissionsExt;
+
+            let temp = TempDir::new()?;
+            let src_dir = temp.path().join("src");
+            let dst_dir = temp.path().join("dst");
+
+            // Create source directory with a read-only file
+            fs::create_dir(&src_dir).await?;
+            let src_file = src_dir.join("readonly.txt");
+            fs::write(&src_file, b"read only content").await?;
+
+            // Set read-only permissions (0o444)
+            let mut perms = fs::metadata(&src_file).await?.permissions();
+            perms.set_mode(0o444);
+            fs::set_permissions(&src_file, perms).await?;
+
+            // Verify source file has correct permissions
+            let src_metadata = fs::metadata(&src_file).await?;
+            assert_eq!(src_metadata.permissions().mode() & 0o777, 0o444);
+
+            // Use clone_dir to trigger fast_copy_file path
+            linux_clone::clone_dir(&src_dir, &dst_dir).await?;
+
+            // Verify destination file has same permissions
+            let dst_file = dst_dir.join("readonly.txt");
+            let dst_metadata = fs::metadata(&dst_file).await?;
+            assert_eq!(
+                dst_metadata.permissions().mode() & 0o777,
+                0o444,
+                "Destination file should preserve read-only permissions"
+            );
+
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn test_clone_dir_preserves_executable_in_subdirs() -> Result<()> {
+            use std::os::unix::fs::PermissionsExt;
+
+            let temp = TempDir::new()?;
+            let src_dir = temp.path().join("src");
+            let dst_dir = temp.path().join("dst");
+
+            // Create directory structure with executable files
+            create_test_structure(
+                &src_dir,
+                &[
+                    ("bin", None),
+                    ("bin/script.sh", Some(b"#!/bin/bash\necho 'hello'")),
+                    ("lib", None),
+                    ("lib/data.txt", Some(b"data")),
+                ],
+            )
+            .await?;
+
+            // Set executable permission on script.sh
+            let script_path = src_dir.join("bin/script.sh");
+            let mut perms = fs::metadata(&script_path).await?.permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&script_path, perms).await?;
+
+            // Set read-only permission on data.txt
+            let data_path = src_dir.join("lib/data.txt");
+            let mut perms = fs::metadata(&data_path).await?.permissions();
+            perms.set_mode(0o644);
+            fs::set_permissions(&data_path, perms).await?;
+
+            // Clone directory
+            linux_clone::clone_dir(&src_dir, &dst_dir).await?;
+
+            // Verify script.sh has executable permissions
+            let dst_script = dst_dir.join("bin/script.sh");
+            let dst_script_metadata = fs::metadata(&dst_script).await?;
+            assert_eq!(
+                dst_script_metadata.permissions().mode() & 0o777,
+                0o755,
+                "Executable file should preserve permissions in subdirectories"
+            );
+
+            // Verify data.txt has correct permissions
+            let dst_data = dst_dir.join("lib/data.txt");
+            let dst_data_metadata = fs::metadata(&dst_data).await?;
+            assert_eq!(
+                dst_data_metadata.permissions().mode() & 0o777,
+                0o644,
+                "Regular file should preserve permissions in subdirectories"
+            );
 
             Ok(())
         }

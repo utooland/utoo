@@ -4,6 +4,7 @@ use rustc_hash::FxHashSet;
 use tracing::instrument;
 use turbo_rcstr::RcStr;
 use turbo_tasks::{FxIndexMap, FxIndexSet, ResolvedVc, TryJoinIterExt, Vc};
+use turbo_tasks_fs::FileSystemPath;
 use turbopack::css::chunk::CssChunk;
 use turbopack_browser::ecmascript::{EcmascriptBrowserChunk, EcmascriptBrowserEvaluateChunk};
 use turbopack_core::{
@@ -12,7 +13,10 @@ use turbopack_core::{
 };
 
 #[instrument(level = "info", name = "generate webpack stats", skip_all)]
-pub async fn generate_webpack_stats<I>(entry_assets: I) -> Result<WebpackStats>
+pub async fn generate_webpack_stats<I>(
+    entry_assets: I,
+    dist_root: FileSystemPath,
+) -> Result<WebpackStats>
 where
     I: IntoIterator<Item = ResolvedVc<Box<dyn OutputAsset>>>,
 {
@@ -48,7 +52,10 @@ where
 
         if let Some(chunk) = ResolvedVc::try_downcast_type::<EcmascriptBrowserEvaluateChunk>(asset)
         {
-            let entry_path = chunk.path().await?.path.clone();
+            let entry_path_full = chunk.path().await?;
+            let entry_path = dist_root
+                .get_relative_path_to(&entry_path_full)
+                .unwrap_or_else(|| entry_path_full.path.clone());
             chunks.push(WebpackStatsChunk {
                 size: asset_len,
                 files: vec![entry_path.clone()],
@@ -72,17 +79,29 @@ where
             let entry_referenced_assets = chunk.chunks_data().await?;
             let mut entry_chunks = entry_referenced_assets
                 .iter()
-                .map(async |asset| Ok(asset.await?.path.as_str().into()))
+                .map(|asset| {
+                    let asset = *asset;
+                    async move {
+                        let chunk_data = asset.await?;
+                        // ChunkData.path is already a relative path string
+                        Ok(chunk_data.path.as_str().into())
+                    }
+                })
                 .try_join()
                 .await?;
             entry_chunks.push(entry_path.clone());
 
             let mut entry_assets_list = entry_referenced_assets
                 .iter()
-                .map(|asset| async move {
-                    Ok(WebpackStatsEntrypointAssets {
-                        name: asset.await?.path.as_str().into(),
-                    })
+                .map(|asset| {
+                    let asset = *asset;
+                    async move {
+                        let chunk_data = asset.await?;
+                        // ChunkData.path is already a relative path string
+                        Ok(WebpackStatsEntrypointAssets {
+                            name: chunk_data.path.as_str().into(),
+                        })
+                    }
                 })
                 .try_join()
                 .await?;
@@ -105,7 +124,10 @@ where
         }
 
         if let Some(chunk) = ResolvedVc::try_downcast_type::<EcmascriptBrowserChunk>(asset) {
-            let chunk_ident = &chunk.path().await?.path;
+            let chunk_path_full = chunk.path().await?;
+            let chunk_ident = dist_root
+                .get_relative_path_to(&chunk_path_full)
+                .unwrap_or_else(|| chunk_path_full.path.clone());
             chunks.push(WebpackStatsChunk {
                 size: asset_len,
                 files: vec![chunk_ident.clone()],
@@ -127,7 +149,10 @@ where
         }
 
         if let Some(chunk) = ResolvedVc::try_downcast_type::<CssChunk>(asset) {
-            let chunk_ident = &chunk.path().await?.path;
+            let chunk_path_full = chunk.path().await?;
+            let chunk_ident = dist_root
+                .get_relative_path_to(&chunk_path_full)
+                .unwrap_or_else(|| chunk_path_full.path.clone());
             chunks.push(WebpackStatsChunk {
                 size: asset_len,
                 files: vec![chunk_ident.clone()],
@@ -136,7 +161,12 @@ where
             });
         }
 
-        let path = &asset.path().await?.path;
+        let asset_path_full = asset.path().await?;
+        let path = dist_root
+            .get_relative_path_to(&asset_path_full)
+            .unwrap_or_else(|| asset_path_full.path.clone());
+        // Remove leading "./" prefix if present
+        let path = path.strip_prefix("./").map(|s| s.into()).unwrap_or(path);
         assets.push(WebpackStatsAsset {
             ty: "asset".into(),
             name: path.clone(),
