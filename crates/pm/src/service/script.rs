@@ -171,15 +171,17 @@ impl ScriptService {
         let is_executable = permissions.mode() & 0o111 != 0;
 
         if !is_executable {
-            let mut content = fs::read_to_string(&target_path)
-                .await
-                .context(format!("Failed to read file {}", target_path.display()))?;
-
-            if !content.starts_with("#!") {
-                content = format!("#!/usr/bin/env node\n{content}");
-                fs::write(&target_path, content)
-                    .await
-                    .context(format!("Failed to write shebang {}", target_path.display()))?;
+            // Check and add shebang only for text files
+            match Self::check_and_add_shebang(target_path).await {
+                Ok(added) => {
+                    if added {
+                        tracing::debug!("Added shebang to {}", target_path.display());
+                    }
+                }
+                Err(e) => {
+                    // Binary file or non-UTF8 file - just log and continue
+                    tracing::debug!("Skipping shebang for {}: {}", target_path.display(), e);
+                }
             }
         }
 
@@ -190,6 +192,45 @@ impl ScriptService {
             .context("Failed to set executable permissions")?;
 
         Ok(())
+    }
+
+    /// Check if file needs shebang and add it if needed
+    /// Returns Ok(true) if shebang was added, Ok(false) if not needed, Err if binary/non-UTF8
+    async fn check_and_add_shebang(target_path: &Path) -> Result<bool> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // Read first 512 bytes to check for shebang and validate UTF-8
+        // file is automatically dropped here
+        let header = {
+            let mut file = fs::File::open(target_path).await?;
+            let mut buffer = vec![0u8; 512];
+            let n = file.read(&mut buffer).await?;
+            buffer.truncate(n);
+
+            // Try to parse as UTF-8 to detect binary files early
+            std::str::from_utf8(&buffer)
+                .map_err(|_| anyhow::anyhow!("File is not valid UTF-8, likely a binary file"))?
+                .to_string()
+        };
+
+        // Check if already has shebang
+        if header.starts_with("#!") {
+            return Ok(false);
+        }
+
+        // Need to add shebang - read entire file now
+        let content = fs::read_to_string(target_path).await?;
+        let new_content = format!("#!/usr/bin/env node\n{}", content);
+
+        // Write the modified content
+        // file is automatically dropped here
+        {
+            let mut file = fs::File::create(target_path).await?;
+            file.write_all(new_content.as_bytes()).await?;
+            file.flush().await?;
+        }
+
+        Ok(true)
     }
 
     async fn collect_bin_paths(package: &PackageInfo) -> Result<Vec<PathBuf>> {
@@ -369,6 +410,151 @@ mod tests {
         // Test with non-existent file
         let result = ScriptService::ensure_executable(Path::new("nonexistent-file")).await;
         assert!(result.is_err(), "Should fail with non-existent file");
+    }
+
+    #[tokio::test]
+    async fn test_ensure_executable_binary_file() {
+        // Test with a binary file (simulating node executable)
+        let temp_dir = TempDir::new().unwrap();
+        let binary_file = temp_dir.path().join("node");
+
+        // Create a fake binary file with non-UTF8 bytes
+        let binary_data = vec![
+            0x7f, 0x45, 0x4c, 0x46, // ELF magic number
+            0x02, 0x01, 0x01, 0x00, // 64-bit, little-endian
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFE, 0xFD,
+            0xFC, // Some non-UTF8 bytes
+        ];
+        fs::write(&binary_file, &binary_data).unwrap();
+
+        // Should not fail, just skip shebang and set permissions
+        let result = ScriptService::ensure_executable(&binary_file).await;
+        assert!(result.is_ok(), "Should handle binary files gracefully");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let permissions = fs::metadata(&binary_file).unwrap().permissions();
+            assert!(
+                permissions.mode() & 0o111 != 0,
+                "Binary file should be executable"
+            );
+        }
+
+        // File content should not be modified
+        let content = fs::read(&binary_file).unwrap();
+        assert_eq!(content, binary_data, "Binary file should not be modified");
+    }
+
+    #[tokio::test]
+    async fn test_ensure_executable_text_without_shebang() {
+        // Test with a text file without shebang
+        let temp_dir = TempDir::new().unwrap();
+        let text_file = temp_dir.path().join("script.js");
+
+        // Create a text file without shebang
+        fs::write(&text_file, "console.log('hello');").unwrap();
+
+        let result = ScriptService::ensure_executable(&text_file).await;
+        assert!(result.is_ok(), "Should add shebang to text file");
+
+        // Should have shebang added
+        let content = fs::read_to_string(&text_file).unwrap();
+        assert!(
+            content.starts_with("#!/usr/bin/env node\n"),
+            "Shebang should be added"
+        );
+        assert!(
+            content.contains("console.log('hello');"),
+            "Original content should be preserved"
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let permissions = fs::metadata(&text_file).unwrap().permissions();
+            assert!(
+                permissions.mode() & 0o111 != 0,
+                "Text file should be executable"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ensure_executable_text_with_shebang() {
+        // Test with a text file that already has shebang
+        let temp_dir = TempDir::new().unwrap();
+        let text_file = temp_dir.path().join("script.sh");
+
+        let original_content = "#!/bin/bash\necho 'test'";
+        fs::write(&text_file, original_content).unwrap();
+
+        let result = ScriptService::ensure_executable(&text_file).await;
+        assert!(result.is_ok(), "Should handle file with existing shebang");
+
+        // Content should not be modified
+        let content = fs::read_to_string(&text_file).unwrap();
+        assert_eq!(
+            content, original_content,
+            "File with shebang should not be modified"
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let permissions = fs::metadata(&text_file).unwrap().permissions();
+            assert!(permissions.mode() & 0o111 != 0, "File should be executable");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_check_and_add_shebang_binary() {
+        // Test check_and_add_shebang with binary file
+        let temp_dir = TempDir::new().unwrap();
+        let binary_file = temp_dir.path().join("binary");
+
+        // Create binary file
+        let binary_data = vec![0xFF, 0xFE, 0xFD, 0xFC];
+        fs::write(&binary_file, &binary_data).unwrap();
+
+        let result = ScriptService::check_and_add_shebang(&binary_file).await;
+        assert!(result.is_err(), "Should return error for binary file");
+        assert!(
+            result.unwrap_err().to_string().contains("UTF-8"),
+            "Error should mention UTF-8"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_check_and_add_shebang_text_without_shebang() {
+        // Test check_and_add_shebang with text file without shebang
+        let temp_dir = TempDir::new().unwrap();
+        let text_file = temp_dir.path().join("script.js");
+
+        fs::write(&text_file, "console.log('test');").unwrap();
+
+        let result = ScriptService::check_and_add_shebang(&text_file).await;
+        assert!(result.is_ok(), "Should succeed for text file");
+        assert!(result.unwrap(), "Should return true when shebang was added");
+
+        let content = fs::read_to_string(&text_file).unwrap();
+        assert!(content.starts_with("#!/usr/bin/env node\n"));
+    }
+
+    #[tokio::test]
+    async fn test_check_and_add_shebang_text_with_shebang() {
+        // Test check_and_add_shebang with text file that already has shebang
+        let temp_dir = TempDir::new().unwrap();
+        let text_file = temp_dir.path().join("script.sh");
+
+        fs::write(&text_file, "#!/bin/sh\necho test").unwrap();
+
+        let result = ScriptService::check_and_add_shebang(&text_file).await;
+        assert!(result.is_ok(), "Should succeed for file with shebang");
+        assert!(
+            !result.unwrap(),
+            "Should return false when shebang already exists"
+        );
     }
 
     #[test]
