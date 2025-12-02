@@ -119,37 +119,50 @@ pub fn mdx_import_source_file() -> RcStr {
 }
 
 #[turbo_tasks::function]
-pub async fn get_postcss_package_mapping() -> Result<Vc<ImportMapping>> {
-    Ok(
-        ImportMapping::Direct(ResolveResult::primary(ResolveResultItem::External {
-            name: rcstr!("postcss"),
-            ty: ExternalType::CommonJs,
-            traced: ExternalTraced::Untraced,
-        }))
-        .cell(),
-    )
+#[allow(unused_variables)]
+pub async fn get_postcss_package_mapping(
+    project_path: FileSystemPath,
+) -> Result<Vc<ImportMapping>> {
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+    {
+        Ok(
+            ImportMapping::Direct(ResolveResult::primary(ResolveResultItem::External {
+                name: rcstr!("postcss"),
+                ty: ExternalType::CommonJs,
+                traced: ExternalTraced::Untraced,
+            }))
+            .cell(),
+        )
+    }
+
+    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+    {
+        Ok(ImportMapping::PrimaryAlternative(rcstr!("postcss"), Some(project_path)).cell())
+    }
 }
 
 /// Computes the client fallback import map, which provides
 /// polyfills to Node.js externals.
 #[turbo_tasks::function]
-pub async fn get_client_fallback_import_map(
-    project_path: FileSystemPath,
-    config: Vc<Config>,
-) -> Result<Vc<ImportMap>> {
+pub async fn get_client_fallback_import_map(node_polyfill: bool) -> Result<Vc<ImportMap>> {
     let mut import_map = ImportMap::empty();
 
-    // If nodePolyfill is true, add polyfills for Node.js built-in modules
-    let node_polyfill = *config.node_polyfill().await?;
     if node_polyfill {
-        for (original, alias) in NODE_POLYFILL_ALIASES.iter() {
-            import_map.insert_exact_alias(
-                original.clone(),
-                request_to_import_mapping(project_path.clone(), alias),
-            );
-        }
+        import_map.extend_ref(&*get_node_polyfill_import_map().await?);
     }
 
+    Ok(import_map.cell())
+}
+
+#[turbo_tasks::function]
+async fn get_node_polyfill_import_map() -> Result<Vc<ImportMap>> {
+    let mut import_map = ImportMap::empty();
+    for (original, alias) in NODE_POLYFILL_ALIASES.iter() {
+        import_map.insert_exact_alias(
+            original.clone(),
+            request_to_import_mapping(crate::embed_js::embed_fs().root().owned().await?, alias),
+        );
+    }
     Ok(import_map.cell())
 }
 

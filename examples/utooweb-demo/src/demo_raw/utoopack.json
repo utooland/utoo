@@ -1,5 +1,4 @@
 {
-  "mode": "development",
   "output": {
     "publicPath": "/dist"
   },

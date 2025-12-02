@@ -1,5 +1,5 @@
 import { Issue } from "@utoo/pack-shared";
-import { DirEntryType } from "./utoo";
+import initWasm, { DirEntryType } from "./utoo";
 
 export interface RawDirent {
   name: string;
@@ -55,7 +55,7 @@ export interface ProjectEndpoint {
 
 export interface ProjectOptions {
   cwd: string;
-  workerUrl?: string;
+  workerUrl: string;
   threadWorkerUrl: string;
   wasmUrl?: string;
   serviceWorker?: ServiceWorkerOptions;
@@ -66,3 +66,5 @@ export interface ServiceWorkerOptions {
   url: string;
   scope: string;
 }
+
+export type Binding = Awaited<ReturnType<typeof initWasm>>;

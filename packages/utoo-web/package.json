@@ -19,15 +19,25 @@
     "dev:pm": "npm run build-wasm:pm -- --profile wasm-dev && npm run bindgen-dev && npm run tsc && cp src/utoo/index_bg.wasm esm/utoo",
     "wasm-opt": "wasm-opt src/utoo/index_bg.wasm -o esm/utoo/index_bg.wasm --enable-threads --enable-bulk-memory --enable-nontrapping-float-to-int -Oz",
     "build": "npm run build-wasm -- --release && npm run bindgen-build && npm run tsc && npm run wasm-opt",
-    "build:local": "npm run build-wasm -- --profile release-local && npm run bindgen-build:local && npm run tsc && cp src/utoo/index_bg.wasm esm/utoo",
-    "prepublishOnly": "npm run build"
+    "build:local": "npm run build-wasm -- --profile release-local && npm run bindgen-build:local && npm run tsc && cp src/utoo/index_bg.wasm esm/utoo && npm run build-loaderWorker",
+    "build-loaderWorker": "node cli/umd.js -e ./src/webpackLoaders/worker/index.ts -o ./src/webpackLoaders/workerContent.js -t webworker --se true",
+    "prepublishOnly": "npm run build-loaderWorker && npm run build"
   },
   "dependencies": {
     "comlink": "^4.4.2",
+    "systemjs": "^6.15.1",
+    "loader-runner": "^4.3.0",
+    "less": "^4.0.0",
     "@utoo/pack-shared": "^0.0.7"
   },
   "devDependencies": {
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "@types/systemjs": "^6.15.1",
+    "webpack": "^5.0.0",
+    "webpack-merge": "^6.0.1",
+    "node-stdlib-browser": "^1.3.1",
+    "ts-loader": "^9.5.2",
+    "yargs": "^18.0.0"
   },
   "engines": {
     "node": ">= 20"

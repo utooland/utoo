@@ -1,0 +1,10 @@
+body {
+  background-color: red;
+}
+
+@some: foo;
+
+div {
+  margin: if((2 > 1), 0, 3px);
+  color: if((iscolor(@some)), @some, black);
+}

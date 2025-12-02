@@ -9,7 +9,9 @@ ignore-vcs = true
 extend-exclude = [
     "next.js/",
     "crates/pack-tests/tests/snapshot/**/output/",
-    "crates/pack-core/js/src/node-polyfills"
+    "crates/pack-core/js/src/node-polyfills",
+    "packages/utoo-web/src/webpackLoaders/nodePolyFillRaw",
+    "packages/utoo-web/src/webpackLoaders/workerContent.js"
 ]
 
 [type.sourcemap]

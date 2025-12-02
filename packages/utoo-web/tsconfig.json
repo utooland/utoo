@@ -16,5 +16,6 @@
     "strict": true,
     "skipLibCheck": true,
     "noImplicitReturns": true
-  }
+  },
+  "exclude": ["./esm", "./cli", "./tmp"]
 }
