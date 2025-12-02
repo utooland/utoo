@@ -31,6 +31,11 @@ jobs:
             platform_os: linux
             platform_cpu: arm64
 
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform_os: win32
+            platform_cpu: x64
+
     runs-on: ${{ matrix.os }}
     container:
       image: ${{ matrix.container }}
@@ -114,12 +119,35 @@ jobs:
           command: build
           args: --release --bin utoo --target ${{ matrix.target }}
 
-      - name: Package Binaries
+      - name: Package Binaries  
+        run: |  
+          cd target/${{ matrix.target }}/release  
+          if [ "${{ matrix.platform_os }}" = "win32" ]; then  
+            tar -czf ../../../utoo-${{ matrix.platform_os }}-${{ matrix.platform_cpu }}.tar.gz utoo.exe  
+          else  
+            tar -czf ../../../utoo-${{ matrix.platform_os }}-${{ matrix.platform_cpu }}.tar.gz utoo  
+          fi  
+        shell: bash  
+  
+      - name: Verify npm package (dry-run)
+        env:
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
         run: |
-          cd target/${{ matrix.target }}/release
-          tar -czf ../../../utoo-${{ matrix.platform_os }}-${{ matrix.platform_cpu }}.tar.gz \
-            utoo
-
+          cd vendor/scripts
+          
+          BINS=("utoo")
+          for BIN in "${BINS[@]}"; do
+            PACKAGE_NAME="$BIN"
+            
+            if [ "${{ matrix.platform_os }}" = "win32" ]; then
+              BINARY_PATH="../../target/${{ matrix.target }}/release/${BIN}.exe"
+            else
+              BINARY_PATH="../../target/${{ matrix.target }}/release/${BIN}"
+            fi
+            
+            ./npm-binary.sh "$PACKAGE_NAME" "$VERSION" "$BINARY_PATH" "${{ matrix.platform_os }}" "${{ matrix.platform_cpu }}"
+          done
+      
       - name: Upload Release Asset
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -142,12 +170,18 @@ jobs:
         run: |
           set -e
           cd vendor/scripts
+          
           BINS=("utoo")
           for BIN in "${BINS[@]}"; do
-            PACKAGE_NAME=$(echo "$BIN")
-            ./npm-binary.sh "$PACKAGE_NAME" "$VERSION" \
-              "../../target/${{ matrix.target }}/release/$BIN" \
-              "${{ matrix.platform_os }}" "${{ matrix.platform_cpu }}"
+            PACKAGE_NAME="$BIN"
+            
+            if [ "${{ matrix.platform_os }}" = "win32" ]; then
+              BINARY_PATH="../../target/${{ matrix.target }}/release/${BIN}.exe"
+            else
+              BINARY_PATH="../../target/${{ matrix.target }}/release/${BIN}"
+            fi
+            
+            ./npm-binary.sh "$PACKAGE_NAME" "$VERSION" "$BINARY_PATH" "${{ matrix.platform_os }}" "${{ matrix.platform_cpu }}"
           done
 
   publish-main:

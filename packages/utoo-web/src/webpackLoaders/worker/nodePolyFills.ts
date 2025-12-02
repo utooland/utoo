@@ -14,12 +14,13 @@ export default {
 	fs: {
 		readFile(path: string, options: any, cb: Function) {
 			// @ts-ignore
-			return self.workerData.readFile(path, options).then(cb)
+			return self.workerData.readFile(path, options).then((data: any) => cb(null, data),
+				(err: Error) => cb(err))
 		},
 	},
 	path,
 	url,
 	util,
-  less,
-  ["less-loader"]: lessLoader
+	less,
+	["less-loader"]: lessLoader
 };

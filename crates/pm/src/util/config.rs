@@ -173,6 +173,15 @@ static REGISTRY: LazyLock<ConfigValue<String>> =
 static LEGACY_PEER_DEPS: LazyLock<ConfigValue<bool>> =
     LazyLock::new(|| ConfigValue::new("legacy-peer-deps", true));
 
+static CACHE_DIR: LazyLock<ConfigValue<String>> = LazyLock::new(|| {
+    let default_cache = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".cache/nm")
+        .to_string_lossy()
+        .to_string();
+    ConfigValue::new("cache-dir", default_cache)
+});
+
 static IS_NPM_REGISTRY: OnceLock<bool> = OnceLock::new();
 
 fn is_npm_registry_url(url: &str) -> bool {
@@ -239,4 +248,90 @@ pub fn set_omit(value: HashSet<OmitType>) {
 
 pub fn get_omit() -> HashSet<OmitType> {
     OMIT.get().cloned().unwrap_or_default()
+}
+
+pub async fn set_cache_dir(cache_dir: Option<String>) {
+    // Priority: CLI argument > UTOO_CACHE_DIR env > config > default
+    let final_cache_dir = if let Some(dir) = cache_dir {
+        Some(dir)
+    } else if let Ok(env_dir) = std::env::var("UTOO_CACHE_DIR")
+        && !env_dir.is_empty()
+    {
+        Some(env_dir)
+    } else {
+        // Read from config file if no CLI arg or env var
+        Config::load(false)
+            .await
+            .ok()
+            .and_then(|config| config.get("cache-dir").ok().flatten())
+    };
+
+    CACHE_DIR.set(final_cache_dir);
+}
+
+pub fn get_cache_dir() -> PathBuf {
+    PathBuf::from(CACHE_DIR.get_sync())
+}
+
+#[cfg(test)]
+mod cache_dir_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_cache_dir_default() {
+        // Test default cache directory
+        let default_cache = dirs::home_dir()
+            .unwrap()
+            .join(".cache/nm")
+            .to_string_lossy()
+            .to_string();
+
+        // Create a fresh ConfigValue to simulate first access
+        let cache_config = ConfigValue::new("cache-dir", default_cache.clone());
+        let result = cache_config.get_sync();
+
+        assert_eq!(result, default_cache);
+    }
+
+    #[test]
+    fn test_config_value_parser_string() {
+        let config = ConfigValue::new("test-key", "default-value".to_string());
+        let parsed = config.parse_config_value("custom-value");
+        assert_eq!(parsed, "custom-value");
+    }
+
+    #[test]
+    fn test_config_value_parser_bool() {
+        let config = ConfigValue::new("test-bool", false);
+        assert!(config.parse_config_value("true"));
+        assert!(config.parse_config_value("TRUE"));
+        assert!(config.parse_config_value("True"));
+        assert!(!config.parse_config_value("false"));
+        assert!(!config.parse_config_value("anything"));
+    }
+
+    #[tokio::test]
+    async fn test_cache_dir_from_config_file() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let config_path = temp_dir.path().join("config.toml");
+
+        // Create a config file with cache-dir setting
+        let custom_path = "/tmp/config-cache-test";
+        let config_content = format!(
+            r#"
+[values]
+cache-dir = "{}"
+"#,
+            custom_path
+        );
+        std::fs::write(&config_path, config_content)?;
+
+        // Load config from file
+        let config = Config::load_from_path(&config_path).await?;
+        let cache_dir = config.get("cache-dir")?.unwrap();
+
+        assert_eq!(cache_dir, custom_path);
+        Ok(())
+    }
 }

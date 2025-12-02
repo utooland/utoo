@@ -21,7 +21,7 @@
     "build": "npm run build-wasm -- --release && npm run bindgen-build && npm run tsc && npm run wasm-opt",
     "build:local": "npm run build-wasm -- --profile release-local && npm run bindgen-build:local && npm run tsc && cp src/utoo/index_bg.wasm esm/utoo && npm run build-loaderWorker",
     "build-loaderWorker": "node cli/umd.js -e ./src/webpackLoaders/worker/index.ts -o ./src/webpackLoaders/workerContent.js -t webworker --se true",
-    "prepublishOnly": "npm run build-loaderWorker && npm run build"
+    "prepublishOnly": "npm run build && npm run build-loaderWorker"
   },
   "dependencies": {
     "comlink": "^4.4.2",

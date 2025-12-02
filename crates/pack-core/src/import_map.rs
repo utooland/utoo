@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::LazyLock};
+use std::collections::BTreeMap;
 
 use anyhow::Result;
 use rustc_hash::FxHashMap;
@@ -11,108 +11,12 @@ use turbopack_core::resolve::{
 };
 use turbopack_node::execution_context::ExecutionContext;
 
-use crate::{config::Config, embed_js, mode::Mode, util::convert_to_project_relative};
+use crate::{
+    config::Config, embed_js, mode::Mode, node_polyfill::get_node_polyfill_import_map,
+    util::convert_to_project_relative,
+};
 
 pub const UTOO_STYLE_LOADER: &str = "@utoo/style-loader";
-
-/// Node.js module to polyfill mapping
-/// These polyfills are located in pack-core/js/src/node-polyfills/
-static NODE_POLYFILL_ALIASES: LazyLock<[(RcStr, RcStr); 23]> = LazyLock::new(|| {
-    [
-        (
-            rcstr!("assert"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/assert/assert.js"),
-        ),
-        (
-            rcstr!("buffer"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/buffer/index.js"),
-        ),
-        (
-            rcstr!("constants"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/constants-browserify/constants.json"),
-        ),
-        (
-            rcstr!("crypto"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/crypto-browserify/index.js"),
-        ),
-        (
-            rcstr!("domain"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/domain-browser/index.js"),
-        ),
-        (
-            rcstr!("events"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/events/events.js"),
-        ),
-        (
-            rcstr!("http"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/stream-http/index.js"),
-        ),
-        (
-            rcstr!("https"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/https-browserify/index.js"),
-        ),
-        (
-            rcstr!("os"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/os-browserify/browser.js"),
-        ),
-        (
-            rcstr!("path"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/path-browserify/index.js"),
-        ),
-        (
-            rcstr!("process"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/process/browser.js"),
-        ),
-        (
-            rcstr!("punycode"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/punycode/punycode.js"),
-        ),
-        (
-            rcstr!("querystring"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/querystring-es3/index.js"),
-        ),
-        (
-            rcstr!("stream"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/stream-browserify/index.js"),
-        ),
-        (
-            rcstr!("string_decoder"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/string_decoder/string_decoder.js"),
-        ),
-        (
-            rcstr!("timers"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/timers-browserify/main.js"),
-        ),
-        (
-            rcstr!("tty"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/tty-browserify/index.js"),
-        ),
-        (
-            rcstr!("url"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/native-url/index.js"),
-        ),
-        (
-            rcstr!("util"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/util/util.js"),
-        ),
-        (
-            rcstr!("vm"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/vm-browserify/index.js"),
-        ),
-        (
-            rcstr!("zlib"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/browserify-zlib/index.js"),
-        ),
-        (
-            rcstr!("setimmediate"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/setimmediate/setImmediate.js"),
-        ),
-        (
-            rcstr!("fs"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/empty/empty.js"),
-        ),
-    ]
-});
 
 pub fn mdx_import_source_file() -> RcStr {
     unreachable!()
@@ -151,18 +55,6 @@ pub async fn get_client_fallback_import_map(node_polyfill: bool) -> Result<Vc<Im
         import_map.extend_ref(&*get_node_polyfill_import_map().await?);
     }
 
-    Ok(import_map.cell())
-}
-
-#[turbo_tasks::function]
-async fn get_node_polyfill_import_map() -> Result<Vc<ImportMap>> {
-    let mut import_map = ImportMap::empty();
-    for (original, alias) in NODE_POLYFILL_ALIASES.iter() {
-        import_map.insert_exact_alias(
-            original.clone(),
-            request_to_import_mapping(crate::embed_js::embed_fs().root().owned().await?, alias),
-        );
-    }
     Ok(import_map.cell())
 }
 

@@ -18,6 +18,8 @@ jobs:
             target: x86_64-apple-darwin
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
 
     name: utoopm-e2e-${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
@@ -46,7 +48,8 @@ jobs:
           nvm use 22
           nvm alias default 22
           echo "NVM_DIR=$HOME/.nvm" >> $GITHUB_ENV
-          echo "$HOME/.nvm/versions/node/v22.*/bin" >> $GITHUB_PATH
+          NODE_PATH=$(find $HOME/.nvm/versions/node -name "v22.*" -type d | head -1)
+          echo "$NODE_PATH/bin" >> $GITHUB_PATH
           node -p process.arch
           npm -v
           '
@@ -66,36 +69,97 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      # - name: Cache nm cache
-      #   uses: actions/cache@v4
-      #   with:
-      #     path: ~/.cache/nm
-      #     key: e2e-nm-cache
-      #     restore-keys: |
-      #       e2e-nm-cache
-
       - name: Build utoo-pm
-        run: cargo build --release --target ${{ matrix.settings.target }} --bin utoo
+        run: cargo build --release --target ${{ matrix.settings.target }} --bin utoo -p utoo-pm
 
-      - name: Update PATH with target directory
+      - name: Update PATH (Unix)
+        if: matrix.settings.host != 'windows-latest'
         run: echo "${{ github.workspace }}/target/${{ matrix.settings.target }}/release" >> $GITHUB_PATH
 
-      - name: Create ut symlink for utoo
+      - name: Update PATH (Windows)
+        if: matrix.settings.host == 'windows-latest'
+        shell: pwsh
+        run: |
+          $binPath = "${{ github.workspace }}\target\${{ matrix.settings.target }}\release"
+          echo $binPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          Write-Host "Added to PATH: $binPath"
+
+      - name: Create ut symlink for utoo (Unix)
+        if: matrix.settings.host != 'windows-latest'
         run: ln -sf utoo $(dirname $(which utoo))/ut
 
+      - name: Create ut copy for utoo (Windows)
+        if: matrix.settings.host == 'windows-latest'
+        shell: pwsh
+        run: |
+          $binPath = "${{ github.workspace }}\target\${{ matrix.settings.target }}\release"
+          $utooPath = Join-Path $binPath "utoo.exe"
+          $utPath = Join-Path $binPath "ut.exe"
+          
+          if (Test-Path $utooPath) {
+            Copy-Item $utooPath $utPath -Force
+            Write-Host "Created ut.exe at: $utPath"
+          } else {
+            Write-Error "utoo.exe not found at: $utooPath"
+            exit 1
+          }
+
+      - name: Verify tools (Unix)
+        if: matrix.settings.host != 'windows-latest'
+        run: |
+          echo "utoo: $(which utoo)"
+          echo "ut: $(which ut)"
+          utoo --version
+          ut --version
+
+      - name: Verify tools (Windows)
+        if: matrix.settings.host == 'windows-latest'
+        shell: pwsh
+        run: |
+          $binPath = "${{ github.workspace }}\target\${{ matrix.settings.target }}\release"
+          Write-Host "Binary path: $binPath"
+          Write-Host "utoo.exe: $(Test-Path "$binPath\utoo.exe")"
+          Write-Host "ut.exe: $(Test-Path "$binPath\ut.exe")"
+          
+          # Add to current session PATH
+          $env:PATH = "$binPath;$env:PATH"
+          
+          # Verify commands
+          Get-Command utoo | Select-Object -ExpandProperty Source
+          Get-Command ut | Select-Object -ExpandProperty Source
+          utoo --version
+          ut --version
+
       - name: Make script executable
+        if: matrix.settings.host != 'windows-latest'
         run: chmod +x e2e/utoo-pm.sh
 
-      - name: Run e2e tests
+      - name: Run e2e tests (Unix)
+        if: matrix.settings.host != 'windows-latest'
         run: |
           if [ "${{ matrix.settings.target }}" = "x86_64-apple-darwin" ]; then
             arch -x86_64 bash -c '
             export NVM_DIR="$HOME/.nvm"
             [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
             nvm use 22
-            e2e/utoo-pm.sh
+            bash e2e/utoo-pm.sh
             '
           else
-            e2e/utoo-pm.sh
+            bash e2e/utoo-pm.sh
           fi
         shell: bash
+
+      - name: Run e2e tests (Windows)
+        if: matrix.settings.host == 'windows-latest'
+        shell: pwsh
+        run: |
+          git config --system core.longpaths true
+          
+          # Ensure binaries are in PATH
+          $binPath = "${{ github.workspace }}\target\${{ matrix.settings.target }}\release"
+          $env:PATH = "$binPath;$env:PATH"
+          
+          Write-Host "Running e2e tests..."
+          Write-Host "Working directory: $(Get-Location)"
+          
+          pwsh -File e2e/utoo-pm.ps1 --verbose

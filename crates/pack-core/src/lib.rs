@@ -10,6 +10,7 @@ pub mod emit;
 pub mod import_map;
 pub mod library;
 pub mod mode;
+pub mod node_polyfill;
 pub mod server;
 pub mod server_component;
 pub mod shared;
