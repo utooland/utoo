@@ -1,14 +1,25 @@
 #!/bin/bash
 
-# Get CPU & OS info
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-ARCH=$(uname -m)
-
-if [ "$ARCH" = "x86_64" ]; then
-    ARCH="x64"
-elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-    ARCH="arm64"
-fi
+# Get CPU & OS info - compatible with Git Bash on Windows  
+if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]]; then  
+    OS="win32"  
+    # On Windows, use PROCESSOR_ARCHITECTURE  
+    if [[ "$PROCESSOR_ARCHITECTURE" == "AMD64" ]] || [[ "$PROCESSOR_ARCHITECTURE" == "x86_64" ]]; then  
+        ARCH="x64"  
+    elif [[ "$PROCESSOR_ARCHITECTURE" == "ARM64" ]]; then  
+        ARCH="arm64"  
+    else  
+        ARCH="x64"  # default  
+    fi  
+else  
+    OS=$(uname -s | tr '[:upper:]' '[:lower:]')  
+    ARCH=$(uname -m)  
+    if [ "$ARCH" = "x86_64" ]; then  
+        ARCH="x64"  
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then  
+        ARCH="arm64"  
+    fi  
+fi  
 
 # Function to find node_modules directory recursively
 find_node_modules() {

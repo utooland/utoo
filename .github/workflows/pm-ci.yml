@@ -31,40 +31,77 @@ jobs:
             test: |
               cargo test -p utoo-pm --target aarch64-unknown-linux-gnu --  --nocapture
 
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+            test: |
+              cargo test -p utoo-pm --target x86_64-pc-windows-msvc -- --nocapture
+
     name: utoopm-ci-${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: false
+      
       - name: Add SSH private keys for submodule repositories
         uses: webfactory/ssh-agent@v0.7.0
         with:
           ssh-private-key: |
             ${{ secrets.CI_SUBMODULE }}
+      
       - name: Init git submodules
         run: git submodule update --init --depth 1
+      
+      # Add: Configure Git longpaths on Windows
+      - name: Configure Git (Windows)
+        if: runner.os == 'Windows'
+        run: git config --system core.longpaths true
+      
+      # Add: Install OpenSSL on Windows
+      - name: Install OpenSSL (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          Write-Host "Installing OpenSSL via vcpkg..."
+          vcpkg install openssl:x64-windows-static-md
+          
+          $openssl_dir = "C:\vcpkg\installed\x64-windows-static-md"
+          echo "OPENSSL_DIR=$openssl_dir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "OPENSSL_NO_VENDOR=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "OPENSSL_STATIC=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          
+          Write-Host "OpenSSL installed at: $openssl_dir"
+          if (Test-Path "$openssl_dir\lib") {
+            Get-ChildItem "$openssl_dir\lib" -Filter "*.lib" | Select-Object Name | Format-Table
+          }
+      
       - name: Setup node
         uses: actions/setup-node@v4
         if: ${{ !matrix.settings.docker }}
         with:
           node-version: 20
-      - name: Install
+      
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         if: ${{ !matrix.settings.docker }}
         with:
           toolchain: nightly-2025-10-27
           targets: ${{ matrix.settings.target }}
+      
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+      
       - name: Setup toolchain
         run: ${{ matrix.settings.setup }}
         if: ${{ matrix.settings.setup }}
         shell: bash
+      
       - name: Install dependencies
         run: npm install
+      
       - name: Setup node x86
         uses: actions/setup-node@v4
+      
       - name: Test in docker
         uses: addnab/docker-run-action@v3
         if: ${{ matrix.settings.docker }}
@@ -72,6 +109,7 @@ jobs:
           image: ${{ matrix.settings.docker }}
           options: "-v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}:/build -w /build"
           run: ${{ matrix.settings.test }}
+      
       - name: Test
         run: ${{ matrix.settings.test }}
         if: ${{ !matrix.settings.docker }}
