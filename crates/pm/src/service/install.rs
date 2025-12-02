@@ -62,6 +62,44 @@ fn should_omit_package(package: &Package, omit: &std::collections::HashSet<OmitT
     false
 }
 
+/// Check if a path is a symlink using async metadata
+async fn is_symlink_async(path: &Path) -> bool {
+    tokio::fs::symlink_metadata(path)
+        .await
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+}
+
+/// Remove a symlink with proper platform-specific handling
+async fn remove_symlink_cross_platform(path: &Path) -> Result<(), std::io::Error> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+
+        // On Windows, we need to check if the symlink points to a directory
+        let metadata = tokio::fs::symlink_metadata(path).await?;
+
+        if !metadata.file_type().is_symlink() {
+            return Ok(());
+        }
+
+        // Check if it's a directory symlink by checking the file attributes
+        const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+        let is_dir_symlink = (metadata.file_attributes() & FILE_ATTRIBUTE_DIRECTORY) != 0;
+
+        if is_dir_symlink {
+            tokio::fs::remove_dir(path).await
+        } else {
+            tokio::fs::remove_file(path).await
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        tokio::fs::remove_file(path).await
+    }
+}
+
 /// Clean up a single node_modules directory
 async fn clean_node_modules_dir(
     node_modules: &Path,
@@ -72,7 +110,7 @@ async fn clean_node_modules_dir(
     if let Ok(mut entries) = tokio::fs::read_dir(node_modules).await {
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
-            if path.is_symlink() {
+            if is_symlink_async(&path).await {
                 clean_symlink(&path).await?;
             } else if path.is_dir() {
                 clean_directory(&path).await?;
@@ -88,9 +126,11 @@ async fn clean_node_modules_dir(
 /// Clean up a symlink
 async fn clean_symlink(path: &Path) -> Result<()> {
     tracing::debug!("Removing symlink: {}", path.display());
-    if let Err(e) = tokio::fs::remove_file(path).await {
+
+    if let Err(e) = remove_symlink_cross_platform(path).await {
         tracing::debug!("Failed to remove symlink {}: {}", path.display(), e);
     }
+
     Ok(())
 }
 
@@ -113,9 +153,12 @@ async fn clean_scoped_package(path: &Path) -> Result<()> {
     if let Ok(mut scope_entries) = tokio::fs::read_dir(path).await {
         while let Ok(Some(scope_entry)) = scope_entries.next_entry().await {
             let scope_path = scope_entry.path();
-            if scope_path.is_symlink() {
+
+            // Use async metadata check for symlink
+            if is_symlink_async(&scope_path).await {
                 tracing::debug!("Removing scoped symlink: {}", scope_path.display());
-                if let Err(e) = tokio::fs::remove_file(&scope_path).await {
+
+                if let Err(e) = remove_symlink_cross_platform(&scope_path).await {
                     tracing::debug!(
                         "Failed to remove scoped symlink {}: {}",
                         scope_path.display(),
@@ -493,6 +536,9 @@ mod tests {
         #[cfg(windows)]
         std::os::windows::fs::symlink_dir(&target_dir, &symlink_path)?;
 
+        // Verify symlink exists
+        assert!(is_symlink_async(&symlink_path).await);
+
         // Test cleaning
         clean_symlink(&symlink_path).await?;
 
@@ -518,6 +564,9 @@ mod tests {
         std::os::unix::fs::symlink(&target_dir, &symlink_path)?;
         #[cfg(windows)]
         std::os::windows::fs::symlink_dir(&target_dir, &symlink_path)?;
+
+        // Verify symlink exists
+        assert!(is_symlink_async(&symlink_path).await);
 
         // Test cleaning
         clean_scoped_package(&scope_dir).await?;
