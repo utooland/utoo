@@ -1,4 +1,4 @@
-error - [bindings] /crates/pack-tests/tests/snapshot/typescript/interface_export/input/index.ts:1:0  Export Target doesn't exist in target module
+warning - [bindings] /crates/pack-tests/tests/snapshot/typescript/interface_export/input/index.ts:1:0  Export Target doesn't exist in target module
   
          + v----------------------------------------------v
        1 + import { Args, Target } from './item-interface';

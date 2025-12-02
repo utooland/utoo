@@ -750,7 +750,13 @@ impl Project {
                 build_environment,
                 mode.runtime_type(),
             )
-            .source_maps(source_maps)
+            .source_maps(
+                if cfg!(all(target_family = "wasm", target_os = "unknown")) {
+                    SourceMapsType::None
+                } else {
+                    source_maps
+                },
+            )
             .build(),
         );
 

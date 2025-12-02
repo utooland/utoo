@@ -11,6 +11,8 @@ extend-exclude = [
     "crates/pack-tests/tests/snapshot/**/output/",
     "crates/pack-core/js/src/node-polyfills",
     "e2e/pm/**",
+    "packages/utoo-web/src/webpackLoaders/nodePolyFillRaw",
+    "packages/utoo-web/src/webpackLoaders/workerContent.js"
 ]
 
 [type.sourcemap]

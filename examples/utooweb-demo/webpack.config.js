@@ -20,12 +20,12 @@ module.exports = [
     module: {
       rules: [
         {
-          test: /raw\/.*/,
+          test: /demo_raw\/.*/,
           type: "asset/source",
         },
         {
           test: /\.tsx?$/,
-          exclude: /node_modules/,
+          exclude: /(node_modules)|(demo_raw\/.*)/,
           use: {
             loader: "ts-loader",
             options: {
@@ -35,6 +35,7 @@ module.exports = [
         },
         {
           test: /\.css$/,
+          exclude: /demo_raw\/.*/,
           use: [MiniCssExtractPlugin.loader, "css-loader"],
         },
       ],
@@ -76,6 +77,11 @@ module.exports = [
   {
     mode: "development",
     entry: {
+      worker: {
+        import: "./src/worker.ts",
+        filename: "worker.js",
+        chunkLoading: false,
+      },
       tokioWorker: {
         import: "./src/threadWorker.ts",
         filename: "threadWorker.js",
@@ -90,7 +96,7 @@ module.exports = [
     devtool: "cheap-module-source-map",
     output: {
       path: path.resolve(__dirname, "dist"),
-      clean: true,
+      clean: false,
     },
     module: {
       rules: [

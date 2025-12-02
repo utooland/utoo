@@ -7,6 +7,7 @@ export const serviceWorkerScope = "/preview";
 export const initializeProject = async () => {
     const projectInstance = new UtooProject({
         cwd: projectName,
+        workerUrl: "http://localhost:8081/worker.js", 
         threadWorkerUrl: "http://localhost:8081/threadWorker.js",
         serviceWorker: {
             url: "http://localhost:8081/serviceWorker.js",
