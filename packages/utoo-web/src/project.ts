@@ -50,9 +50,7 @@ export class Project implements ProjectEndpoint {
     this.remote ??= comlink.wrap(port1);
 
     if (!ProjectWorker) {
-      ProjectWorker = workerUrl
-        ? new Worker(workerUrl)
-        : new Worker(new URL("./worker", import.meta.url));
+      ProjectWorker = new Worker(workerUrl);
       window.addEventListener("message", (e) => {
         this.connectWorker(e);
       });

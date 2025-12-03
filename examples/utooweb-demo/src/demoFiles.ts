@@ -1,4 +1,6 @@
 // @ts-ignore
+import AppLess from "./demo_raw/App.less";
+// @ts-ignore
 import AppTsx from "./demo_raw/App.tsx";
 // @ts-ignore
 import IndexCss from "./demo_raw/index.css";
@@ -19,6 +21,7 @@ export const demoFiles: Record<string, any> = {
   "src/index.tsx": IndexTsx,
   "src/index.css": IndexCss,
   "src/App.tsx": AppTsx,
+  "src/App.less": AppLess,
   "postcss.config.json": PostCssConfig,
   "tailwind.config.json": TailwindConfig,
   "utoopack.json": UtoopackJson,

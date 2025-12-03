@@ -149,7 +149,11 @@ pub async fn webpack_loader_options(
     Ok(Vc::cell(Some(
         WebpackLoadersOptions {
             rules: ResolvedVc::cell(rules),
-            loader_runner_package: Some(loader_runner_package_mapping().to_resolved().await?),
+            loader_runner_package: Some(
+                loader_runner_package_mapping(project_path)
+                    .to_resolved()
+                    .await?,
+            ),
             builtin_conditions: UtooWebpackLoaderBuiltinConditionSet::new(builtin_conditions)
                 .to_resolved()
                 .await?,
@@ -159,13 +163,22 @@ pub async fn webpack_loader_options(
 }
 
 #[turbo_tasks::function]
-async fn loader_runner_package_mapping() -> Result<Vc<ImportMapping>> {
-    Ok(
-        ImportMapping::Direct(ResolveResult::primary(ResolveResultItem::External {
-            name: rcstr!("loader-runner"),
-            ty: ExternalType::CommonJs,
-            traced: ExternalTraced::Untraced,
-        }))
-        .cell(),
-    )
+#[allow(unused_variables)]
+async fn loader_runner_package_mapping(project_path: FileSystemPath) -> Result<Vc<ImportMapping>> {
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+    {
+        Ok(
+            ImportMapping::Direct(ResolveResult::primary(ResolveResultItem::External {
+                name: rcstr!("loader-runner"),
+                ty: ExternalType::CommonJs,
+                traced: ExternalTraced::Untraced,
+            }))
+            .cell(),
+        )
+    }
+
+    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+    {
+        Ok(ImportMapping::PrimaryAlternative(rcstr!("loader-runner"), Some(project_path)).cell())
+    }
 }

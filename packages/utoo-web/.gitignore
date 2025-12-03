@@ -1,3 +1,5 @@
 esm
+tmp
+node_modules
 src/utoo/*
 !src/utoo/index.d.ts

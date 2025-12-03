@@ -1,4 +1,4 @@
-import "./index.css";
+import "./App.less"
 
 import React from 'react';
 
