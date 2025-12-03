@@ -447,7 +447,8 @@ pub async fn project_shutdown(
 ) {
     project.turbo_tasks.stop_and_wait().await;
     project_on_exit_internal(&project).await;
-    turbopack_node::worker_pool::shutdown();
+    // FIXME
+    // turbopack_node::worker_pool::shutdown();
 }
 
 #[napi(object)]
