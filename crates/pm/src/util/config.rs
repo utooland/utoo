@@ -167,6 +167,12 @@ impl ConfigValueParser<bool> for ConfigValue<bool> {
     }
 }
 
+impl ConfigValueParser<usize> for ConfigValue<usize> {
+    fn parse_config_value(&self, value: &str) -> usize {
+        value.parse().unwrap_or(self.default)
+    }
+}
+
 static REGISTRY: LazyLock<ConfigValue<String>> =
     LazyLock::new(|| ConfigValue::new("registry", "https://registry.npmmirror.com".to_string()));
 
@@ -248,6 +254,29 @@ pub fn set_omit(value: HashSet<OmitType>) {
 
 pub fn get_omit() -> HashSet<OmitType> {
     OMIT.get().cloned().unwrap_or_default()
+}
+
+// Preload concurrency configuration
+static PRELOAD_MANIFESTS_LIMIT: LazyLock<ConfigValue<usize>> =
+    LazyLock::new(|| ConfigValue::new("preload-manifests-limit", 64));
+
+static PRELOAD_DOWNLOADS_LIMIT: LazyLock<ConfigValue<usize>> =
+    LazyLock::new(|| ConfigValue::new("preload-downloads-limit", 100));
+
+pub fn set_preload_manifests_limit(value: Option<usize>) {
+    PRELOAD_MANIFESTS_LIMIT.set(value);
+}
+
+pub async fn get_preload_manifests_limit() -> usize {
+    PRELOAD_MANIFESTS_LIMIT.get().await
+}
+
+pub fn set_preload_downloads_limit(value: Option<usize>) {
+    PRELOAD_DOWNLOADS_LIMIT.set(value);
+}
+
+pub async fn get_preload_downloads_limit() -> usize {
+    PRELOAD_DOWNLOADS_LIMIT.get().await
 }
 
 pub async fn set_cache_dir(cache_dir: Option<String>) {

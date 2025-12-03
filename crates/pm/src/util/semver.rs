@@ -34,10 +34,6 @@ pub fn matches(range: &str, version: &str) -> bool {
     req.matches(&version)
 }
 
-pub fn is_valid_version(version: &str) -> bool {
-    Version::parse_from_npm(version).is_ok()
-}
-
 /// Find the maximum version from a list of versions that satisfies the given range
 pub fn max_satisfying<'a>(versions: impl Iterator<Item = &'a str>, range: &str) -> Option<Version> {
     let req = VersionReq::parse_from_npm(range).ok()?;

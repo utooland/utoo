@@ -14,7 +14,10 @@ use cmd::update::update;
 use cmd::view::view;
 use cmd::{clean::clean, deps::build_workspace};
 use helper::auto_update::init_auto_update;
-use util::config::{set_cache_dir, set_legacy_peer_deps, set_omit, set_registry};
+use util::config::{
+    set_cache_dir, set_legacy_peer_deps, set_omit, set_preload_downloads_limit,
+    set_preload_manifests_limit, set_registry,
+};
 use util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
 use util::save_type::{OmitType, PackageAction, SaveType, parse_save_type};
 
@@ -63,6 +66,14 @@ struct Cli {
 
     #[arg(long, global = true, action = clap::ArgAction::SetTrue)]
     legacy_peer_deps: Option<bool>,
+
+    /// Maximum concurrent manifest fetches during preload (default: 64)
+    #[arg(long, global = true)]
+    preload_manifests_limit: Option<usize>,
+
+    /// Maximum concurrent tarball downloads during preload (default: 100)
+    #[arg(long, global = true)]
+    preload_downloads_limit: Option<usize>,
 
     /// Workspace to operate in
     #[arg(long, global = true, hide = true)]
@@ -303,6 +314,14 @@ async fn async_main() -> Result<()> {
     // set legacy_peer_deps when set --legacy
     if cli.legacy_peer_deps == Some(true) {
         set_legacy_peer_deps(cli.legacy_peer_deps);
+    }
+
+    // set preload concurrency limits if specified
+    if cli.preload_manifests_limit.is_some() {
+        set_preload_manifests_limit(cli.preload_manifests_limit);
+    }
+    if cli.preload_downloads_limit.is_some() {
+        set_preload_downloads_limit(cli.preload_downloads_limit);
     }
 
     // Initialize auto update with immediate check and background monitoring
