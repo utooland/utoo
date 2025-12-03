@@ -304,7 +304,7 @@ pub async fn project_new(
 
         let subscriber = subscriber.with(FilterLayer::try_new(&trace).unwrap());
 
-        let internal_dir = PathBuf::from(&options.pack_path).join(".turbopack");
+        let internal_dir = PathBuf::from(&options.project_path).join(".turbopack");
         std::fs::create_dir_all(&internal_dir)
             .context("Unable to create .turbopack directory")
             .unwrap();
@@ -357,7 +357,7 @@ pub async fn project_new(
     let persistent_caching = turbo_engine_options.persistent_caching.unwrap_or_default();
     let dependency_tracking = turbo_engine_options.dependency_tracking.unwrap_or(true);
     let turbo_tasks = create_turbo_tasks(
-        PathBuf::from(&options.pack_path),
+        PathBuf::from(&options.project_path),
         persistent_caching,
         memory_limit,
         dependency_tracking,
