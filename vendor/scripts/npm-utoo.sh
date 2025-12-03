@@ -1,12 +1,15 @@
 #!/bin/bash
 
 # args check
-if [ "$#" -ne 1 ]; then
-    echo "Usage: $0 <version>"
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+    echo "Usage: $0 <version> [tag]"
+    echo "  version: npm package version (e.g., 1.0.0, 1.0.0-beta)"
+    echo "  tag: npm dist-tag (default: latest)"
     exit 1
 fi
 
 VERSION=$1
+NPM_TAG=${2:-latest}
 
 # create temp dir
 WORK_DIR=$(mktemp -d)
@@ -66,7 +69,8 @@ EOF
 
 # do publish
 cd "$ENTRY_DIR"
-npm publish --provenance --access public
+echo "Publishing utoo@$VERSION with tag: $NPM_TAG"
+npm publish --provenance --access public --tag "$NPM_TAG"
 cat package.json
 
 # clean up temp dir
