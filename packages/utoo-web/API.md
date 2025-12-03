@@ -8,10 +8,10 @@ Getting a project up and running involves four main steps, as demonstrated in `e
 
 Before diving into the API, it's important to understand the four main components that make `@utoo/web` work:
 
-1.  **Virtual File System**: The entire project, including source code and `node_modules`, lives in the browser's Origin Private File System (OPFS). The `Project` class provides a Node.js-like `fs` interface to interact with it.
-2.  **Project Main Worker**: The core logic of the `Project` instance runs within its own Web Worker. The `Project` object you interact with in the main thread is a proxy that delegates all core tasks (like file system operations) to this worker. This architecture is key to keeping the UI responsive.
-3.  **Thread Worker**: Heavy tasks like bundling and compilation are offloaded to a dedicated Web Worker. This ensures the main UI thread remains responsive, even during a build. We have ported [`tokio`](https://github.com/utooland/tokio) to the browser to take full advantage of multi-core CPUs for improved performance. The **Thread Worker** will be completely taken over by the tokio runtime.
-4.  **Service Worker**: A Service Worker acts as a local server. It intercepts requests from the preview `iframe`, reads the corresponding files from the OPFS, and serves them back, allowing you to preview your built application.
+1. **Virtual File System**: The entire project, including source code and `node_modules`, lives in the browser's Origin Private File System (OPFS). The `Project` class provides a Node.js-like `fs` interface to interact with it.
+2. **Project Main Worker**: The core logic of the `Project` instance runs within its own Web Worker. The `Project` object you interact with in the main thread is a proxy that delegates all core tasks (like file system operations) to this worker. This architecture is key to keeping the UI responsive.
+3. **Thread Worker**: Heavy tasks like bundling and compilation are offloaded to a dedicated Web Worker. This ensures the main UI thread remains responsive, even during a build. We have ported [`tokio`](https://github.com/utooland/tokio) to the browser to take full advantage of multi-core CPUs for improved performance. The **Thread Worker** will be completely taken over by the tokio runtime.
+4. **Service Worker**: A Service Worker acts as a local server. It intercepts requests from the preview `iframe`, reads the corresponding files from the OPFS, and serves them back, allowing you to preview your built application.
 
 ---
 
@@ -41,6 +41,11 @@ const project = new UtooProject({
         url: `${location.origin}/serviceWorker.js`,
         scope: "/preview", // The path the service worker will control.
     },
+    // ImportMap for run webpack loaders in @utoo/web
+    loadersImportMap: {
+       // accept an umd script url or a script content string
+      "xyzLoader": "https://x.y.z.js"
+    }
 });
 ```
 
@@ -84,6 +89,7 @@ for (const filePath in demoFiles) {
 Before you can build the project, you need to provide a build configuration file named `utoopack.json` in the project's root directory. This file tells `@utoo/web` how to bundle your application, specifying entry points and other build options.
 
 A typical configuration looks like this:
+
 ```json
 {
   "entry": [
@@ -95,11 +101,17 @@ A typical configuration looks like this:
   "output": {
     "path": "dist"
   },
+  "module": {
+    "rules": {
+      "*.tsx": [ "xyzLoader" ]
+    }
+  },
   "stats": true
 }
 ```
 
 You would write this file to the virtual file system just like any other source file:
+
 ```typescript
 await project.writeFile('utoopack.json', JSON.stringify(utoopackConfig, null, 2));
 ```
@@ -116,12 +128,13 @@ Creates a new project instance.
 
 **Options:**
 
-*   `cwd` (string, required): The absolute path that will serve as the root of the project in the virtual file system (e.g., `/my-app`).
-*   `workerUrl` (string, optional): Specifies the URL of the Worker thread where the `Project` instance's core logic actually runs. The `Project` object you interact with in the main thread is a proxy that delegates all core tasks (like file system operations) to this Worker. This architecture is key to keeping the UI responsive.
-*   `threadWorkerUrl` (string, required): Specifies the URL of a separate Worker thread dedicated to handling CPU-intensive tasks like bundling and compiling. This isolates the heavy build process from the `Project`'s main logic worker.
-*   `serviceWorker` (object, optional):
-    *   `url` (string, required): The URL to the service worker script.
-    *   `scope` (string, required): The URL scope that the service worker will intercept requests for. This is the base path for your preview environment.
+* `cwd` (string, required): The absolute path that will serve as the root of the project in the virtual file system (e.g., `/my-app`).
+* `workerUrl` (string, optional): Specifies the URL of the Worker thread where the `Project` instance's core logic actually runs. The `Project` object you interact with in the main thread is a proxy that delegates all core tasks (like file system operations) to this Worker. This architecture is key to keeping the UI responsive.
+* `threadWorkerUrl` (string, required): Specifies the URL of a separate Worker thread dedicated to handling CPU-intensive tasks like bundling and compiling. This isolates the heavy build process from the `Project`'s main logic worker.
+* `serviceWorker` (object, optional):
+  * `url` (string, required): The URL to the service worker script.
+  * `scope` (string, required): The URL scope that the service worker will intercept requests for. This is the base path for your preview environment.
+* `loadersImportMap` (object, optional): Loaders importMap for running webpack loaders in @utoo/web when bundling, the key is loader's name, the value can be an umd string url or umd content string. Loaders will be executed in parallel in a web worker pool.
 
 ### File System Methods
 
@@ -131,42 +144,42 @@ These methods are asynchronous and mimic the Node.js `fs` API.
 
 Writes content to a file in the virtual file system. If the file doesn't exist, it will be created.
 
-*   `path` (string): The absolute path to the file (e.g., `/src/index.js`).
-*   `content` (string | Buffer): The content to write.
+* `path` (string): The absolute path to the file (e.g., `/src/index.js`).
+* `content` (string | Buffer): The content to write.
 
 #### `project.readFile(path, encoding)`
 
 Reads the content of a file.
 
-*   `path` (string): The path to the file.
-*   `encoding` (string, optional): The encoding of the file (e.g., `'utf8'`). If not provided, it returns a Buffer.
+* `path` (string): The path to the file.
+* `encoding` (string, optional): The encoding of the file (e.g., `'utf8'`). If not provided, it returns a Buffer.
 
 #### `project.readDir(path)`
 
 Reads the contents of a directory.
 
-*   `path` (string): The path to the directory.
-*   Returns: `Promise<string[]>` - An array of file and directory names.
+* `path` (string): The path to the directory.
+* Returns: `Promise<string[]>` - An array of file and directory names.
 
 #### `project.mkdir(path)`
 
 Creates a new directory.
 
-*   `path` (string): The path to the directory to be created.
+* `path` (string): The path to the directory to be created.
 
 #### `project.rm(path, options)`
 
 Removes a file or directory.
 
-*   `path` (string): The path to the file or directory to be removed.
-*   `options` (object, optional):
-    *   `recursive` (boolean): If `true`, performs a recursive directory removal. Defaults to `false`.
+* `path` (string): The path to the file or directory to be removed.
+* `options` (object, optional):
+  * `recursive` (boolean): If `true`, performs a recursive directory removal. Defaults to `false`.
 
 #### `project.rmdir(path)`
 
 Removes a directory.
 
-*   `path` (string): The path to the directory to be removed.
+* `path` (string): The path to the directory to be removed.
 
 ### Preview Functionality
 
@@ -178,13 +191,13 @@ Registers and activates the service worker defined in the constructor. This is e
 
 Populates the `node_modules` directory based on a `package-lock.json`.
 
-*   `packageLockJsonString` (string): A JSON string of your `package-lock.json` file.
+* `packageLockJsonString` (string): A JSON string of your `package-lock.json` file.
 
 #### `project.build()`
 
 Triggers the build process in the thread worker. It reads the build configuration from `utoopack.json` in the project's root and runs the bundler based on that configuration.
 
-*   Returns: `Promise<void>` - The promise resolves when the build is complete. It will reject if the build fails.
+* Returns: `Promise<void>` - The promise resolves when the build is complete. It will reject if the build fails.
 
 ---
 
@@ -192,7 +205,7 @@ Triggers the build process in the thread worker. It reads the build configuratio
 
 The `utooweb-demo` shows a complete workflow for editing, building, and previewing.
 
-1.  **Editing**: A file is read using `project.readFile()` and displayed in an editor. When the content changes, `project.writeFile()` is called (often with a debounce) to save the changes back to the OPFS.
+1. **Editing**: A file is read using `project.readFile()` and displayed in an editor. When the content changes, `project.writeFile()` is called (often with a debounce) to save the changes back to the OPFS.
 
     ```typescript
     // In useFileContent.ts
@@ -201,7 +214,7 @@ The `utooweb-demo` shows a complete workflow for editing, building, and previewi
     await project.writeFile(selectedFilePath, newContent);
     ```
 
-2.  **Building**: The user clicks a "Build" button, which calls `project.build()`.
+2. **Building**: The user clicks a "Build" button, which calls `project.build()`.
 
     ```typescript
     // In useBuild.ts
@@ -216,7 +229,7 @@ The `utooweb-demo` shows a complete workflow for editing, building, and previewi
     }
     ```
 
-3.  **Processing Build Output**: After a successful build, the application reads the build output (e.g., `dist/stats.json`) to find the generated asset files (`.js`, `.css`). It then generates an `index.html` that includes these assets.
+3. **Processing Build Output**: After a successful build, the application reads the build output (e.g., `dist/stats.json`) to find the generated asset files (`.js`, `.css`). It then generates an `index.html` that includes these assets.
 
     ```typescript
     // In useBuild.ts
@@ -226,7 +239,7 @@ The `utooweb-demo` shows a complete workflow for editing, building, and previewi
     await project.writeFile("dist/index.html", generatedHtml);
     ```
 
-4.  **Previewing**: The `Preview` component contains an `iframe` whose `src` points to the entry point within the service worker's scope (e.g., `/preview/dist/index.html`). When the build completes, the `iframe` reloads from the Service Worker with the newly generated artifact files from OPFS.
+4. **Previewing**: The `Preview` component contains an `iframe` whose `src` points to the entry point within the service worker's scope (e.g., `/preview/dist/index.html`). When the build completes, the `iframe` reloads from the Service Worker with the newly generated artifact files from OPFS.
 
 This cycle provides a fast and interactive development loop, all running locally in the user's browser.
 
@@ -301,6 +314,7 @@ import "@utoo/web/esm/serviceWorker";
 Your build setup should be configured to output these files to a location that your main application can access, so you can provide their URLs to the `UtooProject` constructor.
 
 ## Notes
+
 * Due to the current default memory allocator for Rust, [`dlmalloc`](https://github.com/alexcrichton/dlmalloc-rs), having less than ideal performance on multi-threaded `wasm`, we are currently trying to support [`mimalloc`](https://github.com/microsoft/mimalloc) with reference to [`emscripten`](https://emscripten.org/docs/tools_reference/settings_reference.html#malloc)'s solution. Once successful, the build speed will be greatly improved;
 * In the future, we will also support the [`HMR`](https://webpack.js.org/concepts/hot-module-replacement/) feature in the browser;
-* Advanced features of turbopack such as [`webpack loaders`](https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#configuring-webpack-loaders), [`persistent caching`](https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopackPersistentCaching), are also in the plan and will be supported directly in the browser in the future.
+* Advanced features of turbopack such as [`persistent caching`](https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopackPersistentCaching), are also in the plan and will be supported directly in the browser in the future.

@@ -2,8 +2,25 @@ import "systemjs/dist/system.js";
 
 import nodePolyFills from "./nodePolyFills";
 
-export function cjs(entrypoint: string, importMaps: Record<string, string>,) {
+export async function cjs(entrypoint: string, importMaps: Record<string, string>,) {
   debugger
+  await Promise.all(Object.entries(importMaps).map(async ([k, v]) => {
+    if (v.startsWith("http")) {
+      try {
+        const response = await fetch(v);
+        if (response.ok) {
+          importMaps[k] = await response.text();
+        } else {
+          console.error(`Failed to fetch loader '${k}' from ${v}: ${response.status} ${response.statusText}`);
+          delete importMaps[k];
+        }
+      } catch (error) {
+        console.error(`Error fetching loader '${k}' from ${v}:`, error);
+        delete importMaps[k];
+      }
+    }
+  }));
+
   Object.assign(importMaps, nodePolyFills);
   const require = (id: string) => {
     let dependency = System.get(id);

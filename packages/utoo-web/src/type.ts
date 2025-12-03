@@ -60,6 +60,7 @@ export interface ProjectOptions {
   wasmUrl?: string;
   serviceWorker?: ServiceWorkerOptions;
   logFilter?: string;
+  loadersImportMap?: Record<string, string>;
 }
 
 export interface ServiceWorkerOptions {

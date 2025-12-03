@@ -22,5 +22,5 @@ export default {
 	url,
 	util,
 	less,
-	["less-loader"]: lessLoader
+	"less-loader": lessLoader
 };

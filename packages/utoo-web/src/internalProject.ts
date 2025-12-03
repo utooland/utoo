@@ -36,7 +36,10 @@ async function getTurbopackLoaderAssets() {
   return turbopackLoaderAssets;
 }
 
-const createOrScalePool = async (binding: Binding, cwd: string) => {
+const createOrScalePool = async (
+  binding: Binding,
+  loadersImportMap?: Record<string, string>,
+) => {
   while (true) {
     try {
       let poolOptions = await binding.recvPoolRequest();
@@ -65,7 +68,7 @@ const createOrScalePool = async (binding: Binding, cwd: string) => {
                 workerId: nextWorkerId,
               },
               loaderAssets: {
-                importMaps: turbopackLoaderAssets,
+                importMaps: { ...turbopackLoaderAssets, ...loadersImportMap },
                 entrypoint: entrypoint.replace(".turbopack/", ""),
               },
             } as LoaderRunnerMeta,
@@ -108,18 +111,14 @@ const waitingForWorkerTermination = async (binding: Binding) => {
   }
 };
 
-const internalEndpoint: ProjectEndpoint & {
+class InternalEndpoint implements ProjectEndpoint {
   projectInternal?: ProjectInternal;
-  mount: (
-    opt: Omit<ProjectOptions, "workerUrl" | "serviceWorker">,
-  ) => Promise<void>;
   wasmInit?: ReturnType<typeof initWasm>;
-} = {
-  projectInternal: undefined,
-  wasmInit: undefined,
+  options?: Omit<ProjectOptions, "workerUrl" | "serviceWorker">;
 
   // This should be called only once
-  async mount(opt) {
+  async mount(opt: Omit<ProjectOptions, "workerUrl" | "serviceWorker">) {
+    this.options = opt;
     const { cwd, wasmUrl, threadWorkerUrl, logFilter } = opt;
 
     this.wasmInit ??= initWasm(wasmUrl);
@@ -131,22 +130,22 @@ const internalEndpoint: ProjectEndpoint & {
 
     this.projectInternal = new ProjectInternal(cwd, threadWorkerUrl);
     return;
-  },
+  }
 
   async install(packageLock: string, maxConcurrentDownloads?: number) {
     await this.wasmInit!;
     await this.projectInternal!.install(packageLock, maxConcurrentDownloads);
     return;
-  },
+  }
 
   async build() {
     const binding = await this.wasmInit!;
 
-    createOrScalePool(binding, this.projectInternal!.cwd);
+    createOrScalePool(binding, this.options?.loadersImportMap);
     waitingForWorkerTermination(binding);
 
     return await this.projectInternal!.build();
-  },
+  }
 
   async readFile(path: string, encoding?: "utf8") {
     await this.wasmInit!;
@@ -157,7 +156,7 @@ const internalEndpoint: ProjectEndpoint & {
       ret = await this.projectInternal!.read(path);
     }
     return ret as any;
-  },
+  }
 
   async writeFile(
     path: string,
@@ -170,12 +169,12 @@ const internalEndpoint: ProjectEndpoint & {
     } else {
       return await this.projectInternal!.write(path, content);
     }
-  },
+  }
 
   async copyFile(src: string, dst: string) {
     await this.wasmInit!;
     return await this.projectInternal!.copyFile(src, dst);
-  },
+  }
 
   async readdir(path: string, options?: { recursive?: boolean }) {
     await this.wasmInit!;
@@ -192,7 +191,7 @@ const internalEndpoint: ProjectEndpoint & {
     });
     // WARN: This is a hack, functions can not be structurally cloned
     return rawDirents as any;
-  },
+  }
 
   async mkdir(path: string, options?: { recursive?: boolean }) {
     await this.wasmInit!;
@@ -201,7 +200,7 @@ const internalEndpoint: ProjectEndpoint & {
     } else {
       return await this.projectInternal!.createDir(path);
     }
-  },
+  }
 
   async rm(path: string, options?: { recursive?: boolean }) {
     await this.wasmInit!;
@@ -219,22 +218,24 @@ const internalEndpoint: ProjectEndpoint & {
         // nothing to remove now
         break;
     }
-  },
+  }
 
   async rmdir(path: string, options?: { recursive?: boolean }) {
     await this.wasmInit!;
     return await this.projectInternal!.removeDir(path, !!options?.recursive);
-  },
+  }
 
   async gzip(files: PackFile[]) {
     await this.wasmInit!;
     return await this.projectInternal!.gzip(files);
-  },
+  }
 
   async sigMd5(content: Uint8Array) {
     await this.wasmInit!;
     return await this.projectInternal!.sigMd5(content);
-  },
-};
+  }
+}
+
+const internalEndpoint = new InternalEndpoint();
 
 export { internalEndpoint };
