@@ -40,6 +40,7 @@ export class Project implements ProjectEndpoint {
       threadWorkerUrl,
       serviceWorker,
       logFilter,
+      loadersImportMap,
     } = options;
 
     this.cwd = cwd;
@@ -68,6 +69,7 @@ export class Project implements ProjectEndpoint {
       cwd,
       wasmUrl,
       threadWorkerUrl,
+      loadersImportMap,
       logFilter,
     });
   }

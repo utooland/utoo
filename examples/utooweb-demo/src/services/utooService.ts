@@ -13,6 +13,9 @@ export const initializeProject = async () => {
             url: "http://localhost:8081/serviceWorker.js",
             scope: serviceWorkerScope,
         },
+        loadersImportMap: {
+        // "xyzLoader": "https://x.y.z"
+        },
         logFilter: new URLSearchParams(location.search).get("logFilter") || "",
     });
 
