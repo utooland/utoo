@@ -74,11 +74,13 @@ jobs:
         run: |
           git config --global --add safe.directory /__w/utoo/utoo
 
-      - name: Get version from release or use alpha version
+      - name: Get version from release
         id: get_version
         run: |
           if [[ "$GITHUB_REF" == refs/tags/utoo-v* ]]; then
-            echo "VERSION=${GITHUB_REF#refs/tags/utoo-v}" >> $GITHUB_OUTPUT
+            VERSION="${GITHUB_REF#refs/tags/utoo-v}"
+            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+            echo "Extracted version: $VERSION"
           else
             echo "VERSION=0.0.0" >> $GITHUB_OUTPUT
           fi
@@ -195,13 +197,24 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Get version from release or use alpha version
+      - name: Get version and tag from release
         id: get_version
         run: |
           if [[ "$GITHUB_REF" == refs/tags/utoo-v* ]]; then
-            echo "VERSION=${GITHUB_REF#refs/tags/utoo-v}" >> $GITHUB_OUTPUT
+            VERSION="${GITHUB_REF#refs/tags/utoo-v}"
+            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+            # Determine npm tag based on GitHub Release prerelease flag
+            if [[ "${{ github.event.release.prerelease }}" == "true" ]]; then
+              echo "NPM_TAG=beta" >> $GITHUB_OUTPUT
+              echo "GitHub Release marked as prerelease, will publish to 'beta' tag"
+            else
+              echo "NPM_TAG=latest" >> $GITHUB_OUTPUT
+              echo "GitHub Release is stable, will publish to 'latest' tag"
+            fi
           else
             echo "VERSION=0.0.0" >> $GITHUB_OUTPUT
+            echo "NPM_TAG=dev" >> $GITHUB_OUTPUT
           fi
 
       - name: Setup Node.js
@@ -214,7 +227,9 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ steps.get_version.outputs.VERSION }}
+          NPM_TAG: ${{ steps.get_version.outputs.NPM_TAG }}
         run: |
           set -e
           cd vendor/scripts
-          ./npm-utoo.sh "$VERSION"
+          echo "Publishing utoo@$VERSION with npm tag: $NPM_TAG"
+          ./npm-utoo.sh "$VERSION" "$NPM_TAG"
