@@ -50,7 +50,6 @@ function createUmdConfig(entry, umdFilename, target) {
     ],
     optimization: {
       moduleIds: 'named',
-      minimize: false,
       minimizer: [
         (compiler) => {
           new TerserPlugin({
