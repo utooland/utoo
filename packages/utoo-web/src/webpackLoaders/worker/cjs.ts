@@ -59,6 +59,10 @@ export async function cjs(entrypoint: string, importMaps: Record<string, string>
 
   require.resolve = (request: string) => request
 
+  // @ts-ignore
+  // a hack for loader-runner resolving
+  self.__systemjs_require__ = require;
+
   let entryPointCode: string | undefined;
 
   for (const path in importMaps) {

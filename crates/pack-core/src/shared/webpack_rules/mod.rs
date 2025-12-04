@@ -8,12 +8,16 @@ use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::{
     WebpackLoaderBuiltinConditionSet, WebpackLoaderBuiltinConditionSetMatch, WebpackLoadersOptions,
 };
-use turbopack_core::resolve::{
-    ExternalTraced, ExternalType, ResolveResult, ResolveResultItem, options::ImportMapping,
+use turbopack_core::{
+    file_source::FileSource,
+    resolve::{
+        ExternalTraced, ExternalType, ResolveResult, ResolveResultItem, options::ImportMapping,
+    },
 };
 
 use crate::{
     config::Config,
+    embed_js::embed_file_path,
     shared::webpack_rules::{
         less::get_less_loader_rules, sass::get_sass_loader_rules,
         style_loader::get_style_loader_rules,
@@ -149,11 +153,7 @@ pub async fn webpack_loader_options(
     Ok(Vc::cell(Some(
         WebpackLoadersOptions {
             rules: ResolvedVc::cell(rules),
-            loader_runner_package: Some(
-                loader_runner_package_mapping(project_path)
-                    .to_resolved()
-                    .await?,
-            ),
+            loader_runner_package: Some(loader_runner_package_mapping().to_resolved().await?),
             builtin_conditions: UtooWebpackLoaderBuiltinConditionSet::new(builtin_conditions)
                 .to_resolved()
                 .await?,
@@ -164,21 +164,19 @@ pub async fn webpack_loader_options(
 
 #[turbo_tasks::function]
 #[allow(unused_variables)]
-async fn loader_runner_package_mapping(project_path: FileSystemPath) -> Result<Vc<ImportMapping>> {
-    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-    {
-        Ok(
-            ImportMapping::Direct(ResolveResult::primary(ResolveResultItem::External {
-                name: rcstr!("loader-runner"),
-                ty: ExternalType::CommonJs,
-                traced: ExternalTraced::Untraced,
-            }))
-            .cell(),
-        )
-    }
-
-    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
-    {
-        Ok(ImportMapping::PrimaryAlternative(rcstr!("loader-runner"), Some(project_path)).cell())
-    }
+async fn loader_runner_package_mapping() -> Result<Vc<ImportMapping>> {
+    Ok(
+        ImportMapping::Direct(ResolveResult::primary(ResolveResultItem::Source(
+            ResolvedVc::upcast(
+                FileSource::new(
+                    embed_file_path(rcstr!("loader-runner/lib/LoaderRunner.js"))
+                        .owned()
+                        .await?,
+                )
+                .to_resolved()
+                .await?,
+            ),
+        )))
+        .cell(),
+    )
 }

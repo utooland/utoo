@@ -5,7 +5,7 @@ const path = require('path');
 const url = require('url');
 const util = require('util');
 const less = require("less/lib/less-node/index.js").default;
-const lessLoader = require("../loaders/lessLoader");
+const lessLoader = require("../loaders/less-loader");
 
 export default {
 	assert,
