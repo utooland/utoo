@@ -46,10 +46,14 @@ const createOrScalePool = async (
     try {
       let poolOptions = await recvPoolRequest();
       const { filename: entrypoint, maxConcurrency } = poolOptions;
+      const concurrency = Math.max(
+        maxConcurrency,
+        navigator.hardwareConcurrency,
+      );
       const workers =
         loaderWorkers[entrypoint] || (loaderWorkers[entrypoint] = []);
-      if (workers.length < maxConcurrency) {
-        for (let i = workers.length; i < maxConcurrency; i++) {
+      if (workers.length < concurrency) {
+        for (let i = workers.length; i < concurrency; i++) {
           nextWorkerId += 1;
           const turbopackLoaderAssets: Record<string, string> =
             await getTurbopackLoaderAssets();
@@ -80,11 +84,8 @@ const createOrScalePool = async (
           // @ts-ignore
           workers.push(worker);
         }
-      } else if (workers.length > maxConcurrency) {
-        const workersToStop = workers.splice(
-          0,
-          workers.length - maxConcurrency,
-        );
+      } else if (workers.length > concurrency) {
+        const workersToStop = workers.splice(0, workers.length - concurrency);
         workersToStop.forEach((worker) => worker.terminate());
       }
     } catch (_e) {
