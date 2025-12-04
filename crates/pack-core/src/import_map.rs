@@ -24,25 +24,15 @@ pub fn mdx_import_source_file() -> RcStr {
 
 #[turbo_tasks::function]
 #[allow(unused_variables)]
-pub async fn get_postcss_package_mapping(
-    project_path: FileSystemPath,
-) -> Result<Vc<ImportMapping>> {
-    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-    {
-        Ok(
-            ImportMapping::Direct(ResolveResult::primary(ResolveResultItem::External {
-                name: rcstr!("postcss"),
-                ty: ExternalType::CommonJs,
-                traced: ExternalTraced::Untraced,
-            }))
-            .cell(),
-        )
-    }
-
-    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
-    {
-        Ok(ImportMapping::PrimaryAlternative(rcstr!("postcss"), Some(project_path)).cell())
-    }
+pub async fn get_postcss_package_mapping() -> Result<Vc<ImportMapping>> {
+    Ok(
+        ImportMapping::Direct(ResolveResult::primary(ResolveResultItem::External {
+            name: rcstr!("postcss"),
+            ty: ExternalType::CommonJs,
+            traced: ExternalTraced::Untraced,
+        }))
+        .cell(),
+    )
 }
 
 /// Computes the client fallback import map, which provides
