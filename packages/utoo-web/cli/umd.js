@@ -24,8 +24,9 @@ function createUmdConfig(entry, umdFilename, target) {
     },
     resolve: {
       extensions: ['.ts', '.js'],
-      alias: {... stdLibBrowser,
-        //  fs: path.join(__dirname, "./fs.js")
+      alias: {
+         ...stdLibBrowser,
+         fs: path.join(__dirname, "./fs.js")
         },
     },
     module: {
@@ -43,6 +44,7 @@ function createUmdConfig(entry, umdFilename, target) {
       ],
     },
     plugins: [
+		  new NodeProtocolUrlPlugin(),
       new webpack.ProvidePlugin({
         process: stdLibBrowser.process,
         Buffer: stdLibBrowser.buffer,
@@ -50,6 +52,7 @@ function createUmdConfig(entry, umdFilename, target) {
     ],
     optimization: {
       moduleIds: 'named',
+      // minimize: false,
       minimizer: [
         (compiler) => {
           new TerserPlugin({
@@ -118,7 +121,7 @@ const argv = yargs(process.argv.slice(2))
     alias: 't',
     description: 'The output target, meaning webpack target (e.g., node or webworker)',
     type: 'string',
-    demandOption: true,
+    demandOption: false,
   })
   .help()
   .alias('help', 'h').argv;

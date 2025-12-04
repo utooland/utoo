@@ -305,11 +305,7 @@ pub async fn get_client_module_options_context(
         #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
         {
             Some(PostCssTransformOptions {
-                postcss_package: Some(
-                    get_postcss_package_mapping(project_path.clone())
-                        .to_resolved()
-                        .await?,
-                ),
+                postcss_package: Some(get_postcss_package_mapping().to_resolved().await?),
                 config_location: PostCssConfigLocation::ProjectPathOrLocalPath,
                 ..Default::default()
             })
