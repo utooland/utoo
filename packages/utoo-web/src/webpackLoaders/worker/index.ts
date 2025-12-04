@@ -2,12 +2,13 @@ import { cjs } from "./cjs";
 import  initWasm, {recvMessageInWorker, recvWorkerRequest,sendTaskMessage, notifyWorkerAck } from "../../utoo"
 import { LoaderRunnerMeta } from "./type";
 
-  interface Binding {
-  recvWorkerRequest(poolId: string): Promise<number>
-  recvMessageInWorker(workerId: number): Promise<string>
-  notifyWorkerAck(taskId: number, workerId: number): Promise<void>
-  sendTaskMessage(taskId: number, message: string): Promise<void>
-}
+const binding =  {
+    recvWorkerRequest,
+    recvMessageInWorker,
+    notifyWorkerAck,
+    sendTaskMessage
+  };
+
 
 declare let self: DedicatedWorkerGlobalScope & {
   process: {
@@ -18,17 +19,10 @@ declare let self: DedicatedWorkerGlobalScope & {
     workerId: number
     poolId: string
     cwd: string,
-    binding: Binding
+    binding: typeof binding
     readFile(path: string, encoding?: 'utf8'): Promise<string>
   }
 }
-
-let binding: Binding =  {
-    recvWorkerRequest,
-    recvMessageInWorker,
-    notifyWorkerAck,
-    sendTaskMessage
-  };
 
 self.process = {
     env: {},
