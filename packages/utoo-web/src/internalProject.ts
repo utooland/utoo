@@ -9,6 +9,8 @@ import initWasm, {
   DirEntryType,
   init_log_filter,
   Project as ProjectInternal,
+  recvPoolRequest,
+  recvWorkerTermination,
 } from "./utoo";
 import { LoaderRunnerMeta } from "./webpackLoaders/worker/type";
 // @ts-ignore
@@ -42,7 +44,7 @@ const createOrScalePool = async (
 ) => {
   while (true) {
     try {
-      let poolOptions = await binding.recvPoolRequest();
+      let poolOptions = await recvPoolRequest();
       const { filename: entrypoint, maxConcurrency } = poolOptions;
       const workers =
         loaderWorkers[entrypoint] || (loaderWorkers[entrypoint] = []);
@@ -92,10 +94,10 @@ const createOrScalePool = async (
   }
 };
 
-const waitingForWorkerTermination = async (binding: Binding) => {
+const waitingForWorkerTermination = async () => {
   while (true) {
     try {
-      const { filename, workerId } = await binding.recvWorkerTermination();
+      const { filename, workerId } = await recvWorkerTermination();
       const workers = loaderWorkers[filename];
       const workerIdx = workers.findIndex(
         (worker) => worker.workerId === workerId,
@@ -142,7 +144,7 @@ class InternalEndpoint implements ProjectEndpoint {
     const binding = await this.wasmInit!;
 
     createOrScalePool(binding, this.options?.loadersImportMap);
-    waitingForWorkerTermination(binding);
+    waitingForWorkerTermination();
 
     return await this.projectInternal!.build();
   }
