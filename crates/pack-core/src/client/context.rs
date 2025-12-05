@@ -517,6 +517,7 @@ pub async fn get_client_chunking_context(
 
     let minify = config.minify(mode);
     let concatenate_modules = config.concatenate_modules(mode);
+    let nested_async_chunking = config.nested_async_chunking(mode);
     let mode = mode.await?;
     let public_path = public_path.owned().await?;
 
@@ -562,7 +563,8 @@ pub async fn get_client_chunking_context(
     .asset_base_path(Some(public_path))
     .current_chunk_method(CurrentChunkMethod::DocumentCurrentScript)
     .export_usage(*export_usage.await?)
-    .module_id_strategy(module_id_strategy.to_resolved().await?);
+    .module_id_strategy(module_id_strategy.to_resolved().await?)
+    .nested_async_availability(*nested_async_chunking.await?);
 
     let output = config.output().await?;
 

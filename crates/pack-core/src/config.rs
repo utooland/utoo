@@ -309,6 +309,7 @@ pub struct OptimizationConfig {
     pub concatenate_modules: Option<bool>,
     /// Defaults to false in development mode, true in production mode.
     pub remove_unused_exports: Option<bool>,
+    pub nested_async_chunking: Option<bool>,
 }
 
 #[derive(
@@ -1428,6 +1429,22 @@ impl Config {
                 .as_ref()
                 .map(|op| op.concatenate_modules.unwrap_or(false))
                 .unwrap_or(false),
+        }))
+    }
+
+    #[turbo_tasks::function]
+    pub async fn nested_async_chunking(&self, mode: Vc<Mode>) -> Result<Vc<bool>> {
+        let option = self
+            .optimization
+            .as_ref()
+            .and_then(|op| op.nested_async_chunking);
+        Ok(Vc::cell(if let Some(val) = option {
+            val
+        } else {
+            match *mode.await? {
+                Mode::Development => false,
+                Mode::Production => true,
+            }
         }))
     }
 
