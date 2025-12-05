@@ -171,6 +171,7 @@ export interface ConfigComplete {
         };
     concatenateModules?: boolean;
     removeUnusedExports?: boolean;
+    nestedAsyncChunking?: boolean;
   };
   styles?: {
     less?: {
