@@ -34,7 +34,8 @@ self.addEventListener("message", (event) => {
 
 self.addEventListener("fetch", async (event: FetchEvent) => {
   await _promise;
-  const { url, referrer } = event.request;
+  let { url, referrer } = event.request;
+  url = decodeURIComponent(url);
   if (
     new URL(url).pathname.startsWith(_serviceWorkerScope) ||
     (referrer && new URL(referrer).pathname.startsWith(_serviceWorkerScope))
