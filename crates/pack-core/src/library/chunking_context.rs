@@ -139,6 +139,11 @@ impl LibraryChunkingContextBuilder {
         self
     }
 
+    pub fn nested_async_availability(mut self, enable_nested_async_availability: bool) -> Self {
+        self.chunking_context.enable_nested_async_availability = enable_nested_async_availability;
+        self
+    }
+
     pub fn build(self) -> Vc<LibraryChunkingContext> {
         LibraryChunkingContext::cell(self.chunking_context)
     }
@@ -186,6 +191,8 @@ pub struct LibraryChunkingContext {
     export_usage: Option<ResolvedVc<ExportUsageInfo>>,
     /// Evaluate chunk filename template
     filename: Option<RcStr>,
+    /// Enable nested async availability for this chunking
+    enable_nested_async_availability: bool,
 }
 
 impl LibraryChunkingContext {
@@ -217,6 +224,7 @@ impl LibraryChunkingContext {
                 runtime_export,
                 enable_module_merging: false,
                 manifest_chunks: true,
+                enable_nested_async_availability: false,
             },
         }
     }

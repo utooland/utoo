@@ -50,6 +50,7 @@ pub async fn get_library_chunking_context(
     } = options;
     let minify = config.minify(mode);
     let concatenate_modules = config.concatenate_modules(mode);
+    let nested_async_chunking = config.nested_async_chunking(mode);
     let mode = mode.await?;
 
     let runtime_type = {
@@ -92,7 +93,8 @@ pub async fn get_library_chunking_context(
         SourceMapsType::None
     })
     .module_id_strategy(module_id_strategy.to_resolved().await?)
-    .export_usage(*export_usage.await?);
+    .export_usage(*export_usage.await?)
+    .nested_async_availability(*nested_async_chunking.await?);
 
     if !mode.is_development()
         && let Some(filename) = &output.filename
