@@ -571,6 +571,7 @@ pub fn project_entrypoints_subscribe(
     )
 }
 
+#[tracing::instrument(level = "debug", name = "get HMR events", skip(project, func))]
 #[napi(ts_return_type = "{ __napiType: \"RootTask\" }")]
 pub fn project_hmr_events(
     #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: External<ProjectInstance>,
@@ -617,10 +618,6 @@ pub fn project_hmr_events(
                     }
                     Ok((Some(update.clone()), issues.clone(), diagnostics.clone()))
                 }
-                .instrument(tracing::info_span!(
-                    "HMR subscription",
-                    identifier = %outer_identifier
-                ))
             }
         },
         move |ctx| {
