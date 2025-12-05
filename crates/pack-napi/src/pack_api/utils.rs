@@ -61,6 +61,7 @@ pub fn create_turbo_tasks(
                     turbo_tasks_backend::StorageMode::ReadWrite
                 }),
                 dependency_tracking,
+                num_workers: Some(tokio::runtime::Handle::current().metrics().num_workers()),
                 ..Default::default()
             },
             backing_storage,
