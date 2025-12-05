@@ -1190,10 +1190,8 @@ impl Project {
                         assets.push(ResolvedVc::upcast(asset.to_resolved().await?));
                     }
                     _ => {
-                        return Err(anyhow::anyhow!(
-                            "Unsupported entry type for copy: {:?}",
-                            entry_type
-                        ));
+                        // skip
+                        continue;
                     }
                 }
             }

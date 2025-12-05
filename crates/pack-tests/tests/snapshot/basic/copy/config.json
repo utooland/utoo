@@ -14,7 +14,8 @@
           "from": "./input/reset.css",
           "to": "./reset.css"
         },
-       "public"
+       "public",
+       "not_found_directory"
       ]
     },
     "stats": true
