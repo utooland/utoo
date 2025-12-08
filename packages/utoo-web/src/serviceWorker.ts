@@ -12,6 +12,7 @@ let _promise: Promise<void> = new Promise((resolve) => {
 let _projectEndpoint: ProjectEndpoint;
 
 let _serviceWorkerScope: string;
+let _relativeDirToCwd: string | undefined;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
@@ -24,6 +25,7 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("message", (event) => {
   if (event.data && event.data[ServiceWorkerHandShake] === true) {
     _serviceWorkerScope = event.data.scope;
+    _relativeDirToCwd = event.data.relativeDirToCwd;
     _projectEndpoint = Project.fork(
       new MessageChannel(),
       event.source as Client,
@@ -34,15 +36,16 @@ self.addEventListener("message", (event) => {
 
 self.addEventListener("fetch", async (event: FetchEvent) => {
   await _promise;
-  let { url, referrer } = event.request;
-  url = decodeURIComponent(url);
+  let { url: url_str, referrer } = event.request;
+  let url = new URL(url_str);
   if (
-    new URL(url).pathname.startsWith(_serviceWorkerScope) ||
+    url.pathname.startsWith(_serviceWorkerScope) ||
     (referrer && new URL(referrer).pathname.startsWith(_serviceWorkerScope))
   ) {
-    const projectPath =
-      "." + new URL(url).pathname.replace(_serviceWorkerScope, "");
-    event.respondWith(readFileFromProject(projectPath));
+    const relateivePathToCwd =
+      (_relativeDirToCwd ?? ".") +
+      url.pathname.replace(_serviceWorkerScope, "");
+    event.respondWith(readFileFromProject(relateivePathToCwd));
   } else {
     return;
   }

@@ -1,6 +1,10 @@
 import { ServiceWorkerHandShake } from "./message";
 
-export async function installServiceWorker(url: string, scope: string) {
+export async function installServiceWorker(
+  url: string,
+  scope: string,
+  relativeDirToCwd?: string,
+) {
   const registration = await navigator.serviceWorker.register(url, {
     scope: "/",
   });
@@ -10,6 +14,7 @@ export async function installServiceWorker(url: string, scope: string) {
       sw.postMessage({
         [ServiceWorkerHandShake]: true,
         scope,
+        relativeDirToCwd,
       });
       resolve();
     }
