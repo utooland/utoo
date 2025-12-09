@@ -11,18 +11,6 @@ import { compatOptionsFromWebpack, WebpackConfig } from "./webpackCompat";
 import { xcodeProfilingReady } from "./xcodeProfile";
 
 export function build(
-  bundleOptions: BundleOptions,
-  projectPath?: string,
-  rootPath?: string,
-): Promise<void>;
-
-export function build(
-  webpackConfig: WebpackConfig,
-  projectPath?: string,
-  rootPath?: string,
-): Promise<void>;
-
-export function build(
   options: BundleOptions | WebpackConfig,
   projectPath?: string,
   rootPath?: string,

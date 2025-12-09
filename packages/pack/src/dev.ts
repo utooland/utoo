@@ -15,20 +15,6 @@ import { compatOptionsFromWebpack, WebpackConfig } from "./webpackCompat";
 import { xcodeProfilingReady } from "./xcodeProfile";
 
 export function serve(
-  bundleOptions: BundleOptions,
-  projectPath?: string,
-  rootPath?: string,
-  serverOptions?: StartServerOptions,
-): Promise<void>;
-
-export function serve(
-  webpackConfig: WebpackConfig,
-  projectPath?: string,
-  rootPath?: string,
-  serverOptions?: StartServerOptions,
-): Promise<void>;
-
-export function serve(
   options: BundleOptions | WebpackConfig,
   projectPath?: string,
   rootPath?: string,
