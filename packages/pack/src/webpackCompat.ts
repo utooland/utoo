@@ -159,7 +159,21 @@ function compatFromWebpackPlugin<R>(
 
 compatDefine.pluginName = "DefinePlugin";
 function compatDefine(maybeWebpackPluginInstance: MaybeWebpackPluginInstance) {
-  return maybeWebpackPluginInstance?.definitions;
+  const definitions = maybeWebpackPluginInstance?.definitions;
+  if (!definitions || typeof definitions !== "object") {
+    return definitions;
+  }
+
+  const processedDefinitions: Record<string, any> = {};
+  for (const [key, value] of Object.entries(definitions)) {
+    if (typeof value === "object" && value !== null) {
+      processedDefinitions[key] = JSON.stringify(value);
+    } else {
+      processedDefinitions[key] = value;
+    }
+  }
+
+  return processedDefinitions;
 }
 
 function compatExternals(
