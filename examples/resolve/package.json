@@ -5,8 +5,8 @@
   "author": "zoomdong",
   "license": "MIT",
   "scripts": {
-    "build": "utoo-pack build",
-    "dev": "utoo-pack dev"
+    "build": "utoopack build",
+    "dev": "utoopack dev"
   },
   "devDependencies": {
     "@utoo/pack-cli": "*"

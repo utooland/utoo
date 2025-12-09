@@ -3,14 +3,13 @@
   "version": "1.0.0",
   "description": "Webpack compatible example",
   "scripts": {
-    "build": "tsx ./pack.ts build",
-    "serve": "tsx ./pack.ts serve"
+    "build": "utoopack build --webpack",
+    "dev": "utoopack dev --webpack"
   },
   "devDependencies": {
     "@types/webpack": "^5.28.5",
     "@utoo/pack": "*",
     "html-loader": "^5.1.0",
-    "tsx": "^4.20.3",
     "typescript": "^5.8.3",
     "webpack": "^5.99.9"
   }

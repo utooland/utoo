@@ -9,8 +9,8 @@
     "ignoreUnknown": false,
     "includes": [
       "**/package.json",
-      "**/packages/**/src/*",
-      "**/examples/**/src/*",
+      "**/packages/**/src/**/*",
+      "**/examples/**/src/**/*",
       "**/examples/**/*.json",
       "**/examples/**/webpack.config.js",
       "./packages/pack/docs/features-list.json",

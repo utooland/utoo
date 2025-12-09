@@ -1,3 +1,5 @@
+import path from "path";
+import { config } from "process";
 import type webpack from "webpack";
 import {
   BundleOptions,
@@ -6,26 +8,39 @@ import {
   TurbopackRuleConfigItem,
 } from "./types";
 
-export type WebpackConfig = Pick<
-  webpack.Configuration,
-  | "name"
-  | "entry"
-  | "mode"
-  | "module"
-  | "resolve"
-  | "externals"
-  | "output"
-  | "target"
-  | "devtool"
-  | "optimization"
-  | "plugins"
-  | "stats"
+export function readWebpackConfig(projectPath?: string, rootPath?: string) {
+  const projectPathOutOfRoot =
+    projectPath === undefined
+      ? process.cwd()
+      : path.join(rootPath ?? "", projectPath);
+  const configPath = path.join(projectPathOutOfRoot, "webpack.config.js");
+  return require(configPath);
+}
+
+export type WebpackConfig = Partial<
+  Pick<
+    webpack.Configuration,
+    | "name"
+    | "entry"
+    | "mode"
+    | "module"
+    | "resolve"
+    | "externals"
+    | "output"
+    | "target"
+    | "devtool"
+    | "optimization"
+    | "plugins"
+    | "stats"
+  >
 > & {
-  compatMode: true;
+  webpackMode: true;
 };
 
 export function compatOptionsFromWebpack(
   webpackConfig: WebpackConfig,
+  projectPath?: string,
+  rootPath?: string,
 ): BundleOptions {
   const {
     entry,
@@ -39,7 +54,9 @@ export function compatOptionsFromWebpack(
     optimization,
     plugins,
     stats,
-  } = webpackConfig;
+  } = webpackConfig.entry
+    ? webpackConfig
+    : readWebpackConfig(projectPath, rootPath);
 
   return {
     config: {

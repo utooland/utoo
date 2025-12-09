@@ -1,16 +1,14 @@
-import path from "path";
-import webpack from "webpack";
-import utoopack from "@utoo/pack";
+const webpack = require("webpack");
 
-const webpackConfig: utoopack.WebpackConfig = {
+module.exports = {
   mode: process.env.NODE_ENV === "production" ? "production" : "development",
   entry: "./src/index.js",
   output: {
     path: "dist",
   },
   externals: {
-    react: 'React',
-    'react-dom': 'ReactDOM',
+    react: "React",
+    "react-dom": "ReactDOM",
   },
   plugins: [
     new webpack.DefinePlugin({
@@ -36,13 +34,4 @@ const webpackConfig: utoopack.WebpackConfig = {
     moduleIds: "named",
     minimize: false,
   },
-  compatMode: true,
 };
-
-const instruction = process.argv[process.argv.length - 1] as "build" | "serve";
-
-utoopack[instruction](
-  webpackConfig,
-  process.cwd(),
-  path.resolve(process.cwd(), "../../"),
-);

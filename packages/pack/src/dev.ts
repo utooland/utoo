@@ -34,8 +34,8 @@ export function serve(
   rootPath?: string,
   serverOptions?: StartServerOptions,
 ) {
-  const bundleOptions = (<WebpackConfig>options).compatMode
-    ? compatOptionsFromWebpack(<WebpackConfig>options)
+  const bundleOptions = (<WebpackConfig>options).webpackMode
+    ? compatOptionsFromWebpack(<WebpackConfig>options, projectPath, rootPath)
     : <BundleOptions>options;
   if (!rootPath) {
     // help user to find the rootDir automatically

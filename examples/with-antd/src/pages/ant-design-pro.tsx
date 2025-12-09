@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
-
-import { ProList } from '@ant-design/pro-components';
-import { Button, Space, Tag } from 'antd';
+import { ProList } from "@ant-design/pro-components";
+import { Button, Space, Tag } from "antd";
+import React, { useState } from "react";
 
 export function AntDesignPro() {
   const [data, setData] = useState(null);
@@ -17,28 +16,28 @@ export function AntDesignPro() {
 
 const dataSource = [
   {
-    name: '语雀的天空1',
+    name: "语雀的天空1",
     image:
-      'https://gw.alipayobjects.com/zos/antfincdn/efFD%24IOql2/weixintupian_20170331104822.jpg',
-    desc: '我是一条测试的描述',
+      "https://gw.alipayobjects.com/zos/antfincdn/efFD%24IOql2/weixintupian_20170331104822.jpg",
+    desc: "我是一条测试的描述",
   },
   {
-    name: 'Ant Design',
+    name: "Ant Design",
     image:
-      'https://gw.alipayobjects.com/zos/antfincdn/efFD%24IOql2/weixintupian_20170331104822.jpg',
-    desc: '我是一条测试的描述',
+      "https://gw.alipayobjects.com/zos/antfincdn/efFD%24IOql2/weixintupian_20170331104822.jpg",
+    desc: "我是一条测试的描述",
   },
   {
-    name: '蚂蚁金服体验科技',
+    name: "蚂蚁金服体验科技",
     image:
-      'https://gw.alipayobjects.com/zos/antfincdn/efFD%24IOql2/weixintupian_20170331104822.jpg',
-    desc: '我是一条测试的描述',
+      "https://gw.alipayobjects.com/zos/antfincdn/efFD%24IOql2/weixintupian_20170331104822.jpg",
+    desc: "我是一条测试的描述",
   },
   {
-    name: 'TechUI',
+    name: "TechUI",
     image:
-      'https://gw.alipayobjects.com/zos/antfincdn/efFD%24IOql2/weixintupian_20170331104822.jpg',
-    desc: '我是一条测试的描述',
+      "https://gw.alipayobjects.com/zos/antfincdn/efFD%24IOql2/weixintupian_20170331104822.jpg",
+    desc: "我是一条测试的描述",
   },
 ];
 
@@ -69,13 +68,13 @@ const List = () => (
     showExtra="hover"
     metas={{
       title: {
-        dataIndex: 'name',
+        dataIndex: "name",
       },
       avatar: {
-        dataIndex: 'image',
+        dataIndex: "image",
       },
       description: {
-        dataIndex: 'desc',
+        dataIndex: "desc",
       },
       subTitle: {
         render: () => {

@@ -1,5 +1,5 @@
-import Editor, { DiffEditor } from '@monaco-editor/react';
-import React from 'react';
+import Editor, { DiffEditor } from "@monaco-editor/react";
+import React from "react";
 
 export function MonacoEditor() {
   return (

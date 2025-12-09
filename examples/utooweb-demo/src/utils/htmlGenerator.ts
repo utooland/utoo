@@ -1,5 +1,5 @@
 export const generateHtml = (styles: string[], scripts: string[]): string => {
-    return `
+  return `
 <!DOCTYPE html>
 <html>
   <head>

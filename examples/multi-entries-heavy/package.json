@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "scripts": {
     "bootstrap": "node ./bootstrap.js",
-    "build": "utoo-pack build",
-    "dev": "utoo-pack dev",
+    "build": "utoopack build",
+    "dev": "utoopack dev",
     "build-by-native": "../../target/release/pack-cli build",
     "dev-by-native": "../../target/release/pack-cli dev",
     "serve": "serve ."

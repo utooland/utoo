@@ -1,37 +1,50 @@
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
-  value: true
+  value: true,
 });
 exports.default = void 0;
 var _path = _interopRequireDefault(require("path"));
 var _options = _interopRequireDefault(require("./options.json"));
 var _utils = require("./utils");
-function _interopRequireDefault(e) { return e && e.__esModule ? e : { default: e }; }
+function _interopRequireDefault(e) {
+  return e && e.__esModule ? e : { default: e };
+}
 async function lessLoader(source) {
   const options = this.getOptions(_options.default);
   const callback = this.async();
   let implementation;
   try {
-    implementation = (0, _utils.getLessImplementation)(this, options.implementation);
+    implementation = (0, _utils.getLessImplementation)(
+      this,
+      options.implementation,
+    );
   } catch (error) {
     callback(error);
     return;
   }
   if (!implementation) {
-    callback(new Error(`The Less implementation "${options.implementation}" not found`));
+    callback(
+      new Error(
+        `The Less implementation "${options.implementation}" not found`,
+      ),
+    );
     return;
   }
   const lessOptions = (0, _utils.getLessOptions)(this, options, implementation);
-  const useSourceMap = typeof options.sourceMap === "boolean" ? options.sourceMap : this.sourceMap;
+  const useSourceMap =
+    typeof options.sourceMap === "boolean" ? options.sourceMap : this.sourceMap;
   if (useSourceMap) {
     lessOptions.sourceMap = {
-      outputSourceFiles: true
+      outputSourceFiles: true,
     };
   }
   let data = source;
   if (typeof options.additionalData !== "undefined") {
-    data = typeof options.additionalData === "function" ? `${await options.additionalData(data, this)}` : `${options.additionalData}\n${data}`;
+    data =
+      typeof options.additionalData === "function"
+        ? `${await options.additionalData(data, this)}`
+        : `${options.additionalData}\n${data}`;
   }
   const logger = this.getLogger("less-loader");
   const loaderContext = this;
@@ -57,7 +70,7 @@ async function lessLoader(source) {
     },
     debug(message) {
       logger.debug(message);
-    }
+    },
   };
   implementation.logger.addListener(loggerListener);
   let result;
@@ -77,11 +90,8 @@ async function lessLoader(source) {
     delete lessOptions.pluginManager.webpackLoaderContext;
     delete lessOptions.pluginManager;
   }
-  const {
-    css,
-    imports
-  } = result;
-  imports.forEach(item => {
+  const { css, imports } = result;
+  imports.forEach((item) => {
     if ((0, _utils.isUnsupportedUrl)(item)) {
       return;
     }
@@ -95,10 +105,11 @@ async function lessLoader(source) {
       this.addDependency(normalizedItem);
     }
   });
-  let map = typeof result.map === "string" ? JSON.parse(result.map) : result.map;
+  let map =
+    typeof result.map === "string" ? JSON.parse(result.map) : result.map;
   if (map && useSourceMap) {
     map = (0, _utils.normalizeSourceMap)(map, this.rootContext);
   }
   callback(null, css, map);
 }
-var _default = exports.default = lessLoader;
+var _default = (exports.default = lessLoader);
