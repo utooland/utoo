@@ -1,0 +1,16 @@
+[92;4msuggestion - [analysis] /crates/pack-tests/tests/snapshot/dynamic_import/input/index.ts:2:11  lint TP1002 require(???*0*) is very dynamic
+  
+       1 | export function requireStat(name: string) {
+         +            v-----------------------------------------------v
+       2 +     return require(require.resolve(`${name}/package.json'`))
+         +            ^-----------------------------------------------^
+       3 | }
+       4 | 
+       5 | export async function importUrl(url: string) {
+       6 |     return import(`${url}`).then((module) => module.default);
+  
+  - *0* require.resolve*1*(`${???*2*}/package.json'`)
+    ⚠️  unresolvable request
+  - *1* require.resolve: The require.resolve method from CommonJS
+  - *2* arguments[0]
+    ⚠️  function calls are not analyzed yet

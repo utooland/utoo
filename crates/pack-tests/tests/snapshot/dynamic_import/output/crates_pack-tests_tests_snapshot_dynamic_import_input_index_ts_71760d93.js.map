@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/dynamic_import/input/index.ts"],"sourcesContent":["export function requireStat(name: string) {\n    return require(require.resolve(`${name}/package.json'`))\n}\n\nexport async function importUrl(url: string) {\n    return import(`${url}`).then((module) => module.default);\n}"],"names":[],"mappings":"AAAO,SAAS,YAAY,IAAY;IACpC;;;;;AACJ;AAEO,eAAe,UAAU,GAAW;IACvC,OAAO;;;;SAAiB,IAAI,CAAC,CAAC,SAAW,OAAO,OAAO;AAC3D"}}]
+}
