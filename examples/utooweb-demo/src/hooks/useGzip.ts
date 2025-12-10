@@ -1,5 +1,5 @@
-import { useState, useCallback } from "react";
-import { Project as UtooProject, PackFile } from "@utoo/web";
+import { PackFile, Project as UtooProject } from "@utoo/web";
+import { useCallback, useState } from "react";
 
 export const useGzip = (project: UtooProject | null) => {
   const [isGzipping, setIsGzipping] = useState(false);
@@ -62,13 +62,14 @@ export const useGzip = (project: UtooProject | null) => {
         content: configBytes,
       });
 
-      console.time('work gzip');
+      console.time("work gzip");
       const archiveContent = await project.gzip(files);
 
-      console.timeEnd('work gzip');
-      console.log(`Successfully created dist.tgz with ${files.length} files (including config.json)`);
+      console.timeEnd("work gzip");
+      console.log(
+        `Successfully created dist.tgz with ${files.length} files (including config.json)`,
+      );
       setGzipSuccess(true);
-
 
       // Clean up temporary file
       try {
@@ -90,7 +91,6 @@ export const useGzip = (project: UtooProject | null) => {
       URL.revokeObjectURL(url);
 
       console.log("Download triggered successfully");
-
     } catch (e: any) {
       console.error("Gzip failed:", e);
       setError(`Gzip failed: ${e.message || JSON.stringify(e)}`);

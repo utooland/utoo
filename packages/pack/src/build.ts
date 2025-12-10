@@ -11,24 +11,12 @@ import { compatOptionsFromWebpack, WebpackConfig } from "./webpackCompat";
 import { xcodeProfilingReady } from "./xcodeProfile";
 
 export function build(
-  bundleOptions: BundleOptions,
-  projectPath?: string,
-  rootPath?: string,
-): Promise<void>;
-
-export function build(
-  webpackConfig: WebpackConfig,
-  projectPath?: string,
-  rootPath?: string,
-): Promise<void>;
-
-export function build(
   options: BundleOptions | WebpackConfig,
   projectPath?: string,
   rootPath?: string,
 ) {
-  const bundleOptions = (<WebpackConfig>options).compatMode
-    ? compatOptionsFromWebpack(<WebpackConfig>options)
+  const bundleOptions = (<WebpackConfig>options).webpackMode
+    ? compatOptionsFromWebpack(<WebpackConfig>options, projectPath, rootPath)
     : <BundleOptions>options;
   if (!rootPath) {
     // help user to find the rootDir automatically.

@@ -1,5 +1,5 @@
-import { EllipsisOutlined, PlusOutlined } from '@ant-design/icons';
-import React from 'react';
+import { EllipsisOutlined, PlusOutlined } from "@ant-design/icons";
+import React from "react";
 
 export function AntDesignIcons() {
   return (

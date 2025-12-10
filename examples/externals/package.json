@@ -5,9 +5,9 @@
   "keywords": [],
   "license": "MIT",
   "scripts": {
-    "build": "utoo-pack build",
-    "analyze": "ANALYZE=1 utoo-pack build",
-    "dev": "utoo-pack dev",
+    "build": "utoopack build",
+    "analyze": "ANALYZE=1 utoopack build",
+    "dev": "utoopack dev",
     "serve": "npm run build && node ./genHtml.js && serve ./dist"
   },
   "dependencies": {

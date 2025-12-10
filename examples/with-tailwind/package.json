@@ -2,8 +2,8 @@
   "name": "with-tailwindcss",
   "version": "0.0.1",
   "scripts": {
-    "dev": "utoo-pack dev",
-    "build": "utoo-pack build"
+    "dev": "utoopack dev",
+    "build": "utoopack build"
   },
   "dependencies": {
     "react": "^18.2.0",

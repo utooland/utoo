@@ -1,7 +1,7 @@
-import { Checkbox, Input } from 'antd';
-import React from 'react';
-import styled from 'styled-components';
-import { proxy, snapshot, subscribe, useSnapshot } from 'valtio';
+import { Checkbox, Input } from "antd";
+import React from "react";
+import styled from "styled-components";
+import { proxy, snapshot, subscribe, useSnapshot } from "valtio";
 
 export function proxyWithPersist<V extends Object>(
   val: V,
@@ -20,10 +20,10 @@ export function proxyWithPersist<V extends Object>(
 
 const todos = proxyWithPersist(
   {
-    list: [{ id: 1, text: 'hello world', done: false }],
+    list: [{ id: 1, text: "hello world", done: false }],
   },
   {
-    key: 'todos',
+    key: "todos",
   },
 );
 
@@ -51,7 +51,7 @@ const Wrapper = styled.div`
 
 export function Todos() {
   const snap = useSnapshot(todos);
-  const [text, setText] = React.useState('');
+  const [text, setText] = React.useState("");
   return (
     <Wrapper>
       <h2>Todos</h2>
@@ -77,14 +77,14 @@ export function Todos() {
             setText(e.target.value);
           }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') {
+            if (e.key === "Enter") {
               text &&
                 actions.addTodo({
                   id: Math.random(),
                   text,
                   done: false,
                 });
-              setText('');
+              setText("");
             }
           }}
         />

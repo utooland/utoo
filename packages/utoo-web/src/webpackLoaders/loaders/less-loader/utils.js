@@ -3,7 +3,7 @@
 const { type } = require("os");
 
 Object.defineProperty(exports, "__esModule", {
-  value: true
+  value: true,
 });
 exports.errorFactory = errorFactory;
 exports.getLessImplementation = getLessImplementation;
@@ -11,7 +11,9 @@ exports.getLessOptions = getLessOptions;
 exports.isUnsupportedUrl = isUnsupportedUrl;
 exports.normalizeSourceMap = normalizeSourceMap;
 var _path = _interopRequireDefault(require("path"));
-function _interopRequireDefault(e) { return e && e.__esModule ? e : { default: e }; }
+function _interopRequireDefault(e) {
+  return e && e.__esModule ? e : { default: e };
+}
 /* eslint-disable class-methods-use-this */
 const trailingSlash = /[/\\]$/;
 
@@ -30,7 +32,8 @@ const IS_NATIVE_WIN32_PATH = /^[a-z]:[/\\]|^\\\\/i;
 // - ~@org/
 // - ~@org/package
 // - ~@org/package/
-const IS_MODULE_IMPORT = /^~([^/]+|[^/]+\/|@[^/]+[/][^/]+|@[^/]+\/?|@[^/]+[/][^/]+\/)$/;
+const IS_MODULE_IMPORT =
+  /^~([^/]+|[^/]+\/|@[^/]+[/][^/]+|@[^/]+\/?|@[^/]+[/][^/]+\/)$/;
 const MODULE_REQUEST_REGEX = /^[^?]*~/;
 
 /**
@@ -48,7 +51,7 @@ function createWebpackLessPlugin(loaderContext, implementation) {
     mainFields: ["less", "style", "main", "..."],
     mainFiles: ["index", "..."],
     extensions: [".less", ".css"],
-    preferRelative: true
+    preferRelative: true,
   });
   class WebpackFileManager extends implementation.FileManager {
     supports(filename) {
@@ -102,7 +105,10 @@ function createWebpackLessPlugin(loaderContext, implementation) {
     async loadFile(filename, ...args) {
       let result;
       try {
-        if (IS_SPECIAL_MODULE_IMPORT.test(filename) || lessOptions.webpackImporter === "only") {
+        if (
+          IS_SPECIAL_MODULE_IMPORT.test(filename) ||
+          lessOptions.webpackImporter === "only"
+        ) {
           const error = new Error();
           error.type = "Next";
           throw error;
@@ -115,13 +121,18 @@ function createWebpackLessPlugin(loaderContext, implementation) {
         try {
           result = await this.resolveFilename(filename, ...args);
         } catch (webpackResolveError) {
-          error.message = `Less resolver error:\n${error.message}\n\n` + `Webpack resolver error details:\n${webpackResolveError.details}\n\n` + `Webpack resolver error missing:\n${webpackResolveError.missing}\n\n`;
+          error.message =
+            `Less resolver error:\n${error.message}\n\n` +
+            `Webpack resolver error details:\n${webpackResolveError.details}\n\n` +
+            `Webpack resolver error missing:\n${webpackResolveError.missing}\n\n`;
           return Promise.reject(error);
         }
         loaderContext.addDependency(result);
         return super.loadFile(result, ...args);
       }
-      const absoluteFilename = _path.default.isAbsolute(result.filename) ? result.filename : _path.default.resolve(".", result.filename);
+      const absoluteFilename = _path.default.isAbsolute(result.filename)
+        ? result.filename
+        : _path.default.resolve(".", result.filename);
       loaderContext.addDependency(_path.default.normalize(absoluteFilename));
       return result;
     }
@@ -130,7 +141,7 @@ function createWebpackLessPlugin(loaderContext, implementation) {
     install(lessInstance, pluginManager) {
       pluginManager.addFileManager(new WebpackFileManager());
     },
-    minVersion: [3, 0, 0]
+    minVersion: [3, 0, 0],
   };
 }
 
@@ -143,16 +154,23 @@ function createWebpackLessPlugin(loaderContext, implementation) {
  * @returns {Object}
  */
 function getLessOptions(loaderContext, loaderOptions, implementation) {
-  const options = typeof loaderOptions.lessOptions === "function" ? loaderOptions.lessOptions(loaderContext) || {} : loaderOptions.lessOptions || {};
+  const options =
+    typeof loaderOptions.lessOptions === "function"
+      ? loaderOptions.lessOptions(loaderContext) || {}
+      : loaderOptions.lessOptions || {};
   const lessOptions = {
     plugins: [],
     relativeUrls: true,
     // We need to set the filename because otherwise our WebpackFileManager will receive an undefined path for the entry
     filename: loaderContext.resourcePath,
-    ...options
+    ...options,
   };
   const plugins = lessOptions.plugins.slice();
-  const shouldUseWebpackImporter = typeof loaderOptions.webpackImporter === "boolean" || loaderOptions.webpackImporter === "only" ? loaderOptions.webpackImporter : true;
+  const shouldUseWebpackImporter =
+    typeof loaderOptions.webpackImporter === "boolean" ||
+    loaderOptions.webpackImporter === "only"
+      ? loaderOptions.webpackImporter
+      : true;
   if (shouldUseWebpackImporter) {
     plugins.unshift(createWebpackLessPlugin(loaderContext, implementation));
   }
@@ -161,7 +179,7 @@ function getLessOptions(loaderContext, loaderOptions, implementation) {
       // eslint-disable-next-line no-param-reassign
       pluginManager.webpackLoaderContext = loaderContext;
       lessOptions.pluginManager = pluginManager;
-    }
+    },
   });
   lessOptions.plugins = plugins;
   return lessOptions;
@@ -189,7 +207,9 @@ function normalizeSourceMap(map) {
 
   // `less` returns POSIX paths, that's why we need to transform them back to native paths.
   // eslint-disable-next-line no-param-reassign
-  newMap.sources = newMap.sources.map(source => _path.default.normalize(source));
+  newMap.sources = newMap.sources.map((source) =>
+    _path.default.normalize(source),
+  );
   return newMap;
 }
 function getLessImplementation(loaderContext, implementation) {
@@ -199,7 +219,7 @@ function getLessImplementation(loaderContext, implementation) {
     resolvedImplementation = require("less/lib/less-node/index.js").default;
   } else if (typeof implementation === "string") {
     // eslint-disable-next-line import/no-dynamic-require, global-require
-    resolvedImplementation = require(implementation)
+    resolvedImplementation = require(implementation);
   }
   // eslint-disable-next-line consistent-return
   return resolvedImplementation;
@@ -217,9 +237,16 @@ function getFileExcerptIfPossible(error) {
   return excerpt;
 }
 function errorFactory(error) {
-  const message = ["\n", ...getFileExcerptIfPossible(error), error.message.charAt(0).toUpperCase() + error.message.slice(1), error.filename ? `      Error in ${_path.default.normalize(error.filename)} (line ${error.line}, column ${error.column})` : ""].join("\n");
+  const message = [
+    "\n",
+    ...getFileExcerptIfPossible(error),
+    error.message.charAt(0).toUpperCase() + error.message.slice(1),
+    error.filename
+      ? `      Error in ${_path.default.normalize(error.filename)} (line ${error.line}, column ${error.column})`
+      : "",
+  ].join("\n");
   const obj = new Error(message, {
-    cause: error
+    cause: error,
   });
   obj.stack = null;
   return obj;

@@ -2,24 +2,31 @@ import "systemjs/dist/system.js";
 
 import nodePolyFills from "./nodePolyFills";
 
-export async function cjs(entrypoint: string, importMaps: Record<string, string>,) {
-  debugger
-  await Promise.all(Object.entries(importMaps).map(async ([k, v]) => {
-    if (v.startsWith("http")) {
-      try {
-        const response = await fetch(v);
-        if (response.ok) {
-          importMaps[k] = await response.text();
-        } else {
-          console.error(`Failed to fetch loader '${k}' from ${v}: ${response.status} ${response.statusText}`);
+export async function cjs(
+  entrypoint: string,
+  importMaps: Record<string, string>,
+) {
+  debugger;
+  await Promise.all(
+    Object.entries(importMaps).map(async ([k, v]) => {
+      if (v.startsWith("http")) {
+        try {
+          const response = await fetch(v);
+          if (response.ok) {
+            importMaps[k] = await response.text();
+          } else {
+            console.error(
+              `Failed to fetch loader '${k}' from ${v}: ${response.status} ${response.statusText}`,
+            );
+            delete importMaps[k];
+          }
+        } catch (error) {
+          console.error(`Error fetching loader '${k}' from ${v}:`, error);
           delete importMaps[k];
         }
-      } catch (error) {
-        console.error(`Error fetching loader '${k}' from ${v}:`, error);
-        delete importMaps[k];
       }
-    }
-  }));
+    }),
+  );
 
   Object.assign(importMaps, nodePolyFills);
   const require = (id: string) => {
@@ -44,9 +51,12 @@ export async function cjs(entrypoint: string, importMaps: Record<string, string>
     const exports = module.exports;
 
     try {
-      new Function('require', 'exports', 'module', moduleCode)(require, exports, module);
+      new Function("require", "exports", "module", moduleCode)(
+        require,
+        exports,
+        module,
+      );
       finalExports = module.exports;
-
     } catch (e: any) {
       console.error(`Worker: Error executing dependency module ${id}:`, e);
       throw new Error(`Failed to load CJS dependency ${id}: ${e.message}`);
@@ -57,7 +67,7 @@ export async function cjs(entrypoint: string, importMaps: Record<string, string>
     return finalExports;
   };
 
-  require.resolve = (request: string) => request
+  require.resolve = (request: string) => request;
 
   // @ts-ignore
   // a hack for loader-runner resolving
@@ -74,8 +84,6 @@ export async function cjs(entrypoint: string, importMaps: Record<string, string>
       entryPointCode = "self.Buffer = require('buffer').Buffer;" + moduleCode;
       break;
     }
-
-
   }
 
   if (entryPointCode) {
@@ -98,4 +106,3 @@ export async function cjs(entrypoint: string, importMaps: Record<string, string>
     );
   }
 }
-

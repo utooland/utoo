@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { FileTreeNode, FileTreeItemProps } from "../types";
+import { FileTreeItemProps, FileTreeNode } from "../types";
 
 export const FileTreeItem = React.memo(
   ({
