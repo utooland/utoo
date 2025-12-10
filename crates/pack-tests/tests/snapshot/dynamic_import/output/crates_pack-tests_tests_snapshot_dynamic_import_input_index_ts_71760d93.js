@@ -3,7 +3,11 @@
 "use strict";
 
 function requireStat(name) {
-    return /*TURBOPACK member replacement*/ __turbopack_context__.z.context(`${name}/package.json`);
+    return (()=>{
+        const e = new Error("Cannot find module as expression is too dynamic");
+        e.code = 'MODULE_NOT_FOUND';
+        throw e;
+    })();
 }
 async function importUrl(url) {
     return Promise.resolve().then(()=>{
