@@ -12,7 +12,7 @@ let _promise: Promise<void> = new Promise((resolve) => {
 let _projectEndpoint: ProjectEndpoint;
 
 let _serviceWorkerScope: string;
-let _relativeDirToCwd: string | undefined;
+let _targetDirToCwd: string | undefined;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
@@ -25,7 +25,7 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("message", (event) => {
   if (event.data && event.data[ServiceWorkerHandShake] === true) {
     _serviceWorkerScope = event.data.scope;
-    _relativeDirToCwd = event.data.relativeDirToCwd;
+    _targetDirToCwd = event.data.targetDirToCwd;
     _projectEndpoint = Project.fork(
       new MessageChannel(),
       event.source as Client,
@@ -34,21 +34,25 @@ self.addEventListener("message", (event) => {
   }
 });
 
-self.addEventListener("fetch", async (event: FetchEvent) => {
-  await _promise;
-  let { url: url_str, referrer } = event.request;
-  let url = new URL(url_str);
-  if (
-    url.pathname.startsWith(_serviceWorkerScope) ||
-    (referrer && new URL(referrer).pathname.startsWith(_serviceWorkerScope))
-  ) {
-    const relateivePathToCwd =
-      (_relativeDirToCwd ?? ".") +
-      url.pathname.replace(_serviceWorkerScope, "");
-    event.respondWith(readFileFromProject(relateivePathToCwd));
-  } else {
-    return;
-  }
+self.addEventListener("fetch", (event: FetchEvent) => {
+  event.respondWith(
+    (async () => {
+      await _promise;
+      let { url: url_str, referrer } = event.request;
+      let url = new URL(url_str);
+      if (
+        url.pathname.startsWith(_serviceWorkerScope) ||
+        (referrer && new URL(referrer).pathname.startsWith(_serviceWorkerScope))
+      ) {
+        const relativePathToCwd =
+          (_targetDirToCwd ?? ".") +
+          url.pathname.replace(_serviceWorkerScope, "");
+        return readFileFromProject(relativePathToCwd);
+      } else {
+        return fetch(event.request);
+      }
+    })(),
+  );
 });
 
 async function readFileFromProject(projectPath: string): Promise<Response> {

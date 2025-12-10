@@ -12,7 +12,7 @@ export const initializeProject = async () => {
     serviceWorker: {
       url: "http://localhost:8081/serviceWorker.js",
       scope: serviceWorkerScope,
-      relativeDirToCwd: "../utooweb-demo/",
+      targetDirToCwd: "../utooweb-demo/",
     },
     loadersImportMap: {
       // "xyzLoader": "https://x.y.z"
