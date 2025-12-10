@@ -83,9 +83,9 @@ export class Project implements ProjectEndpoint {
 
   public async installServiceWorker() {
     if (this.serviceWorkerOptions) {
-      const { url, scope, relativeDirToCwd } = this.serviceWorkerOptions;
+      const { url, scope, targetDirToCwd } = this.serviceWorkerOptions;
       // Should add "Service-Worker-Allowed": "/" in page root response headers,
-      return await installServiceWorker(url, scope, relativeDirToCwd);
+      return await installServiceWorker(url, scope, targetDirToCwd);
     }
   }
 

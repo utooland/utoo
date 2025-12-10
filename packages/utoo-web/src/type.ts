@@ -66,7 +66,7 @@ export interface ProjectOptions {
 export interface ServiceWorkerOptions {
   url: string;
   scope: string;
-  relativeDirToCwd?: string;
+  targetDirToCwd?: string;
 }
 
 export type Binding = Awaited<ReturnType<typeof initWasm>>;
