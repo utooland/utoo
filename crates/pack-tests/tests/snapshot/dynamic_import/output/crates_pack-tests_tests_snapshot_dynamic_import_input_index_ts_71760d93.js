@@ -3,18 +3,14 @@
 "use strict";
 
 function requireStat(name) {
-    return (()=>{
-        const e = new Error("Cannot find module 'unknown'");
-        e.code = 'MODULE_NOT_FOUND';
-        throw e;
-    })();
+    return /*TURBOPACK member replacement*/ __turbopack_context__.z.context(`${name}/package.json`);
 }
 async function importUrl(url) {
-    return (()=>{
-        const e = new Error("Cannot find module 'unknown'");
+    return Promise.resolve().then(()=>{
+        const e = new Error("Cannot find module as expression is too dynamic");
         e.code = 'MODULE_NOT_FOUND';
         throw e;
-    })().then((module)=>module.default);
+    }).then((module)=>module.default);
 }
 __turbopack_context__.s([
     "importUrl",
