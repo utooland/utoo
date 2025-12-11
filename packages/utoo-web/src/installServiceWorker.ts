@@ -5,16 +5,23 @@ export async function installServiceWorker(
   scope: string,
   targetDirToCwd?: string,
 ) {
-  const registration = await navigator.serviceWorker.register(url, {
-    scope: "/",
-  });
+  const swUrl = new URL(url, window.location.href);
+  swUrl.searchParams.set("scope", scope);
+  if (targetDirToCwd) {
+    swUrl.searchParams.set("targetDirToCwd", targetDirToCwd);
+  }
+
+  const registration = await navigator.serviceWorker.register(
+    swUrl.toString(),
+    {
+      scope: "/",
+    },
+  );
 
   return new Promise<void>((resolve) => {
     function sendMessage(sw: ServiceWorker) {
       sw.postMessage({
         [ServiceWorkerHandShake]: true,
-        scope,
-        targetDirToCwd,
       });
       resolve();
     }
