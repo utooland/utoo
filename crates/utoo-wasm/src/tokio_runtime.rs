@@ -22,7 +22,6 @@ pub fn init_tokio_runtime(worker_url: String) {
                  * it will block threads scheduling,
                  * see https://web.dev/articles/scaling-multithreaded-webassembly-applications#heap_management_mallocfree
                  */
-                .worker_threads(4)
                 .disable_lifo_slot()
                 .thread_name_fn(|| {
                     static ATOMIC_ID: AtomicUsize = AtomicUsize::new(1);
