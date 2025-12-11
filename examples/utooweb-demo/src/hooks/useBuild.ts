@@ -28,7 +28,7 @@ export const useBuild = (
 
         if (stats.assets) {
           for (const asset of stats.assets) {
-            const assetPath = `/dist/${asset.name}`;
+            const assetPath = `/preview/dist/${asset.name}`;
             if (asset.name.endsWith(".css")) {
               styles.push(`<link rel="stylesheet" href="${assetPath}">`);
             } else if (asset.name.endsWith(".js")) {
