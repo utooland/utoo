@@ -375,7 +375,7 @@ impl Endpoint for AppEndpoint {
                 let stats_output = VirtualOutputAsset::new(
                     dist_root.join("stats.json")?,
                     AssetContent::file(
-                        File::from(serde_json::to_string_pretty(&webpack_stats)?).into(),
+                        File::from(simd_json::serde::to_string_pretty(&webpack_stats)?).into(),
                     ),
                 )
                 .to_resolved()
