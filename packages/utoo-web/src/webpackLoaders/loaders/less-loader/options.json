@@ -41,9 +41,7 @@
         },
         {
           "type": "string",
-          "enum": [
-            "only"
-          ]
+          "enum": ["only"]
         }
       ]
     },
