@@ -60,6 +60,18 @@
   padding: 10px 20px;
 }
 
+.style-module-less-module__n1Cx1q__message {
+  color: red;
+}
+
+.style-module-less-module__n1Cx1q__message:global(.left) .message-main, .style-module-less-module__n1Cx1q__message:global(.left) .message-context {
+  font-size: 15px;
+}
+
+.style-module-less-module__n1Cx1q__message :global(.right) {
+  font-size: 16px;
+}
+
 /* [project]/crates/pack-tests/tests/snapshot/style/css_modules/input/normal_css_modules/style.module.sass.module.css [client] (css) */
 .style-module-sass-module__qgbigG__card {
   border-radius: 8px;

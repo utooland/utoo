@@ -41,6 +41,7 @@ __turbopack_context__.v({
 
 __turbopack_context__.v({
   "button": "style-module-less-module__n1Cx1q__button",
+  "message": "style-module-less-module__n1Cx1q__message",
 });
 }),
 565, ((__turbopack_context__) => {
