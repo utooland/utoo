@@ -20,6 +20,7 @@ pub async fn get_runtime_asset_context(
             enable_typescript_transform: Some(
                 TypescriptTransformOptions::default().resolved_cell(),
             ),
+            ignore_dynamic_requests: true,
             ..Default::default()
         },
         // TODO: Somehow this fails to compile when enabled.

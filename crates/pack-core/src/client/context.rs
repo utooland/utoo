@@ -342,6 +342,7 @@ pub async fn get_client_module_options_context(
                 TypescriptTransformOptions::default().resolved_cell(),
             ),
             enable_jsx: Some(JsxTransformOptions::default().resolved_cell()),
+            ignore_dynamic_requests: true,
             ..Default::default()
         },
         css: CssOptionsContext {

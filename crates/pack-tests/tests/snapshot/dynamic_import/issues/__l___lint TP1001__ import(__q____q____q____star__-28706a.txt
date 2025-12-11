@@ -1,0 +1,13 @@
+[92;4msuggestion - [analysis] /crates/pack-tests/tests/snapshot/dynamic_import/input/index.ts:6:11  lint TP1001 import(???*0*) is very dynamic
+  
+       2 |     return require(require.resolve(`${name}/package.json`))
+       3 | }
+       4 | 
+       5 | export async function importUrl(url: string) {
+         +            v--------------v
+       6 +     return import(`${url}`).then((module) => module.default);
+         +            ^--------------^
+       7 | }
+  
+  - *0* arguments[0]
+    ⚠️  function calls are not analyzed yet
