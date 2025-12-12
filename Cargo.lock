@@ -3435,7 +3435,7 @@ dependencies = [
 [[package]]
 name = "libmimalloc-sys"
 version = "0.1.44"
-source = "git+https://github.com/utooland/mimalloc_rust.git#3b3740a18780506aff6de30da8842647e0a7c926"
+source = "git+https://github.com/utooland/mimalloc_rust.git#fed2a960edab4e74dcffda3be0bb32cf46085c79"
 dependencies = [
  "cc",
  "cty",
@@ -3741,7 +3741,7 @@ dependencies = [
 [[package]]
 name = "mimalloc"
 version = "0.1.48"
-source = "git+https://github.com/utooland/mimalloc_rust.git#3b3740a18780506aff6de30da8842647e0a7c926"
+source = "git+https://github.com/utooland/mimalloc_rust.git#fed2a960edab4e74dcffda3be0bb32cf46085c79"
 dependencies = [
  "libmimalloc-sys",
 ]
