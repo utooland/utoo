@@ -315,6 +315,6 @@ Your build setup should be configured to output these files to a location that y
 
 ## Notes
 
-* Due to the current default memory allocator for Rust, [`dlmalloc`](https://github.com/alexcrichton/dlmalloc-rs), having less than ideal performance on multi-threaded `wasm`, we are currently trying to support [`mimalloc`](https://github.com/microsoft/mimalloc) with reference to [`emscripten`](https://emscripten.org/docs/tools_reference/settings_reference.html#malloc)'s solution. Once successful, the build speed will be greatly improved;
+* Since the default memory allocator on Rust, [`dlmalloc`](https://github.com/alexcrichton/dlmalloc-rs), does not perform ideally on multi-threaded `wasm`, we have ported [`mimalloc`](https://github.com/microsoft/mimalloc) to the wasm32-unknown-unknown platform to support running builds with threads equal to the number of CPU cores. Therefore, the difference in build performance between the browser environment and the operating system environment is very small.
 * In the future, we will also support the [`HMR`](https://webpack.js.org/concepts/hot-module-replacement/) feature in the browser;
 * Advanced features of turbopack such as [`persistent caching`](https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopackPersistentCaching), are also in the plan and will be supported directly in the browser in the future.
