@@ -27,6 +27,9 @@ mod project;
 pub(crate) mod tokio_runtime;
 pub use project::Project;
 
+#[global_allocator]
+static ALLOC: turbo_tasks_malloc::TurboMalloc = turbo_tasks_malloc::TurboMalloc;
+
 #[wasm_bindgen(start)]
 fn init_pack() {
     panic::set_hook(Box::new(console_error_panic_hook::hook));

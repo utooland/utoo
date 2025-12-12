@@ -312,7 +312,7 @@ import "@utoo/web/esm/serviceWorker";
 
 ## 注意
 
-* 由于当前 Rust 上默认的内存分配器 [`dlmalloc`](https://github.com/alexcrichton/dlmalloc-rs) 在多线程 `wasm` 上性能不够理想，我们目前正在尝试参考 [`emscripten`](https://emscripten.org/docs/tools_reference/settings_reference.html#malloc) 的方案支持 [`mimalloc`](https://github.com/microsoft/mimalloc)，一旦成功，构建速度将会有大幅提升；
+* 由于当前 Rust 上默认的内存分配器 [`dlmalloc`](https://github.com/alexcrichton/dlmalloc-rs) 在多线程 `wasm` 上性能不够理想，我们将 [`mimalloc`](https://github.com/microsoft/mimalloc) 移植到了 wasm32-unknown-unknown 平台，以支持开启 CPU 核心数量的线程来运行构建。因此在浏览器环境和在操作系统环境，构建的性能差异十分微小。
 * 未来我们也会在浏览器中支持 [`HMR`](https://webpack.js.org/concepts/hot-module-replacement/) 功能;
 * turbopack 的部分高级功能如[`持久化缓存`](https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopackPersistentCaching)，目前也在计划之中，未来会在浏览器内直接支持。
 
