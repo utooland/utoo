@@ -39,6 +39,7 @@ schemars            = "0.8"
 serde               = { version = "1.0.219", features = ["derive"] }
 serde_json          = "1.0.140"
 serde_path_to_error = "0.1.16"
+simd-json           = "0.17.0"
 thiserror           = "1.0"
 tokio               = { version = "1.47.1" }
 toml                = "0.8"
