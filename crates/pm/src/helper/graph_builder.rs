@@ -54,6 +54,7 @@ pub async fn build_deps(graph: &mut DependencyGraph) -> Result<()> {
     let legacy_peer_deps = get_legacy_peer_deps().await;
     tracing::debug!("going to build deps for root, legacy_peer_deps: {legacy_peer_deps}");
 
+    let build_start = std::time::Instant::now();
     let mut current_level = vec![graph.root_index];
 
     while !current_level.is_empty() {
@@ -214,6 +215,12 @@ pub async fn build_deps(graph: &mut DependencyGraph) -> Result<()> {
         tracing::debug!("Level completed, next level has {} nodes", next_level.len());
         current_level = next_level;
     }
+
+    tracing::warn!(
+        "Build phase completed: {} nodes, took {:.2}s",
+        graph.graph.node_count(),
+        build_start.elapsed().as_secs_f64()
+    );
 
     Ok(())
 }

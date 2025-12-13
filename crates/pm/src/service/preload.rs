@@ -280,6 +280,13 @@ impl PreloadService {
 
         let duration = start_time.elapsed();
 
+        tracing::warn!(
+            "Preload phase completed: {} success, {} failed, took {:.2}s",
+            manifest_success_count,
+            manifest_failed_count,
+            duration.as_secs_f64()
+        );
+
         tracing::debug!(
             "Preload completed in {:.2}s: {} packages processed | Manifests: {} success, {} failed | Downloads: {} success, {} failed, {} cached",
             duration.as_secs_f64(),
