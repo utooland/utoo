@@ -11,7 +11,7 @@ import webpackLoadersCode from "./webpackLoaders/workerContent";
 
 let nextWorkerId = 0;
 
-const loaderWorkers: Record<string, Array<Worker & { workerId: number }>> = {};
+const loaderWorkers: Record<string, Map<number, Worker>> = {};
 
 async function getTurbopackLoaderAssets(projectInternal: ProjectInternal) {
   const turbopackLoaderAssets: Record<string, string> = {};
@@ -63,13 +63,9 @@ export const runLoaderWorkerPool = async (
           },
         } as LoaderRunnerMeta,
       ]);
-      // @ts-ignore
-      worker.workerId = workerId;
-
       const workers =
-        loaderWorkers[entrypoint] || (loaderWorkers[entrypoint] = []);
-      // @ts-ignore
-      workers.push(worker);
+        loaderWorkers[entrypoint] || (loaderWorkers[entrypoint] = new Map());
+      workers.set(workerId, worker);
 
       workerCreated(workerId);
     },
@@ -78,11 +74,10 @@ export const runLoaderWorkerPool = async (
       const entrypoint = options.filename;
       const workers = loaderWorkers[entrypoint];
       if (workers) {
-        const index = workers.findIndex((w) => w.workerId === workerId);
-        if (index !== -1) {
-          const worker = workers[index];
+        const worker = workers.get(workerId);
+        if (worker) {
           worker.terminate();
-          workers.splice(index, 1);
+          workers.delete(workerId);
         }
       }
     },

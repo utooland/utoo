@@ -2,6 +2,8 @@
 /* eslint-disable */
 export function workerCreated(worker_id: number): void;
 export function registerWorkerScheduler(creator: Function, terminator: Function): void;
+export function workerCreated(worker_id: number): void;
+export function registerWorkerScheduler(creator: Function, terminator: Function): void;
 export function init_log_filter(filter: string): void;
 export function init_pack(): void;
 export function recvTaskMessageInWorker(worker_id: number): Promise<WasmTaskMessage>;
@@ -166,12 +168,12 @@ export interface InitOutput {
   readonly __wbindgen_export_7: WebAssembly.Table;
   readonly __externref_drop_slice: (a: number, b: number) => void;
   readonly __externref_table_dealloc: (a: number) => void;
-  readonly closure117356_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure114804_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure169_externref_shim: (a: number, b: number, c: any) => void;
   readonly closure114807_externref_shim: (a: number, b: number, c: any) => void;
-  readonly wasm_bindgen__convert__closures_____invoke__h2ce973260553dde0: (a: number, b: number) => void;
   readonly wasm_bindgen__convert__closures_____invoke__heac94dfe74335608: (a: number, b: number) => void;
+  readonly closure114804_externref_shim: (a: number, b: number, c: any) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__h2ce973260553dde0: (a: number, b: number) => void;
+  readonly closure169_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure117356_externref_shim: (a: number, b: number, c: any) => void;
   readonly closure117486_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_thread_destroy: (a?: number, b?: number, c?: number) => void;
   readonly __wbindgen_start: (a: number) => void;
