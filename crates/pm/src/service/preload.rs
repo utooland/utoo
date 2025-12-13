@@ -319,8 +319,9 @@ impl PreloadService {
             manifest_stats.get_percentile(99.0),
             manifest_stats.max(),
         ) {
-            tracing::debug!(
-                "Manifest fetch timing: avg={:.0}ms, p50={:.0}ms, p90={:.0}ms, p99={:.0}ms, max={:.0}ms",
+            tracing::warn!(
+                "Preload stats: {} requests, avg={:.0}ms, p50={:.0}ms, p90={:.0}ms, p99={:.0}ms, max={:.0}ms",
+                manifest_total,
                 avg.as_secs_f64() * 1000.0,
                 p50.as_secs_f64() * 1000.0,
                 p90.as_secs_f64() * 1000.0,
