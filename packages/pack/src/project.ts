@@ -9,6 +9,7 @@ import type {
   StackFrame,
 } from "./binding";
 import * as binding from "./binding";
+import { runLoaderWorkerPool } from "./loaderWorkerPool";
 import {
   ConfigComplete,
   Endpoint,
@@ -217,67 +218,16 @@ export function projectFactory() {
     return iterator;
   }
 
-  const loaderWorkers: Record<string, Array<Worker>> = {};
-
-  const createOrScalePool = async () => {
-    while (true) {
-      try {
-        let poolOptions = await binding.recvPoolRequest();
-        const { filename, maxConcurrency } = poolOptions;
-        const workers =
-          loaderWorkers[filename] || (loaderWorkers[filename] = []);
-        if (workers.length < maxConcurrency) {
-          for (let i = workers.length; i < maxConcurrency; i++) {
-            const worker = new Worker(filename, {
-              workerData: {
-                poolId: filename,
-                bindingPath: require.resolve("./binding.js"),
-              },
-            });
-            worker.unref();
-            workers.push(worker);
-          }
-        } else if (workers.length > maxConcurrency) {
-          const workersToStop = workers.splice(
-            0,
-            workers.length - maxConcurrency,
-          );
-          workersToStop.forEach((worker) => worker.terminate());
-        }
-      } catch (e) {
-        return;
-      }
-    }
-  };
-
-  const waitingForWorkerTermination = async () => {
-    while (true) {
-      try {
-        const { filename, workerId } = await binding.recvWorkerTermination();
-        const workers = loaderWorkers[filename];
-        const workerIdx = workers.findIndex(
-          (worker) => worker.threadId === workerId,
-        );
-        if (workerIdx > -1) {
-          const worker = workers.splice(workerIdx, 1);
-          worker[0].terminate();
-        }
-      } catch (e) {
-        return;
-      }
-    }
-  };
-
   class ProjectImpl implements Project {
     readonly _nativeProject: { __napiType: "Project" };
 
     constructor(nativeProject: { __napiType: "Project" }) {
       this._nativeProject = nativeProject;
-      if (typeof binding.recvPoolRequest === "function") {
-        createOrScalePool();
-      }
-      if (typeof binding.recvWorkerTermination === "function") {
-        waitingForWorkerTermination();
+      if (typeof binding.registerWorkerScheduler === "function") {
+        runLoaderWorkerPool(
+          binding,
+          require.resolve("@utoo/pack/cjs/binding.js"),
+        );
       }
     }
 

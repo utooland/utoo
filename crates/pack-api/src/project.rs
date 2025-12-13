@@ -711,6 +711,11 @@ impl Project {
     }
 
     #[turbo_tasks::function]
+    pub(super) fn is_watch_enabled(&self) -> Result<Vc<bool>> {
+        Ok(Vc::cell(self.watch.enable))
+    }
+
+    #[turbo_tasks::function]
     pub(super) async fn per_entry_module_graph(&self) -> Result<Vc<bool>> {
         Ok(Vc::cell(*self.config.mode().await? == Mode::Development))
     }
@@ -842,15 +847,30 @@ impl Project {
 
     #[turbo_tasks::function]
     pub async fn whole_app_module_graphs(self: ResolvedVc<Self>) -> Result<Vc<ModuleGraphs>> {
-        async move {
+        let module_graph = async move {
             let module_graphs_op = whole_app_module_graph_operation(self);
-            let module_graphs_vc = module_graphs_op.connect().resolve().await?;
-            let _ = module_graphs_op.peek_issues();
+            let module_graphs_vc = if self.mode().await?.is_production() {
+                module_graphs_op.connect()
+            } else {
+                // In development mode, we need to to take and drop the issues, otherwise every
+                // route will report all issues.
+                let vc = module_graphs_op.resolve_strongly_consistent().await?;
+                module_graphs_op.drop_issues();
+                *vc
+            };
 
             Ok(module_graphs_vc)
         }
-        .instrument(tracing::info_span!("module graph for project"))
-        .await
+        .instrument(tracing::info_span!("module graph for app"))
+        .await;
+        // At this point all modules have been computed and we can get rid of the node.js
+        // process pools
+        if *self.is_watch_enabled().await? {
+            turbopack_node::evaluate::scale_down();
+        } else {
+            turbopack_node::evaluate::scale_zero();
+        }
+        module_graph
     }
 
     #[turbo_tasks::function]

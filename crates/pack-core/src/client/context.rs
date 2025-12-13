@@ -296,21 +296,11 @@ pub async fn get_client_module_options_context(
         client_rules.push(get_dynamic_import_to_require_rule());
     }
 
-    let postcss_transform_options: Option<PostCssTransformOptions> = {
-        #[cfg(all(target_family = "wasm", target_os = "unknown"))]
-        {
-            None
-        }
-
-        #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-        {
-            Some(PostCssTransformOptions {
-                postcss_package: Some(get_postcss_package_mapping().to_resolved().await?),
-                config_location: PostCssConfigLocation::ProjectPathOrLocalPath,
-                ..Default::default()
-            })
-        }
-    };
+    let postcss_transform_options = Some(PostCssTransformOptions {
+        postcss_package: Some(get_postcss_package_mapping().to_resolved().await?),
+        config_location: PostCssConfigLocation::ProjectPathOrLocalPath,
+        ..Default::default()
+    });
 
     let postcss_foreign_transform_options =
         postcss_transform_options

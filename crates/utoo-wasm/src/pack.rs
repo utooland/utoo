@@ -1,16 +1,4 @@
-use rustc_hash::FxHashMap;
-use serde_json::{json, Value};
-use std::{ops::Deref, path::PathBuf, str::FromStr, sync::Arc};
-use tokio::time::Instant;
-use turbo_tasks_fs::FileContent;
-use turbopack_core::{
-    diagnostics::PlainDiagnostic,
-    error::PrettyPrintError,
-    issue::{PlainIssue, PlainIssueSource, PlainSource},
-    source_pos::SourcePos as SourcePosInner,
-};
-
-use anyhow::{Context, Ok, Result};
+use anyhow::{Context, Result};
 use pack_api::{
     endpoint::Endpoint,
     entrypoint::{get_all_written_entrypoints_with_issues_operation, EntrypointsWithIssues},
@@ -18,12 +6,24 @@ use pack_api::{
     tasks::BundlerTurboTasks,
     utils::StyledStringSerialize,
 };
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::{json, Value};
+use std::{ops::Deref, path::PathBuf, str::FromStr, sync::Arc};
+use tokio::time::Instant;
 use turbo_rcstr::RcStr;
 use turbo_tasks::{OperationVc, ReadConsistency, ResolvedVc, TurboTasks};
 use turbo_tasks_backend::{
     noop_backing_storage, BackendOptions, NoopBackingStorage, TurboTasksBackend,
 };
+use turbo_tasks_fs::FileContent;
+use turbopack_core::{
+    diagnostics::PlainDiagnostic,
+    error::PrettyPrintError,
+    issue::{PlainIssue, PlainIssueSource, PlainSource},
+    source_pos::SourcePos as SourcePosInner,
+};
+use wasm_bindgen::prelude::wasm_bindgen;
 
 unsafe extern "C" {
     pub fn __wasm_call_ctors();
@@ -251,4 +251,18 @@ impl Diagnostic {
 pub struct TurbopackResult {
     pub issues: Vec<Issue>,
     pub diagnostics: Vec<Diagnostic>,
+}
+
+#[cfg(feature = "utoo-pack")]
+#[wasm_bindgen(js_name = "registerWorkerScheduler")]
+pub fn register_worker_scheduler(creator: js_sys::Function, terminator: js_sys::Function) {
+    wasm_bindgen_futures::spawn_local(
+        turbopack_node::worker_pool::web_worker::register_worker_scheduler(creator, terminator),
+    );
+}
+
+#[cfg(feature = "utoo-pack")]
+#[wasm_bindgen(js_name = "workerCreated")]
+pub fn worker_created(worker_id: u32) {
+    turbopack_node::worker_pool::web_worker::worker_created(worker_id);
 }

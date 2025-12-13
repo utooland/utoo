@@ -210,18 +210,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-channel"
-version = "2.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "924ed96dd52d1b75e9c1a3e6275715fd320f5f9439fb5a4a11fa51f4221158d2"
-dependencies = [
- "concurrent-queue",
- "event-listener-strategy",
- "futures-core",
- "pin-project-lite",
-]
-
-[[package]]
 name = "async-compression"
 version = "0.3.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2002,16 +1990,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "event-listener-strategy"
-version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
-dependencies = [
- "event-listener",
- "pin-project-lite",
-]
-
-[[package]]
 name = "fallible-iterator"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3454,7 +3432,7 @@ dependencies = [
 [[package]]
 name = "libmimalloc-sys"
 version = "0.1.44"
-source = "git+https://github.com/utooland/mimalloc_rust.git#fed2a960edab4e74dcffda3be0bb32cf46085c79"
+source = "git+https://github.com/utooland/mimalloc_rust.git#05eecb2cde729d6208e47b25255f765affaf6bad"
 dependencies = [
  "cc",
  "cty",
@@ -3760,7 +3738,7 @@ dependencies = [
 [[package]]
 name = "mimalloc"
 version = "0.1.48"
-source = "git+https://github.com/utooland/mimalloc_rust.git#fed2a960edab4e74dcffda3be0bb32cf46085c79"
+source = "git+https://github.com/utooland/mimalloc_rust.git#05eecb2cde729d6208e47b25255f765affaf6bad"
 dependencies = [
  "libmimalloc-sys",
 ]
@@ -9334,7 +9312,6 @@ name = "turbopack-node"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-channel",
  "async-stream",
  "async-trait",
  "base64 0.21.7",
@@ -9344,6 +9321,7 @@ dependencies = [
  "futures",
  "futures-retry",
  "indoc",
+ "js-sys",
  "napi",
  "napi-derive",
  "once_cell",

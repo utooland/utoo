@@ -50,11 +50,18 @@ const installDependencies = async (project: UtooProject): Promise<void> => {
 };
 
 const initUtooProject = async (project: UtooProject): Promise<void> => {
-  await project.mkdir("src");
-
+  const createdDirs = new Set<string>();
   for (const filePath in demoFiles) {
     if (Object.prototype.hasOwnProperty.call(demoFiles, filePath)) {
       const content = demoFiles[filePath as keyof typeof demoFiles];
+      const lastSlashIndex = filePath.lastIndexOf("/");
+      if (lastSlashIndex !== -1) {
+        const dirPath = filePath.substring(0, lastSlashIndex);
+        if (!createdDirs.has(dirPath)) {
+          await project.mkdir(dirPath, { recursive: true });
+          createdDirs.add(dirPath);
+        }
+      }
       await project.writeFile(filePath, content);
     }
   }

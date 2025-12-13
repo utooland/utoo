@@ -107,6 +107,12 @@ async fn insert_shared_aliases(
 
     insert_package_alias(
         import_map,
+        rcstr!("@vercel/turbopack-node/"),
+        turbopack_node::embed_js::embed_fs().root().owned().await?,
+    );
+
+    insert_package_alias(
+        import_map,
         rcstr!("@utoo/pack-runtime/"),
         embed_js::embed_fs().root().owned().await?,
     );
