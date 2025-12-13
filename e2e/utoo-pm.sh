@@ -23,9 +23,11 @@ if [ ! -d "ant-design-x" ]; then
   git clone --branch next --single-branch https://github.com/ant-design/x.git ant-design-x
 fi
 cd ant-design-x
+echo "Resolving dependencies for ant-design-x (next)..."
+time utoo deps || { echo -e "${RED}FAIL: utoo deps failed for ant-design-x (next)${NC}"; exit 1; }
 echo "Installing dependencies for ant-design-x (next)..."
-utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
-utoo rebuild || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
+time utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for ant-design-x (next)${NC}"; exit 1; }
+RUST_LOG=info utoo rebuild || { echo -e "${RED}FAIL: utoo rebuild failed for ant-design-x (next)${NC}"; exit 1; }
 echo -e "${GREEN}PASS: ant-design-x (next) cloned and installed${NC}"
 cd ../../
 
@@ -37,8 +39,11 @@ if [ ! -d "ant-design" ]; then
 fi
 cd ant-design
 rm -rf ~/.cache/nm
+echo "Resolving dependencies for ant-design..."
+time utoo deps || { echo -e "${RED}FAIL: utoo deps failed for ant-design${NC}"; exit 1; }
 echo "Installing dependencies for ant-design..."
-utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for ant-design${NC}"; exit 1; }
+time utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for ant-design${NC}"; exit 1; }
+RUST_LOG=info utoo rebuild || { echo -e "${RED}FAIL: utoo rebuild failed for ant-design${NC}"; exit 1; }
 echo -e "${GREEN}PASS: ant-design cloned and installed${NC}"
 cd ../../
 
