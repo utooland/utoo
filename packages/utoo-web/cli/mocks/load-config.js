@@ -24,7 +24,7 @@ exports.loadConfig = function loadConfig(path) {
       };
     }
   }
-        console.error("Worker: Failed to load tailwind config: typeof self.__systemjs_require__  is not function");
+    console.error("Worker: Failed to load tailwind config: typeof self.__systemjs_require__  is not function");
 
   return {
         content: [],

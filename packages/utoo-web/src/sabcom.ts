@@ -66,7 +66,6 @@ export class SabComClient {
   }
 
   call(op: number, data: string) {
-  call(op: number, data: string) {
     const encoded = new TextEncoder().encode(data);
     this.int32[1] = op;
     this.int32[2] = encoded.length;
