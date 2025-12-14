@@ -12,13 +12,12 @@ use crate::{
 pub async fn get_client_transforms_rules(config: Vc<Config>) -> Result<Vec<ModuleRule>> {
     let mut rules = vec![];
 
-    let modularize_imports_config = &config
-        .optimization()
-        .await?
+    let optimization_config = config.optimization().await?;
+    let modularize_imports_config = &optimization_config
         .modularize_imports
         .clone()
         .unwrap_or_default();
-    let inline_wasm = config.optimization().await?.inline_wasm.unwrap_or(true);
+    let inline_wasm = optimization_config.inline_wasm.unwrap_or(true);
 
     let enable_mdx_rs = config.mdx_rs().await?.is_some();
     let image_config = config.image_config().await?;
