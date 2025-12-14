@@ -1,6 +1,5 @@
 export interface LoaderRunnerMeta {
   workerData: {
-    poolId: string;
     workerId: number;
     cwd: string;
   };
@@ -8,4 +7,5 @@ export interface LoaderRunnerMeta {
     importMaps: Record<string, string>;
     entrypoint: string;
   };
+  sab?: SharedArrayBuffer;
 }

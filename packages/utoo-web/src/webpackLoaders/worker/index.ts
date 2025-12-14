@@ -1,3 +1,4 @@
+import { SabComClient } from "../../sabcom";
 import initWasm, {
   recvTaskMessageInWorker,
   sendTaskMessage,
@@ -19,19 +20,13 @@ declare let self: DedicatedWorkerGlobalScope & {
   };
   workerData: {
     workerId: number;
-    poolId: string;
     cwd: string;
     binding: typeof binding;
-    readFile(path: string, encoding?: "utf8"): Promise<string>;
+    sabClient?: SabComClient;
   };
 };
 
 export function startLoaderWorker() {
-  self.process = {
-    env: {},
-    cwd: () => self.workerData.cwd,
-  };
-
   self.onmessage = async (event) => {
     let [module, memory, meta] = event.data as [
       WebAssembly.Module,
@@ -44,16 +39,24 @@ export function startLoaderWorker() {
       throw err;
     });
 
+    const sabClient = meta.sab
+      ? new SabComClient(meta.sab, () => {
+          self.postMessage("sab_request");
+        })
+      : undefined;
+
     self.workerData = {
-      poolId: meta.workerData.poolId,
       workerId: meta.workerData.workerId,
-      cwd: "./",
+      cwd: meta.workerData.cwd,
       binding,
-      readFile: async (path: string) => {
-        // TODO: if we want that, just connect to @utoo/web internalProject endpoint port with comlink
-        throw new Error("readFile in loader not supported on browser ");
-      },
+      sabClient,
     };
+
+    self.process = {
+      env: {},
+      cwd: () => self.workerData.cwd,
+    };
+    console.log("Worker CWD:", self.process.cwd());
 
     cjs(meta.loaderAssets.entrypoint, meta.loaderAssets.importMaps);
   };

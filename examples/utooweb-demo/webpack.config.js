@@ -120,7 +120,10 @@ module.exports = [
       new CopyPlugin({
         patterns: [
           {
-            from: path.resolve(__dirname, "../../packages/utoo-web/esm/loaderWorker.js"),
+            from: path.resolve(
+              __dirname,
+              "../../packages/utoo-web/esm/loaderWorker.js",
+            ),
             to: "loaderWorker.js",
           },
         ],

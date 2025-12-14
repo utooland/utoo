@@ -1,10 +1,19 @@
 // @ts-ignore
-const context = require.context("./demo_raw", true, /\.\w+$/);
+const context = require.context(
+  "./demo_raw",
+  true,
+  /\.(js|jsx|ts|tsx|css|less|scss|sass|json|html|vue|svg|png|jpg|jpeg|gif)$/,
+);
 
 export const demoFiles: Record<string, any> = {};
 
 context.keys().forEach((key: string) => {
   const fileName = key.replace(/^\.\//, "");
-  if (!/\.\w+$/.test(fileName)) return;
+  if (
+    !/\.(js|jsx|ts|tsx|css|less|scss|sass|json|html|vue|svg|png|jpg|jpeg|gif)$/.test(
+      fileName,
+    )
+  )
+    return;
   demoFiles[fileName] = context(key);
 });
