@@ -86,7 +86,7 @@ turbopack                         = { workspace = true }
 turbopack-core                    = { workspace = true }
 turbopack-ecmascript-hmr-protocol = { workspace = true }
 turbopack-ecmascript-plugins      = { workspace = true, optional = true }
-turbopack-node                    = { workspace = true, default-features = false, features = ["process_pool"] }
+turbopack-node                    = { workspace = true, default-features = false, features = ["worker_pool"] }
 turbopack-trace-server            = { workspace = true }
 turbopack-trace-utils             = { workspace = true }
 

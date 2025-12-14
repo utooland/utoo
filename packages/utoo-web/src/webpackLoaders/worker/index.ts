@@ -1,17 +1,15 @@
 import initWasm, {
-  notifyWorkerAck,
-  recvMessageInWorker,
-  recvWorkerRequest,
+  recvTaskMessageInWorker,
   sendTaskMessage,
+  workerCreated,
 } from "../../utoo";
 import { cjs } from "./cjs";
 import { LoaderRunnerMeta } from "./type";
 
 const binding = {
-  recvWorkerRequest,
-  recvMessageInWorker,
-  notifyWorkerAck,
+  recvTaskMessageInWorker,
   sendTaskMessage,
+  workerCreated,
 };
 
 declare let self: DedicatedWorkerGlobalScope & {

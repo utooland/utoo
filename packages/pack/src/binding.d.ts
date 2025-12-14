@@ -9,20 +9,25 @@ export declare class ExternalObject<T> {
     [K: symbol]: T
   }
 }
-export interface PoolOptions {
-  filename: string
-  maxConcurrency: number
+export declare function registerWorkerScheduler(creator: (arg: NapiWorkerCreation) => any, terminator: (arg: NapiWorkerTermination) => any): void
+export declare function workerCreated(workerId: number): void
+export interface NapiWorkerCreation {
+  options: NapiWorkerOptions
 }
-export interface WorkerTermination {
-  filename: string
+export interface NapiWorkerOptions {
+  filename: RcStr
+  cwd: RcStr
+}
+export interface NapiWorkerTermination {
+  options: NapiWorkerOptions
   workerId: number
 }
-export declare function recvPoolRequest(): Promise<PoolOptions>
-export declare function recvWorkerTermination(): Promise<WorkerTermination>
-export declare function recvWorkerRequest(filename: string): Promise<number>
-export declare function recvMessageInWorker(workerId: number): Promise<string>
-export declare function notifyWorkerAck(taskId: number, workerId: number): Promise<void>
-export declare function sendTaskMessage(taskId: number, message: string): Promise<void>
+export interface NapiTaskMessage {
+  taskId: number
+  data: string
+}
+export declare function recvTaskMessageInWorker(workerId: number): Promise<NapiTaskMessage>
+export declare function sendTaskMessage(message: NapiTaskMessage): Promise<void>
 export interface NapiEndpointConfig {
   
 }

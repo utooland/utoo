@@ -1,3 +1,4 @@
+import { runLoaderWorkerPool } from "./loaderWorkerPool";
 import {
   Binding,
   PackFile,
@@ -9,110 +10,7 @@ import initWasm, {
   DirEntryType,
   init_log_filter,
   Project as ProjectInternal,
-  recvPoolRequest,
-  recvWorkerTermination,
 } from "./utoo";
-import { LoaderRunnerMeta } from "./webpackLoaders/worker/type";
-// @ts-ignore
-import webpackLoadersCode from "./webpackLoaders/workerContent";
-
-let nextWorkerId = 0;
-
-const loaderWorkers: Record<string, Array<Worker & { workerId: number }>> = {};
-
-async function getTurbopackLoaderAssets() {
-  const turbopackLoaderAssets: Record<string, string> = {};
-  const dirEntries =
-    await internalEndpoint.projectInternal!.readDir(".turbopack");
-  await Promise.all(
-    dirEntries.map(async (entry) => {
-      // only collect .js files
-      if (entry.type === "file" && entry.name.endsWith(".js")) {
-        turbopackLoaderAssets[`./${entry.name}`] =
-          await internalEndpoint.projectInternal!.readToString(
-            `.turbopack/${entry.name}`,
-          );
-      }
-    }),
-  );
-  return turbopackLoaderAssets;
-}
-
-const createOrScalePool = async (
-  binding: Binding,
-  loadersImportMap?: Record<string, string>,
-) => {
-  while (true) {
-    try {
-      let poolOptions = await recvPoolRequest();
-      const { filename: entrypoint, maxConcurrency } = poolOptions;
-      const concurrency = Math.max(
-        maxConcurrency,
-        navigator.hardwareConcurrency,
-      );
-      const workers =
-        loaderWorkers[entrypoint] || (loaderWorkers[entrypoint] = []);
-      if (workers.length < concurrency) {
-        for (let i = workers.length; i < concurrency; i++) {
-          nextWorkerId += 1;
-          const turbopackLoaderAssets: Record<string, string> =
-            await getTurbopackLoaderAssets();
-
-          const blob = new Blob([webpackLoadersCode], {
-            type: "text/javascript",
-          });
-
-          const workerUrl = URL.createObjectURL(blob);
-          const worker = new Worker(workerUrl);
-          worker.postMessage([
-            // @ts-ignore
-            initWasm.__wbindgen_wasm_module,
-            binding.memory,
-            {
-              workerData: {
-                poolId: entrypoint,
-                workerId: nextWorkerId,
-              },
-              loaderAssets: {
-                importMaps: { ...turbopackLoaderAssets, ...loadersImportMap },
-                entrypoint: entrypoint.replace(".turbopack/", ""),
-              },
-            } as LoaderRunnerMeta,
-          ]);
-          // @ts-ignore
-          worker.workerId = nextWorkerId;
-          // @ts-ignore
-          workers.push(worker);
-        }
-      } else if (workers.length > concurrency) {
-        const workersToStop = workers.splice(0, workers.length - concurrency);
-        workersToStop.forEach((worker) => worker.terminate());
-      }
-    } catch (_e) {
-      // rust channel closed. do nothing
-      return;
-    }
-  }
-};
-
-const waitingForWorkerTermination = async () => {
-  while (true) {
-    try {
-      const { filename, workerId } = await recvWorkerTermination();
-      const workers = loaderWorkers[filename];
-      const workerIdx = workers.findIndex(
-        (worker) => worker.workerId === workerId,
-      );
-      if (workerIdx > -1) {
-        const worker = workers.splice(workerIdx, 1);
-        worker[0].terminate();
-      }
-    } catch (_e) {
-      // rust channel closed. do nothing
-      return;
-    }
-  }
-};
 
 class InternalEndpoint implements ProjectEndpoint {
   projectInternal?: ProjectInternal;
@@ -144,8 +42,11 @@ class InternalEndpoint implements ProjectEndpoint {
   async build() {
     const binding = await this.wasmInit!;
 
-    createOrScalePool(binding, this.options?.loadersImportMap);
-    waitingForWorkerTermination();
+    runLoaderWorkerPool(
+      binding,
+      this.projectInternal!,
+      this.options?.loadersImportMap,
+    );
 
     return await this.projectInternal!.build();
   }
