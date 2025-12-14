@@ -6,5 +6,5 @@ export const demoFiles: Record<string, any> = {};
 context.keys().forEach((key: string) => {
   const fileName = key.replace(/^\.\//, "");
   if (!/\.\w+$/.test(fileName)) return;
-  demoFiles[key] = context(key);
+  demoFiles[fileName] = context(key);
 });
