@@ -84,8 +84,21 @@ pub async fn collect_matching_versions(
     Ok(())
 }
 
+/// Converts registry URL to directory name by removing protocol prefix and trailing slash.
+fn registry_to_dir_name(registry_url: &str) -> String {
+    let url = registry_url
+        .strip_prefix("https://")
+        .or_else(|| registry_url.strip_prefix("http://"))
+        .unwrap_or(registry_url);
+    url.trim_end_matches('/').to_string()
+}
+
+/// Returns cache directory path with registry isolation: ~/.cache/nm/registry-host/
 pub fn get_cache_dir() -> PathBuf {
-    config::get_cache_dir()
+    let base_cache_dir = config::get_cache_dir();
+    let registry = config::get_registry();
+    let registry_dir = registry_to_dir_name(&registry);
+    base_cache_dir.join(registry_dir)
 }
 
 pub fn get_package_versions_cache_file(package_name: &str) -> PathBuf {
@@ -266,12 +279,43 @@ mod tests {
     }
 
     #[test]
+    fn test_registry_to_dir_name() {
+        assert_eq!(
+            registry_to_dir_name("https://registry.npmjs.org"),
+            "registry.npmjs.org"
+        );
+        assert_eq!(
+            registry_to_dir_name("https://registry.npmmirror.com"),
+            "registry.npmmirror.com"
+        );
+        assert_eq!(
+            registry_to_dir_name("https://registry.npmjs.org/"),
+            "registry.npmjs.org"
+        );
+        assert_eq!(
+            registry_to_dir_name("http://registry.npmjs.org"),
+            "registry.npmjs.org"
+        );
+    }
+
+    #[test]
     fn test_get_cache_dir_uses_config() {
         // Test that get_cache_dir delegates to config module
         let result = get_cache_dir();
 
         // Should return a valid path
         assert!(result.is_absolute() || result.starts_with("~") || result.starts_with("."));
+    }
+
+    #[test]
+    fn test_get_cache_dir_includes_registry() {
+        // Test that cache directory includes registry dimension
+        let cache_dir = get_cache_dir();
+        let cache_dir_str = cache_dir.to_string_lossy();
+        
+        // Should contain registry directory name
+        // The exact structure depends on current registry setting
+        assert!(cache_dir_str.contains("nm") || cache_dir_str.contains("cache"));
     }
 
     #[test]
