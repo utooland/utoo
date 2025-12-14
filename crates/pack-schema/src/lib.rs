@@ -263,6 +263,14 @@ pub struct SchemaOptimizationConfig {
         description = "Whether to concatenate modules when possible to reduce the number of chunks. This can improve performance by reducing the number of requests and improving caching."
     )]
     pub concatenate_modules: Option<bool>,
+
+    /// Whether to inline WASM files into the bundle. Defaults to true.
+    /// When false, WASM files will be output as static assets.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Whether to inline WASM files into the bundle. Defaults to true. When false, WASM files will be output as static assets."
+    )]
+    pub inline_wasm: Option<bool>,
 }
 
 /// Module ID generation strategy

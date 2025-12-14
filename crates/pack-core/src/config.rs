@@ -310,6 +310,10 @@ pub struct OptimizationConfig {
     /// Defaults to false in development mode, true in production mode.
     pub remove_unused_exports: Option<bool>,
     pub nested_async_chunking: Option<bool>,
+    /// Whether to inline WASM files into the bundle. Defaults to true.
+    /// When false, WASM files will be output as static assets.
+    #[serde(default)]
+    pub inline_wasm: Option<bool>,
 }
 
 #[derive(

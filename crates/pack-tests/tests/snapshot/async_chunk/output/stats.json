@@ -1,86 +1,41 @@
 {
   "assets": [
     {
-      "type": "asset",
-      "name": "main.js",
-      "info": {},
-      "size": 0,
-      "emitted": false,
-      "compared_for_emit": false,
-      "cached": false,
-      "chunks": [
+      "type": "asset","name": "main.js","info": {},"size": 0,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
         "main.js"
       ]
     },
     {
-      "type": "asset",
-      "name": "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js",
-      "info": {},
-      "size": 1092,
-      "emitted": false,
-      "compared_for_emit": false,
-      "cached": false,
-      "chunks": [
+      "type": "asset","name": "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js","info": {},"size": 1092,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
         "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
       ]
     },
     {
-      "type": "asset",
-      "name": "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js.map",
-      "info": {},
-      "size": 0,
-      "emitted": false,
-      "compared_for_emit": false,
-      "cached": false,
-      "chunks": [
+      "type": "asset","name": "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js.map","info": {},"size": 0,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
         "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js.map"
       ]
     },
     {
-      "type": "asset",
-      "name": "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js",
-      "info": {},
-      "size": 797,
-      "emitted": false,
-      "compared_for_emit": false,
-      "cached": false,
-      "chunks": [
+      "type": "asset","name": "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js","info": {},"size": 797,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
         "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js"
       ]
     },
     {
-      "type": "asset",
-      "name": "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js.map",
-      "info": {},
-      "size": 0,
-      "emitted": false,
-      "compared_for_emit": false,
-      "cached": false,
-      "chunks": [
+      "type": "asset","name": "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js.map","info": {},"size": 0,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
         "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js.map"
       ]
     },
     {
-      "type": "asset",
-      "name": "main.js.map",
-      "info": {},
-      "size": 0,
-      "emitted": false,
-      "compared_for_emit": false,
-      "cached": false,
-      "chunks": [
+      "type": "asset","name": "main.js.map","info": {},"size": 0,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
         "main.js.map"
       ]
     }
-  ],
-  "entrypoints": {
+  ],"entrypoints": {
     "main": {
-      "name": "main",
-      "chunks": [
+      "name": "main","chunks": [
         "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js",
         "main.js"
-      ],
-      "assets": [
+      ],"assets": [
         {
           "name": "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
         },
@@ -89,101 +44,57 @@
         }
       ]
     }
-  },
-  "chunks": [
+  },"chunks": [
     {
-      "rendered": false,
-      "initial": false,
-      "entry": false,
-      "recorded": false,
-      "id": "main.js",
-      "size": 0,
-      "hash": "",
-      "files": [
+      "rendered": false,"initial": false,"entry": false,"recorded": false,"id": "main.js","size": 0,"hash": "","files": [
         "main.js"
       ]
     },
     {
-      "rendered": false,
-      "initial": false,
-      "entry": false,
-      "recorded": false,
-      "id": "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js",
-      "size": 1092,
-      "hash": "",
-      "files": [
+      "rendered": false,"initial": false,"entry": false,"recorded": false,"id": "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js","size": 1092,"hash": "","files": [
         "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
       ]
     },
     {
-      "rendered": false,
-      "initial": false,
-      "entry": false,
-      "recorded": false,
-      "id": "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js",
-      "size": 797,
-      "hash": "",
-      "files": [
+      "rendered": false,"initial": false,"entry": false,"recorded": false,"id": "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js","size": 797,"hash": "","files": [
         "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js"
       ]
     }
-  ],
-  "modules": [
+  ],"modules": [
     {
-      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/index.js",
-      "id": "crates/pack-tests/tests/snapshot/async_chunk/input/index.js",
-      "chunks": [
+      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/index.js","id": "crates/pack-tests/tests/snapshot/async_chunk/input/index.js","chunks": [
         "main.js"
-      ],
-      "size": 110
+      ],"size": 110
     },
     {
-      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/node_modules/bar/index.js",
-      "id": "crates/pack-tests/tests/snapshot/async_chunk/input/node_modules/bar/index.js",
-      "chunks": [
+      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/node_modules/bar/index.js","id": "crates/pack-tests/tests/snapshot/async_chunk/input/node_modules/bar/index.js","chunks": [
         "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
-      ],
-      "size": 56
+      ],"size": 56
     },
     {
-      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/shared.js",
-      "id": "crates/pack-tests/tests/snapshot/async_chunk/input/shared.js",
-      "chunks": [
+      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/shared.js","id": "crates/pack-tests/tests/snapshot/async_chunk/input/shared.js","chunks": [
         "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
-      ],
-      "size": 18
+      ],"size": 18
     },
     {
-      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/index.js",
-      "id": "crates/pack-tests/tests/snapshot/async_chunk/input/index.js",
-      "chunks": [
+      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/index.js","id": "crates/pack-tests/tests/snapshot/async_chunk/input/index.js","chunks": [
         "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
-      ],
-      "size": 110
+      ],"size": 110
     },
     {
-      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/import.js",
-      "id": "crates/pack-tests/tests/snapshot/async_chunk/input/import.js",
-      "chunks": [
+      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/import.js","id": "crates/pack-tests/tests/snapshot/async_chunk/input/import.js","chunks": [
         "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
-      ],
-      "size": 91
+      ],"size": 91
     },
     {
-      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/node_modules/foo/index.js",
-      "id": "crates/pack-tests/tests/snapshot/async_chunk/input/node_modules/foo/index.js",
-      "chunks": [
+      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/node_modules/foo/index.js","id": "crates/pack-tests/tests/snapshot/async_chunk/input/node_modules/foo/index.js","chunks": [
         "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js"
-      ],
-      "size": 56
+      ],"size": 56
     },
     {
-      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/import.js",
-      "id": "crates/pack-tests/tests/snapshot/async_chunk/input/import.js",
-      "chunks": [
+      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/import.js","id": "crates/pack-tests/tests/snapshot/async_chunk/input/import.js","chunks": [
         "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js"
-      ],
-      "size": 91
+      ],"size": 91
     }
   ]
 }

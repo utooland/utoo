@@ -6,6 +6,7 @@ use turbopack_core::reference_type::{ReferenceType, UrlReferenceSubType};
 use turbopack_ecmascript::{CustomTransformer, EcmascriptInputTransform};
 
 use image::{StructuredImageModuleType, module::BlurPlaceholderMode};
+use wasm::StaticWasmModuleType;
 
 pub mod css_modules;
 pub mod dynamic_import_to_require;
@@ -16,6 +17,7 @@ pub mod remove_console;
 pub mod styled_components;
 pub mod styled_jsx;
 pub mod swc_ecma_transform_plugins;
+pub mod wasm;
 
 pub async fn get_image_rule(inline_limit: Option<u64>) -> Result<ModuleRule> {
     Ok(ModuleRule::new(
@@ -42,6 +44,21 @@ pub async fn get_image_rule(inline_limit: Option<u64>) -> Result<ModuleRule> {
                     .to_resolved()
                     .await?,
             ),
+        ))],
+    ))
+}
+
+/// Returns a module rule for WASM files that outputs them as static assets.
+pub async fn get_wasm_rule() -> Result<ModuleRule> {
+    Ok(ModuleRule::new(
+        RuleCondition::All(vec![
+            RuleCondition::not(RuleCondition::ReferenceType(ReferenceType::Url(
+                UrlReferenceSubType::Undefined,
+            ))),
+            RuleCondition::ResourcePathEndsWith(".wasm".to_string()),
+        ]),
+        vec![ModuleRuleEffect::ModuleType(ModuleType::Custom(
+            ResolvedVc::upcast(StaticWasmModuleType::new().to_resolved().await?),
         ))],
     ))
 }
