@@ -28,11 +28,34 @@ export async function cjs(
     }),
   );
 
-  Object.assign(importMaps, nodePolyFills);
+  // Object.assign(importMaps, nodePolyFills);
   const require = (id: string) => {
     let dependency = System.get(id);
     if (dependency) {
       return dependency.default;
+    }
+
+    if (importMaps[id]) {
+      const moduleCode = importMaps[id];
+      let finalExports = {};
+      const module = { exports: finalExports };
+      const exports = module.exports;
+
+      try {
+        new Function("require", "exports", "module", moduleCode)(
+          require,
+          exports,
+          module,
+        );
+        finalExports = module.exports;
+      } catch (e: any) {
+        console.error(`Worker: Error executing dependency module ${id}:`, e);
+        throw new Error(`Failed to load CJS dependency ${id}: ${e.message}`);
+      }
+
+      System.set(id, { default: finalExports });
+
+      return finalExports;
     }
 
     if (id in nodePolyFills) {
@@ -40,31 +63,8 @@ export async function cjs(
       return nodePolyFills[id];
     }
 
-    const moduleCode = importMaps[id];
-    if (!moduleCode) {
-      console.error(`Worker: Dependency ${id} not found in import maps.`);
-      return {};
-    }
-
-    let finalExports = {};
-    const module = { exports: finalExports };
-    const exports = module.exports;
-
-    try {
-      new Function("require", "exports", "module", moduleCode)(
-        require,
-        exports,
-        module,
-      );
-      finalExports = module.exports;
-    } catch (e: any) {
-      console.error(`Worker: Error executing dependency module ${id}:`, e);
-      throw new Error(`Failed to load CJS dependency ${id}: ${e.message}`);
-    }
-
-    System.set(id, { default: finalExports });
-
-    return finalExports;
+    console.error(`Worker: Dependency ${id} not found in import maps.`);
+    return {};
   };
 
   require.resolve = (request: string) => request;

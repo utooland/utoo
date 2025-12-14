@@ -42,11 +42,14 @@ class InternalEndpoint implements ProjectEndpoint {
   async build() {
     const binding = await this.wasmInit!;
 
-    runLoaderWorkerPool(
-      binding,
-      this.projectInternal!,
-      this.options?.loadersImportMap,
-    );
+    if (this.options?.loaderWorkerUrl) {
+      runLoaderWorkerPool(
+        binding,
+        this.projectInternal!,
+        this.options!.loaderWorkerUrl,
+        this.options?.loadersImportMap,
+      );
+    }
 
     return await this.projectInternal!.build();
   }

@@ -6,166 +6,140 @@ const TerserPlugin = require('terser-webpack-plugin');
 const stdLibBrowser = require('node-stdlib-browser');
 const { NodeProtocolUrlPlugin } = require('node-stdlib-browser/helpers/webpack/plugin');
 
-const TMP_DIR = './tmp';
-
-function createUmdConfig(entry, umdFilename, target) {
-  return {
-    mode: 'production',
-    entry: entry,
-    output: {
-      path: path.resolve(process.cwd(), TMP_DIR),
-      filename: umdFilename,
-      library: {
-        type: 'umd',
-        export: 'default',
-      },
-      clean: true,
-      globalObject: 'self',
-    },
-    resolve: {
-      extensions: ['.ts', '.js'],
-      alias: {
-         ...stdLibBrowser,
-         fs: path.join(__dirname, "./fs.js")
-        },
-    },
-    module: {
-      rules: [
-        {
-          test: /\.ts$/,
-          exclude: /node_modules/,
-          use: {
-            loader: 'ts-loader',
-            options: {
-              transpileOnly: true,
-            },
-          },
-        },
-      ],
-    },
-    plugins: [
-		  new NodeProtocolUrlPlugin(),
-      new webpack.ProvidePlugin({
-        process: stdLibBrowser.process,
-        Buffer: stdLibBrowser.buffer,
-      }),
-    ],
-    optimization: {
-      moduleIds: 'named',
-      // minimize: false,
-      minimizer: [
-        (compiler) => {
-          new TerserPlugin({
-            terserOptions: {
-              mangle: false,
-              keep_fnames: true,
-              keep_classnames: true,
-            },
-          }).apply(compiler);
-        },
-      ],
-    },
-    devtool: false,
-    target,
-  };
-}
-
-async function writeEsmStringFile(umdFullPath, esmFullPath) {
-  const umdContent = await fs.readFile(umdFullPath, 'utf-8');
-  const escapedContent = JSON.stringify(umdContent);
-
-  const esmContent = `
-export default ${escapedContent};
-`;
-  console.log('       ✅ Generate stringified esm module successful.');
-  await fs.writeFile(esmFullPath, esmContent, 'utf-8');
-}
-
-async function writeCjsStringFile(umdFullPath, esmFullPath) {
-  const umdContent = await fs.readFile(umdFullPath, 'utf-8');
-  const escapedContent = JSON.stringify(umdContent);
-
-  const esmContent = `
-module.exports =  ${escapedContent};
-`;
-  console.log('       ✅ Generate stringified cjs module successful.');
-  await fs.writeFile(esmFullPath, esmContent, 'utf-8');
-}
-
 const argv = yargs(process.argv.slice(2))
   .option('entry', {
     alias: 'e',
-    description: 'The entry file path (e.g., ./src/index.ts)',
+    description: 'The entry file path',
     type: 'string',
     demandOption: true,
   })
   .option('output', {
     alias: 'o',
-    description: 'The output file path (e.g., ./src/webpackLoaders/workerContent.js)',
+    description: 'The output file path',
     type: 'string',
     demandOption: true,
   })
   .option('stringify-esm', {
     alias: 'se',
-    description: 'Whether to convert to esm and export content as string',
+    description: 'Export content as ESM string',
     type: 'boolean',
-    demandOption: false,
   })
   .option('stringify-cjs', {
     alias: 'sc',
-    description: 'Whether to convert to esm and export content as string',
+    description: 'Export content as CJS string',
     type: 'boolean',
-    demandOption: false,
   })
   .option('target', {
     alias: 't',
-    description: 'The output target, meaning webpack target (e.g., node or webworker)',
+    description: 'Webpack target',
     type: 'string',
-    demandOption: false,
   })
   .help()
   .alias('help', 'h').argv;
 
 const { entry, output, target, stringifyEsm, stringifyCjs } = argv;
+const isStringify = stringifyEsm || stringifyCjs;
 
-const filename = path.basename(output);
-const umdFullPath = path.relative(process.cwd(), path.join(TMP_DIR, filename));
 const outputFullPath = path.resolve(process.cwd(), output);
+// If stringifying, use a temp dir. Otherwise output directly.
+const outputDir = isStringify 
+  ? path.resolve(process.cwd(), './tmp') 
+  : path.dirname(outputFullPath);
+const outputFilename = path.basename(outputFullPath);
 
-console.log(`✨ Starting two-stage build...`);
-console.log(`   Entry: ${entry}`);
-console.log(`   Umd Output Directory: ${TMP_DIR}`);
-console.log(`   Stage 1 (UMD Bundle): ${TMP_DIR}/${filename}`);
-console.log(`   Stage 2 (Output String): ${output}`);
+const config = {
+  mode: 'production',
+  entry,
+  output: {
+    path: outputDir,
+    filename: outputFilename,
+    library: {
+      type: 'umd',
+      export: 'default',
+    },
+    globalObject: 'self',
+    // Do not use clean: true here as it might wipe shared output directories
+  },
+  resolve: {
+    extensions: ['.ts', '.js'],
+    alias: {
+      ...stdLibBrowser,
+      // Use the real polyfill instead of the stub
+      fs: path.resolve(__dirname, '../src/webpackLoaders/worker/fsPolyfill.ts'),
+    },
+  },
+  module: {
+    rules: [
+      {
+        test: /\.ts$/,
+        exclude: /node_modules/,
+        use: {
+          loader: 'ts-loader',
+          options: {
+            transpileOnly: true,
+          },
+        },
+      },
+    ],
+  },
+  plugins: [
+    new NodeProtocolUrlPlugin(),
+    new webpack.ProvidePlugin({
+      process: stdLibBrowser.process,
+      Buffer: stdLibBrowser.buffer,
+    }),
+  ],
+  optimization: {
+    moduleIds: 'named',
+    minimizer: [
+      (compiler) => {
+        new TerserPlugin({
+          terserOptions: {
+            mangle: false,
+            keep_fnames: true,
+            keep_classnames: true,
+          },
+        }).apply(compiler);
+      },
+    ],
+  },
+  devtool: false,
+  target,
+};
 
-const umdConfig = createUmdConfig(entry, filename, target);
+console.log(`✨ Starting build for ${output}...`);
 
-const compiler = webpack(umdConfig);
-
-compiler.run(async (err, stats) => {
+webpack(config, async (err, stats) => {
   if (err) {
-    console.error('❌ Webpack build failed with a critical error:', err.stack || err);
-    return process.exit(1);
+    console.error('❌ Webpack configuration error:', err);
+    process.exit(1);
   }
 
   if (stats.hasErrors()) {
-    console.error('❌ Webpack build failed with compilation errors.');
-    stats.toJson({ errors: true }).errors.forEach((e) => console.error(e.message));
-    return process.exit(1);
+    console.error('❌ Build failed with errors:');
+    console.error(stats.toString({ colors: true, modules: false }));
+    process.exit(1);
   }
 
-  try {
-    if (!!stringifyEsm) {
-      await writeEsmStringFile(umdFullPath, outputFullPath);
-    } else if (!!stringifyCjs) {
-      await writeCjsStringFile(umdFullPath, outputFullPath);
-    } else {
-      const umdContent = await fs.readFile(umdFullPath, 'utf8');
-      await fs.writeFile(outputFullPath, umdContent, 'utf-8');
+  if (isStringify) {
+    try {
+      const bundlePath = path.join(outputDir, outputFilename);
+      const content = await fs.readFile(bundlePath, 'utf-8');
+      const escapedContent = JSON.stringify(content);
+      
+      const finalContent = stringifyEsm
+        ? `export default ${escapedContent};\n`
+        : `module.exports = ${escapedContent};\n`;
+
+      await fs.writeFile(outputFullPath, finalContent, 'utf-8');
+      // Optional: clean up temp file
+      // await fs.unlink(bundlePath); 
+      console.log(`✅ Build and stringify successful: ${output}`);
+    } catch (e) {
+      console.error('❌ Failed to write stringified output:', e);
+      process.exit(1);
     }
-    console.log(`✅ Build successful.`);
-  } catch (fsError) {
-    console.error('❌ Write output file failed', fsError);
-    process.exit(1);
+  } else {
+    console.log(`✅ Build successful: ${output}`);
   }
 });

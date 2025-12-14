@@ -6,8 +6,6 @@ import initWasm, {
   workerCreated,
 } from "./utoo";
 import { LoaderRunnerMeta } from "./webpackLoaders/worker/type";
-// @ts-ignore
-import webpackLoadersCode from "./webpackLoaders/workerContent";
 
 let nextWorkerId = 0;
 
@@ -30,6 +28,7 @@ async function getTurbopackLoaderAssets(projectInternal: ProjectInternal) {
 export const runLoaderWorkerPool = async (
   binding: Binding,
   projectInternal: ProjectInternal,
+  workerUrl: string,
   loadersImportMap?: Record<string, string>,
 ) => {
   binding.registerWorkerScheduler(
@@ -42,11 +41,6 @@ export const runLoaderWorkerPool = async (
       const turbopackLoaderAssets: Record<string, string> =
         await getTurbopackLoaderAssets(projectInternal);
 
-      const blob = new Blob([webpackLoadersCode], {
-        type: "text/javascript",
-      });
-
-      const workerUrl = URL.createObjectURL(blob);
       const worker = new Worker(workerUrl, { name: entrypoint });
       worker.postMessage([
         // @ts-ignore

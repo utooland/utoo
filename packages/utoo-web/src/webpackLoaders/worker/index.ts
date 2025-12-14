@@ -26,35 +26,44 @@ declare let self: DedicatedWorkerGlobalScope & {
   };
 };
 
-self.process = {
-  env: {},
-  cwd: () => self.workerData.cwd,
-};
-
-self.onmessage = async (event) => {
-  let [module, memory, meta] = event.data as [
-    WebAssembly.Module,
-    WebAssembly.Memory,
-    LoaderRunnerMeta,
-  ];
-
-  await initWasm(module, memory).catch((err: Error) => {
-    console.log(err);
-    throw err;
-  });
-
-  self.workerData = {
-    poolId: meta.workerData.poolId,
-    workerId: meta.workerData.workerId,
-    cwd: "./",
-    binding,
-    readFile: async (path: string) => {
-      // TODO: if we want that, just connect to @utoo/web internalProject endpoint port with comlink
-      throw new Error("readFile in loader not supported on browser ");
-    },
+export function startLoaderWorker() {
+  self.process = {
+    env: {},
+    cwd: () => self.workerData.cwd,
   };
 
-  cjs(meta.loaderAssets.entrypoint, meta.loaderAssets.importMaps);
-};
+  self.onmessage = async (event) => {
+    let [module, memory, meta] = event.data as [
+      WebAssembly.Module,
+      WebAssembly.Memory,
+      LoaderRunnerMeta,
+    ];
 
-export default null;
+    await initWasm(module, memory).catch((err: Error) => {
+      console.log(err);
+      throw err;
+    });
+
+    self.workerData = {
+      poolId: meta.workerData.poolId,
+      workerId: meta.workerData.workerId,
+      cwd: "./",
+      binding,
+      readFile: async (path: string) => {
+        // TODO: if we want that, just connect to @utoo/web internalProject endpoint port with comlink
+        throw new Error("readFile in loader not supported on browser ");
+      },
+    };
+
+    cjs(meta.loaderAssets.entrypoint, meta.loaderAssets.importMaps);
+  };
+}
+
+// @ts-ignore
+if (typeof __webpack_require__ !== "undefined") {
+  // @ts-ignore
+  self.startLoaderWorker = startLoaderWorker;
+}
+
+startLoaderWorker();
+export default startLoaderWorker;
