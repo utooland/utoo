@@ -7,7 +7,7 @@ __turbopack_context__.v("/onig.86e14394.wasm");}),
 
 var __TURBOPACK__imported__module__10__ = __turbopack_context__.i(10);
 ;
-const __TURBOPACK__default__export__ = __TURBOPACK__imported__module__10__["default"];
+var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__10__["default"];
 __turbopack_context__.s([
     "default",
     0,

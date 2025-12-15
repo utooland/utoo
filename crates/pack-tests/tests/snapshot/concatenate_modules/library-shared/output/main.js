@@ -9,7 +9,7 @@
 ;
 // MERGED MODULE: [project]/crates/pack-tests/tests/snapshot/concatenate_modules/library-shared/input/big/other.js [library] (ecmascript)
 ;
-const __TURBOPACK__default__export__ = `
+var __TURBOPACK__default__export__ = `
 v8XyDjNBXwWR6pNaTwYLp5bfUJ1P8nN4Yigyk9c9S9Xt5JHt28veqF0SRPGEmShfRPTn2LnHWZbPWw5FDmaTfLPdX4NfEzJYzehn
 T6Qw1dW8tnJ3VJUHHE0QUch181CwhbSHbRvzCzwJ66gJ5PWLzpCit6mZ2ZaGuM3kg6Gmmj301bwKWvY0EhFLW26YiDJYyFeb8uR6
 NqBFFqm409pvFhfRdyZWWdBuEdd2TTdQxUgpBd6d147SKeRDj0HyrXKZNc0gd5Cj9pX8grD16fThjEE1uvkn3vPS8HkB7VXcC2Vq
@@ -64,7 +64,7 @@ EDvvH3ZX5z8a39n5qBnwYe5uNdMWrG3Z3RWSurZL2TKKgz2383Gdx1nwfQVd3jJinZBwKt3KRWDghSRt
 FG6adF1kPdxcnQ9rUk0b1jaemDjUwXJRycSSrmUPKiA6MTt8YVMx3Xf4NTZvmTugEE9pXSLyFeQQzEx36QZhdd7jC880YEdjzWbx
 `;
 ;
-const __TURBOPACK__default__export__1 = __TURBOPACK__default__export__.length;
+var __TURBOPACK__default__export__1 = __TURBOPACK__default__export__.length;
 __turbopack_context__.s([
     "default",
     0,

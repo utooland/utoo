@@ -13,7 +13,7 @@ __turbopack_context__.s([
 "[project]/crates/pack-tests/tests/snapshot/node_modules/antd/es/button/style/index.js [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
-const __TURBOPACK__default__export__ = "button-style";
+var __TURBOPACK__default__export__ = "button-style";
 __turbopack_context__.s([]);
 }),
 "[project]/crates/pack-tests/tests/snapshot/node_modules/antd/es/date-picker/index.js [client] (ecmascript)", ((__turbopack_context__) => {
@@ -30,7 +30,7 @@ __turbopack_context__.s([
 "[project]/crates/pack-tests/tests/snapshot/node_modules/antd/es/date-picker/style/index.js [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
-const __TURBOPACK__default__export__ = "date-picker-style";
+var __TURBOPACK__default__export__ = "date-picker-style";
 __turbopack_context__.s([]);
 }),
 "[project]/crates/pack-tests/tests/snapshot/optimization/modularize_imports_keba_case/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {
