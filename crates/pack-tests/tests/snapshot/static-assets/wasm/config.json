@@ -6,6 +6,10 @@
                 "name": "main"
             }
         ],
-        "sourceMaps": false
+        "sourceMaps": false,
+        "optimization": {
+            "wasmAsAsset": false,
+            "minify": false
+        }
     }
 }

@@ -17,7 +17,7 @@ pub async fn get_client_transforms_rules(config: Vc<Config>) -> Result<Vec<Modul
         .modularize_imports
         .clone()
         .unwrap_or_default();
-    let inline_wasm = optimization_config.inline_wasm.unwrap_or(true);
+    let wasm_as_asset = optimization_config.wasm_as_asset.unwrap_or(false);
 
     let enable_mdx_rs = config.mdx_rs().await?.is_some();
     let image_config = config.image_config().await?;
@@ -33,7 +33,7 @@ pub async fn get_client_transforms_rules(config: Vc<Config>) -> Result<Vec<Modul
         rules.push(get_image_rule(image_config.inline_limit.or(Some(10_000))).await?);
     }
 
-    if !inline_wasm {
+    if wasm_as_asset {
         rules.push(get_wasm_rule().await?);
     }
 

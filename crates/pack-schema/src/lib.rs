@@ -264,13 +264,11 @@ pub struct SchemaOptimizationConfig {
     )]
     pub concatenate_modules: Option<bool>,
 
-    /// Whether to inline WASM files into the bundle. Defaults to true.
-    /// When false, WASM files will be output as static assets.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
-        description = "Whether to inline WASM files into the bundle. Defaults to true. When false, WASM files will be output as static assets."
+        description = "Whether to bunle wasm as asset. Defaults to false. When false, WASM files will be output as static assets."
     )]
-    pub inline_wasm: Option<bool>,
+    pub wasm_as_asset: Option<bool>,
 }
 
 /// Module ID generation strategy
