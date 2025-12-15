@@ -87,3 +87,69 @@ export class SabComClient {
     return this.uint8.slice(12, 12 + len);
   }
 }
+
+export interface SabFileSystem {
+  read(path: string): Promise<Uint8Array>;
+  readDir(path: string): Promise<any[]>;
+  writeString(path: string, content: string): Promise<void>;
+  createDirAll(path: string): Promise<void>;
+  createDir(path: string): Promise<void>;
+  metadata(path: string): Promise<any>;
+  removeFile(path: string): Promise<void>;
+  removeDir(path: string, recursive: boolean): Promise<void>;
+  copyFile(src: string, dst: string): Promise<void>;
+}
+
+export const handleSabRequest = async (
+  sabHost: SabComHost,
+  fs: SabFileSystem,
+) => {
+  const { op, data: path } = sabHost.readRequest();
+  try {
+    if (op === SAB_OP_READ_FILE) {
+      const bytes = await fs.read(path);
+      sabHost.writeResponse(bytes);
+    } else if (op === SAB_OP_READ_DIR) {
+      const entries = await fs.readDir(path);
+      sabHost.writeResponse(JSON.stringify(entries.map((e) => e.toJSON())));
+    } else if (op === SAB_OP_WRITE_FILE) {
+      const { content, encoding } = JSON.parse(path);
+      const filePath = content.path;
+      const fileContent = content.data;
+      // TODO: handle binary content (base64?)
+      await fs.writeString(filePath, fileContent);
+      sabHost.writeResponse("ok");
+    } else if (op === SAB_OP_MKDIR) {
+      const { path: dirPath, recursive } = JSON.parse(path);
+      if (recursive) {
+        await fs.createDirAll(dirPath);
+      } else {
+        await fs.createDir(dirPath);
+      }
+      sabHost.writeResponse("ok");
+    } else if (op === SAB_OP_RM) {
+      const { path: rmPath, recursive } = JSON.parse(path);
+      // Mimic internalProject.rm logic
+      const metadata = await fs.metadata(rmPath);
+      const type = (metadata.toJSON() as any).type;
+      if (type === "file") {
+        await fs.removeFile(rmPath);
+      } else if (type === "directory") {
+        await fs.removeDir(rmPath, !!recursive);
+      }
+      sabHost.writeResponse("ok");
+    } else if (op === SAB_OP_RMDIR) {
+      const { path: rmPath, recursive } = JSON.parse(path);
+      await fs.removeDir(rmPath, !!recursive);
+      sabHost.writeResponse("ok");
+    } else if (op === SAB_OP_COPY_FILE) {
+      const { src, dst } = JSON.parse(path);
+      await fs.copyFile(src, dst);
+      sabHost.writeResponse("ok");
+    } else {
+      sabHost.writeError("Unknown op");
+    }
+  } catch (e: any) {
+    sabHost.writeError(e.message);
+  }
+};
