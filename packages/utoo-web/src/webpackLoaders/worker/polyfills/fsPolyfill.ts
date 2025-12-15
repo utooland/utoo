@@ -216,12 +216,34 @@ export function statSync(p: string) {
 
   // Root check
   if (p === "/" || p === ".") {
+    const now = new Date();
+    const nowMs = now.getTime();
     return {
+      dev: 0,
+      ino: 0,
+      mode: 16877,
+      nlink: 1,
+      uid: 0,
+      gid: 0,
+      rdev: 0,
+      size: 0,
+      blksize: 4096,
+      blocks: 0,
+      atimeMs: nowMs,
+      mtimeMs: nowMs,
+      ctimeMs: nowMs,
+      birthtimeMs: nowMs,
+      atime: now,
+      mtime: now,
+      ctime: now,
+      birthtime: now,
       isDirectory: () => true,
       isFile: () => false,
       isSymbolicLink: () => false,
-      size: 0,
-      mtime: new Date(),
+      isBlockDevice: () => false,
+      isCharacterDevice: () => false,
+      isFIFO: () => false,
+      isSocket: () => false,
     };
   }
 
@@ -229,14 +251,45 @@ export function statSync(p: string) {
     const entries = readdirSync(parent, { withFileTypes: true });
     const entry = entries.find((e: any) => e.name === name);
     if (!entry) {
-      throw new Error(`ENOENT: no such file or directory, stat '${p}'`);
+      const error = new Error(`ENOENT: no such file or directory, stat '${p}'`);
+      // @ts-ignore
+      error.code = "ENOENT";
+      // @ts-ignore
+      error.errno = -2;
+      // @ts-ignore
+      error.syscall = "stat";
+      // @ts-ignore
+      error.path = p;
+      throw error;
     }
+    const now = new Date();
+    const nowMs = now.getTime();
     return {
+      dev: 0,
+      ino: 0,
+      mode: entry.isDirectory() ? 16877 : 33188,
+      nlink: 1,
+      uid: 0,
+      gid: 0,
+      rdev: 0,
+      size: 0,
+      blksize: 4096,
+      blocks: 0,
+      atimeMs: nowMs,
+      mtimeMs: nowMs,
+      ctimeMs: nowMs,
+      birthtimeMs: nowMs,
+      atime: now,
+      mtime: now,
+      ctime: now,
+      birthtime: now,
       isDirectory: () => entry.isDirectory(),
       isFile: () => entry.isFile(),
       isSymbolicLink: () => entry.isSymbolicLink(),
-      size: 0,
-      mtime: new Date(),
+      isBlockDevice: () => false,
+      isCharacterDevice: () => false,
+      isFIFO: () => false,
+      isSocket: () => false,
     };
   } catch (e) {
     throw e;
