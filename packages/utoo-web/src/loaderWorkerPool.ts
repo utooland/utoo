@@ -11,6 +11,7 @@ import {
 import { Binding } from "./type";
 import initWasm, {
   Project as ProjectInternal,
+  registerWorkerScheduler,
   WebWorkerCreation,
   WebWorkerTermination,
   workerCreated,
@@ -28,7 +29,7 @@ export const runLoaderWorkerPool = async (
   workerUrl: string,
   loadersImportMap?: Record<string, string>,
 ) => {
-  binding.registerWorkerScheduler(
+  registerWorkerScheduler(
     async (creation: WebWorkerCreation) => {
       const {
         options: { filename, cwd },

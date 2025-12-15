@@ -17,6 +17,7 @@ path.resolve = (...args: string[]) => {
   return originalResolve(cwd, ...args);
 };
 
+import fastGlob from "./fastGlobPolyfill";
 import * as fs from "./fsPolyfill";
 import * as workerThreads from "./workerThreadsPolyfill";
 
@@ -44,6 +45,27 @@ export default {
   buffer,
   "node:buffer": buffer,
 
+  get child_process() {
+    return require("child_process");
+  },
+  get "node:child_process"() {
+    return require("child_process");
+  },
+
+  get cluster() {
+    return require("cluster");
+  },
+  get "node:cluster"() {
+    return require("cluster");
+  },
+
+  get console() {
+    return require("console");
+  },
+  get "node:console"() {
+    return require("console");
+  },
+
   get constants() {
     return require("constants");
   },
@@ -56,6 +78,162 @@ export default {
   },
   get "node:crypto"() {
     return require("crypto");
+  },
+
+  get dgram() {
+    return require("dgram");
+  },
+  get "node:dgram"() {
+    return require("dgram");
+  },
+
+  get dns() {
+    return require("dns");
+  },
+  get "node:dns"() {
+    return require("dns");
+  },
+
+  get domain() {
+    return require("domain");
+  },
+  get "node:domain"() {
+    return require("domain");
+  },
+
+  get events() {
+    return require("events");
+  },
+  get "node:events"() {
+    return require("events");
+  },
+
+  "fast-glob": fastGlob,
+
+  get http() {
+    return require("http");
+  },
+  get "node:http"() {
+    return require("http");
+  },
+
+  get http2() {
+    return require("http2");
+  },
+  get "node:http2"() {
+    return require("http2");
+  },
+
+  get https() {
+    return require("https");
+  },
+  get "node:https"() {
+    return require("https");
+  },
+
+  get module() {
+    return require("module");
+  },
+  get "node:module"() {
+    return require("module");
+  },
+
+  get net() {
+    return require("net");
+  },
+  get "node:net"() {
+    return require("net");
+  },
+
+  get os() {
+    return require("os");
+  },
+  get "node:os"() {
+    return require("os");
+  },
+
+  get punycode() {
+    return require("punycode");
+  },
+  get "node:punycode"() {
+    return require("punycode");
+  },
+
+  get querystring() {
+    return require("querystring");
+  },
+  get "node:querystring"() {
+    return require("querystring");
+  },
+
+  get readline() {
+    return require("readline");
+  },
+  get "node:readline"() {
+    return require("readline");
+  },
+
+  get repl() {
+    return require("repl");
+  },
+  get "node:repl"() {
+    return require("repl");
+  },
+
+  get stream() {
+    return require("stream");
+  },
+  get "node:stream"() {
+    return require("stream");
+  },
+
+  get string_decoder() {
+    return require("string_decoder");
+  },
+  get "node:string_decoder"() {
+    return require("string_decoder");
+  },
+
+  get sys() {
+    return require("util");
+  },
+  get "node:sys"() {
+    return require("util");
+  },
+
+  get timers() {
+    return require("timers");
+  },
+  get "node:timers"() {
+    return require("timers");
+  },
+
+  get tls() {
+    return require("tls");
+  },
+  get "node:tls"() {
+    return require("tls");
+  },
+
+  get tty() {
+    return require("tty");
+  },
+  get "node:tty"() {
+    return require("tty");
+  },
+
+  get vm() {
+    return require("vm");
+  },
+  get "node:vm"() {
+    return require("vm");
+  },
+
+  get zlib() {
+    return require("zlib");
+  },
+  get "node:zlib"() {
+    return require("zlib");
   },
 
   fs,
@@ -84,32 +262,4 @@ export default {
 
   worker_threads: workerThreadsWithLiveWorkerData,
   "node:worker_threads": workerThreadsWithLiveWorkerData,
-
-  get less() {
-    return require("less/lib/less-node/index.js").default;
-  },
-  get "less-loader"() {
-    return require("../../loaders/less-loader");
-  },
-  get postcss() {
-    return require("postcss");
-  },
-  get tailwindcss() {
-    return require("tailwindcss");
-  },
-  get "tailwindcss/lib/processTailwindFeatures"() {
-    return require("tailwindcss/lib/processTailwindFeatures");
-  },
-  get "tailwindcss/lib/util/log"() {
-    return require("tailwindcss/lib/util/log");
-  },
-  get "tailwindcss/resolveConfig"() {
-    return require("tailwindcss/resolveConfig");
-  },
-  get autoprefixer() {
-    return require("autoprefixer");
-  },
-  get "tailwindcss-animate"() {
-    return require("tailwindcss-animate");
-  },
 };
