@@ -1,7 +1,8 @@
 const path = require("path");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
-const { DefinePlugin } = require("webpack");
+const CopyPlugin = require("copy-webpack-plugin");
+const { DefinePlugin, ProvidePlugin } = require("webpack");
 
 module.exports = [
   {
@@ -115,5 +116,18 @@ module.exports = [
     resolve: {
       extensions: [".ts", ".js"],
     },
+    plugins: [
+      new CopyPlugin({
+        patterns: [
+          {
+            from: path.resolve(
+              __dirname,
+              "../../packages/utoo-web/esm/loaderWorker.js",
+            ),
+            to: "loaderWorker.js",
+          },
+        ],
+      }),
+    ],
   },
 ];

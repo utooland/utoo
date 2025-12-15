@@ -1,3 +1,4 @@
+import { SabComClient } from "../../sabcom";
 import initWasm, {
   recvTaskMessageInWorker,
   sendTaskMessage,
@@ -19,42 +20,53 @@ declare let self: DedicatedWorkerGlobalScope & {
   };
   workerData: {
     workerId: number;
-    poolId: string;
     cwd: string;
     binding: typeof binding;
-    readFile(path: string, encoding?: "utf8"): Promise<string>;
+    sabClient?: SabComClient;
   };
 };
 
-self.process = {
-  env: {},
-  cwd: () => self.workerData.cwd,
-};
+export function startLoaderWorker() {
+  self.onmessage = async (event) => {
+    let [module, memory, meta] = event.data as [
+      WebAssembly.Module,
+      WebAssembly.Memory,
+      LoaderRunnerMeta,
+    ];
 
-self.onmessage = async (event) => {
-  let [module, memory, meta] = event.data as [
-    WebAssembly.Module,
-    WebAssembly.Memory,
-    LoaderRunnerMeta,
-  ];
+    await initWasm(module, memory).catch((err: Error) => {
+      console.log(err);
+      throw err;
+    });
 
-  await initWasm(module, memory).catch((err: Error) => {
-    console.log(err);
-    throw err;
-  });
+    const sabClient = meta.sab
+      ? new SabComClient(meta.sab, () => {
+          self.postMessage("sab_request");
+        })
+      : undefined;
 
-  self.workerData = {
-    poolId: meta.workerData.poolId,
-    workerId: meta.workerData.workerId,
-    cwd: "./",
-    binding,
-    readFile: async (path: string) => {
-      // TODO: if we want that, just connect to @utoo/web internalProject endpoint port with comlink
-      throw new Error("readFile in loader not supported on browser ");
-    },
+    self.workerData = {
+      workerId: meta.workerData.workerId,
+      cwd: meta.workerData.cwd,
+      binding,
+      sabClient,
+    };
+
+    self.process = {
+      env: {},
+      cwd: () => self.workerData.cwd,
+    };
+    console.log("Worker CWD:", self.process.cwd());
+
+    cjs(meta.loaderAssets.entrypoint, meta.loaderAssets.importMaps);
   };
+}
 
-  cjs(meta.loaderAssets.entrypoint, meta.loaderAssets.importMaps);
-};
+// @ts-ignore
+if (typeof __webpack_require__ !== "undefined") {
+  // @ts-ignore
+  self.startLoaderWorker = startLoaderWorker;
+}
 
-export default null;
+startLoaderWorker();
+export default startLoaderWorker;

@@ -57,6 +57,7 @@ export interface ProjectOptions {
   cwd: string;
   workerUrl: string;
   threadWorkerUrl: string;
+  loaderWorkerUrl?: string;
   wasmUrl?: string;
   serviceWorker?: ServiceWorkerOptions;
   logFilter?: string;

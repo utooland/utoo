@@ -9,6 +9,7 @@ export const initializeProject = async () => {
     cwd: projectName,
     workerUrl: "http://localhost:8081/worker.js",
     threadWorkerUrl: "http://localhost:8081/threadWorker.js",
+    loaderWorkerUrl: "http://localhost:8081/loaderWorker.js",
     serviceWorker: {
       url: "http://localhost:8081/serviceWorker.js",
       scope: serviceWorkerScope,

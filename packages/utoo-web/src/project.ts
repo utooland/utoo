@@ -32,7 +32,7 @@ export class Project implements ProjectEndpoint {
     }
   >;
 
-  constructor(options: ProjectOptions) {
+  constructor(private options: ProjectOptions) {
     const {
       cwd,
       workerUrl,
@@ -69,6 +69,7 @@ export class Project implements ProjectEndpoint {
       cwd,
       wasmUrl,
       threadWorkerUrl,
+      loaderWorkerUrl: this.options.loaderWorkerUrl,
       loadersImportMap,
       logFilter,
     });
