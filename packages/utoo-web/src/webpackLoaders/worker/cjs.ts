@@ -77,8 +77,16 @@ const executeModule = (
         "module",
         "__filename",
         "__dirname",
+        "process",
         moduleCode,
-      )(moduleRequire, module.exports, module, moduleId, context);
+      )(
+        moduleRequire,
+        module.exports,
+        module,
+        moduleId,
+        context,
+        nodePolyFills.process,
+      );
       finalExports = module.exports;
     }
   } catch (e: any) {
