@@ -6,6 +6,8 @@ process.cwd = () => {
   // @ts-ignore
   return self.workerData?.cwd || originalCwd?.() || "/";
 };
+if (!process.versions) process.versions = {};
+if (!process.versions.node) process.versions.node = "24.0.0";
 self.process = process;
 self.global = self;
 
@@ -17,7 +19,6 @@ path.resolve = (...args: string[]) => {
   return originalResolve(cwd, ...args);
 };
 
-import fastGlob from "./fastGlobPolyfill";
 import * as fs from "./fsPolyfill";
 import * as workerThreads from "./workerThreadsPolyfill";
 
@@ -107,8 +108,6 @@ export default {
   get "node:events"() {
     return require("events");
   },
-
-  "fast-glob": fastGlob,
 
   get http() {
     return require("http");
@@ -238,7 +237,6 @@ export default {
 
   fs,
   "node:fs": fs,
-  "graceful-fs": fs,
 
   path,
   "node:path": path,
