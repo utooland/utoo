@@ -8,7 +8,7 @@
         ],
         "sourceMaps": false,
         "optimization": {
-            "wasmAsAsset": false,
+            "wasmAsAsset": true,
             "minify": false
         }
     }
