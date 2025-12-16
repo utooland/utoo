@@ -6,10 +6,16 @@ function getPoolId(cwd: string, filename: string) {
   return `${cwd}:${filename}`;
 }
 
+let workerSchedulerRegistered = false;
+
 export async function runLoaderWorkerPool(
   binding: typeof import("./binding"),
   bindingPath: string,
 ) {
+  if (workerSchedulerRegistered) {
+    return;
+  }
+
   binding.registerWorkerScheduler(
     (creation) => {
       const {
@@ -47,4 +53,6 @@ export async function runLoaderWorkerPool(
       workers.delete(workerId);
     },
   );
+
+  workerSchedulerRegistered = true;
 }
