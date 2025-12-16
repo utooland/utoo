@@ -66,6 +66,10 @@ const executeModule = (
     moduleCode = "self.Buffer = require('buffer').Buffer;" + moduleCode;
   }
 
+  if (!moduleId.endsWith(".json")) {
+    moduleCode = `// [Debug] Resolved: ${moduleId}\n` + moduleCode;
+  }
+
   try {
     if (moduleId.endsWith(".json")) {
       finalExports = JSON.parse(moduleCode);

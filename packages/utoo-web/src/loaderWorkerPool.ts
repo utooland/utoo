@@ -1,13 +1,4 @@
-import {
-  SAB_OP_COPY_FILE,
-  SAB_OP_MKDIR,
-  SAB_OP_READ_DIR,
-  SAB_OP_READ_FILE,
-  SAB_OP_RM,
-  SAB_OP_RMDIR,
-  SAB_OP_WRITE_FILE,
-  SabComHost,
-} from "./sabcom";
+import * as sabcom from "./sabcom";
 import { Binding } from "./type";
 import initWasm, {
   Project as ProjectInternal,
@@ -26,7 +17,7 @@ export const runLoaderWorkerPool = async (
   binding: Binding,
   projectCwd: string,
   projectInternal: ProjectInternal,
-  workerUrl: string,
+  loaderWorkerUrl: string,
   loadersImportMap?: Record<string, string>,
 ) => {
   registerWorkerScheduler(
@@ -38,61 +29,24 @@ export const runLoaderWorkerPool = async (
       const workerId = nextWorkerId;
 
       const sab = new SharedArrayBuffer(1024 * 1024 * 10); // 10MB
-      const sabHost = new SabComHost(sab);
+      const sabHost = new sabcom.SabComHost(sab);
 
-      const worker = new Worker(workerUrl, { name: filename });
+      const worker = new Worker(loaderWorkerUrl, { name: filename });
       worker.onmessage = async (event) => {
         if (event.data === "sab_request") {
-          const { op, data: path } = sabHost.readRequest();
-          try {
-            if (op === SAB_OP_READ_FILE) {
-              const bytes = await projectInternal.read(path);
-              sabHost.writeResponse(bytes);
-            } else if (op === SAB_OP_READ_DIR) {
-              const entries = await projectInternal.readDir(path);
-              sabHost.writeResponse(
-                JSON.stringify(entries.map((e) => e.toJSON())),
-              );
-            } else if (op === SAB_OP_WRITE_FILE) {
-              const { content, encoding } = JSON.parse(path);
-              const filePath = content.path;
-              const fileContent = content.data;
-              // TODO: handle binary content (base64?)
-              await projectInternal.writeString(filePath, fileContent);
-              sabHost.writeResponse("ok");
-            } else if (op === SAB_OP_MKDIR) {
-              const { path: dirPath, recursive } = JSON.parse(path);
-              if (recursive) {
-                await projectInternal.createDirAll(dirPath);
-              } else {
-                await projectInternal.createDir(dirPath);
-              }
-              sabHost.writeResponse("ok");
-            } else if (op === SAB_OP_RM) {
-              const { path: rmPath, recursive } = JSON.parse(path);
-              // Mimic internalProject.rm logic
-              const metadata = await projectInternal.metadata(rmPath);
-              const type = (metadata.toJSON() as any).type;
-              if (type === "file") {
-                await projectInternal.removeFile(rmPath);
-              } else if (type === "directory") {
-                await projectInternal.removeDir(rmPath, !!recursive);
-              }
-              sabHost.writeResponse("ok");
-            } else if (op === SAB_OP_RMDIR) {
-              const { path: rmPath, recursive } = JSON.parse(path);
-              await projectInternal.removeDir(rmPath, !!recursive);
-              sabHost.writeResponse("ok");
-            } else if (op === SAB_OP_COPY_FILE) {
-              const { src, dst } = JSON.parse(path);
-              await projectInternal.copyFile(src, dst);
-              sabHost.writeResponse("ok");
-            } else {
-              sabHost.writeError("Unknown op");
-            }
-          } catch (e: any) {
-            sabHost.writeError(e.message);
-          }
+          await sabcom.handleSabRequest(sabHost, {
+            read: (path) => projectInternal.read(path),
+            readDir: (path) => projectInternal.readDir(path),
+            writeString: (path, content) =>
+              projectInternal.writeString(path, content),
+            createDirAll: (path) => projectInternal.createDirAll(path),
+            createDir: (path) => projectInternal.createDir(path),
+            metadata: (path) => projectInternal.metadata(path),
+            removeFile: (path) => projectInternal.removeFile(path),
+            removeDir: (path, recursive) =>
+              projectInternal.removeDir(path, recursive),
+            copyFile: (src, dst) => projectInternal.copyFile(src, dst),
+          });
         }
       };
 

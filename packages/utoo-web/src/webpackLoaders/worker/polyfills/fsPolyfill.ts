@@ -1,14 +1,6 @@
 import { Buffer } from "buffer";
 import path from "path";
-import {
-  SAB_OP_COPY_FILE,
-  SAB_OP_MKDIR,
-  SAB_OP_READ_DIR,
-  SAB_OP_READ_FILE,
-  SAB_OP_RM,
-  SAB_OP_RMDIR,
-  SAB_OP_WRITE_FILE,
-} from "../../../sabcom";
+import * as sabcom from "../../../sabcom";
 
 function resolvePath(p: string): string {
   // @ts-ignore
@@ -59,7 +51,7 @@ export function readFile(path: string, options: any, cb: Function) {
 
 export function readFileSync(path: string, options: any) {
   const client = getSabClient();
-  const result = client.call(SAB_OP_READ_FILE, resolvePath(path));
+  const result = client.call(sabcom.SAB_OP_READ_FILE, resolvePath(path));
 
   if (
     options === "utf8" ||
@@ -73,7 +65,7 @@ export function readFileSync(path: string, options: any) {
 
 export function readdirSync(path: string, options?: any) {
   const client = getSabClient();
-  const result = client.call(SAB_OP_READ_DIR, resolvePath(path));
+  const result = client.call(sabcom.SAB_OP_READ_DIR, resolvePath(path));
   const json = new TextDecoder().decode(result);
   const entries = JSON.parse(json);
 
@@ -111,7 +103,7 @@ export function writeFileSync(
   const content =
     typeof data === "string" ? data : new TextDecoder().decode(data);
   const payload = JSON.stringify({ path: resolvePath(path), data: content });
-  client.call(SAB_OP_WRITE_FILE, payload);
+  client.call(sabcom.SAB_OP_WRITE_FILE, payload);
 }
 
 export function writeFile(
@@ -136,7 +128,7 @@ export function mkdirSync(path: string, options?: any) {
   const client = getSabClient();
   const recursive = options?.recursive || false;
   const payload = JSON.stringify({ path: resolvePath(path), recursive });
-  client.call(SAB_OP_MKDIR, payload);
+  client.call(sabcom.SAB_OP_MKDIR, payload);
 }
 
 export function mkdir(path: string, options: any, cb: Function) {
@@ -156,7 +148,7 @@ export function rmSync(path: string, options?: any) {
   const client = getSabClient();
   const recursive = options?.recursive || false;
   const payload = JSON.stringify({ path: resolvePath(path), recursive });
-  client.call(SAB_OP_RM, payload);
+  client.call(sabcom.SAB_OP_RM, payload);
 }
 
 export function rm(path: string, options: any, cb: Function) {
@@ -176,7 +168,7 @@ export function rmdirSync(path: string, options?: any) {
   const client = getSabClient();
   const recursive = options?.recursive || false;
   const payload = JSON.stringify({ path: resolvePath(path), recursive });
-  client.call(SAB_OP_RMDIR, payload);
+  client.call(sabcom.SAB_OP_RMDIR, payload);
 }
 
 export function rmdir(path: string, options: any, cb: Function) {
@@ -198,7 +190,7 @@ export function copyFileSync(src: string, dst: string) {
     src: resolvePath(src),
     dst: resolvePath(dst),
   });
-  client.call(SAB_OP_COPY_FILE, payload);
+  client.call(sabcom.SAB_OP_COPY_FILE, payload);
 }
 
 export function copyFile(src: string, dst: string, cb: Function) {
@@ -216,12 +208,34 @@ export function statSync(p: string) {
 
   // Root check
   if (p === "/" || p === ".") {
+    const now = new Date();
+    const nowMs = now.getTime();
     return {
+      dev: 0,
+      ino: 0,
+      mode: 16877,
+      nlink: 1,
+      uid: 0,
+      gid: 0,
+      rdev: 0,
+      size: 0,
+      blksize: 4096,
+      blocks: 0,
+      atimeMs: nowMs,
+      mtimeMs: nowMs,
+      ctimeMs: nowMs,
+      birthtimeMs: nowMs,
+      atime: now,
+      mtime: now,
+      ctime: now,
+      birthtime: now,
       isDirectory: () => true,
       isFile: () => false,
       isSymbolicLink: () => false,
-      size: 0,
-      mtime: new Date(),
+      isBlockDevice: () => false,
+      isCharacterDevice: () => false,
+      isFIFO: () => false,
+      isSocket: () => false,
     };
   }
 
@@ -229,14 +243,45 @@ export function statSync(p: string) {
     const entries = readdirSync(parent, { withFileTypes: true });
     const entry = entries.find((e: any) => e.name === name);
     if (!entry) {
-      throw new Error(`ENOENT: no such file or directory, stat '${p}'`);
+      const error = new Error(`ENOENT: no such file or directory, stat '${p}'`);
+      // @ts-ignore
+      error.code = "ENOENT";
+      // @ts-ignore
+      error.errno = -2;
+      // @ts-ignore
+      error.syscall = "stat";
+      // @ts-ignore
+      error.path = p;
+      throw error;
     }
+    const now = new Date();
+    const nowMs = now.getTime();
     return {
+      dev: 0,
+      ino: 0,
+      mode: entry.isDirectory() ? 16877 : 33188,
+      nlink: 1,
+      uid: 0,
+      gid: 0,
+      rdev: 0,
+      size: 0,
+      blksize: 4096,
+      blocks: 0,
+      atimeMs: nowMs,
+      mtimeMs: nowMs,
+      ctimeMs: nowMs,
+      birthtimeMs: nowMs,
+      atime: now,
+      mtime: now,
+      ctime: now,
+      birthtime: now,
       isDirectory: () => entry.isDirectory(),
       isFile: () => entry.isFile(),
       isSymbolicLink: () => entry.isSymbolicLink(),
-      size: 0,
-      mtime: new Date(),
+      isBlockDevice: () => false,
+      isCharacterDevice: () => false,
+      isFIFO: () => false,
+      isSocket: () => false,
     };
   } catch (e) {
     throw e;
