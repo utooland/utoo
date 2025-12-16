@@ -10,6 +10,7 @@ use tokio_fs_ext::{DirEntry as RawDirEntry, Metadata as RawMetadata};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
 
+use crate::errors::to_js_error;
 use crate::tokio_runtime::init_tokio_runtime;
 
 #[cfg(feature = "utoo-pack")]
@@ -70,8 +71,7 @@ impl Project {
             .map(|f| PackFile::new(f.path, f.content))
             .collect();
 
-        let bytes =
-            opfs_project::pack::gzip(&pack_files).map_err(|e| JsError::new(&e.to_string()))?;
+        let bytes = opfs_project::pack::gzip(&pack_files).map_err(to_js_error)?;
         Ok(js_sys::Uint8Array::from(&bytes[..]))
     }
 
@@ -86,7 +86,7 @@ impl Project {
         opfs_project::package_manager::install_deps(&package_lock, max_concurrent)
             .await
             // format anyhow backtrace for better error display in JS
-            .map_err(|e| JsError::new(&format!("{:#?}", e)))?;
+            .map_err(to_js_error)?;
         Ok(())
     }
 
@@ -95,9 +95,7 @@ impl Project {
     pub async fn build(&self) -> Result<JsValue, JsError> {
         use turbopack_core::error::PrettyPrintError;
 
-        self.init_pack_project()
-            .await
-            .map_err(|e| JsError::new(&PrettyPrintError(&e).to_string()))?;
+        self.init_pack_project().await.map_err(to_js_error)?;
 
         let pack_project = match self.pack_project.read().as_ref() {
             Some(pack_project) => pack_project.clone(),
@@ -111,9 +109,9 @@ impl Project {
                     .spawn(async move { pack_project.build().await })
             })
             .await
-            .map_err(JsError::from)?
+            .map_err(to_js_error)?
             .map_or_else(
-                |e| Err(JsError::new(&PrettyPrintError(&e).to_string())),
+                |e| Err(to_js_error(e)),
                 |turbopack_result| {
                     use serde::Serialize;
 
@@ -121,7 +119,7 @@ impl Project {
                         .serialize(
                             &serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true),
                         )
-                        .map_err(JsError::from)
+                        .map_err(|e| JsError::new(&e.to_string()))
                 },
             )
     }
@@ -178,12 +176,18 @@ impl Project {
 
     #[wasm_bindgen]
     pub async fn read(&self, path: &str) -> Result<Vec<u8>, JsError> {
-        opfs_project::read(path).await.map_err(JsError::from)
+        opfs_project::read(path)
+            .await
+            .with_context(|| format!("Failed to read file: {}", path))
+            .map_err(to_js_error)
     }
 
     #[wasm_bindgen(js_name = readToString)]
     pub async fn read_to_string(&self, path: &str) -> Result<String, JsError> {
-        let buf = opfs_project::read(path).await.map_err(JsError::from)?;
+        let buf = opfs_project::read(path)
+            .await
+            .with_context(|| format!("Failed to read file: {}", path))
+            .map_err(to_js_error)?;
         Ok(unsafe { String::from_utf8_unchecked(buf) })
     }
 
@@ -191,7 +195,8 @@ impl Project {
     pub async fn write(&self, path: &str, content: &[u8]) -> Result<(), JsError> {
         opfs_project::write(path, content)
             .await
-            .map_err(JsError::from)?;
+            .with_context(|| format!("Failed to write file: {}", path))
+            .map_err(to_js_error)?;
         Ok(())
     }
 
@@ -199,19 +204,24 @@ impl Project {
     pub async fn write_string(&self, path: &str, content: &str) -> Result<(), JsError> {
         opfs_project::write(path, content)
             .await
-            .map_err(JsError::from)?;
+            .with_context(|| format!("Failed to write file: {}", path))
+            .map_err(to_js_error)?;
         Ok(())
     }
 
     #[wasm_bindgen(js_name = readDir)]
     pub async fn read_dir(&self, path: &str) -> Result<Vec<DirEntry>, JsError> {
-        let read_dir = opfs_project::read_dir(path).await.map_err(JsError::from)?;
+        let read_dir = opfs_project::read_dir(path)
+            .await
+            .with_context(|| format!("Failed to read directory: {}", path))
+            .map_err(to_js_error)?;
 
         let ret = read_dir
             .into_iter()
             .map(DirEntry::try_from)
             .collect::<Result<Vec<_>, std::io::Error>>()
-            .map_err(JsError::from)?;
+            .with_context(|| format!("Failed to process directory entries: {}", path))
+            .map_err(to_js_error)?;
 
         Ok(ret)
     }
@@ -220,7 +230,8 @@ impl Project {
     pub async fn create_dir(&self, path: &str) -> Result<(), JsError> {
         opfs_project::create_dir(path)
             .await
-            .map_err(JsError::from)?;
+            .with_context(|| format!("Failed to create directory: {}", path))
+            .map_err(to_js_error)?;
         Ok(())
     }
 
@@ -228,13 +239,17 @@ impl Project {
     pub async fn create_dir_all(&self, path: &str) -> Result<(), JsError> {
         opfs_project::create_dir_all(path)
             .await
-            .map_err(JsError::from)?;
+            .with_context(|| format!("Failed to create directory recursively: {}", path))
+            .map_err(to_js_error)?;
         Ok(())
     }
 
     #[wasm_bindgen(js_name = copyFile)]
     pub async fn copy_file(&self, src: &str, dst: &str) -> Result<(), JsError> {
-        opfs_project::copy(src, dst).await.map_err(JsError::from)?;
+        opfs_project::copy(src, dst)
+            .await
+            .with_context(|| format!("Failed to copy file from {} to {}", src, dst))
+            .map_err(to_js_error)?;
         Ok(())
     }
 
@@ -242,7 +257,8 @@ impl Project {
     pub async fn remove_file(&self, path: &str) -> Result<(), JsError> {
         opfs_project::remove_file(path)
             .await
-            .map_err(JsError::from)?;
+            .with_context(|| format!("Failed to remove file: {}", path))
+            .map_err(to_js_error)?;
         Ok(())
     }
 
@@ -251,11 +267,13 @@ impl Project {
         if recursive {
             opfs_project::remove_dir_all(path)
                 .await
-                .map_err(JsError::from)?;
+                .with_context(|| format!("Failed to remove directory recursively: {}", path))
+                .map_err(to_js_error)?;
         } else {
             opfs_project::remove_dir(path)
                 .await
-                .map_err(JsError::from)?;
+                .with_context(|| format!("Failed to remove directory: {}", path))
+                .map_err(to_js_error)?;
         }
 
         Ok(())
@@ -266,7 +284,8 @@ impl Project {
         opfs_project::metadata(path)
             .await
             .and_then(Metadata::try_from)
-            .map_err(JsError::from)
+            .with_context(|| format!("Failed to get metadata: {}", path))
+            .map_err(to_js_error)
     }
 }
 
@@ -309,8 +328,9 @@ impl TryFrom<RawDirEntry> for DirEntry {
 #[wasm_bindgen(inspectable)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Metadata {
-    r#type: DirEntryType,
-    file_size: u64,
+    #[wasm_bindgen]
+    pub r#type: DirEntryType,
+    pub file_size: u64,
 }
 
 impl TryFrom<RawMetadata> for Metadata {

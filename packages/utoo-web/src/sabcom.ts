@@ -10,6 +10,7 @@ export const SAB_OP_MKDIR = 4;
 export const SAB_OP_RM = 5;
 export const SAB_OP_RMDIR = 6;
 export const SAB_OP_COPY_FILE = 7;
+export const SAB_OP_STAT = 8;
 
 // Layout:
 // 0: State (Int32)
@@ -146,6 +147,9 @@ export const handleSabRequest = async (
       const { src, dst } = JSON.parse(path);
       await fs.copyFile(src, dst);
       sabHost.writeResponse("ok");
+    } else if (op === SAB_OP_STAT) {
+      const metadata = await fs.metadata(path);
+      sabHost.writeResponse(JSON.stringify(metadata));
     } else {
       sabHost.writeError("Unknown op");
     }

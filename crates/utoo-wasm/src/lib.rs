@@ -21,6 +21,7 @@ use wasm_bindgen::prelude::wasm_bindgen;
 #[cfg(feature = "utoo-pack")]
 pub(crate) mod pack;
 
+pub(crate) mod errors;
 #[cfg(feature = "utoo-pack")]
 mod opfs_offload;
 mod project;
