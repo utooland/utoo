@@ -43,6 +43,8 @@ export class Metadata {
   toString(): string;
   free(): void;
   [Symbol.dispose](): void;
+  type: DirEntryType;
+  file_size: bigint;
 }
 export class Project {
   free(): void;
@@ -106,10 +108,14 @@ export interface InitOutput {
   readonly __wbg_direntry_free: (a: number, b: number) => void;
   readonly __wbg_get_direntry_name: (a: number) => [number, number];
   readonly __wbg_get_direntry_type: (a: number) => number;
+  readonly __wbg_get_metadata_file_size: (a: number) => bigint;
+  readonly __wbg_get_metadata_type: (a: number) => number;
   readonly __wbg_metadata_free: (a: number, b: number) => void;
   readonly __wbg_project_free: (a: number, b: number) => void;
   readonly __wbg_set_direntry_name: (a: number, b: number, c: number) => void;
   readonly __wbg_set_direntry_type: (a: number, b: number) => void;
+  readonly __wbg_set_metadata_file_size: (a: number, b: bigint) => void;
+  readonly __wbg_set_metadata_type: (a: number, b: number) => void;
   readonly project_build: (a: number) => any;
   readonly project_copyFile: (a: number, b: number, c: number, d: number, e: number) => any;
   readonly project_createDir: (a: number, b: number, c: number) => any;
@@ -166,13 +172,13 @@ export interface InitOutput {
   readonly __wbindgen_export_7: WebAssembly.Table;
   readonly __externref_drop_slice: (a: number, b: number) => void;
   readonly __externref_table_dealloc: (a: number) => void;
-  readonly wasm_bindgen__convert__closures_____invoke__h2ce973260553dde0: (a: number, b: number) => void;
-  readonly closure115_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure114980_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure117532_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure114991_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure113_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure114994_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure117543_externref_shim: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen__convert__closures_____invoke__heac94dfe74335608: (a: number, b: number) => void;
-  readonly closure114983_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure117662_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__h2ce973260553dde0: (a: number, b: number) => void;
+  readonly closure117673_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_thread_destroy: (a?: number, b?: number, c?: number) => void;
   readonly __wbindgen_start: (a: number) => void;
 }

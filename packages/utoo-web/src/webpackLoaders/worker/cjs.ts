@@ -171,16 +171,6 @@ const loadModule = (
     let searchPaths = searchPathsCache[context];
     if (!searchPaths) {
       searchPaths = [];
-      // @ts-ignore
-      const cwd = self.process?.cwd?.() || self.workerData?.cwd || "/";
-      const isInsideNodeModules =
-        context.includes("/node_modules/") ||
-        context.includes("\\node_modules\\");
-
-      if (isInsideNodeModules) {
-        searchPaths.push(path.join(cwd, "node_modules"));
-      }
-
       let currentDir = context;
       while (true) {
         if (path.basename(currentDir) !== "node_modules") {
@@ -220,10 +210,14 @@ const loadModule = (
             ];
             for (const candidate of candidates) {
               if (existsSync(candidate) && !statSync(candidate).isDirectory()) {
-                resolvedId = candidate;
-                moduleCode = fs.readFileSync(candidate, "utf8") as string;
-                moduleId = candidate;
-                break;
+                try {
+                  resolvedId = candidate;
+                  moduleCode = fs.readFileSync(candidate, "utf8") as string;
+                  moduleId = candidate;
+                  break;
+                } catch (e) {
+                  // ignore
+                }
               }
             }
           }
@@ -235,10 +229,14 @@ const loadModule = (
         for (const ext of extensions) {
           const p = nodeModulesPath + ext;
           if (existsSync(p) && !statSync(p).isDirectory()) {
-            resolvedId = p;
-            moduleCode = fs.readFileSync(p, "utf8") as string;
-            moduleId = p;
-            break;
+            try {
+              resolvedId = p;
+              moduleCode = fs.readFileSync(p, "utf8") as string;
+              moduleId = p;
+              break;
+            } catch (e) {
+              // ignore
+            }
           }
         }
       }
@@ -261,10 +259,14 @@ const loadModule = (
     for (const ext of extensions) {
       const p = relativeId + ext;
       if (existsSync(p) && !statSync(p).isDirectory()) {
-        resolvedId = p; // Use relative path for FS ops
-        moduleCode = fs.readFileSync(p, "utf8") as string;
-        moduleId = id; // Keep original absolute path as module ID
-        break;
+        try {
+          resolvedId = p; // Use relative path for FS ops
+          moduleCode = fs.readFileSync(p, "utf8") as string;
+          moduleId = id; // Keep original absolute path as module ID
+          break;
+        } catch (e) {
+          // ignore
+        }
       }
     }
   }
@@ -275,10 +277,15 @@ const loadModule = (
     for (const ext of extensions) {
       const p = resolvedId + ext;
       if (existsSync(p) && !statSync(p).isDirectory()) {
-        resolvedId = p;
-        moduleCode = fs.readFileSync(p, "utf8") as string;
-        moduleId = p;
-        break;
+        try {
+          resolvedId = p;
+          moduleCode = fs.readFileSync(p, "utf8") as string;
+          moduleId = p;
+          break;
+        } catch (e) {
+          console.error(`[Debug] Failed to read file ${p}:`, e);
+          // ignore
+        }
       }
     }
   }
@@ -290,7 +297,7 @@ const loadModule = (
   }
 
   console.error(
-    `Worker: Dependency ${id} (resolved: ${resolvedId}) not found.`,
+    `Worker: Dependency ${id} (resolved: ${resolvedId}) not found. Context: ${context}`,
   );
   return {};
 };

@@ -70,7 +70,7 @@ async function readFileFromProject(projectPath: string): Promise<Response> {
       headers: {
         "Content-Type": mimeType,
         ...(mimeType === "text/html"
-          ? { "Cross-Origin-Embedder-Policy": "require-corp" }
+          ? { "Cross-Origin-Embedder-Policy": "credentialless" }
           : {}),
       },
     });
