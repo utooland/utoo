@@ -24,7 +24,7 @@ function App(props) {
         children: props.content
     });
 }
-const __TURBOPACK__default__export__ = App;
+var __TURBOPACK__default__export__ = App;
 __turbopack_context__.s([
     "default",
     0,

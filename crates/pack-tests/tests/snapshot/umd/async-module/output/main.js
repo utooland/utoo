@@ -9,7 +9,7 @@ return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, _
 
 await 1;
 await 1;
-const __TURBOPACK__default__export__ = "hello";
+var __TURBOPACK__default__export__ = "hello";
 __turbopack_context__.s([
     "default",
     0,
@@ -28,7 +28,7 @@ var __turbopack_async_dependencies__ = __turbopack_handle_async_dependencies__([
 ]);
 [__TURBOPACK__imported__module__99__] = __turbopack_async_dependencies__.then ? (await __turbopack_async_dependencies__)() : __turbopack_async_dependencies__;
 ;
-const __TURBOPACK__default__export__ = __TURBOPACK__imported__module__99__["default"] + " world";
+var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__99__["default"] + " world";
 __turbopack_context__.s([
     "default",
     0,
@@ -47,7 +47,7 @@ var __turbopack_async_dependencies__ = __turbopack_handle_async_dependencies__([
 ]);
 [__TURBOPACK__imported__module__99__] = __turbopack_async_dependencies__.then ? (await __turbopack_async_dependencies__)() : __turbopack_async_dependencies__;
 ;
-const __TURBOPACK__default__export__ = __TURBOPACK__imported__module__99__["default"] + " world";
+var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__99__["default"] + " world";
 __turbopack_context__.s([
     "default",
     0,
@@ -69,7 +69,7 @@ var __turbopack_async_dependencies__ = __turbopack_handle_async_dependencies__([
 [__TURBOPACK__imported__module__890__, __TURBOPACK__imported__module__152__] = __turbopack_async_dependencies__.then ? (await __turbopack_async_dependencies__)() : __turbopack_async_dependencies__;
 ;
 ;
-const __TURBOPACK__default__export__ = __TURBOPACK__imported__module__890__["default"] + ", " + __TURBOPACK__imported__module__152__["default"];
+var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__890__["default"] + ", " + __TURBOPACK__imported__module__152__["default"];
 __turbopack_context__.s([
     "default",
     0,
@@ -81,7 +81,7 @@ __turbopack_async_result__();
 "use strict";
 
 // This is the async chunk
-const __TURBOPACK__default__export__ = 42;
+var __TURBOPACK__default__export__ = 42;
 const nested = ()=>Promise.resolve().then(()=>__turbopack_context__.r(890));
 __turbopack_context__.s([
     "default",
