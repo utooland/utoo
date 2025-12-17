@@ -55,6 +55,10 @@ async function serveInternal(
     },
     {
       ...options,
+      config: {
+        ...options.config,
+        devServer: { hot: true },
+      },
       packPath: getPackPath(),
     },
     projectPath || process.cwd(),

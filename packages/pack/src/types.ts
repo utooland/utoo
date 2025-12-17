@@ -200,10 +200,11 @@ export interface ConfigComplete {
     inlineLimit?: number;
   };
   stats?: boolean;
-  experimental?: ExperimentalConfig;
   persistentCaching?: boolean;
-  cacheHandler?: string;
   nodePolyfill?: boolean;
+  devServer?: { hot: boolean };
+  cacheHandler?: string;
+  experimental?: ExperimentalConfig;
 }
 
 export interface StyledComponentsConfig {

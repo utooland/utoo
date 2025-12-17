@@ -160,8 +160,8 @@ pub async fn get_client_runtime_entries(
     mode: Vc<Mode>,
     config: Vc<Config>,
     execution_context: Vc<ExecutionContext>,
-    watch: Vc<bool>,
     pack_path: FileSystemPath,
+    hmr: Vc<bool>,
 ) -> Result<Vc<RuntimeEntries>> {
     let mut runtime_entries = vec![];
     let resolve_options_context = get_client_resolve_options_context(
@@ -172,9 +172,9 @@ pub async fn get_client_runtime_entries(
         pack_path,
     );
 
-    let watch = *watch.await?;
+    let hmr = *hmr.await?;
 
-    if watch && mode.await?.is_development() {
+    if hmr && mode.await?.is_development() {
         let enable_react_refresh =
             assert_can_resolve_react_refresh(project_root.clone(), resolve_options_context)
                 .await?
