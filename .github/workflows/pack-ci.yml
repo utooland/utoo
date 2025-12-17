@@ -25,6 +25,8 @@ jobs:
             target: x86_64-unknown-linux-gnu
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
             test: |
+              rustup install nightly-2025-10-27 &&
+              rustup default nightly-2025-10-27 &&
               cargo test -p pack-tests --target x86_64-unknown-linux-gnu
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
@@ -36,6 +38,8 @@ jobs:
               echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/community" >> /etc/apk/repositories &&
               apk update &&
               apk add --no-cache libc6-compat pkgconfig dav1d libdav1d dav1d-dev clang-static llvm-dev &&
+              rustup install nightly-2025-10-27 &&
+              rustup default nightly-2025-10-27 &&
               rustup target add x86_64-unknown-linux-musl &&
               cargo test -p pack-tests --target x86_64-unknown-linux-musl
           # - host: ubuntu-latest
@@ -92,8 +96,8 @@ jobs:
         with:
           toolchain: nightly-2025-10-27
           targets: ${{ matrix.settings.target }}
-      # - name: Cache cargo
-      #   uses: Swatinem/rust-cache@v2
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
       - name: Setup toolchain
         run: ${{ matrix.settings.setup }}
         if: ${{ matrix.settings.setup }}
