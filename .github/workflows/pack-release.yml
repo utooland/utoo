@@ -175,6 +175,8 @@ jobs:
       - name: List packages
         run: cd packages/pack && ls -R ./npm
         shell: bash
+      - name: Build JS
+        run: npx turbo run build:js --filter=@utoo/pack --filter=@utoo/pack-shared
       - name: Get version from release or use alpha version
         id: get_version
         run: |
@@ -184,9 +186,12 @@ jobs:
           # npm config set provenance true
           echo "${VERSION}" &&
           echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc &&
+          npm version --workspace=@utoo/pack-shared "${VERSION}" &&
           npm version --workspace=@utoo/pack "${VERSION}" &&
           npm version --workspace=@utoo/pack-cli "${VERSION}" &&
+          npm install --workspace=@utoo/pack @utoo/pack-shared --save-exact &&
           npm install --workspace=@utoo/pack-cli @utoo/pack --save-exact &&
+          npm publish --workspace=@utoo/pack-shared --access public &&
           npm publish --workspace=@utoo/pack --access public &&
           npm publish --workspace=@utoo/pack-cli --access public
         env:

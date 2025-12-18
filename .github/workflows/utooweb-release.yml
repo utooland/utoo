@@ -39,8 +39,9 @@ jobs:
       - name: Install dependencies
         run: |
           npm install
-          npm install binaryen@123.0.0 --global
           cargo install -f wasm-bindgen-cli --version 0.2.104
+      - name: Build
+        run: npx turbo run build --filter=@utoo/web
       - name: Get version from release or use alpha version
         id: get_version
         run: |

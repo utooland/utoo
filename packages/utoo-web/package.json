@@ -13,15 +13,14 @@
     "bindgen-dev": "wasm-bindgen ../../target/wasm32-unknown-unknown/wasm-dev/utoo_wasm.wasm --out-dir src/utoo --out-name index --target web --debug --keep-debug --no-demangle",
     "bindgen-build": "wasm-bindgen ../../target/wasm32-unknown-unknown/release/utoo_wasm.wasm --out-dir src/utoo --out-name index --target web",
     "bindgen-build:local": "wasm-bindgen ../../target/wasm32-unknown-unknown/release-local/utoo_wasm.wasm --out-dir src/utoo --out-name index --target web",
-    "pretsc": "npm run build --workspace @utoo/pack-shared",
     "tsc": "rm -rf esm && tsc -p ./tsconfig.json",
-    "dev": "npm run build-wasm -- --profile wasm-dev && npm run bindgen-dev && npm run tsc  && npm run build-loaderWorker && cp src/utoo/index_bg.wasm esm/utoo",
+    "dev": "npm run build-wasm -- --profile wasm-dev && npm run bindgen-dev && npx turbo run tsc --filter=@utoo/web  && npm run build-loaderWorker && cp src/utoo/index_bg.wasm esm/utoo",
     "dev:pm": "npm run build-wasm:pm -- --profile wasm-dev && npm run bindgen-dev && npm run tsc && cp src/utoo/index_bg.wasm esm/utoo",
     "wasm-opt": "wasm-opt src/utoo/index_bg.wasm -o esm/utoo/index_bg.wasm --enable-threads --enable-bulk-memory --enable-nontrapping-float-to-int -Oz",
     "build": "npm run build-wasm -- --release && npm run bindgen-build && npm run tsc && npm run build-loaderWorker && npm run wasm-opt",
     "build:local": "npm run build-wasm -- --profile release-local && npm run bindgen-build:local && npm run tsc && npm run build-loaderWorker && cp src/utoo/index_bg.wasm esm/utoo",
     "build-loaderWorker": "node cli/umd.js -e ./src/webpackLoaders/worker.ts -o ./esm/loaderWorker.js -t webworker",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "turbo run build --filter=@utoo/web"
   },
   "dependencies": {
     "@utoo/pack-shared": "^0.0.7",
@@ -32,6 +31,7 @@
   "devDependencies": {
     "@types/micromatch": "^4.0.8",
     "@types/systemjs": "^6.15.1",
+    "binaryen": "^125.0.0",
     "node-stdlib-browser": "^1.3.1",
     "ts-loader": "^9.5.2",
     "typescript": "^5.8.3",

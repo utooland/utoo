@@ -21,7 +21,8 @@
   "scripts": {
     "build:cjs": "rm -rf cjs && tsc -p ./tsconfig.json  --module commonjs --outDir cjs",
     "build:esm": "rm -rf esm && tsc -p ./tsconfig.json  --module esnext --outDir esm",
-    "build": "npm run build:cjs && npm run build:esm"
+    "build": "npm run build:cjs && npm run build:esm",
+    "prepublishOnly": "turbo run build --filter=@utoo/pack-shared"
   },
   "dependencies": {
     "@babel/code-frame": "7.22.5",

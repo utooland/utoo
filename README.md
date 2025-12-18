@@ -5,99 +5,101 @@
 ----
 
 <div align="center">
-<img src="https://mdn.alipayobjects.com/huamei_botco4/afts/img/357RTIva8S8AAAAAAAAAAAAADnNMAQFr/original" alt="Utoo Logo" width="60"/>
-<h4> 🌖 /juːtuː/ Unified Toolchain </h4>
+<img src="https://mdn.alipayobjects.com/huamei_botco4/afts/img/357RTIva8S8AAAAAAAAAAAAADnNMAQFr/original" alt="Utoo Logo" width="80"/>
+<h1>🌖 Utoo</h1>
+<p><strong>Unified Toolchain: Open & Optimized</strong></p>
 </div>
 
-Utoo is a modern frontend toolchain that provides a unified command-line interface for frontend development. It comes with built-in package management capabilities and can be extended with additional tools like the bundler.
+---
 
-- `utoo`: Built-in package manager for dependency resolution and installation
-- `@utoo/pack`: High-performance bundler (requires separate installation)
+Utoo is a modern, high-performance frontend toolchain designed to provide a unified and optimized experience for frontend development. It combines a fast package manager, a powerful bundler, and a flexible command mounting system into a single, cohesive ecosystem.
 
-## 🚀 Installation
+## 📦 Core Components
 
-### 📦 Core Tools
+- **`utoo`**: A high-performance package manager written in Rust, focusing on speed and reliability for dependency resolution and installation.
+- **`@utoo/pack`**: A next-generation bundler built on top of [Turbopack](https://turbo.build/pack), providing extreme build speeds and modern features.
+- **`ut`**: A powerful command mounting system that allows you to unify your development workflow by aliasing and configuring global or local commands.
 
-Install the core tools (`ut` and `utoo`) globally:
+## 🚀 Quick Start
+
+### Installation
+
+Install the core toolchain globally:
 
 ```bash
 npm install -g utoo
 ```
 
-### 🛠️ Bundler
-
-Install the bundler globally if you need build capabilities:
+If you need build capabilities, install the bundler:
 
 ```bash
 npm install -g @utoo/pack
 ```
 
-You can track features progress at [`@utoo/pack features list`](https://github.com/utooland/utoo/blob/next/packages/pack/docs/features-list.md)
+### Basic Usage
 
-## ✨ Features
-
-- 🚀 Fast package management
-- 🔧 Flexible configuration system
-- 📦 Smart dependency resolution
-- 🛠️ Powerful build toolchain
-
-## 🔌 Command Mounting
-
-Utoo provides a powerful command mounting system through the `ut` command. This system allows you to:
-
-1. **Mount Custom Commands**: Map any command to a custom alias
-2. **Configure Global/Local Commands**: Set commands at global or project level
-3. **Use Wildcard Commands**: Define default behavior for unknown commands
-
-### ⚙️ Configuration
-
-Commands can be configured using the `ut config` command:
+#### Package Management
 
 ```bash
-# Set a global command
-ut config set install.cmd "utoo install" --global
-
-# Set a local command (project-specific)
-ut config set build.cmd "utoo-pack build"
-
-# Set a wildcard command (default behavior)
-ut config set *.cmd "utoo" --global
-```
-
-### 🔍 Command Resolution
-
-When you run a command through `ut`, it follows this resolution order:
-
-1. Check for a specific command configuration
-2. If not found, check for a wildcard command
-3. If no wildcard is configured, default to `utoo`
-
-For example:
-
-```bash
-# These commands are equivalent if configured as shown above
-ut install
+# Install dependencies
 utoo install
 
-# Custom command mapping
-ut build
-# Executes: utoo-pack build
+# Run a script from package.json
+utoo run dev
 
-# Unknown command with wildcard
-ut unknown-command
-# Executes: utoo unknown-command
+# Execute a command from a package
+utoo x create-react-app my-app
 ```
 
-### 📁 Configuration Files
+#### Bundling
 
-Command configurations are stored in:
+```bash
+# Build your project
+utoo-pack build
 
-- Global config: `~/.utoo/config.toml`
-- Local config: `.utoo.toml` (project root)
+# Start development mode
+utoo-pack dev
+```
 
-Example configuration:
+#### Command Mounting (`ut`)
 
-```toml
+The `ut` command acts as a proxy to your configured tools:
+
+```bash
+# Configure a global alias
+ut config set install.cmd "utoo install" --global
+
+# Now you can just run
+ut install
+```
+
+## ✨ Key Features
+
+- ⚡ **Extreme Performance**: Core logic implemented in Rust for maximum speed.
+- 🔗 **Unified Workflow**: One toolchain to manage dependencies, build projects, and run commands.
+- 🛠️ **Turbopack Powered**: Leverages the power of Turbopack for incremental builds and fast HMR.
+- 🔧 **Highly Configurable**: Flexible configuration system for both the package manager and the bundler.
+- 📦 **Monorepo Ready**: Built-in support for monorepo structures and workspace management.
+
+## 📂 Project Structure
+
+- [crates/](crates/): Rust-based core logic.
+  - [pack-core/](crates/pack-core/): Core bundler logic based on Turbopack.
+  - [pm/](crates/pm/): The `utoo` package manager implementation.
+  - [pack-napi/](crates/pack-napi/): Node.js bindings for the bundler.
+- [packages/](packages/): Node.js packages and CLI.
+  - [pack/](packages/pack/): The main `@utoo/pack` package.
+  - [pack-cli/](packages/pack-cli/): CLI for the bundler.
+  - [utoo-web/](packages/utoo-web/): Web-compatible version of the toolchain.
+- [examples/](examples/): Various example projects demonstrating Utoo's capabilities.
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to get started.
+
+## 📄 License
+
+Utoo is licensed under the [MIT License](LICENSE).
 [values]
 "install.cmd" = "utoo install"
 "build.cmd" = "utoo-pack build"
