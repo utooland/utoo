@@ -21,11 +21,13 @@ jobs:
       - name: Init git submodules
         run: git submodule update --init --depth 1
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
           toolchain: nightly-2025-10-27
-          override: true
           components: clippy
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: clippy
       - name: Cargo clippy
         run: cargo clippy --all-targets -- -D warnings --no-deps

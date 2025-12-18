@@ -26,17 +26,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'npm'
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2025-10-27
+          targets: wasm32-unknown-unknown
+          components: rust-src
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: utooweb-ci
       - name: Install dependencies
         run: |
           npm install
           npm install binaryen@123.0.0 --global
           cargo install -f wasm-bindgen-cli --version 0.2.104
-          rustup target add wasm32-unknown-unknown
-          rustup component add rust-src --toolchain nightly-2025-10-27-x86_64-unknown-linux-gnu
-      - name: Install rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: nightly-2025-10-27
       - name: Build WASM
         run: |
           npm run build:local --workspace=@utoo/web
