@@ -1,13 +1,15 @@
-import * as sabcom from "./sabcom";
-import { Binding } from "./type";
+import * as comlink from "comlink";
+import { internalEndpoint } from "../internalProject";
+import * as sabcom from "../sabcom";
+import { Binding } from "../type";
 import initWasm, {
   Project as ProjectInternal,
   registerWorkerScheduler,
   WebWorkerCreation,
   WebWorkerTermination,
   workerCreated,
-} from "./utoo";
-import { LoaderRunnerMeta } from "./webpackLoaders/worker/type";
+} from "../utoo";
+import { LoaderRunnerMeta } from "./type";
 
 let nextWorkerId = 0;
 
@@ -16,7 +18,6 @@ const loaderWorkers: Record<string, Map<number, Worker>> = {};
 export const runLoaderWorkerPool = async (
   binding: Binding,
   projectCwd: string,
-  projectInternal: ProjectInternal,
   loaderWorkerUrl: string,
   loadersImportMap?: Record<string, string>,
 ) => {
@@ -35,17 +36,17 @@ export const runLoaderWorkerPool = async (
       worker.onmessage = async (event) => {
         if (event.data === "sab_request") {
           await sabcom.handleSabRequest(sabHost, {
-            read: (path) => projectInternal.read(path),
-            readDir: (path) => projectInternal.readDir(path),
+            read: (path) => ProjectInternal.read(path),
+            readDir: (path) => ProjectInternal.readDir(path),
             writeString: (path, content) =>
-              projectInternal.writeString(path, content),
-            createDirAll: (path) => projectInternal.createDirAll(path),
-            createDir: (path) => projectInternal.createDir(path),
-            metadata: (path) => projectInternal.metadata(path),
-            removeFile: (path) => projectInternal.removeFile(path),
+              ProjectInternal.writeString(path, content),
+            createDirAll: (path) => ProjectInternal.createDirAll(path),
+            createDir: (path) => ProjectInternal.createDir(path),
+            metadata: (path) => ProjectInternal.metadata(path),
+            removeFile: (path) => ProjectInternal.removeFile(path),
             removeDir: (path, recursive) =>
-              projectInternal.removeDir(path, recursive),
-            copyFile: (src, dst) => projectInternal.copyFile(src, dst),
+              ProjectInternal.removeDir(path, recursive),
+            copyFile: (src, dst) => ProjectInternal.copyFile(src, dst),
           });
         }
       };
@@ -55,17 +56,26 @@ export const runLoaderWorkerPool = async (
 
       if (projectCwd) {
         const sep = "/";
-        const pCwd = projectCwd.endsWith(sep)
+        let pCwd = projectCwd.endsWith(sep)
           ? projectCwd.slice(0, -1)
           : projectCwd;
-
-        let cCwd = cwd.startsWith(sep) ? cwd.slice(1) : cwd;
-        if (cCwd === "." || cCwd === "./") {
-          cCwd = "";
+        if (!pCwd.startsWith(sep)) {
+          pCwd = sep + pCwd;
         }
-        finalCwd = cCwd ? `${pCwd}${sep}${cCwd}` : pCwd;
 
-        if (!filename.startsWith("/")) {
+        if (cwd.startsWith(sep)) {
+          finalCwd = cwd;
+        } else {
+          let cCwd = cwd;
+          if (cCwd === "." || cCwd === "./") {
+            cCwd = "";
+          }
+          finalCwd = cCwd ? `${pCwd}${sep}${cCwd}` : pCwd;
+        }
+
+        if (filename.startsWith(sep)) {
+          finalFilename = filename;
+        } else {
           let fName = filename;
           if (fName.startsWith("./")) fName = fName.slice(2);
           finalFilename = `${pCwd}${sep}${fName}`;
@@ -79,6 +89,7 @@ export const runLoaderWorkerPool = async (
         {
           workerData: {
             cwd: finalCwd,
+            projectRoot: projectCwd,
             workerId: workerId,
           },
           loaderAssets: {

@@ -253,7 +253,7 @@ pub struct TurbopackResult {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-#[cfg(feature = "utoo-pack")]
+#[cfg(feature = "utoopack")]
 #[wasm_bindgen(js_name = "registerWorkerScheduler")]
 pub fn register_worker_scheduler(creator: js_sys::Function, terminator: js_sys::Function) {
     wasm_bindgen_futures::spawn_local(
@@ -261,7 +261,7 @@ pub fn register_worker_scheduler(creator: js_sys::Function, terminator: js_sys::
     );
 }
 
-#[cfg(feature = "utoo-pack")]
+#[cfg(feature = "utoopack")]
 #[wasm_bindgen(js_name = "workerCreated")]
 pub fn worker_created(worker_id: u32) {
     turbopack_node::worker_pool::web_worker::worker_created(worker_id);

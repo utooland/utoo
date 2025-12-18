@@ -1,5 +1,5 @@
 module.exports = {
   performance: {
-    now: () => Date.now(),
+    now: () => performance.now(),
   },
 };

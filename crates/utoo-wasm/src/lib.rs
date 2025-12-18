@@ -18,11 +18,11 @@ use tracing_subscriber::{
 use tracing_web::{performance_layer, MakeWebConsoleWriter};
 use wasm_bindgen::prelude::wasm_bindgen;
 
-#[cfg(feature = "utoo-pack")]
+#[cfg(feature = "utoopack")]
 pub(crate) mod pack;
 
 pub(crate) mod errors;
-#[cfg(feature = "utoo-pack")]
+#[cfg(feature = "utoopack")]
 mod opfs_offload;
 mod project;
 pub(crate) mod tokio_runtime;
@@ -35,7 +35,7 @@ static ALLOC: turbo_tasks_malloc::TurboMalloc = turbo_tasks_malloc::TurboMalloc;
 fn init_pack() {
     panic::set_hook(Box::new(console_error_panic_hook::hook));
 
-    #[cfg(feature = "utoo-pack")]
+    #[cfg(feature = "utoopack")]
     {
         unsafe {
             pack::__wasm_call_ctors();

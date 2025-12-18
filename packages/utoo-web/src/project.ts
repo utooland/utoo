@@ -10,7 +10,9 @@ import {
   ProjectEndpoint,
   ProjectOptions,
   RawDirent,
+  RawStats,
   ServiceWorkerOptions,
+  Stats,
 } from "./type";
 
 let ProjectWorker: Worker;
@@ -117,6 +119,13 @@ export class Project implements ProjectEndpoint {
     encoding?: "utf8",
   ) {
     await this.#mount;
+    if (content instanceof Uint8Array) {
+      return await this.remote.writeFile(
+        path,
+        comlink.transfer(content, [content.buffer]),
+        encoding,
+      );
+    }
     return await this.remote.writeFile(path, content, encoding);
   }
 
@@ -152,14 +161,23 @@ export class Project implements ProjectEndpoint {
     return await this.remote.rmdir(path, options);
   }
 
+  public async stat(path: string): Promise<Stats> {
+    await this.#mount;
+    const raw = (await this.remote.stat(path)) as any as RawStats;
+    return new Stats(raw);
+  }
+
   public async gzip(files: PackFile[]): Promise<Uint8Array> {
     await this.#mount;
-    return await this.remote.gzip(files);
+    const buffers = files.map((f) => f.content.buffer);
+    return await this.remote.gzip(comlink.transfer(files, buffers));
   }
 
   public async sigMd5(content: Uint8Array): Promise<string> {
     await this.#mount;
-    return await this.remote.sigMd5(content);
+    return await this.remote.sigMd5(
+      comlink.transfer(content, [content.buffer]),
+    );
   }
 
   public static fork(
