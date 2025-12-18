@@ -7,7 +7,7 @@ Thank you for your interest in contributing to Utoo! This document provides a gu
 Utoo is a unified toolchain composed of several key layers:
 
 1.  **Core (Rust)**: The high-performance engine.
-    *   `crates/pm`: The `utoo` package manager.
+    *   `crates/pm`: The `utoo` package manager (alias `ut`).
     *   `crates/pack-core`: The bundler core, built on **Turbopack**.
 2.  **Bindings**: Bridging Rust to other environments.
     *   `crates/pack-napi`: Node.js bindings for the bundler.

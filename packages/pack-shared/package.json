@@ -3,8 +3,10 @@
   "version": "0.0.7",
   "main": "cjs/index.js",
   "module": "esm/index.js",
+  "types": "esm/index.d.ts",
   "exports": {
     ".": {
+      "types": "./esm/index.d.ts",
       "import": "./esm/index.js",
       "require": "./cjs/index.js"
     },

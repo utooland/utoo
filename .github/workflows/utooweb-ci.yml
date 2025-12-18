@@ -44,5 +44,6 @@ jobs:
           cargo install -f wasm-bindgen-cli --version 0.2.104
       - name: Build WASM
         run: |
+          npm run build --workspace=@utoo/pack-shared
           npm run build:local --workspace=@utoo/web
           ls packages/utoo-web/esm/utoo

@@ -26,9 +26,9 @@ Utoo is a modern, high-performance frontend toolchain designed to provide a unif
 
 ## 📦 Core Components
 
-- **`utoo`**: High-performance Rust package manager (Fast, Parallel, `npm` compatible).
-- **`@utoo/pack`**: Next-gen bundler powered by **Turbopack** (HMR, TS/JSX, Less/Sass).
-- **`ut`**: Command mounting system to unify your local and global workflows.
+- **`utoo`** (alias **`ut`**): High-performance Rust package manager (Fast, Parallel, `npm` compatible).
+- **`@utoo/pack`**: Next-gen bundler powered by **Turbopack** (HMR, TS/JSX, Less/Sass, and more).
+- **`@utoo/web`**: Web-compatible version of the toolchain (WASM, Browser-based bundling).
 
 ## 🚀 Quick Start
 
@@ -40,15 +40,18 @@ npm install -g utoo
 
 # Install the bundler (optional)
 npm install -g @utoo/pack
+
+# Install the web version (optional)
+npm install @utoo/web
 ```
 
 ### 2. Use
 
 #### Package Management
 ```bash
-utoo install          # Install dependencies
-utoo add lodash       # Add a package
-utoo x create-react   # Execute a package (npx style)
+utoo install          # Install dependencies (or use `ut install`)
+utoo add lodash       # Add a package (or use `ut add`)
+utoo x create-react   # Execute a package (npx style, or use `ut x`)
 ```
 
 #### Bundling
