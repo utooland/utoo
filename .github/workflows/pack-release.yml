@@ -45,7 +45,6 @@ jobs:
               npm run build:binding --workspace=@utoo/pack -- --target aarch64-unknown-linux-musl
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
             build: |
               rustup install nightly-2025-10-27 &&
               rustup default nightly-2025-10-27 &&
@@ -81,6 +80,16 @@ jobs:
     name: utoopack-release-${{ matrix.settings.target }} - node@20
     runs-on: ${{ matrix.settings.host }}
     steps:
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@v1.3.1
+        if: matrix.settings.host == 'ubuntu-latest'
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: false
       - uses: actions/checkout@v4
         with:
           submodules: false
@@ -91,6 +100,9 @@ jobs:
             ${{ secrets.CI_SUBMODULE }}
       - name: Init git submodules
         run: git submodule update --init --depth 1
+      - name: Set up QEMU
+        if: matrix.settings.docker && contains(matrix.settings.target, 'aarch64')
+        uses: docker/setup-qemu-action@v3
       - name: Setup node
         uses: actions/setup-node@v4
         if: ${{ !matrix.settings.docker }}
@@ -105,6 +117,8 @@ jobs:
           targets: ${{ matrix.settings.target }}
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pack-release-${{ matrix.settings.target }}
       - name: Setup toolchain
         run: ${{ matrix.settings.setup }}
         if: ${{ matrix.settings.setup }}
@@ -114,12 +128,20 @@ jobs:
       - name: Setup node x86
         uses: actions/setup-node@v4
       - name: Build in docker
-        uses: addnab/docker-run-action@v3
         if: ${{ matrix.settings.docker }}
-        with:
-          image: ${{ matrix.settings.docker }}
-          options: "-v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}:/build -w /build"
-          run: ${{ matrix.settings.build }}
+        run: |
+          cat <<'EOF' > build_script.sh
+          ${{ matrix.settings.build }}
+          EOF
+          chmod +x build_script.sh
+          docker run --rm \
+            -v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db \
+            -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache \
+            -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index \
+            -v ${{ github.workspace }}:/build \
+            -w /build \
+            ${{ matrix.settings.docker }} \
+            /bin/sh /build/build_script.sh
       - name: Build
         run: ${{ matrix.settings.build }}
         if: ${{ !matrix.settings.docker }}
