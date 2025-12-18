@@ -8,19 +8,18 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly-2025-09-21
-          override: true
-          components: rustfmt, clippy
-
-      - name: Run Benchmark
-        uses: actions-rs/cargo@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: nightly-2025-10-27
-          command: bench
-          args: -p utoo-pm
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pm-bench
+
+      - name: Run Benchmark
+        run: cargo bench -p utoo-pm

@@ -17,12 +17,15 @@ jobs:
           - host: macos-latest
             target: x86_64-apple-darwin
             build: |
-              rustup target add x86_64-apple-darwin &&
               npm run build:binding --workspace=@utoo/pack -- --target x86_64-apple-darwin
           - host: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
             build: |
+              apt-get update && apt-get install -y libc6-dev-arm64-cross libgcc-s1-arm64-cross &&
+              export QEMU_LD_PREFIX=/usr/aarch64-linux-gnu &&
+              rustup install nightly-2025-10-27 &&
+              rustup default nightly-2025-10-27 &&
               rustup target add aarch64-unknown-linux-gnu &&
               npm run build:binding --workspace=@utoo/pack -- --target aarch64-unknown-linux-gnu
           - host: ubuntu-latest
@@ -36,13 +39,15 @@ jobs:
               echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/community" >> /etc/apk/repositories &&
               apk update &&
               apk add --no-cache libc6-compat pkgconfig dav1d libdav1d dav1d-dev clang-static llvm-dev &&
+              rustup install nightly-2025-10-27 &&
+              rustup default nightly-2025-10-27 &&
               rustup target add aarch64-unknown-linux-musl &&
               export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Zunstable-options -Csymbol-mangling-version=v0 -Clinker-flavor=gnu-lld-cc -Clink-self-contained=+linker' &&
               npm run build:binding --workspace=@utoo/pack -- --target aarch64-unknown-linux-musl
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
-            build: npm run build:binding --workspace=@utoo/pack -- --target x86_64-unknown-linux-gnu
+            build: |
+              npm run build:binding --workspace=@utoo/pack -- --target x86_64-unknown-linux-gnu
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
@@ -54,8 +59,10 @@ jobs:
               echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/community" >> /etc/apk/repositories &&
               apk update &&
               apk add --no-cache libc6-compat pkgconfig dav1d libdav1d dav1d-dev clang-static llvm-dev &&
+              rustup install nightly-2025-10-27 &&
+              rustup default nightly-2025-10-27 &&
               rustup target add x86_64-unknown-linux-musl &&
-              export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Csymbol-mangling-version=v0 -Ctarget-feature=-crt-static' &&
+              export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Csymbol-mangling-version=v0' &&
               npm run build:binding --workspace=@utoo/pack -- --target x86_64-unknown-linux-musl
           # swc_plugin_runner not supported on aarch64 windows now
           # - host: windows-latest
@@ -64,14 +71,24 @@ jobs:
           #     git config --system core.longpaths true &&
           #     rustup target add aarch64-pc-windows-msvc &&
           #     npm run build:binding --workspace=@utoo/pack -- --target aarch64-pc-windows-msvc
-          - host: windows-latest
-            build: |
-              git config --system core.longpaths true &&
-              npm run build:binding --workspace=@utoo/pack -- --target x86_64-pc-windows-msvc
-            target: x86_64-pc-windows-msvc
+          # - host: windows-latest
+          #   build: |
+          #     git config --system core.longpaths true &&
+          #     npm run build:binding --workspace=@utoo/pack -- --target x86_64-pc-windows-msvc
+          #   target: x86_64-pc-windows-msvc
     name: utoopack-release-${{ matrix.settings.target }} - node@20
     runs-on: ${{ matrix.settings.host }}
     steps:
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@v1.3.1
+        if: matrix.settings.host == 'ubuntu-latest'
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: false
       - uses: actions/checkout@v4
         with:
           submodules: false
@@ -82,19 +99,25 @@ jobs:
             ${{ secrets.CI_SUBMODULE }}
       - name: Init git submodules
         run: git submodule update --init --depth 1
+      - name: Set up QEMU
+        if: matrix.settings.docker && contains(matrix.settings.target, 'aarch64')
+        uses: docker/setup-qemu-action@v3
       - name: Setup node
         uses: actions/setup-node@v4
         if: ${{ !matrix.settings.docker }}
         with:
           node-version: 20
+          cache: 'npm'
       - name: Install
         uses: dtolnay/rust-toolchain@stable
         if: ${{ !matrix.settings.docker }}
         with:
           toolchain: nightly-2025-10-27
           targets: ${{ matrix.settings.target }}
-      # - name: Cache cargo
-      #   uses: Swatinem/rust-cache@v2
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pack-release-${{ matrix.settings.target }}
       - name: Setup toolchain
         run: ${{ matrix.settings.setup }}
         if: ${{ matrix.settings.setup }}
@@ -104,12 +127,20 @@ jobs:
       - name: Setup node x86
         uses: actions/setup-node@v4
       - name: Build in docker
-        uses: addnab/docker-run-action@v3
         if: ${{ matrix.settings.docker }}
-        with:
-          image: ${{ matrix.settings.docker }}
-          options: "-v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}:/build -w /build"
-          run: ${{ matrix.settings.build }}
+        run: |
+          cat <<'EOF' > build_script.sh
+          ${{ matrix.settings.build }}
+          EOF
+          chmod +x build_script.sh
+          docker run --rm \
+            -v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db \
+            -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache \
+            -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index \
+            -v ${{ github.workspace }}:/build \
+            -w /build \
+            ${{ matrix.settings.docker }} \
+            /bin/sh /build/build_script.sh
       - name: Build
         run: ${{ matrix.settings.build }}
         if: ${{ !matrix.settings.docker }}
@@ -143,6 +174,8 @@ jobs:
       - name: List packages
         run: cd packages/pack && ls -R ./npm
         shell: bash
+      - name: Build JS
+        run: npx turbo run build:js --filter=@utoo/pack --filter=@utoo/pack-shared
       - name: Get version from release or use alpha version
         id: get_version
         run: |

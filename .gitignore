@@ -5,3 +5,5 @@ target
 *.trace
 rustc-ice*.txt
 .turbopack
+.turbo
+

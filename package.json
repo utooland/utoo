@@ -2,8 +2,14 @@
   "name": "utoo",
   "version": "1.0.0",
   "description": "",
+  "packageManager": "npm@11.6.2",
   "main": "index.js",
   "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "dev": "turbo run dev",
+    "clean": "turbo run clean",
     "biome": "biome check --write .",
     "prepare": "husky"
   },
@@ -12,7 +18,8 @@
   "license": "ISC",
   "devDependencies": {
     "@biomejs/biome": "2.1.2",
-    "husky": "^9.1.7"
+    "husky": "^9.1.7",
+    "turbo": "^2.6.3"
   },
   "workspaces": [
     "packages/pack",

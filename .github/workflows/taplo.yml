@@ -14,11 +14,13 @@ jobs:
         with:
           submodules: false
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
           toolchain: nightly-2025-10-27
-          override: true
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: taplo
       - name: Install Taplo
         run: cargo install taplo-cli
       - name: Taplo

@@ -40,7 +40,7 @@
   },
   "scripts": {
     "build": "rm -rf dist && tsc -b",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "turbo run build --filter=@utoo/pack-cli"
   },
   "types": "dist/index.d.ts"
 }
