@@ -41,6 +41,7 @@ jobs:
               rustup install nightly-2025-10-27 &&
               rustup default nightly-2025-10-27 &&
               rustup target add x86_64-unknown-linux-musl &&
+              export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Csymbol-mangling-version=v0 -Ctarget-feature=-crt-static' &&
               cargo test -p pack-tests --target x86_64-unknown-linux-musl
           # - host: ubuntu-latest
           #   target: aarch64-unknown-linux-gnu
@@ -75,6 +76,22 @@ jobs:
     name: utoopack-ci-${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        if: matrix.settings.host == 'ubuntu-latest'
+        with:
+          root-reserve-mb: 512
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+      - name: Free Disk Space (macOS)
+        if: matrix.settings.host == 'macos-latest'
+        run: |
+          sudo rm -rf /Users/runner/Library/Android/sdk
+          sudo rm -rf /Users/runner/Library/dotnet
+          sudo rm -rf /Users/runner/hostedtoolcache/CodeQL
       - uses: actions/checkout@v4
         with:
           submodules: false
