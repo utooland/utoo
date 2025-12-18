@@ -3,7 +3,7 @@
 //! Implements ruborist's `FileSystem` trait using `opfs_project` bindings.
 
 use std::path::{Path, PathBuf};
-use utoo_ruborist::service::FileSystem;
+use utoo_ruborist::service::{FileSystem, Glob};
 
 /// OPFS-backed file system for WASM environment.
 #[derive(Debug, Clone, Copy, Default)]
@@ -65,6 +65,10 @@ impl FileSystem for OpfsFileSystem {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create directory {}: {}", path.display(), e))
     }
+}
+
+impl Glob for OpfsFileSystem {
+    type Error = anyhow::Error;
 
     async fn glob(&self, pattern: &Path) -> Result<Vec<PathBuf>, Self::Error> {
         glob_match(self, pattern).await
