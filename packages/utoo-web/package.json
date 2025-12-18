@@ -20,7 +20,7 @@
     "wasm-opt": "wasm-opt src/utoo/index_bg.wasm -o esm/utoo/index_bg.wasm --enable-threads --enable-bulk-memory --enable-nontrapping-float-to-int -Oz",
     "build": "npm run build-wasm -- --release && npm run bindgen-build && npm run tsc && npm run build-loaderWorker && npm run wasm-opt",
     "build:local": "npm run build-wasm -- --profile release-local && npm run bindgen-build:local && npm run tsc && npm run build-loaderWorker && cp src/utoo/index_bg.wasm esm/utoo",
-    "build-loaderWorker": "node cli/umd.js -e ./src/webpackLoaders/worker/index.ts -o ./esm/loaderWorker.js -t webworker",
+    "build-loaderWorker": "node cli/umd.js -e ./src/webpackLoaders/worker.ts -o ./esm/loaderWorker.js -t webworker",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

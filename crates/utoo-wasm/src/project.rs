@@ -20,40 +20,52 @@ use super::{
 };
 
 use parking_lot::RwLock;
+use std::sync::Once;
+
+#[cfg(feature = "utoo-pack")]
+static GLOBAL_PACK_PROJECT: RwLock<Option<Arc<PackProject>>> = RwLock::new(None);
+static GLOBAL_THREAD_URL: RwLock<Option<String>> = RwLock::new(None);
+static CWD_ONCE: Once = Once::new();
 
 #[wasm_bindgen]
-pub struct Project {
-    #[cfg(feature = "utoo-pack")]
-    pack_project: RwLock<Option<Arc<PackProject>>>,
-}
+pub struct Project;
 
 #[wasm_bindgen]
 impl Project {
-    #[wasm_bindgen(constructor)]
-    pub fn new(cwd: String, thread_url: String) -> Project {
-        opfs_project::set_cwd(&cwd);
-        init_tokio_runtime(thread_url);
-        Project {
-            #[cfg(feature = "utoo-pack")]
-            pack_project: RwLock::new(None),
+    #[wasm_bindgen(js_name = init)]
+    pub fn init(thread_url: String) {
+        let mut url_guard = GLOBAL_THREAD_URL.write();
+        if url_guard.is_none() && !thread_url.is_empty() {
+            *url_guard = Some(thread_url.clone());
+        }
+        let final_url = url_guard.as_ref().cloned().unwrap_or(thread_url);
+        drop(url_guard);
+
+        if !final_url.is_empty() {
+            init_tokio_runtime(final_url);
         }
     }
 
+    #[wasm_bindgen(js_name = setCwd)]
+    pub fn set_cwd(path: String) {
+        opfs_project::set_cwd(path);
+    }
+
     #[wasm_bindgen(getter)]
-    pub fn cwd(&self) -> String {
+    pub fn cwd() -> String {
         opfs_project::get_cwd().to_string_lossy().to_string()
     }
 
     /// Calculate MD5 hash of byte content
     #[wasm_bindgen(js_name = sigMd5)]
-    pub fn sig_md5(&self, content: &[u8]) -> String {
+    pub fn sig_md5(content: &[u8]) -> String {
         opfs_project::pack::sig_md5(content)
     }
 
     /// Create a tar.gz archive and return bytes (no file I/O)
     /// This is useful for main thread execution without OPFS access
     #[wasm_bindgen(js_name = gzip)]
-    pub fn gzip(&self, files: JsValue) -> Result<js_sys::Uint8Array, JsError> {
+    pub fn gzip(files: JsValue) -> Result<js_sys::Uint8Array, JsError> {
         use opfs_project::pack::PackFile;
         use serde::Deserialize;
 
@@ -77,7 +89,6 @@ impl Project {
 
     #[wasm_bindgen]
     pub async fn install(
-        &self,
         package_lock: String,
         max_concurrent_downloads: Option<usize>,
     ) -> Result<(), JsError> {
@@ -92,12 +103,12 @@ impl Project {
 
     #[cfg(feature = "utoo-pack")]
     #[wasm_bindgen]
-    pub async fn build(&self) -> Result<JsValue, JsError> {
+    pub async fn build() -> Result<JsValue, JsError> {
         use turbopack_core::error::PrettyPrintError;
 
-        self.init_pack_project().await.map_err(to_js_error)?;
+        Self::init_pack_project().await.map_err(to_js_error)?;
 
-        let pack_project = match self.pack_project.read().as_ref() {
+        let pack_project = match GLOBAL_PACK_PROJECT.read().as_ref() {
             Some(pack_project) => pack_project.clone(),
             None => return Err(JsError::new("invalid pack project")),
         };
@@ -111,7 +122,7 @@ impl Project {
             .await
             .map_err(to_js_error)?
             .map_or_else(
-                |e| Err(to_js_error(e)),
+                |e| JsError::new(&PrettyPrintError(&e).to_string()),
                 |turbopack_result| {
                     use serde::Serialize;
 
@@ -124,15 +135,28 @@ impl Project {
             )
     }
 
-    async fn init_pack_project(&self) -> anyhow::Result<()> {
-        if self.pack_project.read().is_none() {
+    async fn init_pack_project() -> anyhow::Result<()> {
+        if GLOBAL_PACK_PROJECT.read().is_none() {
             use pack_api::project::ProjectOptions;
             use turbo_rcstr::RcStr;
 
-            let config = self.read_to_string("utoopack.json").await.ok();
+            let cwd = opfs_project::get_cwd().to_string_lossy().to_string();
+            let project_root = if cwd.starts_with('/') {
+                cwd
+            } else {
+                format!("/{}", cwd)
+            };
+
+            let config_path = if project_root.ends_with('/') {
+                format!("{}utoopack.json", project_root)
+            } else {
+                format!("{}/utoopack.json", project_root)
+            };
+
+            let config = Self::read_to_string(&config_path).await.ok();
 
             let partial_options = PartialProjectOptions {
-                project_path: ".".into(),
+                project_path: project_root,
                 config,
             };
             let project_path: RcStr = partial_options.project_path.into();
@@ -159,7 +183,7 @@ impl Project {
                 .await
                 .context("fail to initialize pack project")??;
 
-            let mut pack_project_guard = self.pack_project.write();
+            let mut pack_project_guard = GLOBAL_PACK_PROJECT.write();
             *pack_project_guard = Some(Arc::new(pack_context));
         }
 
@@ -168,14 +192,14 @@ impl Project {
 
     #[cfg(not(feature = "utoo-pack"))]
     #[wasm_bindgen]
-    pub async fn build(&self) -> Result<(), JsValue> {
+    pub async fn build() -> Result<(), JsValue> {
         Err(JsValue::from_str(
             "Build functionality requires the 'utoo-pack' feature to be enabled",
         ))
     }
 
     #[wasm_bindgen]
-    pub async fn read(&self, path: &str) -> Result<Vec<u8>, JsError> {
+    pub async fn read(path: &str) -> Result<Vec<u8>, JsError> {
         opfs_project::read(path)
             .await
             .with_context(|| format!("Failed to read file: {}", path))
@@ -183,7 +207,7 @@ impl Project {
     }
 
     #[wasm_bindgen(js_name = readToString)]
-    pub async fn read_to_string(&self, path: &str) -> Result<String, JsError> {
+    pub async fn read_to_string(path: &str) -> Result<String, JsError> {
         let buf = opfs_project::read(path)
             .await
             .with_context(|| format!("Failed to read file: {}", path))
@@ -192,7 +216,7 @@ impl Project {
     }
 
     #[wasm_bindgen]
-    pub async fn write(&self, path: &str, content: &[u8]) -> Result<(), JsError> {
+    pub async fn write(path: &str, content: &[u8]) -> Result<(), JsError> {
         opfs_project::write(path, content)
             .await
             .with_context(|| format!("Failed to write file: {}", path))
@@ -201,7 +225,7 @@ impl Project {
     }
 
     #[wasm_bindgen(js_name = "writeString")]
-    pub async fn write_string(&self, path: &str, content: &str) -> Result<(), JsError> {
+    pub async fn write_string(path: &str, content: &str) -> Result<(), JsError> {
         opfs_project::write(path, content)
             .await
             .with_context(|| format!("Failed to write file: {}", path))
@@ -210,7 +234,7 @@ impl Project {
     }
 
     #[wasm_bindgen(js_name = readDir)]
-    pub async fn read_dir(&self, path: &str) -> Result<Vec<DirEntry>, JsError> {
+    pub async fn read_dir(path: &str) -> Result<Vec<DirEntry>, JsError> {
         let read_dir = opfs_project::read_dir(path)
             .await
             .with_context(|| format!("Failed to read directory: {}", path))
@@ -227,7 +251,7 @@ impl Project {
     }
 
     #[wasm_bindgen(js_name = createDir)]
-    pub async fn create_dir(&self, path: &str) -> Result<(), JsError> {
+    pub async fn create_dir(path: &str) -> Result<(), JsError> {
         opfs_project::create_dir(path)
             .await
             .with_context(|| format!("Failed to create directory: {}", path))
@@ -236,7 +260,7 @@ impl Project {
     }
 
     #[wasm_bindgen(js_name = createDirAll)]
-    pub async fn create_dir_all(&self, path: &str) -> Result<(), JsError> {
+    pub async fn create_dir_all(path: &str) -> Result<(), JsError> {
         opfs_project::create_dir_all(path)
             .await
             .with_context(|| format!("Failed to create directory recursively: {}", path))
@@ -245,7 +269,7 @@ impl Project {
     }
 
     #[wasm_bindgen(js_name = copyFile)]
-    pub async fn copy_file(&self, src: &str, dst: &str) -> Result<(), JsError> {
+    pub async fn copy_file(src: &str, dst: &str) -> Result<(), JsError> {
         opfs_project::copy(src, dst)
             .await
             .with_context(|| format!("Failed to copy file from {} to {}", src, dst))
@@ -254,7 +278,7 @@ impl Project {
     }
 
     #[wasm_bindgen(js_name = removeFile)]
-    pub async fn remove_file(&self, path: &str) -> Result<(), JsError> {
+    pub async fn remove_file(path: &str) -> Result<(), JsError> {
         opfs_project::remove_file(path)
             .await
             .with_context(|| format!("Failed to remove file: {}", path))
@@ -263,7 +287,7 @@ impl Project {
     }
 
     #[wasm_bindgen(js_name = removeDir)]
-    pub async fn remove_dir(&self, path: &str, recursive: bool) -> Result<(), JsError> {
+    pub async fn remove_dir(path: &str, recursive: bool) -> Result<(), JsError> {
         if recursive {
             opfs_project::remove_dir_all(path)
                 .await
@@ -280,7 +304,7 @@ impl Project {
     }
 
     #[wasm_bindgen(js_name = metadata)]
-    pub async fn metadata(&self, path: &str) -> Result<Metadata, JsError> {
+    pub async fn metadata(path: &str) -> Result<Metadata, JsError> {
         opfs_project::metadata(path)
             .await
             .and_then(Metadata::try_from)

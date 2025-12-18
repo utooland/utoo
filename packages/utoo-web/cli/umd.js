@@ -65,21 +65,14 @@ const config = {
     alias: {
       ...stdLibBrowser,
       // Use the real polyfill instead of the stub
-      fs: path.resolve(__dirname, '../src/webpackLoaders/worker/polyfills/fsPolyfill.ts'),
-      'fs/promises': path.resolve(__dirname, '../src/webpackLoaders/worker/polyfills/fsPromisesPolyfill.ts'),
+      fs: path.resolve(__dirname, '../src/webpackLoaders/polyfills/fsPolyfill.ts'),
+      'fs/promises': path.resolve(__dirname, '../src/webpackLoaders/polyfills/fsPromisesPolyfill.ts'),
       v8: path.resolve(__dirname, './mocks/v8.js'),
       perf_hooks: path.resolve(__dirname, './mocks/perf_hooks.js'),
-      'fast-glob': path.resolve(__dirname, '../src/webpackLoaders/worker/polyfills/fastGlobPolyfill.ts'),
-      'tailwindcss/lib/lib/load-config.js': path.resolve(__dirname, './mocks/load-config.js'),
-      'tailwindcss/lib/lib/load-config': path.resolve(__dirname, './mocks/load-config.js'),
     },
   },
   module: {
     rules: [
-      {
-        test: /tailwindcss\/lib\/corePlugins\.js$/,
-        loader: path.resolve(__dirname, './preflight-loader.js'),
-      },
       {
         test: /\.m?js/,
         resolve: {

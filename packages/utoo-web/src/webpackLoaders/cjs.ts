@@ -16,7 +16,11 @@ const statSync = (p: string) => {
     p.includes("node_modules") &&
     Object.prototype.hasOwnProperty.call(statCache, p)
   ) {
-    if (statCache[p] === false) throw new Error("ENOENT");
+    if (statCache[p] === false) {
+      // console.error(`[Debug] statSync cache hit (ENOENT): ${p}`);
+      throw new Error("ENOENT");
+    }
+    // console.error(`[Debug] statSync cache hit (Found): ${p}`);
     return statCache[p];
   }
   try {
@@ -25,6 +29,7 @@ const statSync = (p: string) => {
     return res;
   } catch (e) {
     if (p.includes("node_modules")) statCache[p] = false;
+    console.error(`[Debug] statSync failed for ${p}:`, e);
     throw e;
   }
 };
@@ -33,7 +38,8 @@ const existsSync = (p: string) => {
   try {
     statSync(p);
     return true;
-  } catch {
+  } catch (e) {
+    console.error(`[Debug] existsSync failed for ${p}:`, e);
     return false;
   }
 };
@@ -183,6 +189,12 @@ const loadModule = (
         if (parent === currentDir) break;
         currentDir = parent;
       }
+      // Ensure cwd/node_modules is always included
+      const cwd = nodePolyFills.process.cwd();
+      const cwdNodeModules = path.join(cwd, "node_modules");
+      if (!searchPaths.includes(cwdNodeModules)) {
+        searchPaths.push(cwdNodeModules);
+      }
       searchPathsCache[context] = searchPaths;
     }
 
@@ -191,15 +203,17 @@ const loadModule = (
 
       // Check package.json first
       const pkgJsonPath = path.join(nodeModulesPath, "package.json");
-      if (existsSync(pkgJsonPath)) {
+      let pkg;
+      try {
+        const content = fs.readFileSync(pkgJsonPath, "utf8") as string;
+        pkg = JSON.parse(content);
+        pkgJsonCache[pkgJsonPath] = pkg;
+      } catch (e) {
+        // ignore
+      }
+
+      if (pkg) {
         try {
-          let pkg;
-          if (pkgJsonCache[pkgJsonPath]) {
-            pkg = pkgJsonCache[pkgJsonPath];
-          } else {
-            pkg = JSON.parse(fs.readFileSync(pkgJsonPath, "utf8") as string);
-            pkgJsonCache[pkgJsonPath] = pkg;
-          }
           const mainField = pkg.main;
           if (mainField) {
             const candidates = [
@@ -209,34 +223,34 @@ const loadModule = (
               path.resolve(nodeModulesPath, mainField, "index.js"),
             ];
             for (const candidate of candidates) {
-              if (existsSync(candidate) && !statSync(candidate).isDirectory()) {
-                try {
-                  resolvedId = candidate;
-                  moduleCode = fs.readFileSync(candidate, "utf8") as string;
-                  moduleId = candidate;
-                  break;
-                } catch (e) {
-                  // ignore
-                }
+              try {
+                // Try reading directly to bypass potential statSync issues
+                moduleCode = fs.readFileSync(candidate, "utf8") as string;
+                resolvedId = candidate;
+                moduleId = candidate;
+                break;
+              } catch (e) {
+                // ignore
               }
             }
           }
-        } catch {}
+        } catch (e) {
+          console.error(`[Debug] Error processing package.json:`, e);
+        }
       }
 
       if (!moduleCode) {
         const extensions = ["", ".js", ".json", "/index.js"];
         for (const ext of extensions) {
           const p = nodeModulesPath + ext;
-          if (existsSync(p) && !statSync(p).isDirectory()) {
-            try {
-              resolvedId = p;
-              moduleCode = fs.readFileSync(p, "utf8") as string;
-              moduleId = p;
-              break;
-            } catch (e) {
-              // ignore
-            }
+          try {
+            // Try reading directly
+            moduleCode = fs.readFileSync(p, "utf8") as string;
+            resolvedId = p;
+            moduleId = p;
+            break;
+          } catch (e) {
+            // ignore
           }
         }
       }
@@ -245,28 +259,19 @@ const loadModule = (
     }
   }
 
-  // Fallback: Try resolving absolute path (handling CWD stripping)
+  // Fallback: Try resolving absolute path
   if (!moduleCode && id.startsWith("/")) {
-    // @ts-ignore
-    const cwd = self.process?.cwd?.() || self.workerData?.cwd || "/";
-    let relativeId = id;
-    if (id.startsWith(cwd)) {
-      relativeId = id.slice(cwd.length);
-      if (relativeId.startsWith("/")) relativeId = relativeId.slice(1);
-    }
-
     const extensions = ["", ".js", ".json", "/index.js"];
     for (const ext of extensions) {
-      const p = relativeId + ext;
-      if (existsSync(p) && !statSync(p).isDirectory()) {
-        try {
-          resolvedId = p; // Use relative path for FS ops
-          moduleCode = fs.readFileSync(p, "utf8") as string;
-          moduleId = id; // Keep original absolute path as module ID
-          break;
-        } catch (e) {
-          // ignore
-        }
+      if (ext === "/index.js" && id.endsWith(".js")) continue;
+      const p = id + ext;
+      try {
+        moduleCode = fs.readFileSync(p, "utf8") as string;
+        resolvedId = p;
+        moduleId = id;
+        break;
+      } catch (e) {
+        // ignore
       }
     }
   }
@@ -275,17 +280,15 @@ const loadModule = (
     // Try extensions
     const extensions = ["", ".js", ".json", "/index.js"];
     for (const ext of extensions) {
+      if (ext === "/index.js" && id.endsWith(".js")) continue;
       const p = resolvedId + ext;
-      if (existsSync(p) && !statSync(p).isDirectory()) {
-        try {
-          resolvedId = p;
-          moduleCode = fs.readFileSync(p, "utf8") as string;
-          moduleId = p;
-          break;
-        } catch (e) {
-          console.error(`[Debug] Failed to read file ${p}:`, e);
-          // ignore
-        }
+      try {
+        moduleCode = fs.readFileSync(p, "utf8") as string;
+        resolvedId = p;
+        moduleId = p;
+        break;
+      } catch (e) {
+        // ignore
       }
     }
   }
@@ -306,6 +309,12 @@ export async function cjs(
   entrypoint: string,
   importMaps: Record<string, string>,
 ) {
+  // Clear caches to avoid stale data across runs
+  for (const key in statCache) delete statCache[key];
+  for (const key in pkgJsonCache) delete pkgJsonCache[key];
+  for (const key in resolutionCache) delete resolutionCache[key];
+  for (const key in searchPathsCache) delete searchPathsCache[key];
+
   await Promise.all(
     Object.entries(importMaps).map(async ([k, v]) => {
       if (v.startsWith("https://")) {

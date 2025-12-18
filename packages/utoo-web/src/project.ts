@@ -10,7 +10,9 @@ import {
   ProjectEndpoint,
   ProjectOptions,
   RawDirent,
+  RawStats,
   ServiceWorkerOptions,
+  Stats,
 } from "./type";
 
 let ProjectWorker: Worker;
@@ -150,6 +152,12 @@ export class Project implements ProjectEndpoint {
   public async rmdir(path: string, options?: { recursive?: boolean }) {
     await this.#mount;
     return await this.remote.rmdir(path, options);
+  }
+
+  public async stat(path: string): Promise<Stats> {
+    await this.#mount;
+    const raw = (await this.remote.stat(path)) as any as RawStats;
+    return new Stats(raw);
   }
 
   public async gzip(files: PackFile[]): Promise<Uint8Array> {

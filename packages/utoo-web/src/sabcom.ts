@@ -114,9 +114,7 @@ export const handleSabRequest = async (
       const entries = await fs.readDir(path);
       sabHost.writeResponse(JSON.stringify(entries.map((e) => e.toJSON())));
     } else if (op === SAB_OP_WRITE_FILE) {
-      const { content, encoding } = JSON.parse(path);
-      const filePath = content.path;
-      const fileContent = content.data;
+      const { path: filePath, data: fileContent } = JSON.parse(path);
       // TODO: handle binary content (base64?)
       await fs.writeString(filePath, fileContent);
       sabHost.writeResponse("ok");
@@ -132,7 +130,10 @@ export const handleSabRequest = async (
       const { path: rmPath, recursive } = JSON.parse(path);
       // Mimic internalProject.rm logic
       const metadata = await fs.metadata(rmPath);
-      const type = (metadata.toJSON() as any).type;
+      const json = (metadata as any).toJSON
+        ? (metadata as any).toJSON()
+        : metadata;
+      const type = json.type;
       if (type === "file") {
         await fs.removeFile(rmPath);
       } else if (type === "directory") {
@@ -149,7 +150,14 @@ export const handleSabRequest = async (
       sabHost.writeResponse("ok");
     } else if (op === SAB_OP_STAT) {
       const metadata = await fs.metadata(path);
-      sabHost.writeResponse(JSON.stringify(metadata));
+      const json = (metadata as any).toJSON
+        ? (metadata as any).toJSON()
+        : metadata;
+      sabHost.writeResponse(
+        JSON.stringify(json, (k, v) =>
+          typeof v === "bigint" ? v.toString() : v,
+        ),
+      );
     } else {
       sabHost.writeError("Unknown op");
     }

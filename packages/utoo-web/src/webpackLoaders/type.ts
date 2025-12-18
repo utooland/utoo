@@ -2,6 +2,7 @@ export interface LoaderRunnerMeta {
   workerData: {
     workerId: number;
     cwd: string;
+    projectRoot: string;
   };
   loaderAssets: {
     importMaps: Record<string, string>;
