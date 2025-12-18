@@ -1,10 +1,3 @@
-import {
-  BigUint64,
-  BufferBackedObject,
-  Float64,
-  Uint8,
-} from "buffer-backed-object";
-
 export const SAB_STATE_IDLE = 0;
 export const SAB_STATE_REQUEST = 1;
 export const SAB_STATE_RESPONSE = 2;
@@ -22,14 +15,21 @@ export const SAB_OP_STAT = 8;
 export const STAT_TYPE_FILE = 0;
 export const STAT_TYPE_DIR = 1;
 
-const StatDescriptor = {
-  type: Uint8(),
-  size: BigUint64(),
-  atimeMs: Float64(),
-  mtimeMs: Float64(),
-  ctimeMs: Float64(),
-  birthtimeMs: Float64(),
-};
+// Stat struct layout (starts at byte 12)
+// type: Uint8 (1 byte) -> offset 0
+// padding: 7 bytes
+// size: BigUint64 (8 bytes) -> offset 8
+// atimeMs: Float64 (8 bytes) -> offset 16
+// mtimeMs: Float64 (8 bytes) -> offset 24
+// ctimeMs: Float64 (8 bytes) -> offset 32
+// birthtimeMs: Float64 (8 bytes) -> offset 40
+
+const STAT_OFFSET_TYPE = 0;
+const STAT_OFFSET_SIZE = 8;
+const STAT_OFFSET_ATIME = 16;
+const STAT_OFFSET_MTIME = 24;
+const STAT_OFFSET_CTIME = 32;
+const STAT_OFFSET_BIRTHTIME = 40;
 
 // Layout:
 // 0: State (Int32)
@@ -40,14 +40,12 @@ const StatDescriptor = {
 export class SabComHost {
   private int32: Int32Array;
   private uint8: Uint8Array;
-  public statStruct: any;
+  private dataView: DataView;
 
   constructor(private sab: SharedArrayBuffer) {
     this.int32 = new Int32Array(sab);
     this.uint8 = new Uint8Array(sab);
-    this.statStruct = BufferBackedObject(sab as any, StatDescriptor, {
-      byteOffset: 12,
-    });
+    this.dataView = new DataView(sab);
   }
 
   readRequest() {
@@ -76,7 +74,22 @@ export class SabComHost {
     Atomics.notify(this.int32, 0);
   }
 
-  writeStatResponse() {
+  writeStat(
+    type: number,
+    size: bigint,
+    atimeMs: number,
+    mtimeMs: number,
+    ctimeMs: number,
+    birthtimeMs: number,
+  ) {
+    const base = 12;
+    this.dataView.setUint8(base + STAT_OFFSET_TYPE, type);
+    this.dataView.setBigUint64(base + STAT_OFFSET_SIZE, size, true);
+    this.dataView.setFloat64(base + STAT_OFFSET_ATIME, atimeMs, true);
+    this.dataView.setFloat64(base + STAT_OFFSET_MTIME, mtimeMs, true);
+    this.dataView.setFloat64(base + STAT_OFFSET_CTIME, ctimeMs, true);
+    this.dataView.setFloat64(base + STAT_OFFSET_BIRTHTIME, birthtimeMs, true);
+
     Atomics.store(this.int32, 0, SAB_STATE_RESPONSE);
     Atomics.notify(this.int32, 0);
   }
@@ -85,7 +98,7 @@ export class SabComHost {
 export class SabComClient {
   private int32: Int32Array;
   private uint8: Uint8Array;
-  public statStruct: any;
+  private dataView: DataView;
 
   constructor(
     private sab: SharedArrayBuffer,
@@ -93,9 +106,7 @@ export class SabComClient {
   ) {
     this.int32 = new Int32Array(sab);
     this.uint8 = new Uint8Array(sab);
-    this.statStruct = BufferBackedObject(sab as any, StatDescriptor, {
-      byteOffset: 12,
-    });
+    this.dataView = new DataView(sab);
   }
 
   call(op: number, data: string) {
@@ -137,7 +148,16 @@ export class SabComClient {
       const msg = new TextDecoder().decode(this.uint8.slice(12, 12 + len));
       throw new Error(msg);
     }
-    return this.statStruct;
+
+    const base = 12;
+    return {
+      type: this.dataView.getUint8(base + STAT_OFFSET_TYPE),
+      size: this.dataView.getBigUint64(base + STAT_OFFSET_SIZE, true),
+      atimeMs: this.dataView.getFloat64(base + STAT_OFFSET_ATIME, true),
+      mtimeMs: this.dataView.getFloat64(base + STAT_OFFSET_MTIME, true),
+      ctimeMs: this.dataView.getFloat64(base + STAT_OFFSET_CTIME, true),
+      birthtimeMs: this.dataView.getFloat64(base + STAT_OFFSET_BIRTHTIME, true),
+    };
   }
 }
 
@@ -206,15 +226,14 @@ export const handleSabRequest = async (
         ? (metadata as any).toJSON()
         : metadata;
 
-      sabHost.statStruct.type =
-        json.type === "directory" ? STAT_TYPE_DIR : STAT_TYPE_FILE;
-      sabHost.statStruct.size = BigInt(json.file_size || 0);
-      sabHost.statStruct.atimeMs = Number(json.atimeMs || 0);
-      sabHost.statStruct.mtimeMs = Number(json.mtimeMs || 0);
-      sabHost.statStruct.ctimeMs = Number(json.ctimeMs || 0);
-      sabHost.statStruct.birthtimeMs = Number(json.birthtimeMs || 0);
+      const type = json.type === "directory" ? STAT_TYPE_DIR : STAT_TYPE_FILE;
+      const size = BigInt(json.file_size || 0);
+      const atimeMs = Number(json.atimeMs || 0);
+      const mtimeMs = Number(json.mtimeMs || 0);
+      const ctimeMs = Number(json.ctimeMs || 0);
+      const birthtimeMs = Number(json.birthtimeMs || 0);
 
-      sabHost.writeStatResponse();
+      sabHost.writeStat(type, size, atimeMs, mtimeMs, ctimeMs, birthtimeMs);
     } else {
       sabHost.writeError("Unknown op");
     }

@@ -1,3 +1,4 @@
+import * as comlink from "comlink";
 import {
   Binding,
   PackFile,
@@ -66,6 +67,7 @@ class InternalEndpoint implements ProjectEndpoint {
       ret = await ProjectInternal.readToString(path);
     } else {
       ret = await ProjectInternal.read(path);
+      return comlink.transfer(ret, [ret.buffer]);
     }
     return ret as any;
   }
@@ -148,7 +150,8 @@ class InternalEndpoint implements ProjectEndpoint {
 
   async gzip(files: PackFile[]) {
     await this.wasmInit!;
-    return await ProjectInternal.gzip(files);
+    const ret = await ProjectInternal.gzip(files);
+    return comlink.transfer(ret, [ret.buffer]);
   }
 
   async sigMd5(content: Uint8Array) {
