@@ -105,11 +105,14 @@ export function copyFileSync(src: string, dst: string) {
 
 export function statSync(p: string) {
   const client = getSabClient();
-  const result = client.call(sabcom.SAB_OP_STAT, resolvePath(p));
-  const metadata = JSON.parse(new TextDecoder().decode(result));
+  const struct = client.callStat(resolvePath(p));
   return new Stats({
-    type: metadata.type,
-    size: Number(metadata.file_size || 0),
+    type: struct.type === sabcom.STAT_TYPE_DIR ? "directory" : "file",
+    size: Number(struct.size),
+    atimeMs: struct.atimeMs,
+    mtimeMs: struct.mtimeMs,
+    ctimeMs: struct.ctimeMs,
+    birthtimeMs: struct.birthtimeMs,
   });
 }
 

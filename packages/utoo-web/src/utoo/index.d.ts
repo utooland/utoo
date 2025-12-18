@@ -107,6 +107,8 @@ export class WebWorkerTermination {
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
+  readonly init_log_filter: (a: number, b: number) => void;
+  readonly init_pack: () => void;
   readonly __wbg_direntry_free: (a: number, b: number) => void;
   readonly __wbg_get_direntry_name: (a: number) => [number, number];
   readonly __wbg_get_direntry_type: (a: number) => number;
@@ -136,8 +138,6 @@ export interface InitOutput {
   readonly project_sigMd5: (a: number, b: number) => [number, number];
   readonly project_write: (a: number, b: number, c: number, d: number) => any;
   readonly project_writeString: (a: number, b: number, c: number, d: number) => any;
-  readonly init_log_filter: (a: number, b: number) => void;
-  readonly init_pack: () => void;
   readonly registerWorkerScheduler: (a: any, b: any) => void;
   readonly workerCreated: (a: number) => void;
   readonly rust_mi_get_default_heap: () => number;
@@ -175,10 +175,10 @@ export interface InitOutput {
   readonly __wbindgen_export_7: WebAssembly.Table;
   readonly __externref_drop_slice: (a: number, b: number) => void;
   readonly __externref_table_dealloc: (a: number) => void;
-  readonly closure113_externref_shim: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen__convert__closures_____invoke__h2ce973260553dde0: (a: number, b: number) => void;
   readonly closure115096_externref_shim: (a: number, b: number, c: any) => void;
   readonly closure117648_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure149_externref_shim: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen__convert__closures_____invoke__heac94dfe74335608: (a: number, b: number) => void;
   readonly closure115099_externref_shim: (a: number, b: number, c: any) => void;
   readonly closure117778_externref_shim: (a: number, b: number, c: any, d: any) => void;

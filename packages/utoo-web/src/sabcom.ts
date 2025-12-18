@@ -1,3 +1,10 @@
+import {
+  BigUint64,
+  BufferBackedObject,
+  Float64,
+  Uint8,
+} from "buffer-backed-object";
+
 export const SAB_STATE_IDLE = 0;
 export const SAB_STATE_REQUEST = 1;
 export const SAB_STATE_RESPONSE = 2;
@@ -12,6 +19,18 @@ export const SAB_OP_RMDIR = 6;
 export const SAB_OP_COPY_FILE = 7;
 export const SAB_OP_STAT = 8;
 
+export const STAT_TYPE_FILE = 0;
+export const STAT_TYPE_DIR = 1;
+
+const StatDescriptor = {
+  type: Uint8(),
+  size: BigUint64(),
+  atimeMs: Float64(),
+  mtimeMs: Float64(),
+  ctimeMs: Float64(),
+  birthtimeMs: Float64(),
+};
+
 // Layout:
 // 0: State (Int32)
 // 1: Op (Int32)
@@ -21,10 +40,14 @@ export const SAB_OP_STAT = 8;
 export class SabComHost {
   private int32: Int32Array;
   private uint8: Uint8Array;
+  public statStruct: any;
 
   constructor(private sab: SharedArrayBuffer) {
     this.int32 = new Int32Array(sab);
     this.uint8 = new Uint8Array(sab);
+    this.statStruct = BufferBackedObject(sab as any, StatDescriptor, {
+      byteOffset: 12,
+    });
   }
 
   readRequest() {
@@ -52,11 +75,17 @@ export class SabComHost {
     Atomics.store(this.int32, 0, SAB_STATE_ERROR);
     Atomics.notify(this.int32, 0);
   }
+
+  writeStatResponse() {
+    Atomics.store(this.int32, 0, SAB_STATE_RESPONSE);
+    Atomics.notify(this.int32, 0);
+  }
 }
 
 export class SabComClient {
   private int32: Int32Array;
   private uint8: Uint8Array;
+  public statStruct: any;
 
   constructor(
     private sab: SharedArrayBuffer,
@@ -64,6 +93,9 @@ export class SabComClient {
   ) {
     this.int32 = new Int32Array(sab);
     this.uint8 = new Uint8Array(sab);
+    this.statStruct = BufferBackedObject(sab as any, StatDescriptor, {
+      byteOffset: 12,
+    });
   }
 
   call(op: number, data: string) {
@@ -86,6 +118,26 @@ export class SabComClient {
 
     const len = this.int32[2];
     return this.uint8.slice(12, 12 + len);
+  }
+
+  callStat(path: string) {
+    const encoded = new TextEncoder().encode(path);
+    this.int32[1] = SAB_OP_STAT;
+    this.int32[2] = encoded.length;
+    this.uint8.set(encoded, 12);
+
+    Atomics.store(this.int32, 0, SAB_STATE_REQUEST);
+    this.notifyHost();
+
+    Atomics.wait(this.int32, 0, SAB_STATE_REQUEST);
+
+    const state = Atomics.load(this.int32, 0);
+    if (state === SAB_STATE_ERROR) {
+      const len = this.int32[2];
+      const msg = new TextDecoder().decode(this.uint8.slice(12, 12 + len));
+      throw new Error(msg);
+    }
+    return this.statStruct;
   }
 }
 
@@ -153,11 +205,16 @@ export const handleSabRequest = async (
       const json = (metadata as any).toJSON
         ? (metadata as any).toJSON()
         : metadata;
-      sabHost.writeResponse(
-        JSON.stringify(json, (k, v) =>
-          typeof v === "bigint" ? v.toString() : v,
-        ),
-      );
+
+      sabHost.statStruct.type =
+        json.type === "directory" ? STAT_TYPE_DIR : STAT_TYPE_FILE;
+      sabHost.statStruct.size = BigInt(json.file_size || 0);
+      sabHost.statStruct.atimeMs = Number(json.atimeMs || 0);
+      sabHost.statStruct.mtimeMs = Number(json.mtimeMs || 0);
+      sabHost.statStruct.ctimeMs = Number(json.ctimeMs || 0);
+      sabHost.statStruct.birthtimeMs = Number(json.birthtimeMs || 0);
+
+      sabHost.writeStatResponse();
     } else {
       sabHost.writeError("Unknown op");
     }

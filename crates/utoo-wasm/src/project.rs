@@ -122,7 +122,7 @@ impl Project {
             .await
             .map_err(to_js_error)?
             .map_or_else(
-                |e| JsError::new(&PrettyPrintError(&e).to_string()),
+                |e| Err(JsError::new(&PrettyPrintError(&e).to_string())),
                 |turbopack_result| {
                     use serde::Serialize;
 
