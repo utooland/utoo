@@ -36,7 +36,9 @@ jobs:
         with:
           shared-key: utooweb-release
       - name: Install dependencies
-        run: npm install
+        run: |
+          npm install
+          npm install binaryen@123.0.0 --global
       - name: Install wasm-bindgen-cli
         uses: jetli/wasm-bindgen-action@v0.2.0
         with:
