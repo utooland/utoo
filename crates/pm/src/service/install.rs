@@ -334,9 +334,7 @@ pub async fn install_packages(
                         continue;
                     }
 
-                    let name = package.name.clone().ok_or_else(|| {
-                        anyhow::anyhow!("package {path} missing name, package: {:?}", package)
-                    })?;
+                    let name = package.get_name(&path);
                     let version = package
                         .version
                         .as_ref()
