@@ -17,10 +17,8 @@ const statSync = (p: string) => {
     Object.prototype.hasOwnProperty.call(statCache, p)
   ) {
     if (statCache[p] === false) {
-      // console.error(`[Debug] statSync cache hit (ENOENT): ${p}`);
       throw new Error("ENOENT");
     }
-    // console.error(`[Debug] statSync cache hit (Found): ${p}`);
     return statCache[p];
   }
   try {
@@ -29,7 +27,6 @@ const statSync = (p: string) => {
     return res;
   } catch (e) {
     if (p.includes("node_modules")) statCache[p] = false;
-    console.error(`[Debug] statSync failed for ${p}:`, e);
     throw e;
   }
 };
@@ -39,7 +36,6 @@ const existsSync = (p: string) => {
     statSync(p);
     return true;
   } catch (e) {
-    console.error(`[Debug] existsSync failed for ${p}:`, e);
     return false;
   }
 };
@@ -235,7 +231,7 @@ const loadModule = (
             }
           }
         } catch (e) {
-          console.error(`[Debug] Error processing package.json:`, e);
+          // ignore
         }
       }
 

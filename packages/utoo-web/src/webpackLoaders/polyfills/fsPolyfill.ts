@@ -2,6 +2,7 @@ import { Buffer } from "buffer";
 import path from "path";
 import * as sabcom from "../../sabcom";
 import { Stats } from "../../type";
+import { promises } from "./fsPromisesPolyfill";
 
 function resolvePath(p: string): string {
   // @ts-ignore
@@ -293,9 +294,6 @@ export function access(p: string, mode: number | Function, cb?: Function) {
   });
 }
 
-import { promises } from "./fsPromisesPolyfill";
-export { promises };
-
 export const constants = {
   F_OK: 0,
   R_OK: 4,
@@ -330,3 +328,5 @@ export default {
   promises,
   constants,
 };
+
+export { promises };
