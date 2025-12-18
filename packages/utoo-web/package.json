@@ -25,7 +25,6 @@
   },
   "dependencies": {
     "@utoo/pack-shared": "^0.0.7",
-    "buffer-backed-object": "^1.0.1",
     "comlink": "^4.4.2",
     "micromatch": "^4.0.8",
     "systemjs": "^6.15.1"
