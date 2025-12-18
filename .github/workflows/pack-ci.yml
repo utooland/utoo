@@ -115,6 +115,8 @@ jobs:
           targets: ${{ matrix.settings.target }}
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pack-ci-${{ matrix.settings.target }}
       - name: Setup toolchain
         run: ${{ matrix.settings.setup }}
         if: ${{ matrix.settings.setup }}
