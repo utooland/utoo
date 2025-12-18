@@ -76,23 +76,17 @@ jobs:
     name: utoopack-ci-${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     steps:
-      - name: Maximize build space
-        uses: easimon/maximize-build-space@master
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@v1.3.1
         if: matrix.settings.host == 'ubuntu-latest'
         with:
-          root-reserve-mb: 512
-          swap-size-mb: 1024
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-          remove-docker-images: 'true'
-      - name: Free Disk Space (macOS)
-        if: matrix.settings.host == 'macos-latest'
-        run: |
-          sudo rm -rf /Users/runner/Library/Android/sdk
-          sudo rm -rf /Users/runner/Library/dotnet
-          sudo rm -rf /Users/runner/hostedtoolcache/CodeQL
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
       - uses: actions/checkout@v4
         with:
           submodules: false
