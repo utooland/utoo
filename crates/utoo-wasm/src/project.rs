@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::str::FromStr;
-#[cfg(feature = "utoo-pack")]
+#[cfg(feature = "utoopack")]
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -13,7 +13,7 @@ use wasm_bindgen::JsValue;
 use crate::errors::to_js_error;
 use crate::tokio_runtime::init_tokio_runtime;
 
-#[cfg(feature = "utoo-pack")]
+#[cfg(feature = "utoopack")]
 use super::{
     pack::{PackProject, PartialProjectOptions, TurbopackResult},
     tokio_runtime::TOKIO_RUNTIME,
@@ -22,7 +22,7 @@ use super::{
 use parking_lot::RwLock;
 use std::sync::Once;
 
-#[cfg(feature = "utoo-pack")]
+#[cfg(feature = "utoopack")]
 static GLOBAL_PACK_PROJECT: RwLock<Option<Arc<PackProject>>> = RwLock::new(None);
 static GLOBAL_THREAD_URL: RwLock<Option<String>> = RwLock::new(None);
 static CWD_ONCE: Once = Once::new();
@@ -101,7 +101,7 @@ impl Project {
         Ok(())
     }
 
-    #[cfg(feature = "utoo-pack")]
+    #[cfg(feature = "utoopack")]
     #[wasm_bindgen]
     pub async fn build() -> Result<JsValue, JsError> {
         use turbopack_core::error::PrettyPrintError;
@@ -190,11 +190,11 @@ impl Project {
         Ok(())
     }
 
-    #[cfg(not(feature = "utoo-pack"))]
+    #[cfg(not(feature = "utoopack"))]
     #[wasm_bindgen]
     pub async fn build() -> Result<(), JsValue> {
         Err(JsValue::from_str(
-            "Build functionality requires the 'utoo-pack' feature to be enabled",
+            "Build functionality requires the 'utoopack' feature to be enabled",
         ))
     }
 
