@@ -1,8 +1,9 @@
-name: Cleanup github runner caches on closed pull requests
+name: Cleanup github runner caches
 on:
   pull_request:
     types:
       - closed
+  workflow_dispatch:
 
 jobs:
   cleanup:
@@ -26,4 +27,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          BRANCH: refs/pull/${{ github.event.pull_request.number }}/merge
+          BRANCH: ${{ github.ref }}
