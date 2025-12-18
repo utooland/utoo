@@ -297,7 +297,8 @@ pub async fn install_packages(
                 }
                 let path = path.clone();
                 let package = package.clone();
-                if let Some(resolved) = package.resolved {
+                if let Some(ref resolved) = package.resolved {
+                    let resolved = resolved.clone();
                     if package.link.is_some() {
                         let link_name = extract_package_name(&path);
                         if link_name.is_empty() {
@@ -333,9 +334,9 @@ pub async fn install_packages(
                         continue;
                     }
 
-                    let name = package
-                        .name
-                        .ok_or_else(|| anyhow::anyhow!("package {path} missing name"))?;
+                    let name = package.name.clone().ok_or_else(|| {
+                        anyhow::anyhow!("package {path} missing name, package: {:?}", package)
+                    })?;
                     let version = package
                         .version
                         .as_ref()

@@ -648,10 +648,10 @@ mod tests {
         let cache = PackageCache::new();
         let stats = cache.stats();
 
-        // These are non-negative counts (may be > 0 due to other tests using global cache)
-        assert!(stats.full_manifest_count >= 0);
-        assert!(stats.versions_count >= 0);
-        assert!(stats.version_manifest_count >= 0);
+        // Verify stats fields are accessible (values may vary due to global cache)
+        let _ = stats.full_manifest_count;
+        let _ = stats.versions_count;
+        let _ = stats.version_manifest_count;
         assert!(!stats.has_disk_cache);
     }
 

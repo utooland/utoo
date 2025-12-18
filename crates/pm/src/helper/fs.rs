@@ -74,7 +74,7 @@ impl Context {
     /// Create a UnifiedRegistry with standard configuration.
     pub fn registry() -> Registry {
         UnifiedRegistry::builder(TokioFileSystem)
-            .registry(&get_registry())
+            .registry(get_registry())
             .cache_dir(get_cache_dir())
             .build()
     }
