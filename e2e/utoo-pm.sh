@@ -123,7 +123,7 @@ echo -e "${YELLOW}Case 8: Clone and install ant-design${NC} by npmjs.org"
 cd e2e/pm/ant-design/ant-design
 git clean -dfx
 echo "Installing dependencies for ant-design by npmjs.org..."
-RUST_LOG=debug utoo install --registry=https://registry.npmjs.org || { echo -e "${RED}FAIL: utoo install failed for ant-design${NC}"; exit 1; }
+utoo install --registry=https://registry.npmjs.org || { echo -e "${RED}FAIL: utoo install failed for ant-design${NC}"; exit 1; }
 echo -e "${GREEN}PASS: ant-design cloned and installed${NC}"
 cd ../../../
 
