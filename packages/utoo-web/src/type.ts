@@ -6,6 +6,77 @@ export interface RawDirent {
   type: DirEntryType;
 }
 
+export interface RawStats {
+  type: DirEntryType;
+  size: number;
+  atimeMs?: number;
+  mtimeMs?: number;
+  ctimeMs?: number;
+  birthtimeMs?: number;
+}
+
+export class Stats {
+  public dev = 0;
+  public ino = 0;
+  public mode: number;
+  public nlink = 1;
+  public uid = 0;
+  public gid = 0;
+  public rdev = 0;
+  public size: number;
+  public blksize = 4096;
+  public blocks = 0;
+  public atimeMs: number;
+  public mtimeMs: number;
+  public ctimeMs: number;
+  public birthtimeMs: number;
+  public atime: Date;
+  public mtime: Date;
+  public ctime: Date;
+  public birthtime: Date;
+
+  constructor(private raw: RawStats) {
+    this.size = raw.size;
+    this.mode = raw.type === "directory" ? 16877 : 33188;
+    this.atimeMs = raw.atimeMs || 0;
+    this.mtimeMs = raw.mtimeMs || 0;
+    this.ctimeMs = raw.ctimeMs || 0;
+    this.birthtimeMs = raw.birthtimeMs || 0;
+    this.atime = new Date(this.atimeMs);
+    this.mtime = new Date(this.mtimeMs);
+    this.ctime = new Date(this.ctimeMs);
+    this.birthtime = new Date(this.birthtimeMs);
+  }
+
+  public isDirectory() {
+    return this.raw.type === "directory";
+  }
+
+  public isFile() {
+    return this.raw.type === "file";
+  }
+
+  public isSymbolicLink() {
+    return false;
+  }
+
+  public isBlockDevice() {
+    return false;
+  }
+
+  public isCharacterDevice() {
+    return false;
+  }
+
+  public isFIFO() {
+    return false;
+  }
+
+  public isSocket() {
+    return false;
+  }
+}
+
 export class Dirent {
   public name: string;
 
@@ -55,6 +126,7 @@ export interface ProjectEndpoint {
   rm(path: string, options?: { recursive?: boolean }): Promise<void>;
   rmdir(path: string, options?: { recursive?: boolean }): Promise<void>;
   copyFile(src: string, dst: string): Promise<void>;
+  stat(path: string): Promise<Stats>;
   gzip: (files: PackFile[]) => Promise<Uint8Array>;
   sigMd5: (content: Uint8Array) => Promise<string>;
 }

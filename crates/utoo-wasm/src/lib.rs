@@ -21,13 +21,13 @@ use wasm_bindgen::prelude::wasm_bindgen;
 
 static TRACING_INIT: Once = Once::new();
 
-#[cfg(feature = "utoo-pack")]
+#[cfg(feature = "utoopack")]
 pub(crate) mod pack;
 
 mod deps;
 pub(crate) mod errors;
 mod fs;
-#[cfg(feature = "utoo-pack")]
+#[cfg(feature = "utoopack")]
 mod opfs_offload;
 mod project;
 
@@ -42,7 +42,7 @@ static ALLOC: turbo_tasks_malloc::TurboMalloc = turbo_tasks_malloc::TurboMalloc;
 fn init_pack() {
     panic::set_hook(Box::new(console_error_panic_hook::hook));
 
-    #[cfg(feature = "utoo-pack")]
+    #[cfg(feature = "utoopack")]
     {
         unsafe {
             pack::__wasm_call_ctors();

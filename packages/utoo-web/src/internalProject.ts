@@ -1,4 +1,4 @@
-import { runLoaderWorkerPool } from "./loaderWorkerPool";
+import * as comlink from "comlink";
 import {
   Binding,
   DepsOptions,
@@ -6,15 +6,17 @@ import {
   ProjectEndpoint,
   ProjectOptions,
   RawDirent,
+  RawStats,
+  Stats,
 } from "./type";
 import initWasm, {
   DirEntryType,
   initLogFilter,
   Project as ProjectInternal,
 } from "./utoo";
+import { runLoaderWorkerPool } from "./webpackLoaders/loaderWorkerPool";
 
 class InternalEndpoint implements ProjectEndpoint {
-  projectInternal?: ProjectInternal;
   wasmInit?: ReturnType<typeof initWasm>;
   options?: Omit<ProjectOptions, "workerUrl" | "serviceWorker">;
   loaderWorkerPoolInitialized = false;
@@ -33,7 +35,9 @@ class InternalEndpoint implements ProjectEndpoint {
       "pack_core=info,pack_api=info,utoo_wasm=info,utoo_ruborist=info";
     initLogFilter(filter);
 
-    this.projectInternal = new ProjectInternal(cwd, threadWorkerUrl);
+    const absoluteCwd = cwd.startsWith("/") ? cwd : "/" + cwd;
+    ProjectInternal.init(threadWorkerUrl || "");
+    ProjectInternal.setCwd(absoluteCwd);
     return;
   }
 
@@ -47,7 +51,7 @@ class InternalEndpoint implements ProjectEndpoint {
 
   async install(packageLock: string, maxConcurrentDownloads?: number) {
     await this.wasmInit!;
-    await this.projectInternal!.install(packageLock, maxConcurrentDownloads);
+    await ProjectInternal.install(packageLock, maxConcurrentDownloads);
     return;
   }
 
@@ -58,23 +62,23 @@ class InternalEndpoint implements ProjectEndpoint {
       runLoaderWorkerPool(
         binding,
         this.options.cwd,
-        this.projectInternal!,
         this.options!.loaderWorkerUrl,
         this.options?.loadersImportMap,
       );
       this.loaderWorkerPoolInitialized = true;
     }
 
-    return await this.projectInternal!.build();
+    return await ProjectInternal.build();
   }
 
   async readFile(path: string, encoding?: "utf8") {
     await this.wasmInit!;
     let ret;
     if (encoding === "utf8") {
-      ret = await this.projectInternal!.readToString(path);
+      ret = await ProjectInternal.readToString(path);
     } else {
-      ret = await this.projectInternal!.read(path);
+      ret = await ProjectInternal.read(path);
+      return comlink.transfer(ret, [ret.buffer]);
     }
     return ret as any;
   }
@@ -86,24 +90,36 @@ class InternalEndpoint implements ProjectEndpoint {
   ) {
     await this.wasmInit!;
     if (typeof content === "string") {
-      return await this.projectInternal!.writeString(path, content);
+      return await ProjectInternal.writeString(path, content);
     } else {
-      return await this.projectInternal!.write(path, content);
+      return await ProjectInternal.write(path, content);
     }
   }
 
   async copyFile(src: string, dst: string) {
     await this.wasmInit!;
-    return await this.projectInternal!.copyFile(src, dst);
+    return await ProjectInternal.copyFile(src, dst);
+  }
+
+  async stat(path: string): Promise<Stats> {
+    await this.wasmInit!;
+    const metadata = await ProjectInternal.metadata(path);
+    const json = metadata.toJSON() as any;
+    const raw: RawStats = {
+      type: json.type as DirEntryType,
+      size: Number(json.file_size),
+    };
+    // WARN: This is a hack, functions can not be structurally cloned
+    return raw as any;
   }
 
   async readdir(path: string, options?: { recursive?: boolean }) {
     await this.wasmInit!;
     const dirEntries = options?.recursive
-      ? await this.projectInternal!.readDir(path)
+      ? await ProjectInternal.readDir(path)
       : // TODO: support recursive readDirAll
-        await this.projectInternal!.readDir(path);
-    const rawDirents: RawDirent[] = dirEntries.map((e) => {
+        await ProjectInternal.readDir(path);
+    const rawDirents: RawDirent[] = dirEntries.map((e: any) => {
       const dir = e.toJSON() as any;
       return {
         name: dir.name as string,
@@ -117,30 +133,41 @@ class InternalEndpoint implements ProjectEndpoint {
   async mkdir(path: string, options?: { recursive?: boolean }) {
     await this.wasmInit!;
     if (options?.recursive) {
-      return await this.projectInternal!.createDirAll(path);
+      return await ProjectInternal.createDirAll(path);
     } else {
-      return await this.projectInternal!.createDir(path);
+      return await ProjectInternal.createDir(path);
     }
   }
 
   async rm(path: string, options?: { recursive?: boolean }) {
     await this.wasmInit!;
-    return await this.projectInternal!.removeFile(path);
+    let metadata = (await ProjectInternal.metadata(path)).toJSON();
+
+    switch ((metadata as any).type as DirEntryType) {
+      case "file":
+        return await ProjectInternal.removeFile(path);
+      case "directory":
+        return await ProjectInternal.removeDir(path, !!options?.recursive);
+      default:
+        // nothing to remove now
+        break;
+    }
   }
 
   async rmdir(path: string, options?: { recursive?: boolean }) {
     await this.wasmInit!;
-    return await this.projectInternal!.removeDir(path, !!options?.recursive);
+    return await ProjectInternal.removeDir(path, !!options?.recursive);
   }
 
   async gzip(files: PackFile[]) {
     await this.wasmInit!;
-    return await this.projectInternal!.gzip(files);
+    const ret = await ProjectInternal.gzip(files);
+    return comlink.transfer(ret, [ret.buffer]);
   }
 
   async sigMd5(content: Uint8Array) {
     await this.wasmInit!;
-    return await this.projectInternal!.sigMd5(content);
+    return await ProjectInternal.sigMd5(content);
   }
 }
 

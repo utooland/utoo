@@ -1,5 +1,11 @@
 import * as comlink from "comlink";
-import { DepsOptions, PackFile, ProjectEndpoint } from "./type";
+import {
+  DepsOptions,
+  PackFile,
+  ProjectEndpoint,
+  RawStats,
+  Stats,
+} from "./type";
 
 export class ForkedProject implements ProjectEndpoint {
   private endpoint: comlink.Remote<ProjectEndpoint>;
@@ -50,6 +56,11 @@ export class ForkedProject implements ProjectEndpoint {
 
   public async rmdir(path: string, options?: { recursive?: boolean }) {
     return await this.endpoint.rmdir(path, options);
+  }
+
+  public async stat(path: string): Promise<Stats> {
+    const raw = (await this.endpoint.stat(path)) as any as RawStats;
+    return new Stats(raw);
   }
 
   public async gzip(files: PackFile[]): Promise<Uint8Array> {

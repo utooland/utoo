@@ -47,15 +47,15 @@ export class Metadata {
   file_size: bigint;
 }
 export class Project {
+  private constructor();
   free(): void;
   [Symbol.dispose](): void;
-  createDir(path: string): Promise<void>;
-  removeDir(path: string, recursive: boolean): Promise<void>;
-  removeFile(path: string): Promise<void>;
-  writeString(path: string, content: string): Promise<void>;
-  createDirAll(path: string): Promise<void>;
-  readToString(path: string): Promise<string>;
-  constructor(cwd: string, thread_url: string);
+  static createDir(path: string): Promise<void>;
+  static removeDir(path: string, recursive: boolean): Promise<void>;
+  static removeFile(path: string): Promise<void>;
+  static writeString(path: string, content: string): Promise<void>;
+  static createDirAll(path: string): Promise<void>;
+  static readToString(path: string): Promise<string>;
   /**
    * Generate package-lock.json by resolving dependencies.
    *
@@ -70,19 +70,21 @@ export class Project {
    * Create a tar.gz archive and return bytes (no file I/O)
    * This is useful for main thread execution without OPFS access
    */
-  gzip(files: any): Promise<Uint8Array>;
-  read(path: string): Promise<Uint8Array>;
-  build(): Promise<any>;
-  write(path: string, content: Uint8Array): Promise<void>;
-  install(package_lock: string, max_concurrent_downloads?: number | null): Promise<void>;
+  static gzip(files: any): Promise<Uint8Array>;
+  static init(thread_url: string): void;
+  static read(path: string): Promise<Uint8Array>;
+  static build(): Promise<any>;
+  static write(path: string, content: Uint8Array): Promise<void>;
+  static install(package_lock: string, max_concurrent_downloads?: number | null): Promise<void>;
+  static setCwd(path: string): void;
   /**
    * Calculate MD5 hash of byte content (async for better thread scheduling)
    */
-  sigMd5(content: Uint8Array): Promise<string>;
-  metadata(path: string): Promise<Metadata>;
-  readDir(path: string): Promise<DirEntry[]>;
-  copyFile(src: string, dst: string): Promise<void>;
-  readonly cwd: string;
+  static sigMd5(content: Uint8Array): Promise<string>;
+  static metadata(path: string): Promise<Metadata>;
+  static readDir(path: string): Promise<DirEntry[]>;
+  static copyFile(src: string, dst: string): Promise<void>;
+  static readonly cwd: string;
 }
 export class WasmTaskMessage {
   private constructor();
@@ -115,6 +117,8 @@ export class WebWorkerTermination {
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
+  readonly init_log_filter: (a: number, b: number) => void;
+  readonly init_pack: () => void;
   readonly __wbg_direntry_free: (a: number, b: number) => void;
   readonly __wbg_get_direntry_name: (a: number) => [number, number];
   readonly __wbg_get_direntry_type: (a: number) => number;
@@ -126,26 +130,24 @@ export interface InitOutput {
   readonly __wbg_set_direntry_type: (a: number, b: number) => void;
   readonly __wbg_set_metadata_file_size: (a: number, b: bigint) => void;
   readonly __wbg_set_metadata_type: (a: number, b: number) => void;
-  readonly project_build: (a: number) => any;
-  readonly project_copyFile: (a: number, b: number, c: number, d: number, e: number) => any;
-  readonly project_createDir: (a: number, b: number, c: number) => any;
-  readonly project_createDirAll: (a: number, b: number, c: number) => any;
-  readonly project_cwd: (a: number) => [number, number];
-  readonly project_deps: (a: number, b: number, c: number, d: number) => any;
-  readonly project_gzip: (a: number, b: any) => any;
-  readonly project_install: (a: number, b: number, c: number, d: number) => any;
-  readonly project_metadata: (a: number, b: number, c: number) => any;
-  readonly project_new: (a: number, b: number, c: number, d: number) => number;
-  readonly project_read: (a: number, b: number, c: number) => any;
-  readonly project_readDir: (a: number, b: number, c: number) => any;
-  readonly project_readToString: (a: number, b: number, c: number) => any;
-  readonly project_removeDir: (a: number, b: number, c: number, d: number) => any;
-  readonly project_removeFile: (a: number, b: number, c: number) => any;
-  readonly project_sigMd5: (a: number, b: number, c: number) => any;
-  readonly project_write: (a: number, b: number, c: number, d: number, e: number) => any;
-  readonly project_writeString: (a: number, b: number, c: number, d: number, e: number) => any;
-  readonly initLogFilter: (a: number, b: number) => void;
-  readonly init_pack: () => void;
+  readonly project_build: () => any;
+  readonly project_copyFile: (a: number, b: number, c: number, d: number) => any;
+  readonly project_createDir: (a: number, b: number) => any;
+  readonly project_createDirAll: (a: number, b: number) => any;
+  readonly project_cwd: () => [number, number];
+  readonly project_gzip: (a: any) => [number, number, number];
+  readonly project_init: (a: number, b: number) => void;
+  readonly project_install: (a: number, b: number, c: number) => any;
+  readonly project_metadata: (a: number, b: number) => any;
+  readonly project_read: (a: number, b: number) => any;
+  readonly project_readDir: (a: number, b: number) => any;
+  readonly project_readToString: (a: number, b: number) => any;
+  readonly project_removeDir: (a: number, b: number, c: number) => any;
+  readonly project_removeFile: (a: number, b: number) => any;
+  readonly project_setCwd: (a: number, b: number) => void;
+  readonly project_sigMd5: (a: number, b: number) => [number, number];
+  readonly project_write: (a: number, b: number, c: number, d: number) => any;
+  readonly project_writeString: (a: number, b: number, c: number, d: number) => any;
   readonly registerWorkerScheduler: (a: any, b: any) => void;
   readonly workerCreated: (a: number) => void;
   readonly rust_mi_get_default_heap: () => number;
@@ -182,13 +184,14 @@ export interface InitOutput {
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __wbindgen_export_7: WebAssembly.Table;
   readonly __externref_drop_slice: (a: number, b: number) => void;
-  readonly closure115132_externref_shim: (a: number, b: number, c: any) => void;
+  readonly __externref_table_dealloc: (a: number) => void;
+  readonly closure115096_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure115099_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure117648_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure149_externref_shim: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen__convert__closures_____invoke__h2ce973260553dde0: (a: number, b: number) => void;
-  readonly closure115135_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure370_externref_shim: (a: number, b: number, c: any) => void;
-  readonly wasm_bindgen__convert__closures_____invoke__h13262edabaa325f0: (a: number, b: number) => void;
-  readonly closure117680_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure117815_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__heac94dfe74335608: (a: number, b: number) => void;
+  readonly closure117778_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_thread_destroy: (a?: number, b?: number, c?: number) => void;
   readonly __wbindgen_start: (a: number) => void;
 }

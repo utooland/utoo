@@ -75,6 +75,7 @@ async function readFileFromProject(projectPath: string): Promise<Response> {
       },
     });
   } catch (e) {
+    console.error(`File ${projectPath} not found`);
     return new Response("Not Found", { status: 404 });
   }
 }

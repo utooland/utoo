@@ -1,9 +1,10 @@
-import { SabComClient } from "../../sabcom";
+import { SabComClient } from "../sabcom";
 import initWasm, {
+  Project,
   recvTaskMessageInWorker,
   sendTaskMessage,
   workerCreated,
-} from "../../utoo";
+} from "../utoo";
 import { cjs } from "./cjs";
 import { LoaderRunnerMeta } from "./type";
 
@@ -21,8 +22,10 @@ declare let self: DedicatedWorkerGlobalScope & {
   workerData: {
     workerId: number;
     cwd: string;
+    projectRoot: string;
     binding: typeof binding;
     sabClient?: SabComClient;
+    fs?: Project;
   };
 };
 
@@ -45,18 +48,24 @@ export function startLoaderWorker() {
         })
       : undefined;
 
+    // Initialize the thread-local state (tokio runtime).
+    // We don't need to pass threadWorkerUrl here because it's already stored in a global static in Rust.
+    Project.init("");
+    Project.setCwd(meta.workerData.cwd);
+
     self.workerData = {
       workerId: meta.workerData.workerId,
       cwd: meta.workerData.cwd,
+      projectRoot: meta.workerData.projectRoot,
       binding,
       sabClient,
+      fs: Project as any,
     };
 
     self.process = {
       env: {},
       cwd: () => self.workerData.cwd,
     };
-    console.log("Worker CWD:", self.process.cwd());
 
     cjs(meta.loaderAssets.entrypoint, meta.loaderAssets.importMaps);
   };
