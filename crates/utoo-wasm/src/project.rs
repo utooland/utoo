@@ -25,7 +25,6 @@ use std::sync::Once;
 #[cfg(feature = "utoopack")]
 static GLOBAL_PACK_PROJECT: RwLock<Option<Arc<PackProject>>> = RwLock::new(None);
 static GLOBAL_THREAD_URL: RwLock<Option<String>> = RwLock::new(None);
-static CWD_ONCE: Once = Once::new();
 
 #[wasm_bindgen]
 pub struct Project;
@@ -147,11 +146,10 @@ impl Project {
                 format!("/{}", cwd)
             };
 
-            let config_path = if project_root.ends_with('/') {
-                format!("{}utoopack.json", project_root)
-            } else {
-                format!("{}/utoopack.json", project_root)
-            };
+            let config_path = std::path::PathBuf::from(&project_root)
+                .join("utoopack.json")
+                .to_string_lossy()
+                .to_string();
 
             let config = Self::read_to_string(&config_path).await.ok();
 
