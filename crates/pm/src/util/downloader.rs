@@ -21,7 +21,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-// Global downloader client with DNS cache
+// Global downloader client - no pool limit, concurrency controlled by semaphore
 static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
 
 static DOWNLOAD_LOCKS: Lazy<DashMap<u64, Arc<Mutex<()>>>> = Lazy::new(DashMap::new);

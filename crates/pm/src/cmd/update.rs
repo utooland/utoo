@@ -4,13 +4,13 @@ use anyhow::{Context, Result};
 
 pub async fn update(ignore_scripts: bool) -> Result<()> {
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
-    // Clean all node_modules
+    let root_path = update_cwd_to_root(&cwd).await?;
+
     // Clean package-lock.json
     tracing::debug!("Cleaning package-lock.json...");
-    clean_package_lock()
+    clean_package_lock(&root_path)
         .await
         .context("Failed to clean package-lock.json")?;
-    let root_path = update_cwd_to_root(&cwd).await?;
 
     // // Clean node_modules
     // tracing::debug!("Cleaning node_modules...");

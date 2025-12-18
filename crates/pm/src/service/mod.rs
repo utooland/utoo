@@ -1,16 +1,11 @@
 pub mod binary;
-pub mod cache;
 pub mod config;
 pub mod dependency_graph;
-pub mod dependency_resolution;
 pub mod execute;
-pub mod http_client;
 pub mod install;
 pub mod package;
 pub mod package_management;
-pub mod preload;
 pub mod rebuild;
-pub mod registry;
 pub mod script;
 pub mod update;
 pub mod workspace;

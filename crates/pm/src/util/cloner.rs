@@ -471,7 +471,7 @@ pub async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
         let is_valid = validate_directory(&real_src, dst)
             .await
             .unwrap_or_else(|e| {
-                tracing::warn!("validate_directory error: {e}, will override target directory");
+                tracing::debug!("validate_directory error: {e}, will override target directory");
                 false
             });
 

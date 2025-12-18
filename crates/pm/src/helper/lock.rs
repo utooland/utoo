@@ -1,19 +1,20 @@
-use anyhow::{Context, Result, anyhow};
-use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use anyhow::{Context as _, Result, anyhow};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use super::fs::Context;
 use crate::helper::workspace::find_workspaces;
-use crate::model::graph::DependencyGraph;
-use crate::model::package_lock::LockPackage;
-use crate::service::dependency_resolution::DependencyResolutionService;
 use crate::util::config::get_legacy_peer_deps;
 use crate::util::json::{load_package_json_from_path, load_package_lock_json_from_path};
-use crate::util::registry::resolve;
-use crate::util::relative_path::to_relative_path;
+use crate::util::logger::{finish_progress_bar, start_progress_bar};
 use crate::util::save_type::{PackageAction, SaveType};
-use crate::util::{cache::parse_pattern, cloner::clone, downloader::download};
+use crate::util::{cloner::clone, downloader::download};
+use utoo_ruborist::lock::{LockPackage, PackageLock};
+use utoo_ruborist::manifest::PackageJson;
+use utoo_ruborist::registry::resolve_package;
+use utoo_ruborist::service::build_deps as ruborist_build_deps;
+use utoo_ruborist::util::parse_package_spec;
 
 use super::workspace::find_workspace_path;
 
@@ -22,12 +23,6 @@ use super::workspace::find_workspace_path;
 const LINE_ENDING: &str = "\r\n";
 #[cfg(not(target_os = "windows"))]
 const LINE_ENDING: &str = "\n";
-
-// Use the model's LockPackage but create a simplified PackageLock for helper functions
-#[derive(Deserialize, Serialize, Clone)]
-pub struct PackageLock {
-    pub packages: HashMap<String, LockPackage>,
-}
 
 // Type alias for backward compatibility
 pub type Package = LockPackage;
@@ -55,17 +50,28 @@ pub fn extract_package_name(path: &str) -> String {
     }
 }
 
-/// Normalize dependency field: convert empty objects to None for consistent comparison
-fn normalize_deps_field(field: Option<&Value>) -> Option<&Value> {
-    match field {
-        Some(val) if val.as_object().is_some_and(|obj| obj.is_empty()) => None,
-        other => other,
-    }
-}
+/// Compare a PackageJson dependency map with a lock file Value field.
+/// Treats empty maps and None/empty objects as equal.
+fn deps_map_equals_lock(pkg_deps: &HashMap<String, String>, lock_field: Option<&Value>) -> bool {
+    // Convert lock field to HashMap for comparison
+    let lock_deps: HashMap<String, String> = match lock_field {
+        Some(val) => val
+            .as_object()
+            .map(|obj| {
+                obj.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        None => HashMap::new(),
+    };
 
-/// Compare dependency fields, treating empty objects and None as equal
-fn deps_fields_equal(pkg_field: Option<&Value>, lock_field: Option<&Value>) -> bool {
-    normalize_deps_field(pkg_field) == normalize_deps_field(lock_field)
+    // Treat empty maps as equal
+    if pkg_deps.is_empty() && lock_deps.is_empty() {
+        return true;
+    }
+
+    *pkg_deps == lock_deps
 }
 
 pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
@@ -77,14 +83,17 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
         return Err(anyhow!("package.json not found"));
     }
 
-    // Check package-lock.json exists in project directory
-    if tokio::fs::metadata(root_path.join("package-lock.json"))
+    // Check if we need to regenerate package-lock.json
+    let needs_regenerate = tokio::fs::metadata(root_path.join("package-lock.json"))
         .await
         .is_err()
-    {
+        || is_pkg_lock_outdated(root_path).await?;
+
+    if needs_regenerate {
         tracing::debug!("Resolving dependencies");
-        // Build dependencies using service layer
-        let package_lock = DependencyResolutionService::build_deps(root_path).await?;
+        start_progress_bar();
+        let package_lock = build_deps_with_download(root_path).await?;
+        finish_progress_bar("package-lock.json resolved");
 
         // Write to disk asynchronously in background
         let path = root_path.to_path_buf();
@@ -93,31 +102,15 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
             let _ = save_package_lock(&path, &lock_clone).await;
         });
 
-        Ok(package_lock)
-    } else {
-        // Validate dependencies to ensure package-lock.json is in sync with package.json
-        if is_pkg_lock_outdated(root_path).await? {
-            tracing::debug!("Resolving dependencies");
-            // Build dependencies using service layer
-            let package_lock = DependencyResolutionService::build_deps(root_path).await?;
-
-            // Write to disk asynchronously in background
-            let path = root_path.to_path_buf();
-            let lock_clone = package_lock.clone();
-            tokio::spawn(async move {
-                let _ = save_package_lock(&path, &lock_clone).await;
-            });
-
-            return Ok(package_lock);
-        }
-
-        // Load existing package-lock.json only when it's valid and up-to-date
-        tracing::debug!("Loading package-lock.json from current project for dependency download");
-        let package_lock: PackageLock =
-            crate::util::json::read_json_file(&root_path.join("package-lock.json")).await?;
-
-        Ok(package_lock)
+        return Ok(package_lock);
     }
+
+    // Load existing package-lock.json only when it's valid and up-to-date
+    tracing::debug!("Loading package-lock.json from current project");
+    let package_lock: PackageLock =
+        crate::util::json::read_json_file(&root_path.join("package-lock.json")).await?;
+
+    Ok(package_lock)
 }
 
 /// Batch update package.json for multiple package specifications to reduce file I/O operations
@@ -144,7 +137,7 @@ pub async fn update_package_json(
     // 2. Parse all package specs in parallel
     let mut package_specs = Vec::new();
     for spec in specs {
-        let (name, version, version_spec) = parse_package_spec(spec).await?;
+        let (name, version, version_spec) = resolve_package_spec(spec).await?;
         package_specs.push((name, version, version_spec));
     }
 
@@ -199,15 +192,17 @@ pub async fn update_package_json(
     Ok(())
 }
 
-pub async fn parse_package_spec(spec: &str) -> Result<(String, String, String)> {
-    let (name, version_spec) = parse_pattern(spec);
-    let resolved = resolve(&name, &version_spec).await?;
-    Ok((name, resolved.version, version_spec))
+pub async fn resolve_package_spec(spec: &str) -> Result<(String, String, String)> {
+    let (name, version_spec) = parse_package_spec(spec);
+    let resolved = resolve_package(&Context::registry(), name, version_spec)
+        .await
+        .map_err(|e| anyhow!("{}", e))?;
+    Ok((name.to_string(), resolved.version, version_spec.to_string()))
 }
 
 pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -> Result<PathBuf> {
     // Parse package name and version
-    let (name, _version, version_spec) = parse_package_spec(npm_spec).await?;
+    let (name, _version, version_spec) = resolve_package_spec(npm_spec).await?;
     let lib_path = match prefix {
         Some(prefix) => PathBuf::from(prefix).join("lib/node_modules"),
         None => {
@@ -215,9 +210,9 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
             let current_exe = std::env::current_exe()?;
             current_exe
                 .parent()
-                .unwrap()
+                .expect("executable must have parent directory")
                 .parent()
-                .unwrap()
+                .expect("executable parent must have parent directory")
                 .join("lib/node_modules")
         }
     };
@@ -229,11 +224,16 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
     tokio::fs::create_dir_all(&package_path).await?;
 
     // Get package info from registry
-    let resolved = resolve(&name, &version_spec).await?;
+    let resolved = resolve_package(&Context::registry(), &name, &version_spec)
+        .await
+        .map_err(|e| anyhow!("{}", e))?;
 
     // Get tarball URL from manifest
-    let tarball_url = resolved.manifest["dist"]["tarball"]
-        .as_str()
+    let tarball_url = resolved
+        .manifest
+        .dist
+        .tarball
+        .as_ref()
         .ok_or_else(|| anyhow!("Failed to get tarball URL from manifest"))?;
 
     // Download and extract package
@@ -251,7 +251,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
         // If the package has install scripts, create a flag file
         // in linux, we can use hardlink when FICLONE is not supported
         // so we need to copy the file to the package directory to avoid effect other packages
-        if resolved.manifest.get("hasInstallScript") == Some(&json!(true)) {
+        if resolved.manifest.has_install_script == Some(true) {
             let has_install_script_flag_path = cache_path.join("_hasInstallScript");
             tokio::fs::write(has_install_script_flag_path, "").await?;
         }
@@ -273,7 +273,9 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
     let mut package_json: Value = serde_json::from_str(&package_json_content)?;
 
     // Remove specified dependency fields and scripts.prepare
-    let package_obj = package_json.as_object_mut().unwrap();
+    let package_obj = package_json
+        .as_object_mut()
+        .expect("package.json must be an object");
     package_obj.remove("devDependencies");
 
     // Remove scripts.prepare if it exists
@@ -312,7 +314,9 @@ pub fn path_to_pkg_name(path_str: &str) -> Option<&str> {
 }
 
 pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
-    let pkg_file = load_package_json_from_path(root_path).await?;
+    let pkg_value = load_package_json_from_path(root_path).await?;
+    let pkg: PackageJson =
+        serde_json::from_value(pkg_value).context("Failed to parse package.json")?;
     let lock_file = load_package_lock_json_from_path(root_path).await?;
 
     // get packages in package-lock.json
@@ -322,14 +326,20 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
         .ok_or_else(|| anyhow!("Invalid package-lock.json format"))?;
 
     // prepare packages to check
-    let mut pkgs_to_check = vec![("".to_string(), pkg_file.clone())];
+    let mut pkgs_to_check: Vec<(String, PackageJson)> = vec![("".to_string(), pkg.clone())];
 
     // populate all workspaces
     let workspaces = find_workspaces(root_path).await?;
     for (_, path, workspace_pkg) in workspaces {
-        let target_path = to_relative_path(&path, root_path);
+        let target_path = path
+            .strip_prefix(root_path)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .to_string();
         pkgs_to_check.push((target_path, workspace_pkg));
     }
+
+    let legacy_peer_deps = get_legacy_peer_deps().await;
 
     // new workspace not found
     for (path, pkg) in pkgs_to_check {
@@ -343,90 +353,59 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
         };
 
         // check dependencies whether changed
-        for (dep_field, _is_optional) in get_dep_types().await {
-            if !deps_fields_equal(pkg.get(dep_field), lock.get(dep_field)) {
-                let name = if path.is_empty() { "root" } else { &path };
-                tracing::warn!("package-lock.json is outdated, {name} {dep_field} changed");
-                return Ok(true);
-            }
+        if !deps_map_equals_lock(&pkg.dependencies, lock.get("dependencies")) {
+            let name = if path.is_empty() { "root" } else { &path };
+            tracing::warn!("package-lock.json is outdated, {name} dependencies changed");
+            return Ok(true);
+        }
+
+        if !deps_map_equals_lock(&pkg.optional_dependencies, lock.get("optionalDependencies")) {
+            let name = if path.is_empty() { "root" } else { &path };
+            tracing::warn!("package-lock.json is outdated, {name} optionalDependencies changed");
+            return Ok(true);
+        }
+
+        if !deps_map_equals_lock(&pkg.dev_dependencies, lock.get("devDependencies")) {
+            let name = if path.is_empty() { "root" } else { &path };
+            tracing::warn!("package-lock.json is outdated, {name} devDependencies changed");
+            return Ok(true);
+        }
+
+        if !legacy_peer_deps
+            && !deps_map_equals_lock(&pkg.peer_dependencies, lock.get("peerDependencies"))
+        {
+            let name = if path.is_empty() { "root" } else { &path };
+            tracing::warn!("package-lock.json is outdated, {name} peerDependencies changed");
+            return Ok(true);
         }
 
         // only check engines for root workspace
-        if path.is_empty() && pkg.get("engines") != lock.get("engines") {
-            tracing::warn!("package-lock.json is outdated, engines changed");
-            return Ok(true);
+        if path.is_empty() {
+            let pkg_engines = serde_json::to_value(&pkg.engines)?;
+            if lock.get("engines") != Some(&pkg_engines) {
+                tracing::warn!("package-lock.json is outdated, engines changed");
+                return Ok(true);
+            }
         }
     }
 
     Ok(false)
 }
 
-async fn get_dep_types() -> Vec<(&'static str, bool)> {
-    let legacy_peer_deps = get_legacy_peer_deps().await;
-
-    if legacy_peer_deps {
-        vec![
-            ("dependencies", false),
-            ("optionalDependencies", true),
-            ("devDependencies", false),
-        ]
-    } else {
-        vec![
-            ("dependencies", false),
-            ("peerDependencies", false),
-            ("optionalDependencies", true),
-            ("devDependencies", false),
-        ]
-    }
-}
-
-/// Convert serialized packages Value to HashMap for PackageLock
-fn convert_packages_to_hashmap(packages: Value) -> Result<HashMap<String, Package>> {
-    serde_json::from_value(packages).with_context(|| "Failed to parse packages")
-}
-
-/// Build ideal tree and return PackageLock
-pub async fn build_ideal_tree_to_package_lock(
-    path: &Path,
-    graph: &DependencyGraph,
-) -> Result<PackageLock> {
-    let (packages, total_packages) = graph.serialize_to_packages(path);
-
-    tracing::debug!("Total {total_packages} dependencies after merging");
-
-    // Convert packages Value to HashMap for PackageLock
-    let packages_map = convert_packages_to_hashmap(packages)?;
-    Ok(PackageLock {
-        packages: packages_map,
-    })
+/// Build dependencies with tgz download.
+/// Used by `utoo install` command for faster installation.
+async fn build_deps_with_download(cwd: &Path) -> Result<PackageLock> {
+    let options = Context::build_deps_options(cwd.to_path_buf()).await;
+    ruborist_build_deps(options).await
 }
 
 /// Save PackageLock to disk synchronously
 pub async fn save_package_lock(path: &Path, package_lock: &PackageLock) -> Result<()> {
-    // Get name and version from root package
-    let (name, version) = package_lock
-        .packages
-        .get("")
-        .map(|p| {
-            (
-                p.name.as_ref().unwrap_or(&String::new()).clone(),
-                p.version.as_ref().unwrap_or(&String::new()).clone(),
-            )
-        })
-        .unwrap_or_else(|| (String::new(), String::new()));
-
-    let lock_file = json!({
-        "name": name,
-        "version": version,
-        "lockfileVersion": 3,
-        "requires": true,
-        "packages": package_lock.packages,
-    });
-
     let temp_path = path.join("package-lock.json.tmp");
     let target_path = path.join("package-lock.json");
 
-    let content = serde_json::to_string_pretty(&lock_file)?;
+    // PackageLock now has all required fields (name, version, lockfile_version, requires, packages)
+    let content = serde_json::to_string_pretty(package_lock)?;
     tokio::fs::write(&temp_path, content)
         .await
         .context("Failed to write temporary package-lock.json")?;

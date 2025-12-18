@@ -44,16 +44,19 @@ impl Project {
         opfs_project::get_cwd().to_string_lossy().to_string()
     }
 
-    /// Calculate MD5 hash of byte content
+    /// Calculate MD5 hash of byte content (async for better thread scheduling)
     #[wasm_bindgen(js_name = sigMd5)]
-    pub fn sig_md5(&self, content: &[u8]) -> String {
-        opfs_project::pack::sig_md5(content)
+    pub async fn sig_md5(&self, content: Vec<u8>) -> Result<String, JsError> {
+        let result = tokio::task::spawn_blocking(move || opfs_project::pack::sig_md5(&content))
+            .await
+            .map_err(|e| JsError::new(&format!("Task failed: {}", e)))?;
+        Ok(result)
     }
 
     /// Create a tar.gz archive and return bytes (no file I/O)
     /// This is useful for main thread execution without OPFS access
     #[wasm_bindgen(js_name = gzip)]
-    pub fn gzip(&self, files: JsValue) -> Result<js_sys::Uint8Array, JsError> {
+    pub async fn gzip(&self, files: JsValue) -> Result<js_sys::Uint8Array, JsError> {
         use opfs_project::pack::PackFile;
         use serde::Deserialize;
 
@@ -71,8 +74,37 @@ impl Project {
             .map(|f| PackFile::new(f.path, f.content))
             .collect();
 
-        let bytes = opfs_project::pack::gzip(&pack_files).map_err(to_js_error)?;
+        let bytes = tokio::task::spawn_blocking(move || opfs_project::pack::gzip(&pack_files))
+            .await
+            .map_err(|e| JsError::new(&format!("Task failed: {}", e)))?
+            .map_err(to_js_error)?;
         Ok(js_sys::Uint8Array::from(&bytes[..]))
+    }
+
+    /// Generate package-lock.json by resolving dependencies.
+    ///
+    /// # Arguments
+    /// * `registry` - Optional registry URL. If None, uses npmmirror.
+    ///   - "https://registry.npmmirror.com" - supports semver queries (faster)
+    ///   - "https://registry.npmjs.org" - official npm registry (slower, fetches full manifest)
+    /// * `concurrency` - Optional concurrency limit (defaults to 20)
+    #[wasm_bindgen]
+    pub async fn deps(
+        &self,
+        registry: Option<String>,
+        concurrency: Option<usize>,
+    ) -> Result<String, String> {
+        use std::path::Path;
+
+        let cwd = opfs_project::get_cwd();
+        let package_lock =
+            crate::deps::build_deps_from_file(Path::new(&cwd), registry.as_deref(), concurrency)
+                .await
+                .map_err(|e| format!("{:#?}", e))?;
+
+        // Serialize to JSON string
+        serde_json::to_string_pretty(&package_lock)
+            .map_err(|e| format!("Failed to serialize package lock: {}", e))
     }
 
     #[wasm_bindgen]
@@ -81,7 +113,7 @@ impl Project {
         package_lock: String,
         max_concurrent_downloads: Option<usize>,
     ) -> Result<(), JsError> {
-        const DEFAULT_MAX_CONCURRENT_DOWNLOADS: usize = 10;
+        const DEFAULT_MAX_CONCURRENT_DOWNLOADS: usize = 20;
         let max_concurrent = max_concurrent_downloads.unwrap_or(DEFAULT_MAX_CONCURRENT_DOWNLOADS);
         opfs_project::package_manager::install_deps(&package_lock, max_concurrent)
             .await

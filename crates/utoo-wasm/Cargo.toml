@@ -24,12 +24,13 @@ utoo-pack = [
 [dependencies]
 anyhow                   = { workspace = true, features = ["backtrace"] }
 console_error_panic_hook = { version = "0.1.7" }
+deno_semver              = "0.7"
 flate2                   = "1.1.5"
 futures                  = { workspace = true }
 js-sys                   = "0.3.78"
 opfs-project             = "0.1.14"
 petgraph                 = "0.6"
-reqwest                  = { version = "0.12.22" }
+reqwest                  = { version = "0.12.22", default-features = false, features = ["json"] }
 rustc-hash               = { workspace = true }
 serde                    = { version = "1.0", features = ["derive"] }
 serde-wasm-bindgen       = "0.6.5"
@@ -40,6 +41,7 @@ tokio-fs-ext             = { version = "0.6.5", features = ["opfs_offload", "opf
 tracing                  = { workspace = true }
 tracing-subscriber       = { workspace = true }
 tracing-web              = "0.1.3"
+utoo-ruborist            = { path = "../ruborist" }
 wasm-bindgen             = "0.2.104"
 wasm-bindgen-futures     = "0.4.54"
 

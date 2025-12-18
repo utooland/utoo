@@ -14,7 +14,6 @@ use crate::helper::lock::{
     prepare_global_package_json, update_package_json,
 };
 use crate::helper::workspace;
-use crate::helper::{is_cpu_compatible, is_os_compatible};
 use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
 use crate::util::cache::get_cache_dir;
@@ -23,6 +22,7 @@ use crate::util::downloader::download;
 use crate::util::linker::link;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
 use crate::util::save_type::{OmitType, PackageAction, SaveType};
+use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 
 use super::binary::update_package_binary;
 
@@ -63,11 +63,11 @@ fn should_omit_package(package: &Package, omit: &std::collections::HashSet<OmitT
 }
 
 /// Check if a path is a symlink using async metadata
-async fn is_symlink_async(path: &Path) -> bool {
-    tokio::fs::symlink_metadata(path)
-        .await
-        .map(|m| m.file_type().is_symlink())
-        .unwrap_or(false)
+async fn is_symlink_async(path: &Path) -> Result<bool> {
+    Ok(tokio::fs::symlink_metadata(path)
+        .await?
+        .file_type()
+        .is_symlink())
 }
 
 /// Remove a symlink with proper platform-specific handling
@@ -110,7 +110,7 @@ async fn clean_node_modules_dir(
     if let Ok(mut entries) = tokio::fs::read_dir(node_modules).await {
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
-            if is_symlink_async(&path).await {
+            if is_symlink_async(&path).await? {
                 clean_symlink(&path).await?;
             } else if path.is_dir() {
                 clean_directory(&path).await?;
@@ -155,7 +155,7 @@ async fn clean_scoped_package(path: &Path) -> Result<()> {
             let scope_path = scope_entry.path();
 
             // Use async metadata check for symlink
-            if is_symlink_async(&scope_path).await {
+            if is_symlink_async(&scope_path).await? {
                 tracing::debug!("Removing scoped symlink: {}", scope_path.display());
 
                 if let Err(e) = remove_symlink_cross_platform(&scope_path).await {
@@ -317,20 +317,29 @@ pub async fn install_packages(
                     }
 
                     // skip when cpu or os is not compatible
-                    if package.cpu.is_some() && !is_cpu_compatible(&package.cpu.unwrap()) {
+                    if let Some(ref cpu) = package.cpu
+                        && !is_cpu_compatible(cpu)
+                    {
                         PROGRESS_BAR.inc(1);
                         tracing::debug!("cpu skipped: {}", &path);
                         continue;
                     }
 
-                    if package.os.is_some() && !is_os_compatible(&package.os.unwrap()) {
+                    if let Some(ref os) = package.os
+                        && !is_os_compatible(os)
+                    {
                         PROGRESS_BAR.inc(1);
                         tracing::debug!("os skipped: {}", &path);
                         continue;
                     }
 
-                    let name = package.name.unwrap_or_else(|| extract_package_name(&path));
-                    let version = package.version.as_ref().unwrap();
+                    let name = package
+                        .name
+                        .ok_or_else(|| anyhow::anyhow!("package {path} missing name"))?;
+                    let version = package
+                        .version
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("package {name} missing version"))?;
                     let cache_path = cache_dir.join(format!("{name}/{version}"));
                     let cache_flag_path = cache_dir.join(format!("{name}/{version}/_resolved"));
                     let cwd_clone = cwd.to_path_buf();
@@ -338,7 +347,10 @@ pub async fn install_packages(
                     let semaphore = Arc::clone(&semaphore);
 
                     let task = tokio::spawn(async move {
-                        let _permit = semaphore.acquire().await.unwrap();
+                        let _permit = semaphore
+                            .acquire()
+                            .await
+                            .expect("semaphore should not be closed");
                         if should_resolve {
                             tracing::debug!("Downloading {path} to {name}");
                             match download(&resolved, &cache_path).await {
@@ -537,7 +549,7 @@ mod tests {
         std::os::windows::fs::symlink_dir(&target_dir, &symlink_path)?;
 
         // Verify symlink exists
-        assert!(is_symlink_async(&symlink_path).await);
+        assert!(is_symlink_async(&symlink_path).await?);
 
         // Test cleaning
         clean_symlink(&symlink_path).await?;
@@ -566,7 +578,7 @@ mod tests {
         std::os::windows::fs::symlink_dir(&target_dir, &symlink_path)?;
 
         // Verify symlink exists
-        assert!(is_symlink_async(&symlink_path).await);
+        assert!(is_symlink_async(&symlink_path).await?);
 
         // Test cleaning
         clean_scoped_package(&scope_dir).await?;

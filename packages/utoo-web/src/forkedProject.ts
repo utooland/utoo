@@ -1,5 +1,5 @@
 import * as comlink from "comlink";
-import { PackFile, ProjectEndpoint } from "./type";
+import { DepsOptions, PackFile, ProjectEndpoint } from "./type";
 
 export class ForkedProject implements ProjectEndpoint {
   private endpoint: comlink.Remote<ProjectEndpoint>;
@@ -7,6 +7,11 @@ export class ForkedProject implements ProjectEndpoint {
   constructor(port: MessagePort) {
     this.endpoint ??= comlink.wrap(port);
   }
+
+  public async deps(options?: DepsOptions) {
+    return await this.endpoint.deps(options);
+  }
+
   public async install(packageLock: string, maxConcurrentDownloads?: number) {
     return await this.endpoint.install(packageLock, maxConcurrentDownloads);
   }

@@ -77,7 +77,7 @@ async fn background_version_check() -> Result<()> {
         Ok(cache) => {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("system time before UNIX epoch")
                 .as_secs();
             if now - cache.check_time > 3600 {
                 // Keep 1 hour cache
@@ -163,7 +163,7 @@ async fn check_remote_version_fast() -> Result<VersionCache> {
         version,
         check_time: SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("system time before UNIX epoch")
             .as_secs(),
     };
 

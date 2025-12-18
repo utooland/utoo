@@ -2,9 +2,9 @@
   "name": "utoo-wasm-demo",
   "version": "",
   "dependencies": {
-    "antd": "latest",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "antd": "^5"
   },
   "devDependencies": {
     "@tailwindcss/line-clamp": "^0.4.4",

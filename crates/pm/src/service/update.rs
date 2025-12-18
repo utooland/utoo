@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
+use std::path::Path;
 use tokio::fs;
 
-pub async fn clean_package_lock() -> Result<()> {
-    let current_dir = std::env::current_dir().context("Failed to get current directory")?;
-    let package_lock = current_dir.join("package-lock.json");
-    let utoo_manifest = current_dir.join("node_modules/.utoo-manifest.json");
+pub async fn clean_package_lock(cwd: &Path) -> Result<()> {
+    let package_lock = cwd.join("package-lock.json");
+    let utoo_manifest = cwd.join("node_modules/.utoo-manifest.json");
 
     if tokio::fs::try_exists(&package_lock).await? {
         fs::remove_file(&package_lock)

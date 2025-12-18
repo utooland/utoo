@@ -31,7 +31,13 @@ export interface PackFile {
   content: Uint8Array;
 }
 
+export interface DepsOptions {
+  registry?: string | null;
+  concurrency?: number | null;
+}
+
 export interface ProjectEndpoint {
+  deps: (options?: DepsOptions) => Promise<string>;
   install: (
     packageLock: string,
     maxConcurrentDownloads?: number,

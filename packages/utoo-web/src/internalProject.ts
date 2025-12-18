@@ -1,6 +1,7 @@
 import { runLoaderWorkerPool } from "./loaderWorkerPool";
 import {
   Binding,
+  DepsOptions,
   PackFile,
   ProjectEndpoint,
   ProjectOptions,
@@ -8,7 +9,7 @@ import {
 } from "./type";
 import initWasm, {
   DirEntryType,
-  init_log_filter,
+  initLogFilter,
   Project as ProjectInternal,
 } from "./utoo";
 
@@ -27,11 +28,21 @@ class InternalEndpoint implements ProjectEndpoint {
     await this.wasmInit!;
 
     // Initialize log filter after wasm init
-    const filter = logFilter || "pack_core=info,pack_api=info,utoo_wasm=info";
-    init_log_filter(filter);
+    const filter =
+      logFilter ||
+      "pack_core=info,pack_api=info,utoo_wasm=info,utoo_ruborist=info";
+    initLogFilter(filter);
 
     this.projectInternal = new ProjectInternal(cwd, threadWorkerUrl);
     return;
+  }
+
+  async deps(options?: DepsOptions) {
+    await this.wasmInit!;
+    return await this.projectInternal!.deps(
+      options?.registry ?? undefined,
+      options?.concurrency ?? undefined,
+    );
   }
 
   async install(packageLock: string, maxConcurrentDownloads?: number) {
@@ -114,20 +125,7 @@ class InternalEndpoint implements ProjectEndpoint {
 
   async rm(path: string, options?: { recursive?: boolean }) {
     await this.wasmInit!;
-    let metadata = (await this.projectInternal!.metadata(path)).toJSON();
-
-    switch ((metadata as any).type as DirEntryType) {
-      case "file":
-        return await this.projectInternal!.removeFile(path);
-      case "directory":
-        return await this.projectInternal!.removeDir(
-          path,
-          !!options?.recursive,
-        );
-      default:
-        // nothing to remove now
-        break;
-    }
+    return await this.projectInternal!.removeFile(path);
   }
 
   async rmdir(path: string, options?: { recursive?: boolean }) {

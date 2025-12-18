@@ -6,6 +6,7 @@ const projectName = "/utooweb-demo";
 
 export const useFileTree = (project: UtooProject | null) => {
   const [fileTree, setFileTree] = useState<FileTreeNode[]>([]);
+  const [error, setError] = useState<string>("");
 
   const buildInitialFileTree = useCallback(async (proj: UtooProject) => {
     const rootItems = await proj.readdir(".");
@@ -114,5 +115,111 @@ export const useFileTree = (project: UtooProject | null) => {
     [project, updateTreeWithChildren],
   );
 
-  return { fileTree, handleDirectoryExpand, setFileTree };
+  const refreshFileTree = useCallback(async () => {
+    if (project) {
+      await buildInitialFileTree(project);
+    }
+  }, [project, buildInitialFileTree]);
+
+  const createFile = useCallback(
+    async (parentPath: string, fileName: string): Promise<boolean> => {
+      if (!project) {
+        setError("Project not initialized");
+        return false;
+      }
+
+      try {
+        const filePath =
+          parentPath === "." ? fileName : `${parentPath}/${fileName}`;
+        // Remove leading ./ if present
+        const normalizedPath = filePath.replace(/^\.\//, "");
+        await project.writeFile(normalizedPath, "");
+        // Refresh the parent directory
+        if (parentPath === ".") {
+          await refreshFileTree();
+        } else {
+          await handleDirectoryExpand({
+            fullName: parentPath,
+            name: parentPath.split("/").pop() || parentPath,
+            type: "directory",
+            children: [],
+          });
+        }
+        return true;
+      } catch (e: any) {
+        setError(`Error creating file: ${e.message}`);
+        return false;
+      }
+    },
+    [project, refreshFileTree, handleDirectoryExpand],
+  );
+
+  const createFolder = useCallback(
+    async (parentPath: string, folderName: string): Promise<boolean> => {
+      if (!project) {
+        setError("Project not initialized");
+        return false;
+      }
+
+      try {
+        const folderPath =
+          parentPath === "." ? folderName : `${parentPath}/${folderName}`;
+        // Remove leading ./ if present
+        const normalizedPath = folderPath.replace(/^\.\//, "");
+        await project.mkdir(normalizedPath, { recursive: true });
+        // Refresh the parent directory
+        if (parentPath === ".") {
+          await refreshFileTree();
+        } else {
+          await handleDirectoryExpand({
+            fullName: parentPath,
+            name: parentPath.split("/").pop() || parentPath,
+            type: "directory",
+            children: [],
+          });
+        }
+        return true;
+      } catch (e: any) {
+        setError(`Error creating folder: ${e.message}`);
+        return false;
+      }
+    },
+    [project, refreshFileTree, handleDirectoryExpand],
+  );
+
+  const deleteItem = useCallback(
+    async (item: FileTreeNode): Promise<boolean> => {
+      if (!project) {
+        setError("Project not initialized");
+        return false;
+      }
+
+      try {
+        const normalizedPath = item.fullName.replace(/^\.\//, "");
+        if (item.type === "directory") {
+          await project.rmdir(normalizedPath, { recursive: true });
+        } else {
+          await project.rm(normalizedPath);
+        }
+        // Refresh the file tree
+        await refreshFileTree();
+        return true;
+      } catch (e: any) {
+        setError(`Error deleting ${item.type}: ${e.message}`);
+        return false;
+      }
+    },
+    [project, refreshFileTree],
+  );
+
+  return {
+    fileTree,
+    handleDirectoryExpand,
+    setFileTree,
+    refreshFileTree,
+    createFile,
+    createFolder,
+    deleteItem,
+    error,
+  };
 };

@@ -1,14 +1,18 @@
 use crate::util::config::get_registry;
 use crate::util::json::load_package_json_from_path;
-use crate::util::semver::matches;
 use anyhow::{Context, Result};
 use regex::Regex;
 use serde_json::{Map, Value};
 use std::path::Path;
+use std::sync::OnceLock;
 use tokio::fs;
 use tokio::sync::OnceCell;
+use utoo_ruborist::registry::is_npm_registry;
+use utoo_ruborist::semver::matches;
 
 static CONFIG: OnceCell<Value> = OnceCell::const_new();
+/// Cached result of whether we should skip binary mirror envs
+static SKIP_BINARY_MIRROR: OnceLock<bool> = OnceLock::new();
 
 async fn load_config() -> Result<&'static Value> {
     CONFIG
@@ -281,7 +285,23 @@ pub async fn update_package_binary(dir: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
+fn should_skip_binary_mirror() -> bool {
+    *SKIP_BINARY_MIRROR.get_or_init(|| {
+        let registry = get_registry();
+        let skip = is_npm_registry(&registry);
+        if skip {
+            tracing::debug!("Skipping binary mirror envs for npm registry: {}", registry);
+        }
+        skip
+    })
+}
+
 pub async fn get_envs() -> Option<&'static Map<String, Value>> {
+    // Skip binary mirror envs when using official npm registry
+    if should_skip_binary_mirror() {
+        return None;
+    }
+
     match load_config().await {
         Ok(_) => {
             let config = CONFIG.get();

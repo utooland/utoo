@@ -1,11 +1,13 @@
-use crate::helper::package::parse_package_spec;
-use crate::model::manifest::{FullManifest, VersionManifest};
-use crate::service::http_client::fetch_full_manifest_for_view;
-use crate::util::format_print::print_grid;
-use crate::util::registry::resolve;
-use anyhow::{Context, Result};
+use anyhow::{Result, anyhow};
 use chrono::Utc;
 use owo_colors::OwoColorize;
+use utoo_ruborist::manifest::{FullManifest, VersionManifest};
+use utoo_ruborist::registry::resolve_package;
+use utoo_ruborist::traits::registry::RegistryClient;
+use utoo_ruborist::util::parse_package_spec;
+
+use crate::helper::fs::Context;
+use crate::util::format_print::print_grid;
 
 /// View package information from registry, similar to npm view
 pub async fn view(package_spec: &str) -> Result<()> {
@@ -16,19 +18,22 @@ pub async fn view(package_spec: &str) -> Result<()> {
 
     tracing::debug!("Resolved package: {name} (spec: {version_spec})");
 
-    // Get complete package information (like npm view) - use full JSON format for complete data
-    let (full_manifest, _etag) = fetch_full_manifest_for_view(name, None)
+    // Create registry client
+    let registry = Context::registry();
+
+    // Get complete package information (like npm view)
+    let full_manifest = registry
+        .fetch_full_manifest(name)
         .await
-        .with_context(|| format!("Failed to fetch package info for {package_spec}"))?;
+        .map_err(|e| anyhow!("Failed to fetch package info for {}: {}", package_spec, e))?;
 
     tracing::debug!("Fetched package info: {full_manifest:?}");
 
-    // Get the specific version manifest if a version was specified
-    let resolved_package = resolve(name, version_spec).await?;
-    let version_manifest_value = resolved_package.manifest;
-
-    // Parse version manifest to strong type
-    let version_manifest: VersionManifest = serde_json::from_value(version_manifest_value)?;
+    // Get the specific version manifest
+    let resolved_package = resolve_package(&registry, name, version_spec)
+        .await
+        .map_err(|e| anyhow!("{}", e))?;
+    let version_manifest = resolved_package.manifest;
 
     // Print package information in npm view format
     print_package_info(&full_manifest, &version_manifest)?;
@@ -313,7 +318,7 @@ fn format_publish_line(time_str: &str, version_manifest: &VersionManifest) -> St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::manifest::Dist;
+    use utoo_ruborist::manifest::Dist;
 
     #[test]
     fn test_print_package_info() {

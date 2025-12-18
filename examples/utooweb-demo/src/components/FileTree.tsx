@@ -1,17 +1,25 @@
 import React, { useCallback, useState } from "react";
 import { FileTreeItemProps, FileTreeNode } from "../types";
 
+interface ExtendedFileTreeItemProps extends FileTreeItemProps {
+  onCreateFile?: (parentPath: string, fileName: string) => Promise<boolean>;
+  onCreateFolder?: (parentPath: string, folderName: string) => Promise<boolean>;
+  onDelete?: (item: FileTreeNode) => Promise<boolean>;
+}
+
 export const FileTreeItem = React.memo(
   ({
     item,
     onFileClick,
     onDirectoryExpand,
     selectedFile,
-  }: FileTreeItemProps & {
-    onDelete?: (item: FileTreeNode) => Promise<void>;
-  }) => {
+    onCreateFile,
+    onCreateFolder,
+    onDelete,
+  }: ExtendedFileTreeItemProps) => {
     const [isCollapsed, setIsCollapsed] = useState<boolean>(true);
     const [isNodeLoading, setIsNodeLoading] = useState<boolean>(false);
+    const [showActions, setShowActions] = useState(false);
 
     const toggleCollapse = useCallback(async () => {
       if (item.type === "directory") {
@@ -38,7 +46,53 @@ export const FileTreeItem = React.memo(
       [onDirectoryExpand, item],
     );
 
+    const handleNewFile = useCallback(
+      async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        const fileName = prompt("Enter file name:");
+        if (fileName && onCreateFile) {
+          await onCreateFile(item.fullName, fileName);
+        }
+      },
+      [item.fullName, onCreateFile],
+    );
+
+    const handleNewFolder = useCallback(
+      async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        const folderName = prompt("Enter folder name:");
+        if (folderName && onCreateFolder) {
+          await onCreateFolder(item.fullName, folderName);
+        }
+      },
+      [item.fullName, onCreateFolder],
+    );
+
+    const handleDelete = useCallback(
+      async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        const confirmed = confirm(
+          `Are you sure you want to delete "${item.name}"?`,
+        );
+        if (confirmed && onDelete) {
+          await onDelete(item);
+        }
+      },
+      [item, onDelete],
+    );
+
     const isSelected = selectedFile === item.fullName;
+    const isRootDir = item.fullName === ".";
+
+    const actionButtonStyle: React.CSSProperties = {
+      color: "#fff",
+      border: "none",
+      borderRadius: "0.25rem",
+      padding: "0 0.35rem",
+      fontSize: "0.75em",
+      cursor: "pointer",
+      marginLeft: "0.25rem",
+    };
 
     return (
       <li style={{ listStyleType: "none" }}>
@@ -54,12 +108,14 @@ export const FileTreeItem = React.memo(
             backgroundColor: isSelected ? "rgba(0, 0, 0, 0.1)" : "transparent",
           }}
           onClick={toggleCollapse}
+          onMouseEnter={() => setShowActions(true)}
+          onMouseLeave={() => setShowActions(false)}
         >
           <span style={{ width: "1rem", textAlign: "center" }}>
             {item.type === "directory" ? (isCollapsed ? "▶" : "▼") : ""}
           </span>
           <span>{item.type === "file" ? "📄" : "📁"}</span>
-          <span>{item.name}</span>
+          <span style={{ flex: 1 }}>{item.name}</span>
           {isNodeLoading && (
             <span
               style={{
@@ -71,23 +127,46 @@ export const FileTreeItem = React.memo(
               Loading...
             </span>
           )}
-          {item.type === "directory" && (
-            <button
-              onClick={handleRefresh}
-              style={{
-                marginLeft: "0.5rem",
-                color: "#fff",
-                border: "none",
-                borderRadius: "0.25rem",
-                padding: "0 0.5rem",
-                fontSize: "0.85em",
-                cursor: "pointer",
-                background: "#3b82f6",
-              }}
-              title={`Refresh ${item.type}`}
+          {showActions && (
+            <span
+              style={{ display: "flex", alignItems: "center" }}
+              onClick={(e) => e.stopPropagation()}
             >
-              🔄
-            </button>
+              {item.type === "directory" && (
+                <>
+                  <button
+                    onClick={handleRefresh}
+                    style={{ ...actionButtonStyle, background: "#3b82f6" }}
+                    title="Refresh"
+                  >
+                    🔄
+                  </button>
+                  <button
+                    onClick={handleNewFile}
+                    style={{ ...actionButtonStyle, background: "#10b981" }}
+                    title="New File"
+                  >
+                    +📄
+                  </button>
+                  <button
+                    onClick={handleNewFolder}
+                    style={{ ...actionButtonStyle, background: "#8b5cf6" }}
+                    title="New Folder"
+                  >
+                    +📁
+                  </button>
+                </>
+              )}
+              {!isRootDir && (
+                <button
+                  onClick={handleDelete}
+                  style={{ ...actionButtonStyle, background: "#ef4444" }}
+                  title="Delete"
+                >
+                  🗑
+                </button>
+              )}
+            </span>
           )}
         </div>
         {item.type === "directory" && !isCollapsed && (
@@ -107,6 +186,9 @@ export const FileTreeItem = React.memo(
                   onFileClick={onFileClick}
                   onDirectoryExpand={onDirectoryExpand}
                   selectedFile={selectedFile}
+                  onCreateFile={onCreateFile}
+                  onCreateFolder={onCreateFolder}
+                  onDelete={onDelete}
                 />
               ))}
           </ul>

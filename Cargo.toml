@@ -8,6 +8,7 @@ members = [
   "crates/pack-schema",
   "crates/pack-tests",
   "crates/pm",
+  "crates/ruborist",
   "crates/utoo-wasm",
 ]
 resolver = "2"

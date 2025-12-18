@@ -15,8 +15,7 @@ use cmd::view::view;
 use cmd::{clean::clean, deps::build_workspace};
 use helper::auto_update::init_auto_update;
 use util::config::{
-    set_cache_dir, set_legacy_peer_deps, set_omit, set_preload_downloads_limit,
-    set_preload_manifests_limit, set_registry,
+    set_cache_dir, set_legacy_peer_deps, set_manifests_concurrency_limit, set_omit, set_registry,
 };
 use util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
 use util::save_type::{OmitType, PackageAction, SaveType, parse_save_type};
@@ -67,13 +66,9 @@ struct Cli {
     #[arg(long, global = true, action = clap::ArgAction::SetTrue)]
     legacy_peer_deps: Option<bool>,
 
-    /// Maximum concurrent manifest fetches during preload (default: 64)
+    /// Maximum concurrent manifest fetches (default: 64)
     #[arg(long, global = true)]
-    preload_manifests_limit: Option<usize>,
-
-    /// Maximum concurrent tarball downloads during preload (default: 100)
-    #[arg(long, global = true)]
-    preload_downloads_limit: Option<usize>,
+    manifests_concurrency_limit: Option<usize>,
 
     /// Workspace to operate in
     #[arg(long, global = true, hide = true)]
@@ -264,7 +259,7 @@ fn main() {
         .on_thread_stop(|| {})
         .on_thread_park(|| {})
         .build()
-        .unwrap()
+        .expect("failed to build tokio runtime")
         .block_on(async_main());
 
     if let Err(e) = result {
@@ -316,17 +311,14 @@ async fn async_main() -> Result<()> {
         set_legacy_peer_deps(cli.legacy_peer_deps);
     }
 
-    // set preload concurrency limits if specified
-    if cli.preload_manifests_limit.is_some() {
-        set_preload_manifests_limit(cli.preload_manifests_limit);
-    }
-    if cli.preload_downloads_limit.is_some() {
-        set_preload_downloads_limit(cli.preload_downloads_limit);
+    // set manifests concurrency limit if specified
+    if cli.manifests_concurrency_limit.is_some() {
+        set_manifests_concurrency_limit(cli.manifests_concurrency_limit);
     }
 
     // Initialize auto update with immediate check and background monitoring
     if let Err(_e) = init_auto_update().await {
-        tracing::warn!("Auto update cancelled");
+        tracing::debug!("Auto update cancelled");
     }
 
     match cli.command {
@@ -529,11 +521,6 @@ async fn async_main() -> Result<()> {
                 log_time_end("All packages installed");
             }
         }
-    }
-
-    // Flush cache to disk before exit
-    if let Err(e) = crate::util::registry::flush_cache_to_disk().await {
-        tracing::debug!("Failed to flush cache to disk: {e}");
     }
 
     Ok(())

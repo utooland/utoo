@@ -108,7 +108,6 @@ pub fn compute_topological_layers(node_list: &[Node], edges: &[Edge]) -> Result<
     let topo_sort = match toposort(&graph, None) {
         Ok(sorted) => sorted,
         Err(e) => {
-            tracing::warn!("Failed to perform topological sort");
             return Err(anyhow!("Topological sort failed: {e:?}"));
         }
     };

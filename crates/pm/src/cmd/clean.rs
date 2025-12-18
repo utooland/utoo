@@ -2,14 +2,15 @@ use anyhow::{Context, Result};
 use std::io::{self, Write};
 use tokio::fs;
 
-use crate::util::cache::{collect_matching_versions, matches_pattern, parse_pattern};
+use crate::util::cache::{collect_matching_versions, matches_pattern};
+use utoo_ruborist::util::parse_package_spec;
 
 pub async fn clean(pattern: &str) -> Result<()> {
     let cache_dir = dirs::home_dir()
         .map(|p| p.join(".cache").join("nm"))
         .context("Failed to get cache directory")?;
 
-    let (pkg_pattern, version_pattern) = parse_pattern(pattern);
+    let (pkg_pattern, version_pattern) = parse_package_spec(pattern);
     let mut to_delete = Vec::new();
 
     // Read all package information
@@ -25,12 +26,12 @@ pub async fn clean(pattern: &str) -> Result<()> {
                 let pkg_name = pkg_entry.file_name();
                 let full_pkg_name = format!("{}/{}", name_str, pkg_name.to_string_lossy());
 
-                if matches_pattern(&full_pkg_name, &pkg_pattern) {
+                if matches_pattern(&full_pkg_name, pkg_pattern) {
                     tracing::debug!("full pkg name {full_pkg_name}, pkg_pattern {pkg_pattern}");
                     collect_matching_versions(
                         &pkg_entry.path(),
                         full_pkg_name,
-                        &version_pattern,
+                        version_pattern,
                         &mut to_delete,
                     )
                     .await?;
@@ -38,11 +39,11 @@ pub async fn clean(pattern: &str) -> Result<()> {
             }
         } else {
             // Handle regular packages
-            if matches_pattern(&name_str, &pkg_pattern) {
+            if matches_pattern(&name_str, pkg_pattern) {
                 collect_matching_versions(
                     &entry.path(),
                     name_str.to_string(),
-                    &version_pattern,
+                    version_pattern,
                     &mut to_delete,
                 )
                 .await?;
