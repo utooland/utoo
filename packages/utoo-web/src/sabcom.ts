@@ -15,6 +15,11 @@ export const SAB_OP_STAT = 8;
 export const STAT_TYPE_FILE = 0;
 export const STAT_TYPE_DIR = 1;
 
+export const SAB_INDEX_STATE = 0;
+export const SAB_INDEX_OP = 1;
+export const SAB_INDEX_DATA_LEN = 2;
+export const SAB_DATA_OFFSET = 12;
+
 // Stat struct layout (starts at byte 12)
 // type: Uint8 (1 byte) -> offset 0
 // padding: 7 bytes
@@ -49,9 +54,11 @@ export class SabComHost {
   }
 
   readRequest() {
-    const op = this.int32[1];
-    const len = this.int32[2];
-    const data = new TextDecoder().decode(this.uint8.slice(12, 12 + len));
+    const op = this.int32[SAB_INDEX_OP];
+    const len = this.int32[SAB_INDEX_DATA_LEN];
+    const data = new TextDecoder().decode(
+      this.uint8.slice(SAB_DATA_OFFSET, SAB_DATA_OFFSET + len),
+    );
     return { op, data };
   }
 
@@ -60,18 +67,18 @@ export class SabComHost {
       data = new TextEncoder().encode(data);
     }
     // TODO: Check size overflow
-    this.int32[2] = data.length;
-    this.uint8.set(data, 12);
-    Atomics.store(this.int32, 0, SAB_STATE_RESPONSE);
-    Atomics.notify(this.int32, 0);
+    this.int32[SAB_INDEX_DATA_LEN] = data.length;
+    this.uint8.set(data, SAB_DATA_OFFSET);
+    Atomics.store(this.int32, SAB_INDEX_STATE, SAB_STATE_RESPONSE);
+    Atomics.notify(this.int32, SAB_INDEX_STATE);
   }
 
   writeError(message: string) {
     const data = new TextEncoder().encode(message);
-    this.int32[2] = data.length;
-    this.uint8.set(data, 12);
-    Atomics.store(this.int32, 0, SAB_STATE_ERROR);
-    Atomics.notify(this.int32, 0);
+    this.int32[SAB_INDEX_DATA_LEN] = data.length;
+    this.uint8.set(data, SAB_DATA_OFFSET);
+    Atomics.store(this.int32, SAB_INDEX_STATE, SAB_STATE_ERROR);
+    Atomics.notify(this.int32, SAB_INDEX_STATE);
   }
 
   writeStat(
@@ -82,7 +89,7 @@ export class SabComHost {
     ctimeMs: number,
     birthtimeMs: number,
   ) {
-    const base = 12;
+    const base = SAB_DATA_OFFSET;
     this.dataView.setUint8(base + STAT_OFFSET_TYPE, type);
     this.dataView.setBigUint64(base + STAT_OFFSET_SIZE, size, true);
     this.dataView.setFloat64(base + STAT_OFFSET_ATIME, atimeMs, true);
@@ -90,8 +97,8 @@ export class SabComHost {
     this.dataView.setFloat64(base + STAT_OFFSET_CTIME, ctimeMs, true);
     this.dataView.setFloat64(base + STAT_OFFSET_BIRTHTIME, birthtimeMs, true);
 
-    Atomics.store(this.int32, 0, SAB_STATE_RESPONSE);
-    Atomics.notify(this.int32, 0);
+    Atomics.store(this.int32, SAB_INDEX_STATE, SAB_STATE_RESPONSE);
+    Atomics.notify(this.int32, SAB_INDEX_STATE);
   }
 }
 
@@ -111,45 +118,49 @@ export class SabComClient {
 
   call(op: number, data: string) {
     const encoded = new TextEncoder().encode(data);
-    this.int32[1] = op;
-    this.int32[2] = encoded.length;
-    this.uint8.set(encoded, 12);
+    this.int32[SAB_INDEX_OP] = op;
+    this.int32[SAB_INDEX_DATA_LEN] = encoded.length;
+    this.uint8.set(encoded, SAB_DATA_OFFSET);
 
-    Atomics.store(this.int32, 0, SAB_STATE_REQUEST);
+    Atomics.store(this.int32, SAB_INDEX_STATE, SAB_STATE_REQUEST);
     this.notifyHost();
 
-    Atomics.wait(this.int32, 0, SAB_STATE_REQUEST);
+    Atomics.wait(this.int32, SAB_INDEX_STATE, SAB_STATE_REQUEST);
 
-    const state = Atomics.load(this.int32, 0);
+    const state = Atomics.load(this.int32, SAB_INDEX_STATE);
     if (state === SAB_STATE_ERROR) {
-      const len = this.int32[2];
-      const msg = new TextDecoder().decode(this.uint8.slice(12, 12 + len));
+      const len = this.int32[SAB_INDEX_DATA_LEN];
+      const msg = new TextDecoder().decode(
+        this.uint8.slice(SAB_DATA_OFFSET, SAB_DATA_OFFSET + len),
+      );
       throw new Error(msg);
     }
 
-    const len = this.int32[2];
-    return this.uint8.slice(12, 12 + len);
+    const len = this.int32[SAB_INDEX_DATA_LEN];
+    return this.uint8.slice(SAB_DATA_OFFSET, SAB_DATA_OFFSET + len);
   }
 
   callStat(path: string) {
     const encoded = new TextEncoder().encode(path);
-    this.int32[1] = SAB_OP_STAT;
-    this.int32[2] = encoded.length;
-    this.uint8.set(encoded, 12);
+    this.int32[SAB_INDEX_OP] = SAB_OP_STAT;
+    this.int32[SAB_INDEX_DATA_LEN] = encoded.length;
+    this.uint8.set(encoded, SAB_DATA_OFFSET);
 
-    Atomics.store(this.int32, 0, SAB_STATE_REQUEST);
+    Atomics.store(this.int32, SAB_INDEX_STATE, SAB_STATE_REQUEST);
     this.notifyHost();
 
-    Atomics.wait(this.int32, 0, SAB_STATE_REQUEST);
+    Atomics.wait(this.int32, SAB_INDEX_STATE, SAB_STATE_REQUEST);
 
-    const state = Atomics.load(this.int32, 0);
+    const state = Atomics.load(this.int32, SAB_INDEX_STATE);
     if (state === SAB_STATE_ERROR) {
-      const len = this.int32[2];
-      const msg = new TextDecoder().decode(this.uint8.slice(12, 12 + len));
+      const len = this.int32[SAB_INDEX_DATA_LEN];
+      const msg = new TextDecoder().decode(
+        this.uint8.slice(SAB_DATA_OFFSET, SAB_DATA_OFFSET + len),
+      );
       throw new Error(msg);
     }
 
-    const base = 12;
+    const base = SAB_DATA_OFFSET;
     return {
       type: this.dataView.getUint8(base + STAT_OFFSET_TYPE),
       size: this.dataView.getBigUint64(base + STAT_OFFSET_SIZE, true),
