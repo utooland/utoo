@@ -23,6 +23,7 @@ jobs:
             target: aarch64-unknown-linux-gnu
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
             build: |
+              export QEMU_LD_PREFIX=/usr/aarch64-linux-gnu &&
               rustup install nightly-2025-10-27 &&
               rustup default nightly-2025-10-27 &&
               rustup target add aarch64-unknown-linux-gnu &&
@@ -63,7 +64,7 @@ jobs:
               rustup install nightly-2025-10-27 &&
               rustup default nightly-2025-10-27 &&
               rustup target add x86_64-unknown-linux-musl &&
-              export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Csymbol-mangling-version=v0 -Ctarget-feature=-crt-static' &&
+              export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Csymbol-mangling-version=v0' &&
               npm run build:binding --workspace=@utoo/pack -- --target x86_64-unknown-linux-musl
           # swc_plugin_runner not supported on aarch64 windows now
           # - host: windows-latest
@@ -72,11 +73,11 @@ jobs:
           #     git config --system core.longpaths true &&
           #     rustup target add aarch64-pc-windows-msvc &&
           #     npm run build:binding --workspace=@utoo/pack -- --target aarch64-pc-windows-msvc
-          - host: windows-latest
-            build: |
-              git config --system core.longpaths true &&
-              npm run build:binding --workspace=@utoo/pack -- --target x86_64-pc-windows-msvc
-            target: x86_64-pc-windows-msvc
+          # - host: windows-latest
+          #   build: |
+          #     git config --system core.longpaths true &&
+          #     npm run build:binding --workspace=@utoo/pack -- --target x86_64-pc-windows-msvc
+          #   target: x86_64-pc-windows-msvc
     name: utoopack-release-${{ matrix.settings.target }} - node@20
     runs-on: ${{ matrix.settings.host }}
     steps:
@@ -186,12 +187,9 @@ jobs:
           # npm config set provenance true
           echo "${VERSION}" &&
           echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc &&
-          npm version --workspace=@utoo/pack-shared "${VERSION}" &&
           npm version --workspace=@utoo/pack "${VERSION}" &&
           npm version --workspace=@utoo/pack-cli "${VERSION}" &&
-          npm install --workspace=@utoo/pack @utoo/pack-shared --save-exact &&
           npm install --workspace=@utoo/pack-cli @utoo/pack --save-exact &&
-          npm publish --workspace=@utoo/pack-shared --access public &&
           npm publish --workspace=@utoo/pack --access public &&
           npm publish --workspace=@utoo/pack-cli --access public
         env:

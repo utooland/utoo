@@ -1,0 +1,35 @@
+name: pack-shared-release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    if: startsWith(github.event.release.tag_name, 'shared-v')
+    name: Publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm install
+      - name: Build
+        run: npx turbo run build --filter=@utoo/pack-shared
+      - name: Get version from release
+        id: get_version
+        run: |
+          echo "VERSION=${GITHUB_REF#refs/tags/shared-v}" >> $GITHUB_OUTPUT
+      - name: NPM Publish
+        run: |
+          echo "${VERSION}" &&
+          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc &&
+          npm version --workspace=@utoo/pack-shared "${VERSION}" &&
+          npm publish --workspace=@utoo/pack-shared --access public
+        env:
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
