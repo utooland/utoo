@@ -2,6 +2,21 @@
 
 Thank you for your interest in contributing to Utoo! This document provides a guide for setting up your development environment and working on the project.
 
+## 🏗️ Architecture Overview
+
+Utoo is a unified toolchain composed of several key layers:
+
+1.  **Core (Rust)**: The high-performance engine.
+    *   `crates/pm`: The `utoo` package manager.
+    *   `crates/pack-core`: The bundler core, built on **Turbopack**.
+2.  **Bindings**: Bridging Rust to other environments.
+    *   `crates/pack-napi`: Node.js bindings for the bundler.
+    *   `crates/utoo-wasm`: WebAssembly bindings for browser usage.
+3.  **Packages (TypeScript)**: User-facing tools and APIs.
+    *   `@utoo/pack`: The main bundler library.
+    *   `@utoo/pack-cli`: The `utoopack` CLI.
+    *   `@utoo/web`: The browser-compatible toolchain.
+
 ## 🛠️ Prerequisites
 
 Before you begin, ensure you have the following installed:
@@ -14,7 +29,23 @@ Before you begin, ensure you have the following installed:
   cargo install wasm-bindgen-cli@0.2.104
   ```
 
-## 🚀 Setup
+## 📦 Submodules
+
+Utoo leverages a fork of Next.js to access and modify Turbopack crates.
+
+1.  **Initialize Submodules**:
+    If you haven't cloned with `--recursive`, run:
+    ```bash
+    git submodule update --init --recursive
+    ```
+
+2.  **Next.js Integration**:
+    The `next.js` folder is a git submodule pointing to `utooland/next.js`. Many Rust crates in `crates/` depend on Turbopack crates located within this submodule (e.g., `next.js/turbopack/crates/turbo-tasks`).
+
+    > [!IMPORTANT]
+    > When updating dependencies in `Cargo.toml` that point to the submodule, ensure the paths remain correct and consistent with the submodule's structure.
+
+## �🚀 Setup
 
 1. **Clone the repository**:
    ```bash
@@ -70,14 +101,12 @@ cargo test
 ./e2e/utoo-pm.sh
 ```
 
-### Linting & Formatting
+## 📮 Submitting Changes
 
-We use [Biome](https://biomejs.dev/) for linting and formatting.
-
-```bash
-# Check and fix linting/formatting issues
-npm run biome
-```
+1.  **Create a Branch**: Use a descriptive name like `feat/awesome-feature` or `fix/bug-id`.
+2.  **Commit Messages**: Follow [Conventional Commits](https://www.conventionalcommits.org/) (e.g., `feat: add new loader`).
+3.  **Lint & Format**: Run `npm run biome` before committing.
+4.  **Open a PR**: Provide a clear description of your changes and link any related issues.
 
 ## 📂 Project Structure
 
@@ -87,10 +116,11 @@ npm run biome
   - `pack-napi`: Node.js bindings via NAPI-RS.
   - `utoo-wasm`: WebAssembly bindings for web usage.
 - **`packages/`**: Node.js packages.
-  - `@utoo/pack`: The main bundler package.
+  - `@utoo/pack`: The main bundler package, including the **Webpack compatibility layer**.
   - `@utoo/pack-cli`: Command-line interface for the bundler.
   - `@utoo/pack-shared`: Shared utilities and types.
   - `@utoo/web`: Web-compatible version of the toolchain.
+- **`next.js/`**: Git submodule containing the Turbopack source code used by the core.
 - **`examples/`**: Example projects to test and demonstrate features.
 
 ## 🚢 Release
