@@ -257,8 +257,11 @@ impl AppEndpoint {
             self.project().mode(),
             self.project().config(),
             self.project().execution_context(),
-            Vc::cell(self.project().await?.watch.enable),
             self.project().pack_path().owned().await?,
+            Vc::cell(
+                self.project().await?.watch.enable
+                    && *self.project().config().is_hmr_enabled().await?,
+            ),
         )
         .resolve_entries(Vc::upcast(self.app_module_context())))
     }
