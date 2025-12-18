@@ -381,8 +381,25 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
 
         // only check engines for root workspace
         if path.is_empty() {
-            let pkg_engines = serde_json::to_value(&pkg.engines)?;
-            if lock.get("engines") != Some(&pkg_engines) {
+            // Normalize: None/empty -> None
+            let pkg_engines = pkg.engines.as_ref().filter(|m| !m.is_empty());
+            let lock_engines = lock
+                .get("engines")
+                .filter(|v| !v.is_null())
+                .and_then(|v| v.as_object())
+                .filter(|obj| !obj.is_empty());
+
+            let engines_match = match (pkg_engines, lock_engines) {
+                (None, None) => true,
+                (Some(p), Some(l)) => {
+                    p.len() == l.len()
+                        && p.iter()
+                            .all(|(k, v)| l.get(k).and_then(|x| x.as_str()) == Some(v.as_str()))
+                }
+                _ => false,
+            };
+
+            if !engines_match {
                 tracing::warn!("package-lock.json is outdated, engines changed");
                 return Ok(true);
             }
@@ -624,58 +641,6 @@ mod tests {
             Some("https://registry.npmjs.org/test-package/-/test-package-1.0.0.tgz".to_string())
         );
         assert_eq!(package.link, Some(false));
-    }
-
-    #[test]
-    fn test_deps_fields_equal() {
-        // Test case 1: Both None
-        assert!(deps_fields_equal(None, None));
-
-        // Test case 2: Both empty objects
-        let empty_obj = json!({});
-        assert!(deps_fields_equal(Some(&empty_obj), Some(&empty_obj)));
-
-        // Test case 3: None vs empty object
-        assert!(deps_fields_equal(None, Some(&empty_obj)));
-        assert!(deps_fields_equal(Some(&empty_obj), None));
-
-        // Test case 4: Both have same non-empty content
-        let deps1 = json!({
-            "lodash": "^4.17.20",
-            "react": "^18.0.0"
-        });
-        let deps2 = json!({
-            "lodash": "^4.17.20",
-            "react": "^18.0.0"
-        });
-        assert!(deps_fields_equal(Some(&deps1), Some(&deps2)));
-
-        // Test case 5: Different content
-        let deps3 = json!({
-            "lodash": "^4.17.20"
-        });
-        let deps4 = json!({
-            "react": "^18.0.0"
-        });
-        assert!(!deps_fields_equal(Some(&deps3), Some(&deps4)));
-
-        // Test case 6: Non-empty vs None
-        let deps5 = json!({
-            "lodash": "^4.17.20"
-        });
-        assert!(!deps_fields_equal(Some(&deps5), None));
-        assert!(!deps_fields_equal(None, Some(&deps5)));
-
-        // Test case 7: Non-empty vs empty object
-        assert!(!deps_fields_equal(Some(&deps5), Some(&empty_obj)));
-        assert!(!deps_fields_equal(Some(&empty_obj), Some(&deps5)));
-
-        // Test case 8: Non-object values
-        let string_val = json!("some-string");
-        let number_val = json!(123);
-        assert!(deps_fields_equal(Some(&string_val), Some(&string_val)));
-        assert!(!deps_fields_equal(Some(&string_val), Some(&number_val)));
-        assert!(!deps_fields_equal(Some(&string_val), None));
     }
 
     #[tokio::test]

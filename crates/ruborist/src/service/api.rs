@@ -30,7 +30,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 
 use super::cache::{PackageCache, load_project_cache, save_project_cache};
-use super::fs::FileSystem;
+use super::fs::{FileSystem, Glob};
 use super::registry::UnifiedRegistry;
 use crate::model::graph::{DependencyGraph, PackageNode};
 use crate::model::node::EdgeType;
@@ -109,7 +109,7 @@ impl<FS, R> BuildDepsOptions<FS, R> {
 /// ```
 pub async fn build_deps<FS, R>(options: BuildDepsOptions<FS, R>) -> Result<PackageLock>
 where
-    FS: FileSystem + Clone,
+    FS: FileSystem + Glob + Clone,
     R: EventReceiver,
 {
     let BuildDepsOptions {

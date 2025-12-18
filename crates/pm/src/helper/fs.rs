@@ -1,7 +1,7 @@
 //! Tokio-based file system implementation for ruborist's FileSystem trait.
 
 use std::path::{Path, PathBuf};
-use utoo_ruborist::service::{BuildDepsOptions, FileSystem, UnifiedRegistry};
+use utoo_ruborist::service::{BuildDepsOptions, FileSystem, Glob, UnifiedRegistry};
 
 use crate::util::cache::get_cache_dir;
 use crate::util::config::{get_legacy_peer_deps, get_manifests_concurrency_limit, get_registry};
@@ -33,6 +33,10 @@ impl FileSystem for TokioFileSystem {
     async fn create_dir_all(&self, path: &Path) -> Result<(), Self::Error> {
         tokio::fs::create_dir_all(path).await
     }
+}
+
+impl Glob for TokioFileSystem {
+    type Error = std::io::Error;
 
     async fn glob(&self, pattern: &Path) -> Result<Vec<PathBuf>, Self::Error> {
         let pattern_str = pattern.to_string_lossy();

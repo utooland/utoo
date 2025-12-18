@@ -2,6 +2,14 @@
 //!
 //! Minimal async file system abstraction for cross-platform use.
 //! Implementations are provided by users (e.g., TokioFileSystem in pm, OPFS in WASM).
+//!
+//! # Design
+//!
+//! - `FileSystem`: Basic file operations (read, write, exists, etc.)
+//! - `Glob`: Pattern matching, separated for cleaner abstraction
+//!
+//! Native platforms can use the `glob` crate for full pattern support.
+//! WASM can implement glob using read_dir with simple pattern matching.
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -27,6 +35,28 @@ pub trait FileSystem: Send + Sync {
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
     fn exists(&self, path: &Path) -> impl Future<Output = Result<bool, Self::Error>> + Send;
     fn create_dir_all(&self, path: &Path) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
+
+/// WASM version without Send bounds.
+#[cfg(target_arch = "wasm32")]
+pub trait FileSystem {
+    type Error: std::fmt::Debug + std::fmt::Display + 'static;
+
+    fn read(&self, path: &Path) -> impl Future<Output = Result<Vec<u8>, Self::Error>>;
+    fn read_to_string(&self, path: &Path) -> impl Future<Output = Result<String, Self::Error>>;
+    fn write(&self, path: &Path, content: &[u8]) -> impl Future<Output = Result<(), Self::Error>>;
+    fn exists(&self, path: &Path) -> impl Future<Output = Result<bool, Self::Error>>;
+    fn create_dir_all(&self, path: &Path) -> impl Future<Output = Result<(), Self::Error>>;
+}
+
+/// Glob pattern matching trait.
+///
+/// Separated from FileSystem for cleaner abstraction:
+/// - Native: Use `glob` crate for full pattern support (`**`, `{a,b}`, etc.)
+/// - WASM: Can implement using read_dir with simple matching
+#[cfg(not(target_arch = "wasm32"))]
+pub trait Glob: Send + Sync {
+    type Error: std::error::Error + Send + 'static;
 
     /// Match files using a glob pattern.
     ///
@@ -40,19 +70,10 @@ pub trait FileSystem: Send + Sync {
 
 /// WASM version without Send bounds.
 #[cfg(target_arch = "wasm32")]
-pub trait FileSystem {
+pub trait Glob {
     type Error: std::fmt::Debug + std::fmt::Display + 'static;
 
-    fn read(&self, path: &Path) -> impl Future<Output = Result<Vec<u8>, Self::Error>>;
-    fn read_to_string(&self, path: &Path) -> impl Future<Output = Result<String, Self::Error>>;
-    fn write(&self, path: &Path, content: &[u8]) -> impl Future<Output = Result<(), Self::Error>>;
-    fn exists(&self, path: &Path) -> impl Future<Output = Result<bool, Self::Error>>;
-    fn create_dir_all(&self, path: &Path) -> impl Future<Output = Result<(), Self::Error>>;
-
     /// Match files using a glob pattern.
-    ///
-    /// Returns a list of paths that match the pattern.
-    /// The pattern follows standard glob syntax (e.g., `packages/*/package.json`).
     fn glob(&self, pattern: &Path) -> impl Future<Output = Result<Vec<PathBuf>, Self::Error>>;
 }
 
@@ -91,6 +112,10 @@ impl FileSystem for NoopFileSystem {
     async fn create_dir_all(&self, _path: &Path) -> Result<(), Self::Error> {
         Ok(())
     }
+}
+
+impl Glob for NoopFileSystem {
+    type Error = std::io::Error;
 
     async fn glob(&self, _pattern: &Path) -> Result<Vec<PathBuf>, Self::Error> {
         Ok(Vec::new())

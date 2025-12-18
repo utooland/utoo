@@ -10,7 +10,7 @@
 //! 2. Matching glob patterns (e.g., `packages/*`)
 //! 3. Traversing directory structure
 //!
-//! Glob matching is delegated to the `FileSystem` trait, allowing each platform
+//! Glob matching is delegated to the `Glob` trait, allowing each platform
 //! to provide its own implementation (native uses `glob` crate, WASM can use OPFS).
 
 use std::path::{Path, PathBuf};
@@ -19,7 +19,7 @@ use anyhow::Result;
 
 use crate::model::package_json::PackageJson;
 use crate::model::util::read_package_json;
-use crate::service::FileSystem;
+use crate::service::{FileSystem, Glob};
 
 /// A discovered workspace package.
 #[derive(Debug, Clone)]
@@ -35,12 +35,12 @@ pub struct WorkspacePackage {
 /// Workspace discovery context.
 ///
 /// This struct holds the state needed for workspace discovery,
-/// using a platform-agnostic FileSystem trait.
+/// using platform-agnostic FileSystem and Glob traits.
 pub struct WorkspaceDiscovery<FS> {
     fs: FS,
 }
 
-impl<FS: FileSystem> WorkspaceDiscovery<FS> {
+impl<FS: FileSystem + Glob> WorkspaceDiscovery<FS> {
     /// Create a new workspace discovery context.
     pub fn new(fs: FS) -> Self {
         Self { fs }
@@ -72,7 +72,7 @@ impl<FS: FileSystem> WorkspaceDiscovery<FS> {
             // Prepare glob pattern for package.json files
             let package_json_pattern = root_path.join(pattern_str).join("package.json");
 
-            // Match workspace directories using FileSystem::glob
+            // Match workspace directories using Glob::glob
             let matched_paths = self
                 .fs
                 .glob(&package_json_pattern)
@@ -214,7 +214,7 @@ impl<FS: FileSystem> WorkspaceDiscovery<FS> {
         for pattern_str in patterns {
             let workspace_pattern = root.join(pattern_str);
 
-            // Use FileSystem::glob for pattern matching
+            // Use Glob::glob for pattern matching
             let matched_paths = self
                 .fs
                 .glob(&workspace_pattern)
@@ -236,7 +236,7 @@ impl<FS: FileSystem> WorkspaceDiscovery<FS> {
 ///
 /// This function reads all workspace package.json files and returns them
 /// along with their paths for initializing the dependency graph.
-pub async fn collect_workspace_packages<FS: FileSystem + Clone>(
+pub async fn collect_workspace_packages<FS: FileSystem + Glob + Clone>(
     fs: FS,
     root_path: &Path,
     root_pkg: &PackageJson,

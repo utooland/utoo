@@ -498,19 +498,24 @@ impl NodeManifest {
     }
 
     /// Get engines requirements.
+    /// Returns None for empty maps.
     pub fn engines(&self) -> Option<&HashMap<String, String>> {
         match self {
             NodeManifest::Local(pkg) => pkg.engines.as_ref(),
             NodeManifest::Registry(manifest) => manifest.engines.as_ref(),
         }
+        .filter(|m| !m.is_empty())
     }
 
     /// Get binary configuration as Value (for serialization compatibility).
+    /// Returns None for null or empty objects.
     pub fn bin(&self) -> Option<Value> {
-        match self {
+        let value = match self {
             NodeManifest::Local(pkg) => pkg.bin.as_ref().and_then(|b| serde_json::to_value(b).ok()),
             NodeManifest::Registry(manifest) => manifest.bin.clone(),
-        }
+        };
+        // Filter out null and empty objects
+        value.filter(|v| !v.is_null() && !v.as_object().is_some_and(|obj| obj.is_empty()))
     }
 
     /// Get license.
