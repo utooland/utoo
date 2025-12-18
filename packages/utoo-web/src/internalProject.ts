@@ -43,7 +43,7 @@ class InternalEndpoint implements ProjectEndpoint {
 
   async deps(options?: DepsOptions) {
     await this.wasmInit!;
-    return await this.projectInternal!.deps(
+    return await ProjectInternal.deps(
       options?.registry ?? undefined,
       options?.concurrency ?? undefined,
     );

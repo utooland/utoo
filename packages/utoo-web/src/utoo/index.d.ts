@@ -1,9 +1,9 @@
 /* tslint:disable */
 /* eslint-disable */
-export function initLogFilter(filter: string): void;
-export function init_pack(): void;
-export function registerWorkerScheduler(creator: Function, terminator: Function): void;
 export function workerCreated(worker_id: number): void;
+export function registerWorkerScheduler(creator: Function, terminator: Function): void;
+export function init_pack(): void;
+export function initLogFilter(filter: string): void;
 export function recvTaskMessageInWorker(worker_id: number): Promise<WasmTaskMessage>;
 export function sendTaskMessage(message: any): Promise<void>;
 /**
@@ -65,7 +65,7 @@ export class Project {
    *   - "https://registry.npmjs.org" - official npm registry (slower, fetches full manifest)
    * * `concurrency` - Optional concurrency limit (defaults to 20)
    */
-  deps(registry?: string | null, concurrency?: number | null): Promise<string>;
+  static deps(registry?: string | null, concurrency?: number | null): Promise<string>;
   /**
    * Create a tar.gz archive and return bytes (no file I/O)
    * This is useful for main thread execution without OPFS access
@@ -117,8 +117,8 @@ export class WebWorkerTermination {
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
-  readonly init_log_filter: (a: number, b: number) => void;
-  readonly init_pack: () => void;
+  readonly registerWorkerScheduler: (a: any, b: any) => void;
+  readonly workerCreated: (a: number) => void;
   readonly __wbg_direntry_free: (a: number, b: number) => void;
   readonly __wbg_get_direntry_name: (a: number) => [number, number];
   readonly __wbg_get_direntry_type: (a: number) => number;
@@ -135,7 +135,8 @@ export interface InitOutput {
   readonly project_createDir: (a: number, b: number) => any;
   readonly project_createDirAll: (a: number, b: number) => any;
   readonly project_cwd: () => [number, number];
-  readonly project_gzip: (a: any) => [number, number, number];
+  readonly project_deps: (a: number, b: number, c: number) => any;
+  readonly project_gzip: (a: any) => any;
   readonly project_init: (a: number, b: number) => void;
   readonly project_install: (a: number, b: number, c: number) => any;
   readonly project_metadata: (a: number, b: number) => any;
@@ -145,11 +146,11 @@ export interface InitOutput {
   readonly project_removeDir: (a: number, b: number, c: number) => any;
   readonly project_removeFile: (a: number, b: number) => any;
   readonly project_setCwd: (a: number, b: number) => void;
-  readonly project_sigMd5: (a: number, b: number) => [number, number];
+  readonly project_sigMd5: (a: number, b: number) => any;
   readonly project_write: (a: number, b: number, c: number, d: number) => any;
   readonly project_writeString: (a: number, b: number, c: number, d: number) => any;
-  readonly registerWorkerScheduler: (a: any, b: any) => void;
-  readonly workerCreated: (a: number) => void;
+  readonly initLogFilter: (a: number, b: number) => void;
+  readonly init_pack: () => void;
   readonly rust_mi_get_default_heap: () => number;
   readonly rust_mi_get_thread_id: () => number;
   readonly rust_mi_set_default_heap: (a: number) => void;
@@ -184,14 +185,13 @@ export interface InitOutput {
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __wbindgen_export_7: WebAssembly.Table;
   readonly __externref_drop_slice: (a: number, b: number) => void;
-  readonly __externref_table_dealloc: (a: number) => void;
-  readonly closure115096_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure115099_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure117648_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure149_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure117680_externref_shim: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen__convert__closures_____invoke__h2ce973260553dde0: (a: number, b: number) => void;
-  readonly wasm_bindgen__convert__closures_____invoke__heac94dfe74335608: (a: number, b: number) => void;
-  readonly closure117778_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__h13262edabaa325f0: (a: number, b: number) => void;
+  readonly closure147_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure115135_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure115132_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure117815_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_thread_destroy: (a?: number, b?: number, c?: number) => void;
   readonly __wbindgen_start: (a: number) => void;
 }

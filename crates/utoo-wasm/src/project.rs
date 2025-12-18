@@ -101,7 +101,6 @@ impl Project {
     /// * `concurrency` - Optional concurrency limit (defaults to 20)
     #[wasm_bindgen]
     pub async fn deps(
-        &self,
         registry: Option<String>,
         concurrency: Option<usize>,
     ) -> Result<String, String> {
