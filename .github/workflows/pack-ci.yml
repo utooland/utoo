@@ -19,13 +19,10 @@ jobs:
           - host: macos-latest
             target: x86_64-apple-darwin
             test: |
-              rustup target add x86_64-apple-darwin &&
               cargo test -p pack-tests --target x86_64-apple-darwin
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             test: |
-              rustup install nightly-2025-10-27 &&
-              rustup default nightly-2025-10-27 &&
               cargo test -p pack-tests --target x86_64-unknown-linux-gnu
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl

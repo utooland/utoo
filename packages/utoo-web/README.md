@@ -43,7 +43,7 @@ npm run install-toolchain
 npm run build
 ```
 
-## � Documentation
+## 📚 Documentation
 
 For detailed API usage and examples, please refer to the [API Documentation](./API.md) ([中文版](./API_zh-CN.md)).
 

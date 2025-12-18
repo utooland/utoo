@@ -45,7 +45,7 @@ Utoo leverages a fork of Next.js to access and modify Turbopack crates.
     > [!IMPORTANT]
     > When updating dependencies in `Cargo.toml` that point to the submodule, ensure the paths remain correct and consistent with the submodule's structure.
 
-## �🚀 Setup
+## 🚀 Setup
 
 1. **Clone the repository**:
    ```bash

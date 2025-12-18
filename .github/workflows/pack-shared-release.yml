@@ -28,7 +28,7 @@ jobs:
         run: |
           echo "${VERSION}" &&
           echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc &&
-          npm version --workspace=@utoo/pack-shared "${VERSION}" &&
+          npm version --workspace=@utoo/pack-shared "${VERSION}" --no-git-tag-version &&
           npm publish --workspace=@utoo/pack-shared --access public
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}

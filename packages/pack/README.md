@@ -8,7 +8,7 @@
 
 - ⚡ **Extreme Performance**: Core bundling logic implemented in Rust via NAPI-RS.
 - 🛠️ **Turbopack Powered**: Built on top of the same engine that powers Next.js Turbopack.
-- � **Webpack Compatibility**: Support for consuming `webpack.config.js` to simplify migration from Webpack.
+- 🔌 **Webpack Compatibility**: Support for consuming `webpack.config.js` to simplify migration from Webpack.
 - 📦 **Modern Web Support**: Native support for TypeScript, JSX, CSS Modules, Less, Sass, and more.
 - 🔧 **Extensible Architecture**: Support for custom loaders, plugins, and flexible configuration.
 - 🔄 **Fast HMR**: Instant updates during development with optimized Hot Module Replacement.

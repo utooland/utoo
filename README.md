@@ -1,7 +1,7 @@
 > 🌖 **Notice**: We are building a next-generation toolchain on top of [Turbopack](https://turbo.build/pack). Check out our [progress](https://github.com/utooland/utoo/issues/1872).
 
 <div align="center">
-<img src="https://mdn.alipayobjects.com/huamei_botco4/afts/img/357RTIva8S8AAAAAAAAAAAAADnNMAQFr/original" alt="Utoo Logo" width="120"/>
+<img src="https://mdn.alipayobjects.com/huamei_botco4/afts/img/357RTIva8S8AAAAAAAAAAAAADnNMAQFr/original" alt="Utoo Logo" width="80"/>
 <h1>Utoo</h1>
 <p><strong>Unified Toolchain: Open & Optimized</strong></p>
 
@@ -78,7 +78,7 @@ We are actively working on expanding Utoo's capabilities:
 - [ ] **Plugin System**: Extensible hooks for custom build logic.
 - [ ] **Mobile Support**: Unified tooling for mobile frontend development.
 
-## �📂 Project Structure
+## 📂 Project Structure
 
 - **[crates/](crates/)**: Rust core (Package Manager, Bundler Core, WASM/NAPI bindings).
 - **[packages/](packages/)**: TypeScript packages (CLI, Web version, Shared utilities).
