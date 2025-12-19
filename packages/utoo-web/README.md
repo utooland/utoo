@@ -10,14 +10,15 @@
 - ⚡ **WASM Powered**: High performance via WebAssembly bindings of the Turbopack-based core.
 - 🛠️ **Web Worker Support**: Offloads heavy bundling tasks to background workers to keep the UI responsive.
 - 🔌 **Webpack Compatibility**: Supports a subset of Webpack configurations in the browser.
-- 📂 **Virtual File System**: Uses Origin Private File System (OPFS) for a Node.js-like file system experience.
+- 📂 **Real File System**: Uses Origin Private File System (OPFS) for a Node.js-like file system experience.
 
 ## 🧠 Core Concepts
 
-1. **Virtual File System**: The project lives in the browser's OPFS.
+1. **Real File System**: The project lives in the browser's OPFS.
 2. **Project Main Worker**: Core logic runs in a dedicated worker to keep the UI responsive.
 3. **Thread Worker**: Heavy bundling tasks are offloaded to a worker powered by a ported `tokio` runtime.
-4. **Service Worker**: Acts as a local server to intercept requests and serve built files for preview.
+4. **Loader Worker**: Executes Webpack loaders in a dedicated worker with Node.js polyfills.
+5. **Service Worker**: Acts as a local server to intercept requests and serve built files for preview.
 
 ## 📦 Installation
 
