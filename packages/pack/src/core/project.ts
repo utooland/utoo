@@ -1,5 +1,4 @@
 import { isDeepStrictEqual } from "util";
-import { Worker } from "worker_threads";
 import type {
   HmrIdentifiers,
   NapiPartialProjectOptions,

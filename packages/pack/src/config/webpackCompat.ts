@@ -1,5 +1,5 @@
 export {
-  readWebpackConfig,
   compatOptionsFromWebpack,
+  readWebpackConfig,
   type WebpackConfig,
 } from "@utoo/pack-shared";

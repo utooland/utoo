@@ -1,6 +1,12 @@
 import path from "path";
 import type webpack from "webpack";
-import { BundleOptions, ConfigComplete, ExternalConfig, HtmlConfig, TurbopackRuleConfigItem } from "./config";
+import {
+  BundleOptions,
+  ConfigComplete,
+  ExternalConfig,
+  HtmlConfig,
+  TurbopackRuleConfigItem,
+} from "./config";
 
 export function readWebpackConfig(projectPath?: string, rootPath?: string) {
   const projectPathOutOfRoot =

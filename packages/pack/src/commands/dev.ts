@@ -6,7 +6,6 @@ import path from "path";
 import send from "send";
 import { Duplex, Writable } from "stream";
 import url from "url";
-import { ConfigComplete } from "../config/types";
 import {
   compatOptionsFromWebpack,
   WebpackConfig,

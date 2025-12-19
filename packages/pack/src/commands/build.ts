@@ -3,7 +3,6 @@ import { spawn } from "child_process";
 import fs, { existsSync } from "fs";
 import { nanoid } from "nanoid";
 import { join } from "path";
-import { ConfigComplete } from "../config/types";
 import {
   compatOptionsFromWebpack,
   WebpackConfig,

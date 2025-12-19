@@ -1,4 +1,3 @@
-import { codeFrameColumns } from "@babel/code-frame";
 import { ConfigComplete, DefineEnv, RustifiedEnv } from "./config";
 import { formatIssue, Issue } from "./issue";
 import { renderStyledStringToErrorAnsi } from "./styledString";

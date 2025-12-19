@@ -1,7 +1,7 @@
 import { DOMParser } from "domparser-rs";
 import fs from "fs";
 import path from "path";
-import { ConfigComplete, EntryOptions, HtmlConfig } from "../config/types";
+import { ConfigComplete, EntryOptions } from "../config/types";
 
 export function processHtmlEntry(config: ConfigComplete, projectPath: string) {
   if (!config.entry) return;

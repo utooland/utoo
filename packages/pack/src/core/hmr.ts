@@ -6,7 +6,6 @@ import { join } from "path";
 import { Duplex } from "stream";
 import type webpack from "webpack";
 import ws from "ws";
-import { ConfigComplete } from "../config/types";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import {
   createDefineEnv,

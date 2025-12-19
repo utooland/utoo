@@ -244,4 +244,3 @@ export interface BundleOptions {
    */
   packPath?: string;
 }
-
