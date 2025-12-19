@@ -1,7 +1,7 @@
 > 🌖 **Notice**: We are building a next-generation toolchain on top of [Turbopack](https://turbo.build/pack). Check out our [progress](https://github.com/utooland/utoo/issues/1872).
 
 <div align="center">
-<img src="https://mdn.alipayobjects.com/huamei_botco4/afts/img/357RTIva8S8AAAAAAAAAAAAADnNMAQFr/original" alt="Utoo Logo" width="80"/>
+<img src="https://mdn.alipayobjects.com/huamei_botco4/afts/img/357RTIva8S8AAAAAAAAAAAAADnNMAQFr/original" alt="Utoo Logo" height="80"/>
 <h1>Utoo</h1>
 <p><strong>Unified Toolchain: Open & Optimized</strong></p>
 
@@ -26,9 +26,9 @@ Utoo is a modern, high-performance frontend toolchain designed to provide a unif
 
 ## 📦 Core Components
 
-- **`utoo`** (alias **`ut`**): High-performance Rust package manager (Fast, Parallel, `npm` compatible).
-- **`@utoo/pack`**: Next-gen bundler powered by **Turbopack** (HMR, TS/JSX, Less/Sass, and more).
-- **`@utoo/web`**: Web-compatible version of the toolchain (WASM, Browser-based bundling).
+- **[`utoo`](crates/pm)** (alias **`ut`**): High-performance Rust package manager (Fast, Parallel, `npm` compatible).
+- **[`@utoo/pack`](packages/pack)**: Next-gen bundler powered by **Turbopack** (HMR, TS/JSX, Less/Sass, and more).
+- **[`@utoo/web`](packages/utoo-web)**: Web-compatible version of the toolchain (WASM, Browser-based bundling).
 
 ## 🚀 Quick Start
 

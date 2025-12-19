@@ -1,47 +1,47 @@
-# [`@utoo/web`]## Quick Start Guide
+# [`@utoo/web`](https://www.npmjs.com/package/@utoo/web) API Documentation
 
-Getting a project up and running involves four main steps, as demonstrated in `examples/utooweb-demo`. You can also experience the demo online at [`utoo-repl`](https://utoo-repl.vercel.app/).tps://www.npmjs.com/package/@utoo/web) API Documentation
-
-`@utoo/web` is a powerful library that enables you to run a complete web development environment, including a virtual file system, dependency management, and a build process, entirely within the browser. It deeply integrates [`utoopack`](https://github.com/utooland/utoo), a new builder based on [`Rust`](https://www.rust-lang.org/) and [`turbopack`](https://nextjs.org/docs/app/api-reference/turbopack), and leverages modern web technologies like Web Workers, Service Workers, and the Origin Private File System (OPFS) to provide a seamless and fast development experience without a backend server.
+`@utoo/web` enables a complete web development environment in the browser, including a file system, dependency management, and build process. It integrates [`utoopack`](https://github.com/utooland/utoo) (Rust + Turbopack) and uses Web Workers, Service Workers, and OPFS for a seamless experience.
 
 ## Core Concepts
 
-Before diving into the API, it's important to understand the four main components that make `@utoo/web` work:
-
-1. **Virtual File System**: The entire project, including source code and `node_modules`, lives in the browser's Origin Private File System (OPFS). The `Project` class provides a Node.js-like `fs` interface to interact with it.
-2. **Project Main Worker**: The core logic of the `Project` instance runs within its own Web Worker. The `Project` object you interact with in the main thread is a proxy that delegates all core tasks (like file system operations) to this worker. This architecture is key to keeping the UI responsive.
-3. **Thread Worker**: Heavy tasks like bundling and compilation are offloaded to a dedicated Web Worker. This ensures the main UI thread remains responsive, even during a build. We have ported [`tokio`](https://github.com/utooland/tokio) to the browser to take full advantage of multi-core CPUs for improved performance. The **Thread Worker** will be completely taken over by the tokio runtime.
-4. **Service Worker**: A Service Worker acts as a local server. It intercepts requests from the preview `iframe`, reads the corresponding files from the OPFS, and serves them back, allowing you to preview your built application.
+1. **Real File System**: The project lives in the browser's Origin Private File System (OPFS). `Project` provides a Node.js-like `fs` interface.
+2. **Project Main Worker**: The `Project` instance runs in a Web Worker. The main thread object is a proxy, keeping the UI responsive.
+3. **Thread Worker**: Heavy tasks (bundling, compilation) run in a dedicated Web Worker powered by a ported `tokio` runtime.
+4. **Loader Worker**: Executes Webpack loaders in a dedicated worker with Node.js polyfills.
+5. **Service Worker**: Acts as a local server to intercept requests and serve built files for preview.
 
 ---
 
 ## Quick Start Guide
 
-Getting a project up and running involves four main steps, as demonstrated in `examples/utooweb-demo`. You can also experience the demo online at [`utoo-repl`](https://utoo-repl.vercel.app).
+Getting a project up and running involves four main steps. See `examples/utooweb-demo` or try [`utoo-repl`](https://utoo-repl.vercel.app).
 
 ### 1. Instantiate the Project
 
-First, create an instance of the `Project` class. It requires configuration for the project's root directory, the thread worker, and the service worker.
+Create a `Project` instance with configuration for workers and the service worker.
 
 ```typescript
 import { Project as UtooProject } from "@utoo/web";
 
 const project = new UtooProject({
-    // The root directory for your project inside the virtual file system.
+    // Project root directory in the file system.
     cwd: "/utooweb-demo",
 
-    // The URL of the worker script that manages the virtual file system and other core functionalities.
+    // Worker script URL for file system and core functionality.
     workerUrl: `${location.origin}/worker.js`,
 
-    // The URL of the worker script that handles heavy tasks.
+    // Worker script URL for heavy tasks.
     threadWorkerUrl: `${location.origin}/threadWorker.js`,
     
-    // Configuration for the preview service worker.
+    // Worker script URL for webpack loaders.
+    loaderWorkerUrl: `${location.origin}/loaderWorker.js`,
+
+    // Preview service worker configuration.
     serviceWorker: {
         url: `${location.origin}/serviceWorker.js`,
-        scope: "/preview", // The path the service worker will control.
+        scope: "/preview", // Path controlled by the service worker.
     },
-    // ImportMap for run webpack loaders in @utoo/web
+    // ImportMap for running webpack loaders
     loadersImportMap: {
        // accept an umd script url or a script content string
       "xyzLoader": "https://x.y.z.js"
@@ -70,7 +70,7 @@ await project.install(JSON.stringify(packageLock));
 
 ### 4. Write Project Files
 
-With the environment set up, you can now write your source files to the virtual file system.
+With the environment set up, you can now write your source files to the real file system.
 
 ```typescript
 // An object containing file paths and their content.
@@ -110,7 +110,9 @@ A typical configuration looks like this:
 }
 ```
 
-You would write this file to the virtual file system just like any other source file:
+To use loaders, you must add them to the `devDependencies` in your `package.json` and install them, just as you would in a standard Webpack project. Additionally, you must install `loader-runner`, as `@utoo/web` relies on the `loader-runner` mechanism and context to execute loaders.
+
+You would write this file to the real file system just like any other source file:
 
 ```typescript
 await project.writeFile('utoopack.json', JSON.stringify(utoopackConfig, null, 2));
@@ -128,9 +130,10 @@ Creates a new project instance.
 
 **Options:**
 
-* `cwd` (string, required): The absolute path that will serve as the root of the project in the virtual file system (e.g., `/my-app`).
+* `cwd` (string, required): The absolute path that will serve as the root of the project in the real file system (e.g., `/my-app`).
 * `workerUrl` (string, optional): Specifies the URL of the Worker thread where the `Project` instance's core logic actually runs. The `Project` object you interact with in the main thread is a proxy that delegates all core tasks (like file system operations) to this Worker. This architecture is key to keeping the UI responsive.
 * `threadWorkerUrl` (string, required): Specifies the URL of a separate Worker thread dedicated to handling CPU-intensive tasks like bundling and compiling. This isolates the heavy build process from the `Project`'s main logic worker.
+* `loaderWorkerUrl` (string, required): Specifies the URL of a separate Worker thread dedicated to handling webpack loaders.
 * `serviceWorker` (object, optional):
   * `url` (string, required): The URL to the service worker script.
   * `scope` (string, required): The URL scope that the service worker will intercept requests for. This is the base path for your preview environment.
@@ -142,7 +145,7 @@ These methods are asynchronous and mimic the Node.js `fs` API.
 
 #### `project.writeFile(path, content)`
 
-Writes content to a file in the virtual file system. If the file doesn't exist, it will be created.
+Writes content to a file in the real file system. If the file doesn't exist, it will be created.
 
 * `path` (string): The absolute path to the file (e.g., `/src/index.js`).
 * `content` (string | Buffer): The content to write.
@@ -304,11 +307,20 @@ import "@utoo/web/esm/threadWorker";
 
 #### 3. Service Worker (`serviceWorker.ts`)
 
-This file provides the logic for the service worker, which serves the preview from the virtual file system.
+This file provides the logic for the service worker, which serves the preview from the real file system.
 
 ```typescript
 // src/serviceWorker.ts
 import "@utoo/web/esm/serviceWorker";
+```
+
+#### 4. Loader Worker (`loaderWorker.ts`)
+
+This file provides the logic for the loader worker, which handles webpack loaders.
+
+```typescript
+// src/loaderWorker.ts
+import "@utoo/web/esm/loaderWorker";
 ```
 
 Your build setup should be configured to output these files to a location that your main application can access, so you can provide their URLs to the `UtooProject` constructor.

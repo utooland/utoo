@@ -1,46 +1,49 @@
 # [`@utoo/web`](https://www.npmjs.com/package/@utoo/web) API 文档
 
-`@utoo/web` 是一个功能强大的库，它允许您在浏览器中完整地运行一套 Web 开发环境，包括虚拟文件系统、依赖管理和构建流程。它深度整合了基于 [`Rust`](https://www.rust-lang.org/) 和 [`turbopack`](https://nextjs.org/docs/app/api-reference/turbopack) 的全新构建器 [`utoopack`](https://github.com/utooland/utoo)，并利用 Web Workers、Service Workers 和源私有文件系统（OPFS）等现代 Web 技术，提供无缝且快速的开发体验，无需后端服务器。
+`@utoo/web` 可以在浏览器中运行完整的 Web 开发环境，包括文件系统、依赖管理和构建流程。它集成了 [`utoopack`](https://github.com/utooland/utoo) (Rust + Turbopack)，并利用 Web Workers、Service Workers 和 OPFS 提供流畅的体验。
 
 ## 核心概念
 
-在深入了解 API 之前，理解构成 `@utoo/web` 的四个主要组件非常重要：
-
-1. **Virtual File System**：整个项目，包括源代码和 `node_modules`，都存在于浏览器的源私有文件系统（OPFS）中。`Project` 类提供了一个类似 Node.js `fs` 的接口来与其交互。
-2. **Project Main Worker**：`Project` 实例的核心逻辑运行在它自己的 Web Worker 中。您在主线程中与之交互的 `Project` 对象实际上是一个代理，它将所有核心任务（如文件系统操作）委托给此 Worker。这种架构是保持 UI 响应流畅的关键。
-3. **Thread Worker**：像打包和编译这样的重度任务被卸载到一个专用的 Web Worker 中。这确保了即使在构建过程中，主 UI 线程也能保持响应。我们将 [`tokio`](https://github.com/utooland/tokio) 移植到了浏览器上，以充分利用多核 CPU 提升性能。**Thread Worker** 将完全被 tokio runtime 接管。
-4. **Service Worker**：Service Worker 充当本地服务器。它拦截来自预览 `iframe` 的请求，从 OPFS 中读取相应的文件，并将其提供回去，从而允许您预览构建好的应用程序。
+1. **Real File System**：项目存在于浏览器的源私有文件系统（OPFS）中。`Project` 类提供类似 Node.js `fs` 的接口。
+2. **Project Main Worker**：`Project` 实例运行在 Web Worker 中。主线程对象是代理，保持 UI 响应。
+3. **Thread Worker**：重度任务（打包、编译）在专用的 Web Worker 中运行，由移植的 `tokio` 运行时驱动。
+4. **Loader Worker**：在带有 Node.js polyfills 的专用 Worker 中执行 Webpack loaders。
+5. **Service Worker**：充当本地服务器，拦截请求并提供构建文件以供预览。
 
 ---
 
 ## 快速上手指南
 
-启动一个项目主要涉及四个步骤，如 `examples/utooweb-demo` 中所示。你也可以在 [`utoo-repl`](https://utoo-repl.vercel.app) 在线体验演示效果。
+启动项目主要涉及四个步骤。参考 `examples/utooweb-demo` 或在线体验 [`utoo-repl`](https://utoo-repl.vercel.app)。
 
 ### 1. 实例化项目
 
-首先，创建 `Project` 类的一个实例。它需要配置项目根目录、线程 Worker 和 Service Worker。
+创建 `Project` 实例，配置 Worker 和 Service Worker。
 
 ```typescript
 import { Project as UtooProject } from "@utoo/web";
 
 const project = new UtooProject({
-    // 虚拟文件系统中项目的根目录。
+    // 文件系统中的项目根目录。
     cwd: "/utooweb-demo",
 
-    // 管理虚拟文件系统和其他核心功能的 Worker 脚本的 URL。
+    // 核心功能 Worker 脚本 URL。
     workerUrl: `${location.origin}/worker.js`,
 
-    // 处理重度任务的 Worker 脚本的 URL。
+    // 重度任务 Worker 脚本 URL。
     threadWorkerUrl: `${location.origin}/threadWorker.js`,
+
+    // Webpack loaders Worker 脚本 URL。
+    loaderWorkerUrl: `${location.origin}/loaderWorker.js`,
     
-    // 预览 Service Worker 的配置。
+    // 预览 Service Worker 配置。
     serviceWorker: {
         url: `${location.origin}/serviceWorker.js`,
-        scope: "/preview", // Service Worker 将控制的路径。
+        scope: "/preview", // Service Worker 控制的路径。
     },
+    // 运行 webpack loaders 的 ImportMap
     loadersImportMap: {
-       // accept an umd script url or a script content string
+       // 接受 umd 脚本 url 或脚本内容字符串
       "xyzLoader": "https://x.y.z.js"
     }
 });
@@ -67,7 +70,7 @@ await project.install(JSON.stringify(packageLock));
 
 ### 4. 写入项目文件
 
-环境设置好后，您现在可以将源文件写入虚拟文件系统。
+环境设置好后，您现在可以将源文件写入真实文件系统。
 
 ```typescript
 // 一个包含文件路径及其内容的对象。
@@ -107,7 +110,9 @@ for (const filePath in demoFiles) {
 }
 ```
 
-您可以像写入其他源文件一样，将此文件写入虚拟文件系统：
+若要使用 loader，请将其添加至 `package.json` 的 `devDependencies` 中并安装，这与标准 Webpack 项目的依赖管理方式一致。此外，由于 `@utoo/web` 遵循 `loader-runner` 的机制与上下文来执行 loader，您还需要同时安装 `loader-runner`。
+
+您可以像写入其他源文件一样，将此文件写入真实文件系统：
 
 ```typescript
 await project.writeFile('utoopack.json', JSON.stringify(utoopackConfig, null, 2));
@@ -125,9 +130,10 @@ await project.writeFile('utoopack.json', JSON.stringify(utoopackConfig, null, 2)
 
 **选项:**
 
-* `cwd` (string, 必需): 在虚拟文件系统中作为项目根目录的绝对路径（例如 `/my-app`）。
+* `cwd` (string, 必需): 在真实文件系统中作为项目根目录的绝对路径（例如 `/my-app`）。
 * `workerUrl` (string, 可选): 指定 `Project` 实例核心逻辑实际运行的 Worker 线程的 URL。您在主线程中与之交互的 `Project` 对象是一个代理，它将所有核心任务（如文件系统操作）委托给此 Worker。这种架构是保持 UI 响应的关键。
 * `threadWorkerUrl` (string, 必需): 指定一个专用于处理 CPU 密集型任务（如打包和编译）的独立 Worker 线程的 URL。这将重量级的构建过程与 `Project` 的主要逻辑 Worker 隔离开来。
+* `loaderWorkerUrl` (string, 必需): 指定一个专用于处理 webpack 加载器的独立 Worker 线程的 URL。
 * `serviceWorker` (object, 可选):
   * `url` (string, 必需): Service Worker 脚本的 URL。
   * `scope` (string, 必需): Service Worker 将拦截请求的 URL 范围。这是您预览环境的基路径。
@@ -139,7 +145,7 @@ await project.writeFile('utoopack.json', JSON.stringify(utoopackConfig, null, 2)
 
 #### `project.writeFile(path, content)`
 
-将内容写入虚拟文件系统中的文件。如果文件不存在，将会被创建。
+将内容写入真实文件系统中的文件。如果文件不存在，将会被创建。
 
 * `path` (string): 文件的绝对路径（例如 `/src/index.js`）。
 * `content` (string | Buffer): 要写入的内容。
@@ -301,11 +307,20 @@ import "@utoo/web/esm/threadWorker";
 
 #### 3. 服务 Worker (`serviceWorker.ts`)
 
-此文件为 Service Worker 提供逻辑，该 Worker 从虚拟文件系统提供预览。
+此文件为 Service Worker 提供逻辑，该 Worker 从真实文件系统提供预览。
 
 ```typescript
 // src/serviceWorker.ts
 import "@utoo/web/esm/serviceWorker";
+```
+
+#### 4. 加载器 Worker (`loaderWorker.ts`)
+
+此文件为加载器 Worker 提供逻辑，该 Worker 处理 webpack 加载器。
+
+```typescript
+// src/loaderWorker.ts
+import "@utoo/web/esm/loaderWorker";
 ```
 
 您的构建设置应配置为将这些文件输出到主应用程序可以访问的位置，以便您可以将其 URL 提供给 `UtooProject` 构造函数。
