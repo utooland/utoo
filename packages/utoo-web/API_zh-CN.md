@@ -43,7 +43,7 @@ const project = new UtooProject({
     },
     // 运行 webpack loaders 的 ImportMap
     loadersImportMap: {
-       // 接受 umd 脚本 url 或脚本内容字符串
+      // 接受 umd 脚本 url 或脚本内容字符串
       "xyzLoader": "https://x.y.z.js"
     }
 });
