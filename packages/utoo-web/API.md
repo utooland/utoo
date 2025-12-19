@@ -4,11 +4,21 @@
 
 ## Core Concepts
 
-1. **Real File System**: The project lives in the browser's Origin Private File System (OPFS). `Project` provides a Node.js-like `fs` interface.
+1. **Real File System**: The project lives in the browser's [Origin Private File System (OPFS)](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system). `Project` provides a Node.js-like `fs` interface.
 2. **Project Main Worker**: The `Project` instance runs in a Web Worker. The main thread object is a proxy, keeping the UI responsive.
 3. **Thread Worker**: Heavy tasks (bundling, compilation) run in a dedicated Web Worker powered by a ported `tokio` runtime.
 4. **Loader Worker**: Executes Webpack loaders in a dedicated worker with Node.js polyfills.
 5. **Service Worker**: Acts as a local server to intercept requests and serve built files for preview.
+
+## File Watching & Incremental Builds
+
+`@utoo/web` leverages the modern [FileSystemObserver API](https://github.com/whatwg/fs/blob/main/proposals/FileSystemObserver.md) to implement efficient file system watching directly in the browser. This is crucial for supporting Turbopack's incremental build capabilities.
+
+1.  **FileSystemObserver Integration**: The `tokio-fs-ext` crate (used by `utoo-wasm`) provides a `watch` module that wraps the `FileSystemObserver` API. This allows the Rust code to receive notifications about file changes in the Origin Private File System (OPFS).
+2.  **Offloading to Turbopack**: When a file change is detected, the event is propagated through the `OpfsOffload` layer to the Turbopack engine running in the WASM environment.
+3.  **Incremental Compilation**: Turbopack's architecture is built on a reactive graph. When it receives a file change event, it invalidates only the affected parts of the dependency graph. This triggers a re-computation (rebuild) of only the changed modules and their dependents, resulting in extremely fast updates, similar to Hot Module Replacement (HMR) in native development environments.
+
+This architecture ensures that `@utoo/web` delivers a responsive development experience even for large projects running entirely within the browser.
 
 ---
 
