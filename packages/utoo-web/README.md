@@ -11,6 +11,7 @@
 - 🛠️ **Web Worker Support**: Offloads heavy bundling tasks to background workers to keep the UI responsive.
 - 🔌 **Webpack Compatibility**: Supports a subset of Webpack configurations in the browser.
 - 📂 **Real File System**: Uses Origin Private File System (OPFS) for a Node.js-like file system experience.
+- 📦 **Browser Dependency Resolution**: Resolve dependencies directly from `package.json` without needing a pre-existing lock file. Supports custom registries (npm, npmmirror, private registries).
 
 ## 🧠 Core Concepts
 

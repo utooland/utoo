@@ -57,9 +57,28 @@ const project = new UtooProject({
 await project.installServiceWorker();
 ```
 
-### 3. 安装依赖
+### 3. 解析和安装依赖
 
-`@utoo/web` 可以从 `package-lock.json` 安装依赖，这和 `npm install` 过程一致。我们很快将会支持无需 `package-lock.json` 就能安装依赖。
+`@utoo/web` 提供两种依赖管理方式：
+
+#### 方式 A：从 package.json 生成 lock 文件（推荐）
+
+使用 `deps()` 方法直接从 `package.json` 解析依赖。这会生成一个与 `package-lock.json` 兼容的 lock 文件，无需预先准备 lock 文件。
+
+```typescript
+// 从 package.json 解析依赖
+const packageLock = await project.deps({
+    registry: "https://registry.npmmirror.com", // 可选：自定义 registry
+    concurrency: 20, // 可选：并发请求数（默认：20）
+});
+
+// 安装解析后的依赖
+await project.install(packageLock);
+```
+
+#### 方式 B：使用已有的 package-lock.json
+
+如果你已经有 `package-lock.json`，可以直接使用：
 
 ```typescript
 // 将您的 package-lock.json 作为 JSON 对象导入。
@@ -184,17 +203,49 @@ await project.writeFile('utoopack.json', JSON.stringify(utoopackConfig, null, 2)
 
 * `path` (string): 要删除的目录的路径。
 
+### 依赖管理
+
+#### `project.deps(options?)`
+
+从项目的 `package.json` 解析依赖并生成 lock 文件字符串。这使得在浏览器中直接进行依赖解析成为可能，无需预先准备 `package-lock.json`。
+
+**选项：**
+
+* `registry` (string, 可选): 用于获取包元数据的 npm registry URL。默认为 `https://registry.npmmirror.com`。你可以使用任何与 npm 兼容的 registry，包括私有 registry。
+* `concurrency` (number, 可选): 获取包元数据的最大并发网络请求数。默认为 `20`。
+
+**返回值：** `Promise<string>` - 表示解析后的依赖 lock 文件的 JSON 字符串，与 `package-lock.json` 格式兼容。
+
+**示例：**
+
+```typescript
+// 使用默认 registry（npmmirror）
+const lockFile = await project.deps();
+
+// 使用官方 npm registry
+const lockFile = await project.deps({
+    registry: "https://registry.npmjs.org"
+});
+
+// 使用私有 registry 并自定义并发数
+const lockFile = await project.deps({
+    registry: "https://npm.mycompany.com",
+    concurrency: 10
+});
+```
+
+#### `project.install(packageLockJsonString, maxConcurrentDownloads?)`
+
+根据 lock 文件字符串填充 `node_modules` 目录。
+
+* `packageLockJsonString` (string): 依赖 lock 文件的 JSON 字符串（来自 `deps()` 或 `package-lock.json` 文件）。
+* `maxConcurrentDownloads` (number, 可选): 最大并发包下载数。
+
 ### 预览功能
 
 #### `project.installServiceWorker()`
 
 注册并激活构造函数中定义的 Service Worker。这对于预览功能至关重要。
-
-#### `project.install(packageLockJsonString)`
-
-根据 `package-lock.json` 填充 `node_modules` 目录。
-
-* `packageLockJsonString` (string): `package-lock.json` 文件的 JSON 字符串。
 
 #### `project.build()`
 
