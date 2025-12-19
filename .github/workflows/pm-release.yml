@@ -68,7 +68,7 @@ jobs:
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
           apt-get update && apt-get install -y gh
 
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Configure git safe directory
         run: |
@@ -92,12 +92,15 @@ jobs:
           rm crates/pm/Cargo.toml.bak
 
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
           toolchain: nightly-2025-10-27
-          override: true
-          target: ${{ matrix.target }}
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pm-release-${{ matrix.target }}
 
       - name: Add cross-compilation target for x86_64 on macOS
         if: ${{ matrix.target == 'x86_64-apple-darwin' }}

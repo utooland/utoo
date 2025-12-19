@@ -59,6 +59,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: 'npm'
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -68,6 +69,8 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pm-e2e-${{ matrix.settings.target }}
 
       - name: Build utoo-pm
         run: cargo build --release --target ${{ matrix.settings.target }} --bin utoo -p utoo-pm

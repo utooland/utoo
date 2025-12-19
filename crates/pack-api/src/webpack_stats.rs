@@ -6,7 +6,9 @@ use turbo_rcstr::RcStr;
 use turbo_tasks::{FxIndexMap, FxIndexSet, ResolvedVc, TryJoinIterExt, Vc};
 use turbo_tasks_fs::FileSystemPath;
 use turbopack::css::chunk::CssChunk;
-use turbopack_browser::ecmascript::{EcmascriptBrowserChunk, EcmascriptBrowserEvaluateChunk};
+use turbopack_browser::ecmascript::{
+    EcmascriptBrowserChunk, EcmascriptBrowserEvaluateChunk, EcmascriptDevChunkList,
+};
 use turbopack_core::{
     chunk::{Chunk, ChunkItem, ChunkableModule},
     output::{OutputAsset, OutputAssetsReference},
@@ -146,6 +148,27 @@ where
                         .or_default()
                         .insert(chunk_ident.clone());
                 });
+        }
+
+        if let Some(chunk_list) = ResolvedVc::try_downcast_type::<EcmascriptDevChunkList>(asset) {
+            let chunk_list_path_full = chunk_list.path().await?;
+            let chunk_list_ident = dist_root
+                .get_relative_path_to(&chunk_list_path_full)
+                .unwrap_or_else(|| chunk_list_path_full.path.clone());
+            chunks.push(WebpackStatsChunk {
+                size: asset_len,
+                files: vec![chunk_list_ident.clone()],
+                id: chunk_list_ident.clone(),
+                ..Default::default()
+            });
+
+            // Add dev chunk list to existing entry-points (only in dev mode)
+            for entrypoint in entrypoints.values_mut() {
+                entrypoint.chunks.push(chunk_list_ident.clone());
+                entrypoint.assets.push(WebpackStatsEntrypointAssets {
+                    name: chunk_list_ident.clone(),
+                });
+            }
         }
 
         if let Some(chunk) = ResolvedVc::try_downcast_type::<CssChunk>(asset) {

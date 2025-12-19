@@ -80,6 +80,7 @@ jobs:
         if: ${{ !matrix.settings.docker }}
         with:
           node-version: 20
+          cache: 'npm'
       
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -90,6 +91,8 @@ jobs:
       
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pm-ci-${{ matrix.settings.target }}
       
       - name: Setup toolchain
         run: ${{ matrix.settings.setup }}

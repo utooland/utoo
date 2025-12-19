@@ -12,15 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: nightly-2025-09-21
-          override: true
+          toolchain: nightly-2025-10-27
           components: rustfmt
       - name: Check formatting
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          toolchain: nightly-2025-10-27
-          args: --check
+        run: cargo fmt --all -- --check

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [
+        "dist/**",
+        "lib/**",
+        "esm/**",
+        "cjs/**",
+        "binding.js",
+        "binding.d.ts",
+        "oclif.manifest.json"
+      ]
+    },
+    "build:js": {
+      "dependsOn": ["^build"],
+      "outputs": ["cjs/**", "esm/**"]
+    },
+    "tsc": {
+      "dependsOn": ["^build"],
+      "outputs": ["esm/**", "cjs/**"]
+    },
+    "test": {
+      "dependsOn": ["build"],
+      "outputs": [],
+      "inputs": ["src/**/*.tsx", "src/**/*.ts", "test/**/*.ts", "test/**/*.tsx"]
+    },
+    "lint": {
+      "outputs": []
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "clean": {
+      "cache": false
+    }
+  }
+}

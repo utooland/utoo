@@ -3,8 +3,10 @@
   "version": "0.0.1",
   "main": "cjs/index.js",
   "module": "esm/index.js",
+  "types": "esm/index.d.ts",
   "exports": {
     ".": {
+      "types": "./esm/index.d.ts",
       "import": "./esm/index.js",
       "require": "./cjs/index.js"
     },
@@ -72,14 +74,15 @@
     "node": ">= 20"
   },
   "scripts": {
-    "pretsc": "npm run build --workspace @utoo/pack-shared",
+    "build": "npm run build:binding && npm run build:cjs && npm run build:esm",
+    "build:js": "npm run build:cjs && npm run build:esm",
     "build:cjs": "rm -rf cjs && tsc -p ./tsconfig.json --module commonjs --outDir cjs && cp src/*.d.ts cjs/",
     "build:esm": "rm -rf esm && tsc -p ./tsconfig.json --module esnext --outDir esm && cp src/*.d.ts esm/",
-    "build:local": "npm run build:binding:local && npm run pretsc && npm run build:cjs && npm run build:esm && cp src/*.node cjs/ && cp src/*.node esm/",
+    "build:local": "npm run build:binding:local && npx turbo run build --filter=@utoo/pack-shared && npm run build:cjs && npm run build:esm && cp src/*.node cjs/ && cp src/*.node esm/",
     "artifacts": "napi artifacts --dir ./src --dist npm",
     "build:binding": "napi build src --platform --release -p pack-napi --cargo-cwd ../../ --cargo-name pack_napi --features plugin --js binding.js --dts binding.d.ts",
     "build:binding:local": "napi build src --platform --profile release-local -p pack-napi --cargo-cwd ../../ --cargo-name pack_napi --features plugin --js binding.js --dts binding.d.ts",
-    "prepublishOnly": "npm run pretsc && npm run build:esm && npm run build:cjs && napi prepublish -t npm --skip-gh-release",
+    "prepublishOnly": "turbo run build:js --filter=@utoo/pack && napi prepublish -t npm --skip-gh-release",
     "version": "napi version",
     "generate-features-list": "node ./scripts/generate-feature-list.js"
   },
