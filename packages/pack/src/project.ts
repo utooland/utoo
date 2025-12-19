@@ -81,8 +81,12 @@ function ensureLoadersHaveSerializableOptions(
 }
 
 async function serializeConfig(config: ConfigComplete): Promise<string> {
-  let configSerializable = { ...config };
-  delete configSerializable.html;
+  const configSerializable = { ...config };
+
+  configSerializable.entry = configSerializable.entry.map((entry) => {
+    const { html, ...rest } = entry;
+    return rest;
+  });
 
   if (configSerializable.module?.rules) {
     ensureLoadersHaveSerializableOptions(configSerializable.module.rules);
