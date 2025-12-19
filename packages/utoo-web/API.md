@@ -43,7 +43,7 @@ const project = new UtooProject({
     },
     // ImportMap for running webpack loaders
     loadersImportMap: {
-       // accept an umd script url or a script content string
+      // accept an umd script url or a script content string
       "xyzLoader": "https://x.y.z.js"
     }
 });
