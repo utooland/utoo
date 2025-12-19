@@ -381,7 +381,7 @@ pub async fn project_new(
     let options: ProjectOptions = options.into();
     let container = turbo_tasks
         .run_once(async move {
-            let project = ProjectContainer::new("utoo-pack".into(), options.dev);
+            let project = ProjectContainer::new("utoopack".into(), options.dev);
             let project = project.to_resolved().await?;
             project.initialize(options).await?;
             Ok(project)

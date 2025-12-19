@@ -290,7 +290,7 @@ export interface ProjectOptions {
   };
 
   /**
-   * The mode of utoo-pack.
+   * The mode of utoopack.
    */
   dev?: boolean;
 

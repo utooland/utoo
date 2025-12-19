@@ -105,7 +105,7 @@ export async function startServer(
 ): Promise<void> {
   let { port, hostname, selfSignedCertificate } = serverOptions;
 
-  process.title = "utoo-pack-dev-server";
+  process.title = "utoopack-dev-server";
   let handlersReady = () => {};
   let handlersError = () => {};
 

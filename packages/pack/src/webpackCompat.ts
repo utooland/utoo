@@ -271,7 +271,7 @@ function compatExternals(
               const match = value.match(/^(?:script\s+)?(.+?)@(.+)$/);
               if (match) {
                 const [, globalName, scriptUrl] = match;
-                // Use utoo-pack string format: "script globalName@url"
+                // Use utoopack string format: "script globalName@url"
                 externals![key] = `script ${globalName}@${scriptUrl}`;
               } else {
                 externals![key] = value;
@@ -291,7 +291,7 @@ function compatExternals(
                 first.includes("://") &&
                 typeof second === "string"
               ) {
-                // Use utoo-pack object format for script
+                // Use utoopack object format for script
                 externals![key] = {
                   root: second,
                   type: "script",
@@ -338,7 +338,7 @@ function compatExternals(
                 externals![key] = key;
               }
             } else {
-              // Treat as utoo-pack specific configuration (might already be in correct format)
+              // Treat as utoopack specific configuration (might already be in correct format)
               externals![key] = value as ExternalConfig;
             }
           } else {
