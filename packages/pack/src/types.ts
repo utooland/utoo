@@ -52,6 +52,7 @@ export interface EntryOptions {
   name?: string;
   import: string;
   library?: LibraryOptions;
+  html?: HtmlConfig;
 }
 
 export interface LibraryOptions {
@@ -205,7 +206,6 @@ export interface ConfigComplete {
   devServer?: { hot: boolean };
   cacheHandler?: string;
   experimental?: ExperimentalConfig;
-  html?: HtmlConfig | HtmlConfig[];
 }
 
 export interface HtmlConfig {
@@ -214,7 +214,6 @@ export interface HtmlConfig {
   filename?: string;
   title?: string;
   inject?: boolean | "body" | "head";
-  publicPath?: string;
   scriptLoading?: "blocking" | "defer" | "module";
   meta?: Record<string, string | { [key: string]: string }>;
 }

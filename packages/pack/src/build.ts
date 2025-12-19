@@ -56,7 +56,10 @@ async function buildInternal(
       buildId: bundleOptions.buildId || nanoid(),
       config: {
         ...bundleOptions.config,
-        stats: true,
+        stats:
+          Boolean(process.env.ANALYZE) ||
+          bundleOptions.config.stats ||
+          bundleOptions.config.entry.some((e) => !!e.html),
       },
       projectPath: projectPath || process.cwd(),
       rootPath: rootPath || projectPath || process.cwd(),
@@ -71,11 +74,16 @@ async function buildInternal(
 
   handleIssues(entrypoints.issues);
 
-  if (bundleOptions.config.html) {
-    const htmlConfigs = Array.isArray(bundleOptions.config.html)
+  const htmlConfigs = [
+    ...(Array.isArray(bundleOptions.config.html)
       ? bundleOptions.config.html
-      : [bundleOptions.config.html];
+      : bundleOptions.config.html
+        ? [bundleOptions.config.html]
+        : []),
+    ...bundleOptions.config.entry.filter((e) => !!e.html).map((e) => e.html!),
+  ];
 
+  if (htmlConfigs.length > 0) {
     const assets = { js: [] as string[], css: [] as string[] };
     // if (entrypoints.apps) {
     //   for (const app of entrypoints.apps) {

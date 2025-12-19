@@ -15,7 +15,7 @@ export class HtmlPlugin {
       ? path.resolve(process.cwd(), this.config.template)
       : undefined;
 
-    const publicPath = this.config.publicPath || globalPublicPath || "";
+    const publicPath = globalPublicPath || "";
 
     let htmlContent = "";
     if (this.config.templateContent) {

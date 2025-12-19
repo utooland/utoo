@@ -140,7 +140,10 @@ export async function createHotReloader(
       config: {
         ...bundleOptions.config,
         mode: "development",
-        stats: true,
+        stats:
+          Boolean(process.env.ANALYZE) ||
+          bundleOptions.config.stats ||
+          bundleOptions.config.entry.some((e) => !!e.html),
         optimization: {
           ...bundleOptions.config.optimization,
           minify: false,
@@ -275,11 +278,18 @@ export async function createHotReloader(
         ),
       );
 
-      if (bundleOptions.config.html) {
-        const htmlConfigs = Array.isArray(bundleOptions.config.html)
+      const htmlConfigs = [
+        ...(Array.isArray(bundleOptions.config.html)
           ? bundleOptions.config.html
-          : [bundleOptions.config.html];
+          : bundleOptions.config.html
+            ? [bundleOptions.config.html]
+            : []),
+        ...bundleOptions.config.entry
+          .filter((e) => !!e.html)
+          .map((e) => e.html!),
+      ];
 
+      if (htmlConfigs.length > 0) {
         const outputDir =
           bundleOptions.config.output?.path || join(process.cwd(), "dist");
         const publicPath = bundleOptions.config.output?.publicPath;
