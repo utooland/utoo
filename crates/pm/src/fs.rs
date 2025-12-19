@@ -4,17 +4,22 @@
 //! This module serves as a dispatch layer, making it easy to migrate to tokio-fs-ext
 //! while maintaining fallbacks for APIs not yet supported.
 
+// Some exports are only used on specific platforms (e.g., hard_link/copy on non-Unix)
+#![allow(unused_imports)]
+
 // Re-export tokio-fs-ext APIs
 pub use tokio_fs_ext::{
     // Metadata operations
     canonicalize,
     // Directory operations
+    copy,
     create_dir_all,
     metadata,
     read_dir,
     read_link,
     // File operations
     read_to_string,
+    remove_dir,
     remove_dir_all,
     remove_file,
     rename,
@@ -24,7 +29,7 @@ pub use tokio_fs_ext::{
 };
 
 // Fallback to tokio::fs for operations not in tokio-fs-ext
-pub use tokio::fs::{File, set_permissions};
+pub use tokio::fs::{File, hard_link, set_permissions};
 
 // Unix-only symlink
 #[cfg(unix)]
