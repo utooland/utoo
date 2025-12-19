@@ -11,6 +11,7 @@ import { createHotReloader } from "./hmr";
 import { createSelfSignedCertificate } from "./mkcert";
 import { BundleOptions } from "./types";
 import { blockStdout, getPackPath } from "./util";
+import { printServerInfo } from "./utils/print-server-info";
 import { compatOptionsFromWebpack, WebpackConfig } from "./webpackCompat";
 import { xcodeProfilingReady } from "./xcodeProfile";
 
@@ -208,11 +209,11 @@ export async function startServer(
         );
       }
 
-      if (process.env.TURBOPACK_DEBUG_JS) {
-        console.log(
-          `Listening on ${serverOptions.https ? "https" : "http"}://${formattedHostname}:${port} ...`,
-        );
-      }
+      printServerInfo(
+        serverOptions.https ? "https" : "http",
+        formattedHostname,
+        port,
+      );
 
       try {
         let cleanupStarted = false;

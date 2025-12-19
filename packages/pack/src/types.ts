@@ -205,6 +205,18 @@ export interface ConfigComplete {
   devServer?: { hot: boolean };
   cacheHandler?: string;
   experimental?: ExperimentalConfig;
+  html?: HtmlConfig | HtmlConfig[];
+}
+
+export interface HtmlConfig {
+  template?: string;
+  templateContent?: string;
+  filename?: string;
+  title?: string;
+  inject?: boolean | "body" | "head";
+  publicPath?: string;
+  scriptLoading?: "blocking" | "defer" | "module";
+  meta?: Record<string, string | { [key: string]: string }>;
 }
 
 export interface StyledComponentsConfig {

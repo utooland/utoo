@@ -3,19 +3,19 @@
   "rootPath": "../../",
   "projectPath": "./",
   "config": {
+    "output": {
+      "clean": true
+    },
     "entry": [
       {
-        "import": "./src/index.ts",
-        "library": {
-          "name": "with-style-loader"
-        }
+        "import": "./index.html",
+        "name": "alias-demo"
       }
     ],
-    "output": {
-      "path": "./dist"
-    },
-    "styles": {
-      "inlineCss": {}
+    "resolve": {
+      "alias": {
+        "hello-a": "./src/a.ts"
+      }
     },
     "optimization": {
       "minify": false

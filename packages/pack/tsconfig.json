@@ -9,9 +9,7 @@
     "strict": true,
     "skipLibCheck": true,
     "lib": ["dom", "dom.iterable", "esnext"],
-    "paths": {
-      "@utoo/pack-shared": ["../pack-shared/src/index.ts"]
-    }
+    "outDir": "cjs"
   },
   "include": ["src"],
   "exclude": ["es", "cjs"]

@@ -1,12 +1,14 @@
 import { handleIssues } from "@utoo/pack-shared";
 import { spawn } from "child_process";
-import { existsSync } from "fs";
+import fs, { existsSync } from "fs";
 import { nanoid } from "nanoid";
 import { join } from "path";
 import { findRootDir } from "./find-root";
+import { HtmlPlugin } from "./plugins/HtmlPlugin";
 import { projectFactory } from "./project";
 import { BundleOptions } from "./types";
 import { blockStdout, createDefineEnv, getPackPath } from "./util";
+import { processHtmlEntry } from "./utils/html-entry";
 import { compatOptionsFromWebpack, WebpackConfig } from "./webpackCompat";
 import { xcodeProfilingReady } from "./xcodeProfile";
 
@@ -36,6 +38,8 @@ async function buildInternal(
     await xcodeProfilingReady();
   }
 
+  processHtmlEntry(bundleOptions.config, projectPath || process.cwd());
+
   const createProject = projectFactory();
   const project = await createProject(
     {
@@ -52,7 +56,7 @@ async function buildInternal(
       buildId: bundleOptions.buildId || nanoid(),
       config: {
         ...bundleOptions.config,
-        stats: Boolean(process.env.ANALYZE) || bundleOptions.config.stats,
+        stats: true,
       },
       projectPath: projectPath || process.cwd(),
       rootPath: rootPath || projectPath || process.cwd(),
@@ -66,6 +70,50 @@ async function buildInternal(
   const entrypoints = await project.writeAllEntrypointsToDisk();
 
   handleIssues(entrypoints.issues);
+
+  if (bundleOptions.config.html) {
+    const htmlConfigs = Array.isArray(bundleOptions.config.html)
+      ? bundleOptions.config.html
+      : [bundleOptions.config.html];
+
+    const assets = { js: [] as string[], css: [] as string[] };
+    // if (entrypoints.apps) {
+    //   for (const app of entrypoints.apps) {
+    //     const written = await app.writeToDisk();
+    //     written.clientPaths.forEach((p) => {
+    //       if (p.endsWith(".js")) assets.js.push(p);
+    //       if (p.endsWith(".css")) assets.css.push(p);
+    //     });
+    //   }
+    // }
+
+    const outputDir =
+      bundleOptions.config.output?.path || join(process.cwd(), "dist");
+
+    if (assets.js.length === 0 && assets.css.length === 0) {
+      const statsPath = join(outputDir, "stats.json");
+      if (existsSync(statsPath)) {
+        try {
+          const stats = JSON.parse(fs.readFileSync(statsPath, "utf-8"));
+          if (stats.assets) {
+            stats.assets.forEach((asset: any) => {
+              if (asset.name.endsWith(".js")) assets.js.push(asset.name);
+              if (asset.name.endsWith(".css")) assets.css.push(asset.name);
+            });
+          }
+        } catch (e) {
+          console.warn("Failed to read stats.json for assets discovery", e);
+        }
+      }
+    }
+
+    const publicPath = bundleOptions.config.output?.publicPath;
+
+    for (const config of htmlConfigs) {
+      const plugin = new HtmlPlugin(config);
+      await plugin.generate(outputDir, assets, publicPath);
+    }
+  }
 
   if (process.env.ANALYZE) {
     await analyzeBundle(bundleOptions.config.output?.path || "dist");

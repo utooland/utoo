@@ -21,6 +21,9 @@
       "filename": "[name].[contenthash:8].js",
       "clean": true
     },
+    "html": {
+      "title": "with-library"
+    },
     "optimization": {
       "moduleIds": "named",
       "minify": false

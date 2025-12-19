@@ -5,7 +5,7 @@
   "config": {
     "entry": [
       {
-        "import": "./src/index.tsx",
+        "import": "./index.html",
         "name": "index"
       }
     ],

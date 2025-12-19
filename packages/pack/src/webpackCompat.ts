@@ -5,6 +5,7 @@ import {
   BundleOptions,
   ConfigComplete,
   ExternalConfig,
+  HtmlConfig,
   TurbopackRuleConfigItem,
 } from "./types";
 
@@ -71,6 +72,7 @@ export function compatOptionsFromWebpack(
       optimization: compatOptimization(optimization),
       define: compatFromWebpackPlugin(plugins, compatDefine),
       stats: compatStats(stats),
+      html: compatFromWebpackPlugins(plugins, compatHtml),
     },
     buildId: webpackConfig.name,
   };
@@ -159,19 +161,52 @@ function compatEntry(webpackEntry: WebpackConfig["entry"]) {
 
 type MaybeWebpackPluginInstance = undefined | webpack.WebpackPluginInstance;
 
-type WebpackPluginOptionsPicker<R> = ((p: MaybeWebpackPluginInstance) => R) & {
+type WebpackPluginOptionsPicker<R> = ((
+  p: MaybeWebpackPluginInstance,
+) => R | undefined) & {
   pluginName: string;
 };
 
 function compatFromWebpackPlugin<R>(
   webpackPlugins: webpack.Configuration["plugins"],
   picker: WebpackPluginOptionsPicker<R>,
-): R {
+): R | undefined {
   const plugin = webpackPlugins?.find(
     (p) =>
       p && typeof p === "object" && p.constructor.name === picker.pluginName,
   ) as MaybeWebpackPluginInstance;
   return picker(plugin);
+}
+
+function compatFromWebpackPlugins<R>(
+  webpackPlugins: webpack.Configuration["plugins"],
+  picker: WebpackPluginOptionsPicker<R>,
+): R | R[] | undefined {
+  const plugins = webpackPlugins?.filter(
+    (p) =>
+      p && typeof p === "object" && p.constructor.name === picker.pluginName,
+  ) as MaybeWebpackPluginInstance[];
+
+  if (!plugins || plugins.length === 0) {
+    return undefined;
+  }
+
+  const results = plugins.map(picker).filter((r): r is R => r !== undefined);
+  if (results.length === 0) return undefined;
+  return results.length === 1 ? results[0] : results;
+}
+
+compatHtml.pluginName = "HtmlWebpackPlugin";
+function compatHtml(
+  maybeWebpackPluginInstance: MaybeWebpackPluginInstance,
+): HtmlConfig | undefined {
+  if (!maybeWebpackPluginInstance) {
+    return undefined;
+  }
+  return (
+    (maybeWebpackPluginInstance as any).userOptions ||
+    (maybeWebpackPluginInstance as any).options
+  );
 }
 
 compatDefine.pluginName = "DefinePlugin";

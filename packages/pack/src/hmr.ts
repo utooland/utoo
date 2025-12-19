@@ -1,12 +1,16 @@
+import fs, { existsSync } from "fs";
 import { IncomingMessage } from "http";
 import { nanoid } from "nanoid";
 import type { Socket } from "net";
+import { join } from "path";
 import { Duplex } from "stream";
 import type webpack from "webpack";
 import ws from "ws";
+import { HtmlPlugin } from "./plugins/HtmlPlugin";
 import { projectFactory } from "./project";
 import { BundleOptions, Project, Update as TurbopackUpdate } from "./types";
 import { createDefineEnv, debounce, getPackPath, processIssues } from "./util";
+import { processHtmlEntry } from "./utils/html-entry";
 
 const wsServer = new ws.Server({ noServer: true });
 
@@ -116,6 +120,8 @@ export async function createHotReloader(
   projectPath?: string,
   rootPath?: string,
 ): Promise<HotReloaderInterface> {
+  processHtmlEntry(bundleOptions.config, projectPath || process.cwd());
+
   const createProject = projectFactory();
 
   const project = await createProject(
@@ -134,6 +140,7 @@ export async function createHotReloader(
       config: {
         ...bundleOptions.config,
         mode: "development",
+        stats: true,
         optimization: {
           ...bundleOptions.config.optimization,
           minify: false,
@@ -255,11 +262,50 @@ export async function createHotReloader(
         );
       }
 
+      const assets = { js: [] as string[], css: [] as string[] };
       await Promise.all(
         entrypoints.apps.map((l) =>
-          l.writeToDisk().then((res) => processIssues(res, true, true)),
+          l.writeToDisk().then((res) => {
+            processIssues(res, true, true);
+            res.clientPaths.forEach((p) => {
+              if (p.endsWith(".js")) assets.js.push(p);
+              if (p.endsWith(".css")) assets.css.push(p);
+            });
+          }),
         ),
       );
+
+      if (bundleOptions.config.html) {
+        const htmlConfigs = Array.isArray(bundleOptions.config.html)
+          ? bundleOptions.config.html
+          : [bundleOptions.config.html];
+
+        const outputDir =
+          bundleOptions.config.output?.path || join(process.cwd(), "dist");
+        const publicPath = bundleOptions.config.output?.publicPath;
+
+        if (assets.js.length === 0 && assets.css.length === 0) {
+          const statsPath = join(outputDir, "stats.json");
+          if (existsSync(statsPath)) {
+            try {
+              const stats = JSON.parse(fs.readFileSync(statsPath, "utf-8"));
+              if (stats.assets) {
+                stats.assets.forEach((asset: any) => {
+                  if (asset.name.endsWith(".js")) assets.js.push(asset.name);
+                  if (asset.name.endsWith(".css")) assets.css.push(asset.name);
+                });
+              }
+            } catch (e) {
+              console.warn("Failed to read stats.json for assets discovery", e);
+            }
+          }
+        }
+
+        for (const config of htmlConfigs) {
+          const plugin = new HtmlPlugin(config);
+          await plugin.generate(outputDir, assets, publicPath);
+        }
+      }
 
       currentEntriesHandlingResolve!();
       currentEntriesHandlingResolve = undefined;

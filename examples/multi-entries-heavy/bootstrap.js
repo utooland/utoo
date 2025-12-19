@@ -40,7 +40,7 @@ for (let i = 0; i < total; i++) {
   });
 
   fs.writeFileSync(
-    path.join(__dirname, "project_options.json"),
+    path.join(__dirname, "utoopack.json"),
     JSON.stringify(projectOptions, null, 2),
   );
 }

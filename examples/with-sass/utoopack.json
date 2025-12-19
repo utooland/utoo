@@ -4,7 +4,7 @@
   "config": {
     "entry": [
       {
-        "import": "./src/index.ts"
+        "import": "./index.html"
       }
     ],
     "output": {
