@@ -5,7 +5,7 @@ use std::path::Path;
 
 /// Read and parse a JSON file into the specified type
 pub async fn read_json_file<T: DeserializeOwned>(path: &Path) -> Result<T> {
-    let content = tokio::fs::read_to_string(path)
+    let content = crate::fs::read_to_string(path)
         .await
         .with_context(|| format!("Failed to read file {}", path.display()))?;
 

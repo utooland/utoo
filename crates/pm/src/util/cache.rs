@@ -1,4 +1,4 @@
-use tokio::fs;
+use crate::fs;
 
 pub use super::config::get_cache_dir;
 
@@ -62,8 +62,8 @@ pub async fn collect_matching_versions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs;
     use tempfile::TempDir;
-    use tokio::fs;
 
     #[test]
     fn test_matches_pattern_wildcard() {

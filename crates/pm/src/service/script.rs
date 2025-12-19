@@ -1,9 +1,9 @@
+use crate::fs;
 use crate::model::package::PackageInfo;
 use anyhow::{Context, Result};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tokio::fs;
 use tokio::sync::OnceCell;
 
 use super::binary::get_envs;
@@ -181,7 +181,7 @@ impl ScriptService {
 
     pub async fn ensure_executable(target_path: &Path) -> Result<()> {
         // Early check for file existence (works on all platforms)
-        let metadata = tokio::fs::metadata(&target_path)
+        let metadata = crate::fs::metadata(&target_path)
             .await
             .context(format!("Failed to access file {}", target_path.display()))?;
 
@@ -229,7 +229,7 @@ impl ScriptService {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mut perms = tokio::fs::metadata(&target_path)
+            let mut perms = crate::fs::metadata(&target_path)
                 .await
                 .context(format!(
                     "Failed to get file permissions {}",
@@ -291,8 +291,8 @@ impl ScriptService {
 
         while let Some(path) = current_path {
             let bin_path = path.join("node_modules/.bin");
-            if tokio::fs::try_exists(&bin_path).await?
-                && let Ok(absolute_path) = tokio::fs::canonicalize(&bin_path).await
+            if crate::fs::try_exists(&bin_path).await?
+                && let Ok(absolute_path) = crate::fs::canonicalize(&bin_path).await
             {
                 bin_paths.push(absolute_path);
             }

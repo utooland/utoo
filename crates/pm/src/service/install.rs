@@ -64,7 +64,7 @@ fn should_omit_package(package: &Package, omit: &std::collections::HashSet<OmitT
 
 /// Check if a path is a symlink using async metadata
 async fn is_symlink_async(path: &Path) -> Result<bool> {
-    Ok(tokio::fs::symlink_metadata(path)
+    Ok(crate::fs::symlink_metadata(path)
         .await?
         .file_type()
         .is_symlink())
@@ -77,7 +77,7 @@ async fn remove_symlink_cross_platform(path: &Path) -> Result<(), std::io::Error
         use std::os::windows::fs::MetadataExt;
 
         // On Windows, we need to check if the symlink points to a directory
-        let metadata = tokio::fs::symlink_metadata(path).await?;
+        let metadata = crate::fs::symlink_metadata(path).await?;
 
         if !metadata.file_type().is_symlink() {
             return Ok(());
@@ -88,15 +88,15 @@ async fn remove_symlink_cross_platform(path: &Path) -> Result<(), std::io::Error
         let is_dir_symlink = (metadata.file_attributes() & FILE_ATTRIBUTE_DIRECTORY) != 0;
 
         if is_dir_symlink {
-            tokio::fs::remove_dir(path).await
+            crate::fs::remove_dir(path).await
         } else {
-            tokio::fs::remove_file(path).await
+            crate::fs::remove_file(path).await
         }
     }
 
     #[cfg(not(windows))]
     {
-        tokio::fs::remove_file(path).await
+        crate::fs::remove_file(path).await
     }
 }
 
@@ -107,7 +107,7 @@ async fn clean_node_modules_dir(
     valid_packages: &std::collections::HashSet<String>,
 ) -> Result<()> {
     // clean up symlinks for npminstall
-    if let Ok(mut entries) = tokio::fs::read_dir(node_modules).await {
+    if let Ok(mut entries) = crate::fs::read_dir(node_modules).await {
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
             if is_symlink_async(&path).await? {
@@ -150,7 +150,7 @@ async fn clean_directory(path: &Path) -> Result<()> {
 
 /// Clean up a scoped package directory
 async fn clean_scoped_package(path: &Path) -> Result<()> {
-    if let Ok(mut scope_entries) = tokio::fs::read_dir(path).await {
+    if let Ok(mut scope_entries) = crate::fs::read_dir(path).await {
         while let Ok(Some(scope_entry)) = scope_entries.next_entry().await {
             let scope_path = scope_entry.path();
 
@@ -176,7 +176,7 @@ async fn clean_legacy_npminstall_package(path: &Path, name: &str) -> Result<()> 
     let at_count = name.matches('@').count();
     if name.starts_with('_') && (at_count == 2 || at_count == 4) {
         tracing::debug!("Removing legacy package: {}", path.display());
-        if let Err(e) = tokio::fs::remove_dir_all(path).await {
+        if let Err(e) = crate::fs::remove_dir_all(path).await {
             tracing::debug!("Failed to remove legacy package {}: {}", path.display(), e);
         }
     }
@@ -220,14 +220,14 @@ async fn clean_unused_packages(
                         })?;
                         if !valid_packages.contains(pkg_path.to_string_lossy().as_ref()) {
                             tracing::debug!("Cleaning unused package: {pkg_name}");
-                            if let Err(e) = tokio::fs::remove_dir_all(pkg_dir).await {
+                            if let Err(e) = crate::fs::remove_dir_all(pkg_dir).await {
                                 tracing::debug!("Failed to remove {pkg_name}: {e}");
                             }
                         }
                     }
                     // Recursively check nested node_modules
                     let nested_node_modules = pkg_dir.join("node_modules");
-                    if tokio::fs::try_exists(&nested_node_modules).await? {
+                    if crate::fs::try_exists(&nested_node_modules).await? {
                         find_and_clean(&nested_node_modules, cwd, valid_packages).await?;
                     }
                 }
@@ -254,7 +254,7 @@ async fn clean_deps(groups: &HashMap<usize, Vec<(String, Package)>>, cwd: &Path)
     let workspaces = workspace::find_workspaces(cwd).await?;
     for (_, path, _) in workspaces {
         let workspace_node_modules = path.join("node_modules");
-        if tokio::fs::try_exists(&workspace_node_modules).await? {
+        if crate::fs::try_exists(&workspace_node_modules).await? {
             node_modules_dirs.push(workspace_node_modules.clone());
             tracing::debug!(
                 "add workspace node_modules: {:?}",
@@ -342,7 +342,7 @@ pub async fn install_packages(
                     let cache_path = cache_dir.join(format!("{name}/{version}"));
                     let cache_flag_path = cache_dir.join(format!("{name}/{version}/_resolved"));
                     let cwd_clone = cwd.to_path_buf();
-                    let should_resolve = !tokio::fs::try_exists(&cache_flag_path).await?;
+                    let should_resolve = !crate::fs::try_exists(&cache_flag_path).await?;
                     let semaphore = Arc::clone(&semaphore);
 
                     let task = tokio::spawn(async move {
@@ -359,7 +359,7 @@ pub async fn install_packages(
                                         tracing::debug!("{name} has install script");
                                         let has_install_script_flag_path =
                                             cache_path.join("_hasInstallScript");
-                                        tokio::fs::write(has_install_script_flag_path, "").await?;
+                                        crate::fs::write(has_install_script_flag_path, "").await?;
                                     }
                                 }
                                 Err(e) => {
@@ -529,8 +529,8 @@ impl InstallService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs;
     use tempfile::TempDir;
-    use tokio::fs;
 
     #[tokio::test]
     async fn test_clean_symlink() -> Result<()> {

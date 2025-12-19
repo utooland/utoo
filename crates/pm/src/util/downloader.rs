@@ -43,7 +43,7 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
     let _guard = lock.lock().await;
 
     let resolved_path = dest.join("_resolved");
-    if tokio::fs::try_exists(&resolved_path).await? {
+    if crate::fs::try_exists(&resolved_path).await? {
         tracing::debug!("Download skipped, already resolved: {}", dest.display());
         return Ok(());
     }
@@ -95,7 +95,7 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
     use std::sync::Arc;
     use tokio::sync::{Semaphore, mpsc};
 
-    tokio::fs::create_dir_all(dest)
+    crate::fs::create_dir_all(dest)
         .await
         .with_context(|| format!("Failed to create destination directory: {}", dest.display()))?;
 
@@ -190,7 +190,7 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
 
                         // Check cache first to avoid duplicate directory creation
                         if !created_dirs.contains(&parent_path) {
-                            if let Err(e) = tokio::fs::create_dir_all(&parent_path).await {
+                            if let Err(e) = crate::fs::create_dir_all(&parent_path).await {
                                 tracing::debug!(
                                     "Failed to create parent dir {}: {}",
                                     parent_path.display(),
@@ -207,7 +207,7 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
                     }
 
                     // Write file content
-                    if let Err(e) = tokio::fs::write(&entry.path, &entry.content).await {
+                    if let Err(e) = crate::fs::write(&entry.path, &entry.content).await {
                         tracing::debug!("Failed to write file {}: {}", entry.path.display(), e);
                         return Err(anyhow::anyhow!("Write failed: {e}")
                             .context(format!("File path: {}", entry.path.display())));
@@ -266,7 +266,7 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
 async fn set_file_permissions(path: &Path, mode: u32) -> Result<()> {
     use std::fs::Permissions;
     let permissions = Permissions::from_mode(mode);
-    tokio::fs::set_permissions(path, permissions)
+    crate::fs::set_permissions(path, permissions)
         .await
         .with_context(|| format!("Failed to set permissions for: {}", path.display()))?;
     Ok(())
@@ -283,7 +283,7 @@ async fn set_file_permissions(_path: &Path, _mode: u32) -> Result<()> {
 async fn set_dir_permissions(path: &Path) -> Result<()> {
     use std::fs::Permissions;
     let permissions = Permissions::from_mode(0o755);
-    tokio::fs::set_permissions(path, permissions)
+    crate::fs::set_permissions(path, permissions)
         .await
         .with_context(|| format!("Failed to set directory permissions: {}", path.display()))?;
     Ok(())
@@ -365,7 +365,7 @@ mod tests {
         // Extracted file should exist
         assert!(dest.join("file.txt").exists());
         // All concurrent calls should succeed and not corrupt the output
-        let content = tokio::fs::read_to_string(dest.join("file.txt"))
+        let content = crate::fs::read_to_string(dest.join("file.txt"))
             .await
             .unwrap();
         assert_eq!(content, "hello world");

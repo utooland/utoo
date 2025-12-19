@@ -379,7 +379,7 @@ impl PackageService {
                 tracing::debug!("Linking binary files for {}", package.fullname);
                 for (bin_name, relative_path) in &package.bin_files {
                     let target_path = package.path.join(relative_path);
-                    if !tokio::fs::try_exists(&target_path).await? {
+                    if !crate::fs::try_exists(&target_path).await? {
                         tracing::debug!(
                             "Binary file {} does not exist, skipping",
                             target_path.display()

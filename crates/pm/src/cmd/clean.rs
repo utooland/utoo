@@ -1,6 +1,6 @@
+use crate::fs;
 use anyhow::{Context, Result};
 use std::io::{self, Write};
-use tokio::fs;
 
 use crate::util::cache::{collect_matching_versions, matches_pattern};
 use utoo_ruborist::util::parse_package_spec;

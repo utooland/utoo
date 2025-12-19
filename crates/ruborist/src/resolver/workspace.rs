@@ -6,8 +6,8 @@
 //! # Architecture
 //!
 //! Workspace discovery requires:
-//! 1. Reading package.json files
-//! 2. Matching glob patterns (e.g., `packages/*`)
+//! 1. Reading package.json files (via tokio-fs-ext)
+//! 2. Matching glob patterns (e.g., `packages/*`) via Glob trait
 //! 3. Traversing directory structure
 //!
 //! Glob matching is delegated to the `Glob` trait, allowing each platform
@@ -19,7 +19,7 @@ use anyhow::Result;
 
 use crate::model::package_json::PackageJson;
 use crate::model::util::read_package_json;
-use crate::service::{FileSystem, Glob};
+use crate::service::Glob;
 
 /// A discovered workspace package.
 #[derive(Debug, Clone)]
@@ -35,15 +35,15 @@ pub struct WorkspacePackage {
 /// Workspace discovery context.
 ///
 /// This struct holds the state needed for workspace discovery,
-/// using platform-agnostic FileSystem and Glob traits.
-pub struct WorkspaceDiscovery<FS> {
-    fs: FS,
+/// using platform-agnostic Glob trait for pattern matching.
+pub struct WorkspaceDiscovery<G> {
+    glob: G,
 }
 
-impl<FS: FileSystem + Glob> WorkspaceDiscovery<FS> {
+impl<G: Glob> WorkspaceDiscovery<G> {
     /// Create a new workspace discovery context.
-    pub fn new(fs: FS) -> Self {
-        Self { fs }
+    pub fn new(glob: G) -> Self {
+        Self { glob }
     }
 
     /// Find all workspaces defined in the root package.json.
@@ -51,7 +51,7 @@ impl<FS: FileSystem + Glob> WorkspaceDiscovery<FS> {
     /// This reads the package.json at `root_path`, extracts workspace patterns,
     /// and discovers all matching workspace packages.
     pub async fn find_workspaces(&self, root_path: &Path) -> Result<Vec<WorkspacePackage>> {
-        let pkg = read_package_json(&self.fs, root_path).await?;
+        let pkg = read_package_json(root_path).await?;
         self.find_workspaces_from_pkg(root_path, &pkg).await
     }
 
@@ -74,7 +74,7 @@ impl<FS: FileSystem + Glob> WorkspaceDiscovery<FS> {
 
             // Match workspace directories using Glob::glob
             let matched_paths = self
-                .fs
+                .glob
                 .glob(&package_json_pattern)
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to glob pattern: {}", e))?;
@@ -86,14 +86,13 @@ impl<FS: FileSystem + Glob> WorkspaceDiscovery<FS> {
                 };
 
                 // Read workspace package.json
-                let workspace_pkg: PackageJson =
-                    match read_package_json(&self.fs, &workspace_path).await {
-                        Ok(pkg) => pkg,
-                        Err(e) => {
-                            tracing::debug!("Failed to read workspace package.json: {}", e);
-                            continue;
-                        }
-                    };
+                let workspace_pkg: PackageJson = match read_package_json(&workspace_path).await {
+                    Ok(pkg) => pkg,
+                    Err(e) => {
+                        tracing::debug!("Failed to read workspace package.json: {}", e);
+                        continue;
+                    }
+                };
 
                 tracing::debug!(
                     "Found workspace: {} at {:?}",
@@ -124,7 +123,7 @@ impl<FS: FileSystem + Glob> WorkspaceDiscovery<FS> {
         // Find closest package.json
         let project_path = self.find_project_path(cwd).await?;
 
-        let project_pkg = read_package_json(&self.fs, &project_path).await?;
+        let project_pkg = read_package_json(&project_path).await?;
 
         // If this is already a workspace root, return it
         if Self::is_workspace_root(&project_pkg) {
@@ -134,7 +133,7 @@ impl<FS: FileSystem + Glob> WorkspaceDiscovery<FS> {
         // Look for parent workspace root
         if let Some(parent_root) = self.find_parent_workspace_root(&project_path).await? {
             // Check if current project is within a workspace pattern
-            let parent_pkg = read_package_json(&self.fs, &parent_root).await?;
+            let parent_pkg = read_package_json(&parent_root).await?;
 
             if self
                 .is_in_workspace(&project_path, &parent_root, &parent_pkg)
@@ -152,12 +151,7 @@ impl<FS: FileSystem + Glob> WorkspaceDiscovery<FS> {
     pub async fn find_project_path(&self, cwd: &Path) -> Result<PathBuf> {
         // Check current directory first
         let current_pkg = cwd.join("package.json");
-        if self
-            .fs
-            .exists(&current_pkg)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to check file existence: {}", e))?
-        {
+        if crate::service::exists(&current_pkg).await {
             return Ok(cwd.to_path_buf());
         }
 
@@ -165,12 +159,7 @@ impl<FS: FileSystem + Glob> WorkspaceDiscovery<FS> {
         let mut current = cwd.to_path_buf();
         while let Some(parent) = current.parent() {
             let pkg_path = parent.join("package.json");
-            if self
-                .fs
-                .exists(&pkg_path)
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to check file existence: {}", e))?
-            {
+            if crate::service::exists(&pkg_path).await {
                 return Ok(parent.to_path_buf());
             }
             current = parent.to_path_buf();
@@ -186,13 +175,8 @@ impl<FS: FileSystem + Glob> WorkspaceDiscovery<FS> {
 
         while let Some(parent) = current.parent() {
             let pkg_path = parent.join("package.json");
-            if self
-                .fs
-                .exists(&pkg_path)
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to check file existence: {}", e))?
-            {
-                let pkg = read_package_json(&self.fs, parent).await?;
+            if crate::service::exists(&pkg_path).await {
+                let pkg = read_package_json(parent).await?;
 
                 if Self::is_workspace_root(&pkg) {
                     return Ok(Some(parent.to_path_buf()));
@@ -216,7 +200,7 @@ impl<FS: FileSystem + Glob> WorkspaceDiscovery<FS> {
 
             // Use Glob::glob for pattern matching
             let matched_paths = self
-                .fs
+                .glob
                 .glob(&workspace_pattern)
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to glob pattern: {}", e))?;
@@ -236,12 +220,12 @@ impl<FS: FileSystem + Glob> WorkspaceDiscovery<FS> {
 ///
 /// This function reads all workspace package.json files and returns them
 /// along with their paths for initializing the dependency graph.
-pub async fn collect_workspace_packages<FS: FileSystem + Glob + Clone>(
-    fs: FS,
+pub async fn collect_workspace_packages<G: Glob + Clone>(
+    glob: G,
     root_path: &Path,
     root_pkg: &PackageJson,
 ) -> Result<Vec<(PathBuf, PackageJson)>> {
-    let discovery = WorkspaceDiscovery::new(fs);
+    let discovery = WorkspaceDiscovery::new(glob);
 
     let workspaces = discovery
         .find_workspaces_from_pkg(root_path, root_pkg)
@@ -257,7 +241,7 @@ pub async fn collect_workspace_packages<FS: FileSystem + Glob + Clone>(
 mod tests {
     use super::*;
     use crate::model::package_json::WorkspacesConfig;
-    use crate::service::NoopFileSystem;
+    use crate::service::NoopGlob;
 
     #[test]
     fn test_is_workspace_root() {
@@ -266,7 +250,7 @@ mod tests {
             workspaces: Some(WorkspacesConfig::Array(vec!["packages/*".to_string()])),
             ..Default::default()
         };
-        assert!(WorkspaceDiscovery::<NoopFileSystem>::is_workspace_root(
+        assert!(WorkspaceDiscovery::<NoopGlob>::is_workspace_root(
             &pkg_with_workspaces
         ));
 
@@ -274,7 +258,7 @@ mod tests {
             name: "regular-pkg".to_string(),
             ..Default::default()
         };
-        assert!(!WorkspaceDiscovery::<NoopFileSystem>::is_workspace_root(
+        assert!(!WorkspaceDiscovery::<NoopGlob>::is_workspace_root(
             &pkg_without_workspaces
         ));
     }

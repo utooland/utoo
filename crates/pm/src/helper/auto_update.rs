@@ -317,15 +317,15 @@ mod tests {
 
         // Create directory structure
         if let Some(parent) = cache_path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
+            crate::fs::create_dir_all(parent).await?;
         }
 
         // Test serialization and file writing manually (without using global HOME)
         let content = serde_json::to_string(&cache)?;
-        tokio::fs::write(&cache_path, &content).await?;
+        crate::fs::write(&cache_path, &content).await?;
 
         // Test reading and deserialization
-        let read_content = tokio::fs::read_to_string(cache_path).await?;
+        let read_content = crate::fs::read_to_string(cache_path).await?;
         let loaded_cache: VersionCache = serde_json::from_str(&read_content)?;
 
         assert_eq!(loaded_cache.version, cache.version);

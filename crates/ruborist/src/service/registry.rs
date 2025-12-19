@@ -39,7 +39,6 @@ fn current_timestamp_secs() -> u64 {
 }
 
 use super::cache::{PackageCache, Versions, VersionsInfo};
-use super::fs::FileSystem;
 use super::http;
 use crate::model::manifest::{FullManifest, VersionManifest};
 use crate::resolver::semver::normalize_spec;
@@ -50,7 +49,7 @@ use crate::traits::registry::{RegistryClient, RegistryError, ResolvedPackage, is
 ///
 /// Uses three-tier caching:
 /// 1. Memory cache (fastest, lost on restart)
-/// 2. Disk cache (persistent, requires FileSystem)
+/// 2. Disk cache (persistent, via tokio-fs-ext)
 /// 3. Network (slowest, always authoritative)
 ///
 /// For non-semver registries (npmjs.org), uses ETag validation
@@ -60,31 +59,28 @@ use crate::traits::registry::{RegistryClient, RegistryError, ResolvedPackage, is
 ///
 /// ```ignore
 /// // Using builder pattern
-/// let registry = UnifiedRegistry::builder(fs)
+/// let registry = UnifiedRegistry::builder()
 ///     .registry("https://registry.npmmirror.com")
 ///     .cache_dir(PathBuf::from("/tmp/cache"))
 ///     .build();
 /// ```
-pub struct UnifiedRegistry<FS> {
+pub struct UnifiedRegistry {
     registry_url: String,
     cache: Arc<PackageCache>,
-    fs: FS,
     supports_semver: bool,
 }
 
 /// Builder for `UnifiedRegistry`.
-pub struct UnifiedRegistryBuilder<FS> {
-    fs: FS,
+pub struct UnifiedRegistryBuilder {
     registry_url: Option<String>,
     cache: Option<Arc<PackageCache>>,
     cache_dir: Option<PathBuf>,
 }
 
-impl<FS: FileSystem> UnifiedRegistryBuilder<FS> {
-    /// Create a new builder with the given file system.
-    pub fn new(fs: FS) -> Self {
+impl UnifiedRegistryBuilder {
+    /// Create a new builder.
+    pub fn new() -> Self {
         Self {
-            fs,
             registry_url: None,
             cache: None,
             cache_dir: None,
@@ -110,7 +106,7 @@ impl<FS: FileSystem> UnifiedRegistryBuilder<FS> {
     }
 
     /// Build the registry client.
-    pub fn build(self) -> UnifiedRegistry<FS> {
+    pub fn build(self) -> UnifiedRegistry {
         let registry_url = self
             .registry_url
             .unwrap_or_else(|| "https://registry.npmmirror.com".to_string());
@@ -128,27 +124,31 @@ impl<FS: FileSystem> UnifiedRegistryBuilder<FS> {
         UnifiedRegistry {
             registry_url,
             cache,
-            fs: self.fs,
             supports_semver,
         }
     }
 }
 
-impl<FS: Clone> Clone for UnifiedRegistry<FS> {
+impl Default for UnifiedRegistryBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Clone for UnifiedRegistry {
     fn clone(&self) -> Self {
         Self {
             registry_url: self.registry_url.clone(),
             cache: Arc::clone(&self.cache),
-            fs: self.fs.clone(),
             supports_semver: self.supports_semver,
         }
     }
 }
 
-impl<FS: FileSystem> UnifiedRegistry<FS> {
+impl UnifiedRegistry {
     /// Create a builder for `UnifiedRegistry`.
-    pub fn builder(fs: FS) -> UnifiedRegistryBuilder<FS> {
-        UnifiedRegistryBuilder::new(fs)
+    pub fn builder() -> UnifiedRegistryBuilder {
+        UnifiedRegistryBuilder::new()
     }
 
     /// Get the registry URL.
@@ -182,7 +182,7 @@ impl<FS: FileSystem> UnifiedRegistry<FS> {
         }
 
         // 2. Load etag from disk cache (if available)
-        let disk_versions = self.cache.get_versions_from_disk(&self.fs, name).await;
+        let disk_versions = self.cache.get_versions_from_disk(name).await;
         let etag = disk_versions.as_ref().and_then(|v| v.etag.clone());
 
         // 3. Fetch from network with ETag for validation
@@ -208,9 +208,7 @@ impl<FS: FileSystem> UnifiedRegistry<FS> {
                     .set_versions(name.to_string(), versions_info.clone());
 
                 // 6. Write versions to disk (non-blocking for native, blocking for WASM)
-                self.cache
-                    .set_versions_to_disk(&self.fs, name, &versions_info)
-                    .await;
+                self.cache.set_versions_to_disk(name, &versions_info).await;
 
                 Ok(manifest)
             }
@@ -250,9 +248,7 @@ impl<FS: FileSystem> UnifiedRegistry<FS> {
                     };
                     self.cache
                         .set_versions(name.to_string(), versions_info.clone());
-                    self.cache
-                        .set_versions_to_disk(&self.fs, name, &versions_info)
-                        .await;
+                    self.cache.set_versions_to_disk(name, &versions_info).await;
 
                     Ok(manifest)
                 }
@@ -285,10 +281,7 @@ impl<FS: FileSystem> UnifiedRegistry<FS> {
         // Semver registries resolve specs server-side, so disk cache keys (name@spec)
         // may not match the actual resolved version.
         if !self.supports_semver
-            && let Some(manifest) = self
-                .cache
-                .get_version_manifest_from_disk(&self.fs, name, spec)
-                .await
+            && let Some(manifest) = self.cache.get_version_manifest_from_disk(name, spec).await
         {
             tracing::debug!("Disk cache hit for version manifest: {}@{}", name, spec);
             // Already cached in memory by get_version_manifest_from_disk
@@ -310,7 +303,7 @@ impl<FS: FileSystem> UnifiedRegistry<FS> {
         // 5. Write to disk cache (only for non-semver registries)
         if !self.supports_semver {
             self.cache
-                .set_version_manifest_to_disk(&self.fs, name, spec, &manifest)
+                .set_version_manifest_to_disk(name, spec, &manifest)
                 .await;
         }
 
@@ -318,7 +311,7 @@ impl<FS: FileSystem> UnifiedRegistry<FS> {
     }
 }
 
-impl<FS: FileSystem> RegistryClient for UnifiedRegistry<FS> {
+impl RegistryClient for UnifiedRegistry {
     type Error = RegistryError;
 
     fn supports_semver_resolution(&self) -> bool {
@@ -360,10 +353,7 @@ impl<FS: FileSystem> RegistryClient for UnifiedRegistry<FS> {
 
         // 2. Check disk cache (only for non-semver registries where spec is exact version)
         if !self.supports_semver
-            && let Some(manifest) = self
-                .cache
-                .get_version_manifest_from_disk(&self.fs, name, spec)
-                .await
+            && let Some(manifest) = self.cache.get_version_manifest_from_disk(name, spec).await
         {
             tracing::debug!("Disk cache hit for version manifest: {}@{}", name, spec);
             // Cache in memory for next time
@@ -387,7 +377,7 @@ impl<FS: FileSystem> RegistryClient for UnifiedRegistry<FS> {
         // 5. Write to disk cache (only for non-semver registries)
         if !self.supports_semver {
             self.cache
-                .set_version_manifest_to_disk(&self.fs, name, spec, &manifest)
+                .set_version_manifest_to_disk(name, spec, &manifest)
                 .await;
         }
 
@@ -462,12 +452,7 @@ impl<FS: FileSystem> RegistryClient for UnifiedRegistry<FS> {
             // Write to disk cache for non-semver registries
             if !self.supports_semver {
                 self.cache
-                    .set_version_manifest_to_disk(
-                        &self.fs,
-                        &fetch_name,
-                        &resolved_version,
-                        &version_manifest,
-                    )
+                    .set_version_manifest_to_disk(&fetch_name, &resolved_version, &version_manifest)
                     .await;
             }
             return Ok(ResolvedPackage {
@@ -621,7 +606,6 @@ impl<FS: FileSystem> RegistryClient for UnifiedRegistry<FS> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::service::NoopFileSystem;
 
     #[test]
     fn test_is_npm_registry() {
@@ -634,12 +618,12 @@ mod tests {
     #[test]
     fn test_unified_registry_builder() {
         // Default registry (npmmirror)
-        let registry = UnifiedRegistry::builder(NoopFileSystem).build();
+        let registry = UnifiedRegistry::builder().build();
         assert!(registry.supports_semver());
         assert_eq!(registry.registry_url(), "https://registry.npmmirror.com");
 
         // Custom registry
-        let registry = UnifiedRegistry::builder(NoopFileSystem)
+        let registry = UnifiedRegistry::builder()
             .registry("https://registry.npmjs.org")
             .build();
         assert!(!registry.supports_semver());
@@ -648,7 +632,7 @@ mod tests {
 
     #[test]
     fn test_unified_registry_with_cache_dir() {
-        let registry = UnifiedRegistry::builder(NoopFileSystem)
+        let registry = UnifiedRegistry::builder()
             .registry("https://registry.npmmirror.com")
             .cache_dir(PathBuf::from("/tmp/cache"))
             .build();
@@ -660,12 +644,12 @@ mod tests {
     fn test_unified_registry_with_shared_cache() {
         let shared_cache = Arc::new(PackageCache::with_cache_dir(PathBuf::from("/tmp/shared")));
 
-        let registry1 = UnifiedRegistry::builder(NoopFileSystem)
+        let registry1 = UnifiedRegistry::builder()
             .registry("https://registry.npmmirror.com")
             .cache(Arc::clone(&shared_cache))
             .build();
 
-        let registry2 = UnifiedRegistry::builder(NoopFileSystem)
+        let registry2 = UnifiedRegistry::builder()
             .registry("https://registry.npmmirror.com")
             .cache(Arc::clone(&shared_cache))
             .build();

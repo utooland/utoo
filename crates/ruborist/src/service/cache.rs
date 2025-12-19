@@ -2,7 +2,7 @@
 //!
 //! Provides a unified caching layer that works across platforms:
 //! - **Memory cache**: Fast in-memory lookup (platform-specific synchronization)
-//! - **Disk cache**: Persistent storage (via FileSystem trait)
+//! - **Disk cache**: Persistent storage (via tokio-fs-ext)
 //! - **Project cache**: Per-project resolved packages
 //!
 //! # Architecture
@@ -248,23 +248,18 @@ impl PackageCache {
         self.memory.set_version_manifest(name, version, manifest);
     }
 
-    // === Disk cache operations (async, requires FileSystem) ===
+    // === Disk cache operations (async, uses tokio-fs-ext) ===
 
     /// Load versions info from disk cache.
-    pub async fn get_versions_from_disk<FS: super::FileSystem>(
-        &self,
-        fs: &FS,
-        name: &str,
-    ) -> Option<VersionsInfo> {
+    pub async fn get_versions_from_disk(&self, name: &str) -> Option<VersionsInfo> {
         let cache_dir = self.cache_dir.as_ref()?;
         let path = get_versions_cache_path(cache_dir, name);
 
-        let exists = fs.exists(&path).await.unwrap_or(false);
-        if !exists {
+        if !super::fs::exists(&path).await {
             return None;
         }
 
-        match fs.read_to_string(&path).await {
+        match super::fs::read_to_string(&path).await {
             Ok(content) => match serde_json::from_str::<VersionsInfo>(&content) {
                 Ok(info) => {
                     tracing::debug!("Disk cache hit for versions: {name}");
@@ -285,12 +280,7 @@ impl PackageCache {
     }
 
     /// Save versions info to disk cache.
-    pub async fn set_versions_to_disk<FS: super::FileSystem>(
-        &self,
-        fs: &FS,
-        name: &str,
-        info: &VersionsInfo,
-    ) {
+    pub async fn set_versions_to_disk(&self, name: &str, info: &VersionsInfo) {
         let Some(cache_dir) = &self.cache_dir else {
             return;
         };
@@ -299,12 +289,12 @@ impl PackageCache {
 
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
-            let _ = fs.create_dir_all(parent).await;
+            let _ = tokio_fs_ext::create_dir_all(parent).await;
         }
 
         match serde_json::to_string_pretty(info) {
             Ok(content) => {
-                if let Err(e) = fs.write(&path, content.as_bytes()).await {
+                if let Err(e) = tokio_fs_ext::write(&path, content.as_bytes()).await {
                     tracing::debug!("Failed to write versions cache for {name}: {e}");
                 } else {
                     tracing::debug!("Wrote versions to disk cache: {name}");
@@ -317,21 +307,19 @@ impl PackageCache {
     }
 
     /// Load version manifest from disk cache.
-    pub async fn get_version_manifest_from_disk<FS: super::FileSystem>(
+    pub async fn get_version_manifest_from_disk(
         &self,
-        fs: &FS,
         name: &str,
         version: &str,
     ) -> Option<VersionManifest> {
         let cache_dir = self.cache_dir.as_ref()?;
         let path = get_manifest_cache_path(cache_dir, name, version);
 
-        let exists = fs.exists(&path).await.unwrap_or(false);
-        if !exists {
+        if !super::fs::exists(&path).await {
             return None;
         }
 
-        match fs.read_to_string(&path).await {
+        match super::fs::read_to_string(&path).await {
             Ok(content) => match serde_json::from_str::<VersionManifest>(&content) {
                 Ok(manifest) => {
                     tracing::debug!("Disk cache hit for manifest: {name}@{version}");
@@ -356,9 +344,8 @@ impl PackageCache {
     }
 
     /// Save version manifest to disk cache.
-    pub async fn set_version_manifest_to_disk<FS: super::FileSystem>(
+    pub async fn set_version_manifest_to_disk(
         &self,
-        fs: &FS,
         name: &str,
         version: &str,
         manifest: &VersionManifest,
@@ -371,12 +358,12 @@ impl PackageCache {
 
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
-            let _ = fs.create_dir_all(parent).await;
+            let _ = tokio_fs_ext::create_dir_all(parent).await;
         }
 
         match serde_json::to_string_pretty(manifest) {
             Ok(content) => {
-                if let Err(e) = fs.write(&path, content.as_bytes()).await {
+                if let Err(e) = tokio_fs_ext::write(&path, content.as_bytes()).await {
                     tracing::debug!("Failed to write manifest cache for {name}@{version}: {e}");
                 } else {
                     tracing::debug!("Wrote manifest to disk cache: {name}@{version}");
@@ -498,18 +485,13 @@ impl ProjectCache {
 }
 
 /// Load project cache from file.
-pub async fn load_project_cache<FS: super::FileSystem>(
-    fs: &FS,
-    path: &Path,
-) -> Result<ProjectCacheData> {
-    let exists = fs.exists(path).await.unwrap_or(false);
-    if !exists {
+pub async fn load_project_cache(path: &Path) -> Result<ProjectCacheData> {
+    if !super::fs::exists(path).await {
         tracing::debug!("Project cache file not found: {}", path.display());
         return Ok(ProjectCacheData::default());
     }
 
-    let content = fs
-        .read_to_string(path)
+    let content = super::fs::read_to_string(path)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to read project cache: {}", e))?;
 
@@ -521,20 +503,16 @@ pub async fn load_project_cache<FS: super::FileSystem>(
 }
 
 /// Save project cache to file.
-pub async fn save_project_cache<FS: super::FileSystem>(
-    fs: &FS,
-    path: &Path,
-    data: &ProjectCacheData,
-) -> Result<()> {
+pub async fn save_project_cache(path: &Path, data: &ProjectCacheData) -> Result<()> {
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
-        let _ = fs.create_dir_all(parent).await;
+        let _ = tokio_fs_ext::create_dir_all(parent).await;
     }
 
     let content =
         serde_json::to_string_pretty(data).context("Failed to serialize project cache")?;
 
-    fs.write(path, content.as_bytes())
+    tokio_fs_ext::write(path, content.as_bytes())
         .await
         .map_err(|e| anyhow::anyhow!("Failed to write project cache: {}", e))?;
 

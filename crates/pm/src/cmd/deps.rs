@@ -25,7 +25,7 @@ pub async fn build_deps(cwd: &Path) -> Result<PackageLock> {
 pub async fn build_workspace(cwd: &Path) -> Result<()> {
     let workspace_file = WorkspaceService::build_workspace_json(cwd).await?;
     let content = serde_json::to_string_pretty(&workspace_file)?;
-    tokio::fs::write(cwd.join("workspace.json"), content)
+    crate::fs::write(cwd.join("workspace.json"), content)
         .await
         .context("Failed to write workspace.json")
 }

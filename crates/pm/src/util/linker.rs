@@ -1,6 +1,6 @@
+use crate::fs;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
-use tokio::fs;
 
 /// Convert a path to absolute path
 fn to_absolute(path: &Path) -> Result<PathBuf> {

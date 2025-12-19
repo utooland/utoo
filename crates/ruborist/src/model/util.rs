@@ -6,13 +6,11 @@ use anyhow::{Context, Result};
 use serde_json::{Map, Value};
 
 use super::package_json::PackageJson;
-use crate::service::FileSystem;
 
 /// Read and parse package.json from a directory.
-pub async fn read_package_json<F: FileSystem>(fs: &F, dir: &Path) -> Result<PackageJson> {
+pub async fn read_package_json(dir: &Path) -> Result<PackageJson> {
     let path = dir.join("package.json");
-    let bytes = fs
-        .read(&path)
+    let bytes = tokio_fs_ext::read(&path)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", path.display(), e))?;
     serde_json::from_slice(&bytes).context(format!("Failed to parse {}", path.display()))

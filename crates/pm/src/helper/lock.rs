@@ -76,7 +76,7 @@ fn deps_map_equals_lock(pkg_deps: &HashMap<String, String>, lock_field: Option<&
 
 pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
     // Check package.json exists in project directory
-    if tokio::fs::metadata(root_path.join("package.json"))
+    if crate::fs::metadata(root_path.join("package.json"))
         .await
         .is_err()
     {
@@ -84,7 +84,7 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
     }
 
     // Check if we need to regenerate package-lock.json
-    let needs_regenerate = tokio::fs::metadata(root_path.join("package-lock.json"))
+    let needs_regenerate = crate::fs::metadata(root_path.join("package-lock.json"))
         .await
         .is_err()
         || is_pkg_lock_outdated(root_path).await?;
@@ -143,7 +143,7 @@ pub async fn update_package_json(
 
     // 3. Read package.json once and detect trailing newline
     let package_json_path = target_dir.join("package.json");
-    let package_json_content = tokio::fs::read_to_string(&package_json_path).await?;
+    let package_json_content = crate::fs::read_to_string(&package_json_path).await?;
     let has_trailing_newline =
         package_json_content.ends_with(LINE_ENDING) || package_json_content.ends_with('\n');
     let mut package_json: Value = serde_json::from_str(&package_json_content)?;
@@ -187,7 +187,7 @@ pub async fn update_package_json(
     if has_trailing_newline {
         content.push_str(LINE_ENDING);
     }
-    tokio::fs::write(&package_json_path, content).await?;
+    crate::fs::write(&package_json_path, content).await?;
 
     Ok(())
 }
@@ -221,7 +221,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
 
     // Create global package directory
     let package_path = lib_path.join(&name);
-    tokio::fs::create_dir_all(&package_path).await?;
+    crate::fs::create_dir_all(&package_path).await?;
 
     // Get package info from registry
     let resolved = resolve_package(&Context::registry(), &name, &version_spec)
@@ -242,7 +242,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
     let cache_flag_path = cache_dir.join(format!("{}/{}/_resolved", name, resolved.version));
 
     // Download if not cached
-    if !tokio::fs::try_exists(&cache_flag_path).await? {
+    if !crate::fs::try_exists(&cache_flag_path).await? {
         tracing::debug!("Downloading {} to {}", tarball_url, cache_path.display());
         download(tarball_url, &cache_path)
             .await
@@ -253,7 +253,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
         // so we need to copy the file to the package directory to avoid effect other packages
         if resolved.manifest.has_install_script == Some(true) {
             let has_install_script_flag_path = cache_path.join("_hasInstallScript");
-            tokio::fs::write(has_install_script_flag_path, "").await?;
+            crate::fs::write(has_install_script_flag_path, "").await?;
         }
     }
 
@@ -269,7 +269,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
 
     // Remove devDependencies from package.json
     let package_json_path = package_path.join("package.json");
-    let package_json_content = tokio::fs::read_to_string(&package_json_path).await?;
+    let package_json_content = crate::fs::read_to_string(&package_json_path).await?;
     let mut package_json: Value = serde_json::from_str(&package_json_content)?;
 
     // Remove specified dependency fields and scripts.prepare
@@ -287,7 +287,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
     }
 
     // Write back the modified package.json
-    tokio::fs::write(
+    crate::fs::write(
         &package_json_path,
         serde_json::to_string_pretty(&package_json)?,
     )
@@ -423,10 +423,10 @@ pub async fn save_package_lock(path: &Path, package_lock: &PackageLock) -> Resul
 
     // PackageLock now has all required fields (name, version, lockfile_version, requires, packages)
     let content = serde_json::to_string_pretty(package_lock)?;
-    tokio::fs::write(&temp_path, content)
+    crate::fs::write(&temp_path, content)
         .await
         .context("Failed to write temporary package-lock.json")?;
-    tokio::fs::rename(temp_path, target_path)
+    crate::fs::rename(temp_path, target_path)
         .await
         .context("Failed to rename package-lock.json")?;
 

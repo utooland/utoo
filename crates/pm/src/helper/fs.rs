@@ -1,41 +1,17 @@
-//! Tokio-based file system implementation for ruborist's FileSystem trait.
+//! Tokio-based glob implementation for ruborist's Glob trait.
 
 use std::path::{Path, PathBuf};
-use utoo_ruborist::service::{BuildDepsOptions, FileSystem, Glob, UnifiedRegistry};
+use utoo_ruborist::service::{BuildDepsOptions, Glob, UnifiedRegistry};
 
 use crate::util::cache::get_cache_dir;
 use crate::util::config::{get_legacy_peer_deps, get_manifests_concurrency_limit, get_registry};
 use crate::util::logger::ProgressReceiver;
 
-/// Tokio-based file system implementation.
+/// Tokio-based glob implementation.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct TokioFileSystem;
+pub(crate) struct TokioGlob;
 
-impl FileSystem for TokioFileSystem {
-    type Error = std::io::Error;
-
-    async fn read(&self, path: &Path) -> Result<Vec<u8>, Self::Error> {
-        tokio::fs::read(path).await
-    }
-
-    async fn read_to_string(&self, path: &Path) -> Result<String, Self::Error> {
-        tokio::fs::read_to_string(path).await
-    }
-
-    async fn write(&self, path: &Path, content: &[u8]) -> Result<(), Self::Error> {
-        tokio::fs::write(path, content).await
-    }
-
-    async fn exists(&self, path: &Path) -> Result<bool, Self::Error> {
-        tokio::fs::try_exists(path).await
-    }
-
-    async fn create_dir_all(&self, path: &Path) -> Result<(), Self::Error> {
-        tokio::fs::create_dir_all(path).await
-    }
-}
-
-impl Glob for TokioFileSystem {
+impl Glob for TokioGlob {
     type Error = std::io::Error;
 
     async fn glob(&self, pattern: &Path) -> Result<Vec<PathBuf>, Self::Error> {
@@ -48,13 +24,13 @@ impl Glob for TokioFileSystem {
     }
 }
 
-// Type aliases to hide concrete FileSystem type
-pub(crate) type Fs = TokioFileSystem;
-pub(crate) type Registry = UnifiedRegistry<Fs>;
-pub(crate) type DepsOptions = BuildDepsOptions<Fs, ProgressReceiver>;
+// Type aliases to hide concrete Glob type
+pub(crate) type GlobImpl = TokioGlob;
+pub(crate) type Registry = UnifiedRegistry;
+pub(crate) type DepsOptions = BuildDepsOptions<GlobImpl, ProgressReceiver>;
 
 /// Context for ruborist operations.
-/// Centralizes FileSystem and configuration to avoid spreading concrete types.
+/// Centralizes Glob and configuration to avoid spreading concrete types.
 pub(crate) struct Context;
 
 impl Context {
@@ -66,21 +42,21 @@ impl Context {
             cache_dir: Some(get_cache_dir()),
             concurrency: get_manifests_concurrency_limit().await,
             legacy_peer_deps: get_legacy_peer_deps().await,
-            fs: TokioFileSystem,
+            glob: TokioGlob,
             receiver: ProgressReceiver,
         }
     }
 
     /// Create a UnifiedRegistry with standard configuration.
     pub fn registry() -> Registry {
-        UnifiedRegistry::builder(TokioFileSystem)
+        UnifiedRegistry::builder()
             .registry(get_registry())
             .cache_dir(get_cache_dir())
             .build()
     }
 
-    /// Get the file system instance.
-    pub fn fs() -> Fs {
-        TokioFileSystem
+    /// Get the glob instance.
+    pub fn glob() -> GlobImpl {
+        TokioGlob
     }
 }

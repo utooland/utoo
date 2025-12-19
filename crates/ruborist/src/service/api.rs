@@ -30,7 +30,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 
 use super::cache::{PackageCache, load_project_cache, save_project_cache};
-use super::fs::{FileSystem, Glob};
+use super::fs::Glob;
 use super::registry::UnifiedRegistry;
 use crate::model::graph::{DependencyGraph, PackageNode};
 use crate::model::node::EdgeType;
@@ -43,7 +43,7 @@ use crate::traits::progress::EventReceiver;
 
 /// Options for dependency resolution.
 #[derive(Debug)]
-pub struct BuildDepsOptions<FS, R> {
+pub struct BuildDepsOptions<G, R> {
     /// Current working directory (contains package.json)
     pub cwd: PathBuf,
     /// Registry URL (e.g., "https://registry.npmmirror.com")
@@ -54,17 +54,17 @@ pub struct BuildDepsOptions<FS, R> {
     pub concurrency: usize,
     /// Whether to skip peer dependencies (legacy mode)
     pub legacy_peer_deps: bool,
-    /// File system implementation
-    pub fs: FS,
+    /// Glob implementation for workspace discovery
+    pub glob: G,
     /// Progress event receiver
     pub receiver: R,
 }
 
-impl<FS, R> BuildDepsOptions<FS, R> {
+impl<G, R> BuildDepsOptions<G, R> {
     /// Create options with default values.
-    pub fn new(cwd: PathBuf, fs: FS, receiver: R) -> Self
+    pub fn new(cwd: PathBuf, glob: G, receiver: R) -> Self
     where
-        FS: Default,
+        G: Default,
         R: Default,
     {
         Self {
@@ -73,7 +73,7 @@ impl<FS, R> BuildDepsOptions<FS, R> {
             cache_dir: None,
             concurrency: 20,
             legacy_peer_deps: true,
-            fs,
+            glob,
             receiver,
         }
     }
@@ -103,13 +103,13 @@ impl<FS, R> BuildDepsOptions<FS, R> {
 ///     cache_dir: Some(PathBuf::from("~/.cache/nm")),
 ///     concurrency: 20,
 ///     legacy_peer_deps: false,
-///     fs: TokioFileSystem,
+///     glob: TokioGlob,
 ///     receiver: MyProgressReceiver,
 /// }).await?;
 /// ```
-pub async fn build_deps<FS, R>(options: BuildDepsOptions<FS, R>) -> Result<PackageLock>
+pub async fn build_deps<G, R>(options: BuildDepsOptions<G, R>) -> Result<PackageLock>
 where
-    FS: FileSystem + Glob + Clone,
+    G: Glob + Clone,
     R: EventReceiver,
 {
     let BuildDepsOptions {
@@ -118,18 +118,17 @@ where
         cache_dir,
         concurrency,
         legacy_peer_deps,
-        fs,
+        glob,
         receiver,
     } = options;
 
     // 1. Find root path (workspace root if applicable)
-    let discovery = WorkspaceDiscovery::new(fs.clone());
+    let discovery = WorkspaceDiscovery::new(glob.clone());
     let root_path = discovery.find_root_path(&cwd).await?;
 
     // 2. Read root package.json
     let pkg_path = root_path.join("package.json");
-    let pkg_content = fs
-        .read_to_string(&pkg_path)
+    let pkg_content = super::fs::read_to_string(&pkg_path)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to read package.json: {}", e))?;
 
@@ -201,7 +200,7 @@ where
 
     // 8. Load project cache and pre-populate memory cache
     let project_cache_path = root_path.join("node_modules/.utoo-manifest.json");
-    let project_cache_data = load_project_cache(&fs, &project_cache_path)
+    let project_cache_data = load_project_cache(&project_cache_path)
         .await
         .unwrap_or_default();
 
@@ -239,7 +238,7 @@ where
     }
 
     // 9. Create registry client with shared cache
-    let registry = UnifiedRegistry::builder(fs.clone())
+    let registry = UnifiedRegistry::builder()
         .registry(&registry_url)
         .cache(package_cache)
         .build();
@@ -291,7 +290,7 @@ where
     }
 
     if !new_cache_data.cache.is_empty()
-        && let Err(e) = save_project_cache(&fs, &project_cache_path, &new_cache_data).await
+        && let Err(e) = save_project_cache(&project_cache_path, &new_cache_data).await
     {
         tracing::warn!("Failed to save project cache: {}", e);
     }
@@ -306,18 +305,18 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::service::fs::NoopFileSystem;
+    use crate::service::fs::NoopGlob;
     use crate::traits::progress::NoopReceiver;
 
     #[tokio::test]
     async fn test_build_deps_options_creation() {
-        let options: BuildDepsOptions<NoopFileSystem, NoopReceiver> = BuildDepsOptions {
+        let options: BuildDepsOptions<NoopGlob, NoopReceiver> = BuildDepsOptions {
             cwd: PathBuf::from("."),
             registry_url: "https://registry.npmmirror.com".to_string(),
             cache_dir: None,
             concurrency: 20,
             legacy_peer_deps: true,
-            fs: NoopFileSystem,
+            glob: NoopGlob,
             receiver: NoopReceiver,
         };
 

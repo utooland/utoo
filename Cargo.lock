@@ -9515,6 +9515,7 @@ dependencies = [
  "tempfile",
  "term_size",
  "tokio",
+ "tokio-fs-ext",
  "tokio-retry",
  "tokio-tar",
  "tokio-util",
@@ -9539,6 +9540,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tokio-fs-ext",
  "tracing",
 ]
 

@@ -14,7 +14,7 @@ pub async fn find_binary(command: &str) -> Result<Option<PathBuf>> {
 pub async fn find_binary_in_cache(package_cache_dir: &Path) -> Result<Option<PathBuf>> {
     let bin_dir = package_cache_dir.join("bin");
 
-    if !tokio::fs::try_exists(&bin_dir).await? {
+    if !crate::fs::try_exists(&bin_dir).await? {
         return Ok(None);
     }
 
@@ -40,7 +40,7 @@ async fn find_binary_in_hierarchy(start_path: &Path, command: &str) -> Result<Op
         let bin_path = current_path.join("node_modules").join(".bin").join(command);
 
         // Check if the binary exists and is executable
-        if tokio::fs::try_exists(&bin_path).await? {
+        if crate::fs::try_exists(&bin_path).await? {
             return Ok(Some(bin_path));
         }
 
@@ -59,8 +59,8 @@ async fn find_binary_in_hierarchy(start_path: &Path, command: &str) -> Result<Op
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs as async_fs;
     use tempfile::TempDir;
-    use tokio::fs as async_fs;
 
     // Helper function to create a test directory structure
     async fn create_test_structure() -> Result<TempDir> {

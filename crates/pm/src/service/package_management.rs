@@ -36,7 +36,7 @@ impl PackageManagementService {
         ));
 
         // Check if already installed
-        if tokio::fs::try_exists(&package_cache_dir.join("bin")).await? {
+        if crate::fs::try_exists(&package_cache_dir.join("bin")).await? {
             tracing::debug!(
                 "Package {} already cached at {}",
                 name,

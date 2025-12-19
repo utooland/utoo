@@ -22,8 +22,7 @@
 //!          |
 //!          v
 //! +------------------+
-//! |   FileSystem     |  <- Platform abstraction (fs.rs)
-//! | Tokio / OPFS     |
+//! |  tokio-fs-ext    |  <- Platform abstraction
 //! +------------------+
 //! ```
 //!
@@ -38,7 +37,7 @@
 //!     cache_dir: None,
 //!     concurrency: 20,
 //!     legacy_peer_deps: false,
-//!     fs: my_fs,
+//!     glob: my_glob,
 //!     receiver: my_receiver,
 //! }).await?;
 //! ```
@@ -55,5 +54,5 @@ pub use cache::{
     ProjectPackageCache, Versions, VersionsInfo, get_manifest_cache_path, get_versions_cache_path,
     load_project_cache, save_project_cache,
 };
-pub use fs::{FileSystem, Glob, NoopFileSystem};
+pub use fs::{Glob, NoopGlob, exists, read_to_string};
 pub use registry::UnifiedRegistry;

@@ -31,7 +31,7 @@ mod fs;
 mod opfs_offload;
 mod project;
 
-pub use fs::OpfsFileSystem;
+pub use fs::OpfsGlob;
 pub(crate) mod tokio_runtime;
 pub use project::Project;
 

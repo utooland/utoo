@@ -25,7 +25,7 @@ impl Config {
 
         let mut config = Self::load_from_path(&Self::global_config_path()?).await?;
         let local_path = Self::local_config_path()?;
-        if tokio::fs::try_exists(&local_path).await? {
+        if crate::fs::try_exists(&local_path).await? {
             let local_config = Self::load_from_path(&local_path).await?;
             config.values.extend(local_config.values);
         }
@@ -42,7 +42,7 @@ impl Config {
     }
 
     async fn load_from_path(path: &Path) -> ConfigResult<Self> {
-        if !tokio::fs::try_exists(path).await? {
+        if !crate::fs::try_exists(path).await? {
             return Ok(Config::default());
         }
 

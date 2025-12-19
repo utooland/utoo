@@ -15,7 +15,7 @@ use utoo_ruborist::resolver::workspace::WorkspaceDiscovery;
 ///
 /// Returns a list of (name, path, package_json) tuples.
 pub async fn find_workspaces(root_path: &Path) -> Result<Vec<(String, PathBuf, PackageJson)>> {
-    let discovery = WorkspaceDiscovery::new(FsContext::fs());
+    let discovery = WorkspaceDiscovery::new(FsContext::glob());
     let workspaces = discovery.find_workspaces(root_path).await?;
     Ok(workspaces
         .into_iter()
@@ -54,14 +54,14 @@ pub async fn find_workspace_path(cwd: &Path, workspace: &str) -> Result<PathBuf>
 /// If the current directory is inside a workspace, returns the workspace root.
 /// Otherwise, returns the directory containing the closest package.json.
 pub async fn find_root_path(cwd: &Path) -> Result<PathBuf> {
-    WorkspaceDiscovery::new(FsContext::fs())
+    WorkspaceDiscovery::new(FsContext::glob())
         .find_root_path(cwd)
         .await
 }
 
 /// Find the closest directory containing package.json.
 pub async fn find_project_path(cwd: &Path) -> Result<PathBuf> {
-    WorkspaceDiscovery::new(FsContext::fs())
+    WorkspaceDiscovery::new(FsContext::glob())
         .find_project_path(cwd)
         .await
 }

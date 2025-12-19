@@ -9,7 +9,7 @@ use utoo_ruborist::lock::PackageLock;
 use utoo_ruborist::progress::NoopReceiver;
 use utoo_ruborist::service::{build_deps, BuildDepsOptions};
 
-use crate::fs::OpfsFileSystem;
+use crate::fs::OpfsGlob;
 
 /// Default registry URL for WASM environment.
 const DEFAULT_REGISTRY: &str = "https://registry.npmmirror.com";
@@ -39,7 +39,7 @@ pub async fn build_deps_from_file(
         cache_dir: None,
         concurrency: concurrency.unwrap_or(DEFAULT_CONCURRENCY),
         legacy_peer_deps: true,
-        fs: OpfsFileSystem,
+        glob: OpfsGlob,
         receiver: NoopReceiver,
     };
 
