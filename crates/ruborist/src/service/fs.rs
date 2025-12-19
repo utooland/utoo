@@ -19,13 +19,21 @@ use std::path::{Path, PathBuf};
 
 /// Read a file and return its contents as a UTF-8 string.
 pub async fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
-    let bytes = tokio_fs_ext::read(path).await?;
-    String::from_utf8(bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    tokio_fs_ext::read_to_string(path).await
 }
 
 /// Check if a file or directory exists.
 pub async fn exists(path: impl AsRef<Path>) -> bool {
-    tokio_fs_ext::metadata(path).await.is_ok()
+    tokio_fs_ext::try_exists(path).await.unwrap_or(false)
+}
+
+/// Read a JSON file and deserialize it.
+///
+/// Uses `read` + `from_slice` instead of `read_to_string` + `from_str`
+/// to avoid unnecessary UTF-8 string conversion.
+pub async fn read_json<T: serde::de::DeserializeOwned>(path: impl AsRef<Path>) -> io::Result<T> {
+    let bytes = tokio_fs_ext::read(path).await?;
+    serde_json::from_slice(&bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 /// Glob pattern matching trait.

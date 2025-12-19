@@ -128,12 +128,9 @@ where
 
     // 2. Read root package.json
     let pkg_path = root_path.join("package.json");
-    let pkg_content = super::fs::read_to_string(&pkg_path)
+    let mut pkg: PackageJson = super::fs::read_json(&pkg_path)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to read package.json: {}", e))?;
-
-    let mut pkg: PackageJson =
-        serde_json::from_str(&pkg_content).context("Failed to parse package.json")?;
+        .map_err(|e| anyhow::anyhow!("Failed to read/parse package.json: {}", e))?;
 
     // 3. Inject runtime dependencies (node-bin packages)
     if let Some(engines) = &pkg.engines {

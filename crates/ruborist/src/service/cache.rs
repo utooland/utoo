@@ -259,19 +259,13 @@ impl PackageCache {
             return None;
         }
 
-        match super::fs::read_to_string(&path).await {
-            Ok(content) => match serde_json::from_str::<VersionsInfo>(&content) {
-                Ok(info) => {
-                    tracing::debug!("Disk cache hit for versions: {name}");
-                    // Also cache in memory
-                    self.memory.set_versions(name.to_string(), info.clone());
-                    Some(info)
-                }
-                Err(e) => {
-                    tracing::debug!("Failed to parse versions cache for {name}: {e}");
-                    None
-                }
-            },
+        match super::fs::read_json::<VersionsInfo>(&path).await {
+            Ok(info) => {
+                tracing::debug!("Disk cache hit for versions: {name}");
+                // Also cache in memory
+                self.memory.set_versions(name.to_string(), info.clone());
+                Some(info)
+            }
             Err(e) => {
                 tracing::debug!("Failed to read versions cache for {name}: {e}");
                 None
@@ -319,23 +313,17 @@ impl PackageCache {
             return None;
         }
 
-        match super::fs::read_to_string(&path).await {
-            Ok(content) => match serde_json::from_str::<VersionManifest>(&content) {
-                Ok(manifest) => {
-                    tracing::debug!("Disk cache hit for manifest: {name}@{version}");
-                    // Also cache in memory
-                    self.memory.set_version_manifest(
-                        name.to_string(),
-                        version.to_string(),
-                        manifest.clone(),
-                    );
-                    Some(manifest)
-                }
-                Err(e) => {
-                    tracing::debug!("Failed to parse manifest cache for {name}@{version}: {e}");
-                    None
-                }
-            },
+        match super::fs::read_json::<VersionManifest>(&path).await {
+            Ok(manifest) => {
+                tracing::debug!("Disk cache hit for manifest: {name}@{version}");
+                // Also cache in memory
+                self.memory.set_version_manifest(
+                    name.to_string(),
+                    version.to_string(),
+                    manifest.clone(),
+                );
+                Some(manifest)
+            }
             Err(e) => {
                 tracing::debug!("Failed to read manifest cache for {name}@{version}: {e}");
                 None
@@ -491,12 +479,9 @@ pub async fn load_project_cache(path: &Path) -> Result<ProjectCacheData> {
         return Ok(ProjectCacheData::default());
     }
 
-    let content = super::fs::read_to_string(path)
+    let data: ProjectCacheData = super::fs::read_json(path)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to read project cache: {}", e))?;
-
-    let data: ProjectCacheData =
-        serde_json::from_str(&content).context("Failed to parse project cache")?;
+        .map_err(|e| anyhow::anyhow!("Failed to read/parse project cache: {}", e))?;
 
     tracing::debug!("Loaded project cache from {}", path.display());
     Ok(data)
