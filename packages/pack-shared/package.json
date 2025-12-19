@@ -31,8 +31,9 @@
     "picocolors": "^1.1.1"
   },
   "devDependencies": {
-    "typescript": "^5.8.3",
-    "@types/babel__code-frame": "7.0.2"
+    "@types/babel__code-frame": "7.0.2",
+    "@types/webpack": "^5.28.5",
+    "typescript": "^5.8.3"
   },
   "engines": {
     "node": ">= 20"

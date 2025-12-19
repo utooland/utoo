@@ -1,15 +1,18 @@
 import { codeFrameColumns } from "@babel/code-frame";
-import { formatIssue, renderStyledStringToErrorAnsi } from "@utoo/pack-shared";
-import path from "path";
-import { NapiIssue } from "./binding";
-import { ConfigComplete, DefineEnv, RustifiedEnv } from "./types";
+import { ConfigComplete, DefineEnv, RustifiedEnv } from "./config";
+import { formatIssue, Issue } from "./issue";
+import { renderStyledStringToErrorAnsi } from "./styledString";
 
 export class ModuleBuildError extends Error {
   name = "ModuleBuildError";
 }
 
+export interface ResultWithIssues {
+  issues: Issue[];
+}
+
 export function processIssues(
-  result: TurbopackResult,
+  result: ResultWithIssues,
   throwIssue: boolean,
   logErrors: boolean,
 ) {
@@ -41,7 +44,7 @@ export function processIssues(
   }
 }
 
-export function isWellKnownError(issue: NapiIssue): boolean {
+export function isWellKnownError(issue: Issue): boolean {
   const { title } = issue;
   const formattedTitle = renderStyledStringToErrorAnsi(title);
   // TODO: add more well known errors
@@ -121,7 +124,7 @@ export function debounce<T, F extends AnyFunc<T>>(
   ms: number,
   maxWait = Infinity,
 ) {
-  let timeoutId: undefined | NodeJS.Timeout;
+  let timeoutId: any;
 
   // The time the debouncing function was first called during this debounce queue.
   let startTime = 0;
@@ -171,22 +174,4 @@ export function debounce<T, F extends AnyFunc<T>>(
       timeoutId = setTimeout(run, ms);
     }
   };
-}
-
-// ref:
-// https://github.com/vercel/next.js/pull/51883
-export function blockStdout() {
-  // rust needs stdout to be blocking, otherwise it will throw an error (on macOS at least) when writing a lot of data (logs) to it
-  // see https://github.com/napi-rs/napi-rs/issues/1630
-  // and https://github.com/nodejs/node/blob/main/doc/api/process.md#a-note-on-process-io
-  if ((process.stdout as any)._handle != null) {
-    (process.stdout as any)._handle.setBlocking(true);
-  }
-  if ((process.stderr as any)._handle != null) {
-    (process.stderr as any)._handle.setBlocking(true);
-  }
-}
-
-export function getPackPath() {
-  return path.resolve(__dirname, "..");
 }

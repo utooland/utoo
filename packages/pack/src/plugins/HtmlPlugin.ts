@@ -1,7 +1,7 @@
 import { DOMParser } from "domparser-rs";
 import fs from "fs";
 import path from "path";
-import { HtmlConfig } from "../types";
+import { HtmlConfig } from "../config/types";
 
 export class HtmlPlugin {
   constructor(private config: HtmlConfig) {}

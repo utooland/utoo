@@ -9,7 +9,7 @@ function getPoolId(cwd: string, filename: string) {
 let workerSchedulerRegistered = false;
 
 export async function runLoaderWorkerPool(
-  binding: typeof import("./binding"),
+  binding: typeof import("../binding"),
   bindingPath: string,
 ) {
   if (workerSchedulerRegistered) {

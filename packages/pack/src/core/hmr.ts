@@ -6,11 +6,17 @@ import { join } from "path";
 import { Duplex } from "stream";
 import type webpack from "webpack";
 import ws from "ws";
-import { HtmlPlugin } from "./plugins/HtmlPlugin";
+import { ConfigComplete } from "../config/types";
+import { HtmlPlugin } from "../plugins/HtmlPlugin";
+import {
+  createDefineEnv,
+  debounce,
+  getPackPath,
+  processIssues,
+} from "../utils/common";
+import { processHtmlEntry } from "../utils/html-entry";
 import { projectFactory } from "./project";
 import { BundleOptions, Project, Update as TurbopackUpdate } from "./types";
-import { createDefineEnv, debounce, getPackPath, processIssues } from "./util";
-import { processHtmlEntry } from "./utils/html-entry";
 
 const wsServer = new ws.Server({ noServer: true });
 
@@ -279,10 +285,10 @@ export async function createHotReloader(
       );
 
       const htmlConfigs = [
-        ...(Array.isArray(bundleOptions.config.html)
-          ? bundleOptions.config.html
-          : bundleOptions.config.html
-            ? [bundleOptions.config.html]
+        ...(Array.isArray((bundleOptions.config as any).html)
+          ? (bundleOptions.config as any).html
+          : (bundleOptions.config as any).html
+            ? [(bundleOptions.config as any).html]
             : []),
         ...bundleOptions.config.entry
           .filter((e) => !!e.html)

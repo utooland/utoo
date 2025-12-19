@@ -3,14 +3,18 @@ import { spawn } from "child_process";
 import fs, { existsSync } from "fs";
 import { nanoid } from "nanoid";
 import { join } from "path";
-import { findRootDir } from "./find-root";
-import { HtmlPlugin } from "./plugins/HtmlPlugin";
-import { projectFactory } from "./project";
-import { BundleOptions } from "./types";
-import { blockStdout, createDefineEnv, getPackPath } from "./util";
-import { processHtmlEntry } from "./utils/html-entry";
-import { compatOptionsFromWebpack, WebpackConfig } from "./webpackCompat";
-import { xcodeProfilingReady } from "./xcodeProfile";
+import { ConfigComplete } from "../config/types";
+import {
+  compatOptionsFromWebpack,
+  WebpackConfig,
+} from "../config/webpackCompat";
+import { projectFactory } from "../core/project";
+import { BundleOptions } from "../core/types";
+import { HtmlPlugin } from "../plugins/HtmlPlugin";
+import { blockStdout, createDefineEnv, getPackPath } from "../utils/common";
+import { findRootDir } from "../utils/find-root";
+import { processHtmlEntry } from "../utils/html-entry";
+import { xcodeProfilingReady } from "../utils/xcodeProfile";
 
 export function build(
   options: BundleOptions | WebpackConfig,
@@ -75,10 +79,10 @@ async function buildInternal(
   handleIssues(entrypoints.issues);
 
   const htmlConfigs = [
-    ...(Array.isArray(bundleOptions.config.html)
-      ? bundleOptions.config.html
-      : bundleOptions.config.html
-        ? [bundleOptions.config.html]
+    ...(Array.isArray((bundleOptions.config as any).html)
+      ? (bundleOptions.config as any).html
+      : (bundleOptions.config as any).html
+        ? [(bundleOptions.config as any).html]
         : []),
     ...bundleOptions.config.entry.filter((e) => !!e.html).map((e) => e.html!),
   ];

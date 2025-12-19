@@ -6,14 +6,18 @@ import path from "path";
 import send from "send";
 import { Duplex, Writable } from "stream";
 import url from "url";
-import { findRootDir } from "./find-root";
-import { createHotReloader } from "./hmr";
-import { createSelfSignedCertificate } from "./mkcert";
-import { BundleOptions } from "./types";
-import { blockStdout, getPackPath } from "./util";
-import { printServerInfo } from "./utils/print-server-info";
-import { compatOptionsFromWebpack, WebpackConfig } from "./webpackCompat";
-import { xcodeProfilingReady } from "./xcodeProfile";
+import { ConfigComplete } from "../config/types";
+import {
+  compatOptionsFromWebpack,
+  WebpackConfig,
+} from "../config/webpackCompat";
+import { createHotReloader } from "../core/hmr";
+import { BundleOptions } from "../core/types";
+import { blockStdout, getPackPath } from "../utils/common";
+import { findRootDir } from "../utils/find-root";
+import { createSelfSignedCertificate } from "../utils/mkcert";
+import { printServerInfo } from "../utils/print-server-info";
+import { xcodeProfilingReady } from "../utils/xcodeProfile";
 
 export function serve(
   options: BundleOptions | WebpackConfig,

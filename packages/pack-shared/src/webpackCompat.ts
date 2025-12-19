@@ -1,13 +1,6 @@
 import path from "path";
-import { config } from "process";
 import type webpack from "webpack";
-import {
-  BundleOptions,
-  ConfigComplete,
-  ExternalConfig,
-  HtmlConfig,
-  TurbopackRuleConfigItem,
-} from "./types";
+import { BundleOptions, ConfigComplete, ExternalConfig, HtmlConfig, TurbopackRuleConfigItem } from "./config";
 
 export function readWebpackConfig(projectPath?: string, rootPath?: string) {
   const projectPathOutOfRoot =
@@ -73,7 +66,7 @@ export function compatOptionsFromWebpack(
       define: compatFromWebpackPlugin(plugins, compatDefine),
       stats: compatStats(stats),
       html: compatFromWebpackPlugins(plugins, compatHtml),
-    },
+    } as ConfigComplete,
     buildId: webpackConfig.name,
   };
 }

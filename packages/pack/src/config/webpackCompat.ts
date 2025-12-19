@@ -1,8 +1,5 @@
-export { Project } from "./project";
-export * from "./type";
 export {
   readWebpackConfig,
   compatOptionsFromWebpack,
   type WebpackConfig,
 } from "@utoo/pack-shared";
-

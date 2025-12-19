@@ -7,22 +7,24 @@ import type {
   NapiUpdateMessage,
   NapiWrittenEndpoint,
   StackFrame,
-} from "./binding";
-import * as binding from "./binding";
-import { runLoaderWorkerPool } from "./loaderWorkerPool";
+} from "../binding";
+import * as binding from "../binding";
 import {
   ConfigComplete,
-  Endpoint,
-  Project,
-  ProjectOptions,
-  RawEntrypoints,
   TurbopackLoaderItem,
   TurbopackRuleConfigItem,
   TurbopackRuleConfigItemOptions,
   TurbopackRuleConfigItemOrShortcut,
+} from "../config/types";
+import { rustifyEnv } from "../utils/common";
+import { runLoaderWorkerPool } from "./loaderWorkerPool";
+import {
+  Endpoint,
+  Project,
+  ProjectOptions,
+  RawEntrypoints,
   Update,
 } from "./types";
-import { rustifyEnv } from "./util";
 
 export class TurbopackInternalError extends Error {
   name = "TurbopackInternalError";
@@ -83,37 +85,38 @@ function ensureLoadersHaveSerializableOptions(
 async function serializeConfig(config: ConfigComplete): Promise<string> {
   const configSerializable = { ...config };
 
-  configSerializable.entry = configSerializable.entry.map((entry) => {
-    const { html, ...rest } = entry;
-    return rest;
-  });
+  if (configSerializable.entry) {
+    configSerializable.entry = configSerializable.entry.map((entry) => {
+      const { html, ...rest } = entry;
+      return rest;
+    });
+  }
 
   if (configSerializable.module?.rules) {
     ensureLoadersHaveSerializableOptions(configSerializable.module.rules);
   }
 
   if (configSerializable.optimization) {
-    configSerializable.optimization.modularizeImports =
-      configSerializable.optimization &&
-      configSerializable.optimization?.modularizeImports
-        ? Object.fromEntries(
-            Object.entries<any>(
-              configSerializable.optimization.modularizeImports,
-            ).map(([mod, config]) => [
-              mod,
-              {
-                ...config,
-                transform:
-                  typeof config.transform === "string"
-                    ? config.transform
-                    : Object.entries(config.transform).map(([key, value]) => [
-                        key,
-                        value,
-                      ]),
-              },
-            ]),
-          )
-        : undefined;
+    configSerializable.optimization = { ...configSerializable.optimization };
+    const { modularizeImports } = configSerializable.optimization;
+
+    if (modularizeImports) {
+      configSerializable.optimization.modularizeImports = Object.fromEntries(
+        Object.entries<any>(modularizeImports).map(([mod, config]) => [
+          mod,
+          {
+            ...config,
+            transform:
+              typeof config.transform === "string"
+                ? config.transform
+                : Object.entries(config.transform).map(([key, value]) => [
+                    key,
+                    value,
+                  ]),
+          },
+        ]),
+      );
+    }
   }
 
   return JSON.stringify(configSerializable, null, 2);
