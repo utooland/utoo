@@ -1,8 +1,8 @@
 import { handleIssues } from "@utoo/pack-shared";
 import * as comlink from "comlink";
-import { ForkedProject } from "./forkedProject";
-import { installServiceWorker } from "./installServiceWorker";
-import { Fork, HandShake } from "./message";
+import { ForkedProject } from "./ForkedProject";
+import { installServiceWorker } from "../utils/installServiceWorker";
+import { Fork, HandShake } from "../utils/message";
 import {
   BuildOutput,
   Dirent,
@@ -13,7 +13,7 @@ import {
   RawStats,
   ServiceWorkerOptions,
   Stats,
-} from "./type";
+} from "../types";
 
 let ProjectWorker: Worker;
 

@@ -7,13 +7,13 @@ import {
   RawDirent,
   RawStats,
   Stats,
-} from "./type";
+} from "../types";
 import initWasm, {
   DirEntryType,
   init_log_filter,
   Project as ProjectInternal,
-} from "./utoo";
-import { runLoaderWorkerPool } from "./webpackLoaders/loaderWorkerPool";
+} from "../utoo";
+import { runLoaderWorkerPool } from "../webpackLoaders/loaderWorkerPool";
 
 class InternalEndpoint implements ProjectEndpoint {
   wasmInit?: ReturnType<typeof initWasm>;

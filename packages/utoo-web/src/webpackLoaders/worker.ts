@@ -1,4 +1,4 @@
-import { SabComClient } from "../sabcom";
+import { SabComClient } from "../utils/sabcom";
 import initWasm, {
   Project,
   recvTaskMessageInWorker,
@@ -6,7 +6,7 @@ import initWasm, {
   workerCreated,
 } from "../utoo";
 import { cjs } from "./cjs";
-import { LoaderRunnerMeta } from "./type";
+import { LoaderRunnerMeta } from "./types";
 
 const binding = {
   recvTaskMessageInWorker,

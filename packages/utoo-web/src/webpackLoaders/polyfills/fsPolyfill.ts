@@ -1,7 +1,7 @@
 import { Buffer } from "buffer";
 import path from "path";
-import * as sabcom from "../../sabcom";
-import { Stats } from "../../type";
+import * as sabcom from "../../utils/sabcom";
+import { Stats } from "../../types";
 import { promises } from "./fsPromisesPolyfill";
 
 function resolvePath(p: string): string {

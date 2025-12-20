@@ -1,5 +1,5 @@
 import * as comlink from "comlink";
-import { PackFile, ProjectEndpoint, RawStats, Stats } from "./type";
+import { PackFile, ProjectEndpoint, RawStats, Stats } from "../types";
 
 export class ForkedProject implements ProjectEndpoint {
   private endpoint: comlink.Remote<ProjectEndpoint>;
