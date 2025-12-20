@@ -15,7 +15,7 @@
 `@utoo/web` leverages the modern [FileSystemObserver API](https://github.com/whatwg/fs/blob/main/proposals/FileSystemObserver.md) to implement efficient file system watching directly in the browser. This is crucial for supporting Turbopack's incremental build capabilities.
 
 1.  **FileSystemObserver Integration**: The `tokio-fs-ext` crate (used by `utoo-wasm`) provides a `watch` module that wraps the `FileSystemObserver` API. This allows the Rust code to receive notifications about file changes in the Origin Private File System (OPFS).
-2.  **Offloading to Turbopack**: When a file change is detected, the event is propagated through the `OpfsOffload` layer to the Turbopack engine running in the WASM environment.
+2.  **OpfsOffload Layer**: The [implementation of OpfsOffload](https://github.com/utooland/tokio-fs-ext/tree/master/src/fs/wasm/offload) not only solves the thread safety issue of JS objects in Rust but also extends the `turbo-tasks-fs` file system with minimal intrusiveness. When a file change is detected, the event is also propagated through this layer to the Turbopack engine running in the WASM environment.
 3.  **Incremental Compilation**: Turbopack's architecture is built on a reactive graph. When it receives a file change event, it invalidates only the affected parts of the dependency graph. This triggers a re-computation (rebuild) of only the changed modules and their dependents, resulting in extremely fast updates, similar to Hot Module Replacement (HMR) in native development environments.
 
 This architecture ensures that `@utoo/web` delivers a responsive development experience even for large projects running entirely within the browser.
@@ -70,6 +70,14 @@ await project.installServiceWorker();
 ### 3. Install Dependencies
 
 `@utoo/web` can install dependencies from a `package-lock.json` file, which is consistent with the `npm install` process. We will soon support installing dependencies without a `package-lock.json`.
+
+The dependency packages in the project's `node_modules` are actually logical links pointing to a global shared storage. This means that different projects under the same browser domain can share dependencies with the same name and version without repeated downloads. This mechanism is similar to `pnpm`'s storage strategy.
+
+This design has the following advantages:
+1. **Save Storage Space**: Identical versions of dependency packages are stored only once in OPFS, avoiding redundant usage.
+2. **Accelerate Project Initialization**: When creating a new project or switching projects, if the dependency packages already exist in the global storage, they can be reused directly, achieving second-level installation.
+3. **Reduce Network Traffic**: Frequently used dependency packages only need to be downloaded once, and subsequent projects can use them directly, significantly reducing network overhead.
+4. **Cross-Tab Reuse**: Even if a new browser tab is opened, as long as it is under the same domain, dependencies can be directly reused.
 
 ```typescript
 // Import your package-lock.json as a JSON object.
@@ -234,7 +242,7 @@ The `utooweb-demo` shows a complete workflow for editing, building, and previewi
     setIsBuilding(true);
     try {
         await project.build();
-        // Build succeeded
+        // Build succeededThen it generates an `index.html` that includes these assets. The logic for generating HTML is similar to `html-webpack-plugin`. We are currently planning to support using HTML directly as the build entry. Once this feature is completed, the manual step of generating HTML can be omitted
     } catch (e) {
         // Build failed
     } finally {
