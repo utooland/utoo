@@ -15,7 +15,7 @@
 `@utoo/web` 利用现代的 [FileSystemObserver API](https://github.com/whatwg/fs/blob/main/proposals/FileSystemObserver.md) 在浏览器中直接实现高效的文件系统监听。这对于支持 Turbopack 的增量构建能力至关重要。
 
 1.  **FileSystemObserver 集成**：`tokio-fs-ext` crate（由 `utoo-wasm` 使用）提供了一个 `watch` 模块，封装了 `FileSystemObserver` API。这使得 Rust 代码能够接收关于源私有文件系统（OPFS）中文件更改的通知。
-2.  **OpfsOffload 层**：[OpfsOffload 的实现](https://github.com/utooland/tokio-fs-ext/tree/master/src/fs/wasm/offload)不仅解决了 JS 对象在 Rust 下不满足线程安全的问题，也可以以极少的侵入性来扩展 `turbo-tasks-fs` 的文件系统。当检测到文件更改时，事件也会通过此层传播到在 WASM 环境中运行的 Turbopack 引擎。
+2.  **OpfsOffload 层**：[OpfsOffload 的实现](https://github.com/utooland/tokio-fs-ext/tree/master/src/fs/wasm/offload)不仅解决了 JS 对象在 Rust 下不满足线程安全的问题（允许多个 rust 线程并发调用 opfs），也可以以极少的侵入性来扩展 `turbo-tasks-fs` 的文件系统。当检测到文件更改时，事件也会通过此层传播到在 WASM 环境中运行的 Turbopack 引擎。
 3.  **增量编译**：Turbopack 的架构建立在响应式图之上。当它接收到文件更改事件时，它仅使依赖图中受影响的部分失效。这触发了仅针对更改的模块及其依赖项的重新计算（重建），从而实现极快的更新，类似于原生开发环境中的热模块替换（HMR）。
 
 这种架构确保了 `@utoo/web` 即使对于完全在浏览器中运行的大型项目也能提供响应迅速的开发体验。
