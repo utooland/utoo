@@ -155,7 +155,7 @@ Creates a new project instance.
 * `serviceWorker` (object, optional):
   * `url` (string, required): The URL to the service worker script.
   * `scope` (string, required): The URL scope that the service worker will intercept requests for. This is the base path for your preview environment.
-* `loadersImportMap` (object, optional): Loaders importMap for running webpack loaders in @utoo/web when bundling, the key is loader's name, the value can be an umd string url or umd content string. Loaders will be executed in parallel in a web worker pool.
+* `loadersImportMap` (object, optional): A map for configuring Webpack loader imports. This is an optional advanced configuration. Typically, you can simply declare loader dependencies in `package.json` to install and use them. Configuring `loadersImportMap` allows you to provide pre-bundled, single files that adhere to the CommonJS specification (as a URL string or content string). This avoids file system I/O overhead caused by `require` operations during loader execution, thereby significantly improving build performance. The key is the loader's name, and the value is the URL or content string of the UMD/CommonJS module. Loaders will be executed in parallel in a web worker pool.
 
 ### File System Methods
 

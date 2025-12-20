@@ -155,7 +155,7 @@ await project.writeFile('utoopack.json', JSON.stringify(utoopackConfig, null, 2)
 * `serviceWorker` (object, 可选):
   * `url` (string, 必需): Service Worker 脚本的 URL。
   * `scope` (string, 必需): Service Worker 将拦截请求的 URL 范围。这是您预览环境的基路径。
-* `loadersImportMap`（对象，可选）：用于在 @utoo/web 中打包时运行 webpack 加载器的加载器导入映射。键是加载器的名称，值可以是 UMD 字符串 URL 或 UMD 内容字符串。加载器将在 Web Worker 池中并行执行。
+* `loadersImportMap`（对象，可选）：用于配置 Webpack Loader 的导入映射。这是一个可选的高级配置。通常情况下，您只需在 `package.json` 中声明 loader 依赖并安装，即可让它工作。配置 `loadersImportMap` 允许您直接提供预构建好的、满足 CommonJS 规范的单一文件（作为 URL 字符串或内容字符串）。这样做可以避免 loader 执行过程中因 `require` 操作产生的文件系统 I/O 开销，从而显著提升构建性能。键是 loader 的名称，值是 UMD/CommonJS 模块的 URL 或内容字符串。loader 将在 Web Worker 池中并行执行。
 
 ### 文件系统方法
 
