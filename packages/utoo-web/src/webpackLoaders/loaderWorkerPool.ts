@@ -1,7 +1,5 @@
-import * as comlink from "comlink";
-import { internalEndpoint } from "../project/InternalProject";
-import * as sabcom from "../utils/sabcom";
 import { Binding } from "../types";
+import * as sabcom from "../utils/sabcom";
 import initWasm, {
   Project as ProjectInternal,
   registerWorkerScheduler,
