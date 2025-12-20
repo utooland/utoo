@@ -8,6 +8,7 @@ import { Duplex, Writable } from "stream";
 import url from "url";
 import {
   compatOptionsFromWebpack,
+  readWebpackConfig,
   WebpackConfig,
 } from "../config/webpackCompat";
 import { createHotReloader } from "../core/hmr";
@@ -24,9 +25,18 @@ export function serve(
   rootPath?: string,
   serverOptions?: StartServerOptions,
 ) {
-  const bundleOptions = (<WebpackConfig>options).webpackMode
-    ? compatOptionsFromWebpack(<WebpackConfig>options, projectPath, rootPath)
-    : <BundleOptions>options;
+  let bundleOptions: BundleOptions;
+  if ((<WebpackConfig>options).webpackMode) {
+    let webpackConfig = <WebpackConfig>options;
+    if (!webpackConfig.entry) {
+      const loadedConfig = readWebpackConfig(projectPath, rootPath);
+      webpackConfig = { ...webpackConfig, ...loadedConfig };
+    }
+    bundleOptions = compatOptionsFromWebpack(webpackConfig);
+  } else {
+    bundleOptions = <BundleOptions>options;
+  }
+
   if (!rootPath) {
     // help user to find the rootDir automatically
     rootPath = findRootDir(projectPath || process.cwd());

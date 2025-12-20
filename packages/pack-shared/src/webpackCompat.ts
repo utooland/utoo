@@ -1,4 +1,3 @@
-import path from "path";
 import type webpack from "webpack";
 import {
   BundleOptions,
@@ -7,15 +6,6 @@ import {
   HtmlConfig,
   TurbopackRuleConfigItem,
 } from "./config";
-
-export function readWebpackConfig(projectPath?: string, rootPath?: string) {
-  const projectPathOutOfRoot =
-    projectPath === undefined
-      ? process.cwd()
-      : path.join(rootPath ?? "", projectPath);
-  const configPath = path.join(projectPathOutOfRoot, "webpack.config.js");
-  return require(configPath);
-}
 
 export type WebpackConfig = Partial<
   Pick<
@@ -39,8 +29,6 @@ export type WebpackConfig = Partial<
 
 export function compatOptionsFromWebpack(
   webpackConfig: WebpackConfig,
-  projectPath?: string,
-  rootPath?: string,
 ): BundleOptions {
   const {
     entry,
@@ -54,9 +42,7 @@ export function compatOptionsFromWebpack(
     optimization,
     plugins,
     stats,
-  } = webpackConfig.entry
-    ? webpackConfig
-    : readWebpackConfig(projectPath, rootPath);
+  } = webpackConfig;
 
   return {
     config: {

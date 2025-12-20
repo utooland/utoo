@@ -25,11 +25,9 @@
   "dependencies": {
     "@utoo/pack-shared": "^0.0.7",
     "comlink": "^4.4.2",
-    "micromatch": "^4.0.8",
     "systemjs": "^6.15.1"
   },
   "devDependencies": {
-    "@types/micromatch": "^4.0.8",
     "@types/systemjs": "^6.15.1",
     "binaryen": "^125.0.0",
     "node-stdlib-browser": "^1.3.1",
