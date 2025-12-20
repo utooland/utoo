@@ -15,7 +15,7 @@
 `@utoo/web` 利用现代的 [FileSystemObserver API](https://github.com/whatwg/fs/blob/main/proposals/FileSystemObserver.md) 在浏览器中直接实现高效的文件系统监听。这对于支持 Turbopack 的增量构建能力至关重要。
 
 1.  **FileSystemObserver 集成**：`tokio-fs-ext` crate（由 `utoo-wasm` 使用）提供了一个 `watch` 模块，封装了 `FileSystemObserver` API。这使得 Rust 代码能够接收关于源私有文件系统（OPFS）中文件更改的通知。
-2.  **卸载到 Turbopack**：当检测到文件更改时，事件通过 `OpfsOffload` 层传播到在 WASM 环境中运行的 Turbopack 引擎。
+2.  **OpfsOffload 层**：[OpfsOffload 的实现](https://github.com/utooland/tokio-fs-ext/tree/master/src/fs/wasm/offload)不仅解决了 JS 对象在 Rust 下不满足线程安全的问题（允许多个 rust 线程并发调用 opfs），也可以以极少的侵入性来扩展 `turbo-tasks-fs` 的文件系统。当检测到文件更改时，事件也会通过此层传播到在 WASM 环境中运行的 Turbopack 引擎。
 3.  **增量编译**：Turbopack 的架构建立在响应式图之上。当它接收到文件更改事件时，它仅使依赖图中受影响的部分失效。这触发了仅针对更改的模块及其依赖项的重新计算（重建），从而实现极快的更新，类似于原生开发环境中的热模块替换（HMR）。
 
 这种架构确保了 `@utoo/web` 即使对于完全在浏览器中运行的大型项目也能提供响应迅速的开发体验。
@@ -70,6 +70,14 @@ await project.installServiceWorker();
 ### 3. 安装依赖
 
 `@utoo/web` 可以从 `package-lock.json` 安装依赖，这和 `npm install` 过程一致。我们很快将会支持无需 `package-lock.json` 就能安装依赖。
+
+项目 `node_modules` 中的依赖包实际上是指向全局共享存储的逻辑链接。这意味着在同一浏览器域名下的不同 project 之间，可以共享同名且同版本的依赖，无需重复下载。这种机制类似于 `pnpm` 的存储策略。
+
+这种设计具有以下优势：
+1. **节省存储空间**：相同版本的依赖包在 OPFS 中仅存储一份，避免了冗余占用。
+2. **加速项目初始化**：创建新项目或切换项目时，若依赖包已存在于全局存储中，可直接复用，实现秒级安装。
+3. **减少网络流量**：常用依赖包只需下载一次，后续项目即可直接使用，大幅降低网络开销。
+4. **跨标签页复用**：即使开启新的浏览器标签页，只要处于同一域名下，依赖均可以直接复用。
 
 ```typescript
 // 将您的 package-lock.json 作为 JSON 对象导入。
@@ -242,7 +250,7 @@ await project.writeFile('utoopack.json', JSON.stringify(utoopackConfig, null, 2)
     }
     ```
 
-3. **处理构建输出**: 构建成功后，应用程序读取构建输出（例如 `dist/stats.json`）以查找生成的资源文件（`.js`、`.css`）。然后它会生成一个包含这些资源的 `index.html`。
+3. **处理构建输出**: 构建成功后，应用程序读取构建输出（例如 `dist/stats.json`）以查找生成的资源文件（`.js`、`.css`）。然后它会生成一个包含这些资源的 `index.html`。生成 HTML 的逻辑类似于 `html-webpack-plugin`。我们目前正在计划将 HTML 直接作为构建入口（entry），在完成该特性之后，可以省去手动生成 HTML 这一步。
 
     ```typescript
     // 在 useBuild.ts 中
