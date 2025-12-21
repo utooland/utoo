@@ -115,6 +115,22 @@ export interface ExternalAdvanced {
 
 export type ExternalConfig = string | ExternalAdvanced;
 
+/**
+ * Provider configuration for automatic module imports.
+ * Similar to webpack's ProvidePlugin.
+ *
+ * @example
+ * ```ts
+ * provider: {
+ *   // Provides `$` as `import $ from 'jquery'`
+ *   $: 'jquery',
+ *   // Provides `Buffer` as `import { Buffer } from 'buffer'`
+ *   Buffer: ['buffer', 'Buffer'],
+ * }
+ * ```
+ */
+export type ProviderConfig = Record<string, string | [string, string]>;
+
 export interface ConfigComplete {
   entry: EntryOptions[];
   mode?: "production" | "development";
@@ -139,6 +155,7 @@ export interface ConfigComplete {
   target?: string;
   sourceMaps?: boolean;
   define?: Record<string, string>;
+  provider?: ProviderConfig;
   optimization?: {
     moduleIds?: "named" | "deterministic";
     minify?: boolean;

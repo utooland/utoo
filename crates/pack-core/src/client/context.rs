@@ -24,7 +24,7 @@ use turbopack_core::{
     },
     compile_time_info::{
         CompileTimeDefineValue, CompileTimeDefines, CompileTimeInfo, DefinableNameSegment,
-        FreeVarReferences,
+        FreeVarReference, FreeVarReferences,
     },
     environment::{BrowserEnvironment, Environment, ExecutionEnvironment},
     file_source::FileSource,
@@ -40,8 +40,8 @@ use turbopack_node::{
 use crate::{
     client::runtime_entry::RuntimeEntries,
     config::{
-        Config, default_max_chunk_count_per_group, default_max_merge_chunk_size,
-        default_min_chunk_size,
+        Config, ProviderConfig, ProviderConfigValue, default_max_chunk_count_per_group,
+        default_max_merge_chunk_size, default_min_chunk_size,
     },
     embed_js::embed_file_path,
     import_map::{
@@ -103,22 +103,51 @@ async fn client_defines(define_env: Vc<EnvMap>) -> Result<Vc<CompileTimeDefines>
 }
 
 #[turbo_tasks::function]
-async fn client_free_vars(define_env: Vc<EnvMap>) -> Result<Vc<FreeVarReferences>> {
-    Ok(free_var_references!(
-        ..defines(&*define_env.await?).into_iter() //
-                                                   //FIXME: keep original request when compiling target node
-                                                   //, Buffer = FreeVarReference::EcmaScriptModule {
-                                                   //     request: "node:buffer".into(),
-                                                   //     lookup_path: None,
-                                                   //     export: Some("Buffer".into()),
-                                                   // },
-                                                   // process = FreeVarReference::EcmaScriptModule {
-                                                   //     request: "node:process".into(),
-                                                   //     lookup_path: None,
-                                                   //     export: Some("default".into()),
-                                                   // }
-    )
-    .cell())
+async fn client_free_vars(
+    define_env: Vc<EnvMap>,
+    provider_config: Vc<ProviderConfig>,
+) -> Result<Vc<FreeVarReferences>> {
+    let mut free_vars = free_var_references!(..defines(&*define_env.await?).into_iter());
+
+    // Add provider configurations as FreeVarReference::EcmaScriptModule
+    // This implements webpack's ProvidePlugin behavior
+    let provider = provider_config.await?;
+    for (var_name, value) in provider.iter() {
+        let (request, export) = match value {
+            ProviderConfigValue::Module(module_name) => {
+                // Simple module import: { $: 'jquery' } -> import $ from 'jquery'
+                (module_name.clone(), Some(rcstr!("default")))
+            }
+            ProviderConfigValue::NamedExport(parts) => {
+                // Named export import: { Buffer: ['buffer', 'Buffer'] }
+                // -> import { Buffer } from 'buffer'
+                let request = if let Some(r) = parts.get(0) {
+                    r.clone()
+                } else {
+                    continue;
+                };
+                let export = parts.get(1).cloned().or(Some(rcstr!("default")));
+                (request, export)
+            }
+        };
+
+        // Support nested variable names like "process.env"
+        let name_segments: Vec<DefinableNameSegment> = var_name
+            .split('.')
+            .map(|s| DefinableNameSegment::Name(s.into()))
+            .collect();
+
+        free_vars.0.insert(
+            name_segments,
+            FreeVarReference::EcmaScriptModule {
+                request,
+                lookup_path: None,
+                export,
+            },
+        );
+    }
+
+    Ok(free_vars.cell())
 }
 
 #[turbo_tasks::function]
@@ -126,6 +155,7 @@ pub async fn get_client_compile_time_info(
     browserslist_query: RcStr,
     define_env: Vc<EnvMap>,
     mode: Vc<Mode>,
+    provider_config: Vc<ProviderConfig>,
 ) -> Result<Vc<CompileTimeInfo>> {
     let mut define_env = (*define_env.await?).clone();
     define_env.extend([(
@@ -149,7 +179,11 @@ pub async fn get_client_compile_time_info(
             .await?,
     )
     .defines(client_defines(define_env).to_resolved().await?)
-    .free_var_references(client_free_vars(define_env).to_resolved().await?)
+    .free_var_references(
+        client_free_vars(define_env, provider_config)
+            .to_resolved()
+            .await?,
+    )
     .cell()
     .await
 }

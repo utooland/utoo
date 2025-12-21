@@ -179,7 +179,7 @@
       "children": [
         {
           "featureLevel2": "",
-          "featureStatus": "🟠",
+          "featureStatus": "✅",
           "featureDetails": "[Webpack `ProvidePlugin`](https://webpack.js.org/plugins/provide-plugin/#root)",
           "remarks": ""
         }
