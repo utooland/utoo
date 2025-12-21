@@ -1,6 +1,6 @@
 # [`@utoo/web`](https://www.npmjs.com/package/@utoo/web) API 文档
 
-`@utoo/web` 可以在浏览器中运行完整的 Web 开发环境，包括文件系统、依赖管理和构建流程。它集成了 [`utoopack`](https://github.com/utooland/utoo) (Rust + Turbopack)，并利用 Web Workers、Service Workers 和 OPFS 提供流畅的体验。
+`@utoo/web` 可以在浏览器中运行完整的 Web 开发环境，包括文件系统、依赖管理和构建流程。它集成了 [`utoopack`](https://github.com/utooland/utoo) (Rust + Turbopack)，采用 `wasm32-unknown-unknown` 编译目标，不依赖 Web Container，避免了模拟 Node.js 环境带来的运行时开销（如启动延迟和内存占用）。此外，它利用 Web Workers、Service Workers 和 OPFS 提供流畅的体验。
 
 ## 核心概念
 

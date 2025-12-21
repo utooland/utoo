@@ -1,6 +1,6 @@
 # [`@utoo/web`](https://www.npmjs.com/package/@utoo/web) API Documentation
 
-`@utoo/web` enables a complete web development environment in the browser, including a file system, dependency management, and build process. It integrates [`utoopack`](https://github.com/utooland/utoo) (Rust + Turbopack) and uses Web Workers, Service Workers, and OPFS for a seamless experience.
+`@utoo/web` enables a complete web development environment in the browser, including a file system, dependency management, and build process. It integrates [`utoopack`](https://github.com/utooland/utoo) (Rust + Turbopack), targeting `wasm32-unknown-unknown`. It does not rely on Web Containers, avoiding the runtime overhead (such as startup latency and memory usage) associated with Node.js environment emulation. It also uses Web Workers, Service Workers, and OPFS for a seamless experience.
 
 ## Core Concepts
 
