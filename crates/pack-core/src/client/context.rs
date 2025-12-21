@@ -121,7 +121,7 @@ async fn client_free_vars(
             ProviderConfigValue::NamedExport(parts) => {
                 // Named export import: { Buffer: ['buffer', 'Buffer'] }
                 // -> import { Buffer } from 'buffer'
-                let request = if let Some(r) = parts.get(0) {
+                let request = if let Some(r) = parts.first() {
                     r.clone()
                 } else {
                     continue;
