@@ -44,6 +44,14 @@ npm run install-toolchain
 npm run build
 ```
 
+### Run Demo
+
+To run the web demo:
+
+```bash
+npm start -w utooweb-demo
+```
+
 ## 📚 Documentation
 
 For detailed API usage and examples, please refer to the [API Documentation](./API.md) ([中文版](./API_zh-CN.md)).
