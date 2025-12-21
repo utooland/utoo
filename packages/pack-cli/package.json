@@ -40,6 +40,7 @@
   },
   "scripts": {
     "build": "rm -rf dist && tsc -b",
+    "clean": "rm -rf dist",
     "prepublishOnly": "turbo run build --filter=@utoo/pack-cli"
   },
   "types": "dist/index.d.ts"

@@ -7,7 +7,7 @@
 1. **Real File System**：项目存在于浏览器的[源私有文件系统（OPFS）](https://developer.mozilla.org/zh-CN/docs/Web/API/File_System_API/Origin_private_file_system)中。`Project` 类提供类似 Node.js `fs` 的接口。
 2. **Project Main Worker**：`Project` 实例运行在 Web Worker 中。主线程对象是代理，保持 UI 响应。
 3. **Thread Worker**：重度任务（打包、编译）在专用的 Web Worker 中运行，由移植的 `tokio` 运行时驱动。
-4. **Loader Worker**：在带有 Node.js polyfills 的专用 Worker 中执行 Webpack loaders。
+4. **Loader Worker**：在带有 Node.js polyfills 的专用 Worker 中执行 webpack loaders。
 5. **Service Worker**：充当本地服务器，拦截请求并提供构建文件以供预览。
 
 ## 文件监听与增量构建
@@ -43,7 +43,7 @@ const project = new UtooProject({
     // 重度任务 Worker 脚本 URL。
     threadWorkerUrl: `${location.origin}/threadWorker.js`,
 
-    // Webpack loaders Worker 脚本 URL。
+    // webpack loaders Worker 脚本 URL。
     loaderWorkerUrl: `${location.origin}/loaderWorker.js`,
     
     // 预览 Service Worker 配置。
@@ -128,7 +128,7 @@ for (const filePath in demoFiles) {
 }
 ```
 
-若要使用 loader，请将其添加至 `package.json` 的 `devDependencies` 中并安装，这与标准 Webpack 项目的依赖管理方式一致。此外，由于 `@utoo/web` 遵循 `loader-runner` 的机制与上下文来执行 loader，您还需要同时安装 `loader-runner`。
+若要使用 loader，请将其添加至 `package.json` 的 `devDependencies` 中并安装，这与标准 webpack 项目的依赖管理方式一致。此外，由于 `@utoo/web` 遵循 `loader-runner` 的机制与上下文来执行 loader，您还需要同时安装 `loader-runner`。
 
 您可以像写入其他源文件一样，将此文件写入真实文件系统：
 
@@ -155,7 +155,7 @@ await project.writeFile('utoopack.json', JSON.stringify(utoopackConfig, null, 2)
 * `serviceWorker` (object, 可选):
   * `url` (string, 必需): Service Worker 脚本的 URL。
   * `scope` (string, 必需): Service Worker 将拦截请求的 URL 范围。这是您预览环境的基路径。
-* `loadersImportMap`（对象，可选）：用于配置 Webpack Loader 的导入映射。这是一个可选的高级配置。通常情况下，您只需在 `package.json` 中声明 loader 依赖并安装，即可让它工作。配置 `loadersImportMap` 允许您直接提供预构建好的、满足 CommonJS 规范的单一文件（作为 URL 字符串或内容字符串）。这样做可以避免 loader 执行过程中因 `require` 操作产生的文件系统 I/O 开销，从而显著提升构建性能。键是 loader 的名称，值是 UMD/CommonJS 模块的 URL 或内容字符串。loader 将在 Web Worker 池中并行执行。
+* `loadersImportMap`（对象，可选）：用于配置 webpack Loader 的导入映射。这是一个可选的高级配置。通常情况下，您只需在 `package.json` 中声明 loader 依赖并安装，即可让它工作。配置 `loadersImportMap` 允许您直接提供预构建好的、满足 CommonJS 规范的单一文件（作为 URL 字符串或内容字符串）。这样做可以避免 loader 执行过程中因 `require` 操作产生的文件系统 I/O 开销，从而显著提升构建性能。键是 loader 的名称，值是 UMD/CommonJS 模块的 URL 或内容字符串。loader 将在 Web Worker 池中并行执行。
 
 ### 文件系统方法
 
@@ -303,7 +303,7 @@ module.exports = {
 
 设置 `@utoo/web` 项目的一个关键部分是创建您传递给 `UtooProject` 构造函数的 Worker 脚本。正如在 `utooweb-demo` 示例中所见，这些文件的内容非常少。它们的目的是简单地从 `@utoo/web` 库本身加载必要的 Worker 逻辑。
 
-您需要在项目的源代码中创建三个文件，然后由您的打包器（例如 Webpack、Vite）编译成最终传递给构造函数的 URL。
+您需要在项目的源代码中创建三个文件，然后由您的打包器（例如 webpack、Vite）编译成最终传递给构造函数的 URL。
 
 #### 1. 项目主 Worker (`worker.ts`)
 
