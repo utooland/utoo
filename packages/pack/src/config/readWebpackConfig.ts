@@ -5,6 +5,8 @@ export function readWebpackConfig(projectPath?: string, rootPath?: string) {
     projectPath === undefined
       ? process.cwd()
       : path.join(rootPath ?? "", projectPath);
-  const configPath = path.join(projectPathOutOfRoot, "webpack.config.js");
+  const configPath = require.resolve("webpack.config", {
+    paths: [projectPathOutOfRoot],
+  });
   return require(configPath);
 }
