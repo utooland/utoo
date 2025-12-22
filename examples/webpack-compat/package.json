@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "description": "Webpack compatible example",
   "scripts": {
-    "build": "utoopack build --webpack",
-    "dev": "utoopack dev --webpack"
+    "build": "up build --webpack",
+    "dev": "up dev --webpack"
   },
   "devDependencies": {
     "@types/webpack": "^5.28.5",

@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "author": "xusd320",
   "bin": {
-    "utoopack": "./bin/run.js"
+    "up": "./bin/run.js"
   },
   "dependencies": {
     "@oclif/core": "^4",
@@ -26,7 +26,7 @@
   "license": "MIT",
   "main": "dist/index.js",
   "oclif": {
-    "bin": "utoopack",
+    "bin": "up",
     "commands": "./dist/commands",
     "topicSeparator": " ",
     "topics": {

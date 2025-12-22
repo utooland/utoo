@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "scripts": {
     "bootstrap": "node ./bootstrap.js",
-    "build": "utoopack build",
-    "dev": "utoopack dev",
+    "build": "up build",
+    "dev": "up dev",
     "start": "serve ."
   },
   "dependencies": {
