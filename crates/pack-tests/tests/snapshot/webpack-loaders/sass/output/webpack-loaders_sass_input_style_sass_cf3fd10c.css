@@ -1,0 +1,18 @@
+/* [project]/webpack-loaders/sass/input/style.sass.css [client] (css) */
+nav ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+nav li {
+  display: inline-block;
+}
+
+nav a {
+  padding: 6px 12px;
+  text-decoration: none;
+  display: block;
+}
+
+/*# sourceMappingURL=webpack-loaders_sass_input_style_sass_cf3fd10c.css.map*/
