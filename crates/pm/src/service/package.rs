@@ -1,5 +1,3 @@
-use crate::helper::compatibility::{is_cpu_compatible, is_os_compatible};
-use crate::helper::lock::PackageLock;
 use crate::helper::package::parse_package_name;
 use crate::model::package::{PackageInfo, Scripts};
 use crate::util::json::load_package_json_from_path;
@@ -7,8 +5,20 @@ use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start
 use anyhow::{Context, Result};
 use futures;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
+use utoo_ruborist::lock::PackageLock;
 
 use super::script::ScriptService;
+
+/// Execution queues for package scripts and binary linking
+#[derive(Default)]
+pub struct ExecutionQueues {
+    pub preinstall: Vec<Rc<PackageInfo>>,
+    pub bin_linking: Vec<Rc<PackageInfo>>,
+    pub install: Vec<Rc<PackageInfo>>,
+    pub postinstall: Vec<Rc<PackageInfo>>,
+}
 
 pub struct PackageService;
 
@@ -32,7 +42,7 @@ impl PackageService {
             "postprepare",
         ];
 
-        let (scope, name, fullname) = parse_package_name(&format!(
+        let (_scope, name, fullname) = parse_package_name(&format!(
             "node_modules/{}",
             data.get("name")
                 .and_then(|v| v.as_str())
@@ -74,12 +84,6 @@ impl PackageService {
             },
             name,
             fullname,
-            version: data
-                .get("version")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string(),
-            scope,
         };
 
         for hook in hooks {
@@ -92,11 +96,6 @@ impl PackageService {
         }
 
         Ok(())
-    }
-
-    fn has_cached(_package: &PackageInfo) -> bool {
-        // TODO: implement cache check
-        false
     }
 
     async fn read_package_scripts(package_path: &Path) -> Result<Scripts> {
@@ -185,7 +184,7 @@ impl PackageService {
             }
 
             // Parse package name and create PackageInfo without reading package.json
-            let (scope, name, fullname) = parse_package_name(path);
+            let (_scope, name, fullname) = parse_package_name(path);
             let package_path = PathBuf::from(format!("{}/{}", root_path.display(), path));
 
             // Skip if package directory doesn't exist (e.g., omitted by --production/--omit)
@@ -218,8 +217,6 @@ impl PackageService {
                 scripts,
                 name,
                 fullname,
-                version: lock_package.get_version(),
-                scope,
             };
 
             packages.push(package_info);
@@ -231,44 +228,42 @@ impl PackageService {
     pub fn create_execution_queues_with_options(
         packages: Vec<PackageInfo>,
         ignore_scripts: bool,
-    ) -> Result<Vec<Vec<PackageInfo>>> {
+    ) -> Result<ExecutionQueues> {
         tracing::debug!("Creating execution queues with options...");
-        let mut queues = vec![Vec::new(); 5];
+        let mut queues = ExecutionQueues::default();
 
         for package in packages {
-            let has_cached = Self::has_cached(&package);
-
-            if has_cached {
-                tracing::debug!("Package {} is cached, skipping execution", package.fullname);
-                queues[0].push(package.clone());
-            }
+            let package = Rc::new(package);
 
             // Script queues - skip in bins_only mode
-            if !ignore_scripts && !has_cached {
+            if !ignore_scripts {
                 if package.scripts.preinstall.is_some() {
                     tracing::debug!("Adding {} to preinstall queue", package.path.display());
-                    queues[1].push(package.clone());
+                    queues.preinstall.push(Rc::clone(&package));
                 }
                 if package.scripts.install.is_some() {
                     tracing::debug!("Adding {} to install queue", package.path.display());
-                    queues[3].push(package.clone());
+                    queues.install.push(Rc::clone(&package));
                 }
                 if package.scripts.postinstall.is_some() {
                     tracing::debug!("Adding {} to postinstall queue", package.path.display());
-                    queues[4].push(package.clone());
+                    queues.postinstall.push(Rc::clone(&package));
                 }
             }
 
             // Binary linking queue - always process if package has bin files
             if !package.bin_files.is_empty() {
                 tracing::debug!("Adding {} to bin linking queue", package.path.display());
-                queues[2].push(package.clone());
+                queues.bin_linking.push(Rc::clone(&package));
             }
         }
 
         tracing::debug!(
             "Queue creation completed, {} tasks pending",
-            queues.iter().map(|q| q.len()).sum::<usize>()
+            queues.preinstall.len()
+                + queues.bin_linking.len()
+                + queues.install.len()
+                + queues.postinstall.len()
         );
 
         Ok(queues)
@@ -276,31 +271,32 @@ impl PackageService {
 
     /// Execute queues with bins_only parameter support
     pub async fn execute_queues_with_options(
-        queues: Vec<Vec<PackageInfo>>,
+        queues: ExecutionQueues,
         ignore_scripts: bool,
     ) -> Result<()> {
         if ignore_scripts {
             // Binary-only mode: only execute binary linking
-            Self::execute_binary_linking(&queues[2]).await?;
+            Self::execute_binary_linking(&queues.bin_linking).await?;
         } else {
             // Full mode: execute all queues in sequence
-            let total_scripts = queues[1].len() + queues[3].len() + queues[4].len();
+            let total_scripts =
+                queues.preinstall.len() + queues.install.len() + queues.postinstall.len();
             if total_scripts > 0 {
                 start_progress_bar();
                 PROGRESS_BAR.set_length(total_scripts as u64);
             }
 
             // Execute preinstall scripts in parallel
-            Self::execute_script_queue(&queues[1], "preinstall").await?;
+            Self::execute_script_queue(&queues.preinstall, "preinstall").await?;
 
             // Link binary files
-            Self::execute_binary_linking(&queues[2]).await?;
+            Self::execute_binary_linking(&queues.bin_linking).await?;
 
             // Execute install scripts in parallel
-            Self::execute_script_queue(&queues[3], "install").await?;
+            Self::execute_script_queue(&queues.install, "install").await?;
 
             // Execute postinstall scripts in parallel
-            Self::execute_script_queue(&queues[4], "postinstall").await?;
+            Self::execute_script_queue(&queues.postinstall, "postinstall").await?;
 
             if total_scripts > 0 {
                 finish_progress_bar("scripts executed");
@@ -310,8 +306,15 @@ impl PackageService {
     }
 
     /// Execute script queue for a specific script type
-    async fn execute_script_queue(queue: &[PackageInfo], script_name: &str) -> Result<()> {
+    async fn execute_script_queue(queue: &[Rc<PackageInfo>], script_name: &str) -> Result<()> {
         use futures;
+
+        let queue_start = std::time::Instant::now();
+        tracing::debug!(
+            "Starting {} queue with {} scripts",
+            script_name,
+            queue.len()
+        );
 
         let script_tasks: Vec<_> = queue
             .iter()
@@ -324,10 +327,11 @@ impl PackageService {
                 };
 
                 script_option.as_ref().map(|script| {
-                    let package = package.clone();
+                    let package = Rc::clone(package);
                     let script = script.clone();
                     async move {
                         log_progress(&format!("{} {}", package.fullname, script_name));
+                        let start = std::time::Instant::now();
                         let result = ScriptService::execute_script(&package, script_name, false)
                             .await
                             .with_context(|| {
@@ -336,6 +340,15 @@ impl PackageService {
                                     script_name, package.fullname, script
                                 )
                             });
+                        let elapsed = start.elapsed();
+                        tracing::debug!(
+                            "[{:.2}s] {} {} completed (path: {}, script: {})",
+                            elapsed.as_secs_f64(),
+                            package.fullname,
+                            script_name,
+                            package.path.display(),
+                            script
+                        );
                         PROGRESS_BAR.inc(1);
                         result
                     }
@@ -349,17 +362,24 @@ impl PackageService {
             result?;
         }
 
+        let queue_elapsed = queue_start.elapsed();
+        tracing::debug!(
+            "{} queue completed in {:.2}s",
+            script_name,
+            queue_elapsed.as_secs_f64()
+        );
+
         Ok(())
     }
 
     /// Execute binary file linking for packages
-    async fn execute_binary_linking(queue: &[PackageInfo]) -> Result<()> {
+    async fn execute_binary_linking(queue: &[Rc<PackageInfo>]) -> Result<()> {
         for package in queue {
             if !package.bin_files.is_empty() {
                 tracing::debug!("Linking binary files for {}", package.fullname);
                 for (bin_name, relative_path) in &package.bin_files {
                     let target_path = package.path.join(relative_path);
-                    if !tokio::fs::try_exists(&target_path).await? {
+                    if !crate::fs::try_exists(&target_path).await? {
                         tracing::debug!(
                             "Binary file {} does not exist, skipping",
                             target_path.display()
@@ -764,13 +784,13 @@ mod tests {
             },
             name: "test-bin-missing".to_string(),
             fullname: "test-bin-missing".to_string(),
-            version: "1.0.0".to_string(),
-            scope: None,
         };
 
-        // Prepare queues: only bin linking queue (index 2) has this package
-        let mut queues = vec![vec![], vec![], vec![], vec![], vec![]];
-        queues[2].push(package_info);
+        // Prepare queues: only bin linking queue has this package
+        let queues = ExecutionQueues {
+            bin_linking: vec![Rc::new(package_info)],
+            ..Default::default()
+        };
 
         // Should not panic or error, even though the bin file does not exist
         let result = PackageService::execute_queues_with_options(queues, false).await;
@@ -779,11 +799,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_collect_packages_from_lock_with_ignore_scripts() {
-        use crate::helper::lock::PackageLock;
-        use crate::model::package_lock::LockPackage;
         use serde_json::json;
         use std::collections::HashMap;
         use tempfile::TempDir;
+        use utoo_ruborist::lock::{LockPackage, PackageLock};
 
         let temp_dir = TempDir::new().unwrap();
 
@@ -840,7 +859,8 @@ mod tests {
             },
         );
 
-        let package_lock = PackageLock { packages };
+        let package_lock =
+            PackageLock::new("test-project".to_string(), "1.0.0".to_string(), packages);
 
         // Create minimal package.json files for testing
         let node_modules = temp_dir.path().join("node_modules");
@@ -890,11 +910,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_collect_packages_from_lock_platform_compatibility() {
-        use crate::helper::lock::PackageLock;
-        use crate::model::package_lock::LockPackage;
         use serde_json::json;
         use std::collections::HashMap;
         use tempfile::TempDir;
+        use utoo_ruborist::lock::{LockPackage, PackageLock};
 
         let temp_dir = TempDir::new().unwrap();
 
@@ -927,7 +946,8 @@ mod tests {
             },
         );
 
-        let package_lock = PackageLock { packages };
+        let package_lock =
+            PackageLock::new("test-project".to_string(), "1.0.0".to_string(), packages);
 
         // Create minimal package.json files
         let node_modules = temp_dir.path().join("node_modules");

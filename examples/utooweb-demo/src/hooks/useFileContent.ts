@@ -5,18 +5,24 @@ import { serviceWorkerScope } from "../services/utooService";
 export const useFileContent = (project: UtooProject | null) => {
   const [selectedFilePath, setSelectedFilePath] = useState("src/index.tsx");
   const [selectedFileContent, setSelectedFileContent] = useState("");
+  const [originalContent, setOriginalContent] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string>("");
   const [error, setError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  const hasUnsavedChanges = selectedFileContent !== originalContent;
 
   const fetchFileContent = useCallback(
     async (filePath: string): Promise<void> => {
       setSelectedFilePath(filePath);
       setSelectedFileContent("");
+      setOriginalContent("");
       try {
         if (!project) throw new Error("Project not initialized.");
 
         const content: string = await project.readFile(filePath, "utf8");
         setSelectedFileContent(content);
+        setOriginalContent(content);
 
         if (filePath.endsWith("dist/index.html")) {
           setPreviewUrl(`${location.origin}${serviceWorkerScope}/${filePath}`);
@@ -28,36 +34,27 @@ export const useFileContent = (project: UtooProject | null) => {
     [project],
   );
 
-  const debouncedWriteRef = useRef<NodeJS.Timeout | null>(null);
+  const saveFile = useCallback(async () => {
+    if (!project || !selectedFilePath || !hasUnsavedChanges) return;
+
+    setIsSaving(true);
+    setError("");
+    try {
+      await project.writeFile(selectedFilePath, selectedFileContent);
+      setOriginalContent(selectedFileContent);
+      console.log(`File ${selectedFilePath} saved successfully.`);
+    } catch (e: any) {
+      setError(`Error saving file: ${e.message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [project, selectedFilePath, selectedFileContent, hasUnsavedChanges]);
 
   useEffect(() => {
     if (selectedFilePath) {
-      document.title = `Editing ${selectedFilePath}`;
+      document.title = `${hasUnsavedChanges ? "● " : ""}Editing ${selectedFilePath}`;
     }
-  }, [selectedFilePath]);
-
-  useEffect(() => {
-    if (debouncedWriteRef.current) {
-      clearTimeout(debouncedWriteRef.current);
-    }
-
-    if (project && selectedFilePath && selectedFileContent) {
-      debouncedWriteRef.current = setTimeout(async () => {
-        try {
-          await project.writeFile(selectedFilePath, selectedFileContent);
-          console.log(`File ${selectedFilePath} auto-saved successfully.`);
-        } catch (e: any) {
-          setError(`Error auto-saving file: ${e.message}`);
-        }
-      }, 300);
-    }
-
-    return () => {
-      if (debouncedWriteRef.current) {
-        clearTimeout(debouncedWriteRef.current);
-      }
-    };
-  }, [selectedFileContent, selectedFilePath, project]);
+  }, [selectedFilePath, hasUnsavedChanges]);
 
   return {
     selectedFilePath,
@@ -65,6 +62,9 @@ export const useFileContent = (project: UtooProject | null) => {
     setSelectedFileContent,
     previewUrl,
     fetchFileContent,
+    saveFile,
+    isSaving,
+    hasUnsavedChanges,
     error,
   };
 };

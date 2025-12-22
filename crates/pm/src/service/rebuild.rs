@@ -1,7 +1,7 @@
-use crate::helper::lock::PackageLock;
 use crate::service::package::PackageService;
 use anyhow::Result;
 use std::path::Path;
+use utoo_ruborist::lock::PackageLock;
 
 pub struct RebuildService;
 
@@ -40,12 +40,11 @@ impl RebuildService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::helper::lock::PackageLock;
-    use crate::model::package_lock::LockPackage;
     use serde_json::json;
     use std::collections::HashMap;
     use std::fs;
     use tempfile::TempDir;
+    use utoo_ruborist::lock::{LockPackage, PackageLock};
 
     fn create_test_package_lock() -> PackageLock {
         let mut packages = HashMap::new();
@@ -90,7 +89,7 @@ mod tests {
             ..LockPackage::default()
         });
 
-        PackageLock { packages }
+        PackageLock::new("test-project".to_string(), "1.0.0".to_string(), packages)
     }
 
     fn create_test_project(temp_dir: &TempDir, packages: &[&str]) -> Result<()> {
@@ -150,9 +149,11 @@ mod tests {
     async fn test_rebuild_with_empty_package_lock() -> Result<()> {
         let temp_dir = TempDir::new()?;
         create_test_project(&temp_dir, &[])?;
-        let package_lock = PackageLock {
-            packages: HashMap::new(),
-        };
+        let package_lock = PackageLock::new(
+            "test-project".to_string(),
+            "1.0.0".to_string(),
+            HashMap::new(),
+        );
 
         // Test rebuild with empty package lock
         let result = RebuildService::rebuild(&package_lock, temp_dir.path(), false).await;

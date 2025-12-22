@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use super::retry::create_retry_strategy;
-use tokio::fs;
+use crate::fs;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use tokio_retry::Retry;
 
@@ -16,11 +16,11 @@ use std::os::unix::ffi::OsStrExt;
 
 #[cfg(target_os = "linux")]
 mod linux_clone {
+    use crate::fs;
     use anyhow::{Context, Result};
     use std::os::unix::io::AsRawFd;
     use std::path::Path;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use tokio::fs;
 
     // Cache for copy_file_range support
     static COPY_FILE_RANGE_SUPPORTED: AtomicBool = AtomicBool::new(true);
@@ -40,12 +40,12 @@ mod linux_clone {
 
     // Copy a single file using FICLONE
     async fn copy_file_with_ficlone(src: &Path, dst: &Path) -> Result<()> {
-        let src_file = tokio::fs::File::open(src).await?;
+        let src_file = crate::fs::File::open(src).await?;
         let src_metadata = src_file.metadata().await?;
         let src_permissions = src_metadata.permissions();
 
         // Create destination file
-        let dst_file = tokio::fs::File::create(dst).await?;
+        let dst_file = crate::fs::File::create(dst).await?;
 
         let src_fd = src_file.as_raw_fd();
         let dst_fd = dst_file.as_raw_fd();
@@ -76,13 +76,13 @@ mod linux_clone {
 
     // Copy a single file using copy_file_range
     async fn copy_file_with_range(src: &Path, dst: &Path) -> Result<()> {
-        let src_file = tokio::fs::File::open(src).await?;
+        let src_file = crate::fs::File::open(src).await?;
         let metadata = src_file.metadata().await?;
         let file_size = metadata.len() as usize;
         let src_permissions = metadata.permissions();
 
         // Create destination file
-        let dst_file = tokio::fs::File::create(dst).await?;
+        let dst_file = crate::fs::File::create(dst).await?;
 
         let src_fd = src_file.as_raw_fd();
         let dst_fd = dst_file.as_raw_fd();
@@ -137,7 +137,7 @@ mod linux_clone {
         }
 
         // Fallback to regular copy
-        tokio::fs::copy(src, dst).await.with_context(|| {
+        crate::fs::copy(src, dst).await.with_context(|| {
             format!(
                 "Failed to copy file from {} to {}",
                 src.display(),
@@ -232,13 +232,13 @@ mod linux_clone {
 
 #[cfg(target_os = "windows")]
 mod windows_clone {
+    use crate::fs;
     use anyhow::{Context, Result};
     use std::path::Path;
-    use tokio::fs;
 
     // Copy a single file using regular copy
     async fn fast_copy_file(src: &Path, dst: &Path) -> Result<()> {
-        tokio::fs::copy(src, dst).await.with_context(|| {
+        crate::fs::copy(src, dst).await.with_context(|| {
             format!(
                 "Failed to copy file from {} to {}",
                 src.display(),
@@ -318,7 +318,7 @@ mod windows_clone {
                         e
                     );
                     // If hardlink fails, fallback to regular copy
-                    tokio::fs::copy(&entry_path, &target_path)
+                    crate::fs::copy(&entry_path, &target_path)
                         .await
                         .with_context(|| {
                             format!(
@@ -336,7 +336,7 @@ mod windows_clone {
 }
 
 pub async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
-    if !tokio::fs::try_exists(dst).await? {
+    if !crate::fs::try_exists(dst).await? {
         return Ok(false);
     }
 
@@ -467,11 +467,11 @@ pub async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
         src.to_path_buf()
     };
 
-    if tokio::fs::try_exists(dst).await? {
+    if crate::fs::try_exists(dst).await? {
         let is_valid = validate_directory(&real_src, dst)
             .await
             .unwrap_or_else(|e| {
-                tracing::warn!("validate_directory error: {e}, will override target directory");
+                tracing::debug!("validate_directory error: {e}, will override target directory");
                 false
             });
 
@@ -788,7 +788,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     mod linux_tests {
         use super::*;
-        use tokio::fs::File;
+        use crate::fs::File;
         use tokio::io::AsyncReadExt;
 
         #[tokio::test]

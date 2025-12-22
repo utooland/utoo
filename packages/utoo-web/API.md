@@ -67,9 +67,28 @@ To enable the preview functionality, you must register and install the service w
 await project.installServiceWorker();
 ```
 
-### 3. Install Dependencies
+### 3. Resolve and Install Dependencies
 
-`@utoo/web` can install dependencies from a `package-lock.json` file, which is consistent with the `npm install` process. We will soon support installing dependencies without a `package-lock.json`.
+`@utoo/web` provides two approaches for dependency management:
+
+#### Option A: Generate lock file from package.json (Recommended)
+
+Use the `deps()` method to resolve dependencies directly from your `package.json`. This generates a `package-lock.json` compatible lock file without needing one beforehand.
+
+```typescript
+// Resolve dependencies from package.json
+const packageLock = await project.deps({
+    registry: "https://registry.npmmirror.com", // Optional: custom registry
+    concurrency: 20, // Optional: concurrent requests (default: 20)
+});
+
+// Install the resolved dependencies
+await project.install(packageLock);
+```
+
+#### Option B: Use existing package-lock.json
+
+If you already have a `package-lock.json`, you can use it directly:
 
 The dependency packages in the project's `node_modules` are actually logical links pointing to a global shared storage. This means that different projects under the same browser domain can share dependencies with the same name and version without repeated downloads. This mechanism is similar to `pnpm`'s storage strategy.
 
@@ -202,17 +221,49 @@ Removes a directory.
 
 * `path` (string): The path to the directory to be removed.
 
+### Dependency Management
+
+#### `project.deps(options?)`
+
+Resolves dependencies from the project's `package.json` and generates a lock file string. This enables dependency resolution directly in the browser without requiring a pre-existing `package-lock.json`.
+
+**Options:**
+
+* `registry` (string, optional): The npm registry URL to use for fetching package metadata. Defaults to `https://registry.npmmirror.com`. You can use any npm-compatible registry, including private registries.
+* `concurrency` (number, optional): Maximum number of concurrent network requests for fetching package metadata. Defaults to `20`.
+
+**Returns:** `Promise<string>` - A JSON string representing the resolved dependency lock file, compatible with `package-lock.json` format.
+
+**Example:**
+
+```typescript
+// Using default registry (npmmirror)
+const lockFile = await project.deps();
+
+// Using official npm registry
+const lockFile = await project.deps({
+    registry: "https://registry.npmjs.org"
+});
+
+// Using a private registry with custom concurrency
+const lockFile = await project.deps({
+    registry: "https://npm.mycompany.com",
+    concurrency: 10
+});
+```
+
+#### `project.install(packageLockJsonString, maxConcurrentDownloads?)`
+
+Populates the `node_modules` directory based on a lock file string.
+
+* `packageLockJsonString` (string): A JSON string of the dependency lock file (from `deps()` or a `package-lock.json` file).
+* `maxConcurrentDownloads` (number, optional): Maximum concurrent package downloads.
+
 ### Preview Functionality
 
 #### `project.installServiceWorker()`
 
 Registers and activates the service worker defined in the constructor. This is essential for the preview functionality.
-
-#### `project.install(packageLockJsonString)`
-
-Populates the `node_modules` directory based on a `package-lock.json`.
-
-* `packageLockJsonString` (string): A JSON string of your `package-lock.json` file.
 
 #### `project.build()`
 

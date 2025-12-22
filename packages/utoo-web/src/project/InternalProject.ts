@@ -1,6 +1,7 @@
 import * as comlink from "comlink";
 import {
   Binding,
+  DepsOptions,
   PackFile,
   ProjectEndpoint,
   ProjectOptions,
@@ -10,7 +11,7 @@ import {
 } from "../types";
 import initWasm, {
   DirEntryType,
-  init_log_filter,
+  initLogFilter,
   Project as ProjectInternal,
 } from "../utoo";
 import { runLoaderWorkerPool } from "../webpackLoaders/loaderWorkerPool";
@@ -29,13 +30,23 @@ class InternalEndpoint implements ProjectEndpoint {
     await this.wasmInit!;
 
     // Initialize log filter after wasm init
-    const filter = logFilter || "pack_core=info,pack_api=info,utoo_wasm=info";
-    init_log_filter(filter);
+    const filter =
+      logFilter ||
+      "pack_core=info,pack_api=info,utoo_wasm=info,utoo_ruborist=info";
+    initLogFilter(filter);
 
     const absoluteCwd = cwd.startsWith("/") ? cwd : "/" + cwd;
     ProjectInternal.init(threadWorkerUrl || "");
     ProjectInternal.setCwd(absoluteCwd);
     return;
+  }
+
+  async deps(options?: DepsOptions) {
+    await this.wasmInit!;
+    return await ProjectInternal.deps(
+      options?.registry ?? undefined,
+      options?.concurrency ?? undefined,
+    );
   }
 
   async install(packageLock: string, maxConcurrentDownloads?: number) {

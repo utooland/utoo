@@ -21,18 +21,16 @@ impl fmt::Display for RetryableError {
 
 impl std::error::Error for RetryableError {}
 
-/// Build a reqwest::Client with timeout and connection pool config.
-/// Note: reqwest will automatically use trust-dns as resolver if the feature is enabled.
+/// Build a reqwest::Client with timeout config.
+/// Connection pool is unlimited - concurrency is controlled by semaphore instead.
 pub fn build_dns_cached_client() -> reqwest::Client {
     reqwest::Client::builder()
-        // Set connect timeout (10 seconds)
-        .connect_timeout(std::time::Duration::from_secs(10))
-        // Set total request timeout (60 seconds)
-        .timeout(std::time::Duration::from_secs(60))
-        // Set max idle connections per host
-        .pool_max_idle_per_host(16)
+        .connect_timeout(std::time::Duration::from_secs(5)) // TLS + TCP handshake
+        .timeout(std::time::Duration::from_secs(10)) // Total request timeout - abort slow requests faster
+        // No pool_max_idle_per_host - let reqwest manage connections freely
+        // Concurrency is controlled by semaphore in preload service
         .build()
-        .expect("Failed to build reqwest client with DNS cache and retry config")
+        .expect("Failed to build reqwest client")
 }
 
 pub fn create_retry_strategy() -> impl Iterator<Item = Duration> {

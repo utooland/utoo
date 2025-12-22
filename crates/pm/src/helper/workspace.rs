@@ -1,74 +1,29 @@
+//! Workspace utilities for the CLI.
+//!
+//! This module provides CLI-specific workspace helpers that wrap
+//! ruborist's platform-agnostic workspace discovery.
+
 use anyhow::{Context, Result};
-use glob::glob;
-use serde_json::Value;
 use std::env;
 use std::path::{Path, PathBuf};
 
-use crate::util::json::{load_package_json_from_path, read_json_file};
+use super::fs::Context as FsContext;
+use utoo_ruborist::manifest::PackageJson;
+use utoo_ruborist::resolver::workspace::WorkspaceDiscovery;
 
-pub async fn find_workspaces(root_path: &Path) -> Result<Vec<(String, PathBuf, Value)>> {
-    let mut workspaces = Vec::new();
-    let pkg = load_package_json_from_path(root_path).await?;
-
-    // load workspaces config
-    if let Some(workspaces_config) = pkg.get("workspaces") {
-        match workspaces_config {
-            Value::Array(patterns) => {
-                for pattern in patterns {
-                    if let Some(pattern_str) = pattern.as_str() {
-                        // prepare glob pattern
-                        let package_json_path = root_path.join(pattern_str).join("package.json");
-                        let glob_pattern = package_json_path.to_str().ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "Invalid path encoding: {}",
-                                package_json_path.display()
-                            )
-                        })?;
-
-                        // glob match
-                        for entry in glob(glob_pattern)
-                            .context(format!("Invalid glob pattern: {glob_pattern}"))?
-                        {
-                            match entry {
-                                Ok(path) => {
-                                    // load package.json in workspace
-                                    let workspace_pkg =
-                                        read_json_file::<Value>(&path).await.context(format!(
-                                            "Failed to parse workspace package.json at {}",
-                                            path.display()
-                                        ))?;
-
-                                    // load workspace name
-                                    let name =
-                                        workspace_pkg["name"].as_str().unwrap_or("").to_string();
-
-                                    // get workspace path
-                                    let workspace_path = path
-                                        .parent()
-                                        .ok_or_else(|| {
-                                            anyhow::anyhow!(
-                                                "Invalid workspace path: {}",
-                                                path.display()
-                                            )
-                                        })?
-                                        .to_path_buf();
-
-                                    tracing::debug!("Found workspace: {name} {path:?}");
-                                    workspaces.push((name, workspace_path, workspace_pkg));
-                                }
-                                Err(e) => tracing::debug!("Error processing workspace: {e}"),
-                            }
-                        }
-                    }
-                }
-            }
-            _ => tracing::debug!("Workspaces field is not an array"),
-        }
-    }
-
-    Ok(workspaces)
+/// Find all workspaces in the given root path.
+///
+/// Returns a list of (name, path, package_json) tuples.
+pub async fn find_workspaces(root_path: &Path) -> Result<Vec<(String, PathBuf, PackageJson)>> {
+    let discovery = WorkspaceDiscovery::new(FsContext::glob());
+    let workspaces = discovery.find_workspaces(root_path).await?;
+    Ok(workspaces
+        .into_iter()
+        .map(|ws| (ws.name, ws.path, ws.package_json))
+        .collect())
 }
 
+/// Find a workspace by name or path.
 pub async fn find_workspace_path(cwd: &Path, workspace: &str) -> Result<PathBuf> {
     let workspaces = find_workspaces(cwd)
         .await
@@ -94,97 +49,24 @@ pub async fn find_workspace_path(cwd: &Path, workspace: &str) -> Result<PathBuf>
     anyhow::bail!("Workspace '{workspace}' not found")
 }
 
-/// Check if a directory is a workspace root by examining its package.json
-async fn is_workspace_root(pkg: &Value) -> bool {
-    pkg.get("workspaces").is_some()
-}
-
-/// Check if a directory is within a workspace pattern
-async fn is_in_workspace(cwd: &Path, root: &Path, pattern: &str) -> Result<bool> {
-    let workspace_path = root.join(pattern);
-    let glob_pattern = workspace_path
-        .to_str()
-        .ok_or_else(|| anyhow::anyhow!("Invalid path encoding: {}", workspace_path.display()))?;
-
-    if let Ok(entries) = glob(glob_pattern) {
-        for path in entries.flatten() {
-            if cwd.starts_with(&path) {
-                return Ok(true);
-            }
-        }
-    }
-    Ok(false)
-}
-
-/// Find the closest directory containing package.json by traversing up
-async fn find_closest_parent_pkg(start_dir: &Path) -> Result<Option<(PathBuf, Value)>> {
-    let mut current = start_dir.to_path_buf();
-
-    while let Some(parent) = current.parent() {
-        let package_json_path = parent.join("package.json");
-        if tokio::fs::try_exists(&package_json_path).await? {
-            let pkg = read_json_file::<Value>(&package_json_path)
-                .await
-                .with_context(|| {
-                    format!(
-                        "Failed to read package.json at {}",
-                        package_json_path.display()
-                    )
-                })?;
-            return Ok(Some((parent.to_path_buf(), pkg)));
-        }
-        current = parent.to_path_buf();
-    }
-
-    Ok(None)
-}
-
-/// Find the project root path by traversing up the directory tree
-/// root
-///   -a
-///     -package.json
-///   -b
-///     -package.json
-///     -c
-///       -d
-/// will return root path
+/// Find the project root path by traversing up the directory tree.
+///
+/// If the current directory is inside a workspace, returns the workspace root.
+/// Otherwise, returns the directory containing the closest package.json.
 pub async fn find_root_path(cwd: &Path) -> Result<PathBuf> {
-    // Find closet package.json location
-    let project_path = find_project_path(cwd).await?;
-    let project_pkg = load_package_json_from_path(&project_path).await?;
-
-    // is workspace root, return project path directly
-    if is_workspace_root(&project_pkg).await {
-        return Ok(project_path);
-    }
-
-    let (parent_project_dir, parent_pkg) = match find_closest_parent_pkg(&project_path).await? {
-        Some((dir, pkg)) => (dir, pkg),
-        None => return Ok(project_path),
-    };
-
-    // parent is not workspace root, return project path directly
-    if !is_workspace_root(&parent_pkg).await {
-        return Ok(project_path);
-    }
-    let patterns = match parent_pkg.get("workspaces") {
-        Some(Value::Array(patterns)) => patterns,
-        _ => return Ok(parent_project_dir),
-    };
-    for pattern in patterns {
-        let pattern_str = match pattern.as_str() {
-            Some(s) => s,
-            None => continue,
-        };
-        if is_in_workspace(&project_path, &parent_project_dir, pattern_str).await? {
-            tracing::debug!("Found workspace root at: {}", parent_project_dir.display());
-            return Ok(parent_project_dir);
-        }
-    }
-    Ok(project_path)
+    WorkspaceDiscovery::new(FsContext::glob())
+        .find_root_path(cwd)
+        .await
 }
 
-/// Update current working directory to project root (with workspaces)
+/// Find the closest directory containing package.json.
+pub async fn find_project_path(cwd: &Path) -> Result<PathBuf> {
+    WorkspaceDiscovery::new(FsContext::glob())
+        .find_project_path(cwd)
+        .await
+}
+
+/// Update current working directory to project root (with workspaces).
 pub async fn update_cwd_to_root(cwd: &Path) -> Result<PathBuf> {
     let root_dir = find_root_path(cwd).await?;
     if !compare_paths(cwd, &root_dir) {
@@ -197,7 +79,7 @@ pub async fn update_cwd_to_root(cwd: &Path) -> Result<PathBuf> {
     Ok(root_dir)
 }
 
-/// Update current working directory to project directory (closest package.json)
+/// Update current working directory to project directory (closest package.json).
 pub async fn update_cwd_to_project(cwd: &Path) -> Result<PathBuf> {
     let project_dir = find_project_path(cwd).await?;
     if !compare_paths(cwd, &project_dir) {
@@ -205,23 +87,6 @@ pub async fn update_cwd_to_project(cwd: &Path) -> Result<PathBuf> {
         env::set_current_dir(&project_dir).context("Failed to change to project directory")?;
     }
     Ok(project_dir)
-}
-
-/// Find the closest directory containing package.json by traversing up
-pub async fn find_project_path(cwd: &Path) -> Result<PathBuf> {
-    // First check if current directory has package.json
-    let current_package_json = cwd.join("package.json");
-    if tokio::fs::try_exists(&current_package_json).await? {
-        return Ok(cwd.to_path_buf());
-    }
-
-    // If not, traverse up
-    let (pkg_dir, _) = match find_closest_parent_pkg(cwd).await? {
-        Some((dir, pkg)) => (dir, pkg),
-        None => return Ok(cwd.to_path_buf()),
-    };
-
-    Ok(pkg_dir)
 }
 
 // Helper function to compare paths

@@ -166,3 +166,19 @@ jobs:
           Write-Host "Working directory: $(Get-Location)"
           
           pwsh -File e2e/utoo-pm.ps1 --verbose
+
+      - name: Upload e2e artifacts on failure (Unix)
+        if: failure() && matrix.settings.host != 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-${{ matrix.settings.target }}
+          path: /tmp/utoo-*
+          if-no-files-found: ignore
+
+      - name: Upload e2e artifacts on failure (Windows)
+        if: failure() && matrix.settings.host == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-${{ matrix.settings.target }}
+          path: ${{ runner.temp }}/utoo-*
+          if-no-files-found: ignore

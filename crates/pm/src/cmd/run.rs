@@ -84,7 +84,7 @@ pub async fn run_script(
         load_package_json_from_path(&updated_cwd).await?
     };
 
-    let (scope, name, fullname) =
+    let (_scope, name, fullname) =
         parse_package_name(pkg.get("name").and_then(|v| v.as_str()).unwrap_or_default());
 
     let package = PackageInfo {
@@ -100,14 +100,8 @@ pub async fn run_script(
         },
         bin_files: Default::default(),
         scripts: Scripts::default(),
-        scope,
         fullname,
         name,
-        version: pkg
-            .get("version")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string(),
     };
 
     // Get all scripts from package.json

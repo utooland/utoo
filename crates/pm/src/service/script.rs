@@ -1,53 +1,69 @@
+use crate::fs;
 use crate::model::package::PackageInfo;
 use anyhow::{Context, Result};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tokio::fs;
+use tokio::sync::OnceCell;
 
 use super::binary::get_envs;
+
+/// Cached result of node-gyp availability check and installation
+static NODE_GYP_ENSURED: OnceCell<Result<bool, String>> = OnceCell::const_new();
 
 pub struct ScriptService;
 
 impl ScriptService {
     /// Check if node-gyp exists in PATH by searching directories
     fn has_node_gyp_in_path() -> bool {
+        let path_separator = if cfg!(windows) { ';' } else { ':' };
         if let Ok(paths) = env::var("PATH") {
             paths
-                .split(':')
+                .split(path_separator)
                 .map(|dir| Path::new(dir).join("node-gyp"))
-                .any(|path| std::path::Path::new(&path).exists())
+                .any(|path| path.exists())
         } else {
             false
         }
     }
 
-    /// Ensure node-gyp is available in PATH, install globally if not
+    /// Ensure node-gyp is available in PATH, install globally if not.
+    /// Uses OnceCell to ensure installation happens only once, even with concurrent calls.
     pub async fn ensure_node_gyp() -> Result<bool> {
-        // Check if node-gyp exists in PATH
-        let has_node_gyp = Self::has_node_gyp_in_path();
+        let result = NODE_GYP_ENSURED
+            .get_or_init(|| async {
+                if Self::has_node_gyp_in_path() {
+                    tracing::debug!("node-gyp found in PATH");
+                    return Ok(true);
+                }
 
-        if !has_node_gyp {
-            tracing::debug!("node-gyp not found in PATH, installing globally");
-            // Install node-gyp globally, ignore stdout but keep stderr
-            let status = Command::new("ut")
-                .args(["i", "-g", "node-gyp"])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .context("Failed to install node-gyp globally")?;
-            if !status.success() {
-                tracing::debug!("Failed to install node-gyp globally: {status}");
-                anyhow::bail!("Failed to install node-gyp globally");
-            }
-            return Ok(true);
+                tracing::debug!("node-gyp not found in PATH, installing globally");
+                let status = Command::new("ut")
+                    .args(["i", "-g", "node-gyp"])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+
+                match status {
+                    Ok(s) if s.success() => {
+                        tracing::debug!("node-gyp installed successfully");
+                        Ok(true)
+                    }
+                    Ok(s) => Err(format!("Failed to install node-gyp globally: {s}")),
+                    Err(e) => Err(format!("Failed to run node-gyp installation: {e}")),
+                }
+            })
+            .await;
+
+        match result {
+            Ok(v) => Ok(*v),
+            Err(e) => anyhow::bail!("{e}"),
         }
-        Ok(true)
     }
 
     pub fn is_node_gyp_pkg(package: &PackageInfo) -> bool {
         // https://hitu.antgroup-inc.cn/packages/@npmcli/node-gyp/files/lib/index.js#L6:L6
-        std::path::Path::new(&package.path.join("binding.gyp")).exists()
+        package.path.join("binding.gyp").exists()
     }
 
     pub async fn execute_script(
@@ -100,6 +116,11 @@ impl ScriptService {
                 .env("FORCE_COLOR", "1"); // Enable color output for npm/yarn/etc
 
             if let Some(envs) = get_envs().await {
+                tracing::debug!(
+                    "Injecting {} binary mirror envs for {}",
+                    envs.len(),
+                    package.fullname
+                );
                 for (key, value) in envs {
                     if let Some(value_str) = value.as_str() {
                         cmd.env(key, value_str);
@@ -160,7 +181,7 @@ impl ScriptService {
 
     pub async fn ensure_executable(target_path: &Path) -> Result<()> {
         // Early check for file existence (works on all platforms)
-        let metadata = tokio::fs::metadata(&target_path)
+        let metadata = crate::fs::metadata(&target_path)
             .await
             .context(format!("Failed to access file {}", target_path.display()))?;
 
@@ -208,7 +229,7 @@ impl ScriptService {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mut perms = tokio::fs::metadata(&target_path)
+            let mut perms = crate::fs::metadata(&target_path)
                 .await
                 .context(format!(
                     "Failed to get file permissions {}",
@@ -270,8 +291,8 @@ impl ScriptService {
 
         while let Some(path) = current_path {
             let bin_path = path.join("node_modules/.bin");
-            if tokio::fs::try_exists(&bin_path).await?
-                && let Ok(absolute_path) = tokio::fs::canonicalize(&bin_path).await
+            if crate::fs::try_exists(&bin_path).await?
+                && let Ok(absolute_path) = crate::fs::canonicalize(&bin_path).await
             {
                 bin_paths.push(absolute_path);
             }
@@ -410,10 +431,8 @@ mod tests {
             path: package_path.to_path_buf(),
             bin_files: Default::default(),
             scripts: Scripts::default(),
-            scope: None,
             fullname: "test-package".to_string(),
             name: "test-package".to_string(),
-            version: "1.0.0".to_string(),
         };
 
         let bin_paths = ScriptService::collect_bin_paths(&package).await.unwrap();
@@ -667,10 +686,8 @@ mod tests {
             path: package_path.to_path_buf(),
             bin_files: Default::default(),
             scripts: Scripts::default(),
-            scope: None,
             fullname: "test-package".to_string(),
             name: "test-package".to_string(),
-            version: "1.0.0".to_string(),
         };
         assert!(ScriptService::is_node_gyp_pkg(&package));
         // Case 2: binding.gyp does not exist

@@ -1,31 +1,6 @@
-use std::path::PathBuf;
-use tokio::fs;
+use crate::fs;
 
-use super::config;
-
-pub fn parse_pattern(pattern: &str) -> (String, String) {
-    // for @scope/pkg@version
-    if pattern.starts_with('@') {
-        if let Some(at_pos) = pattern.rfind('@')
-            && let Some(slash_pos) = pattern.find('/')
-            && at_pos > slash_pos
-        {
-            // for @scope/name@version
-            let (pkg, version) = pattern.split_at(at_pos);
-            return (pkg.to_string(), version[1..].to_string());
-        }
-        // @scope/name or @scope*
-        return (pattern.to_string(), "*".to_string());
-    }
-
-    // no scope pkg
-    let parts: Vec<&str> = pattern.rsplitn(2, '@').collect();
-    match parts.as_slice() {
-        [version, pkg] => (pkg.to_string(), version.to_string()),
-        [pkg] => (pkg.to_string(), "*".to_string()),
-        _ => ("*".to_string(), "*".to_string()),
-    }
-}
+pub use super::config::get_cache_dir;
 
 pub fn matches_pattern(text: &str, pattern: &str) -> bool {
     if pattern == "*" {
@@ -84,64 +59,11 @@ pub async fn collect_matching_versions(
     Ok(())
 }
 
-pub fn get_cache_dir() -> PathBuf {
-    config::get_cache_dir()
-}
-
-pub fn get_package_versions_cache_file(package_name: &str) -> PathBuf {
-    // Escape package name for filesystem compatibility
-    get_cache_dir().join(package_name).join("versions.json")
-}
-
-pub fn get_package_manifest_cache_file(package_name: &str, version: &str) -> PathBuf {
-    // Escape package name and version for filesystem compatibility
-    get_cache_dir()
-        .join(package_name)
-        .join("manifests")
-        .join(format!("{version}.json"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs;
     use tempfile::TempDir;
-    use tokio::fs;
-
-    #[test]
-    fn test_parse_pattern_normal_packages() {
-        // normal pkg
-        assert_eq!(
-            parse_pattern("express"),
-            ("express".to_string(), "*".to_string())
-        );
-
-        // normal pkg with version
-        assert_eq!(
-            parse_pattern("express@4.17.1"),
-            ("express".to_string(), "4.17.1".to_string())
-        );
-    }
-
-    #[test]
-    fn test_parse_pattern_scoped_packages() {
-        // scoped pkg
-        assert_eq!(
-            parse_pattern("@types/node"),
-            ("@types/node".to_string(), "*".to_string())
-        );
-
-        // scoped pkg with version
-        assert_eq!(
-            parse_pattern("@types/node@14.14.31"),
-            ("@types/node".to_string(), "14.14.31".to_string())
-        );
-
-        // special case: @types/*
-        assert_eq!(
-            parse_pattern("@types/*"),
-            ("@types/*".to_string(), "*".to_string())
-        );
-    }
 
     #[test]
     fn test_matches_pattern_wildcard() {
@@ -262,75 +184,6 @@ mod tests {
             .await?;
 
         assert_eq!(to_delete.len(), 0);
-        Ok(())
-    }
-
-    #[test]
-    fn test_get_cache_dir_uses_config() {
-        // Test that get_cache_dir delegates to config module
-        let result = get_cache_dir();
-
-        // Should return a valid path
-        assert!(result.is_absolute() || result.starts_with("~") || result.starts_with("."));
-    }
-
-    #[test]
-    fn test_get_package_versions_cache_file() {
-        let result = get_package_versions_cache_file("lodash");
-
-        // Should contain package name and versions.json
-        assert!(result.to_string_lossy().contains("lodash"));
-        assert!(result.to_string_lossy().ends_with("versions.json"));
-    }
-
-    #[test]
-    fn test_get_package_versions_cache_file_scoped() {
-        let result = get_package_versions_cache_file("@types/node");
-
-        // Should handle scoped packages correctly
-        assert!(result.to_string_lossy().contains("@types/node"));
-        assert!(result.to_string_lossy().ends_with("versions.json"));
-    }
-
-    #[test]
-    fn test_get_package_manifest_cache_file() {
-        let result = get_package_manifest_cache_file("lodash", "4.17.21");
-
-        // Should contain package name, manifests directory, and version.json
-        assert!(result.to_string_lossy().contains("lodash"));
-        assert!(result.to_string_lossy().contains("manifests"));
-        assert!(result.to_string_lossy().ends_with("4.17.21.json"));
-    }
-
-    #[test]
-    fn test_get_package_manifest_cache_file_scoped() {
-        let result = get_package_manifest_cache_file("@types/node", "18.0.0");
-
-        // Should handle scoped packages correctly
-        assert!(result.to_string_lossy().contains("@types/node"));
-        assert!(result.to_string_lossy().contains("manifests"));
-        assert!(result.to_string_lossy().ends_with("18.0.0.json"));
-    }
-
-    #[tokio::test]
-    async fn test_cache_file_structure_consistency() -> anyhow::Result<()> {
-        // Test that cache file paths are consistent
-        let pkg_name = "express";
-        let version = "4.18.2";
-
-        let versions_file = get_package_versions_cache_file(pkg_name);
-        let manifest_file = get_package_manifest_cache_file(pkg_name, version);
-
-        // Both should be under the same cache directory
-        let cache_dir = get_cache_dir();
-        assert!(versions_file.starts_with(&cache_dir));
-        assert!(manifest_file.starts_with(&cache_dir));
-
-        // Manifest should be under the same package directory as versions
-        let pkg_dir = cache_dir.join(pkg_name);
-        assert!(versions_file.starts_with(&pkg_dir));
-        assert!(manifest_file.starts_with(&pkg_dir));
-
         Ok(())
     }
 }

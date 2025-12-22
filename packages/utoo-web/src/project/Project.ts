@@ -2,6 +2,7 @@ import { handleIssues } from "@utoo/pack-shared";
 import * as comlink from "comlink";
 import {
   BuildOutput,
+  DepsOptions,
   Dirent,
   PackFile,
   ProjectEndpoint,
@@ -94,6 +95,11 @@ export class Project implements ProjectEndpoint {
 
   public async mount() {
     return await this.#mount;
+  }
+
+  public async deps(options?: DepsOptions) {
+    await this.#mount;
+    return await this.remote.deps(options);
   }
 
   public async install(packageLock: string, maxConcurrentDownloads?: number) {

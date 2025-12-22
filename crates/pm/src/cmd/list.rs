@@ -1,10 +1,8 @@
-use crate::service::dependency_graph::DependencyGraphService;
+use crate::service::dependency_graph::LockGraphService;
 use anyhow::{Context, Result};
 use petgraph::graph::NodeIndex;
 use std::collections::BTreeMap;
 use std::path::Path;
-
-use crate::model::package_lock::PackageLock;
 
 /// List dependency information, similar to npm list
 pub async fn list_dependencies(cwd: &Path, package_name: &str) -> Result<()> {
@@ -12,22 +10,16 @@ pub async fn list_dependencies(cwd: &Path, package_name: &str) -> Result<()> {
 
     // Find package-lock.json file
     let lock_file_path = cwd.join("package-lock.json");
-    if !tokio::fs::try_exists(&lock_file_path).await? {
+    if !crate::fs::try_exists(&lock_file_path).await? {
         return Err(anyhow::anyhow!(
             "package-lock.json not found in current directory"
         ));
     }
 
-    // Load package-lock.json
-    tracing::debug!("Loading package-lock.json...");
-    let package_lock = PackageLock::from_lock_file(&lock_file_path)
-        .context("Failed to parse package-lock.json")?;
-
-    // Build dependency graph
-    tracing::debug!("Building dependency graph...");
-    let graph = package_lock
-        .build_dependency_graph()
-        .context("Failed to build dependency graph")?;
+    // Load package-lock.json and build lock graph
+    tracing::debug!("Loading package-lock.json and building lock graph...");
+    let graph = LockGraphService::from_lock_file(&lock_file_path)
+        .context("Failed to load and parse package-lock.json")?;
 
     show_package_dependencies(&graph, package_name)?;
 
@@ -35,7 +27,7 @@ pub async fn list_dependencies(cwd: &Path, package_name: &str) -> Result<()> {
 }
 
 /// Display dependency information for a specific package
-fn show_package_dependencies(graph: &DependencyGraphService, package_name: &str) -> Result<()> {
+fn show_package_dependencies(graph: &LockGraphService, package_name: &str) -> Result<()> {
     let node_paths = graph.find_paths_to_root(package_name)?;
     if node_paths.is_empty() {
         tracing::debug!("No paths to root found");
@@ -71,7 +63,7 @@ fn build_dep_tree(paths: &[Vec<NodeIndex>]) -> DepTreeNode {
 
 fn print_dep_tree(
     node: &DepTreeNode,
-    graph: &DependencyGraphService,
+    graph: &LockGraphService,
     prefix: &str,
     is_last: bool,
     highlight: &[&str],
@@ -84,8 +76,10 @@ fn print_dep_tree(
             "├───┬"
         };
         if let Some(pkg) = graph.get_graph().node_weight(node.index) {
-            let is_highlight = highlight.iter().any(|&h| pkg.name.starts_with(h));
-            let display = format!("{}@{}", pkg.name, pkg.version);
+            let name = pkg.name();
+            let version = pkg.version();
+            let is_highlight = highlight.iter().any(|&h| name.starts_with(h));
+            let display = format!("{}@{}", name, version);
             if is_highlight {
                 if !pkg.path.is_empty() {
                     println!(
@@ -117,42 +111,42 @@ fn print_dep_tree(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::service::dependency_graph::{
-        DependencyEdge, DependencyGraphService, DependencyType, PackageNode,
-    };
+    use crate::service::dependency_graph::LockGraphService;
     use petgraph::graph::NodeIndex;
+    use utoo_ruborist::lock::{LockPackage, LockPackageNode};
 
-    fn mock_graph() -> DependencyGraphService {
-        let mut graph = DependencyGraphService::new();
+    fn make_lock_package(name: &str, version: &str) -> LockPackage {
+        LockPackage {
+            name: Some(name.to_string()),
+            version: Some(version.to_string()),
+            ..Default::default()
+        }
+    }
+
+    fn mock_graph() -> LockGraphService {
+        let mut graph = LockGraphService::new();
         // root
-        let root = PackageNode::new("root".to_string(), "1.0.0".to_string(), "".to_string());
-        let a = PackageNode::new(
-            "a".to_string(),
-            "1.0.0".to_string(),
+        let root = LockPackageNode::new("".to_string(), make_lock_package("root", "1.0.0"));
+        let a = LockPackageNode::new(
             "node_modules/a".to_string(),
+            make_lock_package("a", "1.0.0"),
         );
-        let b = PackageNode::new(
-            "b".to_string(),
-            "1.0.0".to_string(),
+        let b = LockPackageNode::new(
             "node_modules/b".to_string(),
+            make_lock_package("b", "1.0.0"),
         );
-        let c = PackageNode::new(
-            "c".to_string(),
-            "1.0.0".to_string(),
+        let c = LockPackageNode::new(
             "node_modules/c".to_string(),
+            make_lock_package("c", "1.0.0"),
         );
         let root_idx = graph.add_package(root).unwrap();
         let a_idx = graph.add_package(a).unwrap();
         let b_idx = graph.add_package(b).unwrap();
         let c_idx = graph.add_package(c).unwrap();
         // root -> a, a -> b, b -> c
-        let edge = DependencyEdge {
-            _dependency_type: DependencyType::Production,
-            _version_spec: "1.0.0".to_string(),
-        };
-        graph.graph.add_edge(a_idx, root_idx, edge.clone());
-        graph.graph.add_edge(b_idx, a_idx, edge.clone());
-        graph.graph.add_edge(c_idx, b_idx, edge);
+        graph.graph.add_edge(a_idx, root_idx, ());
+        graph.graph.add_edge(b_idx, a_idx, ());
+        graph.graph.add_edge(c_idx, b_idx, ());
         graph
     }
 

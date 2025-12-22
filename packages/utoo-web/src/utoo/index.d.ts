@@ -1,9 +1,9 @@
 /* tslint:disable */
 /* eslint-disable */
+export function initLogFilter(filter: string): void;
 export function init_pack(): void;
-export function init_log_filter(filter: string): void;
-export function registerWorkerScheduler(creator: Function, terminator: Function): void;
 export function workerCreated(worker_id: number): void;
+export function registerWorkerScheduler(creator: Function, terminator: Function): void;
 export function recvTaskMessageInWorker(worker_id: number): Promise<WasmTaskMessage>;
 export function sendTaskMessage(message: any): Promise<void>;
 /**
@@ -57,10 +57,20 @@ export class Project {
   static createDirAll(path: string): Promise<void>;
   static readToString(path: string): Promise<string>;
   /**
+   * Generate package-lock.json by resolving dependencies.
+   *
+   * # Arguments
+   * * `registry` - Optional registry URL. If None, uses npmmirror.
+   *   - "https://registry.npmmirror.com" - supports semver queries (faster)
+   *   - "https://registry.npmjs.org" - official npm registry (slower, fetches full manifest)
+   * * `concurrency` - Optional concurrency limit (defaults to 20)
+   */
+  static deps(registry?: string | null, concurrency?: number | null): Promise<string>;
+  /**
    * Create a tar.gz archive and return bytes (no file I/O)
    * This is useful for main thread execution without OPFS access
    */
-  static gzip(files: any): Uint8Array;
+  static gzip(files: any): Promise<Uint8Array>;
   static init(thread_url: string): void;
   static read(path: string): Promise<Uint8Array>;
   static build(): Promise<any>;
@@ -68,9 +78,9 @@ export class Project {
   static install(package_lock: string, max_concurrent_downloads?: number | null): Promise<void>;
   static setCwd(path: string): void;
   /**
-   * Calculate MD5 hash of byte content
+   * Calculate MD5 hash of byte content (async for better thread scheduling)
    */
-  static sigMd5(content: Uint8Array): string;
+  static sigMd5(content: Uint8Array): Promise<string>;
   static metadata(path: string): Promise<Metadata>;
   static readDir(path: string): Promise<DirEntry[]>;
   static copyFile(src: string, dst: string): Promise<void>;
@@ -107,7 +117,7 @@ export class WebWorkerTermination {
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
-  readonly init_log_filter: (a: number, b: number) => void;
+  readonly initLogFilter: (a: number, b: number) => void;
   readonly init_pack: () => void;
   readonly registerWorkerScheduler: (a: any, b: any) => void;
   readonly workerCreated: (a: number) => void;
@@ -127,7 +137,8 @@ export interface InitOutput {
   readonly project_createDir: (a: number, b: number) => any;
   readonly project_createDirAll: (a: number, b: number) => any;
   readonly project_cwd: () => [number, number];
-  readonly project_gzip: (a: any) => [number, number, number];
+  readonly project_deps: (a: number, b: number, c: number) => any;
+  readonly project_gzip: (a: any) => any;
   readonly project_init: (a: number, b: number) => void;
   readonly project_install: (a: number, b: number, c: number) => any;
   readonly project_metadata: (a: number, b: number) => any;
@@ -137,7 +148,7 @@ export interface InitOutput {
   readonly project_removeDir: (a: number, b: number, c: number) => any;
   readonly project_removeFile: (a: number, b: number) => any;
   readonly project_setCwd: (a: number, b: number) => void;
-  readonly project_sigMd5: (a: number, b: number) => [number, number];
+  readonly project_sigMd5: (a: number, b: number) => any;
   readonly project_write: (a: number, b: number, c: number, d: number) => any;
   readonly project_writeString: (a: number, b: number, c: number, d: number) => any;
   readonly rust_mi_get_default_heap: () => number;
@@ -174,14 +185,13 @@ export interface InitOutput {
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __wbindgen_export_7: WebAssembly.Table;
   readonly __externref_drop_slice: (a: number, b: number) => void;
-  readonly __externref_table_dealloc: (a: number) => void;
+  readonly closure117912_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure115367_externref_shim: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen__convert__closures_____invoke__h2ce973260553dde0: (a: number, b: number) => void;
-  readonly closure117696_externref_shim: (a: number, b: number, c: any) => void;
-  readonly wasm_bindgen__convert__closures_____invoke__heac94dfe74335608: (a: number, b: number) => void;
-  readonly closure96_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure115147_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure115144_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure117826_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__h13262edabaa325f0: (a: number, b: number) => void;
+  readonly closure115364_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure104_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure118047_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_thread_destroy: (a?: number, b?: number, c?: number) => void;
   readonly __wbindgen_start: (a: number) => void;
 }

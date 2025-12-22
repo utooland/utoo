@@ -10,48 +10,54 @@ name = "utoo"
 path = "src/main.rs"
 
 [dependencies]
-anyhow             = { workspace = true }
-async-compression  = { version = "0.3", features = ["gzip", "tokio"] }
-atty               = "0.2"
-chrono             = { version = "0.4", features = ["serde"] }
-clap               = { workspace = true }
-colored            = "2.1"
-dashmap            = "6.1.0"
-deno_semver        = "0.7"
-dialoguer          = { version = "0.11", features = ["fuzzy-select"] }
-dirs               = "4.0"
-flate2             = "1.0"
-futures            = { workspace = true }
-glob               = "0.3.1"
-indicatif          = "0.17.8"
-libc               = "0.2"
-once_cell          = "1.19"
-openssl            = { version = "0.10", features = ["vendored"] }
-owo-colors         = { workspace = true }
-petgraph           = "0.6"
-regex              = "1.10"
-reqwest            = { version = "0.11", features = ["gzip", "json", "stream", "trust-dns"] }
-serde              = { workspace = true }
-serde_json         = "1.0"
-tar                = "0.4"
-tempfile           = "3.15.0"
-term_size          = "0.3"
-tokio-retry        = "0.3"
-tokio-tar          = "0.3.1"
-tokio-util         = { version = "0.7", features = ["io"] }
-toml               = { workspace = true }
-tracing            = { workspace = true }
-tracing-appender   = "0.2"
+anyhow = { workspace = true }
+async-compression = { version = "0.3", features = ["gzip", "tokio"] }
+atty = "0.2"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { workspace = true }
+colored = "2.1"
+dashmap = "6.1.0"
+deno_semver = "0.7"
+dialoguer = { version = "0.11", features = ["fuzzy-select"] }
+dirs = "4.0"
+flate2 = "1.0"
+futures = { workspace = true }
+glob = "0.3.1"
+indicatif = "0.17.8"
+libc = "0.2"
+once_cell = "1.19"
+owo-colors = { workspace = true }
+petgraph = "0.6"
+regex = "1.10"
+reqwest = { version = "0.12", default-features = false, features = [
+  "gzip",
+  "hickory-dns",
+  "http2",
+  "json",
+  "rustls-tls",
+  "stream",
+] }
+serde = { workspace = true }
+serde_json = "1.0"
+tar = "0.4"
+tempfile = "3.15.0"
+term_size = "0.3"
+tokio-fs-ext = { workspace = true }
+tokio-retry = "0.3"
+tokio-tar = "0.3.1"
+tokio-util = { version = "0.7", features = ["io"] }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-appender = "0.2"
 tracing-subscriber = { workspace = true }
+utoo-ruborist = { path = "../ruborist" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["full"] }
 
-[[bench]]
-harness = false
-name    = "install_benchmark"
-path    = "benches/deps_benchmark.rs"
+# Linux: use vendored OpenSSL for better compatibility with older glibc
+[target.'cfg(target_os = "linux")'.dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
 
 [dev-dependencies]
-criterion = { workspace = true }
-mockito   = "1.7.0"
+mockito = "1.7.0"

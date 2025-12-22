@@ -1,6 +1,9 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
+use super::install::InstallService;
+use crate::helper::lock::resolve_package_spec;
+
 /// Package management service for handling package installation and caching
 pub struct PackageManagementService;
 
@@ -23,20 +26,17 @@ impl PackageManagementService {
     /// Install a package to the utoo cache directory using utoo's own installation logic
     /// This function is similar to prepare_global_package_json but installs to ~/.utoo/utx
     pub async fn install_package_to_cache(package_name: &str) -> Result<PathBuf> {
-        // Parse package name and version
-        let (name, version, _) = Self::parse_package_spec(package_name).await?;
+        let (name, version, _) = resolve_package_spec(package_name).await?;
 
         let cache_dir = Self::get_utoo_cache_dir()?;
-
-        // Create a unique directory for this package installation
         let package_cache_dir = cache_dir.join(format!(
             "{}@{}",
             Self::package_name_to_dir_name(&name),
             version
         ));
 
-        // Maybe the package is already installed
-        if tokio::fs::try_exists(&package_cache_dir.join("bin")).await? {
+        // Check if already installed
+        if crate::fs::try_exists(&package_cache_dir.join("bin")).await? {
             tracing::debug!(
                 "Package {} already cached at {}",
                 name,
@@ -45,21 +45,14 @@ impl PackageManagementService {
             return Ok(package_cache_dir);
         }
 
-        tracing::debug!("Installing package {name} to cache using utoo...");
-        crate::cmd::install::install_global_package(
+        tracing::debug!("Installing package {name} to cache...");
+        InstallService::install_global_package(
             package_name,
             Some(package_cache_dir.to_string_lossy().to_string().as_str()),
         )
         .await?;
-        tracing::debug!("Package {name} installed successfully using utoo");
+        tracing::debug!("Package {name} installed successfully");
 
         Ok(package_cache_dir)
-    }
-
-    /// Parse a package spec and resolve the latest version
-    async fn parse_package_spec(package_spec: &str) -> Result<(String, String, String)> {
-        let (name, version_spec) = crate::util::cache::parse_pattern(package_spec);
-        let resolved = crate::util::registry::resolve(&name, &version_spec).await?;
-        Ok((name, resolved.version, package_spec.to_string()))
     }
 }

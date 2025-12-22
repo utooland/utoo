@@ -156,6 +156,44 @@ pub fn log_time_end(msg: &str) {
     }
 }
 
+/// Event receiver that forwards ruborist events to progress bar.
+pub struct ProgressReceiver;
+
+impl utoo_ruborist::progress::EventReceiver for ProgressReceiver {
+    fn on_event(&self, event: utoo_ruborist::progress::BuildEvent) {
+        use utoo_ruborist::progress::BuildEvent;
+        match event {
+            BuildEvent::PreloadStart { count } | BuildEvent::PreloadQueued { count } => {
+                PROGRESS_BAR.inc_length(count as u64);
+            }
+            BuildEvent::PreloadFetching { name } => {
+                log_progress(&format!("fetching {}", name));
+            }
+            BuildEvent::PreloadProgress { name, .. } => {
+                PROGRESS_BAR.inc(1);
+                log_progress(&format!("resolved {}", name));
+            }
+            BuildEvent::PreloadComplete { success, failed } => {
+                PROGRESS_BAR.set_position(0);
+                PROGRESS_BAR.set_length(0);
+                log_progress(&format!("preload: {} ok, {} failed", success, failed));
+            }
+            BuildEvent::DependencyCount { count } => {
+                PROGRESS_BAR.inc_length(count as u64);
+            }
+            BuildEvent::Resolving { name } => {
+                log_progress(&format!("resolving {}", name));
+            }
+            BuildEvent::Resolved { .. }
+            | BuildEvent::Reused { .. }
+            | BuildEvent::Skipped { .. } => {
+                PROGRESS_BAR.inc(1);
+            }
+            _ => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

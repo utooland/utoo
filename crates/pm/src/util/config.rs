@@ -25,7 +25,7 @@ impl Config {
 
         let mut config = Self::load_from_path(&Self::global_config_path()?).await?;
         let local_path = Self::local_config_path()?;
-        if tokio::fs::try_exists(&local_path).await? {
+        if crate::fs::try_exists(&local_path).await? {
             let local_config = Self::load_from_path(&local_path).await?;
             config.values.extend(local_config.values);
         }
@@ -42,7 +42,7 @@ impl Config {
     }
 
     async fn load_from_path(path: &Path) -> ConfigResult<Self> {
-        if !tokio::fs::try_exists(path).await? {
+        if !crate::fs::try_exists(path).await? {
             return Ok(Config::default());
         }
 
@@ -188,12 +188,6 @@ static CACHE_DIR: LazyLock<ConfigValue<String>> = LazyLock::new(|| {
     ConfigValue::new("cache-dir", default_cache)
 });
 
-static IS_NPM_REGISTRY: OnceLock<bool> = OnceLock::new();
-
-fn is_npm_registry_url(url: &str) -> bool {
-    url.contains("registry.npmjs.org") || url.contains("registry.npmjs.com")
-}
-
 pub async fn set_registry(registry: Option<String>) {
     // Priority: CLI argument > UTOO_REGISTRY env > config > default
     let final_registry = if let Some(reg) = registry {
@@ -210,12 +204,6 @@ pub async fn set_registry(registry: Option<String>) {
             .and_then(|config| config.get("registry").ok().flatten())
     };
 
-    // Determine if this is npm registry and set the global flag
-    let registry_url = final_registry
-        .as_deref()
-        .unwrap_or("https://registry.npmmirror.com");
-    let _ = IS_NPM_REGISTRY.set(is_npm_registry_url(registry_url));
-
     REGISTRY.set(final_registry);
 }
 
@@ -231,18 +219,6 @@ pub async fn get_legacy_peer_deps() -> bool {
     LEGACY_PEER_DEPS.get().await
 }
 
-fn ensure_is_npm_registry_initialized() -> bool {
-    *IS_NPM_REGISTRY.get_or_init(|| false)
-}
-
-pub fn get_registry_support_abbr() -> bool {
-    !ensure_is_npm_registry_initialized()
-}
-
-pub fn get_registry_support_semver() -> bool {
-    !ensure_is_npm_registry_initialized()
-}
-
 static OMIT: OnceLock<HashSet<OmitType>> = OnceLock::new();
 
 pub fn set_omit(value: HashSet<OmitType>) {
@@ -256,27 +232,16 @@ pub fn get_omit() -> HashSet<OmitType> {
     OMIT.get().cloned().unwrap_or_default()
 }
 
-// Preload concurrency configuration
-static PRELOAD_MANIFESTS_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("preload-manifests-limit", 64));
+// Manifest fetch concurrency configuration
+static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
+    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 64));
 
-static PRELOAD_DOWNLOADS_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("preload-downloads-limit", 100));
-
-pub fn set_preload_manifests_limit(value: Option<usize>) {
-    PRELOAD_MANIFESTS_LIMIT.set(value);
+pub fn set_manifests_concurrency_limit(value: Option<usize>) {
+    MANIFESTS_CONCURRENCY_LIMIT.set(value);
 }
 
-pub async fn get_preload_manifests_limit() -> usize {
-    PRELOAD_MANIFESTS_LIMIT.get().await
-}
-
-pub fn set_preload_downloads_limit(value: Option<usize>) {
-    PRELOAD_DOWNLOADS_LIMIT.set(value);
-}
-
-pub async fn get_preload_downloads_limit() -> usize {
-    PRELOAD_DOWNLOADS_LIMIT.get().await
+pub async fn get_manifests_concurrency_limit() -> usize {
+    MANIFESTS_CONCURRENCY_LIMIT.get().await
 }
 
 pub async fn set_cache_dir(cache_dir: Option<String>) {

@@ -1,14 +1,10 @@
 pub mod auto_update;
-pub mod cli;
-pub mod compatibility;
 pub mod deps;
+pub mod fs;
 pub mod fuzzy_select;
 pub mod global_bin;
-pub mod graph_builder;
 pub mod install_runtime;
 pub mod lock;
 pub mod package;
-pub mod ruborist;
+pub mod tree_builder;
 pub mod workspace;
-
-pub use compatibility::{is_cpu_compatible, is_os_compatible};

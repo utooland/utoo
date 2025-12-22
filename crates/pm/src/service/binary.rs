@@ -1,14 +1,18 @@
+use crate::fs;
 use crate::util::config::get_registry;
 use crate::util::json::load_package_json_from_path;
-use crate::util::semver::matches;
 use anyhow::{Context, Result};
 use regex::Regex;
 use serde_json::{Map, Value};
 use std::path::Path;
-use tokio::fs;
+use std::sync::OnceLock;
 use tokio::sync::OnceCell;
+use utoo_ruborist::registry::is_npm_registry;
+use utoo_ruborist::semver::matches;
 
 static CONFIG: OnceCell<Value> = OnceCell::const_new();
+/// Cached result of whether we should skip binary mirror envs
+static SKIP_BINARY_MIRROR: OnceLock<bool> = OnceLock::new();
 
 async fn load_config() -> Result<&'static Value> {
     CONFIG
@@ -68,7 +72,7 @@ fn update_binary_config(pkg: &mut Value, binary_mirror: &Map<String, Value>) {
 
 async fn handle_node_pre_gyp_versioning(dir: &Path) -> Result<()> {
     let versioning_file = dir.join("node_modules/node-pre-gyp/lib/util/versioning.js");
-    if tokio::fs::try_exists(&versioning_file).await? {
+    if crate::fs::try_exists(&versioning_file).await? {
         let content = fs::read_to_string(&versioning_file)
             .await
             .context("Failed to read versioning.js")?;
@@ -145,7 +149,7 @@ async fn handle_replace_host(dir: &Path, binary_mirror: &Map<String, Value>) -> 
     let replace_host_files = get_replace_host_files(binary_mirror);
     for file in replace_host_files {
         let file_path = dir.join(file);
-        if tokio::fs::try_exists(&file_path).await? {
+        if crate::fs::try_exists(&file_path).await? {
             let content = fs::read_to_string(&file_path)
                 .await
                 .context("Failed to read file")?;
@@ -193,7 +197,7 @@ async fn handle_cypress(
     let os = target_os.unwrap_or(std::env::consts::OS);
     if let Some(target_platform) = platforms[os].as_str() {
         let download_file = dir.join("lib/tasks/download.js");
-        if tokio::fs::try_exists(&download_file).await? {
+        if crate::fs::try_exists(&download_file).await? {
             let content = fs::read_to_string(&download_file)
                 .await
                 .context("Failed to read download.js")?;
@@ -281,7 +285,23 @@ pub async fn update_package_binary(dir: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
+fn should_skip_binary_mirror() -> bool {
+    *SKIP_BINARY_MIRROR.get_or_init(|| {
+        let registry = get_registry();
+        let skip = is_npm_registry(&registry);
+        if skip {
+            tracing::debug!("Skipping binary mirror envs for npm registry: {}", registry);
+        }
+        skip
+    })
+}
+
 pub async fn get_envs() -> Option<&'static Map<String, Value>> {
+    // Skip binary mirror envs when using official npm registry
+    if should_skip_binary_mirror() {
+        return None;
+    }
+
     match load_config().await {
         Ok(_) => {
             let config = CONFIG.get();
@@ -407,7 +427,7 @@ mod tests {
 
         // Create necessary directory structure
         let lib_tasks_dir = dir.join("lib/tasks");
-        tokio::fs::create_dir_all(&lib_tasks_dir).await.unwrap();
+        crate::fs::create_dir_all(&lib_tasks_dir).await.unwrap();
         println!("Created directory: {lib_tasks_dir:?}");
 
         // Create test download.js file
@@ -416,7 +436,7 @@ mod tests {
             return version ? prepend(`desktop/${version}`) : prepend('desktop');
             return version ? prepend('desktop/' + version) : prepend('desktop');
         "#;
-        tokio::fs::write(&download_file, original_content)
+        crate::fs::write(&download_file, original_content)
             .await
             .unwrap();
         println!("Created file: {download_file:?}");
@@ -440,7 +460,7 @@ mod tests {
             .await
             .unwrap();
 
-        let content = tokio::fs::read_to_string(&download_file).await.unwrap();
+        let content = crate::fs::read_to_string(&download_file).await.unwrap();
         println!("File content after modification:\n{content}");
 
         assert!(
@@ -470,7 +490,7 @@ mod tests {
         });
 
         let pkg_path = dir.join("package.json");
-        tokio::fs::write(&pkg_path, pkg_json.to_string())
+        crate::fs::write(&pkg_path, pkg_json.to_string())
             .await
             .unwrap();
 
@@ -479,7 +499,7 @@ mod tests {
 
         // Read the updated package.json
         let updated_pkg: Value =
-            serde_json::from_str(&tokio::fs::read_to_string(pkg_path).await.unwrap()).unwrap();
+            serde_json::from_str(&crate::fs::read_to_string(pkg_path).await.unwrap()).unwrap();
 
         // Should not change version
         assert_eq!(updated_pkg["name"], "fsevents");

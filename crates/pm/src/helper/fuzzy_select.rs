@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
 use dialoguer::FuzzySelect;
-use serde_json::Value;
 use std::path::Path;
 
 use crate::helper::workspace::find_workspaces;
 use crate::util::json::load_package_json_from_path;
+use utoo_ruborist::manifest::PackageJson;
 
 /// Represents a script selection with its workspace context
 #[derive(Debug, Clone)]
@@ -53,20 +53,17 @@ impl ScriptItem {
     }
 }
 
-/// Collect scripts from a package.json Value
-fn collect_scripts_from_package(pkg: &Value, workspace_name: Option<String>) -> Vec<ScriptItem> {
-    let Some(Value::Object(scripts)) = pkg.get("scripts") else {
-        return Vec::new();
-    };
-
-    scripts
+/// Collect scripts from a PackageJson
+fn collect_scripts_from_package(
+    pkg: &PackageJson,
+    workspace_name: Option<String>,
+) -> Vec<ScriptItem> {
+    pkg.scripts
         .iter()
-        .filter_map(|(script_name, script_value)| {
-            script_value.as_str().map(|cmd| ScriptItem {
-                workspace_name: workspace_name.clone(),
-                script_name: script_name.clone(),
-                command: cmd.to_string(),
-            })
+        .map(|(script_name, cmd)| ScriptItem {
+            workspace_name: workspace_name.clone(),
+            script_name: script_name.clone(),
+            command: cmd.clone(),
         })
         .collect()
 }
@@ -79,10 +76,12 @@ fn collect_scripts_from_package(pkg: &Value, workspace_name: Option<String>) -> 
 ///   - `None`: Show all scripts (workspace-aware if applicable, or single package)
 ///   - `Some(name)`: Show only scripts from the specified workspace
 pub async fn select_script(cwd: &Path, workspace_filter: Option<&str>) -> Result<ScriptSelection> {
-    let pkg = load_package_json_from_path(cwd).await?;
+    let pkg_value = load_package_json_from_path(cwd).await?;
+    let pkg: PackageJson =
+        serde_json::from_value(pkg_value).context("Failed to parse package.json")?;
 
     // Check if this is a workspace root
-    let is_workspace_root = pkg.get("workspaces").is_some();
+    let is_workspace_root = pkg.workspaces.is_some();
 
     let script_items = if is_workspace_root && workspace_filter.is_none() {
         // Collect scripts from root package (should be first)

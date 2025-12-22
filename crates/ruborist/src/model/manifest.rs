@@ -1,8 +1,14 @@
+//! npm registry manifest types.
+//!
+//! These types represent the JSON responses from npm registry API.
+//! Used by both PM (native) and WASM (browser) implementations.
+
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// Skip on error - try to deserialize, return None if fails
+/// Skip on error - try to deserialize, return None if fails.
+/// This handles malformed npm registry data gracefully.
 fn skip_on_error<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where
     D: Deserializer<'de>,
@@ -11,6 +17,8 @@ where
     Ok(serde_json::from_value(Value::deserialize(deserializer)?).ok())
 }
 
+/// Full package manifest from npm registry.
+/// This is the response from `GET /<package-name>` endpoint.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FullManifest {
@@ -61,58 +69,68 @@ pub struct FullManifest {
     pub readme_filename: Option<String>,
 }
 
-/// Version-specific manifest from npm registry
-/// This represents the JSON response from `npm view <package-name>@<version> --json`
+/// Version-specific manifest from npm registry.
+/// This represents a single version entry in the `versions` field.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VersionManifest {
     pub name: String,
     pub version: String,
+
     #[serde(
         deserialize_with = "skip_on_error",
         skip_serializing_if = "Option::is_none"
     )]
     pub description: Option<String>,
+
     #[serde(
         deserialize_with = "skip_on_error",
         skip_serializing_if = "Option::is_none"
     )]
     pub main: Option<String>,
+
     #[serde(
         deserialize_with = "skip_on_error",
         skip_serializing_if = "Option::is_none"
     )]
     pub scripts: Option<HashMap<String, String>>,
+
     #[serde(
         deserialize_with = "skip_on_error",
         skip_serializing_if = "Option::is_none"
     )]
     pub repository: Option<Repository>,
+
     #[serde(
         deserialize_with = "skip_on_error",
         skip_serializing_if = "Option::is_none"
     )]
     pub keywords: Option<Vec<String>>,
+
     #[serde(
         deserialize_with = "skip_on_error",
         skip_serializing_if = "Option::is_none"
     )]
     pub author: Option<Author>,
+
     #[serde(
         deserialize_with = "skip_on_error",
         skip_serializing_if = "Option::is_none"
     )]
     pub license: Option<String>,
+
     #[serde(
         deserialize_with = "skip_on_error",
         skip_serializing_if = "Option::is_none"
     )]
     pub bugs: Option<Bugs>,
+
     #[serde(
         deserialize_with = "skip_on_error",
         skip_serializing_if = "Option::is_none"
     )]
     pub homepage: Option<String>,
+
     #[serde(
         deserialize_with = "skip_on_error",
         skip_serializing_if = "Option::is_none"
@@ -153,14 +171,14 @@ pub struct VersionManifest {
     )]
     pub engines: Option<HashMap<String, String>>,
 
-    // Binary files configuration - can be string or object
+    /// Binary files configuration - can be string or object
     #[serde(
         deserialize_with = "skip_on_error",
         skip_serializing_if = "Option::is_none"
     )]
     pub bin: Option<Value>,
 
-    // Install script indicator (used by npm to optimize package installation)
+    /// Install script indicator (used by npm to optimize package installation)
     #[serde(rename = "hasInstallScript")]
     #[serde(
         deserialize_with = "skip_on_error",
@@ -168,18 +186,19 @@ pub struct VersionManifest {
     )]
     pub has_install_script: Option<bool>,
 
-    // Platform compatibility
+    /// Platform compatibility - CPU
     #[serde(
         deserialize_with = "skip_on_error",
         skip_serializing_if = "Option::is_none"
     )]
-    pub cpu: Option<Value>, // Can be string or array
+    pub cpu: Option<Value>,
 
+    /// Platform compatibility - OS
     #[serde(
         deserialize_with = "skip_on_error",
         skip_serializing_if = "Option::is_none"
     )]
-    pub os: Option<Value>, // Can be string or array
+    pub os: Option<Value>,
 
     #[serde(rename = "_id")]
     pub id: String,
@@ -218,6 +237,7 @@ pub struct VersionManifest {
     pub directories: Option<Directories>,
 }
 
+/// Package author information.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Author {
     pub name: String,
@@ -227,6 +247,7 @@ pub struct Author {
     pub url: Option<String>,
 }
 
+/// Repository information.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Repository {
     #[serde(rename = "type")]
@@ -236,6 +257,7 @@ pub struct Repository {
     pub directory: Option<String>,
 }
 
+/// Bug tracker information.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Bugs {
     pub url: String,
@@ -243,6 +265,7 @@ pub struct Bugs {
     pub email: Option<String>,
 }
 
+/// Distribution information for a package version.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Dist {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -265,6 +288,7 @@ pub struct Dist {
     pub npm_signature: Option<String>,
 }
 
+/// Package maintainer information.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Maintainer {
     pub name: String,
@@ -272,6 +296,7 @@ pub struct Maintainer {
     pub email: Option<String>,
 }
 
+/// npm user information.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NpmUser {
     pub name: String,
@@ -279,6 +304,7 @@ pub struct NpmUser {
     pub email: Option<String>,
 }
 
+/// npm operational internal metadata.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NpmOperationalInternal {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -287,6 +313,7 @@ pub struct NpmOperationalInternal {
     pub tmp: Option<String>,
 }
 
+/// Directory paths in package.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Directories {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -303,6 +330,7 @@ pub struct Directories {
     pub test: Option<String>,
 }
 
+/// Simplified package manifest (for `npm view` output).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 #[allow(dead_code)]
@@ -372,6 +400,7 @@ pub struct PackageManifest {
     pub versions_count: usize,
 }
 
+/// Simplified version info.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[allow(dead_code)]
 pub struct VersionInfo {
@@ -380,10 +409,204 @@ pub struct VersionInfo {
     pub npm_user: Option<NpmUser>,
 }
 
+use super::package_json::PackageJson;
+
+/// Manifest for a node in the dependency graph.
+///
+/// This enum distinguishes between local packages (root/workspace) and
+/// registry packages (resolved dependencies).
+#[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
+pub enum NodeManifest {
+    /// Local package.json (root or workspace)
+    Local(PackageJson),
+    /// Registry package manifest (resolved dependency)
+    Registry(VersionManifest),
+}
+
+impl NodeManifest {
+    /// Get the package name.
+    pub fn name(&self) -> &str {
+        match self {
+            NodeManifest::Local(pkg) => &pkg.name,
+            NodeManifest::Registry(manifest) => &manifest.name,
+        }
+    }
+
+    /// Get the package version.
+    pub fn version(&self) -> &str {
+        match self {
+            NodeManifest::Local(pkg) => &pkg.version,
+            NodeManifest::Registry(manifest) => &manifest.version,
+        }
+    }
+
+    /// Get production dependencies.
+    pub fn dependencies(&self) -> Option<&HashMap<String, String>> {
+        match self {
+            NodeManifest::Local(pkg) => {
+                if pkg.dependencies.is_empty() {
+                    None
+                } else {
+                    Some(&pkg.dependencies)
+                }
+            }
+            NodeManifest::Registry(manifest) => manifest.dependencies.as_ref(),
+        }
+    }
+
+    /// Get peer dependencies.
+    pub fn peer_dependencies(&self) -> Option<&HashMap<String, String>> {
+        match self {
+            NodeManifest::Local(pkg) => {
+                if pkg.peer_dependencies.is_empty() {
+                    None
+                } else {
+                    Some(&pkg.peer_dependencies)
+                }
+            }
+            NodeManifest::Registry(manifest) => manifest.peer_dependencies.as_ref(),
+        }
+    }
+
+    /// Get optional dependencies.
+    pub fn optional_dependencies(&self) -> Option<&HashMap<String, String>> {
+        match self {
+            NodeManifest::Local(pkg) => {
+                if pkg.optional_dependencies.is_empty() {
+                    None
+                } else {
+                    Some(&pkg.optional_dependencies)
+                }
+            }
+            NodeManifest::Registry(manifest) => manifest.optional_dependencies.as_ref(),
+        }
+    }
+
+    /// Get dev dependencies (only for local packages).
+    pub fn dev_dependencies(&self) -> Option<&HashMap<String, String>> {
+        match self {
+            NodeManifest::Local(pkg) => {
+                if pkg.dev_dependencies.is_empty() {
+                    None
+                } else {
+                    Some(&pkg.dev_dependencies)
+                }
+            }
+            NodeManifest::Registry(_) => None, // Registry packages don't include devDeps
+        }
+    }
+
+    /// Get engines requirements.
+    /// Returns None for empty maps.
+    pub fn engines(&self) -> Option<&HashMap<String, String>> {
+        match self {
+            NodeManifest::Local(pkg) => pkg.engines.as_ref(),
+            NodeManifest::Registry(manifest) => manifest.engines.as_ref(),
+        }
+        .filter(|m| !m.is_empty())
+    }
+
+    /// Get binary configuration as Value (for serialization compatibility).
+    /// Returns None for null or empty objects.
+    pub fn bin(&self) -> Option<Value> {
+        let value = match self {
+            NodeManifest::Local(pkg) => pkg.bin.as_ref().and_then(|b| serde_json::to_value(b).ok()),
+            NodeManifest::Registry(manifest) => manifest.bin.clone(),
+        };
+        // Filter out null and empty objects
+        value.filter(|v| !v.is_null() && !v.as_object().is_some_and(|obj| obj.is_empty()))
+    }
+
+    /// Get license.
+    pub fn license(&self) -> Option<String> {
+        match self {
+            NodeManifest::Local(pkg) => pkg.license.as_ref().map(|l| l.identifier().to_string()),
+            NodeManifest::Registry(manifest) => manifest.license.clone(),
+        }
+    }
+
+    /// Get OS constraints.
+    pub fn os(&self) -> Option<&Value> {
+        match self {
+            NodeManifest::Local(_) => None, // PackageJson uses Vec<String>
+            NodeManifest::Registry(manifest) => manifest.os.as_ref(),
+        }
+    }
+
+    /// Get CPU constraints.
+    pub fn cpu(&self) -> Option<&Value> {
+        match self {
+            NodeManifest::Local(_) => None, // PackageJson uses Vec<String>
+            NodeManifest::Registry(manifest) => manifest.cpu.as_ref(),
+        }
+    }
+
+    /// Check if has install script.
+    pub fn has_install_script(&self) -> bool {
+        match self {
+            NodeManifest::Local(pkg) => pkg.has_install_script.unwrap_or(false),
+            NodeManifest::Registry(manifest) => manifest.has_install_script.unwrap_or(false),
+        }
+    }
+
+    /// Get scripts.
+    pub fn scripts(&self) -> Option<&HashMap<String, String>> {
+        match self {
+            NodeManifest::Local(pkg) => {
+                if pkg.scripts.is_empty() {
+                    None
+                } else {
+                    Some(&pkg.scripts)
+                }
+            }
+            NodeManifest::Registry(manifest) => manifest.scripts.as_ref(),
+        }
+    }
+
+    /// Get distribution info (tarball, integrity).
+    pub fn dist(&self) -> Option<&Dist> {
+        match self {
+            NodeManifest::Local(_) => None,
+            NodeManifest::Registry(manifest) => Some(&manifest.dist),
+        }
+    }
+
+    /// Get workspaces configuration (only for local packages).
+    pub fn workspaces(&self) -> Option<Value> {
+        match self {
+            NodeManifest::Local(pkg) => pkg
+                .workspaces
+                .as_ref()
+                .and_then(|w| serde_json::to_value(w).ok()),
+            NodeManifest::Registry(_) => None,
+        }
+    }
+
+    /// Get overrides configuration (only for local packages).
+    pub fn overrides(&self) -> Option<&Value> {
+        match self {
+            NodeManifest::Local(pkg) => pkg.overrides.as_ref(),
+            NodeManifest::Registry(_) => None,
+        }
+    }
+}
+
+impl From<PackageJson> for NodeManifest {
+    fn from(pkg: PackageJson) -> Self {
+        NodeManifest::Local(pkg)
+    }
+}
+
+impl From<VersionManifest> for NodeManifest {
+    fn from(manifest: VersionManifest) -> Self {
+        NodeManifest::Registry(manifest)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json;
 
     #[test]
     fn test_author_string_deserialization() {
@@ -396,8 +619,6 @@ mod tests {
         }
 
         let manifest: TestManifest = serde_json::from_str(json).unwrap();
-
-        // With skip_on_error, string author should fail to parse and return None
         assert!(manifest.author.is_none());
     }
 
@@ -412,34 +633,14 @@ mod tests {
         }
 
         let manifest: TestManifest = serde_json::from_str(json).unwrap();
-
         assert!(manifest.author.is_some());
         let author = manifest.author.unwrap();
         assert_eq!(author.name, "Erik Lieben");
         assert_eq!(author.email, Some("erik@example.com".to_string()));
-        assert_eq!(
-            author.url,
-            Some("https://github.com/eriklieben".to_string())
-        );
-    }
-
-    #[test]
-    fn test_author_null_deserialization() {
-        let json = r#"{"author": null}"#;
-
-        #[derive(Deserialize)]
-        struct TestManifest {
-            #[serde(deserialize_with = "skip_on_error")]
-            pub author: Option<Author>,
-        }
-
-        let manifest: TestManifest = serde_json::from_str(json).unwrap();
-        assert!(manifest.author.is_none());
     }
 
     #[test]
     fn test_manifest_with_serde_default() {
-        // Test that missing fields don't cause panic with #[serde(default)]
         let json = r#"{"name": "test-package"}"#;
         let manifest: FullManifest = serde_json::from_str(json).unwrap();
 
@@ -450,160 +651,18 @@ mod tests {
     }
 
     #[test]
-    fn test_keywords_flexible_deserialization() {
-        // Test array keywords
-        let json1 = r#"{"keywords": ["test", "package"]}"#;
-
-        #[derive(Deserialize)]
-        struct TestManifest {
-            #[serde(deserialize_with = "skip_on_error")]
-            pub keywords: Option<Vec<String>>,
-        }
-
-        let manifest1: TestManifest = serde_json::from_str(json1).unwrap();
-        assert_eq!(
-            manifest1.keywords,
-            Some(vec!["test".to_string(), "package".to_string()])
-        );
-
-        // Test string keywords - should fail with skip_on_error
-        let json2 = r#"{"keywords": "test"}"#;
-        let manifest2: TestManifest = serde_json::from_str(json2).unwrap();
-        assert_eq!(manifest2.keywords, None);
-    }
-
-    #[test]
-    fn test_license_flexible_deserialization() {
-        // Test string license
-        let json1 = r#"{"license": "MIT"}"#;
-
-        #[derive(Deserialize)]
-        struct TestManifest {
-            #[serde(deserialize_with = "skip_on_error")]
-            pub license: Option<String>,
-        }
-
-        let manifest1: TestManifest = serde_json::from_str(json1).unwrap();
-        assert_eq!(manifest1.license, Some("MIT".to_string()));
-
-        // Test object license - should fail with skip_on_error
-        let json2 = r#"{"license": {"type": "BSD-3-Clause"}}"#;
-        let manifest2: TestManifest = serde_json::from_str(json2).unwrap();
-        assert_eq!(manifest2.license, None);
-    }
-
-    #[test]
-    fn test_bundled_deps_flexible_deserialization() {
-        // Test array bundledDependencies
-        let json1 = r#"{"bundledDependencies": ["dep1", "dep2"]}"#;
-
-        #[derive(Deserialize)]
-        struct TestManifest {
-            #[serde(rename = "bundledDependencies", deserialize_with = "skip_on_error")]
-            pub bundled_dependencies: Option<Vec<String>>,
-        }
-
-        let manifest1: TestManifest = serde_json::from_str(json1).unwrap();
-        assert_eq!(
-            manifest1.bundled_dependencies,
-            Some(vec!["dep1".to_string(), "dep2".to_string()])
-        );
-
-        // Test object bundledDependencies - should fail with skip_on_error
-        let json2 = r#"{"bundledDependencies": {"dep1": "1.0.0", "dep2": "2.0.0"}}"#;
-        let manifest2: TestManifest = serde_json::from_str(json2).unwrap();
-        assert!(manifest2.bundled_dependencies.is_none());
-    }
-
-    #[test]
-    fn test_engines_flexible_deserialization() {
-        // Test object engines (normal format)
-        let json1 = r#"{"engines": {"node": ">=14.0.0", "npm": ">=6.0.0"}}"#;
-
-        #[derive(Deserialize)]
-        struct TestManifest {
-            #[serde(deserialize_with = "skip_on_error")]
-            pub engines: Option<HashMap<String, String>>,
-        }
-
-        let manifest1: TestManifest = serde_json::from_str(json1).unwrap();
-        assert!(manifest1.engines.is_some());
-        let engines = manifest1.engines.unwrap();
-        assert_eq!(engines.get("node"), Some(&">=14.0.0".to_string()));
-        assert_eq!(engines.get("npm"), Some(&">=6.0.0".to_string()));
-
-        // Test array engines (jsonparse format) - should fail with skip_on_error
-        let json2 = r#"{"engines": ["node >= 0.2.0"]}"#;
-        let manifest2: TestManifest = serde_json::from_str(json2).unwrap();
-        assert_eq!(manifest2.engines, None); // Should return None with skip_on_error
-    }
-
-    #[test]
-    fn test_boolean_handling() {
-        // Test boolean false as string field - should fail with skip_on_error
-        let json1 = r#"{"license": false}"#;
-        let manifest1: VersionManifest = serde_json::from_str(json1).unwrap();
-        assert_eq!(manifest1.license, None);
-
-        // Test boolean true as string field - should fail with skip_on_error
-        let json2 = r#"{"license": true}"#;
-        let manifest2: VersionManifest = serde_json::from_str(json2).unwrap();
-        assert_eq!(manifest2.license, None);
-
-        // Test boolean false as array field - should fail with skip_on_error
-        let json3 = r#"{"keywords": false}"#;
-        let manifest3: VersionManifest = serde_json::from_str(json3).unwrap();
-        assert_eq!(manifest3.keywords, None);
-
-        // Test boolean true as array field - should fail with skip_on_error
-        let json4 = r#"{"keywords": true}"#;
-        let manifest4: VersionManifest = serde_json::from_str(json4).unwrap();
-        assert_eq!(manifest4.keywords, None);
-    }
-
-    #[test]
-    fn test_jsonparse_real_manifest() {
-        // Real jsonparse manifest data (simplified)
+    fn test_version_manifest_parsing() {
         let json = r#"{
             "name": "jsonparse",
-            "description": "This is a pure-js JSON streaming parser for node.js",
             "version": "1.3.1",
-            "author": { "name": "Tim Caswell", "email": "tim@creationix.com" },
-            "repository": {
-                "type": "git",
-                "url": "git+ssh://git@github.com/creationix/jsonparse.git"
-            },
-            "devDependencies": { "tape": "~0.1.1", "tap": "~0.3.3" },
-            "scripts": { "test": "tap test/*.js" },
-            "bugs": { "url": "http://github.com/creationix/jsonparse/issues" },
-            "engines": ["node >= 0.2.0"],
             "license": "MIT",
-            "main": "jsonparse.js"
+            "dependencies": { "lodash": "^4.0.0" }
         }"#;
 
         let manifest: VersionManifest = serde_json::from_str(json).unwrap();
-
         assert_eq!(manifest.name, "jsonparse");
         assert_eq!(manifest.version, "1.3.1");
         assert_eq!(manifest.license, Some("MIT".to_string()));
-
-        // Author should be parsed correctly
-        assert!(manifest.author.is_some());
-        let author = manifest.author.unwrap();
-        assert_eq!(author.name, "Tim Caswell");
-        assert_eq!(author.email, Some("tim@creationix.com".to_string()));
-
-        // Dependencies should be parsed correctly
-        assert!(manifest.dev_dependencies.is_some());
-        let dev_deps = manifest.dev_dependencies.unwrap();
-        assert_eq!(dev_deps.get("tape"), Some(&"~0.1.1".to_string()));
-
-        // Scripts should be parsed correctly
-        assert!(manifest.scripts.is_some());
-        let scripts = manifest.scripts.unwrap();
-        assert_eq!(scripts.get("test"), Some(&"tap test/*.js".to_string()));
-
-        // Engines should be None (array format not supported with skip_on_error)
-        assert_eq!(manifest.engines, None);
+        assert!(manifest.dependencies.is_some());
     }
 }

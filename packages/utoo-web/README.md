@@ -7,7 +7,7 @@
 ## ✨ Features
 
 - 📂 **Real File System**: Uses Origin Private File System (OPFS) for a Node.js-like file system experience.
-- 📦 **Dependency Management**: Built-in dependency resolution with global shared storage, similar to pnpm.
+- 📦 **Browser Dependency Resolution**: Resolve dependencies directly from `package.json` without needing a pre-existing lock file. Supports custom registries (npm, npmmirror, private registries).
 - 🌐 **Browser-based Bundling**: Run the Utoo bundler directly in the browser.
 - 🔌 **Webpack Compatibility**: Supports a subset of Webpack configurations in the browser. See [Features List](../pack/docs/features-list.md) for details.
 - 🔄 **Webpack Loaders**: Compatible with standard Webpack loaders (css-loader, style-loader, etc.).

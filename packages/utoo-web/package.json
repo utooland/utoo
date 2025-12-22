@@ -7,7 +7,7 @@
     "esm"
   ],
   "scripts": {
-    "install-toolchain": "cargo install wasm-bindgen-cli@0.2.104 && brew install binaryen",
+    "install-toolchain": "cargo install wasm-bindgen-cli@0.2.104 && brew install binaryen llvm",
     "build-wasm": "cargo build -p utoo-wasm --target wasm32-unknown-unknown -Z build-std=panic_abort,std",
     "build-wasm:pm": "cargo build -p utoo-wasm --target wasm32-unknown-unknown --no-default-features -Z build-std=panic_abort,std",
     "bindgen-dev": "wasm-bindgen ../../target/wasm32-unknown-unknown/wasm-dev/utoo_wasm.wasm --out-dir src/utoo --out-name index --target web --debug --keep-debug --no-demangle",
@@ -20,7 +20,7 @@
     "dev:pm": "npm run build-wasm:pm -- --profile wasm-dev && npm run bindgen-dev && npm run tsc && npm run copy-wasm",
     "wasm-opt": "wasm-opt src/utoo/index_bg.wasm -o esm/utoo/index_bg.wasm --enable-threads --enable-bulk-memory --enable-nontrapping-float-to-int -Oz",
     "build": "npm run build-wasm -- --release && npm run bindgen-build && npm run tsc && npm run build-loaderWorker && npm run wasm-opt",
-    "build:local": "npm run build-wasm -- --profile release-local && npm run bindgen-build:local && npm run build:shared && npm run tsc && npm run build-loaderWorker && npm run copy-wasm",
+    "build:local": "CC=$(brew --prefix llvm)/bin/clang CXX=$(brew --prefix llvm)/bin/clang++ npm run build-wasm -- --profile release-local && npm run bindgen-build:local && npm run build:shared && npm run tsc && npm run build-loaderWorker && npm run copy-wasm",
     "build-loaderWorker": "node cli/umd.js -e ./src/webpackLoaders/worker.ts -o ./esm/loaderWorker.js -t webworker",
     "clean": "rm -rf esm src/utoo",
     "prepublishOnly": "turbo run build --filter=@utoo/web"

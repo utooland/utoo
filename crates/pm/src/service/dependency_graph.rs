@@ -1,91 +1,90 @@
 use anyhow::{Context, Result};
 use petgraph::Graph;
 use petgraph::graph::{DiGraph, NodeIndex};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::path::Path;
 
-/// Represents a package information in package-lock.json
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PackageNode {
-    /// Package name
-    pub name: String,
-    /// Version
-    pub version: String,
-    /// Path in package-lock.json
-    pub path: String,
-    /// Dependencies list
-    pub dependencies: HashMap<String, String>,
-    /// Development dependencies
-    pub dev_dependencies: HashMap<String, String>,
-    /// Optional dependencies
-    pub optional_dependencies: HashMap<String, String>,
-    /// Peer dependencies
-    pub peer_dependencies: HashMap<String, String>,
-}
+use utoo_ruborist::lock::{LockPackageNode, PackageLock};
 
-impl PackageNode {
-    pub fn new(name: String, version: String, path: String) -> Self {
-        Self {
-            name,
-            version,
-            path,
-            dependencies: HashMap::new(),
-            dev_dependencies: HashMap::new(),
-            optional_dependencies: HashMap::new(),
-            peer_dependencies: HashMap::new(),
-        }
-    }
-}
-
-/// Type of dependency relationship
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DependencyType {
-    Production,
-    Development,
-    Optional,
-    Peer,
-}
-
-/// Represents a dependency relationship edge
-#[derive(Debug, Clone)]
-pub struct DependencyEdge {
-    pub _dependency_type: DependencyType,
-    pub _version_spec: String,
-}
-
-/// Dependency graph service
-pub struct DependencyGraphService {
+/// Service for querying dependency graph built from package-lock.json.
+/// This is different from ruborist's DependencyGraph which is used for resolution.
+pub struct LockGraphService {
     /// Use directed graph to represent dependency relationships
-    pub(crate) graph: DiGraph<PackageNode, DependencyEdge>,
+    pub(crate) graph: DiGraph<LockPackageNode, ()>,
     /// Mapping from package name to node index list (one package name may correspond to multiple nodes)
-    name_to_indices: HashMap<String, Vec<NodeIndex>>,
+    name_to_indices: std::collections::HashMap<String, Vec<NodeIndex>>,
     /// Mapping from path to node index
-    path_to_index: HashMap<String, NodeIndex>,
+    path_to_index: std::collections::HashMap<String, NodeIndex>,
 }
 
-impl Default for DependencyGraphService {
+impl Default for LockGraphService {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl DependencyGraphService {
-    /// Create a new dependency graph service
+impl LockGraphService {
+    /// Create a new lock graph service
     pub fn new() -> Self {
         Self {
             graph: Graph::new(),
-            name_to_indices: HashMap::new(),
-            path_to_index: HashMap::new(),
+            name_to_indices: std::collections::HashMap::new(),
+            path_to_index: std::collections::HashMap::new(),
         }
     }
 
+    /// Load and build lock graph from package-lock.json file
+    pub fn from_lock_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let content =
+            std::fs::read_to_string(path.as_ref()).context("Failed to read package-lock.json")?;
+        let package_lock: PackageLock =
+            serde_json::from_str(&content).context("Failed to parse package-lock.json")?;
+        Self::from_package_lock(&package_lock)
+    }
+
+    /// Build lock graph from PackageLock
+    pub fn from_package_lock(package_lock: &PackageLock) -> Result<Self> {
+        let mut graph = Self::new();
+
+        // First add all package entries
+        for (path, package) in &package_lock.packages {
+            let node = LockPackageNode::new(path.clone(), package.clone());
+            tracing::debug!("Adding package: {node:?}");
+            graph.add_package(node)?;
+        }
+
+        // Then add dependency relationships
+        for (path, package) in &package_lock.packages {
+            let name = package.get_name(path);
+
+            // Add all dependency edges
+            let all_deps = [
+                &package.dependencies,
+                &package.dev_dependencies,
+                &package.optional_dependencies,
+                &package.peer_dependencies,
+            ];
+
+            for deps in all_deps.into_iter().flatten() {
+                for dep_name in deps.keys() {
+                    if let Err(e) = graph.add_dependency_edge(path, &name, dep_name) {
+                        tracing::debug!(
+                            "Warning: Failed to add dependency {dep_name} for {name}: {e}"
+                        );
+                    }
+                }
+            }
+        }
+
+        Ok(graph)
+    }
+
     /// Add package node to the graph
-    pub fn add_package(&mut self, package: PackageNode) -> Result<NodeIndex> {
-        let package_name = package.name.clone();
-        let package_path = package.path.clone();
+    pub fn add_package(&mut self, node: LockPackageNode) -> Result<NodeIndex> {
+        let package_name = node.name();
+        let package_path = node.path.clone();
 
         // Add node to the graph
-        let node_index = self.graph.add_node(package);
+        let node_index = self.graph.add_node(node);
 
         // Update mapping from package name to index list
         self.name_to_indices
@@ -100,10 +99,12 @@ impl DependencyGraphService {
     }
 
     /// Find appropriate node index based on current path and package name
-    /// 1. First find all nodeIndex based on name
-    /// 2. Prefer to find nodeIndex for current path + node_modules/name
-    /// 3. If found, return this nodeIndex
-    /// 4. Otherwise, find all parent nodes of current path
+    ///
+    /// Resolution order:
+    /// 1. Check current path + node_modules/dependency_name
+    /// 2. Walk up the path hierarchy checking node_modules at each level
+    /// 3. For workspace packages (paths without node_modules), also check root node_modules
+    /// 4. Fall back to first matching node
     pub fn find_dependency_node_index(
         &self,
         current_path: &str,
@@ -127,7 +128,16 @@ impl DependencyGraphService {
             return Some(preferred_index);
         }
 
-        // 3. Find nodes in parent paths
+        // 3. For workspace packages (paths without "node_modules"), check root node_modules first
+        // This handles the common case where dependencies are hoisted to root
+        if !current_path.is_empty() && !current_path.contains("node_modules") {
+            let root_path = format!("node_modules/{dependency_name}");
+            if let Some(&index) = self.path_to_index.get(&root_path) {
+                return Some(index);
+            }
+        }
+
+        // 4. Find nodes in parent paths
         let mut search_path = current_path.to_string();
         loop {
             let candidate_path = if search_path.is_empty() {
@@ -153,18 +163,16 @@ impl DependencyGraphService {
             }
         }
 
-        // 4. If none found, return the first matching node
+        // 5. If none found, return the first matching node
         candidate_indices.first().copied()
     }
 
     /// Add dependency relationship edge
-    pub fn add_dependency_with_path(
+    fn add_dependency_edge(
         &mut self,
         from_path: &str,
         from_package_name: &str,
         to_package_name: &str,
-        dependency_type: DependencyType,
-        version_spec: String,
     ) -> Result<()> {
         // Find source package node
         let from_index = self
@@ -179,15 +187,10 @@ impl DependencyGraphService {
                 "Dependency package '{to_package_name}' not found for path '{from_path}'"
             ))?;
 
-        let edge = DependencyEdge {
-            _dependency_type: dependency_type,
-            _version_spec: version_spec,
-        };
-
         tracing::debug!(
             "Adding dependency edge: {from_index:?} {from_package_name} -> {to_index:?} {to_package_name}"
         );
-        self.graph.add_edge(to_index, *from_index, edge);
+        self.graph.add_edge(to_index, *from_index, ());
         Ok(())
     }
 
@@ -226,6 +229,10 @@ impl DependencyGraphService {
     }
 
     /// Find paths from specified package to root node (NodeIndex version)
+    ///
+    /// In workspace projects, paths may lead to:
+    /// 1. The root package (path = "")
+    /// 2. Workspace packages (path like "packages/xxx" without "node_modules")
     pub fn find_paths_to_root(&self, package_name: &str) -> Result<Vec<Vec<NodeIndex>>> {
         let package_indices = self.find_package_indices_by_name(package_name);
 
@@ -235,10 +242,22 @@ impl DependencyGraphService {
 
         let mut all_paths = Vec::new();
 
-        // Directly get root node (node with empty path)
-        if let Some(&root_index) = self.path_to_index.get("") {
-            // For each matching package node, find all paths to root node
-            for &package_index in &package_indices {
+        // Collect all "root-like" nodes: root package and workspace packages
+        // Workspace packages have paths that don't contain "node_modules"
+        let root_indices: Vec<NodeIndex> = self
+            .path_to_index
+            .iter()
+            .filter(|(path, _)| {
+                // Root package has empty path
+                // Workspace packages have non-empty paths without "node_modules"
+                path.is_empty() || !path.contains("node_modules")
+            })
+            .map(|(_, &idx)| idx)
+            .collect();
+
+        // For each matching package node, find all paths to any root-like node
+        for &package_index in &package_indices {
+            for &root_index in &root_indices {
                 let paths = self.find_path_between_indices(package_index, root_index)?;
                 for path in paths {
                     all_paths.push(path);
@@ -262,7 +281,7 @@ impl DependencyGraphService {
         Ok(all_paths)
     }
 
-    pub fn get_graph(&self) -> &DiGraph<PackageNode, DependencyEdge> {
+    pub fn get_graph(&self) -> &DiGraph<LockPackageNode, ()> {
         &self.graph
     }
 }
@@ -270,18 +289,26 @@ impl DependencyGraphService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use utoo_ruborist::lock::LockPackage;
+
+    fn make_lock_package(name: &str, version: &str) -> LockPackage {
+        LockPackage {
+            name: Some(name.to_string()),
+            version: Some(version.to_string()),
+            ..Default::default()
+        }
+    }
 
     #[test]
     fn test_dependency_graph_basic() {
-        let mut graph = DependencyGraphService::new();
+        let mut graph = LockGraphService::new();
 
         // Add packages
         let package_a =
-            PackageNode::new("package-a".to_string(), "1.0.0".to_string(), "".to_string());
-        let package_b = PackageNode::new(
-            "package-b".to_string(),
-            "2.0.0".to_string(),
+            LockPackageNode::new("".to_string(), make_lock_package("package-a", "1.0.0"));
+        let package_b = LockPackageNode::new(
             "node_modules/package-b".to_string(),
+            make_lock_package("package-b", "2.0.0"),
         );
 
         let _index_a = graph.add_package(package_a).unwrap();
@@ -292,19 +319,17 @@ mod tests {
 
     #[test]
     fn test_dependency_path_resolution() {
-        let mut graph = DependencyGraphService::new();
+        let mut graph = LockGraphService::new();
 
         // Create multiple packages with same name but different paths
-        let root_package = PackageNode::new("app".to_string(), "1.0.0".to_string(), "".to_string());
-        let lodash_root = PackageNode::new(
-            "lodash".to_string(),
-            "4.17.21".to_string(),
+        let root_package = LockPackageNode::new("".to_string(), make_lock_package("app", "1.0.0"));
+        let lodash_root = LockPackageNode::new(
             "node_modules/lodash".to_string(),
+            make_lock_package("lodash", "4.17.21"),
         );
-        let lodash_nested = PackageNode::new(
-            "lodash".to_string(),
-            "3.10.1".to_string(),
+        let lodash_nested = LockPackageNode::new(
             "node_modules/some-package/node_modules/lodash".to_string(),
+            make_lock_package("lodash", "3.10.1"),
         );
 
         graph.add_package(root_package).unwrap();
@@ -326,6 +351,124 @@ mod tests {
         assert_eq!(
             nested_lodash_node.path,
             "node_modules/some-package/node_modules/lodash"
+        );
+    }
+
+    #[test]
+    fn test_workspace_dependency_resolution() {
+        let mut graph = LockGraphService::new();
+
+        // Simulate workspace structure:
+        // root ("") -> workspace package ("packages/my-app") -> lodash (hoisted to "node_modules/lodash")
+        let root = LockPackageNode::new("".to_string(), make_lock_package("monorepo", "1.0.0"));
+        let workspace_pkg = LockPackageNode::new(
+            "packages/my-app".to_string(),
+            make_lock_package("my-app", "1.0.0"),
+        );
+        let lodash = LockPackageNode::new(
+            "node_modules/lodash".to_string(),
+            make_lock_package("lodash", "4.17.21"),
+        );
+
+        graph.add_package(root).unwrap();
+        graph.add_package(workspace_pkg).unwrap();
+        graph.add_package(lodash).unwrap();
+
+        // Workspace package should find hoisted lodash in root node_modules
+        let ws_lodash = graph.find_dependency_node_index("packages/my-app", "lodash");
+        assert!(ws_lodash.is_some());
+        let ws_lodash_node = graph.graph.node_weight(ws_lodash.unwrap()).unwrap();
+        assert_eq!(ws_lodash_node.path, "node_modules/lodash");
+    }
+
+    #[test]
+    fn test_workspace_find_paths_to_root() {
+        let mut graph = LockGraphService::new();
+
+        // Build workspace graph:
+        // root ("") has dependency on workspace package ("packages/my-app")
+        // workspace package has dependency on lodash ("node_modules/lodash")
+        let mut root_pkg = make_lock_package("monorepo", "1.0.0");
+        root_pkg.dependencies = Some(
+            [("my-app".to_string(), "*".to_string())]
+                .into_iter()
+                .collect(),
+        );
+        let root = LockPackageNode::new("".to_string(), root_pkg);
+
+        let mut ws_pkg = make_lock_package("my-app", "1.0.0");
+        ws_pkg.dependencies = Some(
+            [("lodash".to_string(), "^4.17.0".to_string())]
+                .into_iter()
+                .collect(),
+        );
+        let workspace_pkg = LockPackageNode::new("packages/my-app".to_string(), ws_pkg);
+
+        let lodash = LockPackageNode::new(
+            "node_modules/lodash".to_string(),
+            make_lock_package("lodash", "4.17.21"),
+        );
+
+        let root_idx = graph.add_package(root).unwrap();
+        let ws_idx = graph.add_package(workspace_pkg).unwrap();
+        let lodash_idx = graph.add_package(lodash).unwrap();
+
+        // Add edges: lodash -> my-app -> root
+        graph.graph.add_edge(lodash_idx, ws_idx, ());
+        graph.graph.add_edge(ws_idx, root_idx, ());
+
+        // Find paths from lodash to root should include the path through workspace
+        let paths = graph.find_paths_to_root("lodash").unwrap();
+        assert!(!paths.is_empty(), "Should find paths from lodash to root");
+
+        // The path should include workspace package
+        let path = &paths[0];
+        assert!(path.len() >= 2, "Path should have at least 2 nodes");
+
+        // Verify path goes through workspace package
+        let has_workspace = path.iter().any(|&idx| {
+            graph
+                .get_graph()
+                .node_weight(idx)
+                .map(|n| n.path == "packages/my-app")
+                .unwrap_or(false)
+        });
+        assert!(has_workspace, "Path should go through workspace package");
+    }
+
+    #[test]
+    fn test_workspace_packages_are_root_like() {
+        let mut graph = LockGraphService::new();
+
+        // Create structure where lodash is only depended on by workspace package
+        let root = LockPackageNode::new("".to_string(), make_lock_package("monorepo", "1.0.0"));
+        let workspace_a = LockPackageNode::new(
+            "packages/app-a".to_string(),
+            make_lock_package("app-a", "1.0.0"),
+        );
+        let workspace_b = LockPackageNode::new(
+            "packages/app-b".to_string(),
+            make_lock_package("app-b", "1.0.0"),
+        );
+        let lodash = LockPackageNode::new(
+            "node_modules/lodash".to_string(),
+            make_lock_package("lodash", "4.17.21"),
+        );
+
+        let _root_idx = graph.add_package(root).unwrap();
+        let ws_a_idx = graph.add_package(workspace_a).unwrap();
+        let ws_b_idx = graph.add_package(workspace_b).unwrap();
+        let lodash_idx = graph.add_package(lodash).unwrap();
+
+        // lodash is used by both workspace packages
+        graph.graph.add_edge(lodash_idx, ws_a_idx, ());
+        graph.graph.add_edge(lodash_idx, ws_b_idx, ());
+
+        // find_paths_to_root should find paths to both workspace packages
+        let paths = graph.find_paths_to_root("lodash").unwrap();
+        assert!(
+            paths.len() >= 2,
+            "Should find paths to multiple workspace packages"
         );
     }
 }

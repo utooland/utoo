@@ -1,28 +1,74 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
+import { ConfigPanel } from "./components/ConfigPanel";
 import { Editor } from "./components/Editor";
 import { FileTreeItem } from "./components/FileTree";
+import { MenuItem, MoreMenu } from "./components/MoreMenu";
 import { Panel } from "./components/Panel";
 import { Preview } from "./components/Preview";
 import { useBuild } from "./hooks/useBuild";
 import { useFileContent } from "./hooks/useFileContent";
 import { useFileTree } from "./hooks/useFileTree";
 import { useGzip } from "./hooks/useGzip";
+import { useInstall } from "./hooks/useInstall";
 import { useUtooProject } from "./hooks/useUtooProject";
+import {
+  deleteProjectFiles,
+  getConfig,
+  UtooConfig,
+} from "./services/utooService";
 import "./styles.css";
 
 const Project = () => {
   const { project, isLoading, error: projectError } = useUtooProject();
-  const { fileTree, handleDirectoryExpand } = useFileTree(project);
+  const {
+    fileTree,
+    handleDirectoryExpand,
+    refreshFileTree,
+    createFile,
+    createFolder,
+    deleteItem,
+  } = useFileTree(project);
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [config, setConfig] = useState<UtooConfig>(getConfig);
   const {
     selectedFilePath,
     selectedFileContent,
     setSelectedFileContent,
     previewUrl,
     fetchFileContent,
+    saveFile,
+    isSaving,
+    hasUnsavedChanges,
     error: fileContentError,
   } = useFileContent(project);
 
   const previewRef = React.useRef<{ reload: () => void }>(null);
+
+  const {
+    isInstalling,
+    isUpdating,
+    handleInstall,
+    handleUpdate,
+    error: installError,
+    hasLock,
+  } = useInstall(project, config);
+
+  const handleDeleteProject = async () => {
+    const confirmed = window.confirm(
+      "Are you sure you want to delete all project files? This action cannot be undone.",
+    );
+    if (!confirmed) return;
+
+    setIsDeleting(true);
+    try {
+      await deleteProjectFiles(project!);
+      window.location.reload();
+    } catch (e) {
+      console.error("Failed to delete project:", e);
+      setIsDeleting(false);
+    }
+  };
 
   const {
     isBuilding,
@@ -41,9 +87,37 @@ const Project = () => {
     gzipSuccess,
   } = useGzip(project);
 
-  const error = projectError || fileContentError || buildError || gzipError;
+  const error =
+    projectError || fileContentError || installError || buildError || gzipError;
 
   const memoizedFileTree = useMemo(() => fileTree, [fileTree]);
+
+  const isWorking = isInstalling || isUpdating;
+  const installButton = (
+    <button
+      onClick={hasLock ? handleUpdate : handleInstall}
+      disabled={isWorking || !project}
+      style={{
+        padding: "0.25rem 0.75rem",
+        borderRadius: "0.375rem",
+        border: "none",
+        fontSize: "0.875rem",
+        background: isWorking ? "#d1d5db" : "#10b981",
+        color: "#fff",
+        fontWeight: 500,
+        cursor: isWorking ? "not-allowed" : "pointer",
+        transition: "background 0.2s",
+      }}
+    >
+      {isUpdating
+        ? "Updating..."
+        : isInstalling
+          ? "Installing..."
+          : hasLock
+            ? "Update"
+            : "Install"}
+    </button>
+  );
 
   const buildButton = (
     <button
@@ -59,34 +133,57 @@ const Project = () => {
         fontWeight: 500,
         cursor: isBuilding ? "not-allowed" : "pointer",
         transition: "background 0.2s",
+        marginLeft: "0.5rem",
       }}
     >
       {isBuilding ? "Building..." : "Build"}
     </button>
   );
 
-  const gzipButton = (
+  const moreMenuItems: MenuItem[] = [
+    {
+      label: isGzipping
+        ? "Downloading..."
+        : gzipSuccess
+          ? "Downloaded"
+          : "Download",
+      onClick: handleGzip,
+      disabled: isGzipping || !project || isBuilding,
+    },
+    {
+      label: "Settings",
+      onClick: () => setIsConfigOpen(true),
+      disabled: !project,
+    },
+    {
+      label: isDeleting ? "Resetting..." : "Reset Project",
+      onClick: handleDeleteProject,
+      disabled: isDeleting || !project || isInstalling || isBuilding,
+      danger: true,
+    },
+  ];
+
+  const saveButton = (
     <button
-      onClick={handleGzip}
-      disabled={isGzipping || !project || isBuilding}
+      onClick={saveFile}
+      disabled={isSaving || !hasUnsavedChanges || !project}
       style={{
         padding: "0.25rem 0.75rem",
         borderRadius: "0.375rem",
         border: "none",
         fontSize: "0.875rem",
-        background: isGzipping
-          ? "#d1d5db"
-          : gzipSuccess
-            ? "#22c55e"
-            : "#8b5cf6",
+        background:
+          isSaving || !hasUnsavedChanges || !project ? "#d1d5db" : "#10b981",
         color: "#fff",
         fontWeight: 500,
-        cursor: isGzipping || isBuilding ? "not-allowed" : "pointer",
+        cursor:
+          isSaving || !hasUnsavedChanges || !project
+            ? "not-allowed"
+            : "pointer",
         transition: "background 0.2s",
-        marginLeft: "0.5rem",
       }}
     >
-      {isGzipping ? "Gzipping..." : gzipSuccess ? "Gzipped ✓" : "Gzip (Worker)"}
+      {isSaving ? "Saving..." : hasUnsavedChanges ? "Save" : "Saved"}
     </button>
   );
 
@@ -100,12 +197,19 @@ const Project = () => {
         fontFamily: "sans-serif",
       }}
     >
+      <ConfigPanel
+        isOpen={isConfigOpen}
+        onClose={() => setIsConfigOpen(false)}
+        onConfigChange={setConfig}
+      />
+
       <Panel
         title="Project"
         actions={
           <>
+            {installButton}
             {buildButton}
-            {gzipButton}
+            <MoreMenu items={moreMenuItems} disabled={!project} />
           </>
         }
         style={{
@@ -117,7 +221,7 @@ const Project = () => {
       >
         {isLoading && (
           <p style={{ textAlign: "center", color: "#22c55e", fontWeight: 500 }}>
-            Installing dependencies...
+            Initializing project...
           </p>
         )}
         {error && (
@@ -141,7 +245,10 @@ const Project = () => {
                 onDirectoryExpand={
                   item.type === "directory" ? handleDirectoryExpand : undefined
                 }
-                selectedFile={selectedFilePath} // Pass the selectedFilePath state here
+                selectedFile={selectedFilePath}
+                onCreateFile={createFile}
+                onCreateFolder={createFolder}
+                onDelete={deleteItem}
               />
             ))}
           </ul>
@@ -149,7 +256,8 @@ const Project = () => {
       </Panel>
 
       <Panel
-        title="Editor"
+        title={`Editor${hasUnsavedChanges ? " *" : ""}`}
+        actions={saveButton}
         style={{
           width: "40%",
           minWidth: "320px",
