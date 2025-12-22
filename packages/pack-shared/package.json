@@ -15,10 +15,8 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "./cjs/*.js",
-    "./cjs/*.d.ts",
-    "./esm/*.js",
-    "./esm/*.d.ts"
+    "cjs",
+    "esm"
   ],
   "scripts": {
     "build:cjs": "rm -rf cjs && tsc -p ./tsconfig.json  --module commonjs --outDir cjs",

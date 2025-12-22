@@ -46,7 +46,11 @@ jobs:
               npm run build:binding --workspace=@utoo/pack -- --target aarch64-unknown-linux-musl
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
             build: |
+              rustup install nightly-2025-10-27 &&
+              rustup default nightly-2025-10-27 &&
+              rustup target add x86_64-unknown-linux-gnu &&
               npm run build:binding --workspace=@utoo/pack -- --target x86_64-unknown-linux-gnu
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
@@ -175,7 +179,9 @@ jobs:
         run: cd packages/pack && ls -R ./npm
         shell: bash
       - name: Build JS
-        run: npx turbo run build:js --filter=@utoo/pack --filter=@utoo/pack-shared
+        run: |
+          npx turbo run build --filter='@utoo/pack^...'
+          npm run build:js --workspace=@utoo/pack
       - name: Get version from release or use alpha version
         id: get_version
         run: |
@@ -185,11 +191,19 @@ jobs:
           # npm config set provenance true
           echo "${VERSION}" &&
           echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc &&
+
+          TAG="latest"
+          if [[ "$VERSION" == *"-"* ]]; then
+            PRERELEASE="${VERSION#*-}"
+            TAG="${PRERELEASE%%.*}"
+          fi
+          echo "Publishing with tag: $TAG"
+
           npm version --workspace=@utoo/pack "${VERSION}" &&
           npm version --workspace=@utoo/pack-cli "${VERSION}" &&
           npm install --workspace=@utoo/pack-cli @utoo/pack --save-exact &&
-          npm publish --workspace=@utoo/pack --access public &&
-          npm publish --workspace=@utoo/pack-cli --access public
+          npm publish --workspace=@utoo/pack --access public --tag "${TAG}" &&
+          npm publish --workspace=@utoo/pack-cli --access public --tag "${TAG}"
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
