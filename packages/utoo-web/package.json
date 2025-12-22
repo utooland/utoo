@@ -4,7 +4,7 @@
   "module": "esm/index.js",
   "types": "esm/index.d.ts",
   "files": [
-    "esm/*"
+    "esm"
   ],
   "scripts": {
     "install-toolchain": "cargo install wasm-bindgen-cli@0.2.104 && brew install binaryen",
