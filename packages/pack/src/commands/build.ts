@@ -98,15 +98,6 @@ async function buildInternal(
 
   if (htmlConfigs.length > 0) {
     const assets = { js: [] as string[], css: [] as string[] };
-    // if (entrypoints.apps) {
-    //   for (const app of entrypoints.apps) {
-    //     const written = await app.writeToDisk();
-    //     written.clientPaths.forEach((p) => {
-    //       if (p.endsWith(".js")) assets.js.push(p);
-    //       if (p.endsWith(".css")) assets.css.push(p);
-    //     });
-    //   }
-    // }
 
     const outputDir =
       bundleOptions.config.output?.path || join(process.cwd(), "dist");
