@@ -7,13 +7,13 @@ export function readWebpackConfig(projectPath?: string, rootPath?: string) {
       : path.join(rootPath ?? "", projectPath);
   try {
     const configPath = require.resolve("webpack.config", {
-      paths: [projectPathOutOfRoot]
+      paths: [projectPathOutOfRoot],
     });
     return require(configPath);
   } catch (error) {
-    if (error && (error as { code?: string }).code === 'MODULE_NOT_FOUND') {
+    if (error && (error as { code?: string }).code === "MODULE_NOT_FOUND") {
       throw new Error(
-        `Webpack config not found in "${projectPathOutOfRoot}". Make sure a webpack configuration file (e.g., webpack.config.js) exists when using the --webpack flag.`
+        `Webpack config not found in "${projectPathOutOfRoot}". Make sure a webpack configuration file (e.g., webpack.config.js) exists when using the --webpack flag.`,
       );
     }
     throw error;
