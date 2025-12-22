@@ -17,7 +17,7 @@ export default class Dev extends Command {
       resolveBuildOptions(flags);
     await utooPack.serve(projectOptions, projectPath, rootPath, {
       logServerInfo: true,
-      port: 5173,
+      port: 3000,
     });
   }
 }

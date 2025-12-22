@@ -180,6 +180,7 @@ jobs:
         shell: bash
       - name: Build JS
         run: |
+          npm run build --workspace=@utoo/pack-shared
           npm run build:js --workspace=@utoo/pack
           npm run build --workspace=@utoo/pack-cli
       - name: Get version from release or use alpha version
@@ -199,9 +200,12 @@ jobs:
           fi
           echo "Publishing with tag: $TAG"
 
+          npm version --workspace=@utoo/pack-shared "${VERSION}" &&
           npm version --workspace=@utoo/pack "${VERSION}" &&
           npm version --workspace=@utoo/pack-cli "${VERSION}" &&
-          npm install --workspace=@utoo/pack-cli @utoo/pack --save-exact &&
+          npm pkg set dependencies.@utoo/pack-shared="${VERSION}" --workspace=@utoo/pack &&
+          npm pkg set dependencies.@utoo/pack="${VERSION}" --workspace=@utoo/pack-cli &&
+          npm publish --workspace=@utoo/pack-shared --access public --tag "${TAG}" &&
           npm publish --workspace=@utoo/pack --access public --tag "${TAG}" &&
           npm publish --workspace=@utoo/pack-cli --access public --tag "${TAG}"
         env:
