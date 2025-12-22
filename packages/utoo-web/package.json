@@ -26,7 +26,7 @@
     "prepublishOnly": "turbo run build --filter=@utoo/web"
   },
   "dependencies": {
-    "@utoo/pack-shared": "^0.0.7",
+    "@utoo/pack-shared": "^0.0.8",
     "comlink": "^4.4.2",
     "systemjs": "^6.15.1"
   },
