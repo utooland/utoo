@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Setup node
         uses: actions/setup-node@v4
         with:
@@ -33,3 +35,27 @@ jobs:
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Update dependents and push to default branch
+        if: success()
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git fetch origin $DEFAULT_BRANCH
+          git checkout $DEFAULT_BRANCH
+          
+          # Update pack-shared version
+          npm version --workspace=@utoo/pack-shared "${VERSION}" --no-git-tag-version --allow-same-version
+          
+          # Update dependencies
+          npm pkg set "dependencies.@utoo/pack-shared=^${VERSION}" --workspace=@utoo/pack
+          npm pkg set "dependencies.@utoo/pack-shared=^${VERSION}" --workspace=@utoo/web
+          
+          git add .
+          if ! git diff-index --quiet HEAD --; then
+            git commit -m "chore: update pack-shared to ${VERSION} and sync dependencies"
+            git push origin $DEFAULT_BRANCH
+          fi
+        env:
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
