@@ -180,9 +180,8 @@ jobs:
         shell: bash
       - name: Build JS
         run: |
-          npx turbo run build:js --filter='@utoo/pack'
-          npm run build --workspace=@utoo/pack-cli
           npm run build:js --workspace=@utoo/pack
+          npm run build --workspace=@utoo/pack-cli
       - name: Get version from release or use alpha version
         id: get_version
         run: |
