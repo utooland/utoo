@@ -75,11 +75,11 @@ jobs:
           #     git config --system core.longpaths true &&
           #     rustup target add aarch64-pc-windows-msvc &&
           #     npm run build:binding --workspace=@utoo/pack -- --target aarch64-pc-windows-msvc
-          # - host: windows-latest
-          #   build: |
-          #     git config --system core.longpaths true &&
-          #     npm run build:binding --workspace=@utoo/pack -- --target x86_64-pc-windows-msvc
-          #   target: x86_64-pc-windows-msvc
+          - host: windows-latest
+            build: |
+              git config --system core.longpaths true &&
+              npm run build:binding --workspace=@utoo/pack -- --target x86_64-pc-windows-msvc
+            target: x86_64-pc-windows-msvc
     name: utoopack-release-${{ matrix.settings.target }} - node@20
     runs-on: ${{ matrix.settings.host }}
     steps:
