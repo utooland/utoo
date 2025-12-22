@@ -6840,7 +6840,7 @@ __turbopack_context__.s([
     ()=>process
 ]);
 }),
-"[project]/node_modules/url/node_modules/punycode/punycode.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+"[project]/node_modules/punycode/punycode.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
 
 /*! https://mths.be/punycode v1.4.1 by @mathias */ ;
 (function(root) {
@@ -8055,7 +8055,9 @@ var compactQueue = function compactQueue(queue) {
     }
 };
 var arrayToObject = function arrayToObject(source, options) {
-    var obj = options && options.plainObjects ? Object.create(null) : {};
+    var obj = options && options.plainObjects ? {
+        __proto__: null
+    } : {};
     for(var i = 0; i < source.length; ++i){
         if (typeof source[i] !== 'undefined') {
             obj[i] = source[i];
@@ -8067,7 +8069,7 @@ var merge = function merge(target, source, options) {
     /* eslint no-param-reassign: 0 */ if (!source) {
         return target;
     }
-    if (typeof source !== 'object') {
+    if (typeof source !== 'object' && typeof source !== 'function') {
         if (isArray(target)) {
             target.push(source);
         } else if (target && typeof target === 'object') {
@@ -8122,7 +8124,7 @@ var assign = function assignSingleSource(target, source) {
         return acc;
     }, target);
 };
-var decode = function(str, decoder, charset) {
+var decode = function(str, defaultDecoder, charset) {
     var strWithoutPlus = str.replace(/\+/g, ' ');
     if (charset === 'iso-8859-1') {
         // unescape never throws, no try...catch needed:
@@ -8287,11 +8289,13 @@ var defaults = {
     arrayFormat: 'indices',
     charset: 'utf-8',
     charsetSentinel: false,
+    commaRoundTrip: false,
     delimiter: '&',
     encode: true,
     encodeDotInKeys: false,
     encoder: utils.encode,
     encodeValuesOnly: false,
+    filter: void undefined,
     format: defaultFormat,
     formatter: formats.formatters[defaultFormat],
     // deprecated
@@ -8376,18 +8380,18 @@ var stringify = function stringify(object, prefix, generateArrayPrefix, commaRou
         var keys = Object.keys(obj);
         objKeys = sort ? keys.sort(sort) : keys;
     }
-    var encodedPrefix = encodeDotInKeys ? prefix.replace(/\./g, '%2E') : prefix;
+    var encodedPrefix = encodeDotInKeys ? String(prefix).replace(/\./g, '%2E') : String(prefix);
     var adjustedPrefix = commaRoundTrip && isArray(obj) && obj.length === 1 ? encodedPrefix + '[]' : encodedPrefix;
     if (allowEmptyArrays && isArray(obj) && obj.length === 0) {
         return adjustedPrefix + '[]';
     }
     for(var j = 0; j < objKeys.length; ++j){
         var key = objKeys[j];
-        var value = typeof key === 'object' && typeof key.value !== 'undefined' ? key.value : obj[key];
+        var value = typeof key === 'object' && key && typeof key.value !== 'undefined' ? key.value : obj[key];
         if (skipNulls && value === null) {
             continue;
         }
-        var encodedKey = allowDots && encodeDotInKeys ? key.replace(/\./g, '%2E') : key;
+        var encodedKey = allowDots && encodeDotInKeys ? String(key).replace(/\./g, '%2E') : String(key);
         var keyPrefix = isArray(obj) ? typeof generateArrayPrefix === 'function' ? generateArrayPrefix(adjustedPrefix, encodedKey) : adjustedPrefix : adjustedPrefix + (allowDots ? '.' + encodedKey : '[' + encodedKey + ']');
         sideChannel.set(object, step);
         var valueSideChannel = getSideChannel();
@@ -8444,7 +8448,7 @@ var normalizeStringifyOptions = function normalizeStringifyOptions(opts) {
         arrayFormat: arrayFormat,
         charset: charset,
         charsetSentinel: typeof opts.charsetSentinel === 'boolean' ? opts.charsetSentinel : defaults.charsetSentinel,
-        commaRoundTrip: opts.commaRoundTrip,
+        commaRoundTrip: !!opts.commaRoundTrip,
         delimiter: typeof opts.delimiter === 'undefined' ? defaults.delimiter : opts.delimiter,
         encode: typeof opts.encode === 'boolean' ? opts.encode : defaults.encode,
         encodeDotInKeys: typeof opts.encodeDotInKeys === 'boolean' ? opts.encodeDotInKeys : defaults.encodeDotInKeys,
@@ -8486,10 +8490,11 @@ module.exports = function(object, opts) {
     var sideChannel = getSideChannel();
     for(var i = 0; i < objKeys.length; ++i){
         var key = objKeys[i];
-        if (options.skipNulls && obj[key] === null) {
+        var value = obj[key];
+        if (options.skipNulls && value === null) {
             continue;
         }
-        pushToArray(keys, stringify(obj[key], key, generateArrayPrefix, commaRoundTrip, options.allowEmptyArrays, options.strictNullHandling, options.skipNulls, options.encodeDotInKeys, options.encode ? options.encoder : null, options.filter, options.sort, options.allowDots, options.serializeDate, options.format, options.formatter, options.encodeValuesOnly, options.charset, sideChannel));
+        pushToArray(keys, stringify(value, key, generateArrayPrefix, commaRoundTrip, options.allowEmptyArrays, options.strictNullHandling, options.skipNulls, options.encodeDotInKeys, options.encode ? options.encoder : null, options.filter, options.sort, options.allowDots, options.serializeDate, options.format, options.formatter, options.encodeValuesOnly, options.charset, sideChannel));
     }
     var joined = keys.join(options.delimiter);
     var prefix = options.addQueryPrefix === true ? '?' : '';
@@ -8531,16 +8536,20 @@ var defaults = {
     parseArrays: true,
     plainObjects: false,
     strictDepth: false,
-    strictNullHandling: false
+    strictNullHandling: false,
+    throwOnLimitExceeded: false
 };
 var interpretNumericEntities = function(str) {
     return str.replace(/&#(\d+);/g, function($0, numberStr) {
         return String.fromCharCode(parseInt(numberStr, 10));
     });
 };
-var parseArrayValue = function(val, options) {
+var parseArrayValue = function(val, options, currentArrayLength) {
     if (val && typeof val === 'string' && options.comma && val.indexOf(',') > -1) {
         return val.split(',');
+    }
+    if (options.throwOnLimitExceeded && currentArrayLength >= options.arrayLimit) {
+        throw new RangeError('Array limit exceeded. Only ' + options.arrayLimit + ' element' + (options.arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
     }
     return val;
 };
@@ -8559,7 +8568,10 @@ var parseValues = function parseQueryStringValues(str, options) {
     var cleanStr = options.ignoreQueryPrefix ? str.replace(/^\?/, '') : str;
     cleanStr = cleanStr.replace(/%5B/gi, '[').replace(/%5D/gi, ']');
     var limit = options.parameterLimit === Infinity ? undefined : options.parameterLimit;
-    var parts = cleanStr.split(options.delimiter, limit);
+    var parts = cleanStr.split(options.delimiter, options.throwOnLimitExceeded ? limit + 1 : limit);
+    if (options.throwOnLimitExceeded && parts.length > limit) {
+        throw new RangeError('Parameter limit exceeded. Only ' + limit + ' parameter' + (limit === 1 ? '' : 's') + ' allowed.');
+    }
     var skipIndex = -1; // Keep track of where the utf8 sentinel was found
     var i;
     var charset = options.charset;
@@ -8583,18 +8595,19 @@ var parseValues = function parseQueryStringValues(str, options) {
         var part = parts[i];
         var bracketEqualsPos = part.indexOf(']=');
         var pos = bracketEqualsPos === -1 ? part.indexOf('=') : bracketEqualsPos + 1;
-        var key, val;
+        var key;
+        var val;
         if (pos === -1) {
             key = options.decoder(part, defaults.decoder, charset, 'key');
             val = options.strictNullHandling ? null : '';
         } else {
             key = options.decoder(part.slice(0, pos), defaults.decoder, charset, 'key');
-            val = utils.maybeMap(parseArrayValue(part.slice(pos + 1), options), function(encodedVal) {
+            val = utils.maybeMap(parseArrayValue(part.slice(pos + 1), options, isArray(obj[key]) ? obj[key].length : 0), function(encodedVal) {
                 return options.decoder(encodedVal, defaults.decoder, charset, 'value');
             });
         }
         if (val && options.interpretNumericEntities && charset === 'iso-8859-1') {
-            val = interpretNumericEntities(val);
+            val = interpretNumericEntities(String(val));
         }
         if (part.indexOf('[]=') > -1) {
             val = isArray(val) ? [
@@ -8611,14 +8624,21 @@ var parseValues = function parseQueryStringValues(str, options) {
     return obj;
 };
 var parseObject = function(chain, val, options, valuesParsed) {
-    var leaf = valuesParsed ? val : parseArrayValue(val, options);
+    var currentArrayLength = 0;
+    if (chain.length > 0 && chain[chain.length - 1] === '[]') {
+        var parentKey = chain.slice(0, -1).join('');
+        currentArrayLength = Array.isArray(val) && val[parentKey] ? val[parentKey].length : 0;
+    }
+    var leaf = valuesParsed ? val : parseArrayValue(val, options, currentArrayLength);
     for(var i = chain.length - 1; i >= 0; --i){
         var obj;
         var root = chain[i];
         if (root === '[]' && options.parseArrays) {
-            obj = options.allowEmptyArrays && (leaf === '' || options.strictNullHandling && leaf === null) ? [] : [].concat(leaf);
+            obj = options.allowEmptyArrays && (leaf === '' || options.strictNullHandling && leaf === null) ? [] : utils.combine([], leaf);
         } else {
-            obj = options.plainObjects ? Object.create(null) : {};
+            obj = options.plainObjects ? {
+                __proto__: null
+            } : {};
             var cleanRoot = root.charAt(0) === '[' && root.charAt(root.length - 1) === ']' ? root.slice(1, -1) : root;
             var decodedRoot = options.decodeDotInKeys ? cleanRoot.replace(/%2E/g, '.') : cleanRoot;
             var index = parseInt(decodedRoot, 10);
@@ -8696,6 +8716,9 @@ var normalizeParseOptions = function normalizeParseOptions(opts) {
     if (typeof opts.charset !== 'undefined' && opts.charset !== 'utf-8' && opts.charset !== 'iso-8859-1') {
         throw new TypeError('The charset option must be either utf-8, iso-8859-1, or undefined');
     }
+    if (typeof opts.throwOnLimitExceeded !== 'undefined' && typeof opts.throwOnLimitExceeded !== 'boolean') {
+        throw new TypeError('`throwOnLimitExceeded` option must be a boolean');
+    }
     var charset = typeof opts.charset === 'undefined' ? defaults.charset : opts.charset;
     var duplicates = typeof opts.duplicates === 'undefined' ? defaults.duplicates : opts.duplicates;
     if (duplicates !== 'combine' && duplicates !== 'first' && duplicates !== 'last') {
@@ -8723,16 +8746,21 @@ var normalizeParseOptions = function normalizeParseOptions(opts) {
         parseArrays: opts.parseArrays !== false,
         plainObjects: typeof opts.plainObjects === 'boolean' ? opts.plainObjects : defaults.plainObjects,
         strictDepth: typeof opts.strictDepth === 'boolean' ? !!opts.strictDepth : defaults.strictDepth,
-        strictNullHandling: typeof opts.strictNullHandling === 'boolean' ? opts.strictNullHandling : defaults.strictNullHandling
+        strictNullHandling: typeof opts.strictNullHandling === 'boolean' ? opts.strictNullHandling : defaults.strictNullHandling,
+        throwOnLimitExceeded: typeof opts.throwOnLimitExceeded === 'boolean' ? opts.throwOnLimitExceeded : false
     };
 };
 module.exports = function(str, opts) {
     var options = normalizeParseOptions(opts);
     if (str === '' || str === null || typeof str === 'undefined') {
-        return options.plainObjects ? Object.create(null) : {};
+        return options.plainObjects ? {
+            __proto__: null
+        } : {};
     }
     var tempObj = typeof str === 'string' ? parseValues(str, options) : str;
-    var obj = options.plainObjects ? Object.create(null) : {};
+    var obj = options.plainObjects ? {
+        __proto__: null
+    } : {};
     // Iterate over the keys and setup the new object
     var keys = Object.keys(tempObj);
     for(var i = 0; i < keys.length; ++i){
@@ -8784,12 +8812,12 @@ module.exports = {
  * USE OR OTHER DEALINGS IN THE SOFTWARE.
  */ var punycode = __turbopack_context__.f({
     "punycode": {
-        id: ()=>"[project]/node_modules/url/node_modules/punycode/punycode.js [client] (ecmascript)",
-        module: ()=>__turbopack_context__.r("[project]/node_modules/url/node_modules/punycode/punycode.js [client] (ecmascript)")
+        id: ()=>"[project]/node_modules/punycode/punycode.js [client] (ecmascript)",
+        module: ()=>__turbopack_context__.r("[project]/node_modules/punycode/punycode.js [client] (ecmascript)")
     },
     "punycode/": {
-        id: ()=>"[project]/node_modules/url/node_modules/punycode/punycode.js [client] (ecmascript)",
-        module: ()=>__turbopack_context__.r("[project]/node_modules/url/node_modules/punycode/punycode.js [client] (ecmascript)")
+        id: ()=>"[project]/node_modules/punycode/punycode.js [client] (ecmascript)",
+        module: ()=>__turbopack_context__.r("[project]/node_modules/punycode/punycode.js [client] (ecmascript)")
     }
 })('punycode/');
 function Url() {
@@ -16255,4 +16283,4 @@ __turbopack_context__.s([]);
 }),
 ]);
 
-//# sourceMappingURL=_root-of-the-server___8c08ecf7.js.map
+//# sourceMappingURL=_root-of-the-server___f987a506.js.map
