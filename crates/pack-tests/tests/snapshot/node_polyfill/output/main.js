@@ -1,5 +1,5 @@
 (globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["_root-of-the-server___8c08ecf7.js"],"runtimeModuleIds":["[project]/crates/pack-tests/tests/snapshot/node_polyfill/input/index.ts [client] (ecmascript)"]}
+    {"otherChunks":["_root-of-the-server___f5532ddc.js"],"runtimeModuleIds":["[project]/node_polyfill/input/index.ts [client] (ecmascript)"]}
 ]);
 // Dummy runtime

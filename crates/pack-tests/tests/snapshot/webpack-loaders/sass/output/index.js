@@ -1,5 +1,5 @@
 (globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["crates_pack-tests_tests_snapshot_webpack-loaders_sass_input_style_sass_8c7b4ad0.css","crates_pack-tests_tests_snapshot_webpack-loaders_sass_input_index_ts_7e205e1f.js"],"runtimeModuleIds":[81]}
+    {"otherChunks":["webpack-loaders_sass_input_style_sass_cf3fd10c.css","webpack-loaders_sass_input_index_ts_cb0ae599.js"],"runtimeModuleIds":[76]}
 ]);
 // Dummy runtime

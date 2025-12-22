@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 3, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/copy/input/index.js"],"sourcesContent":["console.log('copy example');"],"names":[],"mappings":"AAAA,QAAQ,GAAG,CAAC"}}]
+}

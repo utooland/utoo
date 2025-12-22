@@ -1,0 +1,17 @@
+warning - [bindings] /typescript/interface_export/input/index.ts:1:0  Export Target doesn't exist in target module
+  
+         + v----------------------------------------------v
+       1 + import { Args, Target } from './item-interface';
+         + ^----------------------------------------------^
+       2 | 
+       3 | export { Args, Target };
+  
+  The export Target was not found in module [project]/typescript/interface_export/input/item-interface.ts [client] (ecmascript).
+  
+  The module has no exports at all.
+  All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+  
+  
+  | These are the exports of the module:
+  | 
+  |

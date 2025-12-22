@@ -6,23 +6,23 @@
       ]
     },
     {
-      "type": "asset","name": "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js","info": {},"size": 1092,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
+      "type": "asset","name": "async_chunk_input_427d2456.js","info": {},"size": 1026,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
+        "async_chunk_input_427d2456.js"
       ]
     },
     {
-      "type": "asset","name": "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js.map","info": {},"size": 0,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js.map"
+      "type": "asset","name": "async_chunk_input_427d2456.js.map","info": {},"size": 0,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
+        "async_chunk_input_427d2456.js.map"
       ]
     },
     {
-      "type": "asset","name": "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js","info": {},"size": 797,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js"
+      "type": "asset","name": "async_chunk_input_79e6c840.js","info": {},"size": 764,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
+        "async_chunk_input_79e6c840.js"
       ]
     },
     {
-      "type": "asset","name": "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js.map","info": {},"size": 0,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js.map"
+      "type": "asset","name": "async_chunk_input_79e6c840.js.map","info": {},"size": 0,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
+        "async_chunk_input_79e6c840.js.map"
       ]
     },
     {
@@ -33,11 +33,11 @@
   ],"entrypoints": {
     "main": {
       "name": "main","chunks": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js",
+        "async_chunk_input_427d2456.js",
         "main.js"
       ],"assets": [
         {
-          "name": "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
+          "name": "async_chunk_input_427d2456.js"
         },
         {
           "name": "main.js"
@@ -51,49 +51,49 @@
       ]
     },
     {
-      "rendered": false,"initial": false,"entry": false,"recorded": false,"id": "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js","size": 1092,"hash": "","files": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
+      "rendered": false,"initial": false,"entry": false,"recorded": false,"id": "async_chunk_input_427d2456.js","size": 1026,"hash": "","files": [
+        "async_chunk_input_427d2456.js"
       ]
     },
     {
-      "rendered": false,"initial": false,"entry": false,"recorded": false,"id": "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js","size": 797,"hash": "","files": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js"
+      "rendered": false,"initial": false,"entry": false,"recorded": false,"id": "async_chunk_input_79e6c840.js","size": 764,"hash": "","files": [
+        "async_chunk_input_79e6c840.js"
       ]
     }
   ],"modules": [
     {
-      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/index.js","id": "crates/pack-tests/tests/snapshot/async_chunk/input/index.js","chunks": [
+      "name": "async_chunk/input/index.js","id": "async_chunk/input/index.js","chunks": [
         "main.js"
       ],"size": 110
     },
     {
-      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/node_modules/bar/index.js","id": "crates/pack-tests/tests/snapshot/async_chunk/input/node_modules/bar/index.js","chunks": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
+      "name": "async_chunk/input/node_modules/bar/index.js","id": "async_chunk/input/node_modules/bar/index.js","chunks": [
+        "async_chunk_input_427d2456.js"
       ],"size": 56
     },
     {
-      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/shared.js","id": "crates/pack-tests/tests/snapshot/async_chunk/input/shared.js","chunks": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
+      "name": "async_chunk/input/shared.js","id": "async_chunk/input/shared.js","chunks": [
+        "async_chunk_input_427d2456.js"
       ],"size": 18
     },
     {
-      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/index.js","id": "crates/pack-tests/tests/snapshot/async_chunk/input/index.js","chunks": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
+      "name": "async_chunk/input/index.js","id": "async_chunk/input/index.js","chunks": [
+        "async_chunk_input_427d2456.js"
       ],"size": 110
     },
     {
-      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/import.js","id": "crates/pack-tests/tests/snapshot/async_chunk/input/import.js","chunks": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_4c1df917.js"
+      "name": "async_chunk/input/import.js","id": "async_chunk/input/import.js","chunks": [
+        "async_chunk_input_427d2456.js"
       ],"size": 91
     },
     {
-      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/node_modules/foo/index.js","id": "crates/pack-tests/tests/snapshot/async_chunk/input/node_modules/foo/index.js","chunks": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js"
+      "name": "async_chunk/input/node_modules/foo/index.js","id": "async_chunk/input/node_modules/foo/index.js","chunks": [
+        "async_chunk_input_79e6c840.js"
       ],"size": 56
     },
     {
-      "name": "crates/pack-tests/tests/snapshot/async_chunk/input/import.js","id": "crates/pack-tests/tests/snapshot/async_chunk/input/import.js","chunks": [
-        "crates_pack-tests_tests_snapshot_async_chunk_input_3b55c753.js"
+      "name": "async_chunk/input/import.js","id": "async_chunk/input/import.js","chunks": [
+        "async_chunk_input_79e6c840.js"
       ],"size": 91
     }
   ]
