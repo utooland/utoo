@@ -69,15 +69,6 @@ utoopack build --webpack # Build using webpack.config.js
 - 📦 **Monorepo First**: Built-in workspace management.
 - 🌐 **Web Ready**: Run the entire toolchain in the browser via WASM.
 
-## 🗺️ Roadmap
-
-We are actively working on expanding Utoo's capabilities:
-
-- [ ] **Persistent Caching**: Disk-based caching for even faster restarts.
-- [ ] **SSR & RSC**: Full support for modern React architectures.
-- [ ] **Plugin System**: Extensible hooks for custom build logic.
-- [ ] **Mobile Support**: Unified tooling for mobile frontend development.
-
 ## 📂 Project Structure
 
 - **[crates/](crates/)**: Rust core (Package Manager, Bundler Core, WASM/NAPI bindings).

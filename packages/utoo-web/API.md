@@ -16,7 +16,7 @@
 
 1.  **FileSystemObserver Integration**: The `tokio-fs-ext` crate (used by `utoo-wasm`) provides a `watch` module that wraps the `FileSystemObserver` API. This allows the Rust code to receive notifications about file changes in the Origin Private File System (OPFS).
 2.  **OpfsOffload Layer**: The [implementation of OpfsOffload](https://github.com/utooland/tokio-fs-ext/tree/master/src/fs/wasm/offload) not only solves the thread safety issue of JS objects in Rust (allowing multiple Rust threads to call OPFS concurrently) but also extends the `turbo-tasks-fs` file system with minimal intrusiveness. When a file change is detected, the event is also propagated through this layer to the Turbopack engine running in the WASM environment.
-3.  **Incremental Compilation**: Turbopack's architecture is built on a reactive graph. When it receives a file change event, it invalidates only the affected parts of the dependency graph. This triggers a re-computation (rebuild) of only the changed modules and their dependents, resulting in extremely fast updates, similar to Hot Module Replacement (HMR) in native development environments.
+3.  **Incremental Compilation**: Turbopack's architecture is built on a reactive graph. When it receives a file change event, it invalidates only the affected parts of the dependency graph. This triggers a re-computation (rebuild) of only the changed modules and their dependents, resulting in extremely fast updates.
 
 This architecture ensures that `@utoo/web` delivers a responsive development experience even for large projects running entirely within the browser.
 
