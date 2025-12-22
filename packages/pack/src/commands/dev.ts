@@ -6,11 +6,7 @@ import path from "path";
 import send from "send";
 import { Duplex, Writable } from "stream";
 import url from "url";
-import {
-  compatOptionsFromWebpack,
-  readWebpackConfig,
-  WebpackConfig,
-} from "../config/webpackCompat";
+import { resolveBundleOptions, WebpackConfig } from "../config/webpackCompat";
 import { createHotReloader } from "../core/hmr";
 import { BundleOptions } from "../core/types";
 import { blockStdout, getPackPath } from "../utils/common";
@@ -25,17 +21,7 @@ export function serve(
   rootPath?: string,
   serverOptions?: StartServerOptions,
 ) {
-  let bundleOptions: BundleOptions;
-  if ((<WebpackConfig>options).webpackMode) {
-    let webpackConfig = <WebpackConfig>options;
-    if (!webpackConfig.entry) {
-      const loadedConfig = readWebpackConfig(projectPath, rootPath);
-      webpackConfig = { ...webpackConfig, ...loadedConfig };
-    }
-    bundleOptions = compatOptionsFromWebpack(webpackConfig);
-  } else {
-    bundleOptions = <BundleOptions>options;
-  }
+  const bundleOptions = resolveBundleOptions(options, projectPath, rootPath);
 
   if (!rootPath) {
     // help user to find the rootDir automatically

@@ -3,11 +3,7 @@ import { spawn } from "child_process";
 import fs, { existsSync } from "fs";
 import { nanoid } from "nanoid";
 import { join } from "path";
-import {
-  compatOptionsFromWebpack,
-  readWebpackConfig,
-  WebpackConfig,
-} from "../config/webpackCompat";
+import { resolveBundleOptions, WebpackConfig } from "../config/webpackCompat";
 import { projectFactory } from "../core/project";
 import { BundleOptions } from "../core/types";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
@@ -21,17 +17,7 @@ export function build(
   projectPath?: string,
   rootPath?: string,
 ) {
-  let bundleOptions: BundleOptions;
-  if ((<WebpackConfig>options).webpackMode) {
-    let webpackConfig = <WebpackConfig>options;
-    if (!webpackConfig.entry) {
-      const loadedConfig = readWebpackConfig(projectPath, rootPath);
-      webpackConfig = { ...webpackConfig, ...loadedConfig };
-    }
-    bundleOptions = compatOptionsFromWebpack(webpackConfig);
-  } else {
-    bundleOptions = <BundleOptions>options;
-  }
+  const bundleOptions = resolveBundleOptions(options, projectPath, rootPath);
 
   if (!rootPath) {
     // help user to find the rootDir automatically.
