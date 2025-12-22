@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 3, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/concatenate_modules/duplicate-imports/input/shared.js"],"sourcesContent":["module.exports = 'shared'\n"],"names":[],"mappings":"AAAA,OAAO,OAAO,GAAG"}},
-    {"offset": {"line": 8, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/concatenate_modules/duplicate-imports/input/a.js","turbopack:///[project]/crates/pack-tests/tests/snapshot/concatenate_modules/duplicate-imports/input/b.js","turbopack:///[project]/crates/pack-tests/tests/snapshot/concatenate_modules/duplicate-imports/input/c.js"],"sourcesContent":["import shared from './shared.js'\n\nconsole.log('a', shared)\n","import './a.js'\nimport shared from './shared.js'\n\nconsole.log('a', shared)\n","import './b.js'\nimport shared from './shared.js'\n\nconsole.log('c', shared)\n"],"names":[],"mappings":";;;;;;;;AAAA;;AAEA,QAAQ,GAAG,CAAC,KAAK,6CAAM;;;;ACCvB,QAAQ,GAAG,CAAC,KAAK,8CAAM;;;;ACAvB,QAAQ,GAAG,CAAC,KAAK,8CAAM"}}]
-}

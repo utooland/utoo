@@ -1,7 +1,5 @@
-import * as comlink from "comlink";
-import { internalEndpoint } from "../internalProject";
-import * as sabcom from "../sabcom";
-import { Binding } from "../type";
+import { Binding } from "../types";
+import * as sabcom from "../utils/sabcom";
 import initWasm, {
   Project as ProjectInternal,
   registerWorkerScheduler,
@@ -9,7 +7,7 @@ import initWasm, {
   WebWorkerTermination,
   workerCreated,
 } from "../utoo";
-import { LoaderRunnerMeta } from "./type";
+import { LoaderRunnerMeta } from "./types";
 
 let nextWorkerId = 0;
 

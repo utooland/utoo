@@ -8,9 +8,7 @@
     "strict": true,
     "target": "es2022",
     "moduleResolution": "node",
-    "paths": {
-      "@utoo/pack": ["../pack/src/index.ts"]
-    }
+    "skipLibCheck": true
   },
   "include": ["./src/**/*"],
   "ts-node": {

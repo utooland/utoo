@@ -116,6 +116,21 @@ pub struct DevServer {
     pub hot: Option<bool>,
 }
 
+/// Provider configuration item - can be a module name string or [module, export] tuple.
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TraceRawVcs, NonLocalValue, OperationValue,
+)]
+#[serde(untagged)]
+pub enum ProviderConfigValue {
+    /// Simple module import: "jquery" -> import $ from 'jquery'
+    Module(RcStr),
+    /// Named export import: ["buffer", "Buffer"] -> import { Buffer } from 'buffer'
+    NamedExport(Vec<RcStr>),
+}
+
+#[turbo_tasks::value(transparent)]
+pub struct ProviderConfig(FxIndexMap<RcStr, ProviderConfigValue>);
+
 #[turbo_tasks::value(serialization = "custom", eq = "manual")]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
@@ -129,6 +144,7 @@ pub struct Config {
     target: Option<RcStr>,
     source_maps: Option<bool>,
     define: Option<FxIndexMap<String, JsonValue>>,
+    provider: Option<FxIndexMap<RcStr, ProviderConfigValue>>,
     images: Option<ImageConfig>,
     styles: Option<StyleConfig>,
     optimization: Option<OptimizationConfig>,
@@ -1046,6 +1062,11 @@ impl Config {
             .collect();
 
         Vc::cell(define_env)
+    }
+
+    #[turbo_tasks::function]
+    pub fn provider_config(&self) -> Vc<ProviderConfig> {
+        Vc::cell(self.provider.clone().unwrap_or_default())
     }
 
     #[turbo_tasks::function]

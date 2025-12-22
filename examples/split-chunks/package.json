@@ -4,11 +4,10 @@
   "scripts": {
     "build": "utoopack build",
     "dev": "utoopack dev",
-    "build-by-native": "../../target/release/pack-cli build",
-    "dev-by-native": "../../target/release/pack-cli dev",
-    "serve": "serve ."
+    "start": "serve ."
   },
   "devdependencies": {
-    "@utoo/pack-cli": "*"
+    "@utoo/pack-cli": "*",
+    "serve": "^14.2.4"
   }
 }

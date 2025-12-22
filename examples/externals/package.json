@@ -8,7 +8,7 @@
     "build": "utoopack build",
     "analyze": "ANALYZE=1 utoopack build",
     "dev": "utoopack dev",
-    "serve": "npm run build && node ./genHtml.js && serve ./dist"
+    "start": "npm run build && serve ./dist"
   },
   "dependencies": {
     "antd": "^5.12.2"

@@ -1,6 +1,6 @@
 import { Buffer } from "buffer";
 import path from "path";
-import { Stats } from "../../type";
+import { Stats } from "../../types";
 
 function resolvePath(p: string): string {
   // @ts-ignore

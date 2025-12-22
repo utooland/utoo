@@ -1,0 +1,24 @@
+{
+  "rootPath": "../../",
+  "projectPath": "./",
+  "config": {
+    "entry": [
+      {
+        "import": "./index.html"
+      }
+    ],
+    "output": {
+      "path": "./dist",
+      "clean": true
+    },
+    "optimization": {
+      "splitChunks": {
+        "js": {
+          "minChunkSize": 2000,
+          "maxChunkCountPerGroup": 1,
+          "maxMergeChunkSize": 20000
+        }
+      }
+    }
+  }
+}

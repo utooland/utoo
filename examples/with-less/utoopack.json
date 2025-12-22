@@ -1,0 +1,25 @@
+{
+  "$schema": "../../packages/pack/config_schema.json",
+  "config": {
+    "entry": [
+      {
+        "import": "./index.html"
+      }
+    ],
+    "optimization": {
+      "minify": false
+    },
+    "styles": {
+      "less": {
+        "javascriptEnabled": true
+      }
+    },
+    "output": {
+      "path": "./dist",
+      "filename": "[name].[contenthash:8]",
+      "chunkFilename": "[name].[contenthash:8]",
+      "clean": true
+    },
+    "stats": true
+  }
+}

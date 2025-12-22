@@ -1,4 +1,5 @@
 const webpack = require("webpack");
+const HtmlWebpackPlugin = require("html-webpack-plugin");
 
 module.exports = {
   mode: process.env.NODE_ENV === "production" ? "production" : "development",
@@ -18,6 +19,7 @@ module.exports = {
       "typeof window": JSON.stringify("object"),
       "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV),
     }),
+    new HtmlWebpackPlugin(),
   ],
   module: {
     rules: [

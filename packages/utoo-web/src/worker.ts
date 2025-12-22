@@ -1,6 +1,6 @@
 import * as comlink from "comlink";
-import { internalEndpoint } from "./internalProject";
-import { HandShake } from "./message";
+import { internalEndpoint } from "./project/InternalProject";
+import { HandShake } from "./utils/message";
 
 declare let self: DedicatedWorkerGlobalScope;
 

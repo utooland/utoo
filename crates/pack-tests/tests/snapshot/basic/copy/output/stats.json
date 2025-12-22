@@ -26,13 +26,13 @@
       ]
     },
     {
-      "type": "asset","name": "crates_pack-tests_tests_snapshot_basic_copy_input_index_df61b525.js","info": {},"size": 309,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
-        "crates_pack-tests_tests_snapshot_basic_copy_input_index_df61b525.js"
+      "type": "asset","name": "basic_copy_input_index_18a5cc2d.js","info": {},"size": 276,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
+        "basic_copy_input_index_18a5cc2d.js"
       ]
     },
     {
-      "type": "asset","name": "crates_pack-tests_tests_snapshot_basic_copy_input_index_df61b525.js.map","info": {},"size": 0,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
-        "crates_pack-tests_tests_snapshot_basic_copy_input_index_df61b525.js.map"
+      "type": "asset","name": "basic_copy_input_index_18a5cc2d.js.map","info": {},"size": 0,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
+        "basic_copy_input_index_18a5cc2d.js.map"
       ]
     },
     {
@@ -43,11 +43,11 @@
   ],"entrypoints": {
     "main": {
       "name": "main","chunks": [
-        "crates_pack-tests_tests_snapshot_basic_copy_input_index_df61b525.js",
+        "basic_copy_input_index_18a5cc2d.js",
         "main.js"
       ],"assets": [
         {
-          "name": "crates_pack-tests_tests_snapshot_basic_copy_input_index_df61b525.js"
+          "name": "basic_copy_input_index_18a5cc2d.js"
         },
         {
           "name": "main.js"
@@ -61,19 +61,19 @@
       ]
     },
     {
-      "rendered": false,"initial": false,"entry": false,"recorded": false,"id": "crates_pack-tests_tests_snapshot_basic_copy_input_index_df61b525.js","size": 309,"hash": "","files": [
-        "crates_pack-tests_tests_snapshot_basic_copy_input_index_df61b525.js"
+      "rendered": false,"initial": false,"entry": false,"recorded": false,"id": "basic_copy_input_index_18a5cc2d.js","size": 276,"hash": "","files": [
+        "basic_copy_input_index_18a5cc2d.js"
       ]
     }
   ],"modules": [
     {
-      "name": "crates/pack-tests/tests/snapshot/basic/copy/input/index.js","id": "crates/pack-tests/tests/snapshot/basic/copy/input/index.js","chunks": [
+      "name": "basic/copy/input/index.js","id": "basic/copy/input/index.js","chunks": [
         "main.js"
       ],"size": 28
     },
     {
-      "name": "crates/pack-tests/tests/snapshot/basic/copy/input/index.js","id": "crates/pack-tests/tests/snapshot/basic/copy/input/index.js","chunks": [
-        "crates_pack-tests_tests_snapshot_basic_copy_input_index_df61b525.js"
+      "name": "basic/copy/input/index.js","id": "basic/copy/input/index.js","chunks": [
+        "basic_copy_input_index_18a5cc2d.js"
       ],"size": 28
     }
   ]

@@ -1,0 +1,8 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 3, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/node_modules/jquery/index.js"],"sourcesContent":["module.exports = function $(selector) {\n  return { selector };\n};\n"],"names":[],"mappings":"AAAA,OAAO,OAAO,GAAG,SAAS,EAAE,QAAQ;IAClC,OAAO;QAAE;IAAS;AACpB","ignoreList":[0]}},
+    {"offset": {"line": 11, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/node_modules/buffer-dep/index.js"],"sourcesContent":["exports.Buffer = {\n  from: function (str) {\n    return { data: str };\n  },\n};\n"],"names":[],"mappings":"AAAA,QAAQ,MAAM,GAAG;IACf,MAAM,SAAU,GAAG;QACjB,OAAO;YAAE,MAAM;QAAI;IACrB;AACF","ignoreList":[0]}},
+    {"offset": {"line": 21, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/provider/basic/input/index.js"],"sourcesContent":["// Test ProvidePlugin functionality\n// $ should be automatically imported from 'jquery'\n// Buffer should be automatically imported from 'buffer'\n\nconsole.log($('#app'));\nconsole.log(Buffer.from('hello'));\n"],"names":[],"mappings":"AAAA,mCAAmC;AACnC,mDAAmD;AACnD,wDAAwD;AAE5C;AACA;AADZ,QAAQ,GAAG,CAAC,IAAA,sIAAC,EAAC;AACd,QAAQ,GAAG,CAAC,4IAAM,CAAC,IAAI,CAAC"}}]
+}
