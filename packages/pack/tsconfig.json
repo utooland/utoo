@@ -8,10 +8,7 @@
     "declaration": true,
     "strict": true,
     "skipLibCheck": true,
-    "lib": ["dom", "dom.iterable", "esnext"],
-    "paths": {
-      "@utoo/pack-shared": ["../pack-shared/src/index.ts"]
-    }
+    "lib": ["dom", "dom.iterable", "esnext"]
   },
   "include": ["src"],
   "exclude": ["es", "cjs"]

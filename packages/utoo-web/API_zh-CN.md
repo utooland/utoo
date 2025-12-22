@@ -1,14 +1,24 @@
 # [`@utoo/web`](https://www.npmjs.com/package/@utoo/web) API 文档
 
-`@utoo/web` 可以在浏览器中运行完整的 Web 开发环境，包括文件系统、依赖管理和构建流程。它集成了 [`utoopack`](https://github.com/utooland/utoo) (Rust + Turbopack)，并利用 Web Workers、Service Workers 和 OPFS 提供流畅的体验。
+`@utoo/web` 可以在浏览器中运行完整的 Web 开发环境，包括文件系统、依赖管理和构建流程。它集成了 [`utoopack`](https://github.com/utooland/utoo) (Rust + Turbopack)，采用 `wasm32-unknown-unknown` 编译目标，不依赖 Web Container，避免了模拟 Node.js 环境带来的运行时开销（如启动延迟和内存占用）。此外，它利用 Web Workers、Service Workers 和 OPFS 提供流畅的体验。
 
 ## 核心概念
 
-1. **Real File System**：项目存在于浏览器的源私有文件系统（OPFS）中。`Project` 类提供类似 Node.js `fs` 的接口。
+1. **Real File System**：项目存在于浏览器的[源私有文件系统（OPFS）](https://developer.mozilla.org/zh-CN/docs/Web/API/File_System_API/Origin_private_file_system)中。`Project` 类提供类似 Node.js `fs` 的接口。
 2. **Project Main Worker**：`Project` 实例运行在 Web Worker 中。主线程对象是代理，保持 UI 响应。
 3. **Thread Worker**：重度任务（打包、编译）在专用的 Web Worker 中运行，由移植的 `tokio` 运行时驱动。
-4. **Loader Worker**：在带有 Node.js polyfills 的专用 Worker 中执行 Webpack loaders。
+4. **Loader Worker**：在带有 Node.js polyfills 的专用 Worker 中执行 webpack loaders。
 5. **Service Worker**：充当本地服务器，拦截请求并提供构建文件以供预览。
+
+## 文件监听与增量构建
+
+`@utoo/web` 利用现代的 [FileSystemObserver API](https://github.com/whatwg/fs/blob/main/proposals/FileSystemObserver.md) 在浏览器中直接实现高效的文件系统监听。这对于支持 Turbopack 的增量构建能力至关重要。
+
+1.  **FileSystemObserver 集成**：`tokio-fs-ext` crate（由 `utoo-wasm` 使用）提供了一个 `watch` 模块，封装了 `FileSystemObserver` API。这使得 Rust 代码能够接收关于源私有文件系统（OPFS）中文件更改的通知。
+2.  **OpfsOffload 层**：[OpfsOffload 的实现](https://github.com/utooland/tokio-fs-ext/tree/master/src/fs/wasm/offload)不仅解决了 JS 对象在 Rust 下不满足线程安全的问题（允许多个 rust 线程并发调用 opfs），也可以以极少的侵入性来扩展 `turbo-tasks-fs` 的文件系统。当检测到文件更改时，事件也会通过此层传播到在 WASM 环境中运行的 Turbopack 引擎。
+3.  **增量编译**：Turbopack 的架构建立在响应式图之上。当它接收到文件更改事件时，它仅使依赖图中受影响的部分失效。这触发了仅针对更改的模块及其依赖项的重新计算（重建），从而实现极快的更新。
+
+这种架构确保了 `@utoo/web` 即使对于完全在浏览器中运行的大型项目也能提供响应迅速的开发体验。
 
 ---
 
@@ -33,7 +43,7 @@ const project = new UtooProject({
     // 重度任务 Worker 脚本 URL。
     threadWorkerUrl: `${location.origin}/threadWorker.js`,
 
-    // Webpack loaders Worker 脚本 URL。
+    // webpack loaders Worker 脚本 URL。
     loaderWorkerUrl: `${location.origin}/loaderWorker.js`,
     
     // 预览 Service Worker 配置。
@@ -79,6 +89,14 @@ await project.install(packageLock);
 #### 方式 B：使用已有的 package-lock.json
 
 如果你已经有 `package-lock.json`，可以直接使用：
+
+项目 `node_modules` 中的依赖包实际上是指向全局共享存储的逻辑链接。这意味着在同一浏览器域名下的不同 project 之间，可以共享同名且同版本的依赖，无需重复下载。这种机制类似于 `pnpm` 的存储策略。
+
+这种设计具有以下优势：
+1. **节省存储空间**：相同版本的依赖包在 OPFS 中仅存储一份，避免了冗余占用。
+2. **加速项目初始化**：创建新项目或切换项目时，若依赖包已存在于全局存储中，可直接复用，实现秒级安装。
+3. **减少网络流量**：常用依赖包只需下载一次，后续项目即可直接使用，大幅降低网络开销。
+4. **跨标签页复用**：即使开启新的浏览器标签页，只要处于同一域名下，依赖均可以直接复用。
 
 ```typescript
 // 将您的 package-lock.json 作为 JSON 对象导入。
@@ -129,7 +147,7 @@ for (const filePath in demoFiles) {
 }
 ```
 
-若要使用 loader，请将其添加至 `package.json` 的 `devDependencies` 中并安装，这与标准 Webpack 项目的依赖管理方式一致。此外，由于 `@utoo/web` 遵循 `loader-runner` 的机制与上下文来执行 loader，您还需要同时安装 `loader-runner`。
+若要使用 loader，请将其添加至 `package.json` 的 `devDependencies` 中并安装，这与标准 webpack 项目的依赖管理方式一致。此外，由于 `@utoo/web` 遵循 `loader-runner` 的机制与上下文来执行 loader，您还需要同时安装 `loader-runner`。
 
 您可以像写入其他源文件一样，将此文件写入真实文件系统：
 
@@ -156,7 +174,7 @@ await project.writeFile('utoopack.json', JSON.stringify(utoopackConfig, null, 2)
 * `serviceWorker` (object, 可选):
   * `url` (string, 必需): Service Worker 脚本的 URL。
   * `scope` (string, 必需): Service Worker 将拦截请求的 URL 范围。这是您预览环境的基路径。
-* `loadersImportMap`（对象，可选）：用于在 @utoo/web 中打包时运行 webpack 加载器的加载器导入映射。键是加载器的名称，值可以是 UMD 字符串 URL 或 UMD 内容字符串。加载器将在 Web Worker 池中并行执行。
+* `loadersImportMap`（对象，可选）：用于配置 webpack Loader 的导入映射。这是一个可选的高级配置。通常情况下，您只需在 `package.json` 中声明 loader 依赖并安装，即可让它工作。配置 `loadersImportMap` 允许您直接提供预构建好的、满足 CommonJS 规范的单一文件（作为 URL 字符串或内容字符串）。这样做可以避免 loader 执行过程中因 `require` 操作产生的文件系统 I/O 开销，从而显著提升构建性能。键是 loader 的名称，值是 UMD/CommonJS 模块的 URL 或内容字符串。loader 将在 Web Worker 池中并行执行。
 
 ### 文件系统方法
 
@@ -283,7 +301,7 @@ const lockFile = await project.deps({
     }
     ```
 
-3. **处理构建输出**: 构建成功后，应用程序读取构建输出（例如 `dist/stats.json`）以查找生成的资源文件（`.js`、`.css`）。然后它会生成一个包含这些资源的 `index.html`。
+3. **处理构建输出**: 构建成功后，应用程序读取构建输出（例如 `dist/stats.json`）以查找生成的资源文件（`.js`、`.css`）。然后它会生成一个包含这些资源的 `index.html`。生成 HTML 的逻辑类似于 `html-webpack-plugin`。我们目前正在计划将 HTML 直接作为构建入口（entry），在完成该特性之后，可以省去手动生成 HTML 这一步。
 
     ```typescript
     // 在 useBuild.ts 中
@@ -336,7 +354,7 @@ module.exports = {
 
 设置 `@utoo/web` 项目的一个关键部分是创建您传递给 `UtooProject` 构造函数的 Worker 脚本。正如在 `utooweb-demo` 示例中所见，这些文件的内容非常少。它们的目的是简单地从 `@utoo/web` 库本身加载必要的 Worker 逻辑。
 
-您需要在项目的源代码中创建三个文件，然后由您的打包器（例如 Webpack、Vite）编译成最终传递给构造函数的 URL。
+您需要在项目的源代码中创建三个文件，然后由您的打包器（例如 webpack、Vite）编译成最终传递给构造函数的 URL。
 
 #### 1. 项目主 Worker (`worker.ts`)
 

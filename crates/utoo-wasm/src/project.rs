@@ -174,7 +174,10 @@ impl Project {
             let project_root = if cwd.starts_with('/') {
                 cwd
             } else {
-                format!("/{}", cwd)
+                tokio_fs_ext::current_dir()?
+                    .join(cwd)
+                    .to_string_lossy()
+                    .to_string()
             };
 
             let config_path = std::path::PathBuf::from(&project_root)
