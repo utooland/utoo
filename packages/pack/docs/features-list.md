@@ -27,7 +27,7 @@
 |  | `node` | 🟠 |  |  |
 | Sourcemap |  | ✅ | [Webpack `devtool` configuration](https://webpack.js.org/configuration/devtool/) |  |
 | Define |  | ✅ | [Webpack `DefinePlugin`](https://webpack.js.org/plugins/define-plugin/) |  |
-| Providers |  | 🟠 | [Webpack `ProvidePlugin`](https://webpack.js.org/plugins/provide-plugin/#root) |  |
+| Providers |  | ✅ | [Webpack `ProvidePlugin`](https://webpack.js.org/plugins/provide-plugin/#root) |  |
 | Optimization | `concatenateModules` | ✅ | [Webpack `optimization.concatenateModules`](https://webpack.js.org/configuration/optimization/#optimizationconcatenatemodules) |  |
 |  | `moduleIds` | ✅ | [Webpack `optimization.moduleIds`](https://webpack.js.org/configuration/optimization/#optimizationmoduleids) | Supports "names" or "deterministic" |
 |  | `minify` | ✅ | [Webpack `optimization.minimize`](https://webpack.js.org/configuration/optimization/#optimizationminimize) |  |

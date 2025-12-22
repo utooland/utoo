@@ -780,6 +780,7 @@ impl Project {
             (*self.config.target().await?).clone(),
             Vc::cell(define_env),
             self.config.mode(),
+            self.config.provider_config(),
         ))
     }
 

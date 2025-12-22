@@ -56,6 +56,7 @@ export function compatOptionsFromWebpack(
       sourceMaps: compatSourceMaps(devtool),
       optimization: compatOptimization(optimization),
       define: compatFromWebpackPlugin(plugins, compatDefine),
+      provider: compatFromWebpackPlugin(plugins, compatProvider),
       stats: compatStats(stats),
       html: compatFromWebpackPlugins(plugins, compatHtml),
     } as ConfigComplete,
@@ -211,6 +212,34 @@ function compatDefine(maybeWebpackPluginInstance: MaybeWebpackPluginInstance) {
   }
 
   return processedDefinitions;
+}
+
+compatProvider.pluginName = "ProvidePlugin";
+function compatProvider(
+  maybeWebpackPluginInstance: MaybeWebpackPluginInstance,
+): ConfigComplete["provider"] {
+  const definitions = maybeWebpackPluginInstance?.definitions;
+  if (!definitions || typeof definitions !== "object") {
+    return undefined;
+  }
+
+  const provider: ConfigComplete["provider"] = {};
+  for (const [key, value] of Object.entries(definitions)) {
+    if (typeof value === "string") {
+      // Simple module import: { $: 'jquery' }
+      provider[key] = value;
+    } else if (Array.isArray(value)) {
+      if (value.length === 1) {
+        // e.g. { process: ['process/browser'] } for default import
+        provider[key] = value[0];
+      } else if (value.length >= 2) {
+        // Named export import: { Buffer: ['buffer', 'Buffer'] }
+        provider[key] = [value[0], value[1]];
+      }
+    }
+  }
+
+  return Object.keys(provider).length > 0 ? provider : undefined;
 }
 
 function compatExternals(
