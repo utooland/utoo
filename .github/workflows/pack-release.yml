@@ -46,7 +46,11 @@ jobs:
               npm run build:binding --workspace=@utoo/pack -- --target aarch64-unknown-linux-musl
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
             build: |
+              rustup install nightly-2025-10-27 &&
+              rustup default nightly-2025-10-27 &&
+              rustup target add x86_64-unknown-linux-gnu &&
               npm run build:binding --workspace=@utoo/pack -- --target x86_64-unknown-linux-gnu
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
