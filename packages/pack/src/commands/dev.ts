@@ -61,6 +61,7 @@ async function serveInternal(
       hostname: serverOptions?.hostname || "localhost",
       port: serverOptions?.port || 3000,
       https: serverOptions?.https,
+      logServerInfo: serverOptions?.logServerInfo,
       selfSignedCertificate: serverOptions?.https
         ? await createSelfSignedCertificate(
             serverOptions?.hostname || "localhost",
@@ -90,6 +91,7 @@ export interface StartServerOptions {
   port: number;
   https?: boolean;
   hostname?: string;
+  logServerInfo?: boolean;
   selfSignedCertificate?: SelfSignedCertificate;
 }
 
@@ -222,11 +224,13 @@ export async function startServer(
         );
       }
 
-      printServerInfo(
-        serverOptions.https ? "https" : "http",
-        formattedHostname,
-        port,
-      );
+      if (serverOptions.logServerInfo !== false) {
+        printServerInfo(
+          serverOptions.https ? "https" : "http",
+          formattedHostname,
+          port,
+        );
+      }
 
       try {
         let cleanupStarted = false;

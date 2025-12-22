@@ -8,9 +8,7 @@ export function processHtmlEntry(config: ConfigComplete, projectPath: string) {
 
   const newEntries: EntryOptions[] = [];
 
-  const entriesToRemove: number[] = [];
-
-  config.entry.forEach((entry, index) => {
+  config.entry = config.entry.filter((entry) => {
     if (entry.import.endsWith(".html")) {
       const htmlPath = path.resolve(projectPath, entry.import);
       if (fs.existsSync(htmlPath)) {
@@ -39,15 +37,11 @@ export function processHtmlEntry(config: ConfigComplete, projectPath: string) {
           }
         });
 
-        entriesToRemove.push(index);
+        return false;
       }
     }
+    return true;
   });
-
-  // Remove processed HTML entries (in reverse order to maintain indices)
-  for (let i = entriesToRemove.length - 1; i >= 0; i--) {
-    config.entry.splice(entriesToRemove[i], 1);
-  }
 
   // Add new script entries
   config.entry.push(...newEntries);

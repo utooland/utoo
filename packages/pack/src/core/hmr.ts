@@ -1,4 +1,4 @@
-import fs, { existsSync } from "fs";
+import fs from "fs";
 import { IncomingMessage } from "http";
 import { nanoid } from "nanoid";
 import type { Socket } from "net";
@@ -301,7 +301,7 @@ export async function createHotReloader(
 
         if (assets.js.length === 0 && assets.css.length === 0) {
           const statsPath = join(outputDir, "stats.json");
-          if (existsSync(statsPath)) {
+          if (fs.existsSync(statsPath)) {
             try {
               const stats = JSON.parse(fs.readFileSync(statsPath, "utf-8"));
               if (stats.assets) {
