@@ -41,7 +41,7 @@
   "scripts": {
     "build": "rm -rf dist && tsc -b",
     "clean": "rm -rf dist",
-    "prepublishOnly": "turbo run build --filter=@utoo/pack-cli"
+    "prepublishOnly": "npm run build"
   },
   "types": "dist/index.d.ts"
 }
