@@ -77,7 +77,7 @@ async function startDev() {
 ### Usage via CLI
 
 ```bash
-utoo-pack build --webpack
+utoopack build --webpack
 ```
 
 ### Programmatic Usage
@@ -98,7 +98,7 @@ async function run() {
 
 ## ⚙️ Configuration
 
-The bundler can be configured via a `project_options.json` or through the programmatic API. Key configuration areas include:
+The bundler can be configured via a `utoopack.json` or through the programmatic API. Key configuration areas include:
 
 - **`entry`**: Define your application entry points.
 - **`define`**: Build-time variable replacement.

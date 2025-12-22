@@ -43,12 +43,9 @@ export function resolveBuildOptions(flags: {
     projectOptions = { webpackMode: true } as utooPack.WebpackConfig;
   } else {
     projectOptions = JSON.parse(
-      fs.readFileSync(
-        path.resolve(cwd, project || "", "project_options.json"),
-        {
-          encoding: "utf-8",
-        },
-      ),
+      fs.readFileSync(path.resolve(cwd, project || "", "utoopack.json"), {
+        encoding: "utf-8",
+      }),
     ) as utooPack.BundleOptions;
   }
 

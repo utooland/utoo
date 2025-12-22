@@ -5,9 +5,7 @@
     "bootstrap": "node ./bootstrap.js",
     "build": "utoopack build",
     "dev": "utoopack dev",
-    "build-by-native": "../../target/release/pack-cli build",
-    "dev-by-native": "../../target/release/pack-cli dev",
-    "serve": "serve ."
+    "start": "serve ."
   },
   "dependencies": {
     "antd": "^5.12.2",
@@ -18,6 +16,7 @@
     "three": "^0.153.0"
   },
   "devdependencies": {
-    "@utoo/pack-cli": "*"
+    "@utoo/pack-cli": "*",
+    "serve": "^14.2.4"
   }
 }

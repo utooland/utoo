@@ -1,0 +1,27 @@
+{
+  "$schema": "../../packages/pack/config_schema.json",
+  "rootPath": "../../",
+  "projectPath": "./",
+  "config": {
+    "entry": [
+      {
+        "import": "./src/index.ts",
+        "library": {
+          "name": "with-style-loader"
+        }
+      }
+    ],
+    "output": {
+      "path": "./dist"
+    },
+    "html": {
+      "title": "with-style-loader"
+    },
+    "styles": {
+      "inlineCss": {}
+    },
+    "optimization": {
+      "minify": false
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "rootPath": "../../",
+  "projectPath": "./",
+  "config": {
+    "entry": [
+      {
+        "import": "./index.html"
+      }
+    ],
+    "output": {
+      "path": "./dist",
+      "filename": "[name].[contenthash:8].js",
+      "chunkFilename": "[name].[contenthash:8].js",
+      "clean": true
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named",
+      "splitChunks": {
+        "js": {
+          "minChunkSize": 50000,
+          "maxChunkCountPerGroup": 40,
+          "maxMergeChunkSize": 200000
+        }
+      }
+    },
+    "stats": true
+  }
+}

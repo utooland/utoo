@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "ProjectOptions",
-  "description": "Top-level project options configuration This represents the root structure of project_options.json",
+  "description": "Top-level project options configuration This represents the root structure of utoopack.json",
   "type": "object",
   "required": [
     "config"

@@ -1,0 +1,24 @@
+{
+  "$schema": "../../packages/pack/config_schema.json",
+  "rootPath": "../../",
+  "projectPath": "./",
+  "config": {
+    "output": {
+      "clean": true
+    },
+    "entry": [
+      {
+        "import": "./index.html",
+        "name": "alias-demo"
+      }
+    ],
+    "resolve": {
+      "alias": {
+        "hello-a": "./src/a.ts"
+      }
+    },
+    "optimization": {
+      "minify": false
+    }
+  }
+}

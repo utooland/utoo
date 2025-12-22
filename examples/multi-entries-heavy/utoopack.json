@@ -1,0 +1,15 @@
+{
+  "rootPath": "../../",
+  "projectPath": "./",
+  "config": {
+    "entry": [
+      {
+        "import": "./index.html"
+      }
+    ],
+    "output": {
+      "path": "./dist"
+    },
+    "stats": true
+  }
+}

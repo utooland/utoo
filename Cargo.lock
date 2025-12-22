@@ -3432,7 +3432,7 @@ dependencies = [
 [[package]]
 name = "libmimalloc-sys"
 version = "0.1.44"
-source = "git+https://github.com/utooland/mimalloc_rust.git#c0c009be1b5198fc22a3c52e73dcadff22cda9e8"
+source = "git+https://github.com/utooland/mimalloc_rust.git#38d16b31247db16a269a61892b5688f959b58951"
 dependencies = [
  "cc",
  "cty",
@@ -3738,7 +3738,7 @@ dependencies = [
 [[package]]
 name = "mimalloc"
 version = "0.1.48"
-source = "git+https://github.com/utooland/mimalloc_rust.git#c0c009be1b5198fc22a3c52e73dcadff22cda9e8"
+source = "git+https://github.com/utooland/mimalloc_rust.git#38d16b31247db16a269a61892b5688f959b58951"
 dependencies = [
  "libmimalloc-sys",
 ]
@@ -8304,9 +8304,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-fs-ext"
-version = "0.6.6"
+version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "858e39d21bef4375dcc0dd6b26fab3db0696b87ff3ff7ad8d93d191a4328caf4"
+checksum = "ec3917b3417132eed9af87201686fb043b2f0806def11c2a4997836369c94a0b"
 dependencies = [
  "bitflags 2.9.4",
  "cfg-if",

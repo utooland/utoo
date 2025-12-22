@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "rootDir": "./src",
-    "outDir": "./esm",
+    "outDir": "./cjs",
     "target": "ES2018",
     "lib": ["dom", "dom.iterable", "esnext"],
     "esModuleInterop": true,
@@ -11,5 +11,6 @@
     "strict": true,
     "skipLibCheck": true,
     "noImplicitReturns": true
-  }
+  },
+  "include": ["src"]
 }

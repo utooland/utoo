@@ -107,7 +107,7 @@ fn main() {
                 None
             };
 
-            let project_options_path = PathBuf::from(&project_path).join("project_options.json");
+            let project_options_path = PathBuf::from(&project_path).join("utoopack.json");
             let mut project_options_file = File::open(&project_options_path)
                 .unwrap_or_else(|_| panic!("failed to load {}", project_options_path.display()));
 

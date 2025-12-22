@@ -1,6 +1,6 @@
 # Pack Schema
 
-一个用于 utoo-pack 配置文件的 JSON Schema 生成器，为 `project_options.json` 配置文件提供类型提示和验证支持。
+一个用于 utoopack 配置文件的 JSON Schema 生成器，为 `utoopack.json` 配置文件提供类型提示和验证支持。
 
 ## ✨ 功能特性
 
