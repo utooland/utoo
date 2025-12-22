@@ -185,11 +185,19 @@ jobs:
           # npm config set provenance true
           echo "${VERSION}" &&
           echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc &&
+
+          TAG="latest"
+          if [[ "$VERSION" == *"-"* ]]; then
+            PRERELEASE="${VERSION#*-}"
+            TAG="${PRERELEASE%%.*}"
+          fi
+          echo "Publishing with tag: $TAG"
+
           npm version --workspace=@utoo/pack "${VERSION}" &&
           npm version --workspace=@utoo/pack-cli "${VERSION}" &&
           npm install --workspace=@utoo/pack-cli @utoo/pack --save-exact &&
-          npm publish --workspace=@utoo/pack --access public &&
-          npm publish --workspace=@utoo/pack-cli --access public
+          npm publish --workspace=@utoo/pack --access public --tag "${TAG}" &&
+          npm publish --workspace=@utoo/pack-cli --access public --tag "${TAG}"
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

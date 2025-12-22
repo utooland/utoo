@@ -55,8 +55,15 @@ jobs:
           echo "${VERSION}" &&
           echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc &&
 
+          TAG="latest"
+          if [[ "$VERSION" == *"-"* ]]; then
+            PRERELEASE="${VERSION#*-}"
+            TAG="${PRERELEASE%%.*}"
+          fi
+          echo "Publishing with tag: $TAG"
+
           npm version --workspace=@utoo/web "${VERSION}" &&
-          npm publish --workspace=@utoo/web --access public
+          npm publish --workspace=@utoo/web --access public --tag "${TAG}"
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
