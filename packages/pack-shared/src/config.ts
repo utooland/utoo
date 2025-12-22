@@ -2,6 +2,12 @@ export interface EntryOptions {
   name?: string;
   import: string;
   library?: LibraryOptions;
+  /**
+   * Configuration for generating an HTML file for this entry point.
+   * When specified, an HTML file will be generated with the entry's assets injected.
+   *
+   * Similar to https://github.com/jantimon/html-webpack-plugin#options
+   */
   html?: HtmlConfig;
 }
 
