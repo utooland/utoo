@@ -780,7 +780,7 @@ const chunksToRegister = __TURBOPACK__;
 __TURBOPACK__ = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
 function factory () {
-    const runtimeModuleIds = ["25"];
+    const runtimeModuleIds = ["11"];
     if (runtimeModuleIds.length > 0) {
         const module = moduleCache[runtimeModuleIds[0]];
         if (module.error) throw module.error;
@@ -801,12 +801,12 @@ if (typeof exports === 'object' && typeof module === 'object') {
 }
 })([["main.js", {
 
-25: ((__turbopack_context__, module, exports) => {
+11: ((__turbopack_context__, module, exports) => {
 
 console.log('Hello, world!');
 }),
 },
-{"otherChunks":[],"runtimeModuleIds":[25]},
+{"otherChunks":[],"runtimeModuleIds":[11]},
 ]]);
 
 

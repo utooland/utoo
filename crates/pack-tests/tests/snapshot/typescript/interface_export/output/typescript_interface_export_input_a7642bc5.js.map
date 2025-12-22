@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":[],"names":[],"mappings":""}},
+    {"offset": {"line": 10, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/typescript/interface_export/input/index.ts"],"sourcesContent":["import { Args, Target } from './item-interface';\n\nexport { Args, Target };"],"names":[],"mappings":"AAAA"}}]
+}

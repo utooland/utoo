@@ -1,0 +1,41 @@
+(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([typeof document === "object" ? document.currentScript : undefined,
+19, ((__turbopack_context__) => {
+
+__turbopack_context__.v("https://cdn.example.com/assets/asset.c77b3abb.jpg");}),
+4, ((__turbopack_context__) => {
+"use strict";
+
+var __TURBOPACK__imported__module__19__ = __turbopack_context__.i(19);
+;
+console.log('Main entry loaded with publicPath');
+async function loadLazyModule() {
+    const module = await __turbopack_context__.A(78);
+    return module.default();
+}
+function getImageUrl() {
+    return __TURBOPACK__imported__module__19__["default"];
+}
+__turbopack_context__.A(78).then((module)=>{
+    console.log(module.default());
+});
+console.log('Ready to load chunks from CDN');
+__turbopack_context__.s([
+    "getImageUrl",
+    ()=>getImageUrl,
+    "loadLazyModule",
+    ()=>loadLazyModule
+]);
+}),
+78, ((__turbopack_context__) => {
+
+__turbopack_context__.v((parentImport) => {
+    return Promise.all([
+  "public_path_basic_input_lazy_438c58b8.js"
+].map((chunk) => __turbopack_context__.l(chunk))).then(() => {
+        return parentImport(73);
+    });
+});
+}),
+]);
+
+//# sourceMappingURL=public_path_basic_input_cd277825.js.map

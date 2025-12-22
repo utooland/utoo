@@ -1,0 +1,11 @@
+error - [analysis] /webpack-loaders/custom-loader/input/test.txt.js:1:7  Parsing ecmascript source code failed
+         +        v--v
+       1 + loader test
+         +        ^--^
+  
+  Expected ';', '}' or <eof>
+  
+  Import trace:
+    Browser:
+      ./webpack-loaders/custom-loader/input/test.txt.js
+      ./webpack-loaders/custom-loader/input/index.tsx

@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 3, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/define/complex/input/index.ts"],"sourcesContent":["console.log(RoutePathEnum);\nconsole.log(RoutePathEnum.TEST20);"],"names":[],"mappings":"AAAA,QAAQ,GAAG;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;AACX,QAAQ,GAAG,CAAC;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;GAAc,MAAM"}}]
-}
