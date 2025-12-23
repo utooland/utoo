@@ -42,7 +42,7 @@ async function serveInternal(
     await xcodeProfilingReady();
   }
 
-  const cfgDevServer: any = options.config?.devServer || {};
+  const cfgDevServer = options.config?.devServer || {};
 
   const serverOpts: StartServerOptions = {
     hostname: serverOptions?.hostname || cfgDevServer.host || "localhost",
