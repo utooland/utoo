@@ -93,10 +93,6 @@ const config = {
   },
   plugins: [
     new NodeProtocolUrlPlugin(),
-    new webpack.NormalModuleReplacementPlugin(
-      /tailwindcss\/lib\/lib\/load-config\.js/,
-      path.resolve(__dirname, './mocks/load-config.js')
-    ),
     new webpack.ProvidePlugin({
       process: stdLibBrowser.process,
       Buffer: stdLibBrowser.buffer,
