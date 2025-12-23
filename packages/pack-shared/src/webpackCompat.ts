@@ -508,9 +508,9 @@ function compatStats(
   return !!webpackStats;
 }
 
-function compatDevServer(devServer: any) {
+function compatDevServer(devServer: any): ConfigComplete["devServer"] {
   if (!devServer) return undefined;
-  const result: any = {};
+  const result: NonNullable<ConfigComplete["devServer"]> = {};
   if (typeof devServer.hot !== "undefined") result.hot = !!devServer.hot;
   if (typeof devServer.port !== "undefined") {
     const p = Number(devServer.port);
