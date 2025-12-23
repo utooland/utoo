@@ -42,23 +42,40 @@ async function serveInternal(
     await xcodeProfilingReady();
   }
 
+  const cfgDevServer = options.config?.devServer || {};
+
+  const serverOpts: StartServerOptions = {
+    hostname: serverOptions?.hostname || cfgDevServer.host || "localhost",
+    port:
+      typeof serverOptions?.port !== "undefined"
+        ? serverOptions!.port
+        : cfgDevServer.port || 3000,
+    https:
+      typeof serverOptions?.https !== "undefined"
+        ? serverOptions!.https
+        : cfgDevServer.https,
+    logServerInfo: serverOptions?.logServerInfo,
+    selfSignedCertificate: serverOptions?.selfSignedCertificate,
+  } as StartServerOptions;
+
+  // If HTTPS is requested and no certificate provided, attempt to generate one.
+  if (serverOpts.https && !serverOpts.selfSignedCertificate) {
+    try {
+      // createSelfSignedCertificate may return undefined on failure
+      const cert = await createSelfSignedCertificate(serverOpts.hostname);
+      if (cert) serverOpts.selfSignedCertificate = cert;
+    } catch (e) {
+      // ignore and fall back to http if certificate generation fails
+    }
+  }
+
   await startServer(
-    {
-      hostname: serverOptions?.hostname || "localhost",
-      port: serverOptions?.port || 3000,
-      https: serverOptions?.https,
-      logServerInfo: serverOptions?.logServerInfo,
-      selfSignedCertificate: serverOptions?.https
-        ? await createSelfSignedCertificate(
-            serverOptions?.hostname || "localhost",
-          )
-        : undefined,
-    },
+    serverOpts,
     {
       ...options,
       config: {
         ...options.config,
-        devServer: { hot: true },
+        devServer: { ...(options.config.devServer || {}), hot: true },
       },
       packPath: getPackPath(),
     },
