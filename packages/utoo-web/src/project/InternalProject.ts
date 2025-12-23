@@ -78,7 +78,8 @@ class InternalEndpoint implements ProjectEndpoint {
       ret = await ProjectInternal.readToString(path);
     } else {
       ret = await ProjectInternal.read(path);
-      return comlink.transfer(ret, [ret.buffer]);
+      const copied = ret.slice(0);
+      return comlink.transfer(copied, [copied.buffer]);
     }
     return ret as any;
   }
@@ -162,7 +163,8 @@ class InternalEndpoint implements ProjectEndpoint {
   async gzip(files: PackFile[]) {
     await this.wasmInit!;
     const ret = await ProjectInternal.gzip(files);
-    return comlink.transfer(ret, [ret.buffer]);
+    const copied = ret.slice(0);
+    return comlink.transfer(copied, [copied.buffer]);
   }
 
   async sigMd5(content: Uint8Array) {
