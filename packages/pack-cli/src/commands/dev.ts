@@ -15,6 +15,9 @@ export default class Dev extends Command {
     const { flags } = await this.parse(Dev);
     const { projectOptions, projectPath, rootPath } =
       resolveBuildOptions(flags);
-    await utooPack.serve(projectOptions, projectPath, rootPath);
+    await utooPack.serve(projectOptions, projectPath, rootPath, {
+      logServerInfo: true,
+      port: 3000,
+    });
   }
 }
