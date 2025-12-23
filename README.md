@@ -28,7 +28,7 @@ Utoo is a modern, high-performance frontend toolchain designed to provide a unif
 
 - **[`utoo`](crates/pm)** (alias **`ut`**): High-performance Rust package manager (Fast, Parallel, `npm` compatible).
 - **[`@utoo/pack`](packages/pack)**: Next-gen bundler powered by **Turbopack** (HMR, TS/JSX, Less/Sass, and more).
- - **[`@utoo/pack-cli`](packages/pack-cli)**: Command-line interface for the bundler (dev server, build, inspect). A lightweight wrapper to run `up` commands.
+- **[`@utoo/pack-cli`](packages/pack-cli)**: Command-line interface for the bundler (dev server, build, inspect). A lightweight wrapper to run `up` commands.
 - **[`@utoo/web`](packages/utoo-web)**: Web-compatible version of the toolchain (WASM, Browser-based bundling).
 
 ## 🚀 Quick Start
