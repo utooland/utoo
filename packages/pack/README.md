@@ -77,7 +77,7 @@ async function startDev() {
 ### Usage via CLI
 
 ```bash
-utoopack build --webpack
+up build --webpack
 ```
 
 ### Programmatic Usage
