@@ -58,7 +58,7 @@ impl Project {
     /// Calculate MD5 hash of byte content (async for better thread scheduling)
     #[wasm_bindgen(js_name = sigMd5)]
     pub async fn sig_md5(content: Vec<u8>) -> Result<String, JsError> {
-        let rt = TOKIO_RUNTIME.get().expect("tokio runtime not found");
+        let rt = TOKIO_RUNTIME.get().ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
 
         let result = rt
             .spawn(tokio::task::spawn_blocking(move || {
