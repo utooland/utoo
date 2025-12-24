@@ -61,10 +61,10 @@ impl Project {
         let rt = TOKIO_RUNTIME.get().ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
 
         let result = rt
-            .spawn(tokio::task::spawn_blocking(move || {
+            .spawn_blocking(move || {
                 opfs_project::pack::sig_md5(&content)
-            }))
-            .await?
+            })
+            .await
             .map_err(to_js_error)?;
         Ok(result)
     }
