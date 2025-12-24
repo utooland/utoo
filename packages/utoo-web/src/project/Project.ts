@@ -126,11 +126,7 @@ export class Project implements ProjectEndpoint {
   ) {
     await this.#mount;
     if (content instanceof Uint8Array) {
-      return await this.remote.writeFile(
-        path,
-        comlink.transfer(content, [content.buffer]),
-        encoding,
-      );
+      return await this.remote.writeFile(path, content, encoding);
     }
     return await this.remote.writeFile(path, content, encoding);
   }
@@ -175,15 +171,12 @@ export class Project implements ProjectEndpoint {
 
   public async gzip(files: PackFile[]): Promise<Uint8Array> {
     await this.#mount;
-    const buffers = files.map((f) => f.content.buffer);
-    return await this.remote.gzip(comlink.transfer(files, buffers));
+    return await this.remote.gzip(files);
   }
 
   public async sigMd5(content: Uint8Array): Promise<string> {
     await this.#mount;
-    return await this.remote.sigMd5(
-      comlink.transfer(content, [content.buffer]),
-    );
+    return await this.remote.sigMd5(content);
   }
 
   public static fork(
