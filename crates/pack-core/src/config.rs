@@ -98,19 +98,8 @@ pub struct LibraryOptions {
 #[turbo_tasks::value(transparent)]
 pub struct Entries(Vec<EntryOptions>);
 
-#[derive(
-    Clone,
-    Debug,
-    Eq,
-    Default,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    TraceRawVcs,
-    ValueDebugFormat,
-    NonLocalValue,
-    OperationValue,
-)]
+#[turbo_tasks::value(eq = "manual")]
+#[derive(Clone, Debug, PartialEq, Default, OperationValue)]
 #[serde(rename_all = "camelCase")]
 pub struct DevServer {
     pub hot: Option<bool>,
@@ -1025,13 +1014,8 @@ impl Config {
     }
 
     #[turbo_tasks::function]
-    pub fn is_hmr_enabled(&self) -> Vc<bool> {
-        Vc::cell(
-            self.dev_server
-                .as_ref()
-                .and_then(|ds| ds.hot)
-                .unwrap_or_default(),
-        )
+    pub fn dev_server(&self) -> Vc<DevServer> {
+        self.dev_server.clone().unwrap_or_default().cell()
     }
 
     #[turbo_tasks::function]

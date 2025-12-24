@@ -196,7 +196,8 @@ pub async fn get_client_runtime_entries(
     config: Vc<Config>,
     execution_context: Vc<ExecutionContext>,
     pack_path: FileSystemPath,
-    hmr: Vc<bool>,
+    watch: Vc<bool>,
+    hot: Vc<bool>,
 ) -> Result<Vc<RuntimeEntries>> {
     let mut runtime_entries = vec![];
     let resolve_options_context = get_client_resolve_options_context(
@@ -207,9 +208,11 @@ pub async fn get_client_runtime_entries(
         pack_path,
     );
 
-    let hmr = *hmr.await?;
+    let is_development = mode.await?.is_development();
+    let watch = *watch.await?;
+    let hot = *hot.await?;
 
-    if hmr && mode.await?.is_development() {
+    if is_development && watch {
         let enable_react_refresh =
             assert_can_resolve_react_refresh(project_root.clone(), resolve_options_context)
                 .await?
@@ -224,7 +227,9 @@ pub async fn get_client_runtime_entries(
                     .resolved_cell(),
             )
         };
+    }
 
+    if is_development && watch && hot {
         runtime_entries.push(
             RuntimeEntry::Source(ResolvedVc::upcast(
                 FileSource::new(embed_file_path(rcstr!("hmr/bootstrap.ts")).owned().await?)

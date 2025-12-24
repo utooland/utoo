@@ -252,15 +252,23 @@ impl AppEndpoint {
 
     #[turbo_tasks::function]
     pub async fn app_runtime_entries(self: Vc<Self>) -> Result<Vc<EvaluatableAssets>> {
+        let watch = self.project().await?.watch.enable;
         Ok(get_client_runtime_entries(
             self.project().project_path().owned().await?,
             self.project().mode(),
             self.project().config(),
             self.project().execution_context(),
             self.project().pack_path().owned().await?,
+            Vc::cell(watch),
             Vc::cell(
-                self.project().await?.watch.enable
-                    && *self.project().config().is_hmr_enabled().await?,
+                watch
+                    && self
+                        .project()
+                        .config()
+                        .dev_server()
+                        .await?
+                        .hot
+                        .unwrap_or_default(),
             ),
         )
         .resolve_entries(Vc::upcast(self.app_module_context())))
