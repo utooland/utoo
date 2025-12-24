@@ -212,7 +212,7 @@ impl Project {
                 ..Default::default()
             };
 
-            let rt = TOKIO_RUNTIME.get().expect("tokio runtime not found");
+            let rt = TOKIO_RUNTIME.get().ok_or_else(|| anyhow::anyhow!("tokio runtime not initialized"))?;
             let pack_context = rt
                 .spawn(PackProject::initialize(options))
                 .await
