@@ -6,7 +6,6 @@ import path from "path";
 import send from "send";
 import { Duplex, Writable } from "stream";
 import url from "url";
-import { ConfigComplete } from "../config/types";
 import { resolveBundleOptions, WebpackConfig } from "../config/webpackCompat";
 import { createHotReloader } from "../core/hmr";
 import { BundleOptions } from "../core/types";
@@ -43,9 +42,8 @@ async function serveInternal(
     await xcodeProfilingReady();
   }
 
-  const cfgDevServer =
-    options.config?.devServer ||
-    ({} as NonNullable<ConfigComplete["devServer"]>);
+  // FIXME: fix any type
+  const cfgDevServer = (options.config?.devServer || {}) as any;
 
   const serverOpts: StartServerOptions = {
     hostname: serverOptions?.hostname || cfgDevServer.host || "localhost",
