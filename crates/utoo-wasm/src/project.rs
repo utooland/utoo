@@ -11,13 +11,10 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
 
 use crate::errors::to_js_error;
-use crate::tokio_runtime::init_tokio_runtime;
+use crate::tokio_runtime::{init_tokio_runtime, TOKIO_RUNTIME};
 
 #[cfg(feature = "utoopack")]
-use super::{
-    pack::{PackProject, PartialProjectOptions, TurbopackResult},
-    tokio_runtime::TOKIO_RUNTIME,
-};
+use super::pack::{PackProject, PartialProjectOptions, TurbopackResult};
 
 use parking_lot::RwLock;
 use std::sync::Once;
@@ -58,8 +55,17 @@ impl Project {
     /// Calculate MD5 hash of byte content (async for better thread scheduling)
     #[wasm_bindgen(js_name = sigMd5)]
     pub async fn sig_md5(content: Vec<u8>) -> Result<String, JsError> {
-        let result = tokio::task::spawn_blocking(move || opfs_project::pack::sig_md5(&content))
+        let result = TOKIO_RUNTIME
+            .with(|rt| {
+                rt.get()
+                    .expect("tokio runtime not initialized, call Project.init() first")
+                    .spawn(async move {
+                        tokio::task::spawn_blocking(move || opfs_project::pack::sig_md5(&content))
+                            .await
+                    })
+            })
             .await
+            .map_err(|e| JsError::new(&format!("Task failed: {}", e)))?
             .map_err(|e| JsError::new(&format!("Task failed: {}", e)))?;
         Ok(result)
     }
@@ -85,10 +91,20 @@ impl Project {
             .map(|f| PackFile::new(f.path, f.content))
             .collect();
 
-        let bytes = tokio::task::spawn_blocking(move || opfs_project::pack::gzip(&pack_files))
+        let bytes = TOKIO_RUNTIME
+            .with(|rt| {
+                rt.get()
+                    .expect("tokio runtime not initialized, call Project.init() first")
+                    .spawn(async move {
+                        tokio::task::spawn_blocking(move || opfs_project::pack::gzip(&pack_files))
+                            .await
+                    })
+            })
             .await
             .map_err(|e| JsError::new(&format!("Task failed: {}", e)))?
+            .map_err(|e| JsError::new(&format!("Task failed: {}", e)))?
             .map_err(to_js_error)?;
+
         Ok(js_sys::Uint8Array::from(&bytes[..]))
     }
 

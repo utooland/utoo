@@ -175,8 +175,13 @@ export class Project implements ProjectEndpoint {
 
   public async gzip(files: PackFile[]): Promise<Uint8Array> {
     await this.#mount;
-    const buffers = files.map((f) => f.content.buffer);
-    return await this.remote.gzip(comlink.transfer(files, buffers));
+    // Clone the files to avoid detaching the original buffers
+    const clonedFiles = files.map((f) => ({
+      path: f.path,
+      content: new Uint8Array(f.content),
+    }));
+    const buffers = clonedFiles.map((f) => f.content.buffer);
+    return await this.remote.gzip(comlink.transfer(clonedFiles, buffers));
   }
 
   public async sigMd5(content: Uint8Array): Promise<string> {
