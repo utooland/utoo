@@ -76,7 +76,10 @@ async function serveInternal(
       ...options,
       config: {
         ...options.config,
-        devServer: { ...(options.config.devServer || {}), hot: true },
+        devServer: {
+          ...(options.config.devServer || {}),
+          hot: true,
+        },
       },
       packPath: getPackPath(),
     },

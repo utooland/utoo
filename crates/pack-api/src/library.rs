@@ -170,6 +170,7 @@ impl LibraryEndpoint {
             self.project().pack_path().owned().await?,
             // Library project not support watch mode
             Vc::cell(false),
+            Vc::cell(false),
         )
         .resolve_entries(Vc::upcast(self.library_module_context())))
     }
