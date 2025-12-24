@@ -10,6 +10,7 @@ import { useFileContent } from "./hooks/useFileContent";
 import { useFileTree } from "./hooks/useFileTree";
 import { useGzip } from "./hooks/useGzip";
 import { useInstall } from "./hooks/useInstall";
+import { useUpload } from "./hooks/useUpload";
 import { useUtooProject } from "./hooks/useUtooProject";
 import {
   deleteProjectFiles,
@@ -87,8 +88,14 @@ const Project = () => {
     gzipSuccess,
   } = useGzip(project);
 
+  const {
+    isUploading,
+    handleUpload,
+    error: uploadError,
+  } = useUpload(project, refreshFileTree);
+
   const error =
-    projectError || fileContentError || installError || buildError || gzipError;
+    projectError || fileContentError || installError || buildError || gzipError || uploadError;
 
   const memoizedFileTree = useMemo(() => fileTree, [fileTree]);
 
@@ -141,6 +148,11 @@ const Project = () => {
   );
 
   const moreMenuItems: MenuItem[] = [
+    {
+      label: isUploading ? "Uploading..." : "Upload Demo",
+      onClick: handleUpload,
+      disabled: isUploading || !project || isBuilding,
+    },
     {
       label: isGzipping
         ? "Downloading..."
