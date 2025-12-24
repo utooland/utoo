@@ -90,7 +90,7 @@ impl Project {
             .map(|f| PackFile::new(f.path, f.content))
             .collect();
 
-        let rt = TOKIO_RUNTIME.get().expect("tokio runtime not found");
+        let rt = TOKIO_RUNTIME.get().ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
 
         let bytes = rt
             .spawn(tokio::task::spawn_blocking(move || {
