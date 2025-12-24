@@ -322,6 +322,8 @@ pub async fn get_client_module_options_context(
     client_rules.push(get_auto_css_modules_rule());
 
     if enable_react_refresh {
+        // This transformer just to solve the react-refresh not work for no named jsx function component.
+        // Refer to: https://github.com/utooland/utoo/issues/2439
         client_rules.push(get_default_export_namer_rule());
     }
 
