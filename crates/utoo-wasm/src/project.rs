@@ -152,7 +152,7 @@ impl Project {
             None => return Err(JsError::new("invalid pack project")),
         };
 
-        let rt = TOKIO_RUNTIME.get().expect("tokio runtime not found");
+        let rt = TOKIO_RUNTIME.get().ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
 
         rt.spawn(async move { pack_project.build().await })
             .await
