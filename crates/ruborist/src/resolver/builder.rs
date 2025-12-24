@@ -234,8 +234,9 @@ pub fn update_node_type_from_edge(
             to_node.is_dev = false;
             to_node.is_optional = false;
             to_node.is_peer = false;
-        } else if source_flags.is_optional && !to_node.is_prod && !to_node.is_dev {
+        } else if source_flags.is_optional && !to_node.is_prod {
             // Optional source propagates optional status
+            // Note: don't check !is_dev here - devOptional packages should propagate both flags
             to_node.is_optional = true;
         } else if source_flags.is_peer && !to_node.is_prod && !to_node.is_dev {
             to_node.is_peer = true;
@@ -905,5 +906,25 @@ mod tests {
         assert!(!target.is_prod, "should not be prod");
         assert!(target.is_dev, "should be dev");
         assert!(!target.is_optional, "should not be optional");
+    }
+
+    #[test]
+    fn test_update_node_type_dev_optional_source_propagates_both() {
+        // dev+optional source (devOptional) with prod edge -> target is dev + optional
+        let (mut graph, source_index, target_index) = create_source_target_graph();
+
+        // Source is both dev and optional (devOptional package)
+        graph.get_node_mut(source_index).unwrap().is_dev = true;
+        graph.get_node_mut(source_index).unwrap().is_optional = true;
+
+        update_node_type_from_edge(&mut graph, source_index, target_index, &EdgeType::Prod);
+
+        let target = graph.get_node(target_index).unwrap();
+        assert!(!target.is_prod, "should not be prod");
+        assert!(target.is_dev, "should be dev (inherited from devOptional source)");
+        assert!(
+            target.is_optional,
+            "should be optional (inherited from devOptional source)"
+        );
     }
 }
