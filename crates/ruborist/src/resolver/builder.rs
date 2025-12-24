@@ -218,24 +218,26 @@ pub fn update_node_type_from_edge(
         }
     } else {
         // Propagate types from non-root nodes
-        if source_flags.is_prod && *edge_type == EdgeType::Prod {
+        // 1. Source's dev status propagates to target
+        // 2. If edge is Optional, target gets optional flag (unless already prod)
+        if source_flags.is_dev && !to_node.is_prod {
+            to_node.is_dev = true;
+        }
+
+        // Handle edge type
+        if *edge_type == EdgeType::Optional && !to_node.is_prod {
+            // Optional edge -> target is optional
+            to_node.is_optional = true;
+        } else if source_flags.is_prod && *edge_type != EdgeType::Optional {
+            // Prod source with non-optional edge -> target becomes prod
             to_node.is_prod = true;
             to_node.is_dev = false;
             to_node.is_optional = false;
             to_node.is_peer = false;
-        } else if source_flags.is_dev && *edge_type == EdgeType::Dev && !to_node.is_prod {
-            to_node.is_dev = true;
-        } else if source_flags.is_optional
-            && *edge_type == EdgeType::Optional
-            && !to_node.is_prod
-            && !to_node.is_dev
-        {
+        } else if source_flags.is_optional && !to_node.is_prod && !to_node.is_dev {
+            // Optional source propagates optional status
             to_node.is_optional = true;
-        } else if source_flags.is_peer
-            && *edge_type == EdgeType::Peer
-            && !to_node.is_prod
-            && !to_node.is_dev
-        {
+        } else if source_flags.is_peer && !to_node.is_prod && !to_node.is_dev {
             to_node.is_peer = true;
         }
     }
@@ -812,5 +814,96 @@ mod tests {
         // Check lodash is in packages
         let lodash = lock.packages.get("node_modules/lodash").unwrap();
         assert_eq!(lodash.version, Some("4.17.21".to_string()));
+    }
+
+    // Helper to create a graph with source -> target for testing update_node_type_from_edge
+    // Returns (graph, source_index, target_index) where source is NOT root
+    fn create_source_target_graph() -> (DependencyGraph, NodeIndex, NodeIndex) {
+        let root_pkg = PackageJson {
+            name: "root".to_string(),
+            version: "1.0.0".to_string(),
+            ..Default::default()
+        };
+        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg);
+
+        // Add source node (non-root)
+        let source = PackageNode::from_version_manifest(
+            "source".to_string(),
+            PathBuf::from("node_modules/source"),
+            create_version_manifest("source", "1.0.0"),
+        );
+        let source_index = graph.add_node(source);
+
+        // Add target node
+        let target = PackageNode::from_version_manifest(
+            "target".to_string(),
+            PathBuf::from("node_modules/target"),
+            create_version_manifest("target", "1.0.0"),
+        );
+        let target_index = graph.add_node(target);
+
+        (graph, source_index, target_index)
+    }
+
+    #[test]
+    fn test_update_node_type_prod_optional_edge() {
+        // prod source with optional edge -> target is optional only
+        let (mut graph, source_index, target_index) = create_source_target_graph();
+
+        // Mark source as prod
+        graph.get_node_mut(source_index).unwrap().is_prod = true;
+
+        update_node_type_from_edge(&mut graph, source_index, target_index, &EdgeType::Optional);
+
+        let target = graph.get_node(target_index).unwrap();
+        assert!(!target.is_prod, "should not be prod");
+        assert!(!target.is_dev, "should not be dev");
+        assert!(target.is_optional, "should be optional");
+    }
+
+    #[test]
+    fn test_update_node_type_dev_optional_edge() {
+        // dev source with optional edge -> target is dev + optional
+        let (mut graph, source_index, target_index) = create_source_target_graph();
+
+        // Mark source as dev
+        graph.get_node_mut(source_index).unwrap().is_dev = true;
+
+        update_node_type_from_edge(&mut graph, source_index, target_index, &EdgeType::Optional);
+
+        let target = graph.get_node(target_index).unwrap();
+        assert!(!target.is_prod, "should not be prod");
+        assert!(target.is_dev, "should be dev");
+        assert!(target.is_optional, "should be optional");
+    }
+
+    #[test]
+    fn test_update_node_type_prod_prod_edge() {
+        // prod source with prod edge -> target is prod
+        let (mut graph, source_index, target_index) = create_source_target_graph();
+
+        graph.get_node_mut(source_index).unwrap().is_prod = true;
+
+        update_node_type_from_edge(&mut graph, source_index, target_index, &EdgeType::Prod);
+
+        let target = graph.get_node(target_index).unwrap();
+        assert!(target.is_prod, "should be prod");
+        assert!(!target.is_dev, "should not be dev");
+        assert!(!target.is_optional, "should not be optional");
+    }
+
+    #[test]
+    fn test_update_node_type_dev_prod_edge() {
+        // dev source with prod edge -> target is dev only
+        let (mut graph, source_index, target_index) = create_source_target_graph();
+
+        graph.get_node_mut(source_index).unwrap().is_dev = true;
+
+        update_node_type_from_edge(&mut graph, source_index, target_index, &EdgeType::Prod);
+
+        let target = graph.get_node(target_index).unwrap();
+        assert!(!target.is_prod, "should not be prod");
+        assert!(target.is_dev, "should be dev");
+        assert!(!target.is_optional, "should not be optional");
     }
 }
