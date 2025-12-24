@@ -921,7 +921,10 @@ mod tests {
 
         let target = graph.get_node(target_index).unwrap();
         assert!(!target.is_prod, "should not be prod");
-        assert!(target.is_dev, "should be dev (inherited from devOptional source)");
+        assert!(
+            target.is_dev,
+            "should be dev (inherited from devOptional source)"
+        );
         assert!(
             target.is_optional,
             "should be optional (inherited from devOptional source)"
