@@ -22,6 +22,6 @@ pub fn init_tokio_runtime(worker_url: String) {
             })
             .wasm_bindgen_shim_url(worker_url.clone())
             .build()
-            .unwrap()
+            .expect("Failed to build tokio runtime")
     });
 }
