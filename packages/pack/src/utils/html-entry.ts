@@ -22,6 +22,11 @@ export function processHtmlEntry(config: ConfigComplete, projectPath: string) {
           const src = script.getAttribute("src");
           if (src && !src.startsWith("http") && !src.startsWith("//")) {
             const scriptPath = path.join(path.dirname(entry.import), src);
+            // Remove the origin script tag from the DOM
+            if (script.parentNode) {
+              script.parentNode.removeChild(script);
+            }
+
             newEntries.push({
               import: scriptPath,
               html: {
@@ -30,10 +35,6 @@ export function processHtmlEntry(config: ConfigComplete, projectPath: string) {
                 filename: path.basename(entry.import),
               },
             });
-            // Remove the script tag from the DOM
-            if (script.parentNode) {
-              script.parentNode.removeChild(script);
-            }
           }
         });
 
