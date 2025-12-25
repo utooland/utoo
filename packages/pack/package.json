@@ -43,17 +43,18 @@
     "@utoo/style-loader": "^1.0.0",
     "domparser-rs": "^0.0.5",
     "find-up": "4.1.0",
-    "less": "^4.0.0",
-    "less-loader": "^12.0.0",
-    "loader-runner": "^4.3.0",
     "nanoid": "^3.3.11",
     "picocolors": "^1.1.1",
-    "postcss": "8.4.31",
     "resolve-url-loader": "^5.0.0",
-    "sass": "1.54.0",
-    "sass-loader": "^13.2.0",
     "send": "0.17.1",
     "ws": "^8.18.1"
+  },
+  "peerDependencies": {
+    "less": "^4.0.0",
+    "less-loader": "^12.0.0",
+    "postcss": "8.4.31",
+    "sass": "1.54.0",
+    "sass-loader": "^13.2.0"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0",
@@ -66,9 +67,7 @@
     "styled-jsx": "^5.1.6",
     "typescript": "^5.8.3"
   },
-  "peerDependencies": {
-    "@types/webpack": "^5.28.5"
-  },
+
   "engines": {
     "node": ">= 20"
   },

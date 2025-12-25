@@ -4,7 +4,6 @@ import { nanoid } from "nanoid";
 import type { Socket } from "net";
 import { join } from "path";
 import { Duplex } from "stream";
-import type webpack from "webpack";
 import ws from "ws";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import {
@@ -83,9 +82,19 @@ export type HMR_ACTION_TYPES =
   | BuiltAction
   | ReloadAction;
 
+export interface WebpackStats {
+  hash?: string;
+  startTime?: number;
+  endTime?: number;
+  hasErrors(): boolean;
+  hasWarnings(): boolean;
+  toJson(options?: any): any;
+  toString(options?: any): string;
+}
+
 export interface HotReloaderInterface {
   turbopackProject?: Project;
-  serverStats: webpack.Stats | null;
+  serverStats: WebpackStats | null;
   setHmrServerError(error: Error | null): void;
   clearHmrServerError(): void;
   start(): Promise<void>;
