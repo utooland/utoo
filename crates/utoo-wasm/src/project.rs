@@ -73,32 +73,36 @@ impl Project {
     /// This is useful for main thread execution without OPFS access
     #[wasm_bindgen(js_name = gzip)]
     pub async fn gzip(files: JsValue) -> Result<js_sys::Uint8Array, JsError> {
+        use anyhow::anyhow;
         use opfs_project::pack::PackFile;
 
         let files_array: js_sys::Array = files
             .dyn_into()
-            .map_err(|_| JsError::new("files must be an array"))?;
+            .map_err(|e| to_js_error(anyhow!("files must be an array: {:?}", e)))?;
 
         let mut pack_files: Vec<PackFile> = Vec::with_capacity(files_array.length() as usize);
 
         for i in 0..files_array.length() {
             let item = files_array.get(i);
             let path = js_sys::Reflect::get(&item, &"path".into())
-                .map_err(|_| JsError::new("missing path"))?
+                .map_err(|e| to_js_error(anyhow!("missing path at index {}: {:?}", i, e)))?
                 .as_string()
-                .ok_or_else(|| JsError::new("path must be a string"))?;
+                .ok_or_else(|| to_js_error(anyhow!("path must be a string at index {}", i)))?;
             let content_js = js_sys::Reflect::get(&item, &"content".into())
-                .map_err(|_| JsError::new("missing content"))?;
-            let content_arr: js_sys::Uint8Array = content_js
-                .dyn_into()
-                .map_err(|_| JsError::new("content must be Uint8Array"))?;
-            let content = content_arr.to_vec();
-            pack_files.push(PackFile::new(path, content));
+                .map_err(|e| to_js_error(anyhow!("missing content at index {}: {:?}", i, e)))?;
+            let content_arr: js_sys::Uint8Array = content_js.dyn_into().map_err(|e| {
+                to_js_error(anyhow!(
+                    "content must be Uint8Array at index {}: {:?}",
+                    i,
+                    e
+                ))
+            })?;
+            pack_files.push(PackFile::new(path, content_arr.to_vec()));
         }
 
         let rt = TOKIO_RUNTIME
             .get()
-            .ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
+            .ok_or_else(|| to_js_error(anyhow!("tokio runtime not initialized")))?;
 
         let bytes = rt
             .spawn_blocking(move || opfs_project::pack::gzip(&pack_files))
