@@ -33,3 +33,19 @@
         }
     }
 }
+
+.message {
+    color: red;
+
+    &:global(.left) {
+
+        .message-main,
+        .message-context {
+            font-size: 15px;
+        }
+    }
+
+    :global(.right) {
+        font-size: 16px;
+    }
+}
