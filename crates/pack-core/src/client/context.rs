@@ -53,6 +53,7 @@ use crate::{
         resolve::externals_plugin::ExternalsPlugin,
         transforms::{
             css_modules::get_auto_css_modules_rule,
+            default_export_namer::get_default_export_namer_rule,
             dynamic_import_to_require::get_dynamic_import_to_require_rule,
             emotion::get_emotion_transform_rule, remove_console::get_remove_console_transform_rule,
             styled_components::get_styled_components_transform_rule,
@@ -195,7 +196,8 @@ pub async fn get_client_runtime_entries(
     config: Vc<Config>,
     execution_context: Vc<ExecutionContext>,
     pack_path: FileSystemPath,
-    hmr: Vc<bool>,
+    watch: Vc<bool>,
+    hot: Vc<bool>,
 ) -> Result<Vc<RuntimeEntries>> {
     let mut runtime_entries = vec![];
     let resolve_options_context = get_client_resolve_options_context(
@@ -206,9 +208,11 @@ pub async fn get_client_runtime_entries(
         pack_path,
     );
 
-    let hmr = *hmr.await?;
+    let is_development = mode.await?.is_development();
+    let watch = *watch.await?;
+    let hot = *hot.await?;
 
-    if hmr && mode.await?.is_development() {
+    if is_development && watch {
         let enable_react_refresh =
             assert_can_resolve_react_refresh(project_root.clone(), resolve_options_context)
                 .await?
@@ -223,7 +227,9 @@ pub async fn get_client_runtime_entries(
                     .resolved_cell(),
             )
         };
+    }
 
+    if is_development && watch && hot {
         runtime_entries.push(
             RuntimeEntry::Source(ResolvedVc::upcast(
                 FileSource::new(embed_file_path(rcstr!("hmr/bootstrap.ts")).owned().await?)
@@ -264,13 +270,20 @@ pub async fn get_client_module_options_context(
         .await?;
     let decorators_options = get_decorators_transform_options(project_path.clone());
     let enable_mdx_rs = *config.mdx_rs().await?;
+    let is_react_development = mode.await?.is_react_development();
+    let enable_react_refresh = if *watch.await? && is_react_development {
+        assert_can_resolve_react_refresh(project_path.clone(), resolve_options_context)
+            .await?
+            .is_found()
+    } else {
+        false
+    };
     let jsx_runtime_options = get_jsx_transform_options(
         project_path.clone(),
         mode,
-        Some(resolve_options_context),
         false,
         config,
-        watch,
+        enable_react_refresh,
     )
     .to_resolved()
     .await?;
@@ -312,6 +325,12 @@ pub async fn get_client_module_options_context(
     foreign_client_rules.push(ignore_dts_rule);
 
     client_rules.push(get_auto_css_modules_rule());
+
+    if enable_react_refresh {
+        // This transformer just to solve the react-refresh not work for no named jsx function component.
+        // Refer to: https://github.com/utooland/utoo/issues/2439
+        client_rules.push(get_default_export_namer_rule());
+    }
 
     let additional_rules: Vec<ModuleRule> = vec![
         get_swc_ecma_transform_plugin_rule(config, project_path.clone()).await?,

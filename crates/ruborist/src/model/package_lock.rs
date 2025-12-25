@@ -383,11 +383,11 @@ fn add_optional_flags(info: &mut Value, node: &super::graph::PackageNode) {
         info["peer"] = json!(true);
     }
 
-    match (node.is_dev, node.is_optional) {
-        (true, true) => info["devOptional"] = json!(true),
-        (true, false) => info["dev"] = json!(true),
-        (false, true) => info["optional"] = json!(true),
-        _ => {}
+    if node.is_dev {
+        info["dev"] = json!(true);
+    }
+    if node.is_optional {
+        info["optional"] = json!(true);
     }
 
     if manifest.has_install_script() {
@@ -470,8 +470,11 @@ fn get_relative_path(path: &Path, root_path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::super::graph::PackageNode;
+    use super::super::package_json::PackageJson;
     use super::*;
     use serde_json::json;
+    use std::path::PathBuf;
 
     #[test]
     fn test_path_to_pkg_name() {
@@ -569,5 +572,64 @@ mod tests {
         assert_eq!(package_lock.name, "test-project");
         assert_eq!(package_lock.lockfile_version, 3);
         assert_eq!(package_lock.packages.len(), 2);
+    }
+
+    fn create_test_node(is_dev: bool, is_optional: bool, is_peer: bool) -> PackageNode {
+        let pkg = PackageJson {
+            name: "test".to_string(),
+            version: "1.0.0".to_string(),
+            ..Default::default()
+        };
+        let mut node = PackageNode::from_package_json("test".to_string(), PathBuf::from("."), pkg);
+        node.is_dev = is_dev;
+        node.is_optional = is_optional;
+        node.is_peer = is_peer;
+        node
+    }
+
+    #[test]
+    fn test_add_optional_flags_dev_only() {
+        let node = create_test_node(true, false, false);
+        let mut info = json!({});
+        add_optional_flags(&mut info, &node);
+
+        assert_eq!(info["dev"], json!(true));
+        assert!(info.get("optional").is_none());
+        assert!(info.get("devOptional").is_none());
+    }
+
+    #[test]
+    fn test_add_optional_flags_optional_only() {
+        let node = create_test_node(false, true, false);
+        let mut info = json!({});
+        add_optional_flags(&mut info, &node);
+
+        assert!(info.get("dev").is_none());
+        assert_eq!(info["optional"], json!(true));
+        assert!(info.get("devOptional").is_none());
+    }
+
+    #[test]
+    fn test_add_optional_flags_dev_and_optional() {
+        // When both dev and optional are true, we output both flags separately
+        // (not devOptional, per npm spec for "optional dependency of a dev dependency")
+        let node = create_test_node(true, true, false);
+        let mut info = json!({});
+        add_optional_flags(&mut info, &node);
+
+        assert_eq!(info["dev"], json!(true));
+        assert_eq!(info["optional"], json!(true));
+        assert!(info.get("devOptional").is_none());
+    }
+
+    #[test]
+    fn test_add_optional_flags_peer() {
+        let node = create_test_node(false, false, true);
+        let mut info = json!({});
+        add_optional_flags(&mut info, &node);
+
+        assert_eq!(info["peer"], json!(true));
+        assert!(info.get("dev").is_none());
+        assert!(info.get("optional").is_none());
     }
 }

@@ -77,8 +77,7 @@ class InternalEndpoint implements ProjectEndpoint {
     if (encoding === "utf8") {
       ret = await ProjectInternal.readToString(path);
     } else {
-      ret = await ProjectInternal.read(path);
-      return comlink.transfer(ret, [ret.buffer]);
+      return await ProjectInternal.read(path);
     }
     return ret as any;
   }
@@ -161,8 +160,7 @@ class InternalEndpoint implements ProjectEndpoint {
 
   async gzip(files: PackFile[]) {
     await this.wasmInit!;
-    const ret = await ProjectInternal.gzip(files);
-    return comlink.transfer(ret, [ret.buffer]);
+    return await ProjectInternal.gzip(files);
   }
 
   async sigMd5(content: Uint8Array) {

@@ -15,7 +15,7 @@ npm install -g @utoo/pack-cli
 Start the development server with Hot Module Replacement (HMR):
 
 ```bash
-utoopack dev
+up dev
 ```
 
 ### Production Build
@@ -23,7 +23,7 @@ utoopack dev
 Build your project for production:
 
 ```bash
-utoopack build
+up build
 ```
 
 ### Webpack Compatibility Mode
@@ -31,16 +31,16 @@ utoopack build
 If you have an existing `webpack.config.js`, you can run `@utoo/pack` in compatibility mode:
 
 ```bash
-utoopack build --webpack
+up build --webpack
 # or
-utoopack dev --webpack
+up dev --webpack
 ```
 
 ## 🛠️ Commands
 
-- `utoopack dev`: Start development server.
-- `utoopack build`: Build for production.
-- `utoopack help`: Show help for all commands.
+- `up dev`: Start development server.
+- `up build`: Build for production.
+- `up help`: Show help for all commands.
 
 ## 📄 License
 

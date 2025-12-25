@@ -58,7 +58,7 @@ export function compatOptionsFromWebpack(
       define: compatFromWebpackPlugin(plugins, compatDefine),
       provider: compatFromWebpackPlugin(plugins, compatProvider),
       stats: compatStats(stats),
-      html: compatFromWebpackPlugins(plugins, compatHtml),
+      devServer: compatDevServer((webpackConfig as any).devServer),
     } as ConfigComplete,
     buildId: webpackConfig.name,
   };
@@ -162,24 +162,6 @@ function compatFromWebpackPlugin<R>(
       p && typeof p === "object" && p.constructor.name === picker.pluginName,
   ) as MaybeWebpackPluginInstance;
   return picker(plugin);
-}
-
-function compatFromWebpackPlugins<R>(
-  webpackPlugins: webpack.Configuration["plugins"],
-  picker: WebpackPluginOptionsPicker<R>,
-): R | R[] | undefined {
-  const plugins = webpackPlugins?.filter(
-    (p) =>
-      p && typeof p === "object" && p.constructor.name === picker.pluginName,
-  ) as MaybeWebpackPluginInstance[];
-
-  if (!plugins || plugins.length === 0) {
-    return undefined;
-  }
-
-  const results = plugins.map(picker).filter((r): r is R => r !== undefined);
-  if (results.length === 0) return undefined;
-  return results.length === 1 ? results[0] : results;
 }
 
 compatHtml.pluginName = "HtmlWebpackPlugin";
@@ -524,4 +506,17 @@ function compatStats(
   webpackStats: webpack.Configuration["stats"],
 ): ConfigComplete["sourceMaps"] {
   return !!webpackStats;
+}
+
+function compatDevServer(devServer: any): ConfigComplete["devServer"] {
+  if (!devServer) return undefined;
+  const result: NonNullable<ConfigComplete["devServer"]> = {};
+  if (typeof devServer.hot !== "undefined") result.hot = !!devServer.hot;
+  if (typeof devServer.port !== "undefined") {
+    const p = Number(devServer.port);
+    if (!Number.isNaN(p)) result.port = p;
+  }
+  if (typeof devServer.host !== "undefined") result.host = devServer.host;
+  if (typeof devServer.https !== "undefined") result.https = !!devServer.https;
+  return result;
 }

@@ -58,9 +58,14 @@ impl Project {
     /// Calculate MD5 hash of byte content (async for better thread scheduling)
     #[wasm_bindgen(js_name = sigMd5)]
     pub async fn sig_md5(content: Vec<u8>) -> Result<String, JsError> {
-        let result = tokio::task::spawn_blocking(move || opfs_project::pack::sig_md5(&content))
+        let rt = TOKIO_RUNTIME
+            .get()
+            .ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
+
+        let result = rt
+            .spawn_blocking(move || opfs_project::pack::sig_md5(&content))
             .await
-            .map_err(|e| JsError::new(&format!("Task failed: {}", e)))?;
+            .map_err(to_js_error)?;
         Ok(result)
     }
 
@@ -85,9 +90,13 @@ impl Project {
             .map(|f| PackFile::new(f.path, f.content))
             .collect();
 
-        let bytes = tokio::task::spawn_blocking(move || opfs_project::pack::gzip(&pack_files))
-            .await
-            .map_err(|e| JsError::new(&format!("Task failed: {}", e)))?
+        let rt = TOKIO_RUNTIME
+            .get()
+            .ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
+
+        let bytes = rt
+            .spawn_blocking(move || opfs_project::pack::gzip(&pack_files))
+            .await?
             .map_err(to_js_error)?;
         Ok(js_sys::Uint8Array::from(&bytes[..]))
     }
@@ -143,12 +152,11 @@ impl Project {
             None => return Err(JsError::new("invalid pack project")),
         };
 
-        TOKIO_RUNTIME
-            .with(|rt| {
-                rt.get()
-                    .expect("tokio runtime not found")
-                    .spawn(async move { pack_project.build().await })
-            })
+        let rt = TOKIO_RUNTIME
+            .get()
+            .ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
+
+        rt.spawn(async move { pack_project.build().await })
             .await
             .map_err(to_js_error)?
             .map_or_else(
@@ -206,12 +214,11 @@ impl Project {
                 ..Default::default()
             };
 
-            let pack_context = TOKIO_RUNTIME
-                .with(|rt| {
-                    rt.get()
-                        .expect("tokio runtime not found")
-                        .spawn(PackProject::initialize(options))
-                })
+            let rt = TOKIO_RUNTIME
+                .get()
+                .ok_or_else(|| anyhow::anyhow!("tokio runtime not initialized"))?;
+            let pack_context = rt
+                .spawn(PackProject::initialize(options))
                 .await
                 .context("fail to initialize pack project")??;
 

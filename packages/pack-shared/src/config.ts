@@ -178,7 +178,12 @@ export interface ConfigComplete {
   stats?: boolean;
   persistentCaching?: boolean;
   nodePolyfill?: boolean;
-  devServer?: { hot: boolean };
+  devServer?: {
+    hot?: boolean;
+    port?: number;
+    host?: string;
+    https?: boolean;
+  };
   cacheHandler?: string;
   experimental?: ExperimentalConfig;
 }
