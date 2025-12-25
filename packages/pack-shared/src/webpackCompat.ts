@@ -1,4 +1,3 @@
-import type webpack from "webpack";
 import {
   BundleOptions,
   ConfigComplete,
@@ -7,25 +6,110 @@ import {
   TurbopackRuleConfigItem,
 } from "./config";
 
-export type WebpackConfig = Partial<
-  Pick<
-    webpack.Configuration,
-    | "name"
-    | "entry"
-    | "mode"
-    | "module"
-    | "resolve"
-    | "externals"
-    | "output"
-    | "target"
-    | "devtool"
-    | "optimization"
-    | "plugins"
-    | "stats"
-  >
-> & {
+export interface WebpackPluginInstance {
+  apply: (compiler: any) => void;
+  [key: string]: any;
+}
+
+export interface WebpackRuleSetRule {
+  test?: RegExp | string;
+  use?: any;
+  loader?: string;
+  options?: any;
+  oneOf?: WebpackRuleSetRule[];
+  type?: string;
+  generator?: any;
+  parser?: any;
+  sideEffects?: boolean;
+  exclude?: any;
+  include?: any;
+  resourceQuery?: any;
+  issuer?: any;
+}
+
+export interface WebpackModule {
+  rules?: (WebpackRuleSetRule | "...")[] | WebpackRuleSetRule[];
+}
+
+export interface WebpackResolve {
+  alias?:
+    | Record<string, string | false | string[]>
+    | Array<{ name: string; alias: string | false | string[] }>;
+  extensions?: string[];
+  modules?: string[];
+  mainFields?: string[];
+  conditionNames?: string[];
+  fallback?: Record<string, string | false | string[]>;
+  plugins?: any[];
+}
+
+export interface WebpackOutput {
+  path?: string;
+  publicPath?: string | ((...args: any[]) => string);
+  filename?: string | ((...args: any[]) => string);
+  chunkFilename?: string | ((...args: any[]) => string);
+  assetModuleFilename?: string;
+  library?: any;
+  libraryTarget?: string;
+  globalObject?: string;
+  clean?: boolean | { keep?: any };
+}
+
+export interface WebpackOptimization {
+  minimize?: boolean;
+  minimizer?: any[];
+  splitChunks?: any;
+  runtimeChunk?: any;
+  moduleIds?: string;
+  chunkIds?: string;
+  concatenateModules?: boolean;
+}
+
+export type WebpackEntry =
+  | string
+  | string[]
+  | Record<
+      string,
+      | string
+      | {
+          import: string;
+          library?: {
+            type: string;
+            name?: string | string[];
+            export?: string | string[];
+          };
+        }
+      | string[]
+    >;
+
+export type WebpackExternals =
+  | string
+  | RegExp
+  | Record<string, string | string[] | object>
+  | (string | RegExp | Record<string, string | string[] | object>)[];
+
+export type WebpackTarget = string | string[];
+export type WebpackDevTool = string | boolean;
+export type WebpackStats = string | boolean | object;
+export type WebpackPlugins = (WebpackPluginInstance | any)[];
+export type WebpackMode = "development" | "production" | "none";
+
+export interface WebpackConfig {
+  name?: string;
+  entry?: WebpackEntry;
+  mode?: WebpackMode;
+  module?: WebpackModule;
+  resolve?: WebpackResolve;
+  externals?: WebpackExternals;
+  output?: WebpackOutput;
+  target?: WebpackTarget;
+  devtool?: WebpackDevTool;
+  optimization?: WebpackOptimization;
+  plugins?: WebpackPlugins;
+  stats?: WebpackStats;
   webpackMode: true;
-};
+  devServer?: any;
+}
 
 export function compatOptionsFromWebpack(
   webpackConfig: WebpackConfig,
@@ -65,7 +149,7 @@ export function compatOptionsFromWebpack(
 }
 
 function compatMode(
-  webpackMode: webpack.Configuration["mode"],
+  webpackMode: WebpackMode | undefined,
 ): "development" | "production" | undefined {
   return webpackMode
     ? webpackMode === "none"
@@ -74,7 +158,10 @@ function compatMode(
     : "production";
 }
 
-function compatEntry(webpackEntry: WebpackConfig["entry"]) {
+function compatEntry(webpackEntry: WebpackEntry | undefined) {
+  if (!webpackEntry) {
+    return undefined;
+  }
   const entry: ConfigComplete["entry"] = [];
 
   switch (typeof webpackEntry) {
@@ -145,7 +232,7 @@ function compatEntry(webpackEntry: WebpackConfig["entry"]) {
   return entry;
 }
 
-type MaybeWebpackPluginInstance = undefined | webpack.WebpackPluginInstance;
+type MaybeWebpackPluginInstance = undefined | WebpackPluginInstance;
 
 type WebpackPluginOptionsPicker<R> = ((
   p: MaybeWebpackPluginInstance,
@@ -154,7 +241,7 @@ type WebpackPluginOptionsPicker<R> = ((
 };
 
 function compatFromWebpackPlugin<R>(
-  webpackPlugins: webpack.Configuration["plugins"],
+  webpackPlugins: WebpackPlugins | undefined,
   picker: WebpackPluginOptionsPicker<R>,
 ): R | undefined {
   const plugin = webpackPlugins?.find(
@@ -225,7 +312,7 @@ function compatProvider(
 }
 
 function compatExternals(
-  webpackExternals?: webpack.Configuration["externals"],
+  webpackExternals?: WebpackExternals,
 ): ConfigComplete["externals"] {
   if (!webpackExternals) {
     return undefined;
@@ -322,14 +409,15 @@ function compatExternals(
             }
           } else if (typeof value === "object" && value !== null) {
             // Object format: handle complex configurations
-            if ("root" in value || "commonjs" in value || "amd" in value) {
+            const val = value as any;
+            if ("root" in val || "commonjs" in val || "amd" in val) {
               // Standard webpack externals object format
-              if (value.commonjs) {
-                externals![key] = `commonjs ${value.commonjs}`;
-              } else if (value.root) {
-                externals![key] = value.root;
-              } else if (value.amd) {
-                externals![key] = value.amd;
+              if (val.commonjs) {
+                externals![key] = `commonjs ${val.commonjs}`;
+              } else if (val.root) {
+                externals![key] = val.root;
+              } else if (val.amd) {
+                externals![key] = val.amd;
               } else {
                 externals![key] = key;
               }
@@ -356,7 +444,7 @@ function compatExternals(
 }
 
 function compatModule(
-  webpackModule: webpack.Configuration["module"],
+  webpackModule: WebpackModule | undefined,
 ): ConfigComplete["module"] {
   if (!Array.isArray(webpackModule?.rules)) {
     return;
@@ -411,7 +499,7 @@ function compatModule(
 }
 
 function compatResolve(
-  webpackResolve: webpack.Configuration["resolve"],
+  webpackResolve: WebpackResolve | undefined,
 ): ConfigComplete["resolve"] {
   if (!webpackResolve) {
     return;
@@ -440,7 +528,7 @@ function compatResolve(
 }
 
 function compatOutput(
-  webpackOutput: webpack.Configuration["output"],
+  webpackOutput: WebpackOutput | undefined,
 ): ConfigComplete["output"] {
   if (webpackOutput?.filename && typeof webpackOutput.filename !== "string") {
     throw "non string output filename not supported yet";
@@ -468,7 +556,7 @@ function compatOutput(
 }
 
 function compatTarget(
-  webpackTarget: webpack.Configuration["target"],
+  webpackTarget: WebpackTarget | undefined,
 ): ConfigComplete["target"] {
   return webpackTarget
     ? Array.isArray(webpackTarget)
@@ -478,13 +566,13 @@ function compatTarget(
 }
 
 function compatSourceMaps(
-  webpackSourceMaps: webpack.Configuration["devtool"],
+  webpackSourceMaps: WebpackDevTool | undefined,
 ): ConfigComplete["sourceMaps"] {
   return !!webpackSourceMaps;
 }
 
 function compatOptimization(
-  webpackOptimization: webpack.Configuration["optimization"],
+  webpackOptimization: WebpackOptimization | undefined,
 ): ConfigComplete["optimization"] {
   if (!webpackOptimization) {
     return;
@@ -503,7 +591,7 @@ function compatOptimization(
 }
 
 function compatStats(
-  webpackStats: webpack.Configuration["stats"],
+  webpackStats: WebpackStats | undefined,
 ): ConfigComplete["sourceMaps"] {
   return !!webpackStats;
 }
