@@ -215,7 +215,7 @@ pub async fn get_client_runtime_entries(
     let watch = *watch.await?;
     let hot = *hot.await?;
 
-        // Add runtime bootstrap code if configured
+    // Add runtime bootstrap code if configured
     // This runs synchronously in the runtime chunk before any entry modules execute
     let bootstrap_config_opt = config.runtime_bootstrap().await?;
     if let Some(bootstrap_config) = bootstrap_config_opt.as_ref() {
@@ -242,7 +242,6 @@ pub async fn get_client_runtime_entries(
             }
         }
     }
-
 
     if is_development && watch {
         let enable_react_refresh =
