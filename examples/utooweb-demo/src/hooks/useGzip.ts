@@ -1,6 +1,43 @@
 import { PackFile, Project as UtooProject } from "@utoo/web";
 import { useCallback, useState } from "react";
 
+// Recursively collect all files from a directory with concurrent processing
+async function collectFilesRecursively(
+  project: UtooProject,
+  dirPath: string,
+  relativePath: string = "",
+): Promise<PackFile[]> {
+  const entries = await project.readdir(dirPath);
+
+  // Process all entries concurrently
+  const results = await Promise.all(
+    entries.map(async (entry) => {
+      const entryRelativePath = relativePath
+        ? `${relativePath}/${entry.name}`
+        : entry.name;
+      const entryFullPath = `${dirPath}/${entry.name}`;
+
+      if (entry.isDirectory()) {
+        // Recursively collect files from subdirectory
+        return collectFilesRecursively(project, entryFullPath, entryRelativePath);
+      } else if (entry.isFile()) {
+        try {
+          const content = await project.readFile(entryFullPath);
+          console.log(`Adding file: ${entryRelativePath} (${content.length} bytes)`);
+          return [{ path: entryRelativePath, content }];
+        } catch (e) {
+          console.error(`Failed to read file ${entryFullPath}:`, e);
+          return [];
+        }
+      }
+      return [];
+    }),
+  );
+
+  // Flatten results
+  return results.flat();
+}
+
 export const useGzip = (project: UtooProject | null) => {
   const [isGzipping, setIsGzipping] = useState(false);
   const [error, setError] = useState("");
@@ -14,30 +51,27 @@ export const useGzip = (project: UtooProject | null) => {
 
     try {
       // Read all files from dist directory recursively
-      const distFiles = await project.readdir("dist", { recursive: true });
-
-      const files: PackFile[] = [];
-
-      // Read content of each file
-      for (const file of distFiles) {
-        if (file.isFile()) {
-          const fullPath = `dist/${file.name}`;
-          try {
-            const content = await project.readFile(fullPath);
-            console.log(`Adding file: ${file.name} (${content.length} bytes)`);
-            files.push({
-              path: file.name,
-              content: content,
-            });
-          } catch (e) {
-            console.error(`Failed to read file ${fullPath}:`, e);
-          }
-        }
-      }
+      const files = await collectFilesRecursively(project, "dist");
 
       if (files.length === 0) {
         setError("No files found in dist directory");
         return;
+      }
+
+      // Calculate MD5 for each file concurrently
+      console.time("files md5");
+      const fileMd5s = await Promise.all(
+        files.map(async (file) => {
+          const md5 = await project.sigMd5(file.content);
+          return { path: file.path, md5 };
+        }),
+      );
+      console.timeEnd("files md5");
+
+      // Build files MD5 map
+      const filesMap: Record<string, string> = {};
+      for (const { path, md5 } of fileMd5s) {
+        filesMap[path] = `md5:${md5}`;
       }
 
       // First, create a temporary archive to calculate its MD5
@@ -50,6 +84,7 @@ export const useGzip = (project: UtooProject | null) => {
         "dist.tgz": `md5:${md5Hash}`,
         generatedAt: new Date().toISOString(),
         fileCount: files.length,
+        files: filesMap,
       };
       const configJson = JSON.stringify(configContent, null, 2);
       const configBytes = new TextEncoder().encode(configJson);

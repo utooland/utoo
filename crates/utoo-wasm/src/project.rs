@@ -8,7 +8,7 @@ use pack_api::project::WatchOptions;
 use serde_wasm_bindgen::to_value;
 use tokio_fs_ext::{DirEntry as RawDirEntry, Metadata as RawMetadata};
 use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsValue;
+use wasm_bindgen::{JsCast, JsValue};
 
 use crate::errors::to_js_error;
 use crate::tokio_runtime::init_tokio_runtime;
@@ -74,21 +74,27 @@ impl Project {
     #[wasm_bindgen(js_name = gzip)]
     pub async fn gzip(files: JsValue) -> Result<js_sys::Uint8Array, JsError> {
         use opfs_project::pack::PackFile;
-        use serde::Deserialize;
 
-        #[derive(Deserialize)]
-        struct JsPackFile {
-            path: String,
-            content: Vec<u8>,
+        let files_array: js_sys::Array = files
+            .dyn_into()
+            .map_err(|_| JsError::new("files must be an array"))?;
+
+        let mut pack_files: Vec<PackFile> = Vec::with_capacity(files_array.length() as usize);
+
+        for i in 0..files_array.length() {
+            let item = files_array.get(i);
+            let path = js_sys::Reflect::get(&item, &"path".into())
+                .map_err(|_| JsError::new("missing path"))?
+                .as_string()
+                .ok_or_else(|| JsError::new("path must be a string"))?;
+            let content_js = js_sys::Reflect::get(&item, &"content".into())
+                .map_err(|_| JsError::new("missing content"))?;
+            let content_arr: js_sys::Uint8Array = content_js
+                .dyn_into()
+                .map_err(|_| JsError::new("content must be Uint8Array"))?;
+            let content = content_arr.to_vec();
+            pack_files.push(PackFile::new(path, content));
         }
-
-        let js_files: Vec<JsPackFile> = serde_wasm_bindgen::from_value(files)
-            .map_err(|e| JsError::new(&format!("Failed to parse files: {}", e)))?;
-
-        let pack_files: Vec<PackFile> = js_files
-            .into_iter()
-            .map(|f| PackFile::new(f.path, f.content))
-            .collect();
 
         let rt = TOKIO_RUNTIME
             .get()
@@ -98,6 +104,7 @@ impl Project {
             .spawn_blocking(move || opfs_project::pack::gzip(&pack_files))
             .await?
             .map_err(to_js_error)?;
+
         Ok(js_sys::Uint8Array::from(&bytes[..]))
     }
 

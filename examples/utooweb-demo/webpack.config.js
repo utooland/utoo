@@ -67,6 +67,7 @@ module.exports = [
         "Access-Control-Allow-Origin": "*",
         "Cross-Origin-Opener-Policy": "same-origin",
         "Cross-Origin-Embedder-Policy": "require-corp",
+        "Cache-Control": "public, max-age=31536000, immutable", // 365天
       },
       hot: false,
       liveReload: false,
@@ -122,7 +123,7 @@ module.exports = [
           {
             from: path.resolve(
               __dirname,
-              "../../packages/utoo-web/esm/loaderWorker.js",
+              "../../packages/utoo-web/esm/loaderWorker.js"
             ),
             to: "loaderWorker.js",
           },
