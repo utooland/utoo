@@ -751,7 +751,6 @@ const devContextPrototype = Context.prototype;
 devContextPrototype.c = devModuleCache;
 class UpdateApplyError extends Error {
     name = 'UpdateApplyError';
-    dependencyChain;
     constructor(message, dependencyChain){
         super(message);
         this.dependencyChain = dependencyChain;

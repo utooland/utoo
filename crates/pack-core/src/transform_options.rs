@@ -42,9 +42,9 @@ pub async fn get_typescript_transform_options(
             json["compilerOptions"]["useDefineForClassFields"].as_bool()
         })
         .await?
-        .unwrap_or(false)
+        .unwrap_or(true)
     } else {
-        false
+        true
     };
 
     let ts_transform_options = TypescriptTransformOptions {
@@ -99,7 +99,7 @@ pub async fn get_decorators_transform_options(
                 emit_decorators_metadata,
                 use_define_for_class_fields: json["compilerOptions"]["useDefineForClassFields"]
                     .as_bool()
-                    .unwrap_or(false),
+                    .unwrap_or(true),
                 ..Default::default()
             })
         })
