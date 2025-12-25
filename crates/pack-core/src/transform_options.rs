@@ -99,7 +99,7 @@ pub async fn get_decorators_transform_options(
                 emit_decorators_metadata,
                 use_define_for_class_fields: json["compilerOptions"]["useDefineForClassFields"]
                     .as_bool()
-                    .unwrap_or(false),
+                    .unwrap_or(true),
                 ..Default::default()
             })
         })
