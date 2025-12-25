@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/typescript/use_define_for_class_fileds/input/index.ts"],"sourcesContent":["export class BrowserFsProvider {\n    private opfsFsProvider: any;\n    constructor() {\n        this.opFs = this.opfsFsProvider.fs;\n    }\n}"],"names":[],"mappings":"AAAO,MAAM;IAET,aAAc;QACV,IAAI,CAAC,IAAI,GAAG,IAAI,CAAC,cAAc,CAAC,EAAE;IACtC;AACJ"}}]
+}
