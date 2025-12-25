@@ -64,4 +64,16 @@
   padding: 0;
 }
 
+.style-module-less-module__VPl8sq__message {
+  color: red;
+}
+
+.style-module-less-module__VPl8sq__message.left .style-module-less-module__VPl8sq__message-main, .style-module-less-module__VPl8sq__message.left .style-module-less-module__VPl8sq__message-context {
+  font-size: 15px;
+}
+
+.style-module-less-module__VPl8sq__message .right {
+  font-size: 16px;
+}
+
 /*# sourceMappingURL=style_global_scoped_input_56612396.css.map*/

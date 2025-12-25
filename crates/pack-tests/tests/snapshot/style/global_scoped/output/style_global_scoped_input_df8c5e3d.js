@@ -4,6 +4,9 @@
 __turbopack_context__.v({
   "img": "style-module-less-module__VPl8sq__img",
   "list": "style-module-less-module__VPl8sq__list",
+  "message": "style-module-less-module__VPl8sq__message",
+  "message-context": "style-module-less-module__VPl8sq__message-context",
+  "message-main": "style-module-less-module__VPl8sq__message-main",
 });
 }),
 52, ((__turbopack_context__) => {

@@ -442,7 +442,7 @@ dependencies = [
  "bitflags 2.9.4",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.12.1",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -3411,7 +3411,7 @@ dependencies = [
 [[package]]
 name = "lightningcss"
 version = "1.0.0-alpha.68"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#dbae91ab4e7b9e6250d4bf836d1202d04dc51ca6"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#2cf088153358cc4a0943cb350f05f1b884a45aba"
 dependencies = [
  "ahash 0.8.12",
  "bitflags 2.9.4",
@@ -3440,7 +3440,7 @@ dependencies = [
 [[package]]
 name = "lightningcss-derive"
 version = "1.0.0-alpha.43"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#dbae91ab4e7b9e6250d4bf836d1202d04dc51ca6"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#2cf088153358cc4a0943cb350f05f1b884a45aba"
 dependencies = [
  "convert_case 0.6.0",
  "proc-macro2",
@@ -4410,7 +4410,7 @@ dependencies = [
 [[package]]
 name = "parcel_selectors"
 version = "0.28.2"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#dbae91ab4e7b9e6250d4bf836d1202d04dc51ca6"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#2cf088153358cc4a0943cb350f05f1b884a45aba"
 dependencies = [
  "bitflags 2.9.4",
  "cssparser",
@@ -6240,7 +6240,7 @@ dependencies = [
 [[package]]
 name = "static-self"
 version = "0.1.2"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#dbae91ab4e7b9e6250d4bf836d1202d04dc51ca6"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#2cf088153358cc4a0943cb350f05f1b884a45aba"
 dependencies = [
  "indexmap 2.11.4",
  "smallvec",
@@ -6250,7 +6250,7 @@ dependencies = [
 [[package]]
 name = "static-self-derive"
 version = "0.1.1"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#dbae91ab4e7b9e6250d4bf836d1202d04dc51ca6"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#2cf088153358cc4a0943cb350f05f1b884a45aba"
 dependencies = [
  "proc-macro2",
  "quote",
