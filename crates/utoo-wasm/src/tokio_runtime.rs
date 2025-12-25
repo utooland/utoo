@@ -20,6 +20,7 @@ pub fn init_tokio_runtime(worker_url: String) {
                 let id = ATOMIC_ID.fetch_add(1, Ordering::SeqCst);
                 format!("tokio-runtime-worker-{id}")
             })
+            .max_blocking_threads(1)
             .wasm_bindgen_shim_url(worker_url.clone())
             .build()
             .expect("Failed to build tokio runtime")
