@@ -19,11 +19,17 @@ async function collectFilesRecursively(
 
       if (entry.isDirectory()) {
         // Recursively collect files from subdirectory
-        return collectFilesRecursively(project, entryFullPath, entryRelativePath);
+        return collectFilesRecursively(
+          project,
+          entryFullPath,
+          entryRelativePath,
+        );
       } else if (entry.isFile()) {
         try {
           const content = await project.readFile(entryFullPath);
-          console.log(`Adding file: ${entryRelativePath} (${content.length} bytes)`);
+          console.log(
+            `Adding file: ${entryRelativePath} (${content.length} bytes)`,
+          );
           return [{ path: entryRelativePath, content }];
         } catch (e) {
           console.error(`Failed to read file ${entryFullPath}:`, e);

@@ -28,10 +28,7 @@ export const useUpload = (
     }
   };
 
-  const extractZip = async (
-    proj: UtooProject,
-    file: File,
-  ): Promise<void> => {
+  const extractZip = async (proj: UtooProject, file: File): Promise<void> => {
     const zip = await JSZip.loadAsync(file);
     const createdDirs = new Set<string>();
 
@@ -76,11 +73,29 @@ export const useUpload = (
       // Determine if file is binary or text
       const ext = filePath.split(".").pop()?.toLowerCase() || "";
       const binaryExts = [
-        "png", "jpg", "jpeg", "gif", "webp", "ico", "svg",
-        "woff", "woff2", "ttf", "eot", "otf",
-        "zip", "tar", "gz", "7z",
-        "pdf", "doc", "docx",
-        "mp3", "mp4", "wav", "webm",
+        "png",
+        "jpg",
+        "jpeg",
+        "gif",
+        "webp",
+        "ico",
+        "svg",
+        "woff",
+        "woff2",
+        "ttf",
+        "eot",
+        "otf",
+        "zip",
+        "tar",
+        "gz",
+        "7z",
+        "pdf",
+        "doc",
+        "docx",
+        "mp3",
+        "mp4",
+        "wav",
+        "webm",
       ];
 
       if (binaryExts.includes(ext)) {

@@ -95,7 +95,12 @@ const Project = () => {
   } = useUpload(project, refreshFileTree);
 
   const error =
-    projectError || fileContentError || installError || buildError || gzipError || uploadError;
+    projectError ||
+    fileContentError ||
+    installError ||
+    buildError ||
+    gzipError ||
+    uploadError;
 
   const memoizedFileTree = useMemo(() => fileTree, [fileTree]);
 
