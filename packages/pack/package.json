@@ -45,7 +45,6 @@
     "find-up": "4.1.0",
     "nanoid": "^3.3.11",
     "picocolors": "^1.1.1",
-    "resolve-url-loader": "^5.0.0",
     "send": "0.17.1",
     "ws": "^8.18.1"
   },
@@ -54,7 +53,8 @@
     "less-loader": "^12.0.0",
     "postcss": "8.4.31",
     "sass": "1.54.0",
-    "sass-loader": "^13.2.0"
+    "sass-loader": "^13.2.0",
+    "resolve-url-loader": "^5.0.0"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0",
