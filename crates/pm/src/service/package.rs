@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 use utoo_ruborist::lock::PackageLock;
+use utoo_ruborist::model::package_json::parse_bin_field;
 
 use super::script::ScriptService;
 
@@ -156,7 +157,11 @@ impl PackageService {
             // Early filtering based on ignore_scripts parameter
             let has_scripts = lock_package.has_install_scripts();
             let package_name = lock_package.get_name(path);
-            let bin_files = lock_package.parse_bin_files(&package_name);
+            let bin_files = lock_package
+                .bin
+                .as_ref()
+                .map(|bin| parse_bin_field(bin, &package_name))
+                .unwrap_or_default();
             let has_bin = !bin_files.is_empty();
 
             // Skip packages that don't meet the filter criteria
