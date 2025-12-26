@@ -67,25 +67,24 @@ impl PackageInfo {
             .ok_or_else(|| anyhow::anyhow!("Failed to get package name from package.json"))?
             .to_string();
 
-        // Parse binary files
-        let bin_files = if let Some(bin) = data.get("bin") {
-            if bin.is_object() {
-                bin.as_object()
-                    .map(|obj| {
-                        obj.iter()
-                            .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            } else if bin.is_string() {
-                let bin_path = bin.as_str().unwrap_or_default().to_string();
-                vec![(name.clone(), bin_path)]
-            } else {
-                Vec::new()
+        // Parse binary files (empty bin paths are filtered out)
+        let bin_files: Vec<_> = match data.get("bin") {
+            Some(bin) if bin.is_object() => bin
+                .as_object()
+                .map(|obj| {
+                    obj.iter()
+                        .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            Some(bin) if bin.is_string() => {
+                vec![(name.clone(), bin.as_str().unwrap_or_default().to_string())]
             }
-        } else {
-            Vec::new()
-        };
+            _ => Vec::new(),
+        }
+        .into_iter()
+        .filter(|(_, path)| !path.is_empty())
+        .collect();
 
         // Parse scripts
         let scripts = Scripts {

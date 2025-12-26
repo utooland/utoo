@@ -115,11 +115,13 @@ pub enum BinConfig {
 
 impl BinConfig {
     /// Get all binary entries as (name, path) pairs.
+    /// Empty bin paths are filtered out.
     pub fn entries(&self, package_name: &str) -> Vec<(String, String)> {
-        match self {
+        let entries: Vec<_> = match self {
             BinConfig::Single(path) => vec![(package_name.to_string(), path.clone())],
             BinConfig::Map(map) => map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
-        }
+        };
+        entries.into_iter().filter(|(_, p)| !p.is_empty()).collect()
     }
 }
 
@@ -295,6 +297,31 @@ mod tests {
         let pkg = PackageJson::from_value(&value).unwrap();
         let entries = pkg.bin.unwrap().entries("my-tools");
         assert_eq!(entries.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_bin_empty_filtered() {
+        // Empty bin string should be filtered out
+        let value = json!({
+            "name": "my-cli",
+            "bin": ""
+        });
+        let pkg = PackageJson::from_value(&value).unwrap();
+        let entries = pkg.bin.unwrap().entries("my-cli");
+        assert_eq!(entries.len(), 0);
+
+        // Empty bin in map should be filtered out
+        let value = json!({
+            "name": "my-tools",
+            "bin": {
+                "tool1": "./bin/tool1.js",
+                "empty": ""
+            }
+        });
+        let pkg = PackageJson::from_value(&value).unwrap();
+        let entries = pkg.bin.unwrap().entries("my-tools");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, "tool1");
     }
 
     #[test]

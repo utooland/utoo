@@ -103,13 +103,17 @@ impl LockPackage {
     }
 
     /// Parse bin files from the bin field.
+    /// Empty bin paths are filtered out.
     pub fn parse_bin_files(&self, package_name: &str) -> Vec<(String, String)> {
         match &self.bin {
             Some(serde_json::Value::Object(obj)) => obj
                 .iter()
                 .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string()))
+                .filter(|(_, path)| !path.is_empty())
                 .collect(),
-            Some(serde_json::Value::String(s)) => vec![(package_name.to_string(), s.clone())],
+            Some(serde_json::Value::String(s)) if !s.is_empty() => {
+                vec![(package_name.to_string(), s.clone())]
+            }
             _ => Vec::new(),
         }
     }
@@ -537,6 +541,16 @@ mod tests {
 
         package.bin = None;
         assert_eq!(package.parse_bin_files("test-package").len(), 0);
+
+        // Test empty bin string is filtered out
+        package.bin = Some(json!(""));
+        assert_eq!(package.parse_bin_files("test-package").len(), 0);
+
+        // Test empty bin in object is filtered out
+        package.bin = Some(json!({"cli": "bin/cli.js", "empty": ""}));
+        let bin_files = package.parse_bin_files("test-package");
+        assert_eq!(bin_files.len(), 1);
+        assert_eq!(bin_files[0].0, "cli");
     }
 
     #[test]
