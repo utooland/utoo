@@ -11,35 +11,6 @@ const pkgJsonCache: Record<string, any> = {};
 const resolutionCache: Record<string, string> = {};
 const searchPathsCache: Record<string, string[]> = {};
 
-const statSync = (p: string) => {
-  if (
-    p.includes("node_modules") &&
-    Object.prototype.hasOwnProperty.call(statCache, p)
-  ) {
-    if (statCache[p] === false) {
-      throw new Error("ENOENT");
-    }
-    return statCache[p];
-  }
-  try {
-    const res = fs.statSync(p);
-    if (p.includes("node_modules")) statCache[p] = res;
-    return res;
-  } catch (e) {
-    if (p.includes("node_modules")) statCache[p] = false;
-    throw e;
-  }
-};
-
-const existsSync = (p: string) => {
-  try {
-    statSync(p);
-    return true;
-  } catch (e) {
-    return false;
-  }
-};
-
 const executeModule = (
   moduleCode: string,
   moduleId: string,
@@ -142,7 +113,7 @@ const loadModule = (
   // 1. Resolve
   let resolvedId = id;
   if (id.startsWith(".")) {
-    resolvedId = path.resolve(context, id);
+    resolvedId = path.join(context, id);
   }
 
   // 2. Check Cache (SystemJS)
@@ -295,10 +266,13 @@ const loadModule = (
     return executeModule(moduleCode, moduleId, id, importMaps, entrypoint);
   }
 
-  console.error(
+  const error = new Error(
     `Worker: Dependency ${id} (resolved: ${resolvedId}) not found. Context: ${context}`,
   );
-  return {};
+
+  console.error(error);
+
+  throw error;
 };
 
 export async function cjs(

@@ -1,4 +1,3 @@
-import { SabComClient } from "../utils/sabcom";
 import initWasm, {
   Project,
   recvTaskMessageInWorker,
@@ -24,7 +23,6 @@ declare let self: DedicatedWorkerGlobalScope & {
     cwd: string;
     projectRoot: string;
     binding: typeof binding;
-    sabClient?: SabComClient;
     fs?: Project;
   };
 };
@@ -42,12 +40,6 @@ export function startLoaderWorker() {
       throw err;
     });
 
-    const sabClient = meta.sab
-      ? new SabComClient(meta.sab, () => {
-          self.postMessage("sab_request");
-        })
-      : undefined;
-
     // Initialize the thread-local state (tokio runtime).
     // We don't need to pass threadWorkerUrl here because it's already stored in a global static in Rust.
     Project.init("");
@@ -58,7 +50,6 @@ export function startLoaderWorker() {
       cwd: meta.workerData.cwd,
       projectRoot: meta.workerData.projectRoot,
       binding,
-      sabClient,
       fs: Project as any,
     };
 

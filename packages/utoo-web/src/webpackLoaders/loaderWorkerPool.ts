@@ -1,7 +1,5 @@
 import { Binding } from "../types";
-import * as sabcom from "../utils/sabcom";
 import initWasm, {
-  Project as ProjectInternal,
   registerWorkerScheduler,
   WebWorkerCreation,
   WebWorkerTermination,
@@ -27,27 +25,7 @@ export const runLoaderWorkerPool = async (
       nextWorkerId += 1;
       const workerId = nextWorkerId;
 
-      const sab = new SharedArrayBuffer(1024 * 1024 * 10); // 10MB
-      const sabHost = new sabcom.SabComHost(sab);
-
       const worker = new Worker(loaderWorkerUrl, { name: filename });
-      worker.onmessage = async (event) => {
-        if (event.data === "sab_request") {
-          await sabcom.handleSabRequest(sabHost, {
-            read: (path) => ProjectInternal.read(path),
-            readDir: (path) => ProjectInternal.readDir(path),
-            writeString: (path, content) =>
-              ProjectInternal.writeString(path, content),
-            createDirAll: (path) => ProjectInternal.createDirAll(path),
-            createDir: (path) => ProjectInternal.createDir(path),
-            metadata: (path) => ProjectInternal.metadata(path),
-            removeFile: (path) => ProjectInternal.removeFile(path),
-            removeDir: (path, recursive) =>
-              ProjectInternal.removeDir(path, recursive),
-            copyFile: (src, dst) => ProjectInternal.copyFile(src, dst),
-          });
-        }
-      };
 
       let finalCwd = cwd;
       let finalFilename = filename;
@@ -94,7 +72,6 @@ export const runLoaderWorkerPool = async (
             importMaps: { ...loadersImportMap },
             entrypoint: finalFilename,
           },
-          sab,
         } as LoaderRunnerMeta,
       ]);
       const workers =

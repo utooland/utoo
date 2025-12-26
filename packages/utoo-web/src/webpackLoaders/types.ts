@@ -8,5 +8,4 @@ export interface LoaderRunnerMeta {
     importMaps: Record<string, string>;
     entrypoint: string;
   };
-  sab?: SharedArrayBuffer;
 }

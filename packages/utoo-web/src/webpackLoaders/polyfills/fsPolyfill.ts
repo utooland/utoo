@@ -1,22 +1,12 @@
 import { Buffer } from "buffer";
 import path from "path";
 import { Stats } from "../../types";
-import * as sabcom from "../../utils/sabcom";
 import { promises } from "./fsPromisesPolyfill";
 
 function resolvePath(p: string): string {
   // @ts-ignore
   const cwd = self.process?.cwd?.() || self.workerData?.cwd || "/";
   return path.resolve(cwd, p);
-}
-
-function getSabClient() {
-  // @ts-ignore
-  const client = self.workerData.sabClient;
-  if (!client) {
-    throw new Error("Sync fs not supported (no sabClient)");
-  }
-  return client;
 }
 
 function getFs() {
@@ -28,27 +18,27 @@ function getFs() {
   return fs;
 }
 
-// --- Synchronous API (via sabcom) ---
+// --- Synchronous API (via WASM Project Sync APIs) ---
+
+const textDecoder = new TextDecoder();
 
 export function readFileSync(path: string, options: any) {
-  const client = getSabClient();
-  const result = client.call(sabcom.SAB_OP_READ_FILE, resolvePath(path));
+  const fs = getFs();
+  const result = fs.readSync(resolvePath(path));
 
   if (
     options === "utf8" ||
     options === "utf-8" ||
     (options && (options.encoding === "utf8" || options.encoding === "utf-8"))
   ) {
-    return new TextDecoder().decode(result);
+    return textDecoder.decode(result);
   }
   return Buffer.from(result);
 }
 
 export function readdirSync(path: string, options?: any) {
-  const client = getSabClient();
-  const result = client.call(sabcom.SAB_OP_READ_DIR, resolvePath(path));
-  const json = new TextDecoder().decode(result);
-  const entries = JSON.parse(json);
+  const fs = getFs();
+  const entries = fs.readDirSync(resolvePath(path));
 
   if (options?.withFileTypes) {
     return entries.map((e: any) => ({
@@ -66,54 +56,72 @@ export function writeFileSync(
   data: string | Uint8Array,
   options?: any,
 ) {
-  const client = getSabClient();
-  // TODO: handle binary data properly
-  const content =
-    typeof data === "string" ? data : new TextDecoder().decode(data);
-  const payload = JSON.stringify({ path: resolvePath(path), data: content });
-  client.call(sabcom.SAB_OP_WRITE_FILE, payload);
+  const fs = getFs();
+  let content: Uint8Array;
+  if (typeof data === "string") {
+    content = new TextEncoder().encode(data);
+  } else {
+    content = data;
+  }
+  fs.writeSync(resolvePath(path), content);
 }
 
 export function mkdirSync(path: string, options?: any) {
-  const client = getSabClient();
+  const fs = getFs();
   const recursive = options?.recursive || false;
-  const payload = JSON.stringify({ path: resolvePath(path), recursive });
-  client.call(sabcom.SAB_OP_MKDIR, payload);
+  if (recursive) {
+    fs.createDirAllSync(resolvePath(path));
+  } else {
+    fs.createDirSync(resolvePath(path));
+  }
 }
 
 export function rmSync(path: string, options?: any) {
-  const client = getSabClient();
+  const fs = getFs();
   const recursive = options?.recursive || false;
-  const payload = JSON.stringify({ path: resolvePath(path), recursive });
-  client.call(sabcom.SAB_OP_RM, payload);
+  if (recursive) {
+    fs.removeDirSync(resolvePath(path), true);
+  } else {
+    fs.removeFileSync(resolvePath(path));
+  }
 }
 
 export function rmdirSync(path: string, options?: any) {
-  const client = getSabClient();
+  const fs = getFs();
   const recursive = options?.recursive || false;
-  const payload = JSON.stringify({ path: resolvePath(path), recursive });
-  client.call(sabcom.SAB_OP_RMDIR, payload);
+  fs.removeDirSync(resolvePath(path), recursive);
 }
 
 export function copyFileSync(src: string, dst: string) {
-  const client = getSabClient();
-  const payload = JSON.stringify({
-    src: resolvePath(src),
-    dst: resolvePath(dst),
-  });
-  client.call(sabcom.SAB_OP_COPY_FILE, payload);
+  const fs = getFs();
+  fs.copyFileSync(resolvePath(src), resolvePath(dst));
 }
 
 export function statSync(p: string) {
-  const client = getSabClient();
-  const struct = client.callStat(resolvePath(p));
+  const fs = getFs();
+  const metadata = fs.metadataSync(resolvePath(p));
+
+  let type, size;
+  // @ts-ignore
+  if (typeof metadata.toJSON === "function") {
+    // @ts-ignore
+    const json = metadata.toJSON();
+    type = json.type;
+    size = json.file_size;
+  } else {
+    // @ts-ignore
+    type = metadata.type;
+    // @ts-ignore
+    size = metadata.file_size;
+  }
+
   return new Stats({
-    type: struct.type === sabcom.STAT_TYPE_DIR ? "directory" : "file",
-    size: Number(struct.size),
-    atimeMs: struct.atimeMs,
-    mtimeMs: struct.mtimeMs,
-    ctimeMs: struct.ctimeMs,
-    birthtimeMs: struct.birthtimeMs,
+    type: type === "directory" ? "directory" : "file",
+    size: Number(size || 0),
+    atimeMs: Date.now(),
+    mtimeMs: Date.now(),
+    ctimeMs: Date.now(),
+    birthtimeMs: Date.now(),
   });
 }
 
