@@ -1,5 +1,5 @@
 (globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([typeof document === "object" ? document.currentScript : undefined,
-12, ((__turbopack_context__) => {
+67, ((__turbopack_context__) => {
 "use strict";
 
 async function importUrl(url) {
@@ -25,4 +25,4 @@ __turbopack_context__.s([
 }),
 ]);
 
-//# sourceMappingURL=dynamic_import_input_index_ts_403d7278.js.map
+//# sourceMappingURL=dynamic_import_very-dynamic_input_index_ts_570ff46a.js.map
