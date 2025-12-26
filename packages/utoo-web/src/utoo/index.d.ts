@@ -1,9 +1,9 @@
 /* tslint:disable */
 /* eslint-disable */
-export function registerWorkerScheduler(creator: Function, terminator: Function): void;
-export function workerCreated(worker_id: number): void;
 export function init_pack(): void;
 export function initLogFilter(filter: string): void;
+export function registerWorkerScheduler(creator: Function, terminator: Function): void;
+export function workerCreated(worker_id: number): void;
 export function recvTaskMessageInWorker(worker_id: number): Promise<WasmTaskMessage>;
 export function sendTaskMessage(message: any): Promise<void>;
 /**
@@ -52,10 +52,18 @@ export class Project {
   [Symbol.dispose](): void;
   static createDir(path: string): Promise<void>;
   static removeDir(path: string, recursive: boolean): Promise<void>;
+  static writeSync(path: string, content: Uint8Array): void;
   static removeFile(path: string): Promise<void>;
   static writeString(path: string, content: string): Promise<void>;
+  static metadataSync(path: string): Metadata;
+  static readDirSync(path: string): DirEntry[];
+  static copyFileSync(src: string, dst: string): void;
   static createDirAll(path: string): Promise<void>;
   static readToString(path: string): Promise<string>;
+  static createDirSync(path: string): void;
+  static removeDirSync(path: string, recursive: boolean): void;
+  static removeFileSync(path: string): void;
+  static createDirAllSync(path: string): void;
   /**
    * Generate package-lock.json by resolving dependencies.
    *
@@ -84,6 +92,7 @@ export class Project {
   static metadata(path: string): Promise<Metadata>;
   static readDir(path: string): Promise<DirEntry[]>;
   static copyFile(src: string, dst: string): Promise<void>;
+  static readSync(path: string): Uint8Array;
   static readonly cwd: string;
 }
 export class WasmTaskMessage {
@@ -117,6 +126,8 @@ export class WebWorkerTermination {
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
+  readonly initLogFilter: (a: number, b: number) => void;
+  readonly init_pack: () => void;
   readonly registerWorkerScheduler: (a: any, b: any) => void;
   readonly workerCreated: (a: number) => void;
   readonly __wbg_direntry_free: (a: number, b: number) => void;
@@ -132,25 +143,32 @@ export interface InitOutput {
   readonly __wbg_set_metadata_type: (a: number, b: number) => void;
   readonly project_build: () => any;
   readonly project_copyFile: (a: number, b: number, c: number, d: number) => any;
+  readonly project_copyFileSync: (a: number, b: number, c: number, d: number) => [number, number];
   readonly project_createDir: (a: number, b: number) => any;
   readonly project_createDirAll: (a: number, b: number) => any;
+  readonly project_createDirAllSync: (a: number, b: number) => [number, number];
+  readonly project_createDirSync: (a: number, b: number) => [number, number];
   readonly project_cwd: () => [number, number];
   readonly project_deps: (a: number, b: number, c: number) => any;
   readonly project_gzip: (a: any) => any;
   readonly project_init: (a: number, b: number) => void;
   readonly project_install: (a: number, b: number, c: number) => any;
   readonly project_metadata: (a: number, b: number) => any;
+  readonly project_metadataSync: (a: number, b: number) => [number, number, number];
   readonly project_read: (a: number, b: number) => any;
   readonly project_readDir: (a: number, b: number) => any;
+  readonly project_readDirSync: (a: number, b: number) => [number, number, number, number];
+  readonly project_readSync: (a: number, b: number) => [number, number, number];
   readonly project_readToString: (a: number, b: number) => any;
   readonly project_removeDir: (a: number, b: number, c: number) => any;
+  readonly project_removeDirSync: (a: number, b: number, c: number) => [number, number];
   readonly project_removeFile: (a: number, b: number) => any;
+  readonly project_removeFileSync: (a: number, b: number) => [number, number];
   readonly project_setCwd: (a: number, b: number) => void;
   readonly project_sigMd5: (a: number, b: number) => any;
   readonly project_write: (a: number, b: number, c: number, d: number) => any;
   readonly project_writeString: (a: number, b: number, c: number, d: number) => any;
-  readonly initLogFilter: (a: number, b: number) => void;
-  readonly init_pack: () => void;
+  readonly project_writeSync: (a: number, b: number, c: number, d: number) => [number, number];
   readonly rust_mi_get_default_heap: () => number;
   readonly rust_mi_get_thread_id: () => number;
   readonly rust_mi_set_default_heap: (a: number) => void;
@@ -185,13 +203,14 @@ export interface InitOutput {
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __wbindgen_export_7: WebAssembly.Table;
   readonly __externref_drop_slice: (a: number, b: number) => void;
-  readonly closure440_externref_shim: (a: number, b: number, c: any) => void;
+  readonly __externref_table_dealloc: (a: number) => void;
+  readonly closure118182_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure115640_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure115637_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure210_externref_shim: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen__convert__closures_____invoke__h13262edabaa325f0: (a: number, b: number) => void;
-  readonly closure115335_externref_shim: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen__convert__closures_____invoke__h2ce973260553dde0: (a: number, b: number) => void;
-  readonly closure117877_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure115338_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure118014_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure118318_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_thread_destroy: (a?: number, b?: number, c?: number) => void;
   readonly __wbindgen_start: (a: number) => void;
 }
