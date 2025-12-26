@@ -26,6 +26,24 @@ use std::sync::Once;
 static GLOBAL_PACK_PROJECT: RwLock<Option<Arc<PackProject>>> = RwLock::new(None);
 static GLOBAL_THREAD_URL: RwLock<Option<String>> = RwLock::new(None);
 
+fn block_on<T>(fut: impl std::future::Future<Output = T> + Send + 'static) -> Result<T, JsError>
+where
+    T: Send + 'static,
+{
+    let (sender, receiver) = oneshot::channel();
+    let rt = crate::tokio_runtime::TOKIO_RUNTIME
+        .get()
+        .ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
+
+    rt.spawn(async move {
+        let _ = sender.send(fut.await);
+    });
+
+    receiver
+        .recv()
+        .map_err(|e| JsError::new(&format!("Recv error: {}", e)))
+}
+
 #[wasm_bindgen]
 pub struct Project;
 
@@ -365,23 +383,15 @@ impl Project {
 
     #[wasm_bindgen(js_name = readSync)]
     pub fn read_sync(path: String) -> Result<js_sys::Uint8Array, JsError> {
-        let (sender, receiver) = oneshot::channel();
-        let rt = crate::tokio_runtime::TOKIO_RUNTIME
-            .get()
-            .ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
-
         let path_clone = path.clone();
-        rt.spawn(async move {
-            let result = turbo_tasks_fs::wasm_fs_offload::CLIENT
+        let fut = async move {
+            turbo_tasks_fs::wasm_fs_offload::CLIENT
                 .read(&path_clone)
-                .await;
-            let _ = sender.send(result);
-        });
+                .await
+        };
 
-        let bytes = receiver
-            .recv()
-            .context("Recv error")
-            .and_then(|res| res.with_context(|| format!("Failed to read file: {}", path)))
+        let bytes = block_on(fut)?
+            .with_context(|| format!("Failed to read file: {}", path))
             .map_err(to_js_error)?;
 
         Ok(js_sys::Uint8Array::from(&bytes[..]))
@@ -389,23 +399,15 @@ impl Project {
 
     #[wasm_bindgen(js_name = readDirSync)]
     pub fn read_dir_sync(path: String) -> Result<Vec<DirEntry>, JsError> {
-        let (sender, receiver) = oneshot::channel();
-        let rt = crate::tokio_runtime::TOKIO_RUNTIME
-            .get()
-            .ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
-
         let path_clone = path.clone();
-        rt.spawn(async move {
-            let result = turbo_tasks_fs::wasm_fs_offload::CLIENT
+        let fut = async move {
+            turbo_tasks_fs::wasm_fs_offload::CLIENT
                 .read_dir(&path_clone)
-                .await;
-            let _ = sender.send(result);
-        });
+                .await
+        };
 
-        let read_dir = receiver
-            .recv()
-            .context("Recv error")
-            .and_then(|res| res.with_context(|| format!("Failed to read directory: {}", path)))
+        let read_dir = block_on(fut)?
+            .with_context(|| format!("Failed to read directory: {}", path))
             .map_err(to_js_error)?;
 
         let ret = read_dir
@@ -422,23 +424,15 @@ impl Project {
 
     #[wasm_bindgen(js_name = writeSync)]
     pub fn write_sync(path: String, content: Vec<u8>) -> Result<(), JsError> {
-        let (sender, receiver) = oneshot::channel();
-        let rt = crate::tokio_runtime::TOKIO_RUNTIME
-            .get()
-            .ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
-
         let path_clone = path.clone();
-        rt.spawn(async move {
-            let result = turbo_tasks_fs::wasm_fs_offload::CLIENT
+        let fut = async move {
+            turbo_tasks_fs::wasm_fs_offload::CLIENT
                 .write(&path_clone, &content)
-                .await;
-            let _ = sender.send(result);
-        });
+                .await
+        };
 
-        receiver
-            .recv()
-            .context("Recv error")
-            .and_then(|res| res.with_context(|| format!("Failed to write file: {}", path)))
+        block_on(fut)?
+            .with_context(|| format!("Failed to write file: {}", path))
             .map_err(to_js_error)?;
 
         Ok(())
@@ -446,48 +440,31 @@ impl Project {
 
     #[wasm_bindgen(js_name = createDirSync)]
     pub fn create_dir_sync(path: String) -> Result<(), JsError> {
-        let (sender, receiver) = oneshot::channel();
-        let rt = crate::tokio_runtime::TOKIO_RUNTIME
-            .get()
-            .ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
-
         let path_clone = path.clone();
-        rt.spawn(async move {
-            let result = turbo_tasks_fs::wasm_fs_offload::CLIENT
+        let fut = async move {
+            turbo_tasks_fs::wasm_fs_offload::CLIENT
                 .create_dir(&path_clone)
-                .await;
-            let _ = sender.send(result);
-        });
+                .await
+        };
 
-        receiver
-            .recv()
-            .context("Recv error")
-            .and_then(|res| res.with_context(|| format!("Failed to create directory: {}", path)))
+        block_on(fut)?
+            .with_context(|| format!("Failed to create directory: {}", path))
             .map_err(to_js_error)?;
+
         Ok(())
     }
 
     #[wasm_bindgen(js_name = createDirAllSync)]
     pub fn create_dir_all_sync(path: String) -> Result<(), JsError> {
-        let (sender, receiver) = oneshot::channel();
-        let rt = crate::tokio_runtime::TOKIO_RUNTIME
-            .get()
-            .ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
-
         let path_clone = path.clone();
-        rt.spawn(async move {
-            let result = turbo_tasks_fs::wasm_fs_offload::CLIENT
+        let fut = async move {
+            turbo_tasks_fs::wasm_fs_offload::CLIENT
                 .create_dir_all(&path_clone)
-                .await;
-            let _ = sender.send(result);
-        });
+                .await
+        };
 
-        receiver
-            .recv()
-            .context("Recv error")
-            .and_then(|res| {
-                res.with_context(|| format!("Failed to create directory recursively: {}", path))
-            })
+        block_on(fut)?
+            .with_context(|| format!("Failed to create directory recursively: {}", path))
             .map_err(to_js_error)?;
 
         Ok(())
@@ -495,33 +472,20 @@ impl Project {
 
     #[wasm_bindgen(js_name = copyFileSync)]
     pub fn copy_file_sync(src: String, dst: String) -> Result<(), JsError> {
-        let (sender, receiver) = oneshot::channel();
-        let rt = crate::tokio_runtime::TOKIO_RUNTIME
-            .get()
-            .ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
-
         let src_clone = src.clone();
         let dst_clone = dst.clone();
-        rt.spawn(async move {
+        let fut = async move {
             // Client doesn't seem to expose copy, so we implement it manually
-            let result = async {
-                let content = turbo_tasks_fs::wasm_fs_offload::CLIENT
-                    .read(&src_clone)
-                    .await?;
-                turbo_tasks_fs::wasm_fs_offload::CLIENT
-                    .write(&dst_clone, &content)
-                    .await
-            }
-            .await;
-            let _ = sender.send(result);
-        });
+            let content = turbo_tasks_fs::wasm_fs_offload::CLIENT
+                .read(&src_clone)
+                .await?;
+            turbo_tasks_fs::wasm_fs_offload::CLIENT
+                .write(&dst_clone, &content)
+                .await
+        };
 
-        receiver
-            .recv()
-            .context("Recv error")
-            .and_then(|res| {
-                res.with_context(|| format!("Failed to copy file from {} to {}", src, dst))
-            })
+        block_on(fut)?
+            .with_context(|| format!("Failed to copy file from {} to {}", src, dst))
             .map_err(to_js_error)?;
 
         Ok(())
@@ -529,23 +493,15 @@ impl Project {
 
     #[wasm_bindgen(js_name = removeFileSync)]
     pub fn remove_file_sync(path: String) -> Result<(), JsError> {
-        let (sender, receiver) = oneshot::channel();
-        let rt = crate::tokio_runtime::TOKIO_RUNTIME
-            .get()
-            .ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
-
         let path_clone = path.clone();
-        rt.spawn(async move {
-            let result = turbo_tasks_fs::wasm_fs_offload::CLIENT
+        let fut = async move {
+            turbo_tasks_fs::wasm_fs_offload::CLIENT
                 .remove_file(&path_clone)
-                .await;
-            let _ = sender.send(result);
-        });
+                .await
+        };
 
-        receiver
-            .recv()
-            .context("Recv error")
-            .and_then(|res| res.with_context(|| format!("Failed to remove file: {}", path)))
+        block_on(fut)?
+            .with_context(|| format!("Failed to remove file: {}", path))
             .map_err(to_js_error)?;
 
         Ok(())
@@ -553,14 +509,9 @@ impl Project {
 
     #[wasm_bindgen(js_name = removeDirSync)]
     pub fn remove_dir_sync(path: String, recursive: bool) -> Result<(), JsError> {
-        let (sender, receiver) = oneshot::channel();
-        let rt = crate::tokio_runtime::TOKIO_RUNTIME
-            .get()
-            .ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
-
         let path_clone = path.clone();
-        rt.spawn(async move {
-            let result = if recursive {
+        let fut = async move {
+            if recursive {
                 turbo_tasks_fs::wasm_fs_offload::CLIENT
                     .remove_dir_all(&path_clone)
                     .await
@@ -568,14 +519,11 @@ impl Project {
                 turbo_tasks_fs::wasm_fs_offload::CLIENT
                     .remove_dir(&path_clone)
                     .await
-            };
-            let _ = sender.send(result);
-        });
+            }
+        };
 
-        receiver
-            .recv()
-            .context("Recv error")
-            .and_then(|res| res.with_context(|| format!("Failed to remove directory: {}", path)))
+        block_on(fut)?
+            .with_context(|| format!("Failed to remove directory: {}", path))
             .map_err(to_js_error)?;
 
         Ok(())
@@ -583,26 +531,16 @@ impl Project {
 
     #[wasm_bindgen(js_name = metadataSync)]
     pub fn metadata_sync(path: String) -> Result<Metadata, JsError> {
-        let (sender, receiver) = oneshot::channel();
-        let rt = crate::tokio_runtime::TOKIO_RUNTIME
-            .get()
-            .ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
-
         let path_clone = path.clone();
-        rt.spawn(async move {
-            let result = turbo_tasks_fs::wasm_fs_offload::CLIENT
+        let fut = async move {
+            turbo_tasks_fs::wasm_fs_offload::CLIENT
                 .metadata(&path_clone)
-                .await;
-            let _ = sender.send(result);
-        });
+                .await
+        };
 
-        receiver
-            .recv()
-            .context("Recv error")
-            .and_then(|res| {
-                res.and_then(Metadata::try_from)
-                    .with_context(|| format!("Failed to get metadata: {}", path))
-            })
+        block_on(fut)?
+            .and_then(Metadata::try_from)
+            .with_context(|| format!("Failed to get metadata: {}", path))
             .map_err(to_js_error)
     }
 }
