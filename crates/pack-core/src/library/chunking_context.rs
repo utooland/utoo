@@ -10,8 +10,8 @@ use turbo_tasks::{
 use turbo_tasks_fs::FileSystemPath;
 use turbo_tasks_hash::{DeterministicHash, Xxh3Hash64Hasher, encode_hex};
 use turbopack_browser::chunking_context::{
-    clean_separators, match_content_hash_placeholder, match_name_placeholder,
-    replace_content_hash_placeholder, replace_name_placeholder,
+    match_content_hash_placeholder, match_name_placeholder, replace_content_hash_placeholder,
+    replace_name_placeholder,
 };
 use turbopack_core::{
     asset::Asset,
@@ -24,7 +24,7 @@ use turbopack_core::{
         module_id_strategies::{DevModuleIdStrategy, ModuleIdStrategy},
     },
     environment::Environment,
-    ident::AssetIdent,
+    ident::{AssetIdent, clean_separators},
     module::Module,
     module_graph::{
         ModuleGraph,
