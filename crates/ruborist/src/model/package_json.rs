@@ -50,9 +50,9 @@ pub struct PackageJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engines: Option<HashMap<String, String>>,
 
-    /// Binary definitions
+    /// Binary definitions (string or object)
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bin: Option<BinConfig>,
+    pub bin: Option<Value>,
 
     /// Package license
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -103,24 +103,23 @@ impl WorkspacesConfig {
     }
 }
 
-/// Binary configuration (can be string or map).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum BinConfig {
-    /// Single binary with package name
-    Single(String),
-    /// Multiple binaries
-    Map(HashMap<String, String>),
-}
-
-impl BinConfig {
-    /// Get all binary entries as (name, path) pairs.
-    pub fn entries(&self, package_name: &str) -> Vec<(String, String)> {
-        match self {
-            BinConfig::Single(path) => vec![(package_name.to_string(), path.clone())],
-            BinConfig::Map(map) => map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
-        }
-    }
+/// Parse bin field from JSON Value.
+/// Handles both string and object formats, filters out empty paths.
+pub fn parse_bin_field(bin: &Value, package_name: &str) -> Vec<(String, String)> {
+    bin.as_object()
+        .map(|obj| {
+            obj.iter()
+                .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string()))
+                .collect()
+        })
+        .or_else(|| {
+            bin.as_str()
+                .map(|s| vec![(package_name.to_string(), s.to_string())])
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(_, path)| !path.is_empty())
+        .collect()
 }
 
 /// License configuration (can be string or object).
@@ -216,6 +215,14 @@ impl PackageJson {
     pub fn integrity(&self) -> Option<&str> {
         self.dist.as_ref().and_then(|d| d.integrity.as_deref())
     }
+
+    /// Get binary entries as (name, path) pairs.
+    pub fn bin_entries(&self) -> Vec<(String, String)> {
+        self.bin
+            .as_ref()
+            .map(|bin| parse_bin_field(bin, &self.name))
+            .unwrap_or_default()
+    }
 }
 
 #[cfg(test)]
@@ -275,15 +282,28 @@ mod tests {
         });
 
         let pkg = PackageJson::from_value(&value).unwrap();
-        let entries = pkg.bin.unwrap().entries("my-cli");
         assert_eq!(
-            entries,
+            pkg.bin_entries(),
             vec![("my-cli".to_string(), "./cli.js".to_string())]
         );
     }
 
     #[test]
     fn test_parse_bin_map() {
+        // Single key with custom name
+        let value = json!({
+            "name": "my-cli",
+            "bin": {
+                "a": "./index.js"
+            }
+        });
+        let pkg = PackageJson::from_value(&value).unwrap();
+        assert_eq!(
+            pkg.bin_entries(),
+            vec![("a".to_string(), "./index.js".to_string())]
+        );
+
+        // Multiple keys
         let value = json!({
             "name": "my-tools",
             "bin": {
@@ -291,10 +311,43 @@ mod tests {
                 "tool2": "./bin/tool2.js"
             }
         });
-
         let pkg = PackageJson::from_value(&value).unwrap();
-        let entries = pkg.bin.unwrap().entries("my-tools");
+        let entries = pkg.bin_entries();
         assert_eq!(entries.len(), 2);
+        assert!(
+            entries
+                .iter()
+                .any(|(k, v)| k == "tool1" && v == "./bin/tool1.js")
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|(k, v)| k == "tool2" && v == "./bin/tool2.js")
+        );
+    }
+
+    #[test]
+    fn test_parse_bin_empty_filtered() {
+        // Empty bin string should be filtered out
+        let value = json!({
+            "name": "my-cli",
+            "bin": ""
+        });
+        let pkg = PackageJson::from_value(&value).unwrap();
+        assert_eq!(pkg.bin_entries().len(), 0);
+
+        // Empty bin in map should be filtered out
+        let value = json!({
+            "name": "my-tools",
+            "bin": {
+                "tool1": "./bin/tool1.js",
+                "empty": ""
+            }
+        });
+        let pkg = PackageJson::from_value(&value).unwrap();
+        let entries = pkg.bin_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, "tool1");
     }
 
     #[test]

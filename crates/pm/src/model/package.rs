@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use std::env;
 use std::path::{Path, PathBuf};
+use utoo_ruborist::model::package_json::parse_bin_field;
 
 use crate::util::json::load_package_json_from_path;
 use crate::{service::script::ScriptService, util::linker::link};
@@ -67,25 +68,11 @@ impl PackageInfo {
             .ok_or_else(|| anyhow::anyhow!("Failed to get package name from package.json"))?
             .to_string();
 
-        // Parse binary files
-        let bin_files = if let Some(bin) = data.get("bin") {
-            if bin.is_object() {
-                bin.as_object()
-                    .map(|obj| {
-                        obj.iter()
-                            .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            } else if bin.is_string() {
-                let bin_path = bin.as_str().unwrap_or_default().to_string();
-                vec![(name.clone(), bin_path)]
-            } else {
-                Vec::new()
-            }
-        } else {
-            Vec::new()
-        };
+        // Parse binary files (empty bin paths are filtered out)
+        let bin_files = data
+            .get("bin")
+            .map(|bin| parse_bin_field(bin, &name))
+            .unwrap_or_default();
 
         // Parse scripts
         let scripts = Scripts {

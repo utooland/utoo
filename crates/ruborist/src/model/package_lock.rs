@@ -102,18 +102,6 @@ impl LockPackage {
             .unwrap_or_else(|| "unknown".to_string())
     }
 
-    /// Parse bin files from the bin field.
-    pub fn parse_bin_files(&self, package_name: &str) -> Vec<(String, String)> {
-        match &self.bin {
-            Some(serde_json::Value::Object(obj)) => obj
-                .iter()
-                .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string()))
-                .collect(),
-            Some(serde_json::Value::String(s)) => vec![(package_name.to_string(), s.clone())],
-            _ => Vec::new(),
-        }
-    }
-
     /// Check if package has install scripts.
     pub fn has_install_scripts(&self) -> bool {
         self.has_install_script.unwrap_or(false)
@@ -515,28 +503,6 @@ mod tests {
             "@scope/package"
         );
         assert_eq!(package.get_name(""), "root");
-    }
-
-    #[test]
-    fn test_parse_bin_files() {
-        let mut package = LockPackage {
-            bin: Some(json!({"cli": "bin/cli.js", "tool": "bin/tool.js"})),
-            ..LockPackage::default()
-        };
-
-        let bin_files = package.parse_bin_files("test-package");
-        assert_eq!(bin_files.len(), 2);
-
-        package.bin = Some(json!("index.js"));
-        let bin_files = package.parse_bin_files("test-package");
-        assert_eq!(bin_files.len(), 1);
-        assert_eq!(
-            bin_files[0],
-            ("test-package".to_string(), "index.js".to_string())
-        );
-
-        package.bin = None;
-        assert_eq!(package.parse_bin_files("test-package").len(), 0);
     }
 
     #[test]
