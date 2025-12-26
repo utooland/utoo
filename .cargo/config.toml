@@ -28,7 +28,7 @@ rustflags = [
   "tokio_unstable",
   "--cfg",
   'getrandom_backend="wasm_js"',
-  "-Ctarget-feature=+atomics,+bulk-memory,+mutable-globals",
+  "-Ctarget-feature=+atomics,+bulk-memory,+crt-static,+exception-handling,+extended-const,+multivalue,+mutable-globals,+nontrapping-fptoint,+reference-types,+relaxed-simd,+sign-ext,+simd128,+tail-call",
   "-Clink-arg=--shared-memory",
   "-Clink-arg=--import-memory",
   "-Clink-arg=--initial-memory=67108864",

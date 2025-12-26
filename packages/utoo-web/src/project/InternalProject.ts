@@ -1,6 +1,4 @@
-import * as comlink from "comlink";
 import {
-  Binding,
   DepsOptions,
   PackFile,
   ProjectEndpoint,
