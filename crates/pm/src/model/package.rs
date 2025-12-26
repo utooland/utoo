@@ -73,13 +73,24 @@ impl PackageInfo {
                 bin.as_object()
                     .map(|obj| {
                         obj.iter()
-                            .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string()))
+                            .filter_map(|(k, v)| {
+                                let path = v.as_str().unwrap_or_default().to_string();
+                                if path.is_empty() {
+                                    None
+                                } else {
+                                    Some((k.clone(), path))
+                                }
+                            })
                             .collect()
                     })
                     .unwrap_or_default()
             } else if bin.is_string() {
                 let bin_path = bin.as_str().unwrap_or_default().to_string();
-                vec![(name.clone(), bin_path)]
+                if bin_path.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![(name.clone(), bin_path)]
+                }
             } else {
                 Vec::new()
             }
@@ -231,5 +242,56 @@ mod tests {
         // Test PackageInfo::from_path with invalid JSON
         let result = PackageInfo::from_path(&package_dir).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_package_info_with_empty_bin_string() {
+        // Create a temporary directory
+        let temp_dir = TempDir::new().unwrap();
+        let package_dir = temp_dir.path().join("test-package");
+        fs::create_dir(&package_dir).unwrap();
+
+        // Create a package.json with empty bin string
+        let package_json = r#"
+        {
+            "name": "test-package",
+            "version": "1.0.0",
+            "bin": ""
+        }"#;
+        fs::write(package_dir.join("package.json"), package_json).unwrap();
+
+        // Test PackageInfo::from_path - should not fail and should have no bin_files
+        let package_info = PackageInfo::from_path(&package_dir).await.unwrap();
+
+        assert_eq!(package_info.name, "test-package");
+        assert_eq!(package_info.bin_files.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_package_info_with_empty_bin_object_values() {
+        // Create a temporary directory
+        let temp_dir = TempDir::new().unwrap();
+        let package_dir = temp_dir.path().join("test-package");
+        fs::create_dir(&package_dir).unwrap();
+
+        // Create a package.json with bin object containing empty values
+        let package_json = r#"
+        {
+            "name": "test-package",
+            "version": "1.0.0",
+            "bin": {
+                "empty-cli": "",
+                "valid-cli": "./bin/cli.js"
+            }
+        }"#;
+        fs::write(package_dir.join("package.json"), package_json).unwrap();
+
+        // Test PackageInfo::from_path - should filter out empty bin entries
+        let package_info = PackageInfo::from_path(&package_dir).await.unwrap();
+
+        assert_eq!(package_info.name, "test-package");
+        assert_eq!(package_info.bin_files.len(), 1);
+        assert_eq!(package_info.bin_files[0].0, "valid-cli");
+        assert_eq!(package_info.bin_files[0].1, "./bin/cli.js");
     }
 }
