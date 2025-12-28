@@ -95,8 +95,8 @@ export class WasmTaskMessage {
   private constructor();
   free(): void;
   [Symbol.dispose](): void;
+  readonly data: Uint8Array;
   taskId: number;
-  data: string;
 }
 
 export class WebWorkerCreation {
@@ -177,10 +177,10 @@ export interface InitOutput {
   readonly project_removeFile: (a: number, b: number) => any;
   readonly project_removeFileSync: (a: number, b: number) => [number, number];
   readonly project_setCwd: (a: number, b: number) => void;
-  readonly project_sigMd5: (a: number, b: number) => any;
-  readonly project_write: (a: number, b: number, c: number, d: number) => any;
+  readonly project_sigMd5: (a: any) => any;
+  readonly project_write: (a: number, b: number, c: any) => any;
   readonly project_writeString: (a: number, b: number, c: number, d: number) => any;
-  readonly project_writeSync: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly project_writeSync: (a: number, b: number, c: any) => [number, number];
   readonly initLogFilter: (a: number, b: number) => void;
   readonly init_pack: () => void;
   readonly registerWorkerScheduler: (a: any, b: any) => void;
@@ -188,14 +188,12 @@ export interface InitOutput {
   readonly rust_mi_get_default_heap: () => number;
   readonly rust_mi_get_thread_id: () => number;
   readonly rust_mi_set_default_heap: (a: number) => void;
-  readonly __wbg_get_wasmtaskmessage_data: (a: number) => [number, number];
   readonly __wbg_get_wasmtaskmessage_taskId: (a: number) => number;
   readonly __wbg_get_webworkercreation_options: (a: number) => number;
   readonly __wbg_get_webworkeroptions_cwd: (a: number) => [number, number];
   readonly __wbg_get_webworkeroptions_filename: (a: number) => [number, number];
   readonly __wbg_get_webworkertermination_options: (a: number) => number;
   readonly __wbg_get_webworkertermination_workerId: (a: number) => number;
-  readonly __wbg_set_wasmtaskmessage_data: (a: number, b: number, c: number) => void;
   readonly __wbg_set_wasmtaskmessage_taskId: (a: number, b: number) => void;
   readonly __wbg_set_webworkercreation_options: (a: number, b: number) => void;
   readonly __wbg_set_webworkeroptions_cwd: (a: number, b: number, c: number) => void;
@@ -208,20 +206,21 @@ export interface InitOutput {
   readonly __wbg_webworkertermination_free: (a: number, b: number) => void;
   readonly recvTaskMessageInWorker: (a: number) => any;
   readonly sendTaskMessage: (a: any) => any;
+  readonly wasmtaskmessage_data: (a: number) => any;
   readonly __wbg_createsyncaccesshandleoptions_free: (a: number, b: number) => void;
   readonly wasm_thread_entry_point: (a: number) => void;
-  readonly wasm_bindgen__convert__closures_____invoke__hce460cf0a813c454: (a: number, b: number) => void;
-  readonly wasm_bindgen__closure__destroy__hc14e8607e23cebd7: (a: number, b: number) => void;
   readonly wasm_bindgen__convert__closures_____invoke__hbd325ba31743329c: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen__closure__destroy__h87d652f0494817e1: (a: number, b: number) => void;
   readonly wasm_bindgen__convert__closures_____invoke__h12ad3f2e11ef8f1f: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen__closure__destroy__ha0c175f92395ef9a: (a: number, b: number) => void;
-  readonly wasm_bindgen__convert__closures_____invoke__h05951ccee93604a9: (a: number, b: number, c: any) => void;
-  readonly wasm_bindgen__closure__destroy__hc95bb6053e4d238d: (a: number, b: number) => void;
-  readonly wasm_bindgen__convert__closures________invoke__hc572a1bf691b2f02: (a: number, b: number, c: any) => void;
-  readonly wasm_bindgen__closure__destroy__h79b136ee1664aaaa: (a: number, b: number) => void;
   readonly wasm_bindgen__convert__closures_____invoke__h1fc3e28920f04101: (a: number, b: number) => void;
   readonly wasm_bindgen__closure__destroy__h697219d9b2418ea3: (a: number, b: number) => void;
+  readonly wasm_bindgen__convert__closures________invoke__hc572a1bf691b2f02: (a: number, b: number, c: any) => void;
+  readonly wasm_bindgen__closure__destroy__h79b136ee1664aaaa: (a: number, b: number) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__hce460cf0a813c454: (a: number, b: number) => void;
+  readonly wasm_bindgen__closure__destroy__hc14e8607e23cebd7: (a: number, b: number) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__h05951ccee93604a9: (a: number, b: number, c: any) => void;
+  readonly wasm_bindgen__closure__destroy__hc95bb6053e4d238d: (a: number, b: number) => void;
   readonly wasm_bindgen__convert__closures_____invoke__heb9448f3005917b6: (a: number, b: number, c: any, d: any) => void;
   readonly memory: WebAssembly.Memory;
   readonly __wbindgen_malloc: (a: number, b: number) => number;

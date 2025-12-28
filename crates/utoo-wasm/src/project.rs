@@ -75,7 +75,8 @@ impl Project {
 
     /// Calculate MD5 hash of byte content (async for better thread scheduling)
     #[wasm_bindgen(js_name = sigMd5)]
-    pub async fn sig_md5(content: Vec<u8>) -> Result<String, JsError> {
+    pub async fn sig_md5(content: js_sys::Uint8Array) -> Result<String, JsError> {
+        let content = content.to_vec();
         let rt = TOKIO_RUNTIME
             .get()
             .ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
@@ -285,8 +286,9 @@ impl Project {
     }
 
     #[wasm_bindgen]
-    pub async fn write(path: &str, content: &[u8]) -> Result<(), JsError> {
-        opfs_project::write(path, content)
+    pub async fn write(path: &str, content: js_sys::Uint8Array) -> Result<(), JsError> {
+        let content = content.to_vec();
+        opfs_project::write(path, &content)
             .await
             .with_context(|| format!("Failed to write file: {}", path))
             .map_err(to_js_error)?;
@@ -423,7 +425,8 @@ impl Project {
     }
 
     #[wasm_bindgen(js_name = writeSync)]
-    pub fn write_sync(path: String, content: Vec<u8>) -> Result<(), JsError> {
+    pub fn write_sync(path: String, content: js_sys::Uint8Array) -> Result<(), JsError> {
+        let content = content.to_vec();
         let path_clone = path.clone();
         let fut = async move {
             turbo_tasks_fs::wasm_fs_offload::CLIENT
