@@ -7,7 +7,7 @@
     "esm"
   ],
   "scripts": {
-    "install-toolchain": "cargo install wasm-bindgen-cli@0.2.104 && brew install binaryen llvm",
+    "install-toolchain": "cargo install wasm-bindgen-cli@0.2.106 && brew install binaryen llvm",
     "build-wasm": "cargo build -p utoo-wasm --target wasm32-unknown-unknown -Z build-std=panic_abort,std",
     "build-wasm:pm": "cargo build -p utoo-wasm --target wasm32-unknown-unknown --no-default-features -Z build-std=panic_abort,std",
     "bindgen-dev": "wasm-bindgen ../../target/wasm32-unknown-unknown/wasm-dev/utoo_wasm.wasm --out-dir src/utoo --out-name index --target web --debug --keep-debug --no-demangle",

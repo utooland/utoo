@@ -13,7 +13,8 @@ extend-exclude = [
     "crates/pack-core/js/src/loader-runner",
     "e2e/pm/**",
     "packages/utoo-web/src/webpackLoaders/nodePolyFillRaw",
-    "packages/utoo-web/src/webpackLoaders/workerContent.js"
+    "packages/utoo-web/src/webpackLoaders/workerContent.js",
+    "packages/utoo-web/src/utoo/index.d.ts"
 ]
 
 [type.sourcemap]
