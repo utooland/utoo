@@ -24,11 +24,6 @@ rustflags = [
 
 [target.wasm32-unknown-unknown]
 rustflags = [
-  "--cfg",
-  "tokio_unstable",
-  "--cfg",
-  'getrandom_backend="wasm_js"',
-  "-Ctarget-feature=+atomics,+bulk-memory,+crt-static,+exception-handling,+extended-const,+multivalue,+mutable-globals,+nontrapping-fptoint,+reference-types,+relaxed-simd,+sign-ext,+simd128,+tail-call",
   "-Clink-arg=--shared-memory",
   "-Clink-arg=--import-memory",
   "-Clink-arg=--initial-memory=67108864",
@@ -37,6 +32,21 @@ rustflags = [
   "-Clink-arg=--export=__tls_size",
   "-Clink-arg=--export=__tls_align",
   "-Clink-arg=--export=__tls_base",
+  "-Ctarget-feature=+atomics",
+  "-Ctarget-feature=+bulk-memory",
+  "-Ctarget-feature=+crt-static",
+  "-Ctarget-feature=+exception-handling",
+  "-Ctarget-feature=+extended-const",
+  "-Ctarget-feature=+multivalue",
+  "-Ctarget-feature=+mutable-globals",
+  "-Ctarget-feature=+nontrapping-fptoint",
+  "-Ctarget-feature=+reference-types",
+  "-Ctarget-feature=+relaxed-simd",
+  "-Ctarget-feature=+sign-ext",
+  "-Ctarget-feature=+simd128",
+  "-Ctarget-feature=+tail-call",
+  "--cfg=tokio_unstable",
+  "--cfg=getrandom_backend=\"wasm_js\"",
   "-Aunused",
 ]
 

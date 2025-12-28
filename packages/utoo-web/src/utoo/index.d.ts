@@ -209,10 +209,6 @@ export interface InitOutput {
   readonly wasmtaskmessage_data: (a: number) => any;
   readonly __wbg_createsyncaccesshandleoptions_free: (a: number, b: number) => void;
   readonly wasm_thread_entry_point: (a: number) => void;
-  readonly wasm_bindgen__convert__closures_____invoke__hbd325ba31743329c: (a: number, b: number, c: any) => void;
-  readonly wasm_bindgen__closure__destroy__h87d652f0494817e1: (a: number, b: number) => void;
-  readonly wasm_bindgen__convert__closures_____invoke__h12ad3f2e11ef8f1f: (a: number, b: number, c: any) => void;
-  readonly wasm_bindgen__closure__destroy__ha0c175f92395ef9a: (a: number, b: number) => void;
   readonly wasm_bindgen__convert__closures_____invoke__h1fc3e28920f04101: (a: number, b: number) => void;
   readonly wasm_bindgen__closure__destroy__h697219d9b2418ea3: (a: number, b: number) => void;
   readonly wasm_bindgen__convert__closures________invoke__hc572a1bf691b2f02: (a: number, b: number, c: any) => void;
@@ -221,6 +217,10 @@ export interface InitOutput {
   readonly wasm_bindgen__closure__destroy__hc14e8607e23cebd7: (a: number, b: number) => void;
   readonly wasm_bindgen__convert__closures_____invoke__h05951ccee93604a9: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen__closure__destroy__hc95bb6053e4d238d: (a: number, b: number) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__hbd325ba31743329c: (a: number, b: number, c: any) => void;
+  readonly wasm_bindgen__closure__destroy__h87d652f0494817e1: (a: number, b: number) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__h12ad3f2e11ef8f1f: (a: number, b: number, c: any) => void;
+  readonly wasm_bindgen__closure__destroy__ha0c175f92395ef9a: (a: number, b: number) => void;
   readonly wasm_bindgen__convert__closures_____invoke__heb9448f3005917b6: (a: number, b: number, c: any, d: any) => void;
   readonly memory: WebAssembly.Memory;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
