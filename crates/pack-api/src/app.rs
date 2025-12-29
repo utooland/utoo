@@ -298,7 +298,6 @@ impl AppEndpoint {
             self.project().client_compile_time_info().environment(),
             self.project().mode(),
             self.project().config(),
-            Vc::cell(false),
             Vc::cell(self.project().await?.watch.enable),
             self.project().pack_path().owned().await?,
         ))

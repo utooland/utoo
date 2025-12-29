@@ -10,7 +10,6 @@ use wasm::StaticWasmModuleType;
 
 pub mod css_modules;
 pub mod default_export_namer;
-pub mod dynamic_import_to_require;
 pub mod emotion;
 pub mod image;
 pub mod modularize_imports;
