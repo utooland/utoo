@@ -74,7 +74,8 @@ pub async fn get_library_chunking_context(
     };
 
     let output = config.output().await?;
-    // we need to disable all async chunk split by: https://github.com/utooland/next.js/blob/utoo/turbopack/crates/turbopack-core/src/chunk/chunk_group.rs#L54
+    // Use an EdgeWorker environment to disable async chunk splitting for library builds.
+    // This ensures the library is bundled as a single, self-contained file.
     let library_environment = Environment::new(ExecutionEnvironment::EdgeWorker(
         EdgeWorkerEnvironment {
             node_version: NodeJsVersion::default().resolved_cell(),
