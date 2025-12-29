@@ -42,7 +42,9 @@ type EsmImport = (
 ) => EsmNamespaceObject | Promise<EsmNamespaceObject>;
 type InvokeAsyncLoader = (moduleId: ModuleId) => Promise<Exports>;
 type EsmExport = (
-  exportGetters: Record<string, () => any>,
+  bindings: Array<
+    string | BindingTag | (() => unknown) | ((v: unknown) => void) | unknown
+  >,
   id: ModuleId | undefined,
 ) => void;
 type ExportValue = (value: any, id: ModuleId | undefined) => void;
@@ -56,12 +58,11 @@ type LoadChunkByUrl = (chunkUrl: ChunkUrl) => Promise<any> | undefined;
 
 type ModuleCache<M> = Record<ModuleId, M>;
 // TODO properly type values here
-type ModuleFactories = Record<ModuleId, Function>;
-// The value is an array with scope hoisting
-type CompressedModuleFactories = Record<
-  ModuleId,
-  Function | [Function, ModuleId[]]
->;
+type ModuleFactories = Map<ModuleId, Function>;
+// This is an alternating, non-empty module factory functions and module ids
+// [id1, id2..., factory1, id3, factory2, id4, id5, factory3]
+// There are multiple ids to support scope hoisting modules
+type CompressedModuleFactories = Array<ModuleId | Function>;
 
 type RelativeURL = (inputUrl: string) => void;
 type ResolvePathFromModule = (moduleId: string) => string;
@@ -91,13 +92,11 @@ type ExternalImport = (
 interface Module {
   exports: Function | Exports | Promise<Exports> | AsyncModulePromise;
   error: Error | undefined;
-  loaded: boolean;
   id: ModuleId;
   namespaceObject?:
     | EsmNamespaceObject
     | Promise<EsmNamespaceObject>
     | AsyncModulePromise<EsmNamespaceObject>;
-  [REEXPORTED_OBJECTS]?: any[];
 }
 
 interface ModuleWithDirection extends Module {

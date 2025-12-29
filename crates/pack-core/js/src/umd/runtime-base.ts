@@ -42,8 +42,7 @@ type RuntimeParams = {
 
 type ChunkRegistration = [
   chunkPath: ChunkScript,
-  chunkModules: CompressedModuleFactories,
-  params: RuntimeParams | undefined,
+  ...(CompressedModuleFactories | [RuntimeParams]),
 ];
 
 type ChunkList = {
@@ -85,18 +84,18 @@ interface RuntimeBackend {
   ) => Promise<void>;
 }
 
-const moduleFactories: ModuleFactories = Object.create(null);
+const moduleFactories: ModuleFactories = new Map();
 contextPrototype.M = moduleFactories;
 
 const availableModules: Map<ModuleId, Promise<any> | true> = new Map();
 
 const availableModuleChunks: Map<ChunkPath, Promise<any> | true> = new Map();
 
-function factoryNotAvailable(
+function factoryNotAvailableMessage(
   moduleId: ModuleId,
   sourceType: SourceType,
   sourceData: SourceData,
-) {
+): string {
   let instantiationReason;
   switch (sourceType) {
     case SourceType.Runtime:
@@ -114,9 +113,7 @@ function factoryNotAvailable(
         (sourceType) => `Unknown source type: ${sourceType}`,
       );
   }
-  throw new Error(
-    `Module ${moduleId} was instantiated ${instantiationReason}, but the module factory is not available. It might have been deleted in an HMR update.`,
-  );
+  return `Module ${moduleId} was instantiated ${instantiationReason}, but the module factory is not available.`;
 }
 
 const loadedChunk = Promise.resolve(undefined);
@@ -257,23 +254,6 @@ function getPathFromScript(
     path = path.slice(1);
   }
   return path as ChunkPath | ChunkListPath;
-}
-
-function registerCompressedModuleFactory(
-  moduleId: ModuleId,
-  moduleFactory: Function | [Function, ModuleId[]],
-) {
-  if (!moduleFactories[moduleId]) {
-    if (Array.isArray(moduleFactory)) {
-      let [moduleFactoryFn, otherIds] = moduleFactory;
-      moduleFactories[moduleId] = moduleFactoryFn;
-      for (const otherModuleId of otherIds) {
-        moduleFactories[otherModuleId] = moduleFactoryFn;
-      }
-    } else {
-      moduleFactories[moduleId] = moduleFactory;
-    }
-  }
 }
 
 const regexJsUrl = /\.js(?:\?[^#]*)?(?:#.*)?$/;
