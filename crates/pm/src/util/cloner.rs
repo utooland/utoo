@@ -336,7 +336,7 @@ mod windows_clone {
     }
 }
 
-pub async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
+async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
     if !crate::fs::try_exists(dst).await? {
         return Ok(false);
     }
@@ -459,7 +459,7 @@ pub async fn find_real_src<P: AsRef<Path>>(src: P) -> Option<PathBuf> {
     None
 }
 
-pub async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
+async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
     let real_src = if find_real {
         find_real_src(src)
             .await
