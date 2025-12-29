@@ -54,7 +54,6 @@ use crate::{
         transforms::{
             css_modules::get_auto_css_modules_rule,
             default_export_namer::get_default_export_namer_rule,
-            dynamic_import_to_require::get_dynamic_import_to_require_rule,
             emotion::get_emotion_transform_rule, remove_console::get_remove_console_transform_rule,
             styled_components::get_styled_components_transform_rule,
             styled_jsx::get_styled_jsx_transform_rule,
@@ -250,7 +249,6 @@ pub async fn get_client_module_options_context(
     env: ResolvedVc<Environment>,
     mode: Vc<Mode>,
     config: Vc<Config>,
-    dynamic_import_to_require: Vc<bool>,
     watch: Vc<bool>,
     pack_path: FileSystemPath,
 ) -> Result<Vc<ModuleOptionsContext>> {
@@ -344,10 +342,6 @@ pub async fn get_client_module_options_context(
     .collect();
 
     client_rules.extend(additional_rules);
-
-    if *dynamic_import_to_require.await? {
-        client_rules.push(get_dynamic_import_to_require_rule());
-    }
 
     let postcss_transform_options = Some(PostCssTransformOptions {
         postcss_package: Some(get_postcss_package_mapping().to_resolved().await?),
