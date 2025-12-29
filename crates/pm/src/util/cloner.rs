@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
+use super::json::load_package_json_from_path;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use super::retry::create_retry_strategy;
 use crate::fs;
@@ -555,6 +556,41 @@ pub async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
     Ok(())
 }
 
+/// Validate that the package.json in dst has matching name and version
+async fn validate_name_version(dst: &Path, name: &str, version: &str) -> bool {
+    let Ok(pkg) = load_package_json_from_path(dst).await else {
+        return false;
+    };
+    pkg.get("name").and_then(|v| v.as_str()) == Some(name)
+        && pkg.get("version").and_then(|v| v.as_str()) == Some(version)
+}
+
+/// Clone a package from cache to destination with name/version validation
+pub async fn clone_package(src: &Path, dst: &Path, name: &str, version: &str) -> Result<()> {
+    match crate::fs::try_exists(dst).await? {
+        true if validate_name_version(dst, name, version).await => {
+            tracing::debug!(
+                "Package {}@{} already exists at {}, skipping clone",
+                name,
+                version,
+                dst.display()
+            );
+            Ok(())
+        }
+        true => {
+            tracing::debug!(
+                "Package at {} has mismatched name/version, removing and re-cloning",
+                dst.display()
+            );
+            if let Err(e) = fs::remove_dir_all(dst).await {
+                tracing::warn!("Failed to clean target directory {}: {}", dst.display(), e);
+            }
+            clone(src, dst, true).await
+        }
+        false => clone(src, dst, true).await,
+    }
+}
+
 // Standard directory copy for non-macOS/Linux/Windows platforms
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 async fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
@@ -782,6 +818,141 @@ mod tests {
             "content changed"
         );
 
+        Ok(())
+    }
+
+    fn create_package_json(name: &str, version: &str) -> String {
+        format!(r#"{{"name": "{}", "version": "{}"}}"#, name, version)
+    }
+
+    #[tokio::test]
+    async fn test_validate_name_version_matching() -> Result<()> {
+        let temp = TempDir::new()?;
+        let pkg_dir = temp.path().join("pkg");
+        fs::create_dir_all(&pkg_dir).await?;
+
+        let pkg_json = create_package_json("lodash", "4.17.21");
+        fs::write(pkg_dir.join("package.json"), pkg_json).await?;
+
+        assert!(validate_name_version(&pkg_dir, "lodash", "4.17.21").await);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_validate_name_version_name_mismatch() -> Result<()> {
+        let temp = TempDir::new()?;
+        let pkg_dir = temp.path().join("pkg");
+        fs::create_dir_all(&pkg_dir).await?;
+
+        let pkg_json = create_package_json("lodash", "4.17.21");
+        fs::write(pkg_dir.join("package.json"), pkg_json).await?;
+
+        assert!(!validate_name_version(&pkg_dir, "underscore", "4.17.21").await);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_validate_name_version_version_mismatch() -> Result<()> {
+        let temp = TempDir::new()?;
+        let pkg_dir = temp.path().join("pkg");
+        fs::create_dir_all(&pkg_dir).await?;
+
+        let pkg_json = create_package_json("lodash", "4.17.21");
+        fs::write(pkg_dir.join("package.json"), pkg_json).await?;
+
+        assert!(!validate_name_version(&pkg_dir, "lodash", "4.17.20").await);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_validate_name_version_no_package_json() -> Result<()> {
+        let temp = TempDir::new()?;
+        let pkg_dir = temp.path().join("pkg");
+        fs::create_dir_all(&pkg_dir).await?;
+
+        // No package.json file
+        assert!(!validate_name_version(&pkg_dir, "lodash", "4.17.21").await);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_clone_package_skip_if_valid() -> Result<()> {
+        let temp = TempDir::new()?;
+        // Cache structure: cache_dir/package/ (find_real looks for first subdir)
+        let cache_dir = temp.path().join("cache/lodash/4.17.21");
+        let src_dir = cache_dir.join("package");
+        let dst_dir = temp.path().join("node_modules/lodash");
+
+        // Create source (with subdir structure that find_real expects)
+        fs::create_dir_all(&src_dir).await?;
+        let pkg_json = create_package_json("lodash", "4.17.21");
+        fs::write(src_dir.join("package.json"), &pkg_json).await?;
+        fs::write(src_dir.join("index.js"), "module.exports = {}").await?;
+
+        // Create destination with same content
+        fs::create_dir_all(&dst_dir).await?;
+        fs::write(dst_dir.join("package.json"), &pkg_json).await?;
+        fs::write(dst_dir.join("index.js"), "module.exports = {}").await?;
+
+        // Add a marker file to verify it wasn't re-cloned
+        fs::write(dst_dir.join("marker.txt"), "original").await?;
+
+        clone_package(&cache_dir, &dst_dir, "lodash", "4.17.21").await?;
+
+        // Marker file should still exist (wasn't deleted and re-cloned)
+        assert!(dst_dir.join("marker.txt").exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_clone_package_reclone_if_version_mismatch() -> Result<()> {
+        let temp = TempDir::new()?;
+        let cache_dir = temp.path().join("cache/lodash/4.17.21");
+        let src_dir = cache_dir.join("package");
+        let dst_dir = temp.path().join("node_modules/lodash");
+
+        // Create source with new version
+        fs::create_dir_all(&src_dir).await?;
+        let new_pkg_json = create_package_json("lodash", "4.17.21");
+        fs::write(src_dir.join("package.json"), &new_pkg_json).await?;
+
+        // Create destination with old version
+        fs::create_dir_all(&dst_dir).await?;
+        let old_pkg_json = create_package_json("lodash", "4.17.20");
+        fs::write(dst_dir.join("package.json"), &old_pkg_json).await?;
+        fs::write(dst_dir.join("marker.txt"), "should be deleted").await?;
+
+        clone_package(&cache_dir, &dst_dir, "lodash", "4.17.21").await?;
+
+        // Marker file should be gone (directory was deleted and re-cloned)
+        assert!(!dst_dir.join("marker.txt").exists());
+        // New package.json should have correct version
+        let content = fs::read_to_string(dst_dir.join("package.json")).await?;
+        assert!(content.contains("4.17.21"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_clone_package_fresh_install() -> Result<()> {
+        let temp = TempDir::new()?;
+        let cache_dir = temp.path().join("cache/lodash/4.17.21");
+        let src_dir = cache_dir.join("package");
+        let dst_dir = temp.path().join("node_modules/lodash");
+
+        // Create source
+        fs::create_dir_all(&src_dir).await?;
+        let pkg_json = create_package_json("lodash", "4.17.21");
+        fs::write(src_dir.join("package.json"), &pkg_json).await?;
+
+        // Destination doesn't exist
+        assert!(!dst_dir.exists());
+
+        clone_package(&cache_dir, &dst_dir, "lodash", "4.17.21").await?;
+
+        // Should be cloned
+        assert!(dst_dir.join("package.json").exists());
+        let content = fs::read_to_string(dst_dir.join("package.json")).await?;
+        assert!(content.contains("lodash"));
         Ok(())
     }
 

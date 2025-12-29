@@ -9,7 +9,7 @@ use crate::util::config::get_legacy_peer_deps;
 use crate::util::json::{load_package_json_from_path, load_package_lock_json_from_path};
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
 use crate::util::save_type::{PackageAction, SaveType};
-use crate::util::{cloner::clone, downloader::download};
+use crate::util::{cloner::clone_package, downloader::download};
 use utoo_ruborist::lock::{LockPackage, PackageLock};
 use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::registry::resolve_package;
@@ -263,7 +263,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
         cache_path.display(),
         package_path.display()
     );
-    clone(&cache_path, &package_path, true)
+    clone_package(&cache_path, &package_path, &name, &resolved.version)
         .await
         .context("Failed to clone package")?;
 

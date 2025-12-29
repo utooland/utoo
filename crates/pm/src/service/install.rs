@@ -17,7 +17,7 @@ use crate::helper::workspace;
 use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
 use crate::util::cache::get_cache_dir;
-use crate::util::cloner::clone;
+use crate::util::cloner::clone_package;
 use crate::util::downloader::download;
 use crate::util::linker::link;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
@@ -337,7 +337,7 @@ pub async fn install_packages(
                     let name = package.get_name(&path);
                     let version = package
                         .version
-                        .as_ref()
+                        .clone()
                         .ok_or_else(|| anyhow::anyhow!("package {name} missing version"))?;
                     let cache_path = cache_dir.join(format!("{name}/{version}"));
                     let cache_flag_path = cache_dir.join(format!("{name}/{version}/_resolved"));
@@ -375,7 +375,9 @@ pub async fn install_packages(
                         }
 
                         tracing::debug!("{name} clone");
-                        match clone(&cache_path, &cwd_clone.join(&path), true).await {
+                        match clone_package(&cache_path, &cwd_clone.join(&path), &name, &version)
+                            .await
+                        {
                             Ok(_) => {
                                 tracing::debug!("{name} resolved");
                                 PROGRESS_BAR.inc(1);
