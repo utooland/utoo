@@ -29,7 +29,7 @@ turbo-unix-path     = { workspace = true }
 turbopack           = { workspace = true }
 turbopack-browser   = { workspace = true }
 turbopack-core      = { workspace = true }
-turbopack-node      = { workspace = true }
+turbopack-node      = { workspace = true, default-features = false }
 turbopack-nodejs    = { workspace = true }
 turbopack-static    = { workspace = true }
 

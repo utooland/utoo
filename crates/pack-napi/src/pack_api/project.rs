@@ -33,9 +33,7 @@ use pack_core::tracing_presets::{
 };
 use serde::{Deserialize, Serialize};
 use tracing::Instrument;
-use tracing_subscriber::{
-    EnvFilter, Registry, fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt,
-};
+use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
 use turbo_rcstr::RcStr;
 use turbo_tasks::{
     NonLocalValue, OperationValue, ReadRef, ResolvedVc, TaskInput, TransientInstance, UpdateInfo,
@@ -344,8 +342,10 @@ pub async fn project_new(
                 .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
                     EnvFilter::new("pack_napi=info,pack_api=info,pack_core=info")
                 }))
-                .with_timer(tracing_subscriber::fmt::time::SystemTime)
-                .with_span_events(FmtSpan::CLOSE)
+                .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
+                    "%Y-%m-%d %H:%M:%S.%3f".to_string(),
+                ))
+                .with_target(false)
                 .init();
         });
     }
@@ -552,7 +552,7 @@ pub fn project_entrypoints_subscribe(
                 effects.apply().await?;
                 Ok((entrypoints.clone(), issues.clone(), diagnostics.clone()))
             }
-            .instrument(tracing::info_span!("entrypoints subscription"))
+            .instrument(tracing::trace_span!("entrypoints subscription"))
         },
         move |ctx| {
             let (entrypoints, issues, diags) = ctx.value;

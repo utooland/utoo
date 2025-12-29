@@ -58,7 +58,7 @@ struct DefaultExportNamerTransformer {}
 
 #[async_trait]
 impl CustomTransformer for DefaultExportNamerTransformer {
-    #[tracing::instrument(level = tracing::Level::TRACE, name = "default_export_namer", skip_all)]
+    #[tracing::instrument(level = "trace", name = "default_export_namer", skip_all)]
     async fn transform(&self, program: &mut Program, _ctx: &TransformContext<'_>) -> Result<()> {
         let mut visitor = DefaultExportNamerVisitor::new();
         program.visit_mut_with(&mut visitor);

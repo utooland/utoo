@@ -68,7 +68,7 @@ swc_core = { workspace = true, features = [
 ] }
 tracing = { workspace = true }
 tracing-chrome = "0.7.2"
-tracing-subscriber = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["chrono"] }
 turbopack-ecmascript-plugins = { workspace = true, optional = true }
 urlencoding = { workspace = true }
 
