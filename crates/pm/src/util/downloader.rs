@@ -61,9 +61,9 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
             match response.status() {
                 StatusCode::OK => {
                     if let Err(e) = try_unpack_stream_direct(response, dest).await {
-                        tracing::debug!("Stream unpacking failed {}: {}", dest.display(), e);
+                        tracing::debug!("Stream unpacking failed {}: {:#}", dest.display(), e);
                         return Err(RetryableError::Temporary(format!(
-                            "Network error during streaming: {e}"
+                            "Network error during streaming: {e:#}"
                         )));
                     }
                     Ok(())
@@ -134,12 +134,10 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
                 if !is_dir {
                     // Stream file content
                     let mut content = Vec::new();
-                    entry.read_to_end(&mut content).await.with_context(|| {
-                        format!(
-                            "Failed to read file content from tar entry: {}",
-                            path.display()
-                        )
-                    })?;
+                    entry
+                        .read_to_end(&mut content)
+                        .await
+                        .with_context(|| format!("Failed to read tar entry: {}", path.display()))?;
 
                     // Extract file permission mode
                     let mode = entry.header().mode().unwrap_or(0o644);
