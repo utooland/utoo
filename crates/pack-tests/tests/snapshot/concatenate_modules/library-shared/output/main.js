@@ -81,7 +81,20 @@ __turbopack_context__.s([]);
 }),
 828: ((__turbopack_context__, module, exports) => {
 
-setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.r(12)), 500);
+setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.i(12)), 500);
+}),
+503: ((__turbopack_context__, module, exports) => {
+
+setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.i(742)), 1000);
+}),
+109: ((__turbopack_context__) => {
+"use strict";
+
+var __TURBOPACK__imported__module__828__ = __turbopack_context__.i(828);
+var __TURBOPACK__imported__module__503__ = __turbopack_context__.i(503);
+;
+;
+__turbopack_context__.s([]);
 }),
 742: ((__turbopack_context__) => {
 "use strict";
@@ -95,19 +108,6 @@ var __TURBOPACK__imported__module__794__ = __turbopack_context__.i(794);
 console.log('y', __TURBOPACK__imported__module__794__["default"]);
 ;
 __turbopack_context__.s([], 742);
-}),
-503: ((__turbopack_context__, module, exports) => {
-
-setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.r(742)), 1000);
-}),
-109: ((__turbopack_context__) => {
-"use strict";
-
-var __TURBOPACK__imported__module__828__ = __turbopack_context__.i(828);
-var __TURBOPACK__imported__module__503__ = __turbopack_context__.i(503);
-;
-;
-__turbopack_context__.s([]);
 }),
 },
 {"otherChunks":[],"runtimeModuleIds":[109]},

@@ -16,7 +16,7 @@ __turbopack_context__.s([
 "use strict";
 
 async function Test() {
-    const module = await Promise.resolve().then(()=>__turbopack_context__.r(23));
+    const module = await Promise.resolve().then(()=>__turbopack_context__.i(23));
     return module;
 }
 __turbopack_context__.s([
