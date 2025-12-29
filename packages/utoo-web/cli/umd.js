@@ -89,6 +89,13 @@ const config = {
           },
         },
       },
+      {
+        test: /utoo\/index_bg\.wasm$/,
+        type: 'asset/resource',
+        generator: {
+          emit: false,
+        },
+      },
     ],
   },
   plugins: [

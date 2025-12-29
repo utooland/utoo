@@ -103,12 +103,13 @@ opt-level = "z"
 strip     = "symbols"
 
 [profile.release-local]
-codegen-units = 256
-incremental   = true
-inherits      = "release"
-lto           = false
-opt-level     = 1
-strip         = "none"
+codegen-units   = 256
+incremental     = true
+inherits        = "release"
+lto             = false
+opt-level       = 1
+split-debuginfo = "unpacked"
+strip           = "none"
 
 # cargo build --profile instruments --bin pack-cli
 # xcrun xctrace record --template "Time Profiler" --launch -- ./target/instruments/pack-cli --mode build --project-dir ./examples/with-antd --root-dir .
@@ -135,6 +136,7 @@ strip         = "none"
 [patch.crates-io]
 lightningcss     = { git = "https://github.com/utooland/lightningcss", branch = "support-css-module-global" }
 mdxjs            = { git = "https://github.com/mischnic/mdxjs-rs.git", branch = "swc-core-32" }
+mimalloc         = { git = "https://github.com/utooland/mimalloc_rust.git", package = "mimalloc" }
 parcel_selectors = { git = "https://github.com/utooland/lightningcss", branch = "support-css-module-global" }
 tokio            = { git = "https://github.com/utooland/tokio.git", package = "tokio" }
 tokio-util       = { git = "https://github.com/utooland/tokio.git", package = "tokio-util" }

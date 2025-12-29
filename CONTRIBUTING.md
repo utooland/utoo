@@ -26,7 +26,7 @@ Before you begin, ensure you have the following installed:
 - **Rust**: We use a specific nightly version defined in [rust-toolchain.toml](rust-toolchain.toml). It will be automatically installed when you run Cargo commands.
 - **wasm-bindgen-cli**: Required for building the web version.
   ```bash
-  cargo install wasm-bindgen-cli@0.2.104
+  cargo install wasm-bindgen-cli@0.2.106
   ```
 
 ## 📦 Submodules
