@@ -1,4 +1,4 @@
-[92;4msuggestion - [analysis] /dynamic_import/input/index.ts:6:11  lint TP1002 require(???*0*) is very dynamic
+[92;4msuggestion - [analysis] /dynamic_import/very-dynamic/input/index.ts:6:11  lint TP1002 require(???*0*) is very dynamic
   
        2 |     return import(`${url}`).then((module) => module.default);
        3 | }

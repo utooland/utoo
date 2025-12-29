@@ -143,7 +143,7 @@ impl LibraryEndpoint {
             self.project().client_compile_time_info().environment(),
             self.project().mode(),
             self.project().config(),
-            Vc::cell(true),
+            Vc::cell(false),
             Vc::cell(false),
             self.project().pack_path().owned().await?,
         ))

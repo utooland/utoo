@@ -1,4 +1,4 @@
-[92;4msuggestion - [analysis] /dynamic_import/input/index.ts:2:11  lint TP1001 import(???*0*) is very dynamic
+[92;4msuggestion - [analysis] /dynamic_import/very-dynamic/input/index.ts:2:11  lint TP1001 import(???*0*) is very dynamic
   
        1 | export async function importUrl(url: string) {
          +            v--------------v
