@@ -26,7 +26,8 @@ impl std::error::Error for RetryableError {}
 pub fn build_dns_cached_client() -> reqwest::Client {
     reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(5)) // TLS + TCP handshake
-        .timeout(std::time::Duration::from_secs(10)) // Total request timeout - abort slow requests faster
+        .read_timeout(std::time::Duration::from_secs(30)) // Timeout for individual read operations
+        // No total timeout - large files (e.g. node binary ~100MB) need longer download time
         // No pool_max_idle_per_host - let reqwest manage connections freely
         // Concurrency is controlled by semaphore in preload service
         .build()
