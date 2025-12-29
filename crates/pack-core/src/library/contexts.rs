@@ -8,7 +8,7 @@ use turbopack_core::{
         ChunkingContext, MangleType, MinifyType, SourceMapSourceType, SourceMapsType,
         module_id_strategies::ModuleIdStrategy,
     },
-    environment::Environment,
+    environment::{EdgeWorkerEnvironment, Environment, ExecutionEnvironment, NodeJsVersion},
     module_graph::export_usage::OptionExportUsageInfo,
 };
 
@@ -22,6 +22,9 @@ pub struct LibraryChunkingContextOptions {
     pub root_path: FileSystemPath,
     pub output_root: FileSystemPath,
     pub output_root_to_root_path: RcStr,
+    /// The environment provided by the caller. Note that this is ignored in favor of
+    /// an EdgeWorker environment to disable async chunk splitting. See
+    /// `get_library_chunking_context` for details.
     pub environment: Vc<Environment>,
     pub module_id_strategy: Vc<Box<dyn ModuleIdStrategy>>,
     pub no_mangling: Vc<bool>,
@@ -40,7 +43,8 @@ pub async fn get_library_chunking_context(
         root_path,
         output_root,
         output_root_to_root_path,
-        environment,
+        // Note: We ignore the provided environment and use EdgeWorker instead.
+        environment: _provided_environment,
         module_id_strategy,
         no_mangling,
         runtime_root,
@@ -70,12 +74,21 @@ pub async fn get_library_chunking_context(
     };
 
     let output = config.output().await?;
+    // we need to disable all async chunk split by: https://github.com/utooland/next.js/blob/utoo/turbopack/crates/turbopack-core/src/chunk/chunk_group.rs#L54
+    let library_environment = Environment::new(ExecutionEnvironment::EdgeWorker(
+        EdgeWorkerEnvironment {
+            node_version: NodeJsVersion::default().resolved_cell(),
+        }
+        .resolved_cell(),
+    ))
+    .to_resolved()
+    .await?;
 
     let mut builder = LibraryChunkingContext::builder(
         root_path,
         output_root,
         output_root_to_root_path,
-        environment.to_resolved().await?,
+        library_environment,
         runtime_type,
         (*runtime_root.await?).clone(),
         (*runtime_export.await?).clone(),

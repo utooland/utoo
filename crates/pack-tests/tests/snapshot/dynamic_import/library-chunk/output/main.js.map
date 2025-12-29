@@ -2,6 +2,7 @@
   "version": 3,
   "sources": [],
   "sections": [
-    {"offset": {"line": 7, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/dynamic_import/library-chunk/input/a.ts"],"sourcesContent":["export const a = \"a\";"],"names":[],"mappings":"AAAO,MAAM,IAAI"}},
-    {"offset": {"line": 17, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/dynamic_import/library-chunk/input/index.ts"],"sourcesContent":["\nexport async function Test() {\n    const module = await import('./a');\n    return module;\n} \n\n"],"names":[],"mappings":"AACO,eAAe;IAClB,MAAM,SAAS;IACf,OAAO;AACX"}}]
+    {"offset": {"line": 6, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/node_modules/jquery/index.js"],"sourcesContent":["module.exports = function $(selector) {\n  return { selector };\n};\n"],"names":[],"mappings":"AAAA,OAAO,OAAO,GAAG,SAAS,EAAE,QAAQ;IAClC,OAAO;QAAE;IAAS;AACpB","ignoreList":[0]}},
+    {"offset": {"line": 15, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/dynamic_import/library-chunk/input/a.ts"],"sourcesContent":["export const a = \"a\";"],"names":[],"mappings":"AAAO,MAAM,IAAI"}},
+    {"offset": {"line": 25, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/dynamic_import/library-chunk/input/index.ts"],"sourcesContent":["\nexport async function Test() {\n    const module = await import('./a');\n    return module;\n} \n\nvar m = require('jquery');\nm"],"names":[],"mappings":"AACO,eAAe;IAClB,MAAM,SAAS;IACf,OAAO;AACX;AAEA,IAAI;AACJ"}}]
 }

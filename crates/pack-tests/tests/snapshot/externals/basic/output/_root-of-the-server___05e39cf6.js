@@ -18,26 +18,20 @@ const mod = __turbopack_context__.x("bar_require2", () => require("bar_require2"
 
 module.exports = mod;
 }),
-377, ((__turbopack_context__) => {
+298, ((__turbopack_context__) => {
 "use strict";
 
-return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
-
-const mod = await __turbopack_context__.y("bar");
+const mod = __turbopack_context__.x("bar", () => require("bar"));
 
 __turbopack_context__.n(mod);
-__turbopack_async_result__();
-} catch(e) { __turbopack_async_result__(e); } }, true);}),
-569, ((__turbopack_context__) => {
+}),
+227, ((__turbopack_context__) => {
 "use strict";
 
-return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
-
-const mod = await __turbopack_context__.y("bar_import2");
+const mod = __turbopack_context__.x("bar_import2", () => require("bar_import2"));
 
 __turbopack_context__.n(mod);
-__turbopack_async_result__();
-} catch(e) { __turbopack_async_result__(e); } }, true);}),
+}),
 462, ((__turbopack_context__) => {
 "use strict";
 
@@ -84,17 +78,15 @@ return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, _
 var __TURBOPACK__imported__module__631__ = __turbopack_context__.i(631);
 var __TURBOPACK__imported__module__414__ = __turbopack_context__.i(414);
 var __TURBOPACK__imported__module__43__ = __turbopack_context__.i(43);
-var __TURBOPACK__imported__module__377__ = __turbopack_context__.i(377);
-var __TURBOPACK__imported__module__569__ = __turbopack_context__.i(569);
+var __TURBOPACK__imported__module__298__ = __turbopack_context__.i(298);
+var __TURBOPACK__imported__module__227__ = __turbopack_context__.i(227);
 var __TURBOPACK__imported__module__462__ = __turbopack_context__.i(462);
 var __TURBOPACK__imported__module__747__ = __turbopack_context__.i(747);
 var __turbopack_async_dependencies__ = __turbopack_handle_async_dependencies__([
-    __TURBOPACK__imported__module__377__,
-    __TURBOPACK__imported__module__569__,
     __TURBOPACK__imported__module__462__,
     __TURBOPACK__imported__module__747__
 ]);
-[__TURBOPACK__imported__module__377__, __TURBOPACK__imported__module__569__, __TURBOPACK__imported__module__462__, __TURBOPACK__imported__module__747__] = __turbopack_async_dependencies__.then ? (await __turbopack_async_dependencies__)() : __turbopack_async_dependencies__;
+[__TURBOPACK__imported__module__462__, __TURBOPACK__imported__module__747__] = __turbopack_async_dependencies__.then ? (await __turbopack_async_dependencies__)() : __turbopack_async_dependencies__;
 ;
 ;
 ;
@@ -102,11 +94,11 @@ var __turbopack_async_dependencies__ = __turbopack_handle_async_dependencies__([
 ;
 ;
 ;
-console.log(__TURBOPACK__imported__module__631__["default"], __TURBOPACK__imported__module__414__["default"], __TURBOPACK__imported__module__43__["default"], __TURBOPACK__imported__module__377__["default"], __TURBOPACK__imported__module__569__["default"]);
+console.log(__TURBOPACK__imported__module__631__["default"], __TURBOPACK__imported__module__414__["default"], __TURBOPACK__imported__module__43__["default"], __TURBOPACK__imported__module__298__["default"], __TURBOPACK__imported__module__227__["default"]);
 console.log(__TURBOPACK__imported__module__462__["default"], __TURBOPACK__imported__module__747__["default"]);
 __turbopack_context__.s([]);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, false);}),
 ]);
 
-//# sourceMappingURL=_root-of-the-server___28c3d6aa.js.map
+//# sourceMappingURL=_root-of-the-server___05e39cf6.js.map
