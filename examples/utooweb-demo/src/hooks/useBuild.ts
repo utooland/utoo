@@ -17,8 +17,13 @@ export const useBuild = (
     setIsBuilding(true);
     setError("");
     try {
+      const start = performance.now();
       await project.build();
-
+      console.log(
+        `%cPack Project:%c Finished to build in ${Math.round(performance.now() - start)} ms.`,
+        "color: blue;",
+        "color: green",
+      );
       try {
         const statsContent = await project.readFile("dist/stats.json", "utf8");
         const stats = JSON.parse(statsContent);

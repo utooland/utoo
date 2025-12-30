@@ -101,7 +101,6 @@ fn main() {
                             .unwrap_or_else(|_| EnvFilter::new("pack_cli=info,pack_api=info")),
                     )
                     .with_timer(tracing_subscriber::fmt::time::SystemTime)
-                    .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
                     .init();
 
                 None

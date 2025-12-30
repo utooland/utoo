@@ -14,7 +14,7 @@ use turbopack_core::{
     output::{OutputAsset, OutputAssetsReference},
 };
 
-#[instrument(level = "info", name = "generate webpack stats", skip_all)]
+#[instrument(level = "trace", name = "generate webpack stats", skip_all)]
 pub async fn generate_webpack_stats<I>(
     entry_assets: I,
     dist_root: FileSystemPath,

@@ -240,7 +240,7 @@ fn output_fs_operation(project: ResolvedVc<Project>) -> Vc<DiskFileSystem> {
 }
 
 impl ProjectContainer {
-    #[tracing::instrument(level = "info", name = "initialize project", skip_all)]
+    #[tracing::instrument(level = "trace", name = "initialize project", skip_all)]
     pub async fn initialize(self: ResolvedVc<Self>, options: ProjectOptions) -> Result<()> {
         let watch = options.watch;
 
@@ -268,7 +268,7 @@ impl ProjectContainer {
         Ok(())
     }
 
-    #[tracing::instrument(level = "info", name = "update project", skip_all)]
+    #[tracing::instrument(level = "trace", name = "update project", skip_all)]
     pub async fn update(self: Vc<Self>, options: PartialProjectOptions) -> Result<()> {
         let PartialProjectOptions {
             root_path,
@@ -862,7 +862,7 @@ impl Project {
 
             Ok(module_graphs_vc)
         }
-        .instrument(tracing::info_span!("module graph for app"))
+        .instrument(tracing::trace_span!("module graph for app"))
         .await;
         // At this point all modules have been computed and we can get rid of the node.js
         // process pools

@@ -92,7 +92,7 @@ struct CssModulesImportTransformer {}
 
 #[async_trait]
 impl CustomTransformer for CssModulesImportTransformer {
-    #[tracing::instrument(level = tracing::Level::TRACE, name = "auto_css_modules", skip_all)]
+    #[tracing::instrument(level = "trace", name = "auto_css_modules", skip_all)]
     async fn transform(&self, program: &mut Program, _ctx: &TransformContext<'_>) -> Result<()> {
         program.visit_mut_with(&mut auto_css_modules_transform());
         Ok(())

@@ -143,7 +143,7 @@ pub fn endpoint_server_changed_subscribe(
                 result.effects.apply().await?;
                 Ok(result)
             }
-            .instrument(tracing::info_span!("server changes subscription"))
+            .instrument(tracing::trace_span!("server changes subscription"))
         },
         |ctx| {
             let EndpointIssuesAndDiags {
@@ -187,7 +187,7 @@ pub fn endpoint_client_changed_subscribe(
                 let _ = changed_op.read_strongly_consistent().await?;
                 Ok(())
             }
-            .instrument(tracing::info_span!("client changes subscription"))
+            .instrument(tracing::trace_span!("client changes subscription"))
         },
         |_| {
             Ok(vec![TurbopackResult {

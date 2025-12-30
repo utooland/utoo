@@ -54,16 +54,18 @@ fn init_pack() {
 }
 
 #[wasm_bindgen(js_name = "initLogFilter")]
-pub fn init_log_filter(filter: String) {
+pub fn init_log_filter(mut filter: String) {
+    if filter.is_empty() {
+        filter.push_str("pack_napi=info,pack_api=info,pack_core=info")
+    }
     TRACING_INIT.call_once(|| {
         let filter_str = filter.clone();
         let fmt_layer = fmt::layer()
             .without_time()
-            .with_span_events(FmtSpan::CLOSE)
+            .with_target(false)
             .with_writer(MakeWebConsoleWriter::new())
             .with_filter(EnvFilter::new(filter));
 
         registry().with(fmt_layer).init();
-        tracing::debug!("Tracing initialized with filter: {}", filter_str);
     });
 }

@@ -52,7 +52,7 @@ struct RemoveConsoleTransformer {
 
 #[async_trait]
 impl CustomTransformer for RemoveConsoleTransformer {
-    #[tracing::instrument(level = tracing::Level::TRACE, name = "remove_console", skip_all)]
+    #[tracing::instrument(level = "trace", name = "remove_console", skip_all)]
     async fn transform(&self, program: &mut Program, ctx: &TransformContext<'_>) -> Result<()> {
         program.mutate(remove_console::remove_console(
             self.config.clone(),
