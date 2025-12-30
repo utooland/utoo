@@ -23,6 +23,7 @@ where
     I: IntoIterator<Item = ResolvedVc<Box<dyn OutputAsset>>>,
 {
     let mut assets = vec![];
+    let mut seen_asset_paths = FxHashSet::default();
     let mut chunks = vec![];
     let mut chunk_items: FxIndexMap<Vc<Box<dyn ChunkItem>>, FxIndexSet<RcStr>> =
         FxIndexMap::default();
@@ -190,13 +191,17 @@ where
             .unwrap_or_else(|| asset_path_full.path.clone());
         // Remove leading "./" prefix if present
         let path = path.strip_prefix("./").map(|s| s.into()).unwrap_or(path);
-        assets.push(WebpackStatsAsset {
-            ty: "asset".into(),
-            name: path.clone(),
-            chunks: vec![path.clone()],
-            size: asset_len,
-            ..Default::default()
-        });
+
+        // Only add asset if we haven't seen this path before
+        if seen_asset_paths.insert(path.clone()) {
+            assets.push(WebpackStatsAsset {
+                ty: "asset".into(),
+                name: path.clone(),
+                chunks: vec![path.clone()],
+                size: asset_len,
+                ..Default::default()
+            });
+        }
     }
 
     for (chunk_item, chunk_ids) in chunk_items {
