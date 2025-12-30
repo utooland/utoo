@@ -55,8 +55,10 @@ fn init_pack() {
 
 #[wasm_bindgen(js_name = "initLogFilter")]
 pub fn init_log_filter(mut filter: String) {
+    const DEFAULT_LOG_FILTER: &str = "utoo_wasm=info,pack_api=info,pack_core=info";
+
     if filter.is_empty() {
-        filter.push_str("utoo_wasm=info,pack_api=info,pack_core=info")
+        filter.push_str(DEFAULT_LOG_FILTER)
     }
     TRACING_INIT.call_once(|| {
         let filter_str = filter.clone();
