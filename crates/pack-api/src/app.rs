@@ -6,7 +6,7 @@ use pack_core::client::context::{
 };
 use pack_core::util::convert_to_project_relative;
 use qstring::QString;
-use tracing::{Instrument, info_span};
+use tracing::{Instrument, trace_span};
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{Completion, JoinIterExt, ResolvedVc, TryJoinIterExt, ValueToString, Vc};
 use turbo_tasks_fs::File;
@@ -348,7 +348,7 @@ impl Endpoint for AppEndpoint {
 
     #[turbo_tasks::function]
     async fn output(self: Vc<Self>) -> Result<Vc<EndpointOutput>> {
-        let span = info_span!("app endpoint");
+        let span = trace_span!("app endpoint");
 
         let asset_context = self.app_module_context();
 

@@ -8,7 +8,7 @@ use pack_core::{
     util::convert_to_project_relative,
 };
 use qstring::QString;
-use tracing::{Instrument, info_span};
+use tracing::{Instrument, trace_span};
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{Completion, JoinIterExt, ResolvedVc, ValueToString, Vc};
 use turbopack::{
@@ -316,7 +316,7 @@ impl Endpoint for LibraryEndpoint {
 
     #[turbo_tasks::function]
     async fn output(self: Vc<Self>) -> Result<Vc<EndpointOutput>> {
-        let span = info_span!("library endpoint");
+        let span = trace_span!("library endpoint");
         async move {
             let this = self.await?;
             let output_assets = self.output_assets();
