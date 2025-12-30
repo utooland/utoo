@@ -25,7 +25,7 @@ tracing-subscriber   = { workspace = true }
 turbo-rcstr          = { workspace = true }
 turbo-tasks          = { workspace = true }
 turbo-tasks-backend  = { workspace = true }
-turbo-tasks-malloc   = { workspace = true }
+turbo-tasks-malloc   = { workspace = true, default-features = false, features = ["custom_allocator"] }
 turbopack-cli-utils  = { workspace = true }
 turbopack-core       = { workspace = true }
 turbopack-dev-server = { workspace = true }
