@@ -2002,7 +2002,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfe33edd8e85a12a67454e37f8c75e730830d83e313556ab9ebf9ee7fbeb3bfb"
 dependencies = [
  "crc32fast",
- "libz-rs-sys",
  "miniz_oxide",
 ]
 
@@ -3391,15 +3390,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c6639b70a7ce854b79c70d7e83f16b5dc0137cc914f3d7d03803b513ecc67ac"
 
 [[package]]
-name = "libz-rs-sys"
-version = "0.5.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c10501e7805cee23da17c7790e59df2870c0d4043ec6d03f67d31e2b53e77415"
-dependencies = [
- "zlib-rs",
-]
-
-[[package]]
 name = "lightningcss"
 version = "1.0.0-alpha.68"
 source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#2cf088153358cc4a0943cb350f05f1b884a45aba"
@@ -4159,9 +4149,9 @@ dependencies = [
 
 [[package]]
 name = "opfs-project"
-version = "0.1.15"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "429d6a7299a31f350b60231b6be938c97f110c9413e6007624faa8efef0b7800"
+checksum = "4c64433ad95ae60f044e55bc0a067264270461ff41152b5509929e5e736570c7"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -8144,9 +8134,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-fs-ext"
-version = "0.6.8"
+version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec3917b3417132eed9af87201686fb043b2f0806def11c2a4997836369c94a0b"
+checksum = "4950e63aa5b76311cb0a9d580d4202e46768abd8b2d17a739441d3dbdcbb524c"
 dependencies = [
  "bitflags 2.9.4",
  "cfg-if",
@@ -10939,12 +10929,6 @@ dependencies = [
  "quote",
  "syn 2.0.106",
 ]
-
-[[package]]
-name = "zlib-rs"
-version = "0.5.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40990edd51aae2c2b6907af74ffb635029d5788228222c4bb811e9351c0caad3"
 
 [[package]]
 name = "zstd"
