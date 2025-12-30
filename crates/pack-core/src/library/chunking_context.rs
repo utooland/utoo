@@ -516,7 +516,7 @@ impl ChunkingContext for LibraryChunkingContext {
     ) -> Result<Vc<ChunkGroupResult>> {
         let span = {
             let ident = ident.to_string().await?.to_string();
-            tracing::info_span!("chunking", chunking_type = "evaluated", ident = ident)
+            tracing::trace_span!("chunking", chunking_type = "evaluated", ident = ident)
         };
         async move {
             let entries = chunk_group.entries();

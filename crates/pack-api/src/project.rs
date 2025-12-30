@@ -972,7 +972,7 @@ impl Project {
         self: Vc<Self>,
         output_assets: OperationVc<OutputAssets>,
     ) -> Result<()> {
-        let span = tracing::info_span!("emitting");
+        let span = tracing::trace_span!("emitting");
         async move {
             // clean dist director if configured
             if self.config().output().await?.clean.is_some_and(|c| c) {

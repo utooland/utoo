@@ -30,7 +30,7 @@ pub async fn all_server_paths(
     assets: Vc<OutputAssets>,
     node_root: Vc<FileSystemPath>,
 ) -> Result<Vc<ServerPaths>> {
-    let span = tracing::info_span!("all_server_paths");
+    let span = tracing::trace_span!("all_server_paths");
     async move {
         let all_assets = all_assets_from_entries(assets).await?;
         let node_root = &node_root.await?;
