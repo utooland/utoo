@@ -12,8 +12,6 @@ import {
   ConfigComplete,
   TurbopackLoaderItem,
   TurbopackRuleConfigItem,
-  TurbopackRuleConfigItemOptions,
-  TurbopackRuleConfigItemOrShortcut,
 } from "../config/types";
 import { rustifyEnv } from "../utils/common";
 import { runLoaderWorkerPool } from "./loaderWorkerPool";
@@ -42,45 +40,6 @@ async function withErrorCause<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-function ensureLoadersHaveSerializableOptions(
-  turbopackRules: Record<string, TurbopackRuleConfigItemOrShortcut>,
-) {
-  for (const [glob, rule] of Object.entries(turbopackRules)) {
-    if (Array.isArray(rule)) {
-      checkLoaderItems(rule, glob);
-    } else {
-      checkConfigItem(rule, glob);
-    }
-  }
-
-  function checkConfigItem(rule: TurbopackRuleConfigItem, glob: string) {
-    if (!rule) return;
-    if ("loaders" in rule) {
-      checkLoaderItems((rule as TurbopackRuleConfigItemOptions).loaders, glob);
-    } else {
-      for (const key in rule) {
-        const inner = rule[key];
-        if (typeof inner === "object" && inner) {
-          checkConfigItem(inner, glob);
-        }
-      }
-    }
-  }
-
-  function checkLoaderItems(loaderItems: TurbopackLoaderItem[], glob: string) {
-    for (const loaderItem of loaderItems) {
-      if (
-        typeof loaderItem !== "string" &&
-        !isDeepStrictEqual(loaderItem, JSON.parse(JSON.stringify(loaderItem)))
-      ) {
-        throw new Error(
-          `loader ${loaderItem.loader} for match "${glob}" does not have serializable options. Ensure that options passed are plain JavaScript objects and values.`,
-        );
-      }
-    }
-  }
-}
-
 async function serializeConfig(config: ConfigComplete): Promise<string> {
   const configSerializable = { ...config };
 
@@ -89,10 +48,6 @@ async function serializeConfig(config: ConfigComplete): Promise<string> {
       const { html, ...rest } = entry;
       return rest;
     });
-  }
-
-  if (configSerializable.module?.rules) {
-    ensureLoadersHaveSerializableOptions(configSerializable.module.rules);
   }
 
   if (configSerializable.optimization) {
