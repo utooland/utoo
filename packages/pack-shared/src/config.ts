@@ -26,33 +26,45 @@ export type RustifiedEnv = { name: string; value: string }[];
 
 export interface ExperimentalConfig {}
 
-export type TurbopackRuleConfigItem =
-  | TurbopackRuleConfigItemOptions
-  | { [condition: string]: TurbopackRuleConfigItem }
-  | false;
+export type JSONValue =
+  | string
+  | number
+  | boolean
+  | JSONValue[]
+  | { [k: string]: JSONValue };
 
-/**
- * @deprecated Use `TurbopackRuleConfigItem` instead.
- */
+// At the moment, Turbopack options must be JSON-serializable, so restrict values.
+export type TurbopackLoaderOptions = Record<string, JSONValue>;
+
 export type TurbopackLoaderItem =
   | string
   | {
       loader: string;
-      // At the moment, Turbopack options must be JSON-serializable, so restrict values.
-      options: Record<string, JSONValue>;
+      options?: TurbopackLoaderOptions;
     };
 
-export type TurbopackRuleConfigItemOrShortcut =
-  | TurbopackLoaderItem[]
-  | TurbopackRuleConfigItem;
+export type TurbopackLoaderBuiltinCondition =
+  | "browser"
+  | "foreign"
+  | "development"
+  | "production"
+  | "node"
+  | "edge-light";
 
-export type TurbopackRuleConfigItemOptions = {
+export type TurbopackRuleCondition =
+  | { all: TurbopackRuleCondition[] }
+  | { any: TurbopackRuleCondition[] }
+  | { not: TurbopackRuleCondition }
+  | TurbopackLoaderBuiltinCondition
+  | {
+      path?: string | RegExp;
+      content?: RegExp;
+    };
+
+export type TurbopackRuleConfigItem = {
   loaders: TurbopackLoaderItem[];
   as?: string;
-};
-
-export type TurbopackRuleCondition = {
-  path: string | RegExp;
+  condition?: TurbopackRuleCondition;
 };
 
 export interface ModuleOptions {
@@ -228,13 +240,6 @@ export interface EmotionConfig {
     };
   };
 }
-
-export type JSONValue =
-  | string
-  | number
-  | boolean
-  | JSONValue[]
-  | { [k: string]: JSONValue };
 
 export interface BundleOptions {
   /**
