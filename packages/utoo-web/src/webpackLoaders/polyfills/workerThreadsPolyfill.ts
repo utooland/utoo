@@ -23,7 +23,6 @@ export const workerData: any = new Proxy(
 );
 
 export const isMainThread = false;
-export const threadId = workerData?.threadId || 0;
 
 export const parentPort = {
   postMessage: (message: any) => self.postMessage(message),

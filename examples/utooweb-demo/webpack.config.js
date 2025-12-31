@@ -127,6 +127,13 @@ module.exports = [
             ),
             to: "loaderWorker.js",
           },
+          {
+            from: path.resolve(
+              __dirname,
+              "../../packages/utoo-web/esm/utoo/index_bg.wasm",
+            ),
+            to: "index_bg.wasm",
+          },
         ],
       }),
     ],

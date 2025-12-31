@@ -22,14 +22,13 @@ path.resolve = (...args: string[]) => {
   return originalResolve(cwd, ...args);
 };
 
-const workerThreadsWithLiveWorkerData = {
+const workerThreadsWithWorkerData = {
   ...workerThreads,
   get workerData() {
     return workerThreads.workerData;
   },
   get threadId() {
-    // @ts-ignore
-    return self.workerData?.threadId || 0;
+    return workerThreads.workerData?.threadId || 0;
   },
 };
 
@@ -257,6 +256,6 @@ export default {
     return require("util");
   },
 
-  worker_threads: workerThreadsWithLiveWorkerData,
-  "node:worker_threads": workerThreadsWithLiveWorkerData,
+  worker_threads: workerThreadsWithWorkerData,
+  "node:worker_threads": workerThreadsWithWorkerData,
 };
