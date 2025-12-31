@@ -1,10 +1,13 @@
+import * as fs from "./fsPolyfill";
+import * as workerThreads from "./workerThreadsPolyfill";
+
 const buffer = require("buffer");
 self.Buffer = buffer.Buffer;
 const process = require("process");
 const originalCwd = process.cwd;
 process.cwd = () => {
   // @ts-ignore
-  return self.workerData?.cwd || originalCwd?.() || "/";
+  return workerThreads.workerData?.cwd || originalCwd?.() || "/";
 };
 if (!process.versions) process.versions = {};
 if (!process.versions.node) process.versions.node = "24.0.0";
@@ -15,22 +18,17 @@ const path = require("path");
 const originalResolve = path.resolve;
 path.resolve = (...args: string[]) => {
   // @ts-ignore
-  const cwd = self.workerData?.cwd || "/";
+  const cwd = workerThreads.workerData?.cwd || "/";
   return originalResolve(cwd, ...args);
 };
 
-import * as fs from "./fsPolyfill";
-import * as workerThreads from "./workerThreadsPolyfill";
-
-const workerThreadsWithLiveWorkerData = {
+const workerThreadsWithWorkerData = {
   ...workerThreads,
   get workerData() {
-    // @ts-ignore
-    return self.workerData;
+    return workerThreads.workerData;
   },
   get threadId() {
-    // @ts-ignore
-    return self.workerData?.workerId || 0;
+    return workerThreads.workerData?.threadId || 0;
   },
 };
 
@@ -258,6 +256,6 @@ export default {
     return require("util");
   },
 
-  worker_threads: workerThreadsWithLiveWorkerData,
-  "node:worker_threads": workerThreadsWithLiveWorkerData,
+  worker_threads: workerThreadsWithWorkerData,
+  "node:worker_threads": workerThreadsWithWorkerData,
 };

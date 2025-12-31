@@ -1,6 +1,6 @@
 export interface LoaderRunnerMeta {
   workerData: {
-    workerId: number;
+    threadId: number;
     cwd: string;
     projectRoot: string;
   };
