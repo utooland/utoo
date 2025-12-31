@@ -19,7 +19,7 @@ declare let self: DedicatedWorkerGlobalScope & {
     cwd: () => string;
   };
   workerData: {
-    workerId: number;
+    threadId: number;
     cwd: string;
     projectRoot: string;
     binding: typeof binding;
@@ -46,7 +46,7 @@ export function startLoaderWorker() {
     Project.setCwd(meta.workerData.cwd);
 
     self.workerData = {
-      workerId: meta.workerData.workerId,
+      threadId: meta.workerData.threadId,
       cwd: meta.workerData.cwd,
       projectRoot: meta.workerData.projectRoot,
       binding,

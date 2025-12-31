@@ -66,7 +66,7 @@ export const runLoaderWorkerPool = async (
           workerData: {
             cwd: finalCwd,
             projectRoot: projectCwd,
-            workerId: workerId,
+            threadId: workerId,
           },
           loaderAssets: {
             importMaps: { ...loadersImportMap },

@@ -2,16 +2,17 @@ import { Buffer } from "buffer";
 import path from "path";
 import { Stats } from "../../types";
 import { promises } from "./fsPromisesPolyfill";
+import { workerData } from "./workerThreadsPolyfill";
 
 function resolvePath(p: string): string {
   // @ts-ignore
-  const cwd = self.process?.cwd?.() || self.workerData?.cwd || "/";
+  const cwd = self.process?.cwd?.() || workerData?.cwd || "/";
   return path.resolve(cwd, p);
 }
 
 function getFs() {
   // @ts-ignore
-  const fs = self.workerData.fs;
+  const fs = workerData.fs;
   if (!fs) {
     throw new Error("FS not initialized");
   }
