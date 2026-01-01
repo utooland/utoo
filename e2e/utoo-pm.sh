@@ -39,16 +39,26 @@ utoo rebuild || { echo -e "${RED}FAIL: utoo rebuild failed for ant-design-x (nex
 echo -e "${GREEN}PASS: ant-design-x (next) cloned and installed${NC}"
 cd ../../
 
-# Case 2: Clone and install ant-design
+# Case 2: Clone and install ant-design - test manifests-concurrency-limit
 echo -e "${YELLOW}Case 2: Clone and install ant-design${NC}"
 cd ant-design
 if [ ! -d "ant-design" ]; then
   git clone --depth=1 --single-branch https://github.com/ant-design/ant-design.git
 fi
 cd ant-design
-rm -rf ~/.cache/nm
-echo "Installing dependencies for ant-design..."
-utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for ant-design${NC}"; exit 1; }
+
+# Test different manifests-concurrency-limit values
+echo -e "${YELLOW}Testing different manifests-concurrency-limit values...${NC}"
+for limit in 10 20 40 60 70 80 90 100 120 200; do
+  echo -e "${YELLOW}--- Testing manifests-concurrency-limit=$limit ---${NC}"
+  rm -rf node_modules package-lock.json
+  rm -rf ~/.cache/nm
+  time utoo install --ignore-scripts --manifests-concurrency-limit $limit || { echo -e "${RED}FAIL: utoo install failed with limit=$limit${NC}"; exit 1; }
+  echo -e "${GREEN}PASS: limit=$limit completed${NC}"
+  echo ""
+done
+
+utoo rebuild || { echo -e "${RED}FAIL: utoo rebuild failed for ant-design${NC}"; exit 1; }
 echo -e "${GREEN}PASS: ant-design cloned and installed${NC}"
 cd ../../
 
