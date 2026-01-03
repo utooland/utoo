@@ -120,6 +120,21 @@ pub enum ProviderConfigValue {
 #[turbo_tasks::value(transparent)]
 pub struct ProviderConfig(FxIndexMap<RcStr, ProviderConfigValue>);
 
+/// Runtime bootstrap configuration - can be either inline code or a file path
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TraceRawVcs, NonLocalValue, OperationValue,
+)]
+#[serde(untagged)]
+pub enum RuntimeBootstrapConfig {
+    /// Inline JavaScript code
+    Code(RcStr),
+    /// Path to a JavaScript/TypeScript file
+    Path(RcStr),
+}
+
+#[turbo_tasks::value(transparent)]
+pub struct OptionRuntimeBootstrapConfig(Option<RuntimeBootstrapConfig>);
+
 #[turbo_tasks::value(serialization = "custom", eq = "manual")]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
@@ -142,6 +157,7 @@ pub struct Config {
     cache_handler: Option<RcStr>,
     node_polyfill: Option<bool>,
     dev_server: Option<DevServer>,
+    runtime_bootstrap: Option<RuntimeBootstrapConfig>,
     #[serde(default)]
     experimental: ExperimentalConfig,
     #[cfg(feature = "test")]
@@ -1189,6 +1205,11 @@ impl Config {
     #[turbo_tasks::function]
     pub fn node_polyfill(&self) -> Vc<bool> {
         Vc::cell(self.node_polyfill.unwrap_or(false))
+    }
+
+    #[turbo_tasks::function]
+    pub fn runtime_bootstrap(&self) -> Vc<OptionRuntimeBootstrapConfig> {
+        OptionRuntimeBootstrapConfig(self.runtime_bootstrap.clone()).cell()
     }
 
     #[turbo_tasks::function]

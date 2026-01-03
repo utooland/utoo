@@ -7,6 +7,7 @@ use turbo_tasks::{
     FxIndexMap, ResolvedVc, TaskInput, TryJoinIterExt, ValueToString, Vc, trace::TraceRawVcs,
 };
 use turbo_tasks_env::EnvMap;
+use turbo_tasks_fs::File;
 use turbo_tasks_fs::FileSystemPath;
 use turbopack::{
     css::chunk::CssChunkType,
@@ -18,6 +19,7 @@ use turbopack::{
 };
 use turbopack_browser::{BrowserChunkingContext, CurrentChunkMethod};
 use turbopack_core::{
+    asset::AssetContent,
     chunk::{
         ChunkingConfig, ChunkingContext, MangleType, MinifyType, SourceMapSourceType,
         SourceMapsType, module_id_strategies::ModuleIdStrategy,
@@ -30,6 +32,7 @@ use turbopack_core::{
     file_source::FileSource,
     free_var_references,
     module_graph::export_usage::OptionExportUsageInfo,
+    virtual_source::VirtualSource,
 };
 use turbopack_ecmascript::{TypeofWindow, chunk::EcmascriptChunkType};
 use turbopack_node::{
@@ -210,6 +213,34 @@ pub async fn get_client_runtime_entries(
     let is_development = mode.await?.is_development();
     let watch = *watch.await?;
     let hot = *hot.await?;
+
+    // Add runtime bootstrap code if configured
+    // This runs synchronously in the runtime chunk before any entry modules execute
+    let bootstrap_config_opt = config.runtime_bootstrap().await?;
+    if let Some(bootstrap_config) = bootstrap_config_opt.as_ref() {
+        match bootstrap_config {
+            crate::config::RuntimeBootstrapConfig::Code(code) => {
+                // Inline code: create a virtual source
+                let bootstrap_source = VirtualSource::new(
+                    project_root.join("__runtime_bootstrap__.js")?,
+                    AssetContent::file(File::from(code.clone()).into()),
+                )
+                .to_resolved()
+                .await?;
+                runtime_entries.push(
+                    RuntimeEntry::Source(ResolvedVc::upcast(bootstrap_source)).resolved_cell(),
+                );
+            }
+            crate::config::RuntimeBootstrapConfig::Path(path) => {
+                // File path: use FileSource to load the file
+                let bootstrap_path = project_root.join(path.as_str())?;
+                let bootstrap_source = FileSource::new(bootstrap_path).to_resolved().await?;
+                runtime_entries.push(
+                    RuntimeEntry::Source(ResolvedVc::upcast(bootstrap_source)).resolved_cell(),
+                );
+            }
+        }
+    }
 
     if is_development && watch {
         let enable_react_refresh =
