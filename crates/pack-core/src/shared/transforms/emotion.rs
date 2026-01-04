@@ -19,7 +19,7 @@ pub async fn get_emotion_transform_rule(config: Vc<Config>) -> Result<Option<Mod
             EmotionTransformOptionsOrBoolean::Boolean(true) => {
                 EmotionTransformer::new(&Default::default())
             }
-            EmotionTransformOptionsOrBoolean::Options(value) => EmotionTransformer::new(&value),
+            EmotionTransformOptionsOrBoolean::Options(value) => EmotionTransformer::new(value),
             _ => None,
         })
         .map(|transformer| {

@@ -986,7 +986,7 @@ impl Config {
 
     #[turbo_tasks::function]
     pub fn webpack_rules(&self, project_path: FileSystemPath) -> Result<Vc<WebpackRules>> {
-        let Some(turbo_rules) = self.module.as_ref().and_then(|t| Some(&t.rules)) else {
+        let Some(turbo_rules) = self.module.as_ref().map(|t| &t.rules) else {
             return Ok(Vc::cell(Vec::new()));
         };
         if turbo_rules.is_empty() {

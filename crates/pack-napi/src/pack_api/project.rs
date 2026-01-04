@@ -1004,7 +1004,7 @@ pub async fn project_get_source_map(
             Ok(Some(map.content().to_str()?.to_string()))
         })
         .await
-        .map_err(|e| napi::Error::from_reason(PrettyPrintError(&e.into()).to_string()))?;
+        .map_err(|e| napi::Error::from_reason(PrettyPrintError(&e).to_string()))?;
 
     Ok(source_map)
 }
