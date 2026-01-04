@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail};
+use bincode::{Decode, Encode};
 use napi::{
     JsFunction, Status,
     bindgen_prelude::{External, within_runtime_if_available},
@@ -31,7 +32,6 @@ use pack_core::tracing_presets::{
     TRACING_OVERVIEW_TARGETS, TRACING_TARGETS, TRACING_TURBO_TASKS_TARGETS,
     TRACING_TURBOPACK_TARGETS,
 };
-use serde::{Deserialize, Serialize};
 use tracing::Instrument;
 use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
 use turbo_rcstr::RcStr;
@@ -44,7 +44,7 @@ use turbo_unix_path::get_relative_path_to;
 use turbopack_core::{
     PROJECT_FILESYSTEM_NAME, SOURCE_URL_PROTOCOL,
     error::PrettyPrintError,
-    source_map::{OptionStringifiedSourceMap, SourceMap, Token},
+    source_map::{SourceMap, Token},
     version::{PartialUpdate, TotalUpdate, Update},
 };
 use turbopack_ecmascript_hmr_protocol::{ClientUpdateInstruction, ResourceIdentifier};
@@ -812,15 +812,15 @@ pub fn project_update_info_subscribe(
 #[derive(
     Clone,
     Debug,
-    Deserialize,
     Eq,
     Hash,
     NonLocalValue,
     OperationValue,
     PartialEq,
-    Serialize,
     TaskInput,
     TraceRawVcs,
+    Encode,
+    Decode,
 )]
 pub struct StackFrame {
     pub is_server: bool,
@@ -995,13 +995,13 @@ pub async fn project_get_source_map(
 
     let source_map = turbo_tasks
         .run_once(async move {
-            let Some(map) = &*get_source_map_rope_operation(container, file_path)
+            let source_map = get_source_map_rope_operation(container, file_path)
                 .read_strongly_consistent()
-                .await?
-            else {
+                .await?;
+            let Some(map) = source_map.as_content() else {
                 return Ok(None);
             };
-            Ok(Some(map.to_str()?.to_string()))
+            Ok(Some(map.content().to_str()?.to_string()))
         })
         .await
         .map_err(|e| napi::Error::from_reason(PrettyPrintError(&e).to_string()))?;
@@ -1013,7 +1013,7 @@ pub async fn project_get_source_map(
 pub fn get_source_map_rope_operation(
     container: ResolvedVc<ProjectContainer>,
     file_path: RcStr,
-) -> Vc<OptionStringifiedSourceMap> {
+) -> Vc<FileContent> {
     get_source_map_rope(*container, file_path)
 }
 

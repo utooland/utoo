@@ -9,7 +9,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use pack_api::project::{DefineEnv, ProjectContainer, ProjectOptions, WatchOptions};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use turbo_rcstr::RcStr;
 use turbo_tasks::{ResolvedVc, TurboTasks};
 use turbo_tasks_backend::{
@@ -41,7 +41,7 @@ pub enum Mode {
     Dev,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Default, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PartialProjectOptions {
     /// A root path from which all files must be nested under. Trying to access

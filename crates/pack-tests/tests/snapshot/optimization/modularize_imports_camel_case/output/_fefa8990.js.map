@@ -3,6 +3,6 @@
   "sources": [],
   "sections": [
     {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/node_modules/antd/es/ButtonGroup/index.js"],"sourcesContent":["export default function ButtonGroup() {\n    return \"ButtonGroup\";\n}"],"names":[],"mappings":"AAAe,SAAS;IACpB,OAAO;AACX","ignoreList":[0]}},
-    {"offset": {"line": 15, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/node_modules/antd/es/DatePicker/index.js"],"sourcesContent":["export default function DatePicker() {\n    return \"DatePicker\";\n}"],"names":[],"mappings":"AAAe,SAAS;IACpB,OAAO;AACX","ignoreList":[0]}},
-    {"offset": {"line": 26, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/optimization/modularize_imports_camel_case/input/index.js"],"sourcesContent":["import { ButtonGroup, DatePicker } from \"antd\";\n\nconsole.log(ButtonGroup, DatePicker);"],"names":[],"mappings":"AAAA;AAAA;;;AAEA,QAAQ,GAAG,CAAC,yJAAW,EAAE,wJAAU"}}]
+    {"offset": {"line": 16, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/node_modules/antd/es/DatePicker/index.js"],"sourcesContent":["export default function DatePicker() {\n    return \"DatePicker\";\n}"],"names":[],"mappings":"AAAe,SAAS;IACpB,OAAO;AACX","ignoreList":[0]}},
+    {"offset": {"line": 28, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/optimization/modularize_imports_camel_case/input/index.js"],"sourcesContent":["import { ButtonGroup, DatePicker } from \"antd\";\n\nconsole.log(ButtonGroup, DatePicker);"],"names":[],"mappings":"AAAA;AAAA;;;AAEA,QAAQ,GAAG,CAAC,yJAAW,EAAE,wJAAU"}}]
 }

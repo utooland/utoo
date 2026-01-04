@@ -8,7 +8,7 @@ use pack_core::{
     mode::Mode,
     util::{Runtime, convert_to_project_relative},
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::{
     fs,
     path::{MAIN_SEPARATOR, Path, PathBuf},
@@ -17,17 +17,21 @@ use std::{
 use tracing::Instrument;
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{
-    Completion, Completions, IntoTraitRef, NonLocalValue, OperationValue, OperationVc, ReadRef,
-    ResolvedVc, State, TaskInput, TransientInstance, TryFlatJoinIterExt, TryJoinIterExt, Vc,
-    mark_root, trace::TraceRawVcs,
+    Completion, Completions, IntoTraitRef, OperationValue, OperationVc, ReadRef, ResolvedVc, State,
+    TransientInstance, TryFlatJoinIterExt, TryJoinIterExt, Vc, mark_root,
 };
 use turbo_tasks_env::{EnvMap, ProcessEnv};
 use turbo_tasks_fs::{
-    DirectoryContent, DirectoryEntry, DiskFileSystem, FileSystem, FileSystemEntryType,
+    DirectoryContent, DirectoryEntry, DiskFileSystem, FileContent, FileSystem, FileSystemEntryType,
     FileSystemPath, VirtualFileSystem, invalidation,
 };
 use turbopack::global_module_ids::get_global_module_id_strategy;
-use turbopack_core::file_source::FileSource;
+use turbopack_core::{
+    file_source::FileSource,
+    module_graph::binding_usage_info::{
+        BindingUsageInfo, OptionBindingUsageInfo, compute_binding_usage_info,
+    },
+};
 
 use turbopack::evaluate_context::node_build_environment;
 
@@ -45,7 +49,6 @@ use turbopack_core::{
     module_graph::{
         GraphEntries, ModuleGraph, SingleModuleGraph, VisitedModules,
         chunk_group_info::ChunkGroupEntry,
-        export_usage::{OptionExportUsageInfo, compute_export_usage_info},
     },
     output::{
         ExpandOutputAssetsInput, ExpandedOutputAssets, OutputAsset, OutputAssets,
@@ -53,7 +56,6 @@ use turbopack_core::{
     },
     raw_output::RawOutput,
     reference::all_assets_from_entries,
-    source_map::OptionStringifiedSourceMap,
     version::{
         NotFoundVersion, OptionVersionedContent, Update, Version, VersionState, VersionedContent,
     },
@@ -69,21 +71,8 @@ use crate::{
     versioned_content_map::VersionedContentMap,
 };
 
-#[derive(
-    Debug,
-    Default,
-    Serialize,
-    Deserialize,
-    Copy,
-    Clone,
-    TaskInput,
-    PartialEq,
-    Eq,
-    Hash,
-    TraceRawVcs,
-    NonLocalValue,
-    OperationValue,
-)]
+#[turbo_tasks::value]
+#[derive(Default, Debug, Clone, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
 pub struct WatchOptions {
     /// Whether to watch the filesystem for file changes.
@@ -94,20 +83,8 @@ pub struct WatchOptions {
     pub poll_interval: Option<Duration>,
 }
 
-#[derive(
-    Debug,
-    Serialize,
-    Deserialize,
-    Default,
-    Clone,
-    TaskInput,
-    PartialEq,
-    Eq,
-    Hash,
-    TraceRawVcs,
-    NonLocalValue,
-    OperationValue,
-)]
+#[turbo_tasks::value]
+#[derive(Debug, Clone, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectOptions {
     /// A root path from which all files must be nested under. Trying to access
@@ -140,19 +117,8 @@ pub struct ProjectOptions {
     pub pack_path: RcStr,
 }
 
-#[derive(
-    Debug,
-    Default,
-    Serialize,
-    Deserialize,
-    Clone,
-    TaskInput,
-    PartialEq,
-    Eq,
-    Hash,
-    TraceRawVcs,
-    NonLocalValue,
-)]
+#[turbo_tasks::value]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PartialProjectOptions {
     /// A root path from which all files must be nested under. Trying to access
@@ -182,20 +148,8 @@ pub struct PartialProjectOptions {
     pub pack_path: Option<RcStr>,
 }
 
-#[derive(
-    Debug,
-    Serialize,
-    Deserialize,
-    Clone,
-    Default,
-    TaskInput,
-    PartialEq,
-    Eq,
-    Hash,
-    TraceRawVcs,
-    NonLocalValue,
-    OperationValue,
-)]
+#[turbo_tasks::value]
+#[derive(Default, Debug, Clone, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
 pub struct DefineEnv {
     pub client: Vec<(RcStr, RcStr)>,
@@ -242,7 +196,7 @@ fn output_fs_operation(project: ResolvedVc<Project>) -> Vc<DiskFileSystem> {
 impl ProjectContainer {
     #[tracing::instrument(level = "trace", name = "initialize project", skip_all)]
     pub async fn initialize(self: ResolvedVc<Self>, options: ProjectOptions) -> Result<()> {
-        let watch = options.watch;
+        let watch = options.watch.clone();
 
         self.await?.options_state.set(Some(options));
 
@@ -317,7 +271,7 @@ impl ProjectContainer {
         }
 
         // TODO: Handle mode switch, should prevent mode being switched.
-        let watch = new_options.watch;
+        let watch = new_options.watch.clone();
 
         let project = self.project().to_resolved().await?;
         let prev_project_fs = project_fs_operation(project)
@@ -387,7 +341,7 @@ impl ProjectContainer {
             config = Config::from_string(Vc::cell(options.config.clone()));
             root_path = options.root_path.clone();
             project_path = options.project_path.clone();
-            watch = options.watch;
+            watch = options.watch.clone();
             build_id = options.build_id.clone();
             pack_path = options.pack_path.clone();
         }
@@ -425,11 +379,11 @@ impl ProjectContainer {
         &self,
         file_path: FileSystemPath,
         section: Option<RcStr>,
-    ) -> Vc<OptionStringifiedSourceMap> {
+    ) -> Vc<FileContent> {
         if let Some(map) = self.versioned_content_map {
             map.get_source_map(file_path, section)
         } else {
-            OptionStringifiedSourceMap::none()
+            FileContent::NotFound.cell()
         }
     }
 }
@@ -830,6 +784,7 @@ impl Project {
         self: Vc<Self>,
         evaluatable_assets: Vc<EvaluatableAssets>,
     ) -> Result<Vc<ModuleGraph>> {
+        let is_production = self.mode().await?.is_production();
         Ok(if *self.per_entry_module_graph().await? {
             let entries = evaluatable_assets
                 .await?
@@ -839,7 +794,8 @@ impl Project {
                 .collect();
             ModuleGraph::from_modules(
                 Vc::cell(vec![ChunkGroupEntry::Entry(entries)]),
-                self.mode().await?.is_production(),
+                is_production,
+                is_production,
             )
         } else {
             *self.whole_app_module_graphs().await?.full
@@ -847,8 +803,10 @@ impl Project {
     }
 
     #[turbo_tasks::function]
-    pub async fn whole_app_module_graphs(self: ResolvedVc<Self>) -> Result<Vc<ModuleGraphs>> {
-        let module_graph = async move {
+    pub async fn whole_app_module_graphs(
+        self: ResolvedVc<Self>,
+    ) -> Result<Vc<BaseAndFullModuleGraph>> {
+        async move {
             let module_graphs_op = whole_app_module_graph_operation(self);
             let module_graphs_vc = if self.mode().await?.is_production() {
                 module_graphs_op.connect()
@@ -860,18 +818,18 @@ impl Project {
                 *vc
             };
 
+            // At this point all modules have been computed and we can get rid of the node.js
+            // process pools
+            if *self.is_watch_enabled().await? {
+                turbopack_node::evaluate::scale_down();
+            } else {
+                turbopack_node::evaluate::scale_zero();
+            }
+
             Ok(module_graphs_vc)
         }
-        .instrument(tracing::trace_span!("module graph for app"))
-        .await;
-        // At this point all modules have been computed and we can get rid of the node.js
-        // process pools
-        if *self.is_watch_enabled().await? {
-            turbopack_node::evaluate::scale_down();
-        } else {
-            turbopack_node::evaluate::scale_zero();
-        }
-        module_graph
+        .instrument(tracing::info_span!("module graph for app"))
+        .await
     }
 
     #[turbo_tasks::function]
@@ -1142,15 +1100,39 @@ impl Project {
         }
     }
 
-    /// Computed the used exports for each module.
+    /// Compute the used exports and unused imports for each module.
     #[turbo_tasks::function]
-    pub async fn export_usage(self: Vc<Self>) -> Result<Vc<OptionExportUsageInfo>> {
+    async fn binding_usage_info(self: Vc<Self>) -> Result<Vc<BindingUsageInfo>> {
+        let remove_unused_imports = *self.config().remove_unused_imports(self.mode()).await?;
+
+        let module_graphs = self.whole_app_module_graphs().await?;
+        Ok(*compute_binding_usage_info(
+            module_graphs.full_with_unused_references,
+            remove_unused_imports,
+        )
+        // As a performance optimization, we resolve strongly consistently
+        .resolve_strongly_consistent()
+        .await?)
+    }
+
+    /// Compute the used exports for each module.
+    #[turbo_tasks::function]
+    pub async fn export_usage(self: Vc<Self>) -> Result<Vc<OptionBindingUsageInfo>> {
         if *self.config().remove_unused_exports(self.mode()).await? {
-            let module_graphs = self.whole_app_module_graphs().await?;
             Ok(Vc::cell(Some(
-                compute_export_usage_info(module_graphs.full)
-                    .resolve_strongly_consistent()
-                    .await?,
+                self.binding_usage_info().to_resolved().await?,
+            )))
+        } else {
+            Ok(Vc::cell(None))
+        }
+    }
+
+    /// Compute the unused references that were removed (inner graph tree shaking).
+    #[turbo_tasks::function]
+    pub async fn unused_references(self: Vc<Self>) -> Result<Vc<OptionBindingUsageInfo>> {
+        if *self.config().remove_unused_imports(self.mode()).await? {
+            Ok(Vc::cell(Some(
+                self.binding_usage_info().to_resolved().await?,
             )))
         } else {
             Ok(Vc::cell(None))
@@ -1275,34 +1257,79 @@ async fn copy_directory_recursive_helper(
 #[turbo_tasks::function(operation)]
 async fn whole_app_module_graph_operation(
     project: ResolvedVc<Project>,
-) -> Result<Vc<ModuleGraphs>> {
+) -> Result<Vc<BaseAndFullModuleGraph>> {
     mark_root();
-    let should_trace = project.mode().await?.is_production();
 
-    let base_single_module_graph =
-        SingleModuleGraph::new_with_entries(project.get_all_entries(), should_trace);
+    let mode = project.mode();
+    let mode_ref = mode.await?;
+    let should_trace = mode_ref.is_production();
+    let should_read_binding_usage = mode_ref.is_production();
+    let base_single_module_graph = SingleModuleGraph::new_with_entries(
+        project.get_all_entries(),
+        should_trace,
+        should_read_binding_usage,
+    );
     let base_visited_modules = VisitedModules::from_graph(base_single_module_graph);
 
     let base = ModuleGraph::from_single_graph(base_single_module_graph);
+
+    let remove_unused_imports = *project.config().remove_unused_imports(mode).await?;
+
+    let base = if remove_unused_imports {
+        // TODO suboptimal that we do compute_binding_usage_info twice (once for the base graph
+        // and later for the full graph)
+        base.without_unused_references(
+            *compute_binding_usage_info(base.to_resolved().await?, true)
+                .resolve_strongly_consistent()
+                .await?,
+        )
+    } else {
+        base
+    };
+
     let additional_entries = project.get_all_additional_entries(base);
 
     let additional_module_graph = SingleModuleGraph::new_with_entries_visited(
         additional_entries,
         base_visited_modules,
         should_trace,
+        should_read_binding_usage,
     );
 
-    let full = ModuleGraph::from_graphs(vec![base_single_module_graph, additional_module_graph]);
-    Ok(ModuleGraphs {
+    let full_with_unused_references =
+        ModuleGraph::from_graphs(vec![base_single_module_graph, additional_module_graph])
+            .to_resolved()
+            .await?;
+
+    let full = if remove_unused_imports {
+        full_with_unused_references
+            .without_unused_references(
+                *compute_binding_usage_info(full_with_unused_references, true)
+                    .resolve_strongly_consistent()
+                    .await?,
+            )
+            .to_resolved()
+            .await?
+    } else {
+        full_with_unused_references
+    };
+
+    Ok(BaseAndFullModuleGraph {
         base: base.to_resolved().await?,
-        full: full.to_resolved().await?,
+        full_with_unused_references,
+        full,
     }
     .cell())
 }
 
 #[turbo_tasks::value(shared)]
-pub struct ModuleGraphs {
+pub struct BaseAndFullModuleGraph {
+    /// The base module graph generated from the entry points.
     pub base: ResolvedVc<ModuleGraph>,
+    /// The base graph plus any modules that were generated from additional entries (for which the
+    /// base graph is needed).
+    pub full_with_unused_references: ResolvedVc<ModuleGraph>,
+    /// `full_with_unused_references` but with unused references removed.
     pub full: ResolvedVc<ModuleGraph>,
 }
 

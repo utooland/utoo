@@ -1,8 +1,9 @@
 use std::path::{MAIN_SEPARATOR, Path};
 
 use anyhow::{Context, Result};
+use bincode::{Decode, Encode};
 use dunce::{canonicalize, simplified};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use turbo_rcstr::RcStr;
 use turbo_tasks::{NonLocalValue, TaskInput, Vc, trace::TraceRawVcs};
 use turbo_tasks_fs::FileSystem;
@@ -18,13 +19,14 @@ use crate::config::Config;
     Copy,
     Debug,
     TraceRawVcs,
-    Serialize,
     Deserialize,
     Hash,
     PartialOrd,
     Ord,
     TaskInput,
     NonLocalValue,
+    Encode,
+    Decode,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum Runtime {

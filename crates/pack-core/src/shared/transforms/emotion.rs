@@ -10,7 +10,6 @@ use crate::{
 };
 
 pub async fn get_emotion_transform_rule(config: Vc<Config>) -> Result<Option<ModuleRule>> {
-    let enable_mdx_rs = config.mdx_rs().await?.is_some();
     let module_rule = config
         .styles()
         .await?
@@ -24,11 +23,7 @@ pub async fn get_emotion_transform_rule(config: Vc<Config>) -> Result<Option<Mod
             _ => None,
         })
         .map(|transformer| {
-            get_ecma_transform_rule(
-                Box::new(transformer),
-                enable_mdx_rs,
-                EcmascriptTransformStage::Main,
-            )
+            get_ecma_transform_rule(Box::new(transformer), false, EcmascriptTransformStage::Main)
         });
 
     Ok(module_rule)

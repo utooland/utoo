@@ -1,20 +1,16 @@
 use std::{collections::BTreeSet, str::FromStr};
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use bincode::{Decode, Encode};
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{
     FxIndexMap, ResolvedVc, TaskInput, TryJoinIterExt, ValueToString, Vc, trace::TraceRawVcs,
 };
 use turbo_tasks_env::EnvMap;
 use turbo_tasks_fs::FileSystemPath;
-use turbopack::{
-    css::chunk::CssChunkType,
-    module_options::{
-        CssOptionsContext, EcmascriptOptionsContext, JsxTransformOptions, ModuleOptionsContext,
-        ModuleRule, TypescriptTransformOptions,
-    },
-    resolve_options_context::ResolveOptionsContext,
+use turbopack::module_options::{
+    CssOptionsContext, EcmascriptOptionsContext, JsxTransformOptions, ModuleOptionsContext,
+    ModuleRule, TypescriptTransformOptions, side_effect_free_packages_glob,
 };
 use turbopack_browser::{BrowserChunkingContext, CurrentChunkMethod};
 use turbopack_core::{
@@ -29,13 +25,15 @@ use turbopack_core::{
     environment::{BrowserEnvironment, Environment, ExecutionEnvironment},
     file_source::FileSource,
     free_var_references,
-    module_graph::export_usage::OptionExportUsageInfo,
+    module_graph::binding_usage_info::OptionBindingUsageInfo,
 };
+use turbopack_css::chunk::CssChunkType;
 use turbopack_ecmascript::{TypeofWindow, chunk::EcmascriptChunkType};
 use turbopack_node::{
     execution_context::ExecutionContext,
     transforms::postcss::{PostCssConfigLocation, PostCssTransformOptions},
 };
+use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 
 use crate::{
     client::runtime_entry::RuntimeEntries,
@@ -267,7 +265,6 @@ pub async fn get_client_module_options_context(
         .to_resolved()
         .await?;
     let decorators_options = get_decorators_transform_options(project_path.clone());
-    let enable_mdx_rs = *config.mdx_rs().await?;
     let is_react_development = mode.await?.is_react_development();
     let enable_react_refresh = if *watch.await? && is_react_development {
         assert_can_resolve_react_refresh(project_path.clone(), resolve_options_context)
@@ -394,7 +391,11 @@ pub async fn get_client_module_options_context(
         execution_context: Some(execution_context),
         tree_shaking_mode: tree_shaking_mode_for_user_code,
         enable_postcss_transform,
-        side_effect_free_packages: config.optimize_package_imports().owned().await?,
+        side_effect_free_packages: Some(
+            side_effect_free_packages_glob(config.optimize_package_imports())
+                .to_resolved()
+                .await?,
+        ),
         keep_last_successful_parse: mode_ref.is_development(),
         ..Default::default()
     };
@@ -431,7 +432,7 @@ pub async fn get_client_module_options_context(
             ..module_options_context.ecmascript.clone()
         },
         enable_webpack_loaders,
-        enable_mdx_rs,
+        enable_mdx_rs: None,
         rules: vec![
             (
                 foreign_code_context_condition(config).await?,
@@ -522,7 +523,7 @@ pub async fn get_client_resolve_options_context(
     .cell())
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, TaskInput, TraceRawVcs, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, TaskInput, TraceRawVcs, Encode, Decode)]
 pub struct ClientChunkingContextOptions {
     pub mode: Vc<Mode>,
     pub root_path: FileSystemPath,
@@ -533,7 +534,7 @@ pub struct ClientChunkingContextOptions {
     pub module_id_strategy: Vc<Box<dyn ModuleIdStrategy>>,
     pub no_mangling: Vc<bool>,
     pub config: Vc<Config>,
-    pub export_usage: Vc<OptionExportUsageInfo>,
+    pub export_usage: Vc<OptionBindingUsageInfo>,
 }
 
 #[turbo_tasks::function]
@@ -624,7 +625,7 @@ pub async fn get_client_chunking_context(
         let split_chunks = &config.optimization().await?.split_chunks;
 
         let (ecmascript_chunking_config, css_chunking_config) = (
-            split_chunks.get("js").map_or(
+            split_chunks.as_ref().and_then(|sc| sc.get("js")).map_or(
                 ChunkingConfig {
                     min_chunk_size: default_min_chunk_size(),
                     max_chunk_count_per_group: default_max_chunk_count_per_group(),
@@ -633,7 +634,7 @@ pub async fn get_client_chunking_context(
                 },
                 Into::into,
             ),
-            split_chunks.get("css").map_or(
+            split_chunks.as_ref().and_then(|sc| sc.get("css")).map_or(
                 ChunkingConfig {
                     max_merge_chunk_size: 100_000,
                     ..Default::default()

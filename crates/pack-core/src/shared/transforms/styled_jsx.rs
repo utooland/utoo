@@ -9,16 +9,15 @@ use crate::{config::Config, shared::transforms::EcmascriptTransformStage};
 
 /// Returns a transform rule for the styled jsx transform.
 pub async fn get_styled_jsx_transform_rule(
-    config: Vc<Config>,
+    _config: Vc<Config>,
     target_browsers: Vc<RuntimeVersions>,
 ) -> Result<Option<ModuleRule>> {
-    let enable_mdx_rs = config.mdx_rs().await?.is_some();
     let versions = *target_browsers.await?;
 
     let transformer = StyledJsxTransformer::new(versions);
     Ok(Some(get_ecma_transform_rule(
         Box::new(transformer),
-        enable_mdx_rs,
+        false,
         EcmascriptTransformStage::Main,
     )))
 }

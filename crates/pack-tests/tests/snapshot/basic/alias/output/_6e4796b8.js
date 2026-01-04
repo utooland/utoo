@@ -27,7 +27,8 @@ const aliasPkg = 'alias-pkg';
 ;
 __turbopack_context__.s([
     "aliasPkg",
-    ()=>aliasPkg
+    0,
+    aliasPkg
 ]);
 }),
 521, ((__turbopack_context__) => {

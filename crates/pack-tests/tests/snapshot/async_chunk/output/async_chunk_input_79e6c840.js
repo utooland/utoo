@@ -7,7 +7,8 @@ function foo(value) {
 }
 __turbopack_context__.s([
     "foo",
-    ()=>foo
+    0,
+    foo
 ]);
 }),
 476, ((__turbopack_context__) => {

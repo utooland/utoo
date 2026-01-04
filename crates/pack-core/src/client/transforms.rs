@@ -19,14 +19,10 @@ pub async fn get_client_transforms_rules(config: Vc<Config>) -> Result<Vec<Modul
         .unwrap_or_default();
     let wasm_as_asset = optimization_config.wasm_as_asset.unwrap_or(false);
 
-    let enable_mdx_rs = config.mdx_rs().await?.is_some();
     let image_config = config.image_config().await?;
 
     if !modularize_imports_config.is_empty() {
-        rules.push(get_modularize_imports_rule(
-            modularize_imports_config,
-            enable_mdx_rs,
-        ));
+        rules.push(get_modularize_imports_rule(modularize_imports_config));
     }
 
     if let Some(image_config) = &*image_config {

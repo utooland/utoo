@@ -12,8 +12,7 @@ use tracing::{Instrument, trace_span};
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{Completion, JoinIterExt, ResolvedVc, ValueToString, Vc};
 use turbopack::{
-    ModuleAssetContext, module_options::ModuleOptionsContext,
-    resolve_options_context::ResolveOptionsContext, transition::TransitionOptions,
+    ModuleAssetContext, module_options::ModuleOptionsContext, transition::TransitionOptions,
 };
 use turbopack_core::{
     chunk::{
@@ -29,10 +28,11 @@ use turbopack_core::{
     output::OutputAssets,
     reference_type::{EntryReferenceSubType, ReferenceType},
     resolve::{
-        origin::{PlainResolveOrigin, ResolveOriginExt},
+        origin::{PlainResolveOrigin, ResolveOrigin, ResolveOriginExt},
         parse::Request,
     },
 };
+use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 
 use crate::{
     endpoint::{Endpoint, EndpointOutput, EndpointOutputPaths},
@@ -198,7 +198,7 @@ impl LibraryEndpoint {
         let ty = ReferenceType::Entry(EntryReferenceSubType::Undefined);
 
         Ok(origin
-            .resolve_asset(entry_request, origin.resolve_options(ty.clone()).await?, ty)
+            .resolve_asset(entry_request, origin.resolve_options(ty.clone()), ty)
             .await?
             .primary_modules())
     }
@@ -251,7 +251,7 @@ impl LibraryEndpoint {
                 runtime_root,
                 runtime_export,
                 config: project.config(),
-                export_usage: project.export_usage(),
+                export_usage: *project.export_usage().await?,
             },
         ))
     }

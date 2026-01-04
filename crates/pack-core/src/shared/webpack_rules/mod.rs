@@ -1,6 +1,7 @@
 use std::{collections::BTreeSet, str::FromStr};
 
 use anyhow::Result;
+use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use turbo_rcstr::rcstr;
 use turbo_tasks::{NonLocalValue, OperationValue, ResolvedVc, TaskInput, Vc, trace::TraceRawVcs};
@@ -35,12 +36,14 @@ pub(crate) mod style_loader;
     PartialOrd,
     Ord,
     Hash,
-    Deserialize,
     Serialize,
+    Deserialize,
     TaskInput,
     TraceRawVcs,
     NonLocalValue,
     OperationValue,
+    Encode,
+    Decode,
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum WebpackLoaderBuiltinCondition {

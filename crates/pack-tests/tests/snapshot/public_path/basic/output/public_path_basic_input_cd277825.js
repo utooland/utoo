@@ -21,9 +21,11 @@ __turbopack_context__.A(78).then((module)=>{
 console.log('Ready to load chunks from CDN');
 __turbopack_context__.s([
     "getImageUrl",
-    ()=>getImageUrl,
+    0,
+    getImageUrl,
     "loadLazyModule",
-    ()=>loadLazyModule
+    0,
+    loadLazyModule
 ]);
 }),
 78, ((__turbopack_context__) => {

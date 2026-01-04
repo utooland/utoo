@@ -1,7 +1,7 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use bincode::{Decode, Encode};
 use turbo_rcstr::RcStr;
-use turbo_tasks::{TaskInput, Vc, trace::TraceRawVcs};
+use turbo_tasks::{ResolvedVc, TaskInput, Vc, trace::TraceRawVcs};
 use turbo_tasks_fs::FileSystemPath;
 use turbopack_core::{
     chunk::{
@@ -9,14 +9,14 @@ use turbopack_core::{
         module_id_strategies::ModuleIdStrategy,
     },
     environment::{EdgeWorkerEnvironment, Environment, ExecutionEnvironment, NodeJsVersion},
-    module_graph::export_usage::OptionExportUsageInfo,
+    module_graph::binding_usage_info::BindingUsageInfo,
 };
 
 use crate::{config::Config, mode::Mode};
 
 use super::LibraryChunkingContext;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, TaskInput, TraceRawVcs, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, TaskInput, TraceRawVcs, Encode, Decode)]
 pub struct LibraryChunkingContextOptions {
     pub mode: Vc<Mode>,
     pub root_path: FileSystemPath,
@@ -31,7 +31,7 @@ pub struct LibraryChunkingContextOptions {
     pub runtime_root: Vc<Option<RcStr>>,
     pub runtime_export: Vc<Vec<RcStr>>,
     pub config: Vc<Config>,
-    pub export_usage: Vc<OptionExportUsageInfo>,
+    pub export_usage: Option<ResolvedVc<BindingUsageInfo>>,
 }
 
 #[turbo_tasks::function]
@@ -107,7 +107,7 @@ pub async fn get_library_chunking_context(
         SourceMapsType::None
     })
     .module_id_strategy(module_id_strategy.to_resolved().await?)
-    .export_usage(*export_usage.await?)
+    .export_usage(export_usage)
     .nested_async_availability(*nested_async_chunking.await?);
 
     if !mode.is_development()

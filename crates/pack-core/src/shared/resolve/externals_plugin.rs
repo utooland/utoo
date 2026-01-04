@@ -158,6 +158,7 @@ fn handle_external_config(
                             name: external_name.into(),
                             ty: ExternalType::Script,
                             traced: ExternalTraced::Traced,
+                            target: None,
                         },
                     ));
                 }
@@ -182,6 +183,7 @@ fn handle_external_config(
         name: external_name,
         ty: external_type,
         traced: ExternalTraced::Traced,
+        target: None,
     }))
 }
 
@@ -427,6 +429,7 @@ impl AfterResolvePlugin for ExternalsPlugin {
                                 name: external_name.into(),
                                 ty: external_type,
                                 traced: ExternalTraced::Traced,
+                                target: None,
                             },
                         )));
                     }
