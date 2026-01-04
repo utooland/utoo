@@ -30,6 +30,7 @@ pub async fn get_postcss_package_mapping() -> Result<Vc<ImportMapping>> {
             name: rcstr!("postcss"),
             ty: ExternalType::CommonJs,
             traced: ExternalTraced::Untraced,
+            target: None,
         }))
         .cell(),
     )

@@ -1,11 +1,11 @@
 use anyhow::Result;
 use qstring::QString;
 use rustc_hash::FxHashSet;
+use serde::Serialize;
 use tracing::instrument;
 use turbo_rcstr::RcStr;
 use turbo_tasks::{FxIndexMap, FxIndexSet, ResolvedVc, TryJoinIterExt, Vc};
 use turbo_tasks_fs::FileSystemPath;
-use turbopack::css::chunk::CssChunk;
 use turbopack_browser::ecmascript::{
     EcmascriptBrowserChunk, EcmascriptBrowserEvaluateChunk, EcmascriptDevChunkList,
 };
@@ -13,6 +13,7 @@ use turbopack_core::{
     chunk::{Chunk, ChunkItem, ChunkableModule},
     output::{OutputAsset, OutputAssetsReference},
 };
+use turbopack_css::chunk::CssChunk;
 
 #[instrument(level = "trace", name = "generate webpack stats", skip_all)]
 pub async fn generate_webpack_stats<I>(
@@ -242,12 +243,12 @@ fn remove_extension_from_str(filename: &str) -> &str {
     filename
 }
 
-#[turbo_tasks::value]
-#[derive(Default)]
+#[derive(Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct WebpackStatsAssetInfo {}
 
-#[turbo_tasks::value]
-#[derive(Default)]
+#[derive(Serialize, Debug, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct WebpackStatsAsset {
     #[serde(rename = "type")]
     pub ty: RcStr,
@@ -260,8 +261,8 @@ pub struct WebpackStatsAsset {
     pub chunks: Vec<RcStr>,
 }
 
-#[turbo_tasks::value]
-#[derive(Default)]
+#[derive(Serialize, Debug, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct WebpackStatsChunk {
     pub rendered: bool,
     pub initial: bool,
@@ -273,7 +274,8 @@ pub struct WebpackStatsChunk {
     pub files: Vec<RcStr>,
 }
 
-#[turbo_tasks::value]
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct WebpackStatsModule {
     pub name: RcStr,
     pub id: RcStr,
@@ -281,19 +283,22 @@ pub struct WebpackStatsModule {
     pub size: Option<u64>,
 }
 
-#[turbo_tasks::value]
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct WebpackStatsEntrypointAssets {
     pub name: RcStr,
 }
 
-#[turbo_tasks::value]
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct WebpackStatsEntrypoint {
     pub name: RcStr,
     pub chunks: Vec<RcStr>,
     pub assets: Vec<WebpackStatsEntrypointAssets>,
 }
 
-#[turbo_tasks::value]
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct WebpackStats {
     pub assets: Vec<WebpackStatsAsset>,
     pub entrypoints: FxIndexMap<RcStr, WebpackStatsEntrypoint>,

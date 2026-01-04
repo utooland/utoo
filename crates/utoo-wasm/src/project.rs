@@ -7,6 +7,7 @@ use anyhow::Context;
 use pack_api::project::WatchOptions;
 use serde_wasm_bindgen::to_value;
 use tokio_fs_ext::{DirEntry as RawDirEntry, Metadata as RawMetadata};
+use turbo_rcstr::rcstr;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{JsCast, JsValue};
 
@@ -241,7 +242,10 @@ impl Project {
                     enable: true,
                     ..Default::default()
                 },
-                ..Default::default()
+                define_env: Default::default(),
+                dev: false,
+                pack_path: rcstr!("./"),
+                process_env: Default::default(),
             };
 
             let rt = TOKIO_RUNTIME

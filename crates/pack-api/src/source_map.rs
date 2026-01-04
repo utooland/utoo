@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use turbo_rcstr::RcStr;
 use turbo_tasks::Vc;
-use turbopack_core::source_map::OptionStringifiedSourceMap;
+use turbo_tasks_fs::FileContent;
 use url::Url;
 
 use crate::project::ProjectContainer;
@@ -10,7 +10,7 @@ use crate::project::ProjectContainer;
 pub async fn get_source_map_rope(
     container: Vc<ProjectContainer>,
     file_path: RcStr,
-) -> Result<Vc<OptionStringifiedSourceMap>> {
+) -> Result<Vc<FileContent>> {
     let (file, module) = match Url::parse(&file_path) {
         Ok(url) => match url.scheme() {
             "file" => {
@@ -37,7 +37,7 @@ pub async fn get_source_map_rope(
         )),
     ) else {
         // File doesn't exist within the dist dir
-        return Ok(OptionStringifiedSourceMap::none());
+        return Ok(FileContent::NotFound.cell());
     };
 
     let server_path = container.project().node_root().await?.join(chunk_base)?;
@@ -46,13 +46,13 @@ pub async fn get_source_map_rope(
 
     let mut map = container.get_source_map(server_path, module.clone());
 
-    if map.await?.is_none() {
+    if map.await?.is_content() {
         // If the chunk doesn't exist as a server chunk, try a client chunk.
         // TODO: Properly tag all server chunks and use the `isServer` query param.
         // Currently, this is inaccurate as it does not cover RSC server
         // chunks.
         map = container.get_source_map(client_path, module);
-        if map.await?.is_none() {
+        if map.await?.is_content() {
             bail!("chunk/module '{}' is missing a sourcemap", file_path);
         }
     }

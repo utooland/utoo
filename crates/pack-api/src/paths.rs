@@ -1,8 +1,7 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use tracing::Instrument;
 use turbo_rcstr::RcStr;
-use turbo_tasks::{NonLocalValue, ResolvedVc, TryFlatJoinIterExt, Vc, trace::TraceRawVcs};
+use turbo_tasks::{ResolvedVc, TryFlatJoinIterExt, Vc};
 use turbo_tasks_fs::FileSystemPath;
 use turbopack_core::{
     asset::{Asset, AssetContent},
@@ -11,7 +10,8 @@ use turbopack_core::{
 };
 
 /// A reference to a server file with content hash for change detection
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TraceRawVcs, NonLocalValue)]
+#[turbo_tasks::value]
+#[derive(Debug, Clone)]
 pub struct ServerPath {
     /// Relative to the root_path
     pub path: String,

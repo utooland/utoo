@@ -5,6 +5,9 @@ use turbo_tasks::Vc;
 use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::ModuleRule;
 
+#[allow(unused_imports)]
+use turbopack_core::{context::AssetContext, resolve::origin::ResolveOrigin};
+
 use crate::config::Config;
 
 pub async fn get_swc_ecma_transform_plugin_rule(
@@ -15,8 +18,7 @@ pub async fn get_swc_ecma_transform_plugin_rule(
     if !plugin_configs.is_empty() {
         #[cfg(feature = "plugin")]
         {
-            let enable_mdx_rs = config.mdx_rs().await?.is_some();
-            get_swc_ecma_transform_rule_impl(project_path, &plugin_configs, enable_mdx_rs).await
+            get_swc_ecma_transform_rule_impl(project_path, &plugin_configs, false).await
         }
 
         #[cfg(not(feature = "plugin"))]
@@ -30,6 +32,35 @@ pub async fn get_swc_ecma_transform_plugin_rule(
 }
 
 #[cfg(feature = "plugin")]
+#[turbo_tasks::value]
+pub struct DummyResolveOrigin {
+    origin_path: FileSystemPath,
+}
+
+#[cfg(feature = "plugin")]
+#[turbo_tasks::value_impl]
+impl DummyResolveOrigin {
+    #[turbo_tasks::function]
+    pub fn new(origin_path: FileSystemPath) -> Vc<Self> {
+        DummyResolveOrigin { origin_path }.cell()
+    }
+}
+
+#[cfg(feature = "plugin")]
+#[turbo_tasks::value_impl]
+impl ResolveOrigin for DummyResolveOrigin {
+    #[turbo_tasks::function]
+    fn origin_path(&self) -> Vc<FileSystemPath> {
+        self.origin_path.clone().cell()
+    }
+
+    #[turbo_tasks::function]
+    fn asset_context(&self) -> Result<Vc<Box<dyn AssetContext>>> {
+        anyhow::bail!("DummyResolveOrigin has no asset context");
+    }
+}
+
+#[cfg(feature = "plugin")]
 pub async fn get_swc_ecma_transform_rule_impl(
     project_path: FileSystemPath,
     plugin_configs: &[(RcStr, serde_json::Value)],
@@ -38,7 +69,6 @@ pub async fn get_swc_ecma_transform_rule_impl(
     use anyhow::bail;
     use turbo_tasks::TryFlatJoinIterExt;
     use turbo_tasks_fs::FileContent;
-    use turbopack::{resolve_options, resolve_options_context::ResolveOptionsContext};
     use turbopack_core::{
         asset::Asset,
         reference_type::{CommonJsReferenceSubType, ReferenceType},
@@ -46,6 +76,9 @@ pub async fn get_swc_ecma_transform_rule_impl(
     };
     use turbopack_ecmascript_plugins::transform::swc_ecma_transform_plugins::{
         SwcEcmaTransformPluginsTransformer, SwcPluginModule,
+    };
+    use turbopack_resolve::{
+        resolve::resolve_options, resolve_options_context::ResolveOptionsContext,
     };
 
     use crate::shared::transforms::{EcmascriptTransformStage, get_ecma_transform_rule};
@@ -82,7 +115,7 @@ pub async fn get_swc_ecma_transform_rule_impl(
                     .as_raw_module_result(),
                     ReferenceType::CommonJs(CommonJsReferenceSubType::Undefined),
                     // TODO proper error location
-                    project_path.clone(),
+                    Vc::upcast(DummyResolveOrigin::new(project_path.clone())),
                     request,
                     resolve_options,
                     false,
