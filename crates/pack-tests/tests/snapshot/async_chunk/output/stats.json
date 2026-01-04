@@ -1,32 +1,32 @@
 {
   "assets": [
     {
-      "type": "asset","name": "main.js","info": {},"size": 0,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
+      "type": "asset","name": "main.js","info": {},"size": 0,"emitted": false,"comparedForEmit": false,"cached": false,"chunks": [
         "main.js"
       ]
     },
     {
-      "type": "asset","name": "async_chunk_input_427d2456.js","info": {},"size": 1026,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
+      "type": "asset","name": "async_chunk_input_427d2456.js","info": {},"size": 1029,"emitted": false,"comparedForEmit": false,"cached": false,"chunks": [
         "async_chunk_input_427d2456.js"
       ]
     },
     {
-      "type": "asset","name": "async_chunk_input_427d2456.js.map","info": {},"size": 0,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
+      "type": "asset","name": "async_chunk_input_427d2456.js.map","info": {},"size": 0,"emitted": false,"comparedForEmit": false,"cached": false,"chunks": [
         "async_chunk_input_427d2456.js.map"
       ]
     },
     {
-      "type": "asset","name": "async_chunk_input_79e6c840.js","info": {},"size": 764,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
+      "type": "asset","name": "async_chunk_input_79e6c840.js","info": {},"size": 767,"emitted": false,"comparedForEmit": false,"cached": false,"chunks": [
         "async_chunk_input_79e6c840.js"
       ]
     },
     {
-      "type": "asset","name": "async_chunk_input_79e6c840.js.map","info": {},"size": 0,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
+      "type": "asset","name": "async_chunk_input_79e6c840.js.map","info": {},"size": 0,"emitted": false,"comparedForEmit": false,"cached": false,"chunks": [
         "async_chunk_input_79e6c840.js.map"
       ]
     },
     {
-      "type": "asset","name": "main.js.map","info": {},"size": 0,"emitted": false,"compared_for_emit": false,"cached": false,"chunks": [
+      "type": "asset","name": "main.js.map","info": {},"size": 0,"emitted": false,"comparedForEmit": false,"cached": false,"chunks": [
         "main.js.map"
       ]
     }
@@ -51,12 +51,12 @@
       ]
     },
     {
-      "rendered": false,"initial": false,"entry": false,"recorded": false,"id": "async_chunk_input_427d2456.js","size": 1026,"hash": "","files": [
+      "rendered": false,"initial": false,"entry": false,"recorded": false,"id": "async_chunk_input_427d2456.js","size": 1029,"hash": "","files": [
         "async_chunk_input_427d2456.js"
       ]
     },
     {
-      "rendered": false,"initial": false,"entry": false,"recorded": false,"id": "async_chunk_input_79e6c840.js","size": 764,"hash": "","files": [
+      "rendered": false,"initial": false,"entry": false,"recorded": false,"id": "async_chunk_input_79e6c840.js","size": 767,"hash": "","files": [
         "async_chunk_input_79e6c840.js"
       ]
     }

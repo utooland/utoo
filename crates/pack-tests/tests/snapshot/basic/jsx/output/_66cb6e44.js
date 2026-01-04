@@ -10,7 +10,8 @@ function jsxs() {
 }
 __turbopack_context__.s([
     "jsx",
-    ()=>jsx
+    0,
+    jsx
 ]);
 }),
 96, ((__turbopack_context__) => {

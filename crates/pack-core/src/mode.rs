@@ -7,8 +7,9 @@ use crate::shared::webpack_rules::WebpackLoaderBuiltinCondition;
 /// The mode in which Next.js is running.
 #[turbo_tasks::value(shared)]
 #[derive(
-    Debug, Copy, Clone, Default, TaskInput, Ord, PartialOrd, Hash, Deserialize, OperationValue,
+    Default, Debug, Copy, Clone, TaskInput, Ord, PartialOrd, Hash, Deserialize, OperationValue,
 )]
+#[serde(rename_all = "camelCase")]
 pub enum Mode {
     Development,
     #[default]

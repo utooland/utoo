@@ -7,7 +7,8 @@ function bar(value) {
 }
 __turbopack_context__.s([
     "bar",
-    ()=>bar
+    0,
+    bar
 ]);
 }),
 743, ((__turbopack_context__, module, exports) => {

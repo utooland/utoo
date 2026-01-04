@@ -18,9 +18,11 @@ async function requireStat(name) {
 }
 __turbopack_context__.s([
     "importUrl",
-    ()=>importUrl,
+    0,
+    importUrl,
     "requireStat",
-    ()=>requireStat
+    0,
+    requireStat
 ]);
 }),
 ]);

@@ -9,7 +9,8 @@ class BrowserFsProvider {
 }
 __turbopack_context__.s([
     "BrowserFsProvider",
-    ()=>BrowserFsProvider
+    0,
+    BrowserFsProvider
 ]);
 }),
 ]);

@@ -12,7 +12,8 @@ function getImageUrl() {
 }
 __turbopack_context__.s([
     "getImageUrl",
-    ()=>getImageUrl
+    0,
+    getImageUrl
 ]);
 }),
 ]);

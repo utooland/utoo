@@ -10,7 +10,8 @@ function jsxs() {
 }
 __turbopack_context__.s([
     "jsx",
-    ()=>jsx
+    0,
+    jsx
 ]);
 }),
 70, ((__turbopack_context__, module, exports) => {
@@ -33,7 +34,8 @@ function App() {
 }
 __turbopack_context__.s([
     "default",
-    ()=>App
+    0,
+    App
 ]);
 }),
 ]);
