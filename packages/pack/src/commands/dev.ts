@@ -15,6 +15,73 @@ import { createSelfSignedCertificate } from "../utils/mkcert";
 import { printServerInfo } from "../utils/print-server-info";
 import { xcodeProfilingReady } from "../utils/xcodeProfile";
 
+function parsePath(pathStr: string): {
+  pathname: string;
+  query: string;
+  hash: string;
+} {
+  const hashIndex = pathStr.indexOf("#");
+  const queryIndex = pathStr.indexOf("?");
+  const hasQuery = queryIndex > -1 && (hashIndex < 0 || queryIndex < hashIndex);
+
+  if (hasQuery || hashIndex > -1) {
+    return {
+      pathname: pathStr.substring(0, hasQuery ? queryIndex : hashIndex),
+      query: hasQuery
+        ? pathStr.substring(queryIndex, hashIndex > -1 ? hashIndex : undefined)
+        : "",
+      hash: hashIndex > -1 ? pathStr.slice(hashIndex) : "",
+    };
+  }
+
+  return { pathname: pathStr, query: "", hash: "" };
+}
+
+function pathHasPrefix(pathStr: string, prefix: string): boolean {
+  if (typeof pathStr !== "string") {
+    return false;
+  }
+
+  const { pathname } = parsePath(pathStr);
+  return pathname === prefix || pathname.startsWith(prefix + "/");
+}
+
+function removePathPrefix(pathStr: string, prefix: string): string {
+  // If the path doesn't start with the prefix we can return it as is.
+  if (!pathHasPrefix(pathStr, prefix)) {
+    return pathStr;
+  }
+
+  // Remove the prefix from the path via slicing.
+  const withoutPrefix = pathStr.slice(prefix.length);
+
+  // If the path without the prefix starts with a `/` we can return it as is.
+  if (withoutPrefix.startsWith("/")) {
+    return withoutPrefix;
+  }
+
+  // If the path without the prefix doesn't start with a `/` we need to add it
+  // back to the path to make sure it's a valid path.
+  return `/${withoutPrefix}`;
+}
+
+function normalizedPublicPath(publicPath: string | undefined): string {
+  const escapedPublicPath = publicPath?.replace(/^\/+|\/+$/g, "") || false;
+
+  if (!escapedPublicPath) {
+    return "";
+  }
+
+  try {
+    if (URL.canParse(escapedPublicPath)) {
+      const url = new URL(escapedPublicPath).toString();
+      return url.endsWith("/") ? url.slice(0, -1) : url;
+    }
+  } catch {}
+
+  return `/${escapedPublicPath}`;
+}
+
 export function serve(
   options: BundleOptions | WebpackConfig,
   projectPath?: string,
@@ -24,7 +91,6 @@ export function serve(
   const bundleOptions = resolveBundleOptions(options, projectPath, rootPath);
 
   if (!rootPath) {
-    // help user to find the rootDir automatically
     rootPath = findRootDir(projectPath || process.cwd());
   }
   return serveInternal(bundleOptions, projectPath, rootPath, serverOptions);
@@ -325,10 +391,28 @@ export async function initialize(
         projectPath,
         bundleOptions.config.output?.path || "./dist",
       );
+
+      const publicPath = bundleOptions.config.output?.publicPath;
+
       try {
         const reqUrl = req.url || "";
-        const path = url.parse(reqUrl).pathname || "";
-        return await serveStatic(req, res, path, { root: distRoot });
+        let requestPath = url.parse(reqUrl).pathname || "";
+
+        if (publicPath && publicPath !== "runtime") {
+          const normalizedPrefix = normalizedPublicPath(publicPath);
+
+          const isAbsoluteUrl =
+            normalizedPrefix.startsWith("http://") ||
+            normalizedPrefix.startsWith("https://");
+
+          if (!isAbsoluteUrl && normalizedPrefix) {
+            if (pathHasPrefix(requestPath, normalizedPrefix)) {
+              requestPath = removePathPrefix(requestPath, normalizedPrefix);
+            }
+          }
+        }
+
+        return await serveStatic(req, res, requestPath, { root: distRoot });
       } catch (err: any) {
         res.setHeader(
           "Cache-Control",
