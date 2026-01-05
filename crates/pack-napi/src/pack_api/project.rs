@@ -342,10 +342,11 @@ pub async fn project_new(
                 .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
                     EnvFilter::new("pack_napi=info,pack_api=info,pack_core=info")
                 }))
+                .with_target(false)
+                .with_span_events(tracing_subscriber::fmt::format::FmtSpan::NONE)
                 .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
                     "%Y-%m-%d %H:%M:%S.%3f".to_string(),
                 ))
-                .with_target(false)
                 .init();
         });
     }
