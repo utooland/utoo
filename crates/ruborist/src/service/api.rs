@@ -276,14 +276,15 @@ where
     // Export version manifests from memory cache to project cache
     // Memory cache key format: "name@spec", manifest contains resolved version
     for (key, manifest) in registry.cache().export_version_manifests() {
-        if let Some((name, spec)) = key.split_once('@') {
-            let version = manifest.version.clone();
-            let pkg_cache = new_cache_data.cache.entry(name.to_string()).or_default();
-            // specs: spec -> version (e.g., "^2.1.1" -> "2.1.1")
-            pkg_cache.specs.insert(spec.to_string(), version.clone());
-            // manifests: version -> manifest (e.g., "2.1.1" -> {...})
-            pkg_cache.manifests.insert(version, manifest);
-        }
+        // Use parse_package_spec to handle scoped packages correctly
+        // e.g., "@babel/core@^7.0.0" -> ("@babel/core", "^7.0.0")
+        let (name, spec) = crate::model::util::parse_package_spec(&key);
+        let version = manifest.version.clone();
+        let pkg_cache = new_cache_data.cache.entry(name.to_string()).or_default();
+        // specs: spec -> version (e.g., "^2.1.1" -> "2.1.1")
+        pkg_cache.specs.insert(spec.to_string(), version.clone());
+        // manifests: version -> manifest (e.g., "2.1.1" -> {...})
+        pkg_cache.manifests.insert(version, manifest);
     }
 
     if !new_cache_data.cache.is_empty()
@@ -319,5 +320,41 @@ mod tests {
 
         assert_eq!(options.concurrency, 20);
         assert!(options.legacy_peer_deps);
+    }
+
+    #[test]
+    fn test_project_cache_export_scoped_packages() {
+        // Test that scoped packages are correctly parsed when exporting project cache
+        // This ensures "@babel/core@^7.0.0" is parsed as ("@babel/core", "^7.0.0")
+        // not ("", "babel/core@^7.0.0")
+
+        // Test parse_package_spec directly to avoid polluting global cache
+        let test_cases = [
+            // (input, expected_name, expected_spec)
+            ("@babel/core@^7.0.0", "@babel/core", "^7.0.0"),
+            ("@types/node@^18.0.0", "@types/node", "^18.0.0"),
+            ("@scope/pkg@1.0.0", "@scope/pkg", "1.0.0"),
+            ("lodash@^4.17.0", "lodash", "^4.17.0"),
+            ("express@4.18.0", "express", "4.18.0"),
+        ];
+
+        for (input, expected_name, expected_spec) in test_cases {
+            let (name, spec) = crate::model::util::parse_package_spec(input);
+            assert_eq!(
+                name, expected_name,
+                "Failed for input '{}': expected name '{}', got '{}'",
+                input, expected_name, name
+            );
+            assert_eq!(
+                spec, expected_spec,
+                "Failed for input '{}': expected spec '{}', got '{}'",
+                input, expected_spec, spec
+            );
+        }
+
+        // Verify the old buggy behavior would have failed
+        // split_once('@') on "@babel/core@^7.0.0" returns ("", "babel/core@^7.0.0")
+        let buggy_result = "@babel/core@^7.0.0".split_once('@');
+        assert_eq!(buggy_result, Some(("", "babel/core@^7.0.0")));
     }
 }
