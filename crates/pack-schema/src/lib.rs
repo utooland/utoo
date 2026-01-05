@@ -7,26 +7,38 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectOptions {
-    /// Root path of the project
+    /// A root path from which all files must be nested under.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Root path of the project")]
     pub root_path: Option<String>,
 
-    /// Project path relative to root
+    /// A path inside the root_path which contains the app directories.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Project path relative to root")]
     pub project_path: Option<String>,
 
-    /// Main configuration object
-    #[schemars(description = "Main configuration object")]
-    pub config: SchemaConfig,
-}
+    /// A map of environment variables to use when compiling code.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub process_env: Option<HashMap<String, String>>,
 
-/// Main configuration structure that mirrors pack_core::config::Config
-/// All fields are derived from the original Config structure in pack-core
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SchemaConfig {
+    /// Whether to run in development mode
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dev: Option<bool>,
+
+    /// The build id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub build_id: Option<String>,
+
+    /// Absolute path for @utoo/pack
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pack_path: Option<String>,
+
+    /// Filesystem watcher options.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub watch: Option<SchemaWatchOptions>,
+
+    /// A map of environment variables which should get injected at compile time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub define_env: Option<SchemaDefineEnv>,
+
     /// Build mode (development, production)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Build mode")]
@@ -106,6 +118,61 @@ pub struct SchemaConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Enable Node.js polyfills for browser builds")]
     pub node_polyfill: Option<bool>,
+
+    /// Enable build statistics
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Enable build statistics")]
+    pub stats: Option<bool>,
+
+    /// Development server configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Development server configuration")]
+    pub dev_server: Option<SchemaDevServer>,
+}
+
+/// Filesystem watcher options
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaWatchOptions {
+    /// Whether to watch the filesystem for file changes.
+    pub enable: bool,
+
+    /// Enable polling at a certain interval if the native file watching doesn't work (e.g. docker).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub poll_interval: Option<u64>,
+}
+
+/// Environment variables for build-time injection
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaDefineEnv {
+    /// Client-side environment variables
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client: Option<Vec<SchemaEnvVar>>,
+    /// Edge-side environment variables
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edge: Option<Vec<SchemaEnvVar>>,
+    /// Node.js environment variables
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nodejs: Option<Vec<SchemaEnvVar>>,
+}
+
+/// Environment variable pair
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SchemaEnvVar {
+    /// Variable name
+    pub name: String,
+    /// Variable value
+    pub value: String,
+}
+
+/// Development server configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaDevServer {
+    /// Enable hot module replacement
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hot: Option<bool>,
 }
 
 /// Entry point configuration
@@ -125,6 +192,44 @@ pub struct SchemaEntryOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Library configuration for this entry")]
     pub library: Option<SchemaLibraryOptions>,
+
+    /// HTML generation configuration for this entry
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "HTML generation configuration for this entry")]
+    pub html: Option<SchemaHtmlConfig>,
+}
+
+/// HTML generation configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaHtmlConfig {
+    /// Path to the HTML template file
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub template: Option<String>,
+
+    /// Inline HTML template content
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub template_content: Option<String>,
+
+    /// Output filename for the generated HTML
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+
+    /// Title for the generated HTML
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+
+    /// Where to inject scripts (true, false, "body", "head")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inject: Option<serde_json::Value>,
+
+    /// Script loading strategy ("blocking", "defer", "module")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub script_loading: Option<String>,
+
+    /// Meta tags configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<HashMap<String, serde_json::Value>>,
 }
 
 /// Library output configuration
@@ -269,6 +374,18 @@ pub struct SchemaOptimizationConfig {
         description = "Whether to bunle wasm as asset. Defaults to false. When false, WASM files will be output as static assets."
     )]
     pub wasm_as_asset: Option<bool>,
+
+    /// Whether to remove unused exports
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remove_unused_exports: Option<bool>,
+
+    /// Whether to remove unused imports
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remove_unused_imports: Option<bool>,
+
+    /// Whether to enable nested async chunking
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nested_async_chunking: Option<bool>,
 }
 
 /// Module ID generation strategy
@@ -473,12 +590,58 @@ pub struct SchemaModuleConfig {
     /// Module rules configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Module rules configuration")]
-    pub rules: Option<HashMap<String, serde_json::Value>>,
+    pub rules: Option<HashMap<String, SchemaModuleRule>>,
 
     /// Module conditions configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Module conditions configuration")]
     pub conditions: Option<HashMap<String, SchemaConfigConditionItem>>,
+}
+
+/// Module rule configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SchemaModuleRule {
+    /// Shorthand for a single loader
+    Shorthand(String),
+    /// Full rule configuration
+    Full(SchemaRuleConfigItem),
+    /// Multiple rule configurations
+    Array(Vec<SchemaModuleRuleItem>),
+}
+
+/// Item in a module rule array
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SchemaModuleRuleItem {
+    /// Shorthand for a single loader
+    Shorthand(String),
+    /// Full rule configuration
+    Full(SchemaRuleConfigItem),
+}
+
+/// Full module rule configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaRuleConfigItem {
+    /// Loaders to apply
+    pub loaders: Vec<SchemaLoaderItem>,
+    /// Rename the module as another extension
+    #[serde(default, alias = "as")]
+    pub rename_as: Option<String>,
+    /// Condition for applying the rule
+    #[serde(default)]
+    pub condition: Option<SchemaConfigConditionItem>,
+}
+
+/// Loader configuration item
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SchemaLoaderItem {
+    /// Loader name
+    LoaderName(String),
+    /// Loader with options
+    LoaderOptions(serde_json::Value),
 }
 
 /// Configuration condition item
@@ -664,11 +827,15 @@ mod tests {
         let schema_str = serde_json::to_string(&schema).unwrap();
 
         // Check for key configuration fields
-        assert!(schema_str.contains("config"));
+        assert!(schema_str.contains("rootPath"));
+        assert!(schema_str.contains("projectPath"));
         assert!(schema_str.contains("entry"));
         assert!(schema_str.contains("externals"));
         assert!(schema_str.contains("optimization"));
         assert!(schema_str.contains("concatenateModules"));
+        assert!(schema_str.contains("watch"));
+        assert!(schema_str.contains("defineEnv"));
+        assert!(schema_str.contains("html"));
     }
 
     #[test]
@@ -726,26 +893,24 @@ mod tests {
         {
           "rootPath": "../../",
           "projectPath": "./",
-          "config": {
-            "entry": [
-              {
-                "import": "./index.js"       
-              }
-            ],
-            "output": {
-              "path": "./dist",
-              "filename": "[name].[contenthash:6].js",
-              "chunkFilename": "[name].[contenthash:8].js",
-              "clean": true
-            },
-            "optimization": {
-              "moduleIds": "named",
-              "minify": false,
-              "concatenateModules": true
-            },
-            "externals": {
-              "foo": "bar"
+          "entry": [
+            {
+              "import": "./index.js"       
             }
+          ],
+          "output": {
+            "path": "./dist",
+            "filename": "[name].[contenthash:6].js",
+            "chunkFilename": "[name].[contenthash:8].js",
+            "clean": true
+          },
+          "optimization": {
+            "moduleIds": "named",
+            "minify": false,
+            "concatenateModules": true
+          },
+          "externals": {
+            "foo": "bar"
           }
         }
         "#;
@@ -753,13 +918,13 @@ mod tests {
         let config: ProjectOptions = serde_json::from_str(json).unwrap();
         assert_eq!(config.root_path, Some("../../".to_string()));
         assert_eq!(config.project_path, Some("./".to_string()));
-        assert!(config.config.entry.is_some());
-        assert!(config.config.output.is_some());
-        assert!(config.config.optimization.is_some());
-        assert!(config.config.externals.is_some());
+        assert!(config.entry.is_some());
+        assert!(config.output.is_some());
+        assert!(config.optimization.is_some());
+        assert!(config.externals.is_some());
 
         // Test concatenateModules configuration
-        let optimization = config.config.optimization.as_ref().unwrap();
+        let optimization = config.optimization.as_ref().unwrap();
         assert_eq!(optimization.concatenate_modules, Some(true));
     }
 
@@ -768,43 +933,73 @@ mod tests {
         // Test with concatenateModules: true
         let json_true = r#"
         {
-          "config": {
-            "optimization": {
-              "concatenateModules": true
-            }
+          "optimization": {
+            "concatenateModules": true
           }
         }
         "#;
         let config: ProjectOptions = serde_json::from_str(json_true).unwrap();
-        let optimization = config.config.optimization.as_ref().unwrap();
+        let optimization = config.optimization.as_ref().unwrap();
         assert_eq!(optimization.concatenate_modules, Some(true));
 
         // Test with concatenateModules: false
         let json_false = r#"
         {
-          "config": {
-            "optimization": {
-              "concatenateModules": false
-            }
+          "optimization": {
+            "concatenateModules": false
           }
         }
         "#;
         let config: ProjectOptions = serde_json::from_str(json_false).unwrap();
-        let optimization = config.config.optimization.as_ref().unwrap();
+        let optimization = config.optimization.as_ref().unwrap();
         assert_eq!(optimization.concatenate_modules, Some(false));
 
         // Test without concatenateModules (should be None)
         let json_none = r#"
         {
-          "config": {
-            "optimization": {
-              "minify": true
-            }
+          "optimization": {
+            "minify": true
           }
         }
         "#;
         let config: ProjectOptions = serde_json::from_str(json_none).unwrap();
-        let optimization = config.config.optimization.as_ref().unwrap();
+        let optimization = config.optimization.as_ref().unwrap();
         assert_eq!(optimization.concatenate_modules, None);
+    }
+
+    #[test]
+    fn test_module_rules_deserialization() {
+        let json = r#"
+        {
+          "module": {
+            "rules": {
+              "*.txt": {
+                "loaders": ["./test-file-loader.js"],
+                "as": "*.js"
+              },
+              "*.svg": "svg-loader"
+            }
+          }
+        }
+        "#;
+        let config: ProjectOptions = serde_json::from_str(json).unwrap();
+        let rules = config.module.as_ref().unwrap().rules.as_ref().unwrap();
+
+        // Check full rule
+        let txt_rule = rules.get("*.txt").unwrap();
+        if let SchemaModuleRule::Full(full) = txt_rule {
+            assert_eq!(full.rename_as, Some("*.js".to_string()));
+            assert_eq!(full.loaders.len(), 1);
+        } else {
+            panic!("Expected Full rule for *.txt");
+        }
+
+        // Check shorthand rule
+        let svg_rule = rules.get("*.svg").unwrap();
+        if let SchemaModuleRule::Shorthand(s) = svg_rule {
+            assert_eq!(s, "svg-loader");
+        } else {
+            panic!("Expected Shorthand rule for *.svg");
+        }
     }
 }

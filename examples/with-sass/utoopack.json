@@ -1,17 +1,16 @@
 {
-  "rootPath": "../../",
-  "projectPath": "./",
-  "config": {
-    "entry": [
-      {
-        "import": "./index.html"
+  "entry": [
+    {
+      "import": "./src/index.ts",
+      "html": {
+        "template": "./index.html"
       }
-    ],
-    "output": {
-      "path": "./dist",
-      "filename": "[name].[contenthash:8]",
-      "chunkFilename": "[name].[contenthash:8]",
-      "clean": true
     }
+  ],
+  "output": {
+    "path": "./dist",
+    "filename": "[name].[contenthash:8]",
+    "chunkFilename": "[name].[contenthash:8]",
+    "clean": true
   }
 }
