@@ -100,7 +100,11 @@ fn main() {
                         EnvFilter::try_from_default_env()
                             .unwrap_or_else(|_| EnvFilter::new("pack_cli=info,pack_api=info")),
                     )
-                    .with_timer(tracing_subscriber::fmt::time::SystemTime)
+                    .with_target(false)
+                    .with_span_events(tracing_subscriber::fmt::format::FmtSpan::NONE)
+                    .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
+                        "%Y-%m-%d %H:%M:%S.%3f".to_string(),
+                    ))
                     .init();
 
                 None

@@ -64,6 +64,7 @@ pub fn init_log_filter(mut filter: String) {
         let filter_str = filter.clone();
         let fmt_layer = fmt::layer()
             .without_time()
+            .with_span_events(fmt::format::FmtSpan::NONE)
             .with_writer(MakeWebConsoleWriter::new())
             .with_filter(EnvFilter::new(filter));
 
