@@ -1,19 +1,18 @@
 {
   "$schema": "../../packages/pack/config_schema.json",
-  "rootPath": "../../",
-  "projectPath": "./",
-  "config": {
-    "entry": [
-      {
-        "name": "index",
-        "import": "./index.html"
+  "entry": [
+    {
+      "name": "index",
+      "import": "./src/index.jsx",
+      "html": {
+        "template": "./index.html"
       }
-    ],
-    "output": {
-      "clean": true
-    },
-    "optimization": {
-      "minify": false
     }
+  ],
+  "output": {
+    "clean": true
+  },
+  "optimization": {
+    "minify": false
   }
 }

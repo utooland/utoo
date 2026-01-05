@@ -1,63 +1,64 @@
 {
   "$schema": "../../packages/pack/config_schema.json",
-  "config": {
-    "stats": true,
-    "entry": [
-      {
-        "import": "./index.html"
+  "stats": true,
+  "entry": [
+    {
+      "import": "./index.js",
+      "html": {
+        "template": "./index.html"
       }
-    ],
-    "output": {
-      "path": "./dist",
-      "filename": "[name].[contenthash:6].js",
-      "chunkFilename": "[name].[contenthash:8].js",
-      "clean": true
+    }
+  ],
+  "output": {
+    "path": "./dist",
+    "filename": "[name].[contenthash:6].js",
+    "chunkFilename": "[name].[contenthash:8].js",
+    "clean": true
+  },
+  "optimization": {
+    "moduleIds": "named",
+    "minify": false
+  },
+  "externals": {
+    "foo": "bar",
+    "foo_require": "commonjs bar",
+    "foo_require2": {
+      "root": "bar_require2",
+      "type": "commonjs"
     },
-    "optimization": {
-      "moduleIds": "named",
-      "minify": false
+    "foo_import": "esm bar",
+    "foo_import2": {
+      "root": "bar_import2",
+      "type": "esm"
     },
-    "externals": {
-      "foo": "bar",
-      "foo_require": "commonjs bar",
-      "foo_require2": {
-        "root": "bar_require2",
-        "type": "commonjs"
-      },
-      "foo_import": "esm bar",
-      "foo_import2": {
-        "root": "bar_import2",
-        "type": "esm"
-      },
-      "foo_script": "script bar_script1@https://example.com/lib/script.js",
-      "foo_script2": {
-        "root": "bar_script2",
-        "type": "script",
-        "script": "https://example.com/lib/script2.js"
-      },
-      "antd": {
-        "root": "antd",
-        "subPath": {
-          "exclude": [
-            "style"
-          ],
-          "rules": [
-            {
-              "regex": "/(version|message|notification)$/",
-              "target": "$1"
-            },
-            {
-              "regex": "/^\/(?:es|lib)\/([a-z\\-]+)$/",
-              "target": "$1",
-              "targetConverter": "PascalCase"
-            },
-            {
-              "regex": "/^\/(?:es|lib)\/([a-z-]+)\/([A-Z][a-zA-Z-]+)$/",
-              "target": "$1/$2",
-              "targetConverter": "PascalCase"
-            }
-          ]
-        }
+    "foo_script": "script bar_script1@https://example.com/lib/script.js",
+    "foo_script2": {
+      "root": "bar_script2",
+      "type": "script",
+      "script": "https://example.com/lib/script2.js"
+    },
+    "antd": {
+      "root": "antd",
+      "subPath": {
+        "exclude": [
+          "style"
+        ],
+        "rules": [
+          {
+            "regex": "/(version|message|notification)$/",
+            "target": "$1"
+          },
+          {
+            "regex": "/^/(?:es|lib)/([a-z\\-]+)$/",
+            "target": "$1",
+            "targetConverter": "PascalCase"
+          },
+          {
+            "regex": "/^/(?:es|lib)/([a-z-]+)/([A-Z][a-zA-Z-]+)$/",
+            "target": "$1/$2",
+            "targetConverter": "PascalCase"
+          }
+        ]
       }
     }
   }

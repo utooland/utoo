@@ -10,7 +10,8 @@ name = "pack-schema"
 path = "src/main.rs"
 
 [dependencies]
-pack-core  = { path = "../pack-core" }
-schemars   = { workspace = true }
-serde      = { workspace = true }
-serde_json = { workspace = true }
+pack-core      = { path = "../pack-core" }
+schemars       = { workspace = true }
+serde          = { workspace = true }
+serde_json     = { workspace = true }
+turbopack-node = { workspace = true, default-features = false, features = ["process_pool"] }

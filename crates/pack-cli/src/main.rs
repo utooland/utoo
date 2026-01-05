@@ -4,7 +4,7 @@
 use clap::Parser;
 use dunce::canonicalize;
 use pack_api::project::{ProjectOptions, WatchOptions};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{cell::RefCell, fs::File, path::PathBuf, time::Instant};
 use turbo_rcstr::RcStr;
 
@@ -30,13 +30,13 @@ fn main() {
 
     let watch = dev && args.watch.is_some_and(|watch| watch);
 
-    let project_path: RcStr = canonicalize(args.project_dir)
+    let project_path: RcStr = canonicalize(args.project_path.unwrap_or_else(|| ".".to_string()))
         .unwrap()
         .to_str()
         .unwrap()
         .into();
 
-    let root_dir = args.root_dir.map(RcStr::from);
+    let root_path = args.root_path.map(RcStr::from);
 
     thread_local! {
         static LAST_SWC_ATOM_GC_TIME: RefCell<Option<Instant>> = const { RefCell::new(None) };
@@ -114,17 +114,12 @@ fn main() {
                 serde_json::from_reader(&mut project_options_file).unwrap();
             let mode = if dev { "development" } else { "production" };
 
-            partial_project_options.config = partial_project_options.config.as_mut().map_or(
-                Some(json!(format!(r#"{{ "mode": {mode}}}"#,))),
-                |mut config| {
-                    if let Value::Object(map) = &mut config {
-                        map.insert("mode".to_string(), mode.into());
-                    }
-                    Some(config.take())
-                },
-            );
+            if let Value::Object(map) = &mut partial_project_options.config {
+                map.insert("mode".to_string(), mode.into());
+            }
+
             let project_options = ProjectOptions {
-                root_path: root_dir
+                root_path: root_path
                     .as_ref()
                     .map(|r| {
                         canonicalize(PathBuf::from(&r))
@@ -133,16 +128,9 @@ fn main() {
                             .unwrap()
                             .into()
                     })
-                    .or(partial_project_options.root_path.as_ref().map(|r| {
-                        canonicalize(PathBuf::from(&project_path).join(r))
-                            .unwrap()
-                            .to_str()
-                            .unwrap()
-                            .into()
-                    }))
                     .unwrap_or_else(|| project_path.clone()),
                 project_path,
-                config: partial_project_options.config.unwrap().to_string().into(),
+                config: partial_project_options.config.to_string().into(),
                 process_env: partial_project_options.process_env.unwrap_or_default(),
                 define_env: partial_project_options.define_env.unwrap_or_default(),
 

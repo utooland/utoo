@@ -1,23 +1,22 @@
 {
-  "rootPath": "../../",
-  "projectPath": "./",
-  "config": {
-    "entry": [
-      {
-        "import": "./index.html"
+  "entry": [
+    {
+      "import": "./index.js",
+      "html": {
+        "template": "./index.html"
       }
-    ],
-    "output": {
-      "path": "./dist",
-      "clean": true
-    },
-    "optimization": {
-      "splitChunks": {
-        "js": {
-          "minChunkSize": 2000,
-          "maxChunkCountPerGroup": 1,
-          "maxMergeChunkSize": 20000
-        }
+    }
+  ],
+  "output": {
+    "path": "./dist",
+    "clean": true
+  },
+  "optimization": {
+    "splitChunks": {
+      "js": {
+        "minChunkSize": 2000,
+        "maxChunkCountPerGroup": 1,
+        "maxMergeChunkSize": 20000
       }
     }
   }

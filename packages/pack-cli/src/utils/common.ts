@@ -8,11 +8,13 @@ export const commonFlags = {
     char: "p",
     description: "Set the project path",
     required: false,
+    aliases: ["projectPath"],
   }),
   root: Flags.string({
     char: "r",
     description: "Set the root path",
     required: false,
+    aliases: ["rootPath"],
   }),
   webpack: Flags.boolean({
     name: "webpack",
@@ -42,11 +44,31 @@ export function resolveBuildOptions(flags: {
   if (webpack) {
     projectOptions = { webpackMode: true } as utooPack.WebpackConfig;
   } else {
-    projectOptions = JSON.parse(
+    const rawOptions = JSON.parse(
       fs.readFileSync(path.resolve(cwd, project || "", "utoopack.json"), {
         encoding: "utf-8",
       }),
-    ) as utooPack.BundleOptions;
+    );
+    const {
+      processEnv,
+      defineEnv,
+      watch,
+      dev,
+      buildId,
+      packPath,
+      rootPath: _rootPath,
+      projectPath: _projectPath,
+      ...config
+    } = rawOptions;
+    projectOptions = {
+      config,
+      processEnv,
+      defineEnv,
+      watch,
+      dev,
+      buildId,
+      packPath,
+    } as utooPack.BundleOptions;
   }
 
   return { projectPath, rootPath, projectOptions };
