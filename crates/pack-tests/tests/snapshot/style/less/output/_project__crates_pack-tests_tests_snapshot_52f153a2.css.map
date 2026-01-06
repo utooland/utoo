@@ -1,8 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/node_modules/antd/reset.css"],"sourcesContent":[".body{\n  display: inline-block;\n  fill: currentColor;\n  vertical-align: text-bottom;\n}"],"names":[],"mappings":"AAAA","ignoreList":[0]}},
-    {"offset": {"line": 8, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/node_modules/antd/reset2.css"],"sourcesContent":[".header {\n  background-color: red;\n}"],"names":[],"mappings":"AAAA","ignoreList":[0]}},
-    {"offset": {"line": 13, "column": 0}, "map": {"version":3,"sources":["turbopack:///turbopack:///[project]/crates/pack-tests/tests/snapshot/style/less/input/mixins/light.less","turbopack:///turbopack:///[project]/crates/pack-tests/tests/snapshot/style/less/input/index.less","turbopack:///turbopack:///[project]/crates/pack-tests/tests/snapshot/style/less/input/mixins/dark.less"],"sourcesContent":["@import '~antd/reset.css';\n@import './dark.less';","\n@import './mixins/light.less';\n@import '~antd/reset.css';\n@import 'antd/reset2.css';","body {\n    background-color: black;\n}"],"names":[],"mappings":"AAAA"}}]
-}
