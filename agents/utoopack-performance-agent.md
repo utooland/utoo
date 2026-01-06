@@ -8,7 +8,8 @@ Empower AI agents to identify and resolve performance bottlenecks in Utoopack/Tu
 ---
 
 ## 🛠 Step 1: Data Acquisition & Environment Prep
-- **Trace Generation**: Run Utoopack with `TRACING_CHROME=./.trace/trace.json`.
+- **Trace Generation**: Run Utoopack with `TRACING_CHROME=./.trace/trace_$(date +%Y%m%d_%H%M%S).json`.
+  - *Example*: `TRACING_CHROME=$PWD/.trace/trace_$(date +%Y%m%d_%H%M%S).json npm run build --prefix examples/with-antd`
 - **Intermediate Files**: All diagnostic scripts (Python/Node), filtered JSON fragments, and analytical results **MUST** be placed in the `./.trace/` directory.
 - **Workspace Hygiene**: Ensure `./.trace/` is in `.gitignore`. Never upload too huge raw trace data (> 2000MB) directly; share filtered summaries or key findings.
 
@@ -83,6 +84,7 @@ Follow this tiered hierarchy. Solve P0 before descending to P1, as high-level sc
 1. **Quantitative Baseline**: Run a summary script (Python/Node) in `.trace/` to list Top 20 tasks by `count` and `sum(duration)`.
 2. **Qualitative Timeline Scan**: Open the trace in `edge://tracing`. Look for "Wall-like" structures (Parallelism) vs "Staircase" structures (Serialism).
 3. **Causal Attribution**: Identify the `Parent Span` of the top bottlenecks to understand *why* they were invoked.
+4. **Final Reporting**: Summarize findings and save the report to `./agents/reports/utoopack_performance_report_YYYYMMDD_HHMMSS.md`. Include specific Tiered signals and recommended actions.
 
 ---
 
