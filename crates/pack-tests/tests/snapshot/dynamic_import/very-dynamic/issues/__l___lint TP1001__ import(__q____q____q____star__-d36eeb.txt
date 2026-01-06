@@ -1,0 +1,13 @@
+[92;4msuggestion - [analysis] /dynamic_import/very-dynamic/input/index.ts:2:11  lint TP1001 import(???*0*) is very dynamic
+  
+       1 | export async function importUrl(url: string) {
+         +            v--------------v
+       2 +     return import(`${url}`).then((module) => module.default);
+         +            ^--------------^
+       3 | }
+       4 | 
+       5 | export async function requireStat(name: string) {
+       6 |     return require(name);
+  
+  - *0* arguments[0]
+    ⚠️  function calls are not analyzed yet

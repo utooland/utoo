@@ -233,7 +233,11 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
     let final_config_content = serde_json::to_string_pretty(&user_config)?;
 
     let project_options = ProjectOptions {
-        root_path: REPO_ROOT.clone(),
+        root_path: Path::new(&*REPO_ROOT)
+            .join("crates/pack-tests/tests/snapshot")
+            .to_string_lossy()
+            .to_string()
+            .into(),
         project_path: project_path.to_string_lossy().into(),
         config: final_config_content.into(),
         process_env: vec![
