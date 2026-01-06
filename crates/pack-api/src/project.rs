@@ -562,14 +562,44 @@ impl Project {
 
     #[turbo_tasks::function]
     pub async fn project_fs(&self, denied_path: Vc<RcStr>) -> Result<Vc<DiskFileSystem>> {
+        let mut denied_paths = Vec::new();
+
         let denied_path = denied_path.await?;
-        let normalized_denied_path =
-            normalize_path(&denied_path).map_or_else(|| (*denied_path).clone(), RcStr::from);
-        Ok(DiskFileSystem::new_with_denied_path(
-            PROJECT_FILESYSTEM_NAME.into(),
-            self.root_path.clone(),
-            normalized_denied_path,
-        ))
+        if !denied_path.is_empty() {
+            let normalized =
+                normalize_path(&denied_path).map_or_else(|| (*denied_path).clone(), RcStr::from);
+            if !normalized.is_empty() {
+                denied_paths.push(normalized);
+            }
+        }
+
+        if self.pack_path.starts_with(&*self.root_path) {
+            let relative_pack_path = self.pack_path.strip_prefix(&*self.root_path).unwrap();
+            let relative_pack_path = relative_pack_path.trim_start_matches(MAIN_SEPARATOR);
+            let turbopack_path = Path::new(relative_pack_path).join(".turbopack");
+            if let Some(path_str) = turbopack_path.to_str() {
+                let turbopack_path_normalized =
+                    normalize_path(path_str).map_or_else(|| path_str.into(), RcStr::from);
+                if !turbopack_path_normalized.is_empty()
+                    && !denied_paths.contains(&turbopack_path_normalized)
+                {
+                    denied_paths.push(turbopack_path_normalized);
+                }
+            }
+        }
+
+        if denied_paths.is_empty() {
+            Ok(DiskFileSystem::new(
+                PROJECT_FILESYSTEM_NAME.into(),
+                self.root_path.clone(),
+            ))
+        } else {
+            Ok(DiskFileSystem::new_with_denied_paths(
+                PROJECT_FILESYSTEM_NAME.into(),
+                self.root_path.clone(),
+                denied_paths,
+            ))
+        }
     }
 
     #[turbo_tasks::function]
@@ -580,7 +610,7 @@ impl Project {
 
     #[turbo_tasks::function]
     pub fn output_fs(&self) -> Vc<DiskFileSystem> {
-        DiskFileSystem::new(rcstr!("output"), self.project_path.clone())
+        DiskFileSystem::new(rcstr!("output"), self.root_path.clone())
     }
 
     #[turbo_tasks::function]
@@ -606,16 +636,43 @@ impl Project {
 
     #[turbo_tasks::function]
     pub async fn node_root(self: Vc<Self>) -> Result<Vc<FileSystemPath>> {
-        Ok(self.pack_path().await?.join(".turbopack")?.cell())
-    }
+        let this = self.await?;
+        let pack_relative = if this.pack_path.starts_with(&*this.root_path) {
+            this.pack_path.strip_prefix(&*this.root_path).unwrap()
+        } else {
+            this.pack_path.as_str()
+        };
+        let pack_relative = pack_relative
+            .strip_prefix(MAIN_SEPARATOR)
+            .unwrap_or(pack_relative)
+            .replace(MAIN_SEPARATOR, "/");
 
-    #[turbo_tasks::function]
-    pub async fn dist_root(self: Vc<Self>) -> Result<Vc<FileSystemPath>> {
         Ok(self
             .output_fs()
             .root()
             .await?
-            .join(self.dist_dir().await?.as_str())?
+            .join(&pack_relative)?
+            .join(".turbopack")?
+            .cell())
+    }
+
+    #[turbo_tasks::function]
+    pub async fn dist_root(self: Vc<Self>) -> Result<Vc<FileSystemPath>> {
+        let this = self.await?;
+        let dist_dir = self.dist_dir().await?;
+
+        let project_relative = this.project_path.strip_prefix(&*this.root_path).unwrap();
+        let project_relative = project_relative
+            .strip_prefix(MAIN_SEPARATOR)
+            .unwrap_or(project_relative)
+            .replace(MAIN_SEPARATOR, "/");
+
+        Ok(self
+            .output_fs()
+            .root()
+            .await?
+            .join(&project_relative)?
+            .join(dist_dir.as_str())?
             .cell())
     }
 
@@ -626,11 +683,10 @@ impl Project {
 
     #[turbo_tasks::function]
     pub async fn node_root_to_root_path(self: Vc<Self>) -> Result<Vc<RcStr>> {
-        let output_root_to_root_path = self
-            .pack_path()
-            .await?
-            .join(".turbopack")?
-            .get_relative_path_to(&*self.project_root().await?)
+        let node_root = self.node_root().owned().await?;
+        let output_root = self.output_fs().root().owned().await?;
+        let output_root_to_root_path = node_root
+            .get_relative_path_to(&output_root)
             .context("Pack path need to be in root path")?;
         Ok(Vc::cell(output_root_to_root_path))
     }

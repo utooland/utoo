@@ -11,5 +11,5 @@ trace-*.json
 trace-*.json.gz
 *.cpuprofile
 *.heapprofile
-tmp/
+.trace/
 

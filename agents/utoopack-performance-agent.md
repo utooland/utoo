@@ -8,9 +8,9 @@ Empower AI agents to identify and resolve performance bottlenecks in Utoopack/Tu
 ---
 
 ## 🛠 Step 1: Data Acquisition & Environment Prep
-- **Trace Generation**: Run Utoopack with `TRACING_CHROME=trace.json`. Use `TRACING_CHROME_LAYER=turbo_tasks` for cleaner task-specific data if available.
-- **Intermediate Files**: All diagnostic scripts (Python/Node), filtered JSON fragments, and analytical results **MUST** be placed in the `./tmp/` directory.
-- **Workspace Hygiene**: Ensure `./tmp/` is in `.gitignore`. Never upload raw trace data (> 1000MB) directly; share filtered summaries or key findings.
+- **Trace Generation**: Run Utoopack with `TRACING_CHROME=./.trace/trace.json`.
+- **Intermediate Files**: All diagnostic scripts (Python/Node), filtered JSON fragments, and analytical results **MUST** be placed in the `./.trace/` directory.
+- **Workspace Hygiene**: Ensure `./.trace/` is in `.gitignore`. Never upload too huge raw trace data (> 2000MB) directly; share filtered summaries or key findings.
 
 ---
 
@@ -80,7 +80,7 @@ Follow this tiered hierarchy. Solve P0 before descending to P1, as high-level sc
 ---
 
 ## 🚀 Step 3: Actionable Diagnostic Workflow
-1. **Quantitative Baseline**: Run a summary script (Python/Node) in `tmp/` to list Top 20 tasks by `count` and `sum(duration)`.
+1. **Quantitative Baseline**: Run a summary script (Python/Node) in `.trace/` to list Top 20 tasks by `count` and `sum(duration)`.
 2. **Qualitative Timeline Scan**: Open the trace in `edge://tracing`. Look for "Wall-like" structures (Parallelism) vs "Staircase" structures (Serialism).
 3. **Causal Attribution**: Identify the `Parent Span` of the top bottlenecks to understand *why* they were invoked.
 

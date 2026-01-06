@@ -328,7 +328,7 @@ async fn walk_asset(
     // Check if the path is already relative to output_path
     let full_path = if let Some(relative_path) = output_path.get_path_to(&path) {
         // Path is already inside output_path, join it
-        output_path.join(&relative_path)?
+        output_path.join(relative_path)?
     } else {
         // Path is not inside output_path.
         // This might happen if it's a virtual path or if it's from a different FS.
