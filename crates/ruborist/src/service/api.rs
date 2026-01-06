@@ -36,6 +36,7 @@ use crate::model::graph::{DependencyGraph, PackageNode};
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
 use crate::model::package_lock::{LockPackage, PackageLock};
+use crate::model::util::parse_package_spec;
 use crate::resolver::builder::{BuildDepsConfig, add_edges_from, build_deps_with_config};
 use crate::resolver::runtime::install_runtime_from_map;
 use crate::resolver::workspace::WorkspaceDiscovery;
@@ -278,7 +279,7 @@ where
     for (key, manifest) in registry.cache().export_version_manifests() {
         // Use parse_package_spec to handle scoped packages correctly
         // e.g., "@babel/core@^7.0.0" -> ("@babel/core", "^7.0.0")
-        let (name, spec) = crate::model::util::parse_package_spec(&key);
+        let (name, spec) = parse_package_spec(&key);
         let version = manifest.version.clone();
         let pkg_cache = new_cache_data.cache.entry(name.to_string()).or_default();
         // specs: spec -> version (e.g., "^2.1.1" -> "2.1.1")
