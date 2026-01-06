@@ -8,7 +8,7 @@ Empower AI agents to identify and resolve performance bottlenecks in Utoopack/Tu
 ---
 
 ## 🛠 Step 1: Data Acquisition & Environment Prep
-- **Trace Generation**: Run Utoopack with `TRACING_CHROME=./.trace/trace_$(date +%Y%m%d_%H%M%S).json`.
+- **Trace Generation**: Run Utoopack with `TRACING_CHROME=$PWD/.trace/trace_$(date +%Y%m%d_%H%M%S).json`.
   - *Example*: `TRACING_CHROME=$PWD/.trace/trace_$(date +%Y%m%d_%H%M%S).json npm run build --prefix examples/with-antd`
 - **Intermediate Files**: All diagnostic scripts (Python/Node), filtered JSON fragments, and analytical results **MUST** be placed in the `./.trace/` directory.
 - **Workspace Hygiene**: Ensure `./.trace/` is in `.gitignore`. Never upload too huge raw trace data (> 2000MB) directly; share filtered summaries or key findings.
