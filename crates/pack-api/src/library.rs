@@ -238,13 +238,14 @@ impl LibraryEndpoint {
         runtime_export: Vc<Vec<RcStr>>,
     ) -> Result<Vc<Box<dyn ChunkingContext>>> {
         let project = self.project();
+        let output_root_to_root_path = project.node_root_to_root_path().await?;
 
         Ok(get_library_chunking_context(
             LibraryChunkingContextOptions {
                 mode: project.mode(),
-                root_path: project.project_root().owned().await?,
+                root_path: project.project_path().owned().await?,
                 output_root: project.dist_root().owned().await?,
-                output_root_to_root_path: rcstr!("/ROOT"),
+                output_root_to_root_path: (*output_root_to_root_path).clone(),
                 environment: project.client_compile_time_info().environment(),
                 module_id_strategy: project.module_ids(),
                 no_mangling: project.no_mangling(),
@@ -279,7 +280,7 @@ impl LibraryEndpoint {
             };
 
             let library_chunk_group = library_chunking_context.evaluated_chunk_group(
-                AssetIdent::from_path(project.project_root().await?.join(this.import.as_str())?)
+                AssetIdent::from_path(project.project_path().await?.join(this.import.as_str())?)
                     .with_query(query.into()),
                 ChunkGroup::Entry(self.library_entry_modules().await?.to_vec()),
                 module_graph,

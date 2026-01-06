@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 3, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/style/less/input/index.less?modules [client] (css module)"],"sourcesContent":["__turbopack_context__.v({\n});\n"],"names":[],"mappings":"AAAA;AACA"}},
-    {"offset": {"line": 9, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/style/less/input/index.js"],"sourcesContent":["import style from './index.less';\n\nstyle;"],"names":[],"mappings":"AAAA;;AAEA,8CAAK"}}]
-}

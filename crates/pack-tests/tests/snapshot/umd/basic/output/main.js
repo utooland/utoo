@@ -2,7 +2,7 @@
 // Dummy runtime
 })([["main.js", {
 
-76: ((__turbopack_context__) => {
+16: ((__turbopack_context__) => {
 "use strict";
 
 function jsx() {
@@ -31,7 +31,7 @@ let mod; if (typeof exports === 'object' && typeof module === 'object') { mod = 
 
 __turbopack_context__.v(mod);
 }),
-36: ((__turbopack_context__) => {
+86: ((__turbopack_context__) => {
 "use strict";
 
 const a = "aaa";
@@ -41,36 +41,36 @@ __turbopack_context__.s([
     a
 ]);
 }),
-49: ((__turbopack_context__) => {
+27: ((__turbopack_context__) => {
 "use strict";
 
-var __TURBOPACK__imported__module__76__ = __turbopack_context__.i(76);
+var __TURBOPACK__imported__module__16__ = __turbopack_context__.i(16);
 // @ts-ignore
 var __TURBOPACK__imported__module__11__ = __turbopack_context__.i(11);
 var __TURBOPACK__imported__module__32__ = __turbopack_context__.i(32);
-var __TURBOPACK__imported__module__36__ = __turbopack_context__.i(36);
+var __TURBOPACK__imported__module__86__ = __turbopack_context__.i(86);
 ;
 console.log('hello here');
 ;
 ;
 console.log(__TURBOPACK__imported__module__32__["styled"]);
 ;
-console.log(__TURBOPACK__imported__module__36__["a"]);
+console.log(__TURBOPACK__imported__module__86__["a"]);
 function App({ content }) {
     // @ts-ignore
-    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__76__["jsx"])("div", {
+    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__16__["jsx"])("div", {
         children: content
     });
 }
 // @ts-ignore
 const root = __TURBOPACK__imported__module__11__["default"].createRoot(document.getElementById('root'));
-root.render(/*#__PURE__*/ (0, __TURBOPACK__imported__module__76__["jsx"])(App, {
+root.render(/*#__PURE__*/ (0, __TURBOPACK__imported__module__16__["jsx"])(App, {
     content: 'hello'
 }));
 __turbopack_context__.s([]);
 }),
 },
-{"otherChunks":[],"runtimeModuleIds":[49]},
+{"otherChunks":[],"runtimeModuleIds":[27]},
 ]]);
 
 

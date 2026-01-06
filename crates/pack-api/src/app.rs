@@ -204,7 +204,7 @@ impl AppEntrypoint {
             };
 
             let app_chunk_group = app_chunking_context.evaluated_chunk_group(
-                AssetIdent::from_path(project.project_root().await?.join(this.import.as_str())?)
+                AssetIdent::from_path(project.project_path().await?.join(this.import.as_str())?)
                     .with_query(query.into()),
                 ChunkGroup::Entry(
                     self.entry_evaluatable_assets(asset_context, runtime_entries)
@@ -369,7 +369,7 @@ impl Endpoint for AppEndpoint {
             let (server_paths, client_paths) = (vec![], vec![]);
 
             let written_endpoint = EndpointOutputPaths::NodeJs {
-                server_entry_path: dist_root.to_string(),
+                server_entry_path: dist_root.path.to_string(),
                 server_paths,
                 client_paths,
             };

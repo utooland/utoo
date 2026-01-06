@@ -1,0 +1,8 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 3, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/concatenate_modules/side-effects-import/input/shared1.js"],"sourcesContent":["console.log(\"shared1\");"],"names":[],"mappings":"AAAA,QAAQ,GAAG,CAAC"}},
+    {"offset": {"line": 7, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/concatenate_modules/side-effects-import/input/shared2.js"],"sourcesContent":["console.log(\"shared2\");"],"names":[],"mappings":"AAAA,QAAQ,GAAG,CAAC"}},
+    {"offset": {"line": 12, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/concatenate_modules/side-effects-import/input/a1.js","turbopack:///[project]/crates/pack-tests/tests/snapshot/concatenate_modules/side-effects-import/input/a2.js"],"sourcesContent":["import \"./shared1.js\";\nconsole.log(\"a1\");","import \"./shared2.js\";\nconsole.log(\"a2\");"],"names":[],"mappings":";;;;AAAA;;AACA,QAAQ,GAAG,CAAC;;;ACDZ;;AACA,QAAQ,GAAG,CAAC"}}]
+}

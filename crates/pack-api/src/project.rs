@@ -25,6 +25,7 @@ use turbo_tasks_fs::{
     DirectoryContent, DirectoryEntry, DiskFileSystem, FileContent, FileSystem, FileSystemEntryType,
     FileSystemPath, VirtualFileSystem, invalidation,
 };
+use turbo_unix_path::normalize_path;
 use turbopack::global_module_ids::get_global_module_id_strategy;
 use turbopack_core::{
     file_source::FileSource,
@@ -561,10 +562,13 @@ impl Project {
 
     #[turbo_tasks::function]
     pub async fn project_fs(&self, denied_path: Vc<RcStr>) -> Result<Vc<DiskFileSystem>> {
+        let denied_path = denied_path.await?;
+        let normalized_denied_path =
+            normalize_path(&denied_path).map_or_else(|| (*denied_path).clone(), RcStr::from);
         Ok(DiskFileSystem::new_with_denied_path(
             PROJECT_FILESYSTEM_NAME.into(),
             self.root_path.clone(),
-            (*denied_path.await?).clone(),
+            normalized_denied_path,
         ))
     }
 
@@ -696,7 +700,7 @@ impl Project {
         let node_root = self.node_root().owned().await?;
         let mode = self.mode().await?;
 
-        let project_root = self.project_root().owned().await?;
+        let project_root = self.project_path().owned().await?;
         let node_root_to_root_path = self.node_root_to_root_path().owned().await?;
         let source_maps = if *self.config().source_maps().await? {
             SourceMapsType::Full
@@ -856,11 +860,12 @@ impl Project {
 
     #[turbo_tasks::function]
     pub async fn client_chunking_context(self: Vc<Self>) -> Result<Vc<Box<dyn ChunkingContext>>> {
+        let output_root_to_root_path = self.node_root_to_root_path().await?;
         Ok(get_client_chunking_context(ClientChunkingContextOptions {
             mode: self.mode(),
-            root_path: self.project_root().owned().await?,
+            root_path: self.project_path().owned().await?,
             output_root: self.client_root().owned().await?,
-            output_root_to_root_path: rcstr!("/ROOT"),
+            output_root_to_root_path: (*output_root_to_root_path).clone(),
             public_path: self.config().computed_public_path(),
             environment: self.client_compile_time_info().environment(),
             module_id_strategy: self.module_ids(),
@@ -1150,7 +1155,6 @@ impl Project {
     pub async fn copy_output_assets(self: Vc<Self>) -> Result<Vc<OutputAssets>> {
         let project_path_vc = self.project_path();
         let dist_root_vc = self.dist_root();
-        let project_root_vc = self.project_root();
 
         let output_config = self.config().output().await?;
         let copy_config = output_config.copy.as_ref();
@@ -1170,7 +1174,7 @@ impl Project {
                     match *entry_type {
                         FileSystemEntryType::Directory => {
                             let to_base_path = if let Some(to) = pattern.to() {
-                                project_root_vc.await?.join(to)?
+                                dist_root_vc.await?.join(to)?
                             } else {
                                 (*dist_root_vc.await?).clone()
                             };
@@ -1183,8 +1187,8 @@ impl Project {
                         FileSystemEntryType::File => {
                             // For files, if to is not specified, copy to dist root with filename only
                             let to_path = if let Some(to) = pattern.to() {
-                                // If to is specified, copy to the specified path relative to project root
-                                project_root_vc.await?.join(to.as_str())?
+                                // If to is specified, copy to the specified path relative to dist root
+                                dist_root_vc.await?.join(to.as_str())?
                             } else {
                                 // Extract just the filename and put it in the dist root
                                 let file_name = from_path.file_name();

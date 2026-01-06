@@ -1,0 +1,8 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/node_modules/tsconfig-mod/index.js"],"sourcesContent":["export const foo = 'bar';"],"names":[],"mappings":"AAAO,MAAM,MAAM","ignoreList":[0]}},
+    {"offset": {"line": 14, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/node_modules/tsconfig-mod/foo.ts"],"sourcesContent":["export const prop = \"prop\";\n"],"names":[],"mappings":"AAAO,MAAM,OAAO","ignoreList":[0]}},
+    {"offset": {"line": 24, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/typescript/foreign_tsconfig/input/index.ts"],"sourcesContent":["import { foo } from 'tsconfig-mod';\nimport { prop } from 'tsconfig-mod/foo';\n\nconsole.log('foo', foo);\nconsole.log('prop', prop);"],"names":[],"mappings":"AAAA;AACA;;;AAEA,QAAQ,GAAG,CAAC,OAAO,0CAAG;AACtB,QAAQ,GAAG,CAAC,QAAQ,2CAAI"}}]
+}

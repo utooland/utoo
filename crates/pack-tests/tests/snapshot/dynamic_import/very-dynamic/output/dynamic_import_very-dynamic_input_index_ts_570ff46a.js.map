@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/dynamic_import/very-dynamic/input/index.ts"],"sourcesContent":["export async function importUrl(url: string) {\n    return import(`${url}`).then((module) => module.default);\n}\n\nexport async function requireStat(name: string) {\n    return require(name);\n}\n"],"names":[],"mappings":"AAAO,eAAe,UAAU,GAAW;IACvC,OAAO;;;;OAAiB,IAAI,CAAC,CAAC,SAAW,OAAO,OAAO;AAC3D;AAEO,eAAe,YAAY,IAAY;IAC1C;;;;;AACJ"}}]
-}
