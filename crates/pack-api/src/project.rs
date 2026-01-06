@@ -185,12 +185,12 @@ impl ProjectContainer {
 
 #[turbo_tasks::function(operation)]
 fn project_fs_operation(project: ResolvedVc<Project>) -> Vc<DiskFileSystem> {
-    project.project_fs()
+    project.project_fs(project.dist_dir())
 }
 
 #[turbo_tasks::function(operation)]
 fn output_fs_operation(project: ResolvedVc<Project>) -> Vc<DiskFileSystem> {
-    project.project_fs()
+    project.output_fs()
 }
 
 impl ProjectContainer {
@@ -479,6 +479,9 @@ impl Issue for ConflictIssue {
     }
 }
 
+#[turbo_tasks::value(transparent)]
+pub struct OutputAssetVec(pub Vec<ResolvedVc<Box<dyn OutputAsset>>>);
+
 #[turbo_tasks::value_impl]
 impl Project {
     #[turbo_tasks::function]
@@ -557,8 +560,12 @@ impl Project {
     }
 
     #[turbo_tasks::function]
-    pub fn project_fs(&self) -> Vc<DiskFileSystem> {
-        DiskFileSystem::new(PROJECT_FILESYSTEM_NAME.into(), self.root_path.clone())
+    pub async fn project_fs(&self, denied_path: Vc<RcStr>) -> Result<Vc<DiskFileSystem>> {
+        Ok(DiskFileSystem::new_with_denied_path(
+            PROJECT_FILESYSTEM_NAME.into(),
+            self.root_path.clone(),
+            (*denied_path.await?).clone(),
+        ))
     }
 
     #[turbo_tasks::function]
@@ -573,17 +580,22 @@ impl Project {
     }
 
     #[turbo_tasks::function]
+    pub async fn project_root(self: Vc<Self>) -> Result<Vc<FileSystemPath>> {
+        Ok(self.project_fs(self.dist_dir()).root())
+    }
+
+    #[turbo_tasks::function]
     pub async fn dist_dir(self: Vc<Self>) -> Result<Vc<RcStr>> {
-        let dist_path = self
-            .config()
+        let this = self.await?;
+        let dist_path = this
+            .config
             .output()
             .await?
             .path
             .clone()
             .unwrap_or("dist".into());
 
-        let relative_dist_path =
-            convert_to_project_relative(&dist_path, &self.project_path().await?.path)?;
+        let relative_dist_path = convert_to_project_relative(&dist_path, &this.project_path)?;
 
         Ok(Vc::cell(relative_dist_path))
     }
@@ -606,11 +618,6 @@ impl Project {
     #[turbo_tasks::function]
     pub fn client_root(self: Vc<Self>) -> Vc<FileSystemPath> {
         self.client_fs().root()
-    }
-
-    #[turbo_tasks::function]
-    pub fn project_root(self: Vc<Self>) -> Vc<FileSystemPath> {
-        self.project_fs().root()
     }
 
     #[turbo_tasks::function]
@@ -907,7 +914,7 @@ impl Project {
             },
             libraries: match *library_project {
                 Some(lib) => {
-                    let endpoints = lib
+                    let endpoints: Vec<ResolvedVc<Box<dyn Endpoint>>> = lib
                         .get_library_endpoints()
                         .await?
                         .into_iter()
@@ -917,7 +924,7 @@ impl Project {
                         })
                         .try_join()
                         .await?;
-                    Some(Endpoints(endpoints.to_vec()).resolved_cell())
+                    Some(Endpoints(endpoints).resolved_cell())
                 }
                 None => None,
             },
@@ -1141,115 +1148,121 @@ impl Project {
 
     #[turbo_tasks::function]
     pub async fn copy_output_assets(self: Vc<Self>) -> Result<Vc<OutputAssets>> {
-        let project_path = self.project_path().owned().await?;
-        let dist_root = self.dist_root().owned().await?;
-        let project_root = self.project_root().owned().await?;
+        let project_path_vc = self.project_path();
+        let dist_root_vc = self.dist_root();
+        let project_root_vc = self.project_root();
 
         let output_config = self.config().output().await?;
         let copy_config = output_config.copy.as_ref();
 
         let mut assets = vec![];
         if let Some(patterns) = copy_config {
-            for pattern in patterns {
-                // Support three forms:
-                // 1. String: "path" -> copies to dist root (filename only for files, or directory with same structure)
-                // 2. Object without to: { "from": "path" } -> copies to dist root (filename only for files, or directory with same structure)
-                // 3. Object with to: { "from": "path", "to": "dest" } -> copies to specified dest relative to project root
-                let from = pattern.from();
-                let from_path = project_path.join(from)?;
+            let futures: Vec<_> = patterns
+                .iter()
+                .map(|pattern| {
+                    let project_path_vc = project_path_vc;
+                    let project_root_vc = project_root_vc;
+                    let dist_root_vc = dist_root_vc;
+                    async move {
+                        let from = pattern.from();
+                        let from_path = project_path_vc.await?.join(from.as_str().into())?;
+                        let from_path_vc = from_path.clone().cell();
 
-                // Check if source is a directory or file
-                let entry_type = from_path.get_type().await?;
-                match *entry_type {
-                    FileSystemEntryType::Directory => {
-                        if let Some(to) = pattern.to() {
-                            // If to is specified, copy directory to the specified path relative to project root
-                            let to_base_path = project_root.join(to.as_str())?;
-                            let dir_assets =
-                                copy_directory_recursive_helper(from_path, to_base_path).await?;
-                            assets.extend(dir_assets);
-                        } else {
-                            // If to is not specified, copy directory contents directly to dist root
-                            // (without the source directory prefix)
-                            // e.g., public/icons/ant.svg -> icons/ant.svg in dist
-                            let dir_assets =
-                                copy_directory_recursive_helper(from_path, dist_root.clone())
-                                    .await?;
-                            assets.extend(dir_assets);
+                        // Check if source is a directory or file
+                        let entry_type = from_path.get_type().await?;
+                        let mut local_assets = vec![];
+                        match *entry_type {
+                            FileSystemEntryType::Directory => {
+                                let to_base_path = if let Some(to) = pattern.to() {
+                                    project_root_vc.await?.join(to)?
+                                } else {
+                                    (*dist_root_vc.await?).clone()
+                                };
+                                let to_base_path_vc = to_base_path.cell();
+                                let dir_assets =
+                                    copy_directory_recursive_helper(from_path_vc, to_base_path_vc)
+                                        .await?;
+                                local_assets.extend(dir_assets.iter().copied());
+                            }
+                            FileSystemEntryType::File => {
+                                // For files, if to is not specified, copy to dist root with filename only
+                                let to_path = if let Some(to) = pattern.to() {
+                                    // If to is specified, copy to the specified path relative to project root
+                                    project_root_vc.await?.join(to.as_str().into())?
+                                } else {
+                                    // Extract just the filename and put it in the dist root
+                                    let file_name = from_path.file_name();
+                                    dist_root_vc.await?.join(file_name.into())?
+                                };
+                                let source = FileSource::new(from_path);
+                                let asset = RawOutput::new(to_path, Vc::upcast(source));
+                                local_assets.push(ResolvedVc::upcast(asset.to_resolved().await?));
+                            }
+                            _ => {}
                         }
+                        Ok::<_, anyhow::Error>(local_assets)
                     }
-                    FileSystemEntryType::File => {
-                        // For files, if to is not specified, copy to dist root with filename only
-                        let to_path = if let Some(to) = pattern.to() {
-                            // If to is specified, copy to the specified path relative to project root
-                            project_root.join(to.as_str())?
-                        } else {
-                            // Extract just the filename and put it in the dist root
-                            let file_name = from_path.file_name();
-                            dist_root.join(file_name)?
-                        };
-                        let source = FileSource::new(from_path);
-                        let asset = RawOutput::new(to_path, Vc::upcast(source));
-                        assets.push(ResolvedVc::upcast(asset.to_resolved().await?));
-                    }
-                    _ => {
-                        // skip
-                        continue;
-                    }
-                }
+                })
+                .collect();
+
+            let results = futures::future::try_join_all(futures).await?;
+            for sub_assets in results {
+                assets.extend(sub_assets);
             }
         }
-        Ok(OutputAssets::concat(vec![*ResolvedVc::cell(assets)]))
+        Ok(Vc::cell(assets))
     }
 }
 
 /// Recursively copy all files from a source directory to a destination directory
 /// Preserves the directory structure
+#[turbo_tasks::function]
 async fn copy_directory_recursive_helper(
-    source_dir: FileSystemPath,
-    dest_dir: FileSystemPath,
-) -> Result<Vec<ResolvedVc<Box<dyn OutputAsset>>>> {
+    source_dir: Vc<FileSystemPath>,
+    dest_dir: Vc<FileSystemPath>,
+) -> Result<Vc<OutputAssetVec>> {
     let mut assets = vec![];
-    let mut stack = vec![source_dir.clone()];
-    let source_dir_ref = &source_dir;
+    let mut queue = vec![source_dir];
+    let source_dir_ref = source_dir.await?;
+    let dest_dir_ref = dest_dir.await?;
 
-    while let Some(src_path) = stack.pop() {
-        let dir_content = src_path.read_dir().await?;
-        if let DirectoryContent::Entries(entries) = &*dir_content {
-            for (_name, entry) in entries.iter() {
-                match entry {
-                    DirectoryEntry::File(file_path) => {
-                        // Calculate relative path from the original source directory
-                        let relative_path =
-                            source_dir_ref.get_path_to(file_path).ok_or_else(|| {
-                                anyhow::anyhow!(
-                                    "File path is not under source directory: {:?}",
-                                    file_path
-                                )
-                            })?;
+    while !queue.is_empty() {
+        let current_batch = std::mem::take(&mut queue);
+        let futures: Vec<_> = current_batch
+            .into_iter()
+            .map(|path| async move {
+                let dir_content = path.await?.read_dir().await?;
+                Ok::<_, anyhow::Error>(dir_content)
+            })
+            .collect();
+        let results = futures::future::try_join_all(futures).await?;
 
-                        // Always use dest_dir as base to avoid path duplication
-                        let dest_path = dest_dir.join(relative_path)?;
-                        let source = FileSource::new(file_path.clone());
-                        let asset = RawOutput::new(dest_path, Vc::upcast(source));
-                        assets.push(ResolvedVc::upcast(asset.to_resolved().await?));
-                    }
-                    DirectoryEntry::Directory(dir_path) => {
-                        // Just push the directory to stack for recursive processing
-                        // We don't need to track dest path since we always calculate
-                        // relative path from source_dir
-                        stack.push(dir_path.clone());
-                    }
-                    _ => {
-                        // Skip symlinks and other entry types
-                        continue;
+        for dir_content in results {
+            if let DirectoryContent::Entries(entries) = &*dir_content {
+                for entry in entries.values() {
+                    match entry {
+                        DirectoryEntry::File(file_path) => {
+                            let relative_path =
+                                source_dir_ref.get_path_to(file_path).ok_or_else(|| {
+                                    anyhow::anyhow!("File path is not under source directory")
+                                })?;
+
+                            let dest_path = dest_dir_ref.join(relative_path.into())?;
+                            let source = FileSource::new(file_path.clone());
+                            let asset = RawOutput::new(dest_path, Vc::upcast(source));
+                            assets.push(ResolvedVc::upcast(asset.to_resolved().await?));
+                        }
+                        DirectoryEntry::Directory(dir_path) => {
+                            queue.push(dir_path.clone().cell());
+                        }
+                        _ => {}
                     }
                 }
             }
         }
     }
 
-    Ok(assets)
+    Ok(Vc::cell(assets))
 }
 
 // This is a performance optimization. This function is a root aggregation function that

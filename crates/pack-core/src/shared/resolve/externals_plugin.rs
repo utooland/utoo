@@ -1,6 +1,6 @@
 use anyhow::Result;
 use turbo_esregex::EsRegex;
-use turbo_rcstr::rcstr;
+use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{ResolvedVc, Vc};
 use turbo_tasks_fs::{
     self, FileSystemPath,
@@ -23,18 +23,31 @@ use crate::config::{
     ExternalConfig, ExternalSubPathTarget, ExternalTargetConverter, ExternalsConfig,
 };
 
-/// Parse a string to a Swc Regex
-fn parse_str_to_regex(regex_str: &str) -> Result<EsRegex> {
-    if let Some(captures) = regex_str.strip_prefix('/')
-        && let Some(last_slash) = captures.rfind('/')
-    {
-        let pattern = &captures[..last_slash];
-        let flags = &captures[last_slash + 1..];
+/// Parse a string to a Swc Regex (cached as a turbo task)
+#[turbo_tasks::function]
+pub fn cached_parse_str_to_regex(regex_str: RcStr) -> Vc<EsRegex> {
+    let s = regex_str.as_str();
+    let regex = if s.starts_with('/') {
+        if let Some(last_slash) = s.rfind('/') {
+            let pattern = &s[1..last_slash];
+            let flags = &s[last_slash + 1..];
+            EsRegex::new(pattern, flags)
+        } else {
+            EsRegex::new(s, "")
+        }
+    } else {
+        EsRegex::new(s, "")
+    };
 
-        return EsRegex::new(pattern, flags);
+    match regex {
+        Ok(r) => r.cell(),
+        Err(_) => {
+            // Fallback to a regex that matches nothing if parsing fails
+            // or we could return a Result, but let's keep it simple for now
+            // to avoid Vc<Result<...>> complexity
+            EsRegex::new("a^", "").unwrap().cell()
+        }
     }
-
-    EsRegex::new(regex_str, "")
 }
 
 /// Convert string based on target converter type
@@ -282,12 +295,54 @@ impl BeforeResolvePlugin for ExternalsPlugin {
 #[turbo_tasks::value_impl]
 impl AfterResolvePlugin for ExternalsPlugin {
     #[turbo_tasks::function]
-    fn after_resolve_condition(&self) -> Vc<AfterResolvePluginCondition> {
-        // We need to match files in node_modules to handle subpath externals
-        AfterResolvePluginCondition::new(
+    pub async fn after_resolve_condition(&self) -> Result<Vc<AfterResolvePluginCondition>> {
+        let externals_config = self.externals_config.await?;
+
+        // Optimization: Instead of matching all node_modules, only match packages listed in externals.
+        // This significantly reduces the number of AfterResolve tasks (Tier 1: Task Explosion).
+        let mut packages = Vec::new();
+        for (key, config) in externals_config.iter() {
+            // Only need after_resolve for Advanced config with sub_path rules
+            if let ExternalConfig::Advanced(advanced) = config
+                && advanced.sub_path.is_some()
+            {
+                // Extract the base package name (e.g., "antd/lib" -> "antd", "@scope/pkg/sub" -> "@scope/pkg")
+                let pkg_name = if key.starts_with('@') {
+                    let parts: Vec<&str> = key.splitn(3, '/').collect();
+                    if parts.len() >= 2 {
+                        format!("{}/{}", parts[0], parts[1])
+                    } else {
+                        key.to_string()
+                    }
+                } else {
+                    key.split('/').next().unwrap_or(key).to_string()
+                };
+                packages.push(pkg_name);
+            }
+        }
+
+        let glob_str = if packages.is_empty() {
+            // If no sub_path externals, return a glob that matches nothing (or a very safe tiny set)
+            // Using a non-existent path to prevent any after_resolve tasks
+            rcstr!(".utoopack_no_externals")
+        } else {
+            // Sort and dedup for cache stability
+            packages.sort();
+            packages.dedup();
+
+            if packages.len() == 1 {
+                format!("**/node_modules/{}/**", packages[0]).into()
+            } else {
+                format!("**/node_modules/{{{}}}/**", packages.join(",")).into()
+            }
+        };
+
+        Ok(AfterResolvePluginCondition::new(
             self.root.clone(),
-            Glob::new(rcstr!("**/node_modules/**"), GlobOptions::default()),
-        )
+            *Glob::new(glob_str, GlobOptions::default())
+                .to_resolved()
+                .await?,
+        ))
     }
 
     #[turbo_tasks::function]
@@ -296,7 +351,7 @@ impl AfterResolvePlugin for ExternalsPlugin {
         _fs_path: FileSystemPath,
         _lookup_path: FileSystemPath,
         _reference_type: ReferenceType,
-        request: ResolvedVc<Request>,
+        request: Vc<Request>,
     ) -> Result<Vc<ResolveResultOption>> {
         tracing::debug!("execute externals plugins after resolve");
         let externals_config = self.externals_config.await?;
@@ -327,36 +382,48 @@ impl AfterResolvePlugin for ExternalsPlugin {
         if let Some(ExternalConfig::Advanced(advanced)) = externals_config.get(package) {
             tracing::debug!("found advanced config for package: {}", package);
             if let Some(sub_path_config) = &advanced.sub_path {
-                // Check exclude list first (highest priority)
+                // Tier 2 Optimization: Pre-fetch all regex tasks for exclude list in parallel
+                // to avoid serial await in loops (Parallelization Slums).
                 if let Some(exclude_list) = &sub_path_config.exclude {
+                    let mut regex_tasks = Vec::new();
                     for exclude_pattern in exclude_list {
                         let pattern = exclude_pattern.as_str();
-                        let is_excluded = if pattern.starts_with('/') && pattern.ends_with('/') {
-                            // Treat as regex pattern
-                            if let Ok(regex) = parse_str_to_regex(pattern) {
-                                regex.is_match(sub_path_str)
-                            } else {
-                                false
-                            }
+                        if pattern.starts_with('/') && pattern.ends_with('/') {
+                            regex_tasks
+                                .push(Some(cached_parse_str_to_regex(exclude_pattern.clone())));
                         } else {
-                            // Simple string matching - check if sub_path contains this pattern
-                            sub_path_str.contains(pattern)
+                            regex_tasks.push(None);
+                        }
+                    }
+
+                    for (i, exclude_pattern) in exclude_list.iter().enumerate() {
+                        let is_excluded = if let Some(regex_vc) = regex_tasks[i] {
+                            regex_vc.await?.is_match(sub_path_str)
+                        } else {
+                            sub_path_str.contains(exclude_pattern.as_str())
                         };
 
                         if is_excluded {
                             tracing::debug!(
                                 "sub_path '{}' excluded by pattern '{}'",
                                 sub_path_str,
-                                pattern
+                                exclude_pattern
                             );
                             return Ok(ResolveResultOption::none());
                         }
                     }
                 }
 
-                // Process each rule in order
-                for rule in &sub_path_config.rules {
-                    let rule_regex = parse_str_to_regex(rule.regex.as_str())?;
+                // Tier 2 Optimization: Pre-fetch all rule regexes in parallel.
+                let rule_regex_tasks: Vec<_> = sub_path_config
+                    .rules
+                    .iter()
+                    .map(|rule| cached_parse_str_to_regex(rule.regex.clone()))
+                    .collect();
+
+                // Process each rule in order (matching must be ordered, but compilation is parallel)
+                for (i, rule) in sub_path_config.rules.iter().enumerate() {
+                    let rule_regex = rule_regex_tasks[i].await?;
                     // Compile regex and match against sub path
                     if rule_regex.is_match(sub_path_str) {
                         // Apply the target transformation

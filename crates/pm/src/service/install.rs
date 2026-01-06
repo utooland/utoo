@@ -136,13 +136,12 @@ async fn clean_symlink(path: &Path) -> Result<()> {
 
 /// Clean up a directory, handling scoped packages and legacy npm install packages
 async fn clean_directory(path: &Path) -> Result<()> {
-    if let Some(file_name) = path.file_name()
-        && let Some(name) = file_name.to_str()
-    {
+    if let Some(file_name) = path.file_name() {
+        let name = file_name.to_string_lossy();
         if name.starts_with('@') {
             clean_scoped_package(path).await?;
         } else {
-            clean_legacy_npminstall_package(path, name).await?;
+            clean_legacy_npminstall_package(path, &name).await?;
         }
     }
     Ok(())

@@ -1,12 +1,11 @@
 use anyhow::{Result, bail};
-use futures::stream::{self, StreamExt};
 use pack_core::client::context::{
     get_client_module_options_context, get_client_resolve_options_context,
     get_client_runtime_entries,
 };
 use pack_core::util::convert_to_project_relative;
 use qstring::QString;
-use tracing::{Instrument, trace_span};
+use tracing::Instrument;
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{Completion, JoinIterExt, ResolvedVc, TryJoinIterExt, ValueToString, Vc};
 use turbo_tasks_fs::{File, FileContent};
@@ -349,25 +348,23 @@ impl Endpoint for AppEndpoint {
 
     #[turbo_tasks::function]
     async fn output(self: Vc<Self>) -> Result<Vc<EndpointOutput>> {
-        let span = trace_span!("app endpoint");
-
-        let asset_context = self.app_module_context();
-
-        let runtime_entries = self.app_runtime_entries();
-
         async move {
+            let asset_context = self.app_module_context();
+
+            let runtime_entries = self.app_runtime_entries();
+
             let this = self.await?;
-            let output_assets = stream::iter(&*self.await?.entrypoints)
-                .fold(OutputAssets::empty(), |acc, e| async move {
-                    acc.concatenate(
-                        (*e).output_assets_for_entry(Vc::upcast(asset_context), runtime_entries),
-                    )
-                })
-                .await;
+            let output_assets = {
+                let mut vcs = this
+                    .entrypoints
+                    .iter()
+                    .map(|e| e.output_assets_for_entry(Vc::upcast(asset_context), runtime_entries))
+                    .collect::<Vec<_>>();
+                vcs.push(this.project.copy_output_assets());
+                OutputAssets::concat(vcs)
+            };
 
-            let output_assets = output_assets.concatenate(self.project().copy_output_assets());
-
-            let dist_root = self.project().dist_root().await?;
+            let dist_root = this.project.dist_root().await?;
 
             let (server_paths, client_paths) = (vec![], vec![]);
 
@@ -377,20 +374,14 @@ impl Endpoint for AppEndpoint {
                 client_paths,
             };
 
-            let output_assets = if *self.project().should_create_webpack_stats().await? {
-                let output_assets_vec = output_assets.await?;
-                let dist_root = self.project().dist_root().owned().await?;
-                let webpack_stats =
-                    generate_webpack_stats(output_assets_vec.iter().copied(), dist_root.clone())
-                        .await?;
+            let output_assets = if *this.project.should_create_webpack_stats().await? {
+                let webpack_stats = generate_webpack_stats(output_assets, this.project.dist_root());
+                let webpack_stats_read = webpack_stats.await?;
+                let dist_root_owned = this.project.dist_root().owned().await?;
+                let stats_json = simd_json::serde::to_string(&*webpack_stats_read)?;
                 let stats_output = VirtualOutputAsset::new(
-                    dist_root.join("stats.json")?,
-                    AssetContent::file(
-                        FileContent::from(File::from(simd_json::serde::to_string_pretty(
-                            &webpack_stats,
-                        )?))
-                        .cell(),
-                    ),
+                    dist_root_owned.join("stats.json")?,
+                    AssetContent::file(FileContent::from(File::from(stats_json)).cell()),
                 )
                 .to_resolved()
                 .await?;
@@ -406,7 +397,7 @@ impl Endpoint for AppEndpoint {
             }
             .cell())
         }
-        .instrument(span)
+        .instrument(tracing::trace_span!("app_output"))
         .await
     }
 

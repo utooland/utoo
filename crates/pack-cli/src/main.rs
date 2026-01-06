@@ -32,8 +32,7 @@ fn main() {
 
     let project_path: RcStr = canonicalize(args.project_path.unwrap_or_else(|| ".".to_string()))
         .unwrap()
-        .to_str()
-        .unwrap()
+        .to_string_lossy()
         .into();
 
     let root_path = args.root_path.map(RcStr::from);
@@ -126,10 +125,9 @@ fn main() {
                 root_path: root_path
                     .as_ref()
                     .map(|r| {
-                        canonicalize(PathBuf::from(&r))
+                        canonicalize(PathBuf::from(r.as_str()))
                             .unwrap()
-                            .to_str()
-                            .unwrap()
+                            .to_string_lossy()
                             .into()
                     })
                     .unwrap_or_else(|| project_path.clone()),

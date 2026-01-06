@@ -6,4 +6,10 @@ target
 rustc-ice*.txt
 .turbopack
 .turbo
+trace.json
+trace-*.json
+trace-*.json.gz
+*.cpuprofile
+*.heapprofile
+tmp/
 

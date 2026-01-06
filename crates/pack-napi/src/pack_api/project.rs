@@ -268,7 +268,11 @@ pub async fn project_new(
         .ok()
         .filter(|v| !v.is_empty());
 
-    if cfg!(feature = "tokio-console") && trace.is_none() {
+    let tracing_chrome = std::env::var("TRACING_CHROME")
+        .ok()
+        .filter(|v| !v.is_empty());
+
+    if cfg!(feature = "tokio-console") && trace.is_none() && tracing_chrome.is_none() {
         // ensure `trace` is set to *something* so that the `tokio-console` feature works, otherwise
         // you just get empty output from `tokio-console`, which can be confusing.
         trace = Some("overview".to_owned());
@@ -335,6 +339,24 @@ pub async fn project_new(
 
         TRACING_INIT.call_once(|| {
             subscriber.init();
+        });
+    } else if let Some(chrome_file) = tracing_chrome {
+        let mut builder = tracing_chrome::ChromeLayerBuilder::new();
+        if chrome_file != "1" && chrome_file != "true" {
+            builder = builder.file(chrome_file);
+        }
+        let (chrome_layer, guard) = builder.build();
+        exit.on_exit(async move {
+            tokio::task::spawn_blocking(move || drop(guard))
+                .await
+                .unwrap();
+        });
+
+        TRACING_INIT.call_once(|| {
+            tracing_subscriber::registry()
+                .with(EnvFilter::new("trace"))
+                .with(chrome_layer)
+                .init();
         });
     } else {
         TRACING_INIT.call_once(|| {

@@ -116,7 +116,7 @@ async fn run(resource: PathBuf) -> Result<()> {
         noop_backing_storage(),
     ));
     tt.run_once(async move {
-        let emit_op = run_inner_options(resource.to_str().unwrap().into());
+        let emit_op = run_inner_options(resource.to_string_lossy().into());
         emit_op.read_strongly_consistent().await?;
         apply_effects(emit_op).await?;
 
@@ -149,7 +149,7 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
     assert!(
         test_path.is_dir(),
         "{} is not a directory. Snapshot tests only support directories",
-        test_path.to_str().unwrap()
+        test_path.to_string_lossy()
     );
 
     // Check if config.json exists in the current directory

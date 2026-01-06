@@ -19,12 +19,10 @@ impl Glob for OpfsGlob {
 
 /// Check if a path exists in OPFS.
 async fn exists(path: &Path) -> Result<bool, anyhow::Error> {
-    let path_str = path
-        .to_str()
-        .ok_or_else(|| anyhow::anyhow!("Invalid path: {}", path.display()))?;
+    let path_str = path.to_string_lossy();
 
     // Try to get metadata - if it fails, the path doesn't exist
-    match opfs_project::metadata(path_str).await {
+    match opfs_project::metadata(&path_str).await {
         Ok(_) => Ok(true),
         Err(_) => Ok(false),
     }
