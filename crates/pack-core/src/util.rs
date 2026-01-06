@@ -102,8 +102,9 @@ pub fn convert_to_project_relative(project_inside_path: &str, project_path: &str
                     .to_string_lossy()
                     .to_string();
                 if current_dir
-                    .to_str()
-                    .is_some_and(|c| c.rfind(&project_path).is_some_and(|index| index > 0))
+                    .to_string_lossy()
+                    .rfind(&project_path)
+                    .is_some_and(|index| index > 0)
                 {
                     current_dir
                 } else {

@@ -15,6 +15,7 @@ base64              = "0.22.1"
 bincode             = { workspace = true }
 dunce               = { workspace = true }
 either              = { workspace = true, features = ["serde"] }
+futures             = { workspace = true }
 indoc               = { workspace = true }
 mime_guess          = "2.0.4"
 pathdiff            = { workspace = true }

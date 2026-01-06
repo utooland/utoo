@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["turbopack:///turbopack:///[project]/webpack-loaders/sass/input/input/style.sass"],"sourcesContent":["nav\n  ul\n    margin: 0\n    padding: 0\n    list-style: none\n\n  li\n    display: inline-block\n\n  a\n    display: block\n    padding: 6px 12px\n    text-decoration: none\n"],"names":[],"mappings":"AACE;;;;;;AAKA;;;;AAGA"}}]
-}

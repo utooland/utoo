@@ -68,6 +68,9 @@ fn is_empty_dir_tree(dir_entries: impl IntoIterator<Item = io::Result<fs::DirEnt
 
 #[testing::fixture("tests/snapshot/*/*/", exclude("node_modules"))]
 fn test(resource: PathBuf) {
+    if !resource.exists() {
+        return;
+    }
     let resource = canonicalize(resource).unwrap();
 
     // Skip non-directory resources (like config.json files)
@@ -116,7 +119,7 @@ async fn run(resource: PathBuf) -> Result<()> {
         noop_backing_storage(),
     ));
     tt.run_once(async move {
-        let emit_op = run_inner_options(resource.to_str().unwrap().into());
+        let emit_op = run_inner_options(resource.to_string_lossy().into());
         emit_op.read_strongly_consistent().await?;
         apply_effects(emit_op).await?;
 
@@ -149,7 +152,7 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
     assert!(
         test_path.is_dir(),
         "{} is not a directory. Snapshot tests only support directories",
-        test_path.to_str().unwrap()
+        test_path.to_string_lossy()
     );
 
     // Check if config.json exists in the current directory
@@ -230,11 +233,7 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
     let final_config_content = serde_json::to_string_pretty(&user_config)?;
 
     let project_options = ProjectOptions {
-        root_path: Path::new(&*REPO_ROOT)
-            .join("crates/pack-tests/tests/snapshot")
-            .to_string_lossy()
-            .to_string()
-            .into(),
+        root_path: REPO_ROOT.clone(),
         project_path: project_path.to_string_lossy().into(),
         config: final_config_content.into(),
         process_env: vec![
@@ -327,12 +326,24 @@ async fn walk_asset(
     let path = asset.path().owned().await?;
 
     // Check if the path is already relative to output_path
-    let full_path = if let Some(_relative_path) = output_path.get_path_to(&path) {
-        // Path is already inside output_path, use it directly
-        path.clone()
+    let full_path = if let Some(relative_path) = output_path.get_path_to(&path) {
+        // Path is already inside output_path, join it
+        output_path.join(relative_path)?
     } else {
-        // Path is not inside output_path, join it
-        output_path.join(&path.to_string())?
+        // Path is not inside output_path.
+        // This might happen if it's a virtual path or if it's from a different FS.
+        let path_str = path.to_string();
+        if path_str.starts_with('/') {
+            // If it's an absolute path, we only want the filename to avoid mirroring absolute paths
+            // into the snapshot directory.
+            let filename = Path::new(&path_str)
+                .file_name()
+                .and_then(|f| f.to_str())
+                .unwrap_or(&path_str);
+            output_path.join(filename)?
+        } else {
+            output_path.join(&path_str)?
+        }
     };
 
     // Add the full path to seen set

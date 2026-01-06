@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 3, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/define/basic/input/index.ts"],"sourcesContent":["console.log(AAA);\nconsole.log(BBB);\nconsole.log(CCC);\n"],"names":[],"mappings":"AAAA,QAAQ,GAAG;AACX,QAAQ,GAAG;AACX,QAAQ,GAAG"}}]
+}

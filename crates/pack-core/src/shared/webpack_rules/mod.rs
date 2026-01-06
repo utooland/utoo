@@ -143,9 +143,15 @@ pub async fn webpack_loader_options(
 ) -> Result<Vc<OptionWebpackLoadersOptions>> {
     let mut rules = config.webpack_rules(project_path.clone()).owned().await?;
 
-    rules.append(&mut get_sass_loader_rules(config.sass_config()).await?);
-    rules.append(&mut get_less_loader_rules(config.less_config()).await?);
-    rules.append(&mut get_style_loader_rules(config.inline_css()).await?);
+    let (mut sass_rules, mut less_rules, mut style_loader_rules) = futures::try_join!(
+        get_sass_loader_rules(config.sass_config()),
+        get_less_loader_rules(config.less_config()),
+        get_style_loader_rules(config.inline_css()),
+    )?;
+
+    rules.append(&mut sass_rules);
+    rules.append(&mut less_rules);
+    rules.append(&mut style_loader_rules);
 
     if rules.is_empty() {
         return Ok(Vc::cell(None));

@@ -20,7 +20,7 @@ urlencoding = { workspace = true }
 
 ## turbpack specific
 pack-core           = { workspace = true }
-simd-json           = { workspace = true }
+simd-json           = { workspace = true, features = ["arraybackend"] }
 turbo-bincode       = { workspace = true }
 turbo-rcstr         = { workspace = true }
 turbo-tasks         = { workspace = true }

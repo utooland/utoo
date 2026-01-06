@@ -93,6 +93,7 @@ pub async fn endpoint_write_to_disk(
 }
 
 #[turbo_tasks::function(operation)]
+#[tracing::instrument(name = "output_assets_operation", skip_all)]
 fn output_assets_operation(endpoint: ResolvedVc<Box<dyn Endpoint>>) -> Vc<EndpointOutput> {
     endpoint.output()
 }

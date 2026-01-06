@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 3, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/basic/minify/input/index.js"],"sourcesContent":["const inlined = 3\nconst message = getMessage()\n\nconsole.log('Hello,' + ' world!', inlined, message)\nconsole.log(message)\n\nfunction getMessage() {\n  return 'Hello'\n}\n"],"names":[],"mappings":"AAAA,MAAM,UAAU;AAChB,MAAM,UAAU;AAEhB,QAAQ,GAAG,CAAC,WAAW,WAAW,SAAS;AAC3C,QAAQ,GAAG,CAAC;AAEZ,SAAS;IACP,OAAO;AACT"}}]
+}

@@ -1,5 +1,5 @@
 (globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["style_css_modules_input_30f79b81.css","style_css_modules_input_ef2fa198.js"],"runtimeModuleIds":[502]}
+    {"otherChunks":["input_db4c60c6.css","input_317327a4.js"],"runtimeModuleIds":[818]}
 ]);
 // Dummy runtime

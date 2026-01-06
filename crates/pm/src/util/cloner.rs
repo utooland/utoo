@@ -362,7 +362,7 @@ async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
         while let Some(entry) = read_dir.next_entry().await? {
             if let Some(ignore_list) = ignore
                 && let Some(file_name) = entry.path().file_name()
-                && ignore_list.contains(&file_name.to_str().unwrap_or_default())
+                && ignore_list.contains(&&*file_name.to_string_lossy())
             {
                 continue;
             }
@@ -451,7 +451,7 @@ pub async fn find_real_src<P: AsRef<Path>>(src: P) -> Option<PathBuf> {
         if let Ok(metadata) = entry.metadata().await
             && metadata.is_dir()
             && let Some(name) = entry.path().file_name()
-            && name.to_str().unwrap_or_default() != ".utoo_built"
+            && name.to_string_lossy() != ".utoo_built"
         {
             return Some(entry.path());
         }

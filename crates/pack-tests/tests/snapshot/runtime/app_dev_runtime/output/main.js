@@ -1,6 +1,6 @@
 (globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["runtime_app_dev_runtime_input_index_4000282c.js"],"runtimeModuleIds":[41]}
+    {"otherChunks":["input_index_844ce608.js"],"runtimeModuleIds":[89]}
 ]);
 (() => {
 if (!Array.isArray(globalThis.TURBOPACK)) {
@@ -8,7 +8,7 @@ if (!Array.isArray(globalThis.TURBOPACK)) {
 }
 
 const CHUNK_BASE_PATH = "/";
-const RELATIVE_ROOT_PATH = "/ROOT";
+const RELATIVE_ROOT_PATH = "../../../..";
 const RUNTIME_PUBLIC_PATH = "/";
 const CHUNK_SUFFIX = "";
 /**

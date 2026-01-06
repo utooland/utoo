@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/node_modules/@emotion/react/jsx-runtime.js"],"sourcesContent":["export function jsx() {\n  return 'purposefully empty stub for @emotion/react/jsx-runtime.js'\n}\nexport function jsxs() {\n  return 'purposefully empty stub for @emotion/react/jsx-runtime.js'\n}\n"],"names":[],"mappings":"AAAO,SAAS;IACd,OAAO;AACT;AACO,SAAS;IACd,OAAO;AACT","ignoreList":[0]}},
+    {"offset": {"line": 19, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/crates/pack-tests/tests/snapshot/basic/jsx/input/index.tsx"],"sourcesContent":["/** @jsxImportSource @emotion/react */\nimport { jsx } from '@emotion/react'\n\ntype IProps = {\n    content: string;\n}\n\nfunction App(props: IProps) {\n    // @ts-ignore make lsp happy.\n    return <div>{props.content}</div>;\n}\n\nexport default App;"],"names":[],"mappings":"AAAA,oCAAoC;;AAOpC,SAAS,IAAI,KAAa;IACtB,6BAA6B;IAC7B,qBAAO,+CAAC;kBAAK,MAAM,OAAO;;AAC9B;qCAEe"}}]
+}
