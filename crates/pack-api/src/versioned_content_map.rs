@@ -1,31 +1,21 @@
 use anyhow::{Result, bail};
+use bincode::{Decode, Encode};
 use pack_core::emit_assets;
 use rustc_hash::{FxHashMap, FxHashSet};
-use serde::{Deserialize, Serialize};
 use turbo_rcstr::RcStr;
 use turbo_tasks::{
     FxIndexSet, NonLocalValue, OperationValue, OperationVc, ResolvedVc, State, TryFlatJoinIterExt,
     TryJoinIterExt, ValueDefault, Vc, debug::ValueDebugFormat, trace::TraceRawVcs,
 };
-use turbo_tasks_fs::FileSystemPath;
+use turbo_tasks_fs::{FileContent, FileSystemPath};
 use turbopack_core::{
     asset::Asset,
     output::{ExpandedOutputAssets, OptionOutputAsset, OutputAsset},
-    source_map::{GenerateSourceMap, OptionStringifiedSourceMap},
+    source_map::GenerateSourceMap,
     version::OptionVersionedContent,
 };
 
-#[derive(
-    Clone,
-    TraceRawVcs,
-    PartialEq,
-    Eq,
-    ValueDebugFormat,
-    Serialize,
-    Deserialize,
-    Debug,
-    NonLocalValue,
-)]
+#[turbo_tasks::value]
 struct MapEntry {
     assets_operation: OperationVc<ExpandedOutputAssets>,
     /// Precomputed map for quick access to output asset by filepath
@@ -38,8 +28,9 @@ unsafe impl OperationValue for MapEntry {}
 #[turbo_tasks::value(transparent, operation)]
 struct OptionMapEntry(Option<MapEntry>);
 
-#[turbo_tasks::value]
-#[derive(Debug)]
+#[derive(
+    Clone, TraceRawVcs, PartialEq, Eq, ValueDebugFormat, Debug, NonLocalValue, Encode, Decode,
+)]
 pub struct PathToOutputOperation(
     /// We need to use an operation for outputs as it's stored for later usage and we want to
     /// reconnect this operation when it's received from the map again.
@@ -47,7 +38,23 @@ pub struct PathToOutputOperation(
     /// It may not be 100% correct for the key (`FileSystemPath`) to be in a `ResolvedVc` here, but
     /// it's impractical to make it an `OperationVc`/`OperationValue`, and it's unlikely to
     /// change/break?
-    FxHashMap<FileSystemPath, FxIndexSet<OperationVc<ExpandedOutputAssets>>>,
+    FxHashMap<FileSystemPath, ExpandedOutputAssetsOperationSet>,
+);
+
+#[derive(
+    Clone,
+    Default,
+    TraceRawVcs,
+    PartialEq,
+    Eq,
+    ValueDebugFormat,
+    Debug,
+    NonLocalValue,
+    Encode,
+    Decode,
+)]
+struct ExpandedOutputAssetsOperationSet(
+    #[bincode(with = "turbo_bincode::indexset")] FxIndexSet<OperationVc<ExpandedOutputAssets>>,
 );
 
 // HACK: This is technically incorrect because the map's key is a `ResolvedVc`...
@@ -132,7 +139,12 @@ impl VersionedContentMap {
             let mut stale_assets = map.0.keys().cloned().collect::<FxHashSet<_>>();
 
             for (k, _) in entries.iter().flatten() {
-                let res = map.0.entry(k.clone()).or_default().insert(assets_operation);
+                let res = map
+                    .0
+                    .entry(k.clone())
+                    .or_default()
+                    .0
+                    .insert(assets_operation);
                 stale_assets.remove(k);
                 changed = changed || res;
             }
@@ -144,6 +156,7 @@ impl VersionedContentMap {
                     .get_mut(k)
                     // guaranteed
                     .unwrap()
+                    .0
                     .swap_remove(&assets_operation);
                 changed = changed || res
             }
@@ -151,13 +164,13 @@ impl VersionedContentMap {
         });
 
         // Make sure all written client assets are up-to-date
-        let _ = emit_assets(
+        emit_assets(
             assets_operation.connect(),
             node_root,
             client_relative_path,
             client_output_path,
         )
-        .resolve()
+        .as_side_effect()
         .await?;
         let map_entry = Vc::cell(Some(MapEntry {
             assets_operation,
@@ -179,9 +192,9 @@ impl VersionedContentMap {
         self: Vc<Self>,
         path: FileSystemPath,
         section: Option<RcStr>,
-    ) -> Result<Vc<OptionStringifiedSourceMap>> {
+    ) -> Result<Vc<FileContent>> {
         let Some(asset) = &*self.get_asset(path.clone()).await? else {
-            return Ok(Vc::cell(None));
+            return Ok(FileContent::NotFound.cell());
         };
 
         if let Some(generate_source_map) =
@@ -234,7 +247,7 @@ impl VersionedContentMap {
     fn raw_get(&self, path: FileSystemPath) -> Vc<OptionMapEntry> {
         let assets = {
             let map = &self.map_path_to_op.get().0;
-            map.get(&path).and_then(|m| m.iter().next().copied())
+            map.get(&path).and_then(|m| m.0.iter().next().copied())
         };
         let Some(assets) = assets else {
             return Vc::cell(None);

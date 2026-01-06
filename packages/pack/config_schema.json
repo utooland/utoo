@@ -3,180 +3,241 @@
   "title": "ProjectOptions",
   "description": "Top-level project options configuration This represents the root structure of utoopack.json",
   "type": "object",
-  "required": [
-    "config"
-  ],
   "properties": {
-    "config": {
-      "description": "Main configuration object",
-      "allOf": [
+    "buildId": {
+      "description": "The build id.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "cacheHandler": {
+      "description": "Cache handler configuration",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "define": {
+      "description": "Define variables for build-time replacement",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "defineEnv": {
+      "description": "A map of environment variables which should get injected at compile time.",
+      "anyOf": [
         {
-          "$ref": "#/definitions/SchemaConfig"
+          "$ref": "#/definitions/SchemaDefineEnv"
+        },
+        {
+          "type": "null"
         }
       ]
     },
-    "projectPath": {
-      "description": "Project path relative to root",
+    "dev": {
+      "description": "Whether to run in development mode",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "devServer": {
+      "description": "Development server configuration",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SchemaDevServer"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "entry": {
+      "description": "Entry points for the build",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/SchemaEntryOptions"
+      }
+    },
+    "experimental": {
+      "description": "Experimental features",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SchemaExperimentalConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "externals": {
+      "description": "External dependencies configuration",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "$ref": "#/definitions/SchemaExternalConfig"
+      }
+    },
+    "images": {
+      "description": "Image processing configuration",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SchemaImageConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "mode": {
+      "description": "Build mode",
       "type": [
         "string",
         "null"
       ]
     },
-    "rootPath": {
-      "description": "Root path of the project",
+    "module": {
+      "description": "Module configuration",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SchemaModuleConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nodePolyfill": {
+      "description": "Enable Node.js polyfills for browser builds",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "optimization": {
+      "description": "Build optimization settings",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SchemaOptimizationConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "output": {
+      "description": "Output configuration",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SchemaOutputConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "packPath": {
+      "description": "Absolute path for @utoo/pack",
       "type": [
         "string",
         "null"
+      ]
+    },
+    "persistentCaching": {
+      "description": "Enable persistent caching",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "processEnv": {
+      "description": "A map of environment variables to use when compiling code.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "projectPath": {
+      "description": "A path inside the root_path which contains the app directories.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "resolve": {
+      "description": "Resolve configuration",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SchemaResolveConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "rootPath": {
+      "description": "A root path from which all files must be nested under.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sourceMaps": {
+      "description": "Enable source maps",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "stats": {
+      "description": "Enable build statistics",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "styles": {
+      "description": "Style processing configuration",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SchemaStyleConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "target": {
+      "description": "Target environment",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "watch": {
+      "description": "Filesystem watcher options.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SchemaWatchOptions"
+        },
+        {
+          "type": "null"
+        }
       ]
     }
   },
   "definitions": {
-    "SchemaConfig": {
-      "description": "Main configuration structure that mirrors pack_core::config::Config All fields are derived from the original Config structure in pack-core",
-      "type": "object",
-      "properties": {
-        "cacheHandler": {
-          "description": "Cache handler configuration",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "define": {
-          "description": "Define variables for build-time replacement",
-          "type": [
-            "object",
-            "null"
-          ],
-          "additionalProperties": true
-        },
-        "entry": {
-          "description": "Entry points for the build",
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "$ref": "#/definitions/SchemaEntryOptions"
-          }
-        },
-        "experimental": {
-          "description": "Experimental features",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SchemaExperimentalConfig"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "externals": {
-          "description": "External dependencies configuration",
-          "type": [
-            "object",
-            "null"
-          ],
-          "additionalProperties": {
-            "$ref": "#/definitions/SchemaExternalConfig"
-          }
-        },
-        "images": {
-          "description": "Image processing configuration",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SchemaImageConfig"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "mode": {
-          "description": "Build mode",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "module": {
-          "description": "Module configuration",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SchemaModuleConfig"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "optimization": {
-          "description": "Build optimization settings",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SchemaOptimizationConfig"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "output": {
-          "description": "Output configuration",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SchemaOutputConfig"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "persistentCaching": {
-          "description": "Enable persistent caching",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "resolve": {
-          "description": "Resolve configuration",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SchemaResolveConfig"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "sourceMaps": {
-          "description": "Enable source maps",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "styles": {
-          "description": "Style processing configuration",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SchemaStyleConfig"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "target": {
-          "description": "Target environment",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      }
-    },
     "SchemaConfigConditionItem": {
       "description": "Configuration condition item",
       "type": "object",
@@ -238,20 +299,80 @@
       ]
     },
     "SchemaCopyItem": {
-      "description": "Copy item configuration",
-      "type": "object",
-      "required": [
-        "from",
-        "to"
-      ],
-      "properties": {
-        "from": {
-          "description": "Source path to copy from",
+      "description": "Copy item configuration Can be either a string (source path) or an object with from and optional to",
+      "anyOf": [
+        {
+          "description": "String variant: source path (destination will be same as source)",
           "type": "string"
         },
-        "to": {
-          "description": "Destination path to copy to",
-          "type": "string"
+        {
+          "description": "Object variant: source path and optional destination path",
+          "type": "object",
+          "required": [
+            "from"
+          ],
+          "properties": {
+            "from": {
+              "description": "Source path to copy from",
+              "type": "string"
+            },
+            "to": {
+              "description": "Destination path to copy to (optional, defaults to same as from)",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "SchemaDefineEnv": {
+      "description": "Environment variables for build-time injection",
+      "type": "object",
+      "properties": {
+        "client": {
+          "description": "Client-side environment variables",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/SchemaEnvVar"
+          }
+        },
+        "edge": {
+          "description": "Edge-side environment variables",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/SchemaEnvVar"
+          }
+        },
+        "nodejs": {
+          "description": "Node.js environment variables",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/SchemaEnvVar"
+          }
+        }
+      }
+    },
+    "SchemaDevServer": {
+      "description": "Development server configuration",
+      "type": "object",
+      "properties": {
+        "hot": {
+          "description": "Enable hot module replacement",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       }
     },
@@ -262,6 +383,17 @@
         "import"
       ],
       "properties": {
+        "html": {
+          "description": "HTML generation configuration for this entry",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaHtmlConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "import": {
           "description": "Import path for the entry point",
           "type": "string"
@@ -283,6 +415,24 @@
             "string",
             "null"
           ]
+        }
+      }
+    },
+    "SchemaEnvVar": {
+      "description": "Environment variable pair",
+      "type": "object",
+      "required": [
+        "name",
+        "value"
+      ],
+      "properties": {
+        "name": {
+          "description": "Variable name",
+          "type": "string"
+        },
+        "value": {
+          "description": "Variable value",
+          "type": "string"
         }
       }
     },
@@ -515,6 +665,58 @@
         }
       }
     },
+    "SchemaHtmlConfig": {
+      "description": "HTML generation configuration",
+      "type": "object",
+      "properties": {
+        "filename": {
+          "description": "Output filename for the generated HTML",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "inject": {
+          "description": "Where to inject scripts (true, false, \"body\", \"head\")"
+        },
+        "meta": {
+          "description": "Meta tags configuration",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "scriptLoading": {
+          "description": "Script loading strategy (\"blocking\", \"defer\", \"module\")",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "template": {
+          "description": "Path to the HTML template file",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "templateContent": {
+          "description": "Inline HTML template content",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "description": "Title for the generated HTML",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
     "SchemaImageConfig": {
       "description": "Image configuration",
       "type": "object",
@@ -552,6 +754,18 @@
           ]
         }
       }
+    },
+    "SchemaLoaderItem": {
+      "description": "Loader configuration item",
+      "anyOf": [
+        {
+          "description": "Loader name",
+          "type": "string"
+        },
+        {
+          "description": "Loader with options"
+        }
+      ]
     },
     "SchemaModularizeImportPackageConfig": {
       "description": "Modularize import package configuration",
@@ -617,7 +831,9 @@
             "object",
             "null"
           ],
-          "additionalProperties": true
+          "additionalProperties": {
+            "$ref": "#/definitions/SchemaModuleRule"
+          }
         }
       }
     },
@@ -627,6 +843,47 @@
       "enum": [
         "named",
         "deterministic"
+      ]
+    },
+    "SchemaModuleRule": {
+      "description": "Module rule configuration",
+      "anyOf": [
+        {
+          "description": "Shorthand for a single loader",
+          "type": "string"
+        },
+        {
+          "description": "Full rule configuration",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SchemaRuleConfigItem"
+            }
+          ]
+        },
+        {
+          "description": "Multiple rule configurations",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SchemaModuleRuleItem"
+          }
+        }
+      ]
+    },
+    "SchemaModuleRuleItem": {
+      "description": "Item in a module rule array",
+      "anyOf": [
+        {
+          "description": "Shorthand for a single loader",
+          "type": "string"
+        },
+        {
+          "description": "Full rule configuration",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SchemaRuleConfigItem"
+            }
+          ]
+        }
       ]
     },
     "SchemaOptimizationConfig": {
@@ -668,6 +925,13 @@
             }
           ]
         },
+        "nestedAsyncChunking": {
+          "description": "Whether to enable nested async chunking",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "noMangling": {
           "description": "Whether to disable name mangling",
           "type": [
@@ -696,6 +960,20 @@
             }
           ]
         },
+        "removeUnusedExports": {
+          "description": "Whether to remove unused exports",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "removeUnusedImports": {
+          "description": "Whether to remove unused imports",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "splitChunks": {
           "description": "Split chunks configuration",
           "type": [
@@ -718,6 +996,13 @@
         },
         "treeShaking": {
           "description": "Whether to enable tree shaking",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "wasmAsAsset": {
+          "description": "Whether to bunle wasm as asset. Defaults to false. When false, WASM files will be output as static assets.",
           "type": [
             "boolean",
             "null"
@@ -855,6 +1140,42 @@
         }
       }
     },
+    "SchemaRuleConfigItem": {
+      "description": "Full module rule configuration",
+      "type": "object",
+      "required": [
+        "loaders"
+      ],
+      "properties": {
+        "condition": {
+          "description": "Condition for applying the rule",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaConfigConditionItem"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "loaders": {
+          "description": "Loaders to apply",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SchemaLoaderItem"
+          }
+        },
+        "renameAs": {
+          "description": "Rename the module as another extension",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
     "SchemaSplitChunkConfig": {
       "description": "Split chunk configuration",
       "type": "object",
@@ -928,6 +1249,28 @@
           }
         }
       ]
+    },
+    "SchemaWatchOptions": {
+      "description": "Filesystem watcher options",
+      "type": "object",
+      "required": [
+        "enable"
+      ],
+      "properties": {
+        "enable": {
+          "description": "Whether to watch the filesystem for file changes.",
+          "type": "boolean"
+        },
+        "pollInterval": {
+          "description": "Enable polling at a certain interval if the native file watching doesn't work (e.g. docker).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
     }
   }
 }

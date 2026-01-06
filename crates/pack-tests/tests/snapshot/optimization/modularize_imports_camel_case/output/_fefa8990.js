@@ -7,7 +7,8 @@ function ButtonGroup() {
 }
 __turbopack_context__.s([
     "default",
-    ()=>ButtonGroup
+    0,
+    ButtonGroup
 ]);
 }),
 "[project]/node_modules/antd/es/DatePicker/index.js [client] (ecmascript)", ((__turbopack_context__) => {
@@ -18,7 +19,8 @@ function DatePicker() {
 }
 __turbopack_context__.s([
     "default",
-    ()=>DatePicker
+    0,
+    DatePicker
 ]);
 }),
 "[project]/optimization/modularize_imports_camel_case/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {

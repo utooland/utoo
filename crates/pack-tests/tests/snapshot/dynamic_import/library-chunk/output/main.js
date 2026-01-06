@@ -21,7 +21,8 @@ async function Test() {
 }
 __turbopack_context__.s([
     "Test",
-    ()=>Test
+    0,
+    Test
 ]);
 }),
 },

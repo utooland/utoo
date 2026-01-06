@@ -1,9 +1,5 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
-use turbo_tasks::{
-    CollectiblesSource, NonLocalValue, OperationVc, ResolvedVc, Vc, debug::ValueDebugFormat,
-    get_effects, trace::TraceRawVcs,
-};
+use turbo_tasks::{CollectiblesSource, OperationVc, ResolvedVc, Vc, get_effects};
 use turbopack_core::{diagnostics::Diagnostic, issue::CollectibleIssuesExt};
 
 use crate::{endpoint::Endpoint, entrypoint::Entrypoints};
@@ -83,28 +79,8 @@ fn wrap(
     *endpoint
 }
 
-#[derive(
-    TraceRawVcs,
-    Serialize,
-    Deserialize,
-    PartialEq,
-    Eq,
-    ValueDebugFormat,
-    Clone,
-    Debug,
-    NonLocalValue,
-)]
+#[turbo_tasks::value(shared)]
 pub struct LibraryOperation(pub Vec<OperationVc<Box<dyn Endpoint>>>);
 
-#[derive(
-    TraceRawVcs,
-    Serialize,
-    Deserialize,
-    PartialEq,
-    Eq,
-    ValueDebugFormat,
-    Clone,
-    Debug,
-    NonLocalValue,
-)]
+#[turbo_tasks::value]
 pub struct AppOperation(pub Vec<OperationVc<Box<dyn Endpoint>>>);

@@ -7,7 +7,8 @@ function Button() {
 }
 __turbopack_context__.s([
     "default",
-    ()=>Button
+    0,
+    Button
 ]);
 }),
 "[project]/node_modules/antd/es/button/style/index.js [client] (ecmascript)", ((__turbopack_context__) => {
@@ -24,7 +25,8 @@ function DatePicker() {
 }
 __turbopack_context__.s([
     "default",
-    ()=>DatePicker
+    0,
+    DatePicker
 ]);
 }),
 "[project]/node_modules/antd/es/date-picker/style/index.js [client] (ecmascript)", ((__turbopack_context__) => {

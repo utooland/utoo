@@ -9,11 +9,11 @@ use qstring::QString;
 use tracing::{Instrument, trace_span};
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{Completion, JoinIterExt, ResolvedVc, TryJoinIterExt, ValueToString, Vc};
-use turbo_tasks_fs::File;
+use turbo_tasks_fs::{File, FileContent};
 use turbopack::{
-    ModuleAssetContext, module_options::ModuleOptionsContext,
-    resolve_options_context::ResolveOptionsContext, transition::TransitionOptions,
+    ModuleAssetContext, module_options::ModuleOptionsContext, transition::TransitionOptions,
 };
+use turbopack_core::resolve::origin::ResolveOrigin;
 use turbopack_core::{
     asset::AssetContent,
     chunk::{
@@ -41,6 +41,7 @@ use crate::{
     project::Project,
     webpack_stats::generate_webpack_stats,
 };
+use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 
 #[turbo_tasks::value(transparent)]
 pub struct AppEntripoints(pub Vec<AppEntrypoint>);
@@ -135,7 +136,7 @@ impl AppEntrypoint {
         let ty = ReferenceType::Entry(EntryReferenceSubType::Undefined);
 
         Ok(origin
-            .resolve_asset(entry_request, origin.resolve_options(ty.clone()).await?, ty)
+            .resolve_asset(entry_request, origin.resolve_options(ty.clone()), ty)
             .await?
             .primary_modules())
     }
@@ -385,7 +386,10 @@ impl Endpoint for AppEndpoint {
                 let stats_output = VirtualOutputAsset::new(
                     dist_root.join("stats.json")?,
                     AssetContent::file(
-                        File::from(simd_json::serde::to_string_pretty(&webpack_stats)?).into(),
+                        FileContent::from(File::from(simd_json::serde::to_string_pretty(
+                            &webpack_stats,
+                        )?))
+                        .cell(),
                     ),
                 )
                 .to_resolved()

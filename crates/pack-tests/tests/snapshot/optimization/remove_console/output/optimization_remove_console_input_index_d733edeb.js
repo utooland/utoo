@@ -8,7 +8,8 @@ function main() {
 }
 __turbopack_context__.s([
     "main",
-    ()=>main
+    0,
+    main
 ]);
 }),
 ]);

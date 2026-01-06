@@ -26,7 +26,9 @@ __internal_dhat-heap = ["dhat"]
 __internal_dhat-ad-hoc = ["dhat"]
 
 [dependencies]
-anyhow = { workspace = true, features = ["backtrace"] }
+anyhow  = { workspace = true, features = ["backtrace"] }
+bincode = { workspace = true }
+
 console-subscriber = { workspace = true, optional = true }
 dhat = { version = "0.3.2", optional = true }
 napi = { version = "2", default-features = false, features = [

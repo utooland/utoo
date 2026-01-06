@@ -1,50 +1,49 @@
 {
   "$schema": "../../packages/pack/config_schema.json",
-  "rootPath": "../../",
-  "projectPath": "./",
-  "config": {
-    "entry": [
-      {
-        "import": "./index.html",
-        "name": "index"
-      }
-    ],
-    "output": {
-      "path": "./dist",
-      "clean": true,
-      "copy": [
-        {
-          "from": "./static/index.css",
-          "to": "./index.css"
-        }
-      ]
-    },
-    "optimization": {
-      "minify": false
-    },
-    "module": {
-      "rules": {
-        "*.txt": {
-          "loaders": [
-            "./test-file-loader.js"
-          ],
-          "as": "*.js"
-        },
-        "#svg": {
-          "loaders": [
-            "@svgr/webpack"
-          ],
-          "as": "*.js"
-        }
+  "entry": [
+    {
+      "import": "./src/index.tsx",
+      "html": {
+        "template": "./index.html"
       },
-      "conditions": {
-        "#svg": {
-          "path": {
-            "type": "regex",
-            "value": {
-              "source": ".*\\.svg$",
-              "flags": "i"
-            }
+      "name": "index"
+    }
+  ],
+  "output": {
+    "path": "./dist",
+    "clean": true,
+    "copy": [
+      {
+        "from": "./static/index.css",
+        "to": "./index.css"
+      }
+    ]
+  },
+  "optimization": {
+    "minify": false
+  },
+  "module": {
+    "rules": {
+      "*.txt": {
+        "loaders": [
+          "./test-file-loader.js"
+        ],
+        "as": "*.js"
+      },
+      "#svg": {
+        "loaders": [
+          "@svgr/webpack"
+        ],
+        "as": "*.js"
+      }
+    },
+    "conditions": {
+      "#svg": {
+        "path": {
+          "type": "regex",
+          "value": {
+            "source": ".*\\.svg$",
+            "flags": "i"
           }
         }
       }

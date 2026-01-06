@@ -14,7 +14,8 @@ const lazyData = {
 };
 __turbopack_context__.s([
     "default",
-    ()=>lazyModule,
+    0,
+    lazyModule,
     "lazyData",
     0,
     lazyData

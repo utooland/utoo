@@ -4,7 +4,7 @@ use serde::Serialize;
 use std::io::Write;
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{ReadRef, ResolvedVc, TryJoinIterExt, ValueToString, Vc};
-use turbo_tasks_fs::{File, FileSystemPath, rope::RopeBuilder};
+use turbo_tasks_fs::{File, FileContent, FileSystemPath, rope::RopeBuilder};
 use turbopack_core::{
     asset::{Asset, AssetContent},
     chunk::{ChunkingContext, EvaluatableAssets, MinifyType, ModuleChunkItemIdExt, ModuleId},
@@ -12,7 +12,7 @@ use turbopack_core::{
     environment::{EdgeWorkerEnvironment, Environment, ExecutionEnvironment, NodeJsVersion},
     ident::AssetIdent,
     output::{OutputAsset, OutputAssetsReference, OutputAssetsWithReferenced},
-    source_map::{GenerateSourceMap, OptionStringifiedSourceMap, SourceMapAsset},
+    source_map::{GenerateSourceMap, SourceMapAsset},
 };
 use turbopack_ecmascript::{
     chunk::{EcmascriptChunk, EcmascriptChunkData, EcmascriptChunkPlaceable},
@@ -268,14 +268,16 @@ impl Asset for EcmascriptLibraryEvaluateChunk {
             code.source_code().clone()
         };
 
-        Ok(AssetContent::file(File::from(rope).into()))
+        Ok(AssetContent::file(
+            FileContent::Content(File::from(rope)).cell(),
+        ))
     }
 }
 
 #[turbo_tasks::value_impl]
 impl GenerateSourceMap for EcmascriptLibraryEvaluateChunk {
     #[turbo_tasks::function]
-    fn generate_source_map(self: Vc<Self>) -> Vc<OptionStringifiedSourceMap> {
+    fn generate_source_map(self: Vc<Self>) -> Vc<FileContent> {
         self.code().generate_source_map()
     }
 }

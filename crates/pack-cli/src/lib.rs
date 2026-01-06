@@ -9,7 +9,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use pack_api::project::{DefineEnv, ProjectContainer, ProjectOptions, WatchOptions};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use turbo_rcstr::RcStr;
 use turbo_tasks::{ResolvedVc, TurboTasks};
 use turbo_tasks_backend::{
@@ -29,10 +29,10 @@ pub struct Command {
     pub watch: Option<bool>,
 
     #[arg(short, long)]
-    pub project_dir: String,
+    pub project_path: Option<String>,
 
     #[arg(short, long)]
-    pub root_dir: Option<String>,
+    pub root_path: Option<String>,
 }
 
 #[derive(Debug, Clone, ValueEnum)]
@@ -41,19 +41,9 @@ pub enum Mode {
     Dev,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Default, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PartialProjectOptions {
-    /// A root path from which all files must be nested under. Trying to access
-    /// a file outside this root will fail. Think of this as a chroot.
-    pub root_path: Option<RcStr>,
-
-    /// A path inside the root_path which contains the app/pages directories.
-    pub project_path: Option<RcStr>,
-
-    /// The contents of next.config.js, serialized to JSON.
-    pub config: Option<serde_json::Value>,
-
     /// A map of environment variables to use when compiling code.
     pub process_env: Option<Vec<(RcStr, RcStr)>>,
 
@@ -69,6 +59,9 @@ pub struct PartialProjectOptions {
 
     /// Absolute path for `@utoo/pack`.
     pub pack_path: Option<RcStr>,
+
+    #[serde(flatten)]
+    pub config: serde_json::Value,
 }
 
 pub async fn initialize_project_container(

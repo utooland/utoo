@@ -70,7 +70,7 @@ impl VisitMut for CssModulesImportVisitor {
     }
 
     fn visit_mut_import_decl(&mut self, import_decl: &mut ImportDecl) {
-        let source_value = import_decl.src.value.to_string();
+        let source_value = import_decl.src.value.to_string_lossy();
 
         // Check if this is a default import of a CSS-like file
         let has_default_import = import_decl

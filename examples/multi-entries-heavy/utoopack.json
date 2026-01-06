@@ -1,15 +1,14 @@
 {
-  "rootPath": "../../",
-  "projectPath": "./",
-  "config": {
-    "entry": [
-      {
-        "import": "./index.html"
+  "entry": [
+    {
+      "import": "./src/entry-0.js",
+      "html": {
+        "template": "./index.html"
       }
-    ],
-    "output": {
-      "path": "./dist"
-    },
-    "stats": true
-  }
+    }
+  ],
+  "output": {
+    "path": "./dist"
+  },
+  "stats": true
 }
