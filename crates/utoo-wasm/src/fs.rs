@@ -22,7 +22,7 @@ async fn exists(path: &Path) -> Result<bool, anyhow::Error> {
     let path_str = path.to_string_lossy();
 
     // Try to get metadata - if it fails, the path doesn't exist
-    match opfs_project::metadata(&path_str).await {
+    match opfs_project::metadata(path_str.as_ref()).await {
         Ok(_) => Ok(true),
         Err(_) => Ok(false),
     }

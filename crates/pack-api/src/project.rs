@@ -1159,49 +1159,44 @@ impl Project {
         if let Some(patterns) = copy_config {
             let futures: Vec<_> = patterns
                 .iter()
-                .map(|pattern| {
-                    let project_path_vc = project_path_vc;
-                    let project_root_vc = project_root_vc;
-                    let dist_root_vc = dist_root_vc;
-                    async move {
-                        let from = pattern.from();
-                        let from_path = project_path_vc.await?.join(from.as_str().into())?;
-                        let from_path_vc = from_path.clone().cell();
+                .map(|pattern| async move {
+                    let from = pattern.from();
+                    let from_path = project_path_vc.await?.join(from.as_str())?;
+                    let from_path_vc = from_path.clone().cell();
 
-                        // Check if source is a directory or file
-                        let entry_type = from_path.get_type().await?;
-                        let mut local_assets = vec![];
-                        match *entry_type {
-                            FileSystemEntryType::Directory => {
-                                let to_base_path = if let Some(to) = pattern.to() {
-                                    project_root_vc.await?.join(to)?
-                                } else {
-                                    (*dist_root_vc.await?).clone()
-                                };
-                                let to_base_path_vc = to_base_path.cell();
-                                let dir_assets =
-                                    copy_directory_recursive_helper(from_path_vc, to_base_path_vc)
-                                        .await?;
-                                local_assets.extend(dir_assets.iter().copied());
-                            }
-                            FileSystemEntryType::File => {
-                                // For files, if to is not specified, copy to dist root with filename only
-                                let to_path = if let Some(to) = pattern.to() {
-                                    // If to is specified, copy to the specified path relative to project root
-                                    project_root_vc.await?.join(to.as_str().into())?
-                                } else {
-                                    // Extract just the filename and put it in the dist root
-                                    let file_name = from_path.file_name();
-                                    dist_root_vc.await?.join(file_name.into())?
-                                };
-                                let source = FileSource::new(from_path);
-                                let asset = RawOutput::new(to_path, Vc::upcast(source));
-                                local_assets.push(ResolvedVc::upcast(asset.to_resolved().await?));
-                            }
-                            _ => {}
+                    // Check if source is a directory or file
+                    let entry_type = from_path.get_type().await?;
+                    let mut local_assets = vec![];
+                    match *entry_type {
+                        FileSystemEntryType::Directory => {
+                            let to_base_path = if let Some(to) = pattern.to() {
+                                project_root_vc.await?.join(to)?
+                            } else {
+                                (*dist_root_vc.await?).clone()
+                            };
+                            let to_base_path_vc = to_base_path.cell();
+                            let dir_assets =
+                                copy_directory_recursive_helper(from_path_vc, to_base_path_vc)
+                                    .await?;
+                            local_assets.extend(dir_assets.iter().copied());
                         }
-                        Ok::<_, anyhow::Error>(local_assets)
+                        FileSystemEntryType::File => {
+                            // For files, if to is not specified, copy to dist root with filename only
+                            let to_path = if let Some(to) = pattern.to() {
+                                // If to is specified, copy to the specified path relative to project root
+                                project_root_vc.await?.join(to.as_str())?
+                            } else {
+                                // Extract just the filename and put it in the dist root
+                                let file_name = from_path.file_name();
+                                dist_root_vc.await?.join(file_name)?
+                            };
+                            let source = FileSource::new(from_path);
+                            let asset = RawOutput::new(to_path, Vc::upcast(source));
+                            local_assets.push(ResolvedVc::upcast(asset.to_resolved().await?));
+                        }
+                        _ => {}
                     }
+                    Ok::<_, anyhow::Error>(local_assets)
                 })
                 .collect();
 
@@ -1247,7 +1242,7 @@ async fn copy_directory_recursive_helper(
                                     anyhow::anyhow!("File path is not under source directory")
                                 })?;
 
-                            let dest_path = dest_dir_ref.join(relative_path.into())?;
+                            let dest_path = dest_dir_ref.join(relative_path)?;
                             let source = FileSource::new(file_path.clone());
                             let asset = RawOutput::new(dest_path, Vc::upcast(source));
                             assets.push(ResolvedVc::upcast(asset.to_resolved().await?));

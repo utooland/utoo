@@ -229,13 +229,10 @@ pub async fn generate_webpack_stats(
     let asset_results = asset_children
         .keys()
         .copied()
-        .map(|asset: Vc<Box<dyn OutputAsset>>| {
-            let dist_root = dist_root.clone();
-            async move {
-                let asset_resolved = asset.to_resolved().await?;
-                let info = get_asset_intermediate_info(*asset_resolved, dist_root).await?;
-                Ok::<_, anyhow::Error>(info)
-            }
+        .map(|asset: Vc<Box<dyn OutputAsset>>| async move {
+            let asset_resolved = asset.to_resolved().await?;
+            let info = get_asset_intermediate_info(*asset_resolved, dist_root).await?;
+            Ok::<_, anyhow::Error>(info)
         })
         .try_join()
         .await?;
