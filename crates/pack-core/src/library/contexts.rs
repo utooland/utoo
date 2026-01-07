@@ -32,6 +32,7 @@ pub struct LibraryChunkingContextOptions {
     pub runtime_export: Vc<Vec<RcStr>>,
     pub config: Vc<Config>,
     pub export_usage: Option<ResolvedVc<BindingUsageInfo>>,
+    pub unused_references: Option<ResolvedVc<BindingUsageInfo>>,
 }
 
 #[turbo_tasks::function]
@@ -51,6 +52,7 @@ pub async fn get_library_chunking_context(
         runtime_export,
         config,
         export_usage,
+        unused_references,
     } = options;
     let minify = config.minify(mode);
     let concatenate_modules = config.concatenate_modules(mode);
@@ -108,6 +110,7 @@ pub async fn get_library_chunking_context(
     })
     .module_id_strategy(module_id_strategy.to_resolved().await?)
     .export_usage(export_usage)
+    .unused_references(unused_references)
     .nested_async_availability(*nested_async_chunking.await?);
 
     if !mode.is_development()
