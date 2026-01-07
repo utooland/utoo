@@ -1,8 +1,9 @@
-use std::path::{MAIN_SEPARATOR, Path};
+use std::{borrow::Cow, path::Path, sync::LazyLock};
 
 use anyhow::{Context, Result};
 use bincode::{Decode, Encode};
 use dunce::{canonicalize, simplified};
+use regex::Regex;
 use serde::Deserialize;
 use turbo_rcstr::RcStr;
 use turbo_tasks::{NonLocalValue, TaskInput, Vc, trace::TraceRawVcs};
@@ -10,6 +11,29 @@ use turbo_tasks_fs::FileSystem;
 use turbopack::{condition::ContextCondition, module_options::RuleCondition};
 
 use crate::config::Config;
+
+static WINDOWS_PATH: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z]:[/\\]|^\\\\").unwrap());
+
+pub fn is_absolute_path(path: &str) -> bool {
+    if Path::new(path).is_absolute() {
+        return true;
+    }
+
+    WINDOWS_PATH.is_match(path)
+}
+
+pub fn to_unix_path(path: &str) -> Cow<'_, str> {
+    if path.contains('\\') {
+        Cow::Owned(path.replace('\\', "/"))
+    } else {
+        Cow::Borrowed(path)
+    }
+}
+
+pub fn strip_leading_separator(path: &str) -> &str {
+    path.trim_start_matches(['/', '\\'])
+}
 
 #[derive(
     Default,
@@ -91,10 +115,10 @@ pub async fn internal_assets_conditions() -> Result<ContextCondition> {
 }
 
 pub fn convert_to_project_relative(project_inside_path: &str, project_path: &str) -> Result<RcStr> {
-    if project_inside_path.starts_with(MAIN_SEPARATOR) {
+    if is_absolute_path(project_inside_path) {
         pathdiff::diff_paths(
             simplified(Path::new(project_inside_path)),
-            canonicalize(if project_path.starts_with(MAIN_SEPARATOR) {
+            canonicalize(if is_absolute_path(project_path) {
                 project_path.into()
             } else {
                 let current_dir = std::env::current_dir().unwrap();

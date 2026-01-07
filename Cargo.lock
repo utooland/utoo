@@ -4327,6 +4327,7 @@ dependencies = [
  "modularize_imports",
  "pathdiff",
  "qstring",
+ "regex",
  "remove_console",
  "rustc-hash 2.1.1",
  "serde",
