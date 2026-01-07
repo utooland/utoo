@@ -3,7 +3,7 @@
 ## 🛠 Build Context
 - **Target**: `examples/with-antd`
 - **Command**: `up build`
-- **Trace Date**: 2026-01-06
+- **Trace Date**: 2026-01-06 21:54:09
 
 ---
 
