@@ -48,6 +48,7 @@ jobs:
               rustup install nightly-2025-10-27 &&
               rustup default nightly-2025-10-27 &&
               rustup target add aarch64-unknown-linux-gnu &&
+              export QEMU_LD_PREFIX=/usr/aarch64-linux-gnu &&
               cargo test -p pack-tests --target aarch64-unknown-linux-gnu
           - host: ubuntu-latest
             target: aarch64-unknown-linux-musl
@@ -98,8 +99,6 @@ jobs:
           sudo rm -rf "/usr/local/share/boost"
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
           sudo rm -rf /usr/share/swift
-          sudo rm -rf /usr/local/.ghcup
-          sudo rm -rf /usr/local/lib/node_modules
           sudo rm -rf /usr/local/share/powershell
           sudo rm -rf /usr/share/miniconda
           sudo docker image prune --all --force
