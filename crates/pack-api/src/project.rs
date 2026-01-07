@@ -6,12 +6,12 @@ use pack_core::{
     config::{Config, ModuleIds as ModuleIdStrategyConfig},
     emit_assets,
     mode::Mode,
-    util::{Runtime, convert_to_project_relative},
+    util::{Runtime, convert_to_project_relative, strip_leading_separator, to_unix_path},
 };
 use serde::Deserialize;
 use std::{
     fs,
-    path::{MAIN_SEPARATOR, Path, PathBuf},
+    path::{Path, PathBuf},
     time::Duration,
 };
 use tracing::Instrument;
@@ -575,7 +575,7 @@ impl Project {
 
         if self.pack_path.starts_with(&*self.root_path) {
             let relative_pack_path = self.pack_path.strip_prefix(&*self.root_path).unwrap();
-            let relative_pack_path = relative_pack_path.trim_start_matches(MAIN_SEPARATOR);
+            let relative_pack_path = strip_leading_separator(relative_pack_path);
             let turbopack_path = Path::new(relative_pack_path).join(".turbopack");
             if let Some(path_str) = turbopack_path.to_str() {
                 let turbopack_path_normalized =
@@ -642,10 +642,7 @@ impl Project {
         } else {
             "./"
         };
-        let pack_relative = pack_relative
-            .strip_prefix(MAIN_SEPARATOR)
-            .unwrap_or(pack_relative)
-            .replace(MAIN_SEPARATOR, "/");
+        let pack_relative = to_unix_path(strip_leading_separator(pack_relative));
 
         Ok(self
             .output_fs()
@@ -662,10 +659,7 @@ impl Project {
         let dist_dir = self.dist_dir().await?;
 
         let project_relative = this.project_path.strip_prefix(&*this.root_path).unwrap();
-        let project_relative = project_relative
-            .strip_prefix(MAIN_SEPARATOR)
-            .unwrap_or(project_relative)
-            .replace(MAIN_SEPARATOR, "/");
+        let project_relative = to_unix_path(strip_leading_separator(project_relative));
 
         Ok(self
             .output_fs()
@@ -696,10 +690,7 @@ impl Project {
         let this = self.await?;
         let root = self.project_root().await?;
         let project_relative = this.project_path.strip_prefix(&*this.root_path).unwrap();
-        let project_relative = project_relative
-            .strip_prefix(MAIN_SEPARATOR)
-            .unwrap_or(project_relative)
-            .replace(MAIN_SEPARATOR, "/");
+        let project_relative = to_unix_path(strip_leading_separator(project_relative));
         Ok(root.join(&project_relative)?.cell())
     }
 
