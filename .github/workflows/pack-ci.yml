@@ -97,6 +97,12 @@ jobs:
           sudo rm -rf /opt/ghc
           sudo rm -rf "/usr/local/share/boost"
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/.ghcup
+          sudo rm -rf /usr/local/lib/node_modules
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/share/miniconda
+          sudo docker image prune --all --force
       - name: Set up QEMU
         if: matrix.settings.docker && contains(matrix.settings.target, 'aarch64')
         uses: docker/setup-qemu-action@v3
