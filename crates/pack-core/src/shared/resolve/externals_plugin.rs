@@ -1,6 +1,6 @@
 use anyhow::Result;
 use turbo_esregex::EsRegex;
-use turbo_rcstr::{RcStr, rcstr};
+use turbo_rcstr::RcStr;
 use turbo_tasks::{FxIndexMap, ResolvedVc, Vc};
 use turbo_tasks_fs::{
     self, FileSystemPath,
@@ -14,7 +14,8 @@ use turbopack_core::{
         pattern::Pattern,
         plugin::{
             AfterResolvePlugin, AfterResolvePluginCondition, BeforeResolvePlugin,
-            BeforeResolvePluginCondition,
+            BeforeResolvePluginCondition, OptionAfterResolvePluginCondition,
+            OptionBeforeResolvePluginCondition,
         },
     },
 };
@@ -338,8 +339,12 @@ impl ExternalsPlugin {
 #[turbo_tasks::value_impl]
 impl BeforeResolvePlugin for ExternalsPlugin {
     #[turbo_tasks::function]
-    async fn before_resolve_condition(&self) -> Result<Vc<BeforeResolvePluginCondition>> {
+    async fn before_resolve_condition(&self) -> Result<Vc<OptionBeforeResolvePluginCondition>> {
         let externals_config = self.externals_config.await?;
+
+        if externals_config.is_empty() {
+            return Ok(OptionBeforeResolvePluginCondition::none());
+        }
 
         // Extract all possible module names from external keys
         // For "react" -> ["react"]
@@ -356,9 +361,9 @@ impl BeforeResolvePlugin for ExternalsPlugin {
             }
         }
 
-        Ok(BeforeResolvePluginCondition::from_modules(Vc::cell(
-            modules,
-        )))
+        Ok(OptionBeforeResolvePluginCondition::some(
+            BeforeResolvePluginCondition::from_modules(Vc::cell(modules)),
+        ))
     }
 
     #[turbo_tasks::function]
@@ -406,7 +411,7 @@ impl BeforeResolvePlugin for ExternalsPlugin {
 #[turbo_tasks::value_impl]
 impl AfterResolvePlugin for ExternalsPlugin {
     #[turbo_tasks::function]
-    pub async fn after_resolve_condition(&self) -> Result<Vc<AfterResolvePluginCondition>> {
+    async fn after_resolve_condition(&self) -> Result<Vc<OptionAfterResolvePluginCondition>> {
         let externals_config = self.externals_config.await?;
 
         // Optimization: Instead of matching all node_modules, only match packages listed in externals.
@@ -432,27 +437,25 @@ impl AfterResolvePlugin for ExternalsPlugin {
             }
         }
 
-        let glob_str = if packages.is_empty() {
-            // If no sub_path externals, return a glob that matches nothing (or a very safe tiny set)
-            // Using a non-existent path to prevent any after_resolve tasks
-            rcstr!(".utoopack_no_externals")
-        } else {
-            // Sort and dedup for cache stability
-            packages.sort();
-            packages.dedup();
+        if packages.is_empty() {
+            return Ok(OptionAfterResolvePluginCondition::none());
+        }
 
-            if packages.len() == 1 {
-                format!("**/node_modules/{}/**", packages[0]).into()
-            } else {
-                format!("**/node_modules/{{{}}}/**", packages.join(",")).into()
-            }
+        // Sort and dedup for cache stability
+        packages.sort();
+        packages.dedup();
+
+        let glob_str = if packages.len() == 1 {
+            format!("**/node_modules/{}/**", packages[0]).into()
+        } else {
+            format!("**/node_modules/{{{}}}/**", packages.join(",")).into()
         };
 
-        Ok(AfterResolvePluginCondition::new(
-            self.root.clone(),
-            *Glob::new(glob_str, GlobOptions::default())
-                .to_resolved()
-                .await?,
+        Ok(OptionAfterResolvePluginCondition::some(
+            AfterResolvePluginCondition::new(
+                self.root.clone(),
+                Glob::new(glob_str, GlobOptions::default()),
+            ),
         ))
     }
 
