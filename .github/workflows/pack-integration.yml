@@ -9,20 +9,9 @@ on:
 jobs:
   integration:
     name: Pack Integration Test
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
 
     steps:
-      - name: Free Disk Space (Ubuntu)
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
-
       - name: Checkout
         uses: actions/checkout@v4
         with:
