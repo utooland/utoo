@@ -24,4 +24,4 @@ jobs:
       - name: Install Taplo
         run: cargo install taplo-cli
       - name: Taplo
-        run: RUST_LOG=warn taplo format --check
+        run: taplo format --check
