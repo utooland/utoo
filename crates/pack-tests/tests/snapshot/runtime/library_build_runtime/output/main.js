@@ -6,7 +6,7 @@ if (!Array.isArray(__TURBOPACK__)) {
 
 const CHUNK_BASE_PATH = "";
 const CHUNK_SUFFIX_PATH = "";
-const RELATIVE_ROOT_PATH = "../../../../../../..";
+const RELATIVE_ROOT_PATH = "..";
 const RUNTIME_PUBLIC_PATH = "";
 /**
  * This file contains runtime types and functions that are shared between all
