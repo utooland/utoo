@@ -273,8 +273,14 @@ pub async fn generate_webpack_stats(
         .map(|(chunk_item, chunk_ids)| async move {
             let content_ident = chunk_item.content_ident().await?;
             let asset_path = chunk_item.asset_ident().path().await?;
-            let size_vc = content_ident.path.read().len();
-            let size: Option<u64> = *size_vc.await?;
+            let size = content_ident
+                .path
+                .read()
+                .await
+                .ok()
+                .and_then(|file_content| {
+                    file_content.as_content().map(|f| f.content().len() as u64)
+                });
             let path = asset_path.path.clone();
             Ok::<_, anyhow::Error>(WebpackStatsModule {
                 name: path.clone(),
