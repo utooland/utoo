@@ -8,7 +8,7 @@ if (!Array.isArray(globalThis.TURBOPACK)) {
 }
 
 const CHUNK_BASE_PATH = "__RUNTIME_PUBLIC_PATH__";
-const RELATIVE_ROOT_PATH = "../../../../../../..";
+const RELATIVE_ROOT_PATH = "..";
 const RUNTIME_PUBLIC_PATH = "__RUNTIME_PUBLIC_PATH__";
 const CHUNK_SUFFIX = "";
 /**
