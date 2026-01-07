@@ -33,6 +33,10 @@ jobs:
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
             test: |
               set -ex &&
+              rm /etc/apk/repositories &&
+              echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/main" >> /etc/apk/repositories &&
+              echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/community" >> /etc/apk/repositories &&
+              apk update &&
               apk add --no-cache libc6-compat pkgconfig dav1d libdav1d dav1d-dev clang-static llvm-dev &&
               rustup install nightly-2025-10-27 &&
               rustup default nightly-2025-10-27 &&
@@ -53,6 +57,10 @@ jobs:
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
             test: |
               set -ex &&
+              rm /etc/apk/repositories &&
+              echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/main" >> /etc/apk/repositories &&
+              echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/community" >> /etc/apk/repositories &&
+              apk update &&
               apk add --no-cache libc6-compat pkgconfig dav1d libdav1d dav1d-dev clang-static llvm-dev &&
               rustup install nightly-2025-10-27 &&
               rustup default nightly-2025-10-27 &&
