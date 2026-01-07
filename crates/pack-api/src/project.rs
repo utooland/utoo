@@ -928,6 +928,7 @@ impl Project {
             no_mangling: self.no_mangling(),
             config: self.config(),
             export_usage: self.export_usage(),
+            unused_references: self.unused_references(),
         }))
     }
 

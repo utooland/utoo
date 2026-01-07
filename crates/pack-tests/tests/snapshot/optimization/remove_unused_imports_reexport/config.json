@@ -7,9 +7,9 @@
       }
     ],
     "optimization": {
+      "moduleIds": "named",
       "minify": false,
-      "removeUnusedImports": true,
-      "removeUnusedExports": true
+      "concatenateModules": true
     }
   }
 }
