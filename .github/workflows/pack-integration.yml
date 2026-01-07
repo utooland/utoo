@@ -69,7 +69,7 @@ jobs:
                 echo "----------------------------------------------------"
                 echo "Verifying example: $dir"
                 echo "----------------------------------------------------"
-                (cd "$dir" && npm run build && echo "Output dist content:" && ls -lh dist)
+                (cd "$dir" && npm run build && echo "Output dist content:" && ls -lh dist | awk 'NR>1 {print $5, $9}')
                 if [ $? -ne 0 ]; then
                   echo "Error: Build failed for example $dir"
                   exit 1
