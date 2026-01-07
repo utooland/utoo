@@ -1,7 +1,7 @@
 use anyhow::Result;
 use turbo_esregex::EsRegex;
 use turbo_rcstr::{RcStr, rcstr};
-use turbo_tasks::{ResolvedVc, Vc};
+use turbo_tasks::{FxIndexMap, ResolvedVc, Vc};
 use turbo_tasks_fs::{
     self, FileSystemPath,
     glob::{Glob, GlobOptions},
@@ -20,8 +20,114 @@ use turbopack_core::{
 };
 
 use crate::config::{
-    ExternalConfig, ExternalSubPathTarget, ExternalTargetConverter, ExternalsConfig,
+    ExternalConfig, ExternalSubPathTarget, ExternalTargetConverter,
+    ExternalType as ConfigExternalType, ExternalUmd, ExternalsConfig,
 };
+
+#[turbo_tasks::value]
+#[derive(Clone, Debug)]
+pub enum ProcessedExcludeItem {
+    Regex(ResolvedVc<EsRegex>),
+    String(RcStr),
+}
+
+#[turbo_tasks::value]
+#[derive(Clone, Debug)]
+pub struct ProcessedExternalSubPathRule {
+    pub regex: ResolvedVc<EsRegex>,
+    pub target: ExternalSubPathTarget,
+    pub target_converter: Option<ExternalTargetConverter>,
+}
+
+#[turbo_tasks::value]
+#[derive(Clone, Debug)]
+pub struct ProcessedExternalSubPath {
+    pub exclude: Option<Vec<ProcessedExcludeItem>>,
+    pub rules: Vec<ProcessedExternalSubPathRule>,
+}
+
+#[turbo_tasks::value]
+#[derive(Clone, Debug)]
+pub struct ProcessedExternalAdvanced {
+    pub root: RcStr,
+    pub r#type: Option<ConfigExternalType>,
+    pub script: Option<RcStr>,
+    pub sub_path: Option<ProcessedExternalSubPath>,
+}
+
+#[turbo_tasks::value]
+#[derive(Clone, Debug)]
+pub enum ProcessedExternalConfig {
+    Basic(RcStr),
+    Umd(ExternalUmd),
+    Advanced(ProcessedExternalAdvanced),
+}
+
+#[turbo_tasks::value(transparent)]
+pub struct ProcessedExternalsConfig(
+    #[bincode(with = "turbo_bincode::indexmap")] pub FxIndexMap<RcStr, ProcessedExternalConfig>,
+);
+
+#[turbo_tasks::function]
+pub async fn pre_process_externals_config(
+    config: Vc<ExternalsConfig>,
+) -> Result<Vc<ProcessedExternalsConfig>> {
+    let config = config.await?;
+    let mut map = FxIndexMap::default();
+
+    for (k, v) in &*config {
+        let processed = match v {
+            ExternalConfig::Basic(b) => ProcessedExternalConfig::Basic(b.clone()),
+            ExternalConfig::Umd(u) => ProcessedExternalConfig::Umd(u.clone()),
+            ExternalConfig::Advanced(a) => {
+                let sub_path = if let Some(sub) = &a.sub_path {
+                    let exclude = if let Some(names) = &sub.exclude {
+                        let mut excluded = Vec::with_capacity(names.len());
+                        for name in names {
+                            let s = name.as_str();
+                            if s.starts_with('/') && s.ends_with('/') {
+                                excluded.push(ProcessedExcludeItem::Regex(
+                                    cached_parse_str_to_regex(name.clone())
+                                        .to_resolved()
+                                        .await?,
+                                ));
+                            } else {
+                                excluded.push(ProcessedExcludeItem::String(name.clone()));
+                            }
+                        }
+                        Some(excluded)
+                    } else {
+                        None
+                    };
+
+                    let mut rules = Vec::with_capacity(sub.rules.len());
+                    for rule in &sub.rules {
+                        rules.push(ProcessedExternalSubPathRule {
+                            regex: cached_parse_str_to_regex(rule.regex.clone())
+                                .to_resolved()
+                                .await?,
+                            target: rule.target.clone(),
+                            target_converter: rule.target_converter.clone(),
+                        });
+                    }
+
+                    Some(ProcessedExternalSubPath { exclude, rules })
+                } else {
+                    None
+                };
+
+                ProcessedExternalConfig::Advanced(ProcessedExternalAdvanced {
+                    root: a.root.clone(),
+                    r#type: a.r#type.clone(),
+                    script: a.script.clone(),
+                    sub_path,
+                })
+            }
+        };
+        map.insert(k.clone(), processed);
+    }
+    Ok(Vc::cell(map))
+}
 
 /// Parse a string to a Swc Regex (cached as a turbo task)
 #[turbo_tasks::function]
@@ -205,22 +311,27 @@ pub struct ExternalsPlugin {
     project_path: FileSystemPath,
     root: FileSystemPath,
     externals_config: ResolvedVc<ExternalsConfig>,
+    processed_config: ResolvedVc<ProcessedExternalsConfig>,
 }
 
 #[turbo_tasks::value_impl]
 impl ExternalsPlugin {
     #[turbo_tasks::function]
-    pub fn new(
+    pub async fn new(
         project_path: FileSystemPath,
         root: FileSystemPath,
         externals_config: ResolvedVc<ExternalsConfig>,
-    ) -> Vc<Self> {
-        ExternalsPlugin {
+    ) -> Result<Vc<Self>> {
+        let processed_config = pre_process_externals_config(*externals_config)
+            .to_resolved()
+            .await?;
+        Ok(ExternalsPlugin {
             project_path,
             root,
             externals_config,
+            processed_config,
         }
-        .cell()
+        .cell())
     }
 }
 
@@ -354,7 +465,7 @@ impl AfterResolvePlugin for ExternalsPlugin {
         request: Vc<Request>,
     ) -> Result<Vc<ResolveResultOption>> {
         tracing::debug!("execute externals plugins after resolve");
-        let externals_config = self.externals_config.await?;
+        let processed_config = self.processed_config.await?;
         let request_value = &*request.await?;
 
         let Request::Module {
@@ -379,51 +490,29 @@ impl AfterResolvePlugin for ExternalsPlugin {
         );
 
         // Check if the package exists in externals config and has subPath configuration
-        if let Some(ExternalConfig::Advanced(advanced)) = externals_config.get(package) {
+        if let Some(ProcessedExternalConfig::Advanced(advanced)) = (*processed_config).get(package)
+        {
             tracing::debug!("found advanced config for package: {}", package);
             if let Some(sub_path_config) = &advanced.sub_path {
-                // Tier 2 Optimization: Pre-fetch all regex tasks for exclude list in parallel
-                // to avoid serial await in loops (Parallelization Slums).
                 if let Some(exclude_list) = &sub_path_config.exclude {
-                    let mut regex_tasks = Vec::new();
-                    for exclude_pattern in exclude_list {
-                        let pattern = exclude_pattern.as_str();
-                        if pattern.starts_with('/') && pattern.ends_with('/') {
-                            regex_tasks
-                                .push(Some(cached_parse_str_to_regex(exclude_pattern.clone())));
-                        } else {
-                            regex_tasks.push(None);
-                        }
-                    }
-
-                    for (i, exclude_pattern) in exclude_list.iter().enumerate() {
-                        let is_excluded = if let Some(regex_vc) = regex_tasks[i] {
-                            regex_vc.await?.is_match(sub_path_str)
-                        } else {
-                            sub_path_str.contains(exclude_pattern.as_str())
+                    for exclude_item in exclude_list {
+                        let is_excluded = match exclude_item {
+                            ProcessedExcludeItem::Regex(regex) => {
+                                regex.await?.is_match(sub_path_str)
+                            }
+                            ProcessedExcludeItem::String(s) => sub_path_str.contains(s.as_str()),
                         };
 
                         if is_excluded {
-                            tracing::debug!(
-                                "sub_path '{}' excluded by pattern '{}'",
-                                sub_path_str,
-                                exclude_pattern
-                            );
+                            tracing::debug!("sub_path '{}' excluded", sub_path_str);
                             return Ok(ResolveResultOption::none());
                         }
                     }
                 }
 
-                // Tier 2 Optimization: Pre-fetch all rule regexes in parallel.
-                let rule_regex_tasks: Vec<_> = sub_path_config
-                    .rules
-                    .iter()
-                    .map(|rule| cached_parse_str_to_regex(rule.regex.clone()))
-                    .collect();
-
-                // Process each rule in order (matching must be ordered, but compilation is parallel)
-                for (i, rule) in sub_path_config.rules.iter().enumerate() {
-                    let rule_regex = rule_regex_tasks[i].await?;
+                // Process each rule in order
+                for rule in &sub_path_config.rules {
+                    let rule_regex = rule.regex.await?;
                     // Compile regex and match against sub path
                     if rule_regex.is_match(sub_path_str) {
                         // Apply the target transformation
@@ -431,12 +520,6 @@ impl AfterResolvePlugin for ExternalsPlugin {
                             ExternalSubPathTarget::Empty => {
                                 // Return empty external to skip this module
                                 return Ok(ResolveResultOption::some(*ResolveResult::primary(
-                                    // TODO: this is a plan b for empty target.
-                                    // ResolveResultItem::External {
-                                    //     name: "{}".into(),
-                                    //     ty: ExternalType::Global,
-                                    //     traced: ExternalTraced::Traced,
-                                    // },
                                     // ignore will just skip this module and the code which import the module will be undefined.
                                     ResolveResultItem::Ignore,
                                 )));
@@ -482,12 +565,10 @@ impl AfterResolvePlugin for ExternalsPlugin {
 
                         // Determine external type
                         let external_type = match &advanced.r#type {
-                            Some(crate::config::ExternalType::CommonJs) => ExternalType::CommonJs,
-                            Some(crate::config::ExternalType::ESM) => {
-                                ExternalType::EcmaScriptModule
-                            }
-                            Some(crate::config::ExternalType::Script) => ExternalType::Script,
-                            Some(crate::config::ExternalType::Global) => ExternalType::Global,
+                            Some(ConfigExternalType::CommonJs) => ExternalType::CommonJs,
+                            Some(ConfigExternalType::ESM) => ExternalType::EcmaScriptModule,
+                            Some(ConfigExternalType::Script) => ExternalType::Script,
+                            Some(ConfigExternalType::Global) => ExternalType::Global,
                             None => ExternalType::Global,
                         };
 
