@@ -1,0 +1,79 @@
+name: utoopack-integration
+
+on:
+  push:
+    branches: ["next"]
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  integration:
+    name: Pack Integration Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Add SSH private keys for submodule repositories
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: |
+            ${{ secrets.CI_SUBMODULE }}
+
+      - name: Init git submodules
+        run: git submodule update --init --depth 1
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-10-27
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+
+      - name: Integration Test
+        run: |
+          # Build packages
+          npm run build --workspace @utoo/pack-shared
+          npm run build:local --workspace @utoo/pack
+          npm run build --workspace @utoo/pack-cli
+
+          # Verify examples
+          for dir in examples/*/; do
+            if [ -f "${dir}package.json" ]; then
+              if jq -e '.scripts.build // "" | contains("up build")' "${dir}package.json" > /dev/null; then
+                echo "----------------------------------------------------"
+                echo "Verifying example: $dir"
+                echo "----------------------------------------------------"
+                (cd "$dir" && npm run build && echo "Output dist content:" && ls -lh dist)
+                if [ $? -ne 0 ]; then
+                  echo "Error: Build failed for example $dir"
+                  exit 1
+                fi
+              fi
+            fi
+          done
