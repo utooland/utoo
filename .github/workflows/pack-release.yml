@@ -88,6 +88,14 @@ jobs:
             ${{ secrets.CI_SUBMODULE }}
       - name: Init git submodules
         run: git submodule update --init --depth 1
+      - name: Free disk space
+        if: matrix.settings.host == 'ubuntu-latest'
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
       - name: Set up QEMU
         if: matrix.settings.docker && contains(matrix.settings.target, 'aarch64')
         uses: docker/setup-qemu-action@v3
