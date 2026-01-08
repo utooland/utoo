@@ -150,8 +150,8 @@ export const updateDependencies = async (
   await project.writeFile("package-lock.json", packageLock, "utf8");
 
   // Install with lazy extraction
-  console.log("Installing with lazy extraction (installParallel)...");
-  await project.installParallel(packageLock);
+  console.log("Installing...");
+  await project.install(packageLock, concurrency);
   console.log("Update complete");
 };
 
@@ -201,8 +201,8 @@ export const installDependencies = async (
       // Write the lock file to disk for future use
       await project.writeFile("package-lock.json", packageLock, "utf8");
     }
-    console.log("Installing with lazy extraction (installParallel)...");
-    await project.installParallel(packageLock);
+    console.log("Installing...");
+    await project.install(packageLock, concurrency);
   } catch (e) {
     console.error("Failed to install dependencies:", e);
     throw e;

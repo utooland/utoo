@@ -157,34 +157,20 @@ impl Project {
             .map_err(|e| format!("Failed to serialize package lock: {}", e))
     }
 
+    /// Install dependencies - downloads tgz files only, extracts on-demand when files are read
     #[wasm_bindgen]
     pub async fn install(
         package_lock: String,
         max_concurrent_downloads: Option<usize>,
     ) -> Result<(), JsError> {
-        const DEFAULT_MAX_CONCURRENT_DOWNLOADS: usize = 20;
-        let max_concurrent = max_concurrent_downloads.unwrap_or(DEFAULT_MAX_CONCURRENT_DOWNLOADS);
-        opfs_project::package_manager::install_deps(&package_lock, max_concurrent)
-            .await
-            // format anyhow backtrace for better error display in JS
-            .map_err(to_js_error)?;
-        Ok(())
-    }
-
-    /// Lazy install - downloads tgz files only, extracts on-demand when files are read
-    /// This is much faster than full extraction since:
-    /// 1. Only downloads tgz files (no OPFS writes for individual files)
-    /// 2. Files are extracted from tgz on first read
-    #[wasm_bindgen(js_name = installParallel)]
-    pub async fn install_parallel(package_lock: String) -> Result<(), JsError> {
         use opfs_project::{PublicPackagePaths, is_tgz_cached, download_only, create_fuse_links_lazy};
         use opfs_project::package_lock::PackageLock;
+        use futures::stream::{self, StreamExt};
         use std::collections::HashMap;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::Arc;
+
+        const DEFAULT_MAX_CONCURRENT_DOWNLOADS: usize = 20;
 
         let total_start = js_sys::Date::now();
-        tracing::info!("[installLazy] Starting lazy install (no extraction)...");
 
         let lock = PackageLock::from_json(&package_lock)
             .map_err(|e| JsError::new(&format!("Failed to parse package-lock.json: {}", e)))?;
@@ -235,10 +221,8 @@ impl Project {
                 .push(path.clone());
         }
 
-        let total_groups = groups.len();
-        tracing::info!("[installLazy] Total unique packages: {}", total_groups);
-
         // Step 2: Partition by cache status (check if tgz already downloaded)
+        let total_packages = groups.len();
         let mut cached: Vec<(PathBuf, Vec<String>)> = Vec::new();
         let mut to_download: Vec<PackageGroup> = Vec::new();
 
@@ -251,80 +235,54 @@ impl Project {
             }
         }
 
-        let cached_count = cached.len();
         let download_count = to_download.len();
-        tracing::info!("[installLazy] Cached: {}, To download: {}", cached_count, download_count);
 
-        // Step 3: Create lazy fuse links for cached packages (pointing to tgz)
-        if !cached.is_empty() {
-            tracing::info!("[installLazy] Creating lazy fuse links for {} cached packages...", cached_count);
-            for (tgz_path, target_paths) in cached {
-                // npm tarballs have "package" prefix
-                create_fuse_links_lazy(&tgz_path, &target_paths, Some("package"))
-                    .await
-                    .map_err(to_js_error)?;
-            }
-            tracing::info!("[installLazy] Cached packages linked");
+        // Step 3: Create lazy fuse links for cached packages
+        for (tgz_path, target_paths) in cached {
+            create_fuse_links_lazy(&tgz_path, &target_paths, Some("package"))
+                .await
+                .map_err(to_js_error)?;
         }
 
-        // Download non-cached packages and create lazy fuse links
+        // Step 4: Download non-cached packages
         if !to_download.is_empty() {
-            let download_start = js_sys::Date::now();
-            tracing::info!("[installLazy] Downloading {} packages...", download_count);
-            let download_completed = Arc::new(AtomicUsize::new(0));
+            let max_concurrent = max_concurrent_downloads.unwrap_or(DEFAULT_MAX_CONCURRENT_DOWNLOADS);
 
-            let download_futures: Vec<_> = to_download
-                .iter()
-                .map(|group| {
-                    let name = group.name.clone();
-                    let version = group.version.clone();
-                    let tgz_url = group.tgz_url.clone();
-                    let integrity = group.integrity.clone();
-                    let shasum = group.shasum.clone();
-                    let completed = download_completed.clone();
-                    let total = download_count;
+            let download_results: Vec<_> = stream::iter(to_download.iter().map(|group| {
+                let name = group.name.clone();
+                let version = group.version.clone();
+                let tgz_url = group.tgz_url.clone();
+                let integrity = group.integrity.clone();
+                let shasum = group.shasum.clone();
 
-                    async move {
-                        tracing::debug!("[Download] Downloading {}@{}...", name, version);
-                        // download_only downloads and saves tgz to OPFS
-                        let _bytes = download_only(
-                            &name,
-                            &version,
-                            &tgz_url,
-                            integrity.as_deref(),
-                            shasum.as_deref(),
-                        )
-                        .await?;
-                        let done = completed.fetch_add(1, Ordering::SeqCst) + 1;
-                        tracing::info!("[Download] Downloaded {}@{} ({}/{})", name, version, done, total);
-                        Ok::<(String, String), anyhow::Error>((name, tgz_url))
-                    }
-                })
-                .collect();
-
-            let download_results = futures::future::join_all(download_futures).await;
+                async move {
+                    let _bytes = download_only(
+                        &name,
+                        &version,
+                        &tgz_url,
+                        integrity.as_deref(),
+                        shasum.as_deref(),
+                    )
+                    .await?;
+                    Ok::<(String, String), anyhow::Error>((name, tgz_url))
+                }
+            }))
+            .buffer_unordered(max_concurrent)
+            .collect()
+            .await;
 
             // Create lazy fuse links for downloaded packages
             for (result, group) in download_results.into_iter().zip(to_download.into_iter()) {
                 let (name, tgz_url) = result.map_err(to_js_error)?;
                 let paths = PublicPackagePaths::new(&name, &tgz_url);
-
-                // Create lazy fuse links pointing to tgz (with "package" prefix)
                 create_fuse_links_lazy(&paths.tgz_store_path, &group.target_paths, Some("package"))
                     .await
                     .map_err(to_js_error)?;
             }
-
-            let download_elapsed = js_sys::Date::now() - download_start;
-            tracing::info!(
-                "[installLazy] Downloads complete: {} packages in {:.1}s",
-                download_count,
-                download_elapsed / 1000.0
-            );
         }
 
-        let total_elapsed = js_sys::Date::now() - total_start;
-        tracing::info!("[installLazy] Install completed in {:.1}s", total_elapsed / 1000.0);
+        let elapsed = (js_sys::Date::now() - total_start) / 1000.0;
+        tracing::info!("[install] {} packages in {:.1}s", total_packages, elapsed);
 
         Ok(())
     }
@@ -435,7 +393,7 @@ impl Project {
             .await
             .with_context(|| format!("Failed to read file: {}", path))
             .map_err(to_js_error)?;
-        Ok(js_sys::Uint8Array::from(&bytes[..]))
+        Ok(js_sys::Uint8Array::from(bytes.as_slice()))
     }
 
     #[wasm_bindgen(js_name = readToString)]
@@ -444,7 +402,7 @@ impl Project {
             .await
             .with_context(|| format!("Failed to read file: {}", path))
             .map_err(to_js_error)?;
-        Ok(unsafe { String::from_utf8_unchecked(buf) })
+        Ok(unsafe { String::from_utf8_unchecked(buf.to_vec()) })
     }
 
     #[wasm_bindgen]

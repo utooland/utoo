@@ -159,7 +159,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
           <input
             type="range"
             min="1"
-            max="50"
+            max="200"
             value={config.maxConcurrentDownloads}
             onChange={(e) =>
               setConfig((prev) => ({
@@ -180,8 +180,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
             }}
           >
             <span>1</span>
-            <span>25</span>
-            <span>50</span>
+            <span>100</span>
+            <span>200</span>
           </div>
         </div>
 

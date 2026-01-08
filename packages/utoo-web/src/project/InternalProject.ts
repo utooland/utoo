@@ -53,12 +53,6 @@ class InternalEndpoint implements ProjectEndpoint {
     return;
   }
 
-  async installParallel(packageLock: string) {
-    await this.wasmInit!;
-    await ProjectInternal.installParallel(packageLock);
-    return;
-  }
-
   async build() {
     const binding = await this.wasmInit!;
 
