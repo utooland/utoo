@@ -53,7 +53,9 @@ impl Default for CacheKinds {
 }
 
 #[turbo_tasks::value(transparent)]
-pub struct OptionalJsonValue(#[bincode(with_serde)] Option<JsonValue>);
+pub struct OptionalJsonValue(
+    #[bincode(with = "turbo_bincode::serde_self_describing")] Option<JsonValue>,
+);
 
 #[turbo_tasks::value]
 #[derive(Clone, Debug, Default, Deserialize, OperationValue)]
@@ -107,14 +109,14 @@ pub struct Config {
     entry: Vec<EntryOptions>,
     module: Option<ModuleConfig>,
     resolve: Option<ResolveConfig>,
-    #[bincode(with_serde)]
+    #[bincode(with = "turbo_bincode::serde_self_describing")]
     externals: Option<FxIndexMap<RcStr, ExternalConfig>>,
     output: Option<OutputConfig>,
     target: Option<RcStr>,
     source_maps: Option<bool>,
-    #[bincode(with_serde)]
+    #[bincode(with = "turbo_bincode::serde_self_describing")]
     define: Option<FxIndexMap<String, JsonValue>>,
-    #[bincode(with_serde)]
+    #[bincode(with = "turbo_bincode::serde_self_describing")]
     provider: Option<FxIndexMap<RcStr, ProviderConfigValue>>,
     images: Option<ImageConfig>,
     pub styles: Option<StyleConfig>,
@@ -283,11 +285,11 @@ pub struct OptimizationConfig {
     pub minify: Option<bool>,
     pub tree_shaking: Option<bool>,
     pub package_imports: Option<Vec<RcStr>>,
-    #[bincode(with_serde)]
+    #[bincode(with = "turbo_bincode::serde_self_describing")]
     pub modularize_imports: Option<FxIndexMap<String, ModularizeImportPackageConfig>>,
     pub transpile_packages: Option<Vec<RcStr>>,
     pub remove_console: Option<RemoveConsoleConfig>,
-    #[bincode(with_serde)]
+    #[bincode(with = "turbo_bincode::serde_self_describing")]
     pub split_chunks: Option<FxIndexMap<RcStr, SplitChunkConfig>>,
     /// Concatenate modules when possible to reduce the number of chunks.
     /// This can improve performance by reducing the number of requests and
@@ -561,7 +563,7 @@ pub struct ExperimentalConfig {
     #[serde(rename = "dynamicIO")]
     dynamic_io: Option<bool>,
     use_cache: Option<bool>,
-    #[bincode(with_serde)]
+    #[bincode(with = "turbo_bincode::serde_self_describing")]
     cache_handlers: Option<FxIndexMap<RcStr, RcStr>>,
     esm_externals: Option<EsmExternals>,
     /// Using this feature will enable the `react@experimental` for the `app`
