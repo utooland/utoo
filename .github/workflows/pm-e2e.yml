@@ -8,6 +8,7 @@ on:
 
 jobs:
   e2e:
+    if: (github.event_name == 'push' && !contains(github.event.head_commit.message, '(pack)')) || (github.event_name == 'pull_request' && !contains(github.event.pull_request.title, '(pack)'))
     strategy:
       fail-fast: false
       matrix:

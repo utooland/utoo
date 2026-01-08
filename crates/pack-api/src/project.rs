@@ -630,8 +630,11 @@ impl Project {
             .unwrap_or("dist".into());
 
         let relative_dist_path = convert_to_project_relative(&dist_path, &this.project_path)?;
+        let relative_dist_path = relative_dist_path
+            .strip_prefix("./")
+            .unwrap_or(&relative_dist_path);
 
-        Ok(Vc::cell(relative_dist_path))
+        Ok(Vc::cell(relative_dist_path.into()))
     }
 
     #[turbo_tasks::function]
@@ -1010,7 +1013,7 @@ impl Project {
                 let dist_path = Path::new(&this.project_path).join(&*dist_dir);
 
                 if let Err(e) = clean_directory(&dist_path) {
-                    tracing::warn!("Failed to clean dist directory: {}", e);
+                    tracing::debug!("Failed to clean dist directory: {}", e);
                 }
             }
             let client_root = self.client_root().owned().await?;
