@@ -18,10 +18,7 @@ export class ForkedProject implements ProjectEndpoint {
     return await this.endpoint.deps(options);
   }
 
-  public async install(
-    packageLock: string,
-    maxConcurrentDownloads?: number,
-  ) {
+  public async install(packageLock: string, maxConcurrentDownloads?: number) {
     return await this.endpoint.install(packageLock, maxConcurrentDownloads);
   }
 

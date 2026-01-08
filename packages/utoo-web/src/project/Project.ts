@@ -102,10 +102,7 @@ export class Project implements ProjectEndpoint {
     return await this.remote.deps(options);
   }
 
-  public async install(
-    packageLock: string,
-    maxConcurrentDownloads?: number,
-  ) {
+  public async install(packageLock: string, maxConcurrentDownloads?: number) {
     await this.#mount;
     return await this.remote.install(packageLock, maxConcurrentDownloads);
   }
