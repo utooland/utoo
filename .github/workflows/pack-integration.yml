@@ -8,21 +8,11 @@ on:
 
 jobs:
   integration:
+    if: (github.event_name == 'push' && !contains(github.event.head_commit.message, '(pm)')) || (github.event_name == 'pull_request' && !contains(github.event.pull_request.title, '(pm)'))
     name: Pack Integration Test
     runs-on: ubuntu-latest
 
     steps:
-      - name: Free Disk Space (Ubuntu)
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
-
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -36,6 +26,20 @@ jobs:
 
       - name: Init git submodules
         run: git submodule update --init --depth 1
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/.ghcup
+          sudo rm -rf /usr/local/lib/node_modules
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/share/miniconda
+          sudo docker image prune --all --force
 
       - name: Setup node
         uses: actions/setup-node@v4
@@ -69,7 +73,7 @@ jobs:
                 echo "----------------------------------------------------"
                 echo "Verifying example: $dir"
                 echo "----------------------------------------------------"
-                (cd "$dir" && npm run build && echo "Output dist content:" && ls -lh dist)
+                (cd "$dir" && npm run build && echo "Output dist content:" && ls -lh dist | awk 'NR>1 {print $5, $9}')
                 if [ $? -ne 0 ]; then
                   echo "Error: Build failed for example $dir"
                   exit 1

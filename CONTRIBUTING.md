@@ -97,14 +97,23 @@ npm run test
 # Run Rust tests only
 cargo test
 
-# Run E2E tests
+# Run PM tests
+cargo test -p utoo-pm
+
+# Run Pack tests
+cargo test -p pack-tests
+
+# Update Pack tests snapshots
+UPDATE=1 cargo test -p pack-tests
+
+# Run PM E2E tests
 ./e2e/utoo-pm.sh
 ```
 
 ## 📮 Submitting Changes
 
 1.  **Create a Branch**: Use a descriptive name like `feat/awesome-feature` or `fix/bug-id`.
-2.  **Commit Messages**: Follow [Conventional Commits](https://www.conventionalcommits.org/) (e.g., `feat: add new loader`).
+2.  **Commit Messages**: Follow [Conventional Commits](https://www.conventionalcommits.org/). Use scopes like `pm`, `pack`, or `wasm` (e.g., `feat(pack): add new loader`).
 3.  **Lint & Format**: Run `npm run biome` before committing.
 4.  **Open a PR**: Provide a clear description of your changes and link any related issues.
 
