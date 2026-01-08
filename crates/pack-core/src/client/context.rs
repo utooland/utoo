@@ -535,6 +535,7 @@ pub struct ClientChunkingContextOptions {
     pub no_mangling: Vc<bool>,
     pub config: Vc<Config>,
     pub export_usage: Vc<OptionBindingUsageInfo>,
+    pub unused_references: Vc<OptionBindingUsageInfo>,
 }
 
 #[turbo_tasks::function]
@@ -552,6 +553,7 @@ pub async fn get_client_chunking_context(
         no_mangling,
         config,
         export_usage,
+        unused_references,
     } = options;
 
     let minify = config.minify(mode);
@@ -602,6 +604,7 @@ pub async fn get_client_chunking_context(
     .asset_base_path(Some(public_path))
     .current_chunk_method(CurrentChunkMethod::DocumentCurrentScript)
     .export_usage(*export_usage.await?)
+    .unused_references(*unused_references.await?)
     .module_id_strategy(module_id_strategy.to_resolved().await?)
     .nested_async_availability(*nested_async_chunking.await?);
 

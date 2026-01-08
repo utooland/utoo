@@ -253,6 +253,7 @@ impl LibraryEndpoint {
                 runtime_export,
                 config: project.config(),
                 export_usage: *project.export_usage().await?,
+                unused_references: *project.unused_references().await?,
             },
         ))
     }

@@ -1,0 +1,83 @@
+name: utoopack-integration
+
+on:
+  push:
+    branches: ["next"]
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  integration:
+    if: (github.event_name == 'push' && !contains(github.event.head_commit.message, '(pm)')) || (github.event_name == 'pull_request' && !contains(github.event.pull_request.title, '(pm)'))
+    name: Pack Integration Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Add SSH private keys for submodule repositories
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: |
+            ${{ secrets.CI_SUBMODULE }}
+
+      - name: Init git submodules
+        run: git submodule update --init --depth 1
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/.ghcup
+          sudo rm -rf /usr/local/lib/node_modules
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/share/miniconda
+          sudo docker image prune --all --force
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-10-27
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+
+      - name: Integration Test
+        run: |
+          # Build packages
+          npm run build --workspace @utoo/pack-shared
+          npm run build:local --workspace @utoo/pack
+          npm run build --workspace @utoo/pack-cli
+
+          # Verify examples
+          for dir in examples/*/; do
+            if [ -f "${dir}package.json" ]; then
+              if jq -e '.scripts.build // "" | contains("up build")' "${dir}package.json" > /dev/null; then
+                echo "----------------------------------------------------"
+                echo "Verifying example: $dir"
+                echo "----------------------------------------------------"
+                (cd "$dir" && npm run build && echo "Output dist content:" && ls -lh dist | awk 'NR>1 {print $5, $9}')
+                if [ $? -ne 0 ]; then
+                  echo "Error: Build failed for example $dir"
+                  exit 1
+                fi
+              fi
+            fi
+          done

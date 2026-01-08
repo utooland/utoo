@@ -8,6 +8,7 @@ on:
 
 jobs:
   test:
+    if: (github.event_name == 'push' && !contains(github.event.head_commit.message, '(pm)')) || (github.event_name == 'pull_request' && !contains(github.event.pull_request.title, '(pm)'))
     strategy:
       fail-fast: false
       matrix:
@@ -24,6 +25,7 @@ jobs:
             target: x86_64-unknown-linux-gnu
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
             test: |
+              apt-get update &&
               rustup install nightly-2025-10-27 &&
               rustup default nightly-2025-10-27 &&
               rustup target add x86_64-unknown-linux-gnu &&
@@ -48,10 +50,10 @@ jobs:
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
             test: |
               apt-get update && apt-get install -y libc6-dev-arm64-cross libgcc-s1-arm64-cross &&
-              export QEMU_LD_PREFIX=/usr/aarch64-linux-gnu &&
               rustup install nightly-2025-10-27 &&
               rustup default nightly-2025-10-27 &&
               rustup target add aarch64-unknown-linux-gnu &&
+              export QEMU_LD_PREFIX=/usr/aarch64-linux-gnu &&
               cargo test -p pack-tests --target aarch64-unknown-linux-gnu
           - host: ubuntu-latest
             target: aarch64-unknown-linux-musl
@@ -83,16 +85,6 @@ jobs:
     name: utoopack-ci-${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     steps:
-      - name: Free Disk Space (Ubuntu)
-        uses: jlumbroso/free-disk-space@v1.3.1
-        if: matrix.settings.host == 'ubuntu-latest'
-        with:
-          tool-cache: false
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          swap-storage: false
       - uses: actions/checkout@v4
         with:
           submodules: false
@@ -103,6 +95,18 @@ jobs:
             ${{ secrets.CI_SUBMODULE }}
       - name: Init git submodules
         run: git submodule update --init --depth 1
+      - name: Free disk space
+        if: matrix.settings.host == 'ubuntu-latest'
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/share/miniconda
+          sudo docker image prune --all --force
       - name: Set up QEMU
         if: matrix.settings.docker && contains(matrix.settings.target, 'aarch64')
         uses: docker/setup-qemu-action@v3
