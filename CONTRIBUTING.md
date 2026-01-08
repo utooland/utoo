@@ -113,7 +113,7 @@ UPDATE=1 cargo test -p pack-tests
 ## 📮 Submitting Changes
 
 1.  **Create a Branch**: Use a descriptive name like `feat/awesome-feature` or `fix/bug-id`.
-2.  **Commit Messages**: Follow [Conventional Commits](https://www.conventionalcommits.org/) (e.g., `feat: add new loader`).
+2.  **Commit Messages**: Follow [Conventional Commits](https://www.conventionalcommits.org/). Use scopes like `pm`, `pack`, or `wasm` (e.g., `feat(pack): add new loader`).
 3.  **Lint & Format**: Run `npm run biome` before committing.
 4.  **Open a PR**: Provide a clear description of your changes and link any related issues.
 
