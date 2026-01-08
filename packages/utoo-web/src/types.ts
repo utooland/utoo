@@ -113,6 +113,7 @@ export interface ProjectEndpoint {
     packageLock: string,
     maxConcurrentDownloads?: number,
   ) => Promise<void>;
+  installParallel: (packageLock: string) => Promise<void>;
   build: () => Promise<BuildOutput>;
   readFile(path: string): Promise<Uint8Array>;
   readFile(path: string, encoding?: "utf8"): Promise<string>;

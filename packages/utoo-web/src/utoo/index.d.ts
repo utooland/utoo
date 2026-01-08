@@ -57,6 +57,13 @@ export class Project {
   static readToString(path: string): Promise<string>;
   static createDirSync(path: string): void;
   static removeDirSync(path: string, recursive: boolean): void;
+  /**
+   * Lazy install - downloads tgz files only, extracts on-demand when files are read
+   * This is much faster than full extraction since:
+   * 1. Only downloads tgz files (no OPFS writes for individual files)
+   * 2. Files are extracted from tgz on first read
+   */
+  static installParallel(package_lock: string): Promise<void>;
   static removeFileSync(path: string): void;
   static createDirAllSync(path: string): void;
   /**
@@ -167,6 +174,7 @@ export interface InitOutput {
   readonly project_gzip: (a: any) => any;
   readonly project_init: (a: number, b: number) => void;
   readonly project_install: (a: number, b: number, c: number) => any;
+  readonly project_installParallel: (a: number, b: number) => any;
   readonly project_metadata: (a: number, b: number) => any;
   readonly project_metadataSync: (a: number, b: number) => [number, number, number];
   readonly project_read: (a: number, b: number) => any;
@@ -209,18 +217,18 @@ export interface InitOutput {
   readonly wasmtaskmessage_data: (a: number) => any;
   readonly __wbg_createsyncaccesshandleoptions_free: (a: number, b: number) => void;
   readonly wasm_thread_entry_point: (a: number) => void;
-  readonly wasm_bindgen__convert__closures________invoke__hc572a1bf691b2f02: (a: number, b: number, c: any) => void;
-  readonly wasm_bindgen__closure__destroy__h79b136ee1664aaaa: (a: number, b: number) => void;
   readonly wasm_bindgen__convert__closures_____invoke__h05951ccee93604a9: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen__closure__destroy__hc95bb6053e4d238d: (a: number, b: number) => void;
-  readonly wasm_bindgen__convert__closures_____invoke__hd01d906c585a4882: (a: number, b: number) => void;
-  readonly wasm_bindgen__closure__destroy__h4f7407a77b90c2b4: (a: number, b: number) => void;
-  readonly wasm_bindgen__convert__closures_____invoke__ha745ee3df3bc829f: (a: number, b: number, c: any) => void;
-  readonly wasm_bindgen__closure__destroy__h4de2849d9209ec7a: (a: number, b: number) => void;
-  readonly wasm_bindgen__convert__closures_____invoke__h56a508b165bb0698: (a: number, b: number) => void;
-  readonly wasm_bindgen__closure__destroy__hb10b6a816b65033c: (a: number, b: number) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__h05448945d634c320: (a: number, b: number, c: any) => void;
+  readonly wasm_bindgen__closure__destroy__h01774800325514c8: (a: number, b: number) => void;
   readonly wasm_bindgen__convert__closures_____invoke__h12ad3f2e11ef8f1f: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen__closure__destroy__ha0c175f92395ef9a: (a: number, b: number) => void;
+  readonly wasm_bindgen__convert__closures________invoke__hc572a1bf691b2f02: (a: number, b: number, c: any) => void;
+  readonly wasm_bindgen__closure__destroy__h79b136ee1664aaaa: (a: number, b: number) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__h56a508b165bb0698: (a: number, b: number) => void;
+  readonly wasm_bindgen__closure__destroy__hb10b6a816b65033c: (a: number, b: number) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__hd01d906c585a4882: (a: number, b: number) => void;
+  readonly wasm_bindgen__closure__destroy__h4f7407a77b90c2b4: (a: number, b: number) => void;
   readonly wasm_bindgen__convert__closures_____invoke__heb9448f3005917b6: (a: number, b: number, c: any, d: any) => void;
   readonly memory: WebAssembly.Memory;
   readonly __wbindgen_malloc: (a: number, b: number) => number;

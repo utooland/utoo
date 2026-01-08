@@ -98,6 +98,9 @@ export const initializeProject = async () => {
     logFilter: new URLSearchParams(location.search).get("logFilter") || "",
   });
 
+  // Expose project on window for debugging
+  (window as any).project = projectInstance;
+
   await projectInstance.installServiceWorker();
   await initUtooProject(projectInstance);
   const hasLock = await hasPackageLock(projectInstance);
@@ -114,7 +117,7 @@ export const updateDependencies = async (
   const registryUrl = config ? getRegistryUrl(config) : REGISTRIES.npmmirror;
   const concurrency = config?.maxConcurrentDownloads ?? 20;
 
-  console.log("Updating dependencies...");
+  console.log("Updating dependencies (lazy mode)...");
 
   // Delete node_modules and package-lock.json first
   try {
@@ -146,9 +149,9 @@ export const updateDependencies = async (
   // Write the lock file to disk
   await project.writeFile("package-lock.json", packageLock, "utf8");
 
-  // Install
-  console.log("Installing from lock file...");
-  await project.install(packageLock, concurrency);
+  // Install with lazy extraction
+  console.log("Installing with lazy extraction (installParallel)...");
+  await project.installParallel(packageLock);
   console.log("Update complete");
 };
 
@@ -161,18 +164,17 @@ export const installDependencies = async (
   const concurrency = config?.maxConcurrentDownloads ?? 20;
 
   console.log(
-    "%cOPFS Project:%c Start to install dependencies.",
+    "%cOPFS Project:%c Start to install dependencies (lazy mode).",
     "color: blue;",
     "color: green",
   );
   const start = performance.now();
 
   try {
+    let packageLock: string;
     if (hasLock) {
       console.log("Reading existing package-lock.json...");
-      const packageLock = await project.readFile("package-lock.json", "utf8");
-      console.log("Installing from lock file...");
-      await project.install(packageLock, concurrency);
+      packageLock = await project.readFile("package-lock.json", "utf8");
     } else {
       // Check if package.json exists first
       try {
@@ -191,16 +193,16 @@ export const installDependencies = async (
         "concurrency:",
         concurrency,
       );
-      const packageLock = await project.deps({
+      packageLock = await project.deps({
         registry: registryUrl,
         concurrency,
       });
       console.log("deps returned lock file, length:", packageLock.length);
       // Write the lock file to disk for future use
       await project.writeFile("package-lock.json", packageLock, "utf8");
-      console.log("Installing from lock file...");
-      await project.install(packageLock, concurrency);
     }
+    console.log("Installing with lazy extraction (installParallel)...");
+    await project.installParallel(packageLock);
   } catch (e) {
     console.error("Failed to install dependencies:", e);
     throw e;

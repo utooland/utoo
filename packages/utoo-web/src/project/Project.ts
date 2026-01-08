@@ -107,6 +107,11 @@ export class Project implements ProjectEndpoint {
     return await this.remote.install(packageLock, maxConcurrentDownloads);
   }
 
+  public async installParallel(packageLock: string) {
+    await this.#mount;
+    return await this.remote.installParallel(packageLock);
+  }
+
   public async build(): Promise<BuildOutput> {
     await this.#mount;
     const res = await this.remote.build();
