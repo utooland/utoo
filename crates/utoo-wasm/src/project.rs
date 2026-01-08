@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::str::FromStr;
+use std::str::{self, FromStr};
 #[cfg(feature = "utoopack")]
 use std::sync::Arc;
 
@@ -288,7 +288,7 @@ impl Project {
             .await
             .with_context(|| format!("Failed to read file: {}", path))
             .map_err(to_js_error)?;
-        Ok(unsafe { String::from_utf8_unchecked(buf.to_vec()) })
+        Ok(unsafe { str::from_utf8_unchecked(&buf).to_owned() })
     }
 
     #[wasm_bindgen]
