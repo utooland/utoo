@@ -97,7 +97,16 @@ npm run test
 # Run Rust tests only
 cargo test
 
-# Run E2E tests
+# Run PM tests
+cargo test -p utoo-pm
+
+# Run Pack tests
+cargo test -p pack-tests
+
+# Update Pack tests snapshots
+UPDATE=1 cargo test -p pack-tests
+
+# Run PM E2E tests
 ./e2e/utoo-pm.sh
 ```
 
