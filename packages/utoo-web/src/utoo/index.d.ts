@@ -78,6 +78,9 @@ export class Project {
   static read(path: string): Promise<Uint8Array>;
   static build(): Promise<any>;
   static write(path: string, content: Uint8Array): Promise<void>;
+  /**
+   * Install dependencies - downloads tgz files only, extracts on-demand when files are read
+   */
   static install(package_lock: string, max_concurrent_downloads?: number | null): Promise<void>;
   static setCwd(path: string): void;
   /**
@@ -209,18 +212,18 @@ export interface InitOutput {
   readonly wasmtaskmessage_data: (a: number) => any;
   readonly __wbg_createsyncaccesshandleoptions_free: (a: number, b: number) => void;
   readonly wasm_thread_entry_point: (a: number) => void;
-  readonly wasm_bindgen__convert__closures________invoke__hc572a1bf691b2f02: (a: number, b: number, c: any) => void;
-  readonly wasm_bindgen__closure__destroy__h79b136ee1664aaaa: (a: number, b: number) => void;
-  readonly wasm_bindgen__convert__closures_____invoke__h05951ccee93604a9: (a: number, b: number, c: any) => void;
-  readonly wasm_bindgen__closure__destroy__hc95bb6053e4d238d: (a: number, b: number) => void;
-  readonly wasm_bindgen__convert__closures_____invoke__hd01d906c585a4882: (a: number, b: number) => void;
-  readonly wasm_bindgen__closure__destroy__h4f7407a77b90c2b4: (a: number, b: number) => void;
-  readonly wasm_bindgen__convert__closures_____invoke__ha745ee3df3bc829f: (a: number, b: number, c: any) => void;
-  readonly wasm_bindgen__closure__destroy__h4de2849d9209ec7a: (a: number, b: number) => void;
   readonly wasm_bindgen__convert__closures_____invoke__h56a508b165bb0698: (a: number, b: number) => void;
   readonly wasm_bindgen__closure__destroy__hb10b6a816b65033c: (a: number, b: number) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__h2858c75136ebca17: (a: number, b: number, c: any) => void;
+  readonly wasm_bindgen__closure__destroy__he6d1c6bf29fdb02d: (a: number, b: number) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__hd01d906c585a4882: (a: number, b: number) => void;
+  readonly wasm_bindgen__closure__destroy__h4f7407a77b90c2b4: (a: number, b: number) => void;
   readonly wasm_bindgen__convert__closures_____invoke__h12ad3f2e11ef8f1f: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen__closure__destroy__ha0c175f92395ef9a: (a: number, b: number) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__h05951ccee93604a9: (a: number, b: number, c: any) => void;
+  readonly wasm_bindgen__closure__destroy__hc95bb6053e4d238d: (a: number, b: number) => void;
+  readonly wasm_bindgen__convert__closures________invoke__hc572a1bf691b2f02: (a: number, b: number, c: any) => void;
+  readonly wasm_bindgen__closure__destroy__h79b136ee1664aaaa: (a: number, b: number) => void;
   readonly wasm_bindgen__convert__closures_____invoke__heb9448f3005917b6: (a: number, b: number, c: any, d: any) => void;
   readonly memory: WebAssembly.Memory;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
