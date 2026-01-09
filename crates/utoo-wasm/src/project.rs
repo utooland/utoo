@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::str::FromStr;
+use std::str::{self, FromStr};
 #[cfg(feature = "utoopack")]
 use std::sync::Arc;
 
@@ -157,18 +157,20 @@ impl Project {
             .map_err(|e| format!("Failed to serialize package lock: {}", e))
     }
 
+    /// Install dependencies - downloads tgz files only, extracts on-demand when files are read
     #[wasm_bindgen]
     pub async fn install(
         package_lock: String,
         max_concurrent_downloads: Option<usize>,
     ) -> Result<(), JsError> {
-        const DEFAULT_MAX_CONCURRENT_DOWNLOADS: usize = 20;
-        let max_concurrent = max_concurrent_downloads.unwrap_or(DEFAULT_MAX_CONCURRENT_DOWNLOADS);
-        opfs_project::package_manager::install_deps(&package_lock, max_concurrent)
+        use opfs_project::package_lock::PackageLock;
+
+        let lock = PackageLock::from_json(&package_lock)
+            .map_err(|e| JsError::new(&format!("Failed to parse package-lock.json: {}", e)))?;
+
+        opfs_project::install(&lock, max_concurrent_downloads)
             .await
-            // format anyhow backtrace for better error display in JS
-            .map_err(to_js_error)?;
-        Ok(())
+            .map_err(to_js_error)
     }
 
     #[cfg(feature = "utoopack")]
@@ -286,7 +288,7 @@ impl Project {
             .await
             .with_context(|| format!("Failed to read file: {}", path))
             .map_err(to_js_error)?;
-        Ok(unsafe { String::from_utf8_unchecked(buf) })
+        Ok(unsafe { str::from_utf8_unchecked(&buf).to_owned() })
     }
 
     #[wasm_bindgen]
