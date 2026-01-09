@@ -14,8 +14,7 @@ use turbopack_core::{
         pattern::Pattern,
         plugin::{
             AfterResolvePlugin, AfterResolvePluginCondition, BeforeResolvePlugin,
-            BeforeResolvePluginCondition, OptionAfterResolvePluginCondition,
-            OptionBeforeResolvePluginCondition,
+            BeforeResolvePluginCondition,
         },
     },
 };
@@ -339,11 +338,11 @@ impl ExternalsPlugin {
 #[turbo_tasks::value_impl]
 impl BeforeResolvePlugin for ExternalsPlugin {
     #[turbo_tasks::function]
-    async fn before_resolve_condition(&self) -> Result<Vc<OptionBeforeResolvePluginCondition>> {
+    async fn before_resolve_condition(&self) -> Result<Vc<BeforeResolvePluginCondition>> {
         let externals_config = self.externals_config.await?;
 
         if externals_config.is_empty() {
-            return Ok(OptionBeforeResolvePluginCondition::none());
+            return Ok(BeforeResolvePluginCondition::Never.cell());
         }
 
         // Extract all possible module names from external keys
@@ -361,9 +360,9 @@ impl BeforeResolvePlugin for ExternalsPlugin {
             }
         }
 
-        Ok(OptionBeforeResolvePluginCondition::some(
-            BeforeResolvePluginCondition::from_modules(Vc::cell(modules)),
-        ))
+        Ok(BeforeResolvePluginCondition::from_modules(Vc::cell(
+            modules,
+        )))
     }
 
     #[turbo_tasks::function]
@@ -411,7 +410,7 @@ impl BeforeResolvePlugin for ExternalsPlugin {
 #[turbo_tasks::value_impl]
 impl AfterResolvePlugin for ExternalsPlugin {
     #[turbo_tasks::function]
-    async fn after_resolve_condition(&self) -> Result<Vc<OptionAfterResolvePluginCondition>> {
+    async fn after_resolve_condition(&self) -> Result<Vc<AfterResolvePluginCondition>> {
         let externals_config = self.externals_config.await?;
 
         // Optimization: Instead of matching all node_modules, only match packages listed in externals.
@@ -438,7 +437,7 @@ impl AfterResolvePlugin for ExternalsPlugin {
         }
 
         if packages.is_empty() {
-            return Ok(OptionAfterResolvePluginCondition::none());
+            return Ok(AfterResolvePluginCondition::Never.cell());
         }
 
         // Sort and dedup for cache stability
@@ -451,11 +450,9 @@ impl AfterResolvePlugin for ExternalsPlugin {
             format!("**/node_modules/{{{}}}/**", packages.join(",")).into()
         };
 
-        Ok(OptionAfterResolvePluginCondition::some(
-            AfterResolvePluginCondition::new(
-                self.root.clone(),
-                Glob::new(glob_str, GlobOptions::default()),
-            ),
+        Ok(AfterResolvePluginCondition::new_with_glob(
+            self.root.clone(),
+            Glob::new(glob_str, GlobOptions::default()),
         ))
     }
 
