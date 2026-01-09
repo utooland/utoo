@@ -31,7 +31,7 @@
 ## 📦 Installation
 
 ```bash
-npm install @utoo/pack
+npm install @utoo/pack --save
 ```
 
 ## 🚀 Quick Start
@@ -72,15 +72,7 @@ async function startDev() {
 
 ## 🔌 Webpack Compatibility Mode
 
-`@utoo/pack` provides a partial compatibility layer for Webpack. This allows you to use your existing `webpack.config.js` with minimal changes.
-
-### Usage via CLI
-
-```bash
-up build --webpack
-```
-
-### Programmatic Usage
+`@utoo/pack` provides a partial compatibility layer for Webpack.
 
 ```javascript
 const { build } = require('@utoo/pack');
