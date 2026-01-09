@@ -57,7 +57,7 @@ ut x create-react   # Execute a package (npx style, or use `ut x`)
 
 #### Bundling via @utoo/pack-cli
 ```bash
-ut install @utoo/pack-cli
+ut install @utoo/pack-cli --save-dev
 utx up dev          # Start dev server with HMR
 utx up build        # Production build
 utx up build --webpack # Build using webpack.config.js
