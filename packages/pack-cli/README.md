@@ -27,7 +27,7 @@ Add a `utoopack.json` config file in the root directory:
   ],
   "output": {
     "path": "./dist",
-    "filename": "[name].[contenthash:6].js",
+    "filename": "[name].[contenthash:8].js",
     "chunkFilename": "[name].[contenthash:8].js",
     "clean": true
   },
