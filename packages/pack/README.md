@@ -31,7 +31,7 @@
 ## 📦 Installation
 
 ```bash
-npm install @utoo/pack --save-dev
+ut install @utoo/pack --save-dev
 ```
 
 ## 🚀 Quick Start

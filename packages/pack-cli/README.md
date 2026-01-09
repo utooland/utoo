@@ -5,7 +5,7 @@
 ## 📦 Installation
 
 ```bash
-utx install @utoo/pack-cli --save-dev
+ut install @utoo/pack-cli --save-dev
 ```
 
 ## 🚀 Usage
