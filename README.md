@@ -39,10 +39,13 @@ Utoo is a modern, high-performance frontend toolchain designed to provide a unif
 # Install the core toolchain
 npm install -g utoo
 
-# Install the bundler (optional)
-ut install @utoo/pack --save
+# Install the bundler in nodejs environment
+ut install @utoo/pack --save-dev
 
-# Install the web version (optional)
+# Install the bundler cli in nodejs environment(Optional)
+ut install @utoo/pack-cli --save-dev
+
+# Install the web version
 ut install @utoo/web --save
 ```
 
@@ -55,11 +58,11 @@ ut add lodash       # Add a package (or use `ut add`)
 ut x create-react   # Execute a package (npx style, or use `ut x`)
 ```
 
-#### Bundling
+#### Bundling via @utoo/pack-cli
 ```bash
-up dev          # Start dev server with HMR
-up build        # Production build
-up build --webpack # Build using webpack.config.js
+utx up dev          # Start dev server with HMR
+utx up build        # Production build
+utx up build --webpack # Build using webpack.config.js
 ```
 
 ## ✨ Key Features
