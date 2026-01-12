@@ -1,5 +1,6 @@
 import {
   DepsOptions,
+  InstallOptions,
   PackFile,
   ProjectEndpoint,
   ProjectOptions,
@@ -47,9 +48,13 @@ class InternalEndpoint implements ProjectEndpoint {
     );
   }
 
-  async install(packageLock: string, maxConcurrentDownloads?: number) {
+  async install(packageLock: string, options?: InstallOptions) {
     await this.wasmInit!;
-    await ProjectInternal.install(packageLock, maxConcurrentDownloads);
+    await ProjectInternal.install(
+      packageLock,
+      options?.maxConcurrentDownloads,
+      options?.omit ?? [],
+    );
     return;
   }
 
