@@ -4,6 +4,7 @@ import {
   BuildOutput,
   DepsOptions,
   Dirent,
+  InstallOptions,
   PackFile,
   ProjectEndpoint,
   ProjectOptions,
@@ -102,9 +103,9 @@ export class Project implements ProjectEndpoint {
     return await this.remote.deps(options);
   }
 
-  public async install(packageLock: string, maxConcurrentDownloads?: number) {
+  public async install(packageLock: string, options?: InstallOptions) {
     await this.#mount;
-    return await this.remote.install(packageLock, maxConcurrentDownloads);
+    return await this.remote.install(packageLock, options);
   }
 
   public async build(): Promise<BuildOutput> {
