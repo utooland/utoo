@@ -8,8 +8,9 @@ import { projectFactory } from "../core/project";
 import { BundleOptions } from "../core/types";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import { blockStdout, createDefineEnv, getPackPath } from "../utils/common";
-import { findRootDir } from "../utils/find-root";
-import { processHtmlEntry } from "../utils/html-entry";
+import { findRootDir } from "../utils/findRoot";
+import { getInitialAssetsFromStats } from "../utils/getInitialAssets";
+import { processHtmlEntry } from "../utils/htmlEntry";
 import { xcodeProfilingReady } from "../utils/xcodeProfile";
 
 export function build(
@@ -89,20 +90,9 @@ async function buildInternal(
       bundleOptions.config.output?.path || join(process.cwd(), "dist");
 
     if (assets.js.length === 0 && assets.css.length === 0) {
-      const statsPath = join(outputDir, "stats.json");
-      if (existsSync(statsPath)) {
-        try {
-          const stats = JSON.parse(fs.readFileSync(statsPath, "utf-8"));
-          if (stats.assets) {
-            stats.assets.forEach((asset: any) => {
-              if (asset.name.endsWith(".js")) assets.js.push(asset.name);
-              if (asset.name.endsWith(".css")) assets.css.push(asset.name);
-            });
-          }
-        } catch (e) {
-          console.warn("Failed to read stats.json for assets discovery", e);
-        }
-      }
+      const discovered = getInitialAssetsFromStats(outputDir);
+      assets.js.push(...discovered.js);
+      assets.css.push(...discovered.css);
     }
 
     const publicPath = bundleOptions.config.output?.publicPath;

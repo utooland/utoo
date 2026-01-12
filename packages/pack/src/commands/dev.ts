@@ -10,9 +10,9 @@ import { resolveBundleOptions, WebpackConfig } from "../config/webpackCompat";
 import { createHotReloader } from "../core/hmr";
 import { BundleOptions } from "../core/types";
 import { blockStdout, getPackPath } from "../utils/common";
-import { findRootDir } from "../utils/find-root";
+import { findRootDir } from "../utils/findRoot";
 import { createSelfSignedCertificate } from "../utils/mkcert";
-import { printServerInfo } from "../utils/print-server-info";
+import { printServerInfo } from "../utils/printServerInfo";
 import { xcodeProfilingReady } from "../utils/xcodeProfile";
 
 function parsePath(pathStr: string): {
