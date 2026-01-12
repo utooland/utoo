@@ -4222,7 +4222,7 @@ dependencies = [
  "sha1",
  "sha2",
  "tar",
- "tokio-fs-ext 0.7.0",
+ "tokio-fs-ext",
  "tracing",
  "tracing-web",
  "web-time",
@@ -8184,26 +8184,6 @@ dependencies = [
 
 [[package]]
 name = "tokio-fs-ext"
-version = "0.6.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d40184a3ebace868985529617fa92e871096ca74cdb41fb870341d0266fde87"
-dependencies = [
- "bitflags 2.9.4",
- "cfg-if",
- "futures",
- "js-sys",
- "notify-types",
- "pin-project-lite",
- "rustc-hash 2.1.1",
- "tokio",
- "tokio-stream",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
-name = "tokio-fs-ext"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b3a15b2ea3a517a0d27eeea0c5e43605490ea5722983351973a67756d68a5900"
@@ -8881,7 +8861,7 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "tokio",
- "tokio-fs-ext 0.6.10",
+ "tokio-fs-ext",
  "tracing",
  "triomphe 0.1.12",
  "turbo-bincode",
@@ -9634,7 +9614,7 @@ dependencies = [
  "tempfile",
  "term_size",
  "tokio",
- "tokio-fs-ext 0.7.0",
+ "tokio-fs-ext",
  "tokio-retry",
  "tokio-tar",
  "tokio-util",
@@ -9659,7 +9639,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "tokio-fs-ext 0.7.0",
+ "tokio-fs-ext",
  "tracing",
 ]
 
@@ -9686,7 +9666,7 @@ dependencies = [
  "serde_json",
  "tar",
  "tokio",
- "tokio-fs-ext 0.7.0",
+ "tokio-fs-ext",
  "tracing",
  "tracing-subscriber",
  "tracing-web",
