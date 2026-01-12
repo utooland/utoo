@@ -1,6 +1,7 @@
 import * as comlink from "comlink";
 import {
   DepsOptions,
+  InstallOptions,
   PackFile,
   ProjectEndpoint,
   RawStats,
@@ -18,8 +19,8 @@ export class ForkedProject implements ProjectEndpoint {
     return await this.endpoint.deps(options);
   }
 
-  public async install(packageLock: string, maxConcurrentDownloads?: number) {
-    return await this.endpoint.install(packageLock, maxConcurrentDownloads);
+  public async install(packageLock: string, options?: InstallOptions) {
+    return await this.endpoint.install(packageLock, options);
   }
 
   public async build() {
