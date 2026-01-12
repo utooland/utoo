@@ -53,7 +53,7 @@ class InternalEndpoint implements ProjectEndpoint {
     await ProjectInternal.install(
       packageLock,
       options?.maxConcurrentDownloads,
-      options?.omit ?? ["optional"],
+      options?.omit ?? [],
     );
     return;
   }

@@ -111,7 +111,7 @@ export type OmitType = "dev" | "optional";
 
 export interface InstallOptions {
   maxConcurrentDownloads?: number;
-  /** Dependency types to omit. Default: ['optional'] */
+  /** Dependency types to omit. Default: [] */
   omit?: OmitType[];
 }
 
