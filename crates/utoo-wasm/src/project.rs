@@ -164,11 +164,17 @@ impl Project {
         max_concurrent_downloads: Option<usize>,
     ) -> Result<(), JsError> {
         use opfs_project::package_lock::PackageLock;
+        use opfs_project::InstallOptions;
 
         let lock = PackageLock::from_json(&package_lock)
             .map_err(|e| JsError::new(&format!("Failed to parse package-lock.json: {}", e)))?;
 
-        opfs_project::install(&lock, max_concurrent_downloads)
+        let options = max_concurrent_downloads.map(|n| InstallOptions {
+            max_concurrent_downloads: Some(n),
+            ..Default::default()
+        });
+
+        opfs_project::install(&lock, options)
             .await
             .map_err(to_js_error)
     }

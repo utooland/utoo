@@ -461,7 +461,7 @@ dependencies = [
  "bitflags 2.9.4",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -4205,9 +4205,9 @@ dependencies = [
 
 [[package]]
 name = "opfs-project"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f00e54f510b0be0af18906fb0f9bce2957cbea7cac161e82f13d7c9dbc98b18a"
+checksum = "7b1eeed1d8b7ee17f0bc5631404f0ddd4f7b610548147d31029cce98dc020421"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -4938,7 +4938,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.106",
@@ -8184,9 +8184,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-fs-ext"
-version = "0.6.10"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d40184a3ebace868985529617fa92e871096ca74cdb41fb870341d0266fde87"
+checksum = "b3a15b2ea3a517a0d27eeea0c5e43605490ea5722983351973a67756d68a5900"
 dependencies = [
  "bitflags 2.9.4",
  "cfg-if",
