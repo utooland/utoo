@@ -107,12 +107,17 @@ export interface DepsOptions {
   concurrency?: number | null;
 }
 
+export type OmitType = "dev" | "optional";
+
+export interface InstallOptions {
+  maxConcurrentDownloads?: number;
+  /** Dependency types to omit. Default: ['optional'] */
+  omit?: OmitType[];
+}
+
 export interface ProjectEndpoint {
   deps: (options?: DepsOptions) => Promise<string>;
-  install: (
-    packageLock: string,
-    maxConcurrentDownloads?: number,
-  ) => Promise<void>;
+  install: (packageLock: string, options?: InstallOptions) => Promise<void>;
   build: () => Promise<BuildOutput>;
   readFile(path: string): Promise<Uint8Array>;
   readFile(path: string, encoding?: "utf8"): Promise<string>;

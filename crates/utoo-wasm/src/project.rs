@@ -162,16 +162,26 @@ impl Project {
     pub async fn install(
         package_lock: String,
         max_concurrent_downloads: Option<usize>,
+        omit: Vec<String>,
     ) -> Result<(), JsError> {
         use opfs_project::package_lock::PackageLock;
-        use opfs_project::InstallOptions;
+        use opfs_project::{InstallOptions, OmitType};
 
         let lock = PackageLock::from_json(&package_lock)
             .map_err(|e| JsError::new(&format!("Failed to parse package-lock.json: {}", e)))?;
 
-        let options = max_concurrent_downloads.map(|n| InstallOptions {
-            max_concurrent_downloads: Some(n),
-            ..Default::default()
+        let omit = omit
+            .into_iter()
+            .filter_map(|s| match s.as_str() {
+                "dev" => Some(OmitType::Dev),
+                "optional" => Some(OmitType::Optional),
+                _ => None,
+            })
+            .collect();
+
+        let options = Some(InstallOptions {
+            max_concurrent_downloads,
+            omit,
         });
 
         opfs_project::install(&lock, options)
