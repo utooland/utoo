@@ -143,8 +143,8 @@ async function serveInternal(
       config: {
         ...options.config,
         devServer: {
-          ...(options.config.devServer || {}),
           hot: true,
+          ...(options.config.devServer || {}),
         },
       },
       packPath: getPackPath(),
