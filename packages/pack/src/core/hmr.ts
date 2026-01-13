@@ -12,7 +12,8 @@ import {
   getPackPath,
   processIssues,
 } from "../utils/common";
-import { processHtmlEntry } from "../utils/html-entry";
+import { getInitialAssetsFromStats } from "../utils/getInitialAssets";
+import { processHtmlEntry } from "../utils/htmlEntry";
 import { projectFactory } from "./project";
 import { BundleOptions, Project, Update as TurbopackUpdate } from "./types";
 
@@ -284,10 +285,6 @@ export async function createHotReloader(
         entrypoints.apps.map((l) =>
           l.writeToDisk().then((res) => {
             processIssues(res, true, true);
-            res.clientPaths.forEach((p) => {
-              if (p.endsWith(".js")) assets.js.push(p);
-              if (p.endsWith(".css")) assets.css.push(p);
-            });
           }),
         ),
       );
@@ -309,20 +306,9 @@ export async function createHotReloader(
         const publicPath = bundleOptions.config.output?.publicPath;
 
         if (assets.js.length === 0 && assets.css.length === 0) {
-          const statsPath = join(outputDir, "stats.json");
-          if (fs.existsSync(statsPath)) {
-            try {
-              const stats = JSON.parse(fs.readFileSync(statsPath, "utf-8"));
-              if (stats.assets) {
-                stats.assets.forEach((asset: any) => {
-                  if (asset.name.endsWith(".js")) assets.js.push(asset.name);
-                  if (asset.name.endsWith(".css")) assets.css.push(asset.name);
-                });
-              }
-            } catch (e) {
-              console.warn("Failed to read stats.json for assets discovery", e);
-            }
-          }
+          const discovered = getInitialAssetsFromStats(outputDir);
+          assets.js.push(...discovered.js);
+          assets.css.push(...discovered.css);
         }
 
         for (const config of htmlConfigs) {

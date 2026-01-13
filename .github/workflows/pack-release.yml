@@ -187,8 +187,11 @@ jobs:
           npm run build --workspace=@utoo/pack-cli
       - name: Get version from release or use alpha version
         id: get_version
+        shell: bash
         run: |
-          echo "VERSION=${GITHUB_REF#refs/tags/utoopack-v}" >> $GITHUB_OUTPUT
+          TAG_NAME="${{ github.event.release.tag_name }}"
+          VERSION=${TAG_NAME#utoopack-v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
       - name: NPM Publish
         run: |
           # npm config set provenance true
@@ -202,9 +205,9 @@ jobs:
           fi
           echo "Publishing with tag: $TAG"
 
-          npm version --workspace=@utoo/pack-shared "${VERSION}" &&
-          npm version --workspace=@utoo/pack "${VERSION}" &&
-          npm version --workspace=@utoo/pack-cli "${VERSION}" &&
+          npm version --workspace=@utoo/pack-shared "${VERSION}" --no-git-tag-version &&
+          npm version --workspace=@utoo/pack "${VERSION}" --no-git-tag-version &&
+          npm version --workspace=@utoo/pack-cli "${VERSION}" --no-git-tag-version &&
           npm pkg set dependencies.@utoo/pack-shared="${VERSION}" --workspace=@utoo/pack &&
           npm pkg set dependencies.@utoo/pack="${VERSION}" --workspace=@utoo/pack-cli &&
           npm publish --workspace=@utoo/pack-shared --access public --tag "${TAG}" &&
