@@ -610,20 +610,11 @@ pub async fn get_client_chunking_context(
 
     let output = config.output().await?;
 
-    if !mode.is_development() {
-        if let Some(filename) = &output.filename {
-            builder = builder.filename(filename.clone());
-        }
-
-        if let Some(chunk_filename) = &output.chunk_filename {
-            builder = builder.chunk_filename(chunk_filename.clone());
-        }
-    }
-
     if mode.is_development() {
         builder = builder
             .hot_module_replacement()
-            .source_map_source_type(SourceMapSourceType::AbsoluteFileUri);
+            .source_map_source_type(SourceMapSourceType::AbsoluteFileUri)
+            .dynamic_chunk_content_loading(true);
     } else {
         let split_chunks = &config.optimization().await?.split_chunks;
 
@@ -645,6 +636,14 @@ pub async fn get_client_chunking_context(
                 Into::into,
             ),
         );
+
+        if let Some(filename) = &output.filename {
+            builder = builder.filename(filename.clone());
+        }
+
+        if let Some(chunk_filename) = &output.chunk_filename {
+            builder = builder.chunk_filename(chunk_filename.clone());
+        }
 
         builder = builder
             .chunking_config(
