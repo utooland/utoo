@@ -20,7 +20,13 @@ export function processHtmlEntry(config: ConfigComplete, projectPath: string) {
 
         scripts.forEach((script) => {
           const src = script.getAttribute("src");
-          if (src && !src.startsWith("http") && !src.startsWith("//")) {
+          const type = script.getAttribute("type");
+          if (
+            src &&
+            !src.startsWith("http") &&
+            !src.startsWith("//") &&
+            type === "module"
+          ) {
             const scriptPath = path.join(path.dirname(entry.import), src);
             // Remove the origin script tag from the DOM
             if (script.parentNode) {
