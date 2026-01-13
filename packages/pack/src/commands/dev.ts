@@ -143,8 +143,8 @@ async function serveInternal(
       config: {
         ...options.config,
         devServer: {
-          ...(options.config.devServer || {}),
           hot: true,
+          ...(options.config.devServer || {}),
         },
       },
       packPath: getPackPath(),
@@ -192,8 +192,6 @@ export async function startServer(
   rootPath?: string,
 ): Promise<void> {
   let { port, hostname, selfSignedCertificate } = serverOptions;
-
-  debugger;
 
   process.title = "utoopack-dev-server";
   let handlersReady = () => {};
