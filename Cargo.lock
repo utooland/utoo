@@ -4205,9 +4205,9 @@ dependencies = [
 
 [[package]]
 name = "opfs-project"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b1eeed1d8b7ee17f0bc5631404f0ddd4f7b610548147d31029cce98dc020421"
+checksum = "7d77ca7a6d7350983237fc64db36a5d3d570bd9d31be15c7d55f1b5e05a1152f"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
