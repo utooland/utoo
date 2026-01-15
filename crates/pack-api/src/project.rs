@@ -89,7 +89,7 @@ pub struct WatchOptions {
     pub ignored: Vec<RcStr>,
 }
 
-fn default_ignored_paths() -> Vec<RcStr> {
+pub fn default_ignored_paths() -> Vec<RcStr> {
     vec!["node_modules".into()]
 }
 

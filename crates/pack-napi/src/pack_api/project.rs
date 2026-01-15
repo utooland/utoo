@@ -184,10 +184,8 @@ impl From<NapiWatchOptions> for WatchOptions {
                 .map(|interval| Duration::from_secs_f64(interval / 1000.0)),
             ignored: val
                 .ignored
-                .unwrap_or_else(|| vec!["node_modules".to_string()])
-                .into_iter()
-                .map(|s| s.into())
-                .collect(),
+                .map(|v| v.into_iter().map(|s| s.into()).collect())
+                .unwrap_or_else(pack_api::project::default_ignored_paths),
         }
     }
 }
