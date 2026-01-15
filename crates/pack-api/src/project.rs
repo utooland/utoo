@@ -82,6 +82,15 @@ pub struct WatchOptions {
     /// Enable polling at a certain interval if the native file watching doesn't work (e.g.
     /// docker).
     pub poll_interval: Option<Duration>,
+
+    /// Paths to ignore when watching for file changes.
+    /// By default, ignores: node_modules
+    #[serde(default = "default_ignored_paths")]
+    pub ignored: Vec<RcStr>,
+}
+
+pub fn default_ignored_paths() -> Vec<RcStr> {
+    vec!["node_modules".into()]
 }
 
 #[turbo_tasks::value]
@@ -588,16 +597,20 @@ impl Project {
             }
         }
 
-        if denied_paths.is_empty() {
+        // Get watched ignored paths from configuration
+        let watched_ignored = self.watch.ignored.clone();
+
+        if denied_paths.is_empty() && watched_ignored.is_empty() {
             Ok(DiskFileSystem::new(
                 PROJECT_FILESYSTEM_NAME.into(),
                 self.root_path.clone(),
             ))
         } else {
-            Ok(DiskFileSystem::new_with_denied_paths(
+            Ok(DiskFileSystem::new_with_watched_ignored(
                 PROJECT_FILESYSTEM_NAME.into(),
                 self.root_path.clone(),
                 denied_paths,
+                watched_ignored,
             ))
         }
     }

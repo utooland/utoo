@@ -82,6 +82,10 @@ pub struct NapiWatchOptions {
     /// Enable polling at a certain interval if the native file watching doesn't work (e.g.
     /// docker).
     pub poll_interval_ms: Option<f64>,
+
+    /// Paths to ignore when watching for file changes.
+    /// By default, ignores: node_modules
+    pub ignored: Option<Vec<String>>,
 }
 
 #[napi(object)]
@@ -178,6 +182,10 @@ impl From<NapiWatchOptions> for WatchOptions {
                 .poll_interval_ms
                 .filter(|interval| !interval.is_nan() && interval.is_finite() && *interval > 0.0)
                 .map(|interval| Duration::from_secs_f64(interval / 1000.0)),
+            ignored: val
+                .ignored
+                .map(|v| v.into_iter().map(|s| s.into()).collect())
+                .unwrap_or_else(pack_api::project::default_ignored_paths),
         }
     }
 }
