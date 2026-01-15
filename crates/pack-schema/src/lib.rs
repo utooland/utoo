@@ -140,6 +140,11 @@ pub struct SchemaWatchOptions {
     /// Enable polling at a certain interval if the native file watching doesn't work (e.g. docker).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub poll_interval: Option<u64>,
+
+    /// Paths to ignore when watching for file changes.
+    /// By default, ignores: node_modules
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ignored: Option<Vec<String>>,
 }
 
 /// Environment variables for build-time injection
