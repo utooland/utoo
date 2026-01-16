@@ -1,4 +1,14 @@
 (globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([typeof document === "object" ? document.currentScript : undefined,
+84, ((__turbopack_context__) => {
+
+__turbopack_context__.v((parentImport) => {
+    return Promise.all([
+  "input_Regular_Expressions__JavaScript__tmLanguage_json_82538685.js"
+].map((chunk) => __turbopack_context__.l(chunk))).then(() => {
+        return parentImport(3);
+    });
+});
+}),
 59, ((__turbopack_context__) => {
 "use strict";
 
@@ -11,15 +21,5 @@ __turbopack_context__.s([
     0,
     getTempJson
 ]);
-}),
-84, ((__turbopack_context__) => {
-
-__turbopack_context__.v((parentImport) => {
-    return Promise.all([
-  "input_Regular_Expressions__JavaScript__tmLanguage_json_82538685.js"
-].map((chunk) => __turbopack_context__.l(chunk))).then(() => {
-        return parentImport(3);
-    });
-});
 }),
 ]);

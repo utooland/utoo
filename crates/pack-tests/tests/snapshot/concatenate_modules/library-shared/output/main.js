@@ -71,6 +71,10 @@ __turbopack_context__.s([
     __TURBOPACK__default__export__1
 ], 794);
 }),
+828: ((__turbopack_context__, module, exports) => {
+
+setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.i(12)), 500);
+}),
 12: ((__turbopack_context__) => {
 "use strict";
 
@@ -78,10 +82,6 @@ var __TURBOPACK__imported__module__794__ = __turbopack_context__.i(794);
 ;
 console.log('x', __TURBOPACK__imported__module__794__["default"]);
 __turbopack_context__.s([]);
-}),
-828: ((__turbopack_context__, module, exports) => {
-
-setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.i(12)), 500);
 }),
 503: ((__turbopack_context__, module, exports) => {
 

@@ -1,12 +1,4 @@
 (globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([typeof document === "object" ? document.currentScript : undefined,
-805, ((__turbopack_context__, module, exports) => {
-
-console.log("shared1");
-}),
-625, ((__turbopack_context__, module, exports) => {
-
-console.log("shared2");
-}),
 650, ((__turbopack_context__) => {
 "use strict";
 
@@ -26,6 +18,14 @@ console.log("a2");
 ;
 __turbopack_context__.s([], 650);
 }),
+805, ((__turbopack_context__, module, exports) => {
+
+console.log("shared1");
+}),
+625, ((__turbopack_context__, module, exports) => {
+
+console.log("shared2");
+}),
 ]);
 
-//# sourceMappingURL=input_ded1aa15.js.map
+//# sourceMappingURL=input_45f00f4e.js.map

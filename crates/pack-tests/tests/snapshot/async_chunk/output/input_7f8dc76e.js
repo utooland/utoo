@@ -1,16 +1,4 @@
 (globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([typeof document === "object" ? document.currentScript : undefined,
-976, ((__turbopack_context__) => {
-"use strict";
-
-function foo(value) {
-    console.assert(value);
-}
-__turbopack_context__.s([
-    "foo",
-    0,
-    foo
-]);
-}),
 476, ((__turbopack_context__) => {
 "use strict";
 
@@ -24,6 +12,18 @@ var __TURBOPACK__imported__module__743__ = __turbopack_context__.i(743);
 (0, __TURBOPACK__imported__module__402__["bar"])(true);
 __turbopack_context__.s([]);
 }),
+976, ((__turbopack_context__) => {
+"use strict";
+
+function foo(value) {
+    console.assert(value);
+}
+__turbopack_context__.s([
+    "foo",
+    0,
+    foo
+]);
+}),
 ]);
 
-//# sourceMappingURL=input_79e6c840.js.map
+//# sourceMappingURL=input_7f8dc76e.js.map
