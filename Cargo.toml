@@ -44,7 +44,7 @@ serde_path_to_error = "0.1.16"
 simd-json           = "0.17.0"
 thiserror           = "1.0"
 tokio               = { version = "1.47.1" }
-tokio-fs-ext        = "0.7.0"
+tokio-fs-ext        = "0.7.1"
 toml                = "0.8"
 tracing             = "0.1.41"
 tracing-subscriber  = { version = "0.3.19", features = ["env-filter", "fmt"] }
@@ -151,7 +151,7 @@ strip         = "none"
 bincode          = { git = "https://github.com/bgw/bincode.git", branch = "bgw/patches" }
 lightningcss     = { git = "https://github.com/utooland/lightningcss", branch = "support-css-module-global" }
 mdxjs            = { git = "https://github.com/mischnic/mdxjs-rs.git", branch = "swc-core-32" }
-mimalloc         = { git = "https://github.com/utooland/mimalloc_rust.git", package = "mimalloc" }
+mimalloc         = { git = "https://github.com/utooland/mimalloc_rust.git" }
 parcel_selectors = { git = "https://github.com/utooland/lightningcss", branch = "support-css-module-global" }
 tokio            = { git = "https://github.com/utooland/tokio.git", package = "tokio" }
 tokio-util       = { git = "https://github.com/utooland/tokio.git", package = "tokio-util" }
