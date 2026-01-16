@@ -81,7 +81,7 @@ export class Project {
   /**
    * Install dependencies - downloads tgz files only, extracts on-demand when files are read
    */
-  static install(package_lock: string, max_concurrent_downloads: number | null | undefined, omit: string[]): Promise<void>;
+  static install(package_lock: string, max_concurrent_downloads?: number | null): Promise<void>;
   static setCwd(path: string): void;
   /**
    * Calculate MD5 hash of byte content (async for better thread scheduling)
@@ -147,8 +147,6 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
   readonly registerWorkerScheduler: (a: any, b: any) => void;
   readonly workerCreated: (a: number) => void;
-  readonly initLogFilter: (a: number, b: number) => void;
-  readonly init_pack: () => void;
   readonly __wbg_direntry_free: (a: number, b: number) => void;
   readonly __wbg_get_direntry_name: (a: number) => [number, number];
   readonly __wbg_get_direntry_type: (a: number) => number;
@@ -171,7 +169,7 @@ export interface InitOutput {
   readonly project_deps: (a: number, b: number, c: number) => any;
   readonly project_gzip: (a: any) => any;
   readonly project_init: (a: number, b: number) => void;
-  readonly project_install: (a: number, b: number, c: number, d: number, e: number) => any;
+  readonly project_install: (a: number, b: number, c: number) => any;
   readonly project_metadata: (a: number, b: number) => any;
   readonly project_metadataSync: (a: number, b: number) => [number, number, number];
   readonly project_read: (a: number, b: number) => any;
@@ -188,6 +186,8 @@ export interface InitOutput {
   readonly project_write: (a: number, b: number, c: any) => any;
   readonly project_writeString: (a: number, b: number, c: number, d: number) => any;
   readonly project_writeSync: (a: number, b: number, c: any) => [number, number];
+  readonly initLogFilter: (a: number, b: number) => void;
+  readonly init_pack: () => void;
   readonly rust_mi_get_default_heap: () => number;
   readonly rust_mi_get_thread_id: () => number;
   readonly rust_mi_set_default_heap: (a: number) => void;
@@ -214,14 +214,14 @@ export interface InitOutput {
   readonly wasm_thread_entry_point: (a: number) => void;
   readonly wasm_bindgen__convert__closures_____invoke__h56a508b165bb0698: (a: number, b: number) => void;
   readonly wasm_bindgen__closure__destroy__hb10b6a816b65033c: (a: number, b: number) => void;
-  readonly wasm_bindgen__convert__closures_____invoke__hd01d906c585a4882: (a: number, b: number) => void;
-  readonly wasm_bindgen__closure__destroy__h4f7407a77b90c2b4: (a: number, b: number) => void;
-  readonly wasm_bindgen__convert__closures_____invoke__h0718aff2bbc4838f: (a: number, b: number, c: any) => void;
-  readonly wasm_bindgen__closure__destroy__h421c3c7ae98d890c: (a: number, b: number) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__h1fc4d085249c5ea3: (a: number, b: number, c: any) => void;
+  readonly wasm_bindgen__closure__destroy__hbc23ea6ab53be1d2: (a: number, b: number) => void;
   readonly wasm_bindgen__convert__closures_____invoke__h12ad3f2e11ef8f1f: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen__closure__destroy__ha0c175f92395ef9a: (a: number, b: number) => void;
   readonly wasm_bindgen__convert__closures_____invoke__h05951ccee93604a9: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen__closure__destroy__hc95bb6053e4d238d: (a: number, b: number) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__hd01d906c585a4882: (a: number, b: number) => void;
+  readonly wasm_bindgen__closure__destroy__h4f7407a77b90c2b4: (a: number, b: number) => void;
   readonly wasm_bindgen__convert__closures________invoke__hc572a1bf691b2f02: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen__closure__destroy__h79b136ee1664aaaa: (a: number, b: number) => void;
   readonly wasm_bindgen__convert__closures_____invoke__heb9448f3005917b6: (a: number, b: number, c: any, d: any) => void;
