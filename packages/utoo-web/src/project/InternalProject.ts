@@ -50,11 +50,7 @@ class InternalEndpoint implements ProjectEndpoint {
 
   async install(packageLock: string, options?: InstallOptions) {
     await this.wasmInit!;
-    await ProjectInternal.install(
-      packageLock,
-      options?.maxConcurrentDownloads,
-      options?.omit ?? [],
-    );
+    await ProjectInternal.install(packageLock, options?.maxConcurrentDownloads);
     return;
   }
 
