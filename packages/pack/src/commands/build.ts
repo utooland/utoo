@@ -11,6 +11,7 @@ import { blockStdout, createDefineEnv, getPackPath } from "../utils/common";
 import { findRootDir } from "../utils/findRoot";
 import { getInitialAssetsFromStats } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
+import { validateEntryPaths } from "../utils/validateEntry";
 import { xcodeProfilingReady } from "../utils/xcodeProfile";
 
 export function build(
@@ -38,7 +39,9 @@ async function buildInternal(
     await xcodeProfilingReady();
   }
 
-  processHtmlEntry(bundleOptions.config, projectPath || process.cwd());
+  const resolvedProjectPath = projectPath || process.cwd();
+  processHtmlEntry(bundleOptions.config, resolvedProjectPath);
+  validateEntryPaths(bundleOptions.config, resolvedProjectPath);
 
   const createProject = projectFactory();
   const project = await createProject(
