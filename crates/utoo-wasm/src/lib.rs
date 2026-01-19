@@ -30,10 +30,12 @@ mod fs;
 #[cfg(feature = "utoopack")]
 mod opfs_offload;
 mod project;
+mod wasm_shim;
 
-pub use fs::OpfsGlob;
+pub use fs::{DirEntry, DirEntryType, Fs, Metadata, OpfsGlob};
 pub(crate) mod tokio_runtime;
 pub use project::Project;
+pub use wasm_shim::{get_wasm_memory, get_wasm_module};
 
 #[global_allocator]
 static ALLOC: turbo_tasks_malloc::TurboMalloc = turbo_tasks_malloc::TurboMalloc;
