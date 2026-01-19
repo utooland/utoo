@@ -1,6 +1,6 @@
-import { Project } from "./project/Project";
-import { ProjectEndpoint } from "./types";
-import { ServiceWorkerHandShake } from "./utils/message";
+import { ServiceWorkerHandShake } from "../message";
+import { Project } from "../project/Project";
+import { ProjectEndpoint } from "../types";
 
 declare let self: ServiceWorkerGlobalScope;
 
