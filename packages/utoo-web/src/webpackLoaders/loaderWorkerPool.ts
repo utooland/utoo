@@ -68,7 +68,7 @@ export const runLoaderWorkerPool = async (
             threadId: workerId,
           },
           loaderAssets: {
-            importMaps: loadersImportMap,
+            importMaps: loadersImportMap ?? {},
             entrypoint: finalFilename,
           },
         } as LoaderRunnerMeta,
