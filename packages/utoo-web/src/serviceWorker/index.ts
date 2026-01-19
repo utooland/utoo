@@ -47,10 +47,7 @@ async function waitForHandshake(requestUrl: string): Promise<void> {
   if (_handshakeCompleted) return;
 
   const startTime = Date.now();
-  let warningCount = 0;
-
   const warningTimer = setInterval(() => {
-    warningCount++;
     const elapsed = Date.now() - startTime;
     console.warn(
       `[ServiceWorker] Still waiting for handshake... (${elapsed}ms elapsed, request: ${requestUrl})`,
