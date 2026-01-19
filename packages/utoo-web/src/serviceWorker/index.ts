@@ -1,13 +1,20 @@
-import { Project } from "./project/Project";
-import { ProjectEndpoint } from "./types";
-import { ServiceWorkerHandShake } from "./utils/message";
+import { ServiceWorkerHandShake } from "../message";
+import { Project } from "../project/Project";
+import { ProjectEndpoint } from "../types";
 
 declare let self: ServiceWorkerGlobalScope;
 
+const HANDSHAKE_TIMEOUT = 10000; // 10 seconds
+const HANDSHAKE_WARNING_INTERVAL = 3000; // 3 seconds
+
 let _resolve: () => void;
+let _handshakeCompleted = false;
 
 let _promise: Promise<void> = new Promise((resolve) => {
-  _resolve = resolve;
+  _resolve = () => {
+    _handshakeCompleted = true;
+    resolve();
+  };
 });
 
 let _projectEndpoint: ProjectEndpoint;
@@ -26,13 +33,45 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("message", (event) => {
   if (event.data && event.data[ServiceWorkerHandShake] === true) {
+    console.log("[ServiceWorker] Handshake message received");
     _projectEndpoint = Project.fork(
       new MessageChannel(),
       event.source as Client,
     );
     _resolve();
+    console.log("[ServiceWorker] Handshake completed, ProjectEndpoint ready");
   }
 });
+
+async function waitForHandshake(requestUrl: string): Promise<void> {
+  if (_handshakeCompleted) return;
+
+  const startTime = Date.now();
+  const warningTimer = setInterval(() => {
+    const elapsed = Date.now() - startTime;
+    console.warn(
+      `[ServiceWorker] Still waiting for handshake... (${elapsed}ms elapsed, request: ${requestUrl})`,
+    );
+  }, HANDSHAKE_WARNING_INTERVAL);
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => {
+      reject(
+        new Error(
+          `[ServiceWorker] Handshake timeout after ${HANDSHAKE_TIMEOUT}ms. ` +
+            `Make sure the main thread calls installServiceWorker() and sends the handshake message. ` +
+            `Request: ${requestUrl}`,
+        ),
+      );
+    }, HANDSHAKE_TIMEOUT);
+  });
+
+  try {
+    await Promise.race([_promise, timeoutPromise]);
+  } finally {
+    clearInterval(warningTimer);
+  }
+}
 
 self.addEventListener("fetch", (event: FetchEvent) => {
   let { url: urlStr } = event.request;
@@ -41,7 +80,15 @@ self.addEventListener("fetch", (event: FetchEvent) => {
     if (url.pathname.startsWith(_serviceWorkerScope)) {
       event.respondWith(
         (async () => {
-          await _promise;
+          try {
+            await waitForHandshake(urlStr);
+          } catch (e) {
+            console.error((e as Error).message);
+            return new Response((e as Error).message, {
+              status: 503,
+              statusText: "Service Unavailable",
+            });
+          }
           const relativePathToCwd =
             (_targetDirToCwd ?? ".") +
             url.pathname.replace(_serviceWorkerScope, "");

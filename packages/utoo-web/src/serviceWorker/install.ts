@@ -1,4 +1,4 @@
-import { ServiceWorkerHandShake } from "./message";
+import { ServiceWorkerHandShake } from "../message";
 
 export async function installServiceWorker(
   url: string,

@@ -600,19 +600,12 @@ impl Project {
         // Get watched ignored paths from configuration
         let watched_ignored = self.watch.ignored.clone();
 
-        if denied_paths.is_empty() && watched_ignored.is_empty() {
-            Ok(DiskFileSystem::new(
-                PROJECT_FILESYSTEM_NAME.into(),
-                self.root_path.clone(),
-            ))
-        } else {
-            Ok(DiskFileSystem::new_with_watched_ignored(
-                PROJECT_FILESYSTEM_NAME.into(),
-                self.root_path.clone(),
-                denied_paths,
-                watched_ignored,
-            ))
-        }
+        Ok(DiskFileSystem::new_with_watched_ignored(
+            PROJECT_FILESYSTEM_NAME.into(),
+            self.root_path.clone(),
+            denied_paths,
+            watched_ignored,
+        ))
     }
 
     #[turbo_tasks::function]
