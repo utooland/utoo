@@ -1,5 +1,5 @@
 [workspace]
-exclude = ["crates/runtime", "next.js"]
+exclude = ["next.js"]
 members = [
   "crates/pack-api",
   "crates/pack-cli",
