@@ -318,6 +318,14 @@ pub async fn init_pack_project(dev_mode: bool) -> Result<()> {
         "production"
     });
 
+    // Set devServer.hot for HMR in dev mode
+    if dev_mode {
+        if config_json.get("devServer").is_none() {
+            config_json["devServer"] = serde_json::json!({});
+        }
+        config_json["devServer"]["hot"] = serde_json::json!(true);
+    }
+
     let config: RcStr = serde_json::to_string(&config_json)
         .unwrap_or("{}".to_string())
         .into();
