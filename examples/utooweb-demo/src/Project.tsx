@@ -47,6 +47,25 @@ const Project = () => {
 
   const previewRef = React.useRef<{ reload: () => void }>(null);
 
+  // HMR iframe connection handler - access hmrServer directly here to avoid passing project to child
+  const handleConnectHmrIframe = React.useCallback(
+    (iframe: HTMLIFrameElement) => {
+      if (!project) return null;
+      // Access hmrServer directly in the parent component
+      const hmrServer = (
+        project as unknown as {
+          hmrServer?: {
+            connectIframe: (
+              iframe: HTMLIFrameElement,
+            ) => { close: () => void } | null;
+          };
+        }
+      ).hmrServer;
+      return hmrServer?.connectIframe(iframe) ?? null;
+    },
+    [project],
+  );
+
   const {
     isInstalling,
     isUpdating,
@@ -339,7 +358,11 @@ const Project = () => {
         style={{ width: "35%", minWidth: "320px" }}
         contentStyle={{ padding: "1rem" }}
       >
-        <Preview ref={previewRef} url={previewUrl} project={project} />
+        <Preview
+          ref={previewRef}
+          url={previewUrl}
+          onIframeReady={handleConnectHmrIframe}
+        />
       </Panel>
     </div>
   );
