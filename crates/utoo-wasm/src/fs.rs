@@ -11,18 +11,15 @@ use utoo_ruborist::service::Glob;
 use wasm_bindgen::prelude::*;
 
 use crate::errors::to_js_error;
-use crate::tokio_runtime::TOKIO_RUNTIME;
+use crate::tokio_runtime::runtime;
 
 fn block_on<T>(fut: impl std::future::Future<Output = T> + Send + 'static) -> Result<T, JsError>
 where
     T: Send + 'static,
 {
     let (sender, receiver) = oneshot::channel();
-    let rt = TOKIO_RUNTIME
-        .get()
-        .ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
 
-    rt.spawn(async move {
+    runtime().spawn(async move {
         let _ = sender.send(fut.await);
     });
 

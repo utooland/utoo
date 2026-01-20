@@ -30,9 +30,9 @@ export const useDev = (
   const [error, setError] = useState("");
   const [buildCount, setBuildCount] = useState(0);
 
-  // Track if we've done initial build
-  const initialBuildDone = useRef(false);
+  // Track if we've started dev mode
   const isStarting = useRef(false);
+  const buildStartTime = useRef<number>(0);
 
   // Get HMR server if available
   const getHmrServer = useCallback((): HmrServerLike | undefined => {
@@ -76,42 +76,7 @@ export const useDev = (
     }
   }, [project, fileTree, handleDirectoryExpand, onBuildComplete]);
 
-  // Single build function
-  const runBuild = useCallback(async (): Promise<boolean> => {
-    if (!project) return false;
-
-    const hmrServer = getHmrServer();
-    setIsBuilding(true);
-    hmrServer?.sendBuilding();
-
-    try {
-      const start = performance.now();
-      await project.dev();
-      const duration = Math.round(performance.now() - start);
-
-      console.log(
-        `%cDev:%c Built in ${duration}ms`,
-        "color: blue;",
-        "color: green",
-      );
-
-      hmrServer?.sendBuilt();
-      setBuildCount((c) => c + 1);
-
-      await processBuildOutput();
-
-      return true;
-    } catch (e: any) {
-      console.error("Build failed:", e);
-      setError(`Build failed: ${e.message || JSON.stringify(e)}`);
-      hmrServer?.sendBuilt([{ message: e.message || String(e) }]);
-      return false;
-    } finally {
-      setIsBuilding(false);
-    }
-  }, [project, getHmrServer, processBuildOutput]);
-
-  // Start dev mode
+  // Start dev mode - calls project.dev() with an onUpdate callback
   const startDev = useCallback(async () => {
     if (!project || isDevMode || isStarting.current) return;
 
@@ -125,37 +90,72 @@ export const useDev = (
         "color: gray",
       );
 
-      // Do initial build
-      const success = await runBuild();
-      if (success) {
-        initialBuildDone.current = true;
-        setIsDevMode(true);
+      const hmrServer = getHmrServer();
+
+      // Start dev mode with onUpdate callback
+      // This will trigger initial build and watch for file changes
+      buildStartTime.current = performance.now();
+      setIsBuilding(true);
+      hmrServer?.sendBuilding();
+
+      project.dev((result) => {
+        const duration = Math.round(performance.now() - buildStartTime.current);
+        buildStartTime.current = performance.now();
+
         console.log(
-          "%cDev:%c Dev mode started. Edit files and click rebuild, or implement file watching.",
+          `%cDev:%c Built in ${duration}ms`,
           "color: blue;",
           "color: green",
         );
-      }
+
+        setIsBuilding(false);
+        setBuildCount((c) => c + 1);
+
+        if (result.issues && result.issues.length > 0) {
+          const errorIssues = result.issues.filter(
+            (i: any) => i.severity === "error",
+          );
+          if (errorIssues.length > 0) {
+            hmrServer?.sendBuilt(
+              errorIssues.map((i: any) => ({ message: i.title })),
+            );
+          } else {
+            hmrServer?.sendBuilt();
+          }
+        } else {
+          hmrServer?.sendBuilt();
+        }
+
+        // Process build output
+        processBuildOutput();
+
+        // Mark dev mode as active after first build
+        if (!isDevMode) {
+          setIsDevMode(true);
+          console.log(
+            "%cDev:%c Dev mode started. Watching for file changes...",
+            "color: blue;",
+            "color: green",
+          );
+        }
+
+        // Signal next build is starting
+        setIsBuilding(true);
+        hmrServer?.sendBuilding();
+      });
     } catch (e: any) {
       console.error("Failed to start dev mode:", e);
       setError(`Failed to start dev mode: ${e.message}`);
-    } finally {
       isStarting.current = false;
     }
-  }, [project, isDevMode, runBuild]);
+  }, [project, isDevMode, getHmrServer, processBuildOutput]);
 
-  // Stop dev mode
+  // Stop dev mode (note: currently no way to stop the subscription)
   const stopDev = useCallback(() => {
     setIsDevMode(false);
-    initialBuildDone.current = false;
+    setIsBuilding(false);
     console.log("%cDev:%c Dev mode stopped", "color: blue;", "color: gray");
   }, []);
-
-  // Rebuild (manual trigger for incremental builds)
-  const rebuild = useCallback(async () => {
-    if (!project || !isDevMode) return;
-    await runBuild();
-  }, [project, isDevMode, runBuild]);
 
   // Auto start if enabled
   useEffect(() => {
@@ -173,11 +173,9 @@ export const useDev = (
     error,
     /** Number of successful builds */
     buildCount,
-    /** Start dev mode (initial build) */
+    /** Start dev mode (initial build + file watching) */
     startDev,
     /** Stop dev mode */
     stopDev,
-    /** Trigger a rebuild */
-    rebuild,
   };
 };

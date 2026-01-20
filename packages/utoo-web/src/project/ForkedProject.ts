@@ -6,6 +6,7 @@ import {
   ProjectEndpoint,
   RawStats,
   Stats,
+  UpdateMessage,
 } from "../types";
 
 export class ForkedProject implements ProjectEndpoint {
@@ -32,8 +33,22 @@ export class ForkedProject implements ProjectEndpoint {
     return await this.endpoint.build();
   }
 
-  public async dev() {
-    return await this.endpoint.dev();
+  public dev(onUpdate?: (result: any) => void): void {
+    this.endpoint.dev(onUpdate ? comlink.proxy(onUpdate) : undefined);
+  }
+
+  public hmrSubscribe(
+    identifier: string,
+    callback: (update: unknown) => void,
+  ): void {
+    this.endpoint.hmrSubscribe(identifier, comlink.proxy(callback));
+  }
+
+  public updateInfoSubscribe(
+    aggregationMs: number,
+    callback: (message: UpdateMessage) => void,
+  ): void {
+    this.endpoint.updateInfoSubscribe(aggregationMs, comlink.proxy(callback));
   }
 
   public async readFile(path: string, encoding?: "utf8") {

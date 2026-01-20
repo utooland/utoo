@@ -7,9 +7,16 @@ use std::{
     time::Duration,
 };
 
-use tokio::runtime;
+use tokio::runtime::{self, Runtime};
 
-pub static TOKIO_RUNTIME: OnceLock<runtime::Runtime> = OnceLock::new();
+pub static TOKIO_RUNTIME: OnceLock<Runtime> = OnceLock::new();
+
+/// Get the tokio runtime, panics if not initialized.
+pub fn runtime() -> &'static Runtime {
+    TOKIO_RUNTIME
+        .get()
+        .expect("tokio runtime not initialized, call init_tokio_runtime first")
+}
 
 pub fn init_tokio_runtime(worker_url: String) {
     TOKIO_RUNTIME.get_or_init(|| {

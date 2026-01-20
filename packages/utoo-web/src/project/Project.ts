@@ -16,6 +16,7 @@ import {
   ServiceWorkerOptions,
   Stats,
 } from "../types";
+import { UpdateMessage } from "../hmr/types";
 import { ForkedProject } from "./ForkedProject";
 
 let ProjectWorker: Worker;
@@ -30,7 +31,7 @@ export class Project implements ProjectEndpoint {
   public readonly serviceWorkerOptions?: ServiceWorkerOptions;
 
   /** HMR server for managing hot module replacement with preview iframes */
-  public readonly hmrServer: HmrServer;
+  private hmrServer?: HmrServer;
 
   private remote: comlink.Remote<
     ProjectEndpoint & {
@@ -53,7 +54,6 @@ export class Project implements ProjectEndpoint {
 
     this.cwd = cwd;
     this.serviceWorkerOptions = serviceWorker;
-    this.hmrServer = new HmrServer();
 
     const { port1, port2 } = new MessageChannel();
 
@@ -127,11 +127,40 @@ export class Project implements ProjectEndpoint {
     return res;
   }
 
-  public async dev(): Promise<BuildOutput> {
-    await this.#mount;
-    const res = await this.remote.dev();
-    handleIssues(res.issues, false, false);
-    return res;
+  public dev(onUpdate?: (result: BuildOutput) => void): void {
+    // Create HmrServer lazily on first dev() call
+    if (!this.hmrServer) {
+      this.hmrServer = new HmrServer({
+        onSubscribe: (path, client) => {
+          this.hmrSubscribe(path, (update) => {
+            this.hmrServer!.sendUpdate(path, update as any);
+          });
+        },
+      });
+    }
+
+    this.remote.dev(
+      onUpdate
+        ? comlink.proxy((result: BuildOutput) => {
+            handleIssues(result.issues, false, false);
+            onUpdate(result);
+          })
+        : undefined,
+    );
+  }
+
+  public hmrSubscribe(
+    identifier: string,
+    callback: (update: unknown) => void,
+  ): void {
+    this.remote.hmrSubscribe(identifier, comlink.proxy(callback));
+  }
+
+  public updateInfoSubscribe(
+    aggregationMs: number,
+    callback: (message: UpdateMessage) => void,
+  ): void {
+    this.remote.updateInfoSubscribe(aggregationMs, comlink.proxy(callback));
   }
 
   public async readFile(path: string, encoding?: "utf8") {
@@ -201,15 +230,19 @@ export class Project implements ProjectEndpoint {
 
   /**
    * Connect an iframe to the HMR server for hot module replacement.
+   * Only works after dev() has been called.
    *
    * @param iframe The iframe element to connect
    * @param origin Optional origin for postMessage (default: "*")
-   * @returns The HMR client instance, or null if connection failed
+   * @returns The HMR client instance, or null if connection failed or dev() not called
    */
   public connectHmrIframe(
     iframe: HTMLIFrameElement,
     origin?: string,
   ): HmrClient | null {
+    if (!this.hmrServer) {
+      return null;
+    }
     return this.hmrServer.connectIframe(iframe, origin);
   }
 

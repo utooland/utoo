@@ -94,6 +94,16 @@ export class Project {
     static readonly cwd: string;
 }
 
+/**
+ * A root task handle that keeps the turbo-tasks subscription alive.
+ * This must be held by JS to keep the subscription active.
+ */
+export class WasmRootTask {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+}
+
 export class WasmTaskMessage {
     private constructor();
     free(): void;
@@ -125,9 +135,24 @@ export class WebWorkerTermination {
     workerId: number;
 }
 
+/**
+ * Subscribe to entrypoints changes.
+ * This will watch for file changes and automatically rebuild, calling the callback with results.
+ * Should be used for dev mode instead of manually calling build after file saves.
+ * Returns a WasmRootTask that must be held by JS to keep the subscription active.
+ */
+export function entrypointsSubscribe(callback: Function): Promise<WasmRootTask>;
+
 export function getWasmMemory(): any;
 
 export function getWasmModule(): any;
+
+/**
+ * Subscribe to HMR events for a specific identifier.
+ * The callback will be called with update data whenever changes are detected.
+ * Returns a function to unsubscribe.
+ */
+export function hmrSubscribe(identifier: string, callback: Function): void;
 
 export function initLogFilter(filter: string): void;
 
@@ -140,11 +165,24 @@ export function registerWorkerScheduler(creator: Function, terminator: Function)
 export function sendTaskMessage(message: any): Promise<void>;
 
 /**
+ * Subscribe to compilation lifecycle events.
+ * Emits "start" when computation begins, "end" when idle for aggregation_ms.
+ * The callback receives { updateType: "start" | "end", value?: { duration: number, tasks: number } }
+ */
+export function updateInfoSubscribe(aggregation_ms: number, callback: Function): void;
+
+/**
  * Entry point for web workers
  */
 export function wasm_thread_entry_point(ptr: number): void;
 
 export function workerCreated(worker_id: number): void;
+
+/**
+ * Write all entrypoints to disk.
+ * Should be called after receiving entrypoints from entrypointsSubscribe callback.
+ */
+export function writeAllToDisk(callback: Function): void;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -194,8 +232,13 @@ export interface InitOutput {
     readonly project_install: (a: number, b: number, c: number) => any;
     readonly project_setCwd: (a: number, b: number) => void;
     readonly project_sigMd5: (a: any) => any;
+    readonly __wbg_wasmroottask_free: (a: number, b: number) => void;
+    readonly entrypointsSubscribe: (a: any) => any;
+    readonly hmrSubscribe: (a: number, b: number, c: any) => void;
     readonly registerWorkerScheduler: (a: any, b: any) => void;
+    readonly updateInfoSubscribe: (a: number, b: any) => void;
     readonly workerCreated: (a: number) => void;
+    readonly writeAllToDisk: (a: any) => void;
     readonly rust_mi_get_default_heap: () => number;
     readonly rust_mi_get_thread_id: () => number;
     readonly rust_mi_set_default_heap: (a: number) => void;
@@ -220,17 +263,17 @@ export interface InitOutput {
     readonly wasmtaskmessage_data: (a: number) => any;
     readonly __wbg_createsyncaccesshandleoptions_free: (a: number, b: number) => void;
     readonly wasm_thread_entry_point: (a: number) => void;
+    readonly wasm_bindgen__closure__destroy__hcea912784bd75060: (a: number, b: number) => void;
     readonly wasm_bindgen__closure__destroy__hdc0c9a5abebea22a: (a: number, b: number) => void;
     readonly wasm_bindgen__closure__destroy__h00341c46fa27177b: (a: number, b: number) => void;
     readonly wasm_bindgen__closure__destroy__h391e6789779e56da: (a: number, b: number) => void;
     readonly wasm_bindgen__closure__destroy__h96856d441dbabdfc: (a: number, b: number) => void;
     readonly wasm_bindgen__closure__destroy__hcd544267e9a8b41a: (a: number, b: number) => void;
-    readonly wasm_bindgen__closure__destroy__hcea912784bd75060: (a: number, b: number) => void;
     readonly wasm_bindgen__convert__closures_____invoke__hb6c1c61344794a50: (a: number, b: number, c: any, d: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h69eaa04d23e30afb: (a: number, b: number, c: any) => void;
     readonly wasm_bindgen__convert__closures_____invoke__h1c90b71c761ed3b8: (a: number, b: number, c: any) => void;
     readonly wasm_bindgen__convert__closures_____invoke__hf447be52ec002243: (a: number, b: number, c: any) => void;
     readonly wasm_bindgen__convert__closures________invoke__h717385505976dc94: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h69eaa04d23e30afb: (a: number, b: number, c: any) => void;
     readonly wasm_bindgen__convert__closures_____invoke__hcdaa890baa3d79c0: (a: number, b: number) => void;
     readonly wasm_bindgen__convert__closures_____invoke__h3fb07518adc4b25d: (a: number, b: number) => void;
     readonly memory: WebAssembly.Memory;

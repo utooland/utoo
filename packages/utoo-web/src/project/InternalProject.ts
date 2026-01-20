@@ -8,11 +8,17 @@ import {
   RawStats,
   Stats,
 } from "../types";
+import { UpdateMessage } from "../hmr/types";
 import initWasm, {
   DirEntryType,
+  entrypointsSubscribe as wasmEntrypointsSubscribe,
+  writeAllToDisk as wasmWriteAllToDisk,
   Fs,
+  hmrSubscribe as wasmHmrSubscribe,
+  updateInfoSubscribe as wasmUpdateInfoSubscribe,
   initLogFilter,
   Project as ProjectInternal,
+  WasmRootTask,
 } from "../utoo";
 import { runLoaderWorkerPool } from "../webpackLoaders/loaderWorkerPool";
 
@@ -20,6 +26,9 @@ class InternalEndpoint implements ProjectEndpoint {
   wasmInit?: ReturnType<typeof initWasm>;
   options?: Omit<ProjectOptions, "workerUrl" | "serviceWorker">;
   loaderWorkerPoolInitialized = false;
+  
+  // Keep root task alive for the subscription to work
+  private rootTask?: WasmRootTask;
 
   // This should be called only once
   async mount(opt: Omit<ProjectOptions, "workerUrl" | "serviceWorker">) {
@@ -71,9 +80,7 @@ class InternalEndpoint implements ProjectEndpoint {
     return await ProjectInternal.build();
   }
 
-  async dev() {
-    await this.wasmInit!;
-
+  async dev(onUpdate?: (result: any) => void) {
     if (this.options?.loaderWorkerUrl && !this.loaderWorkerPoolInitialized) {
       runLoaderWorkerPool(
         this.options.cwd,
@@ -83,7 +90,14 @@ class InternalEndpoint implements ProjectEndpoint {
       this.loaderWorkerPoolInitialized = true;
     }
 
-    return await ProjectInternal.dev();
+    // Use entrypointsSubscribe which handles both initial build and watching for changes
+    // Store the root task to keep the subscription alive
+    this.rootTask = await wasmEntrypointsSubscribe((_result: any) => {
+      // Write all entrypoints to disk, then call onUpdate with the result
+      wasmWriteAllToDisk((writeResult: any) => {
+        onUpdate?.(writeResult);
+      });
+    });
   }
 
   async readFile(path: string, encoding?: "utf8") {
@@ -181,6 +195,14 @@ class InternalEndpoint implements ProjectEndpoint {
   async sigMd5(content: Uint8Array) {
     await this.wasmInit!;
     return await ProjectInternal.sigMd5(content);
+  }
+
+  hmrSubscribe(identifier: string, callback: (update: unknown) => void) {
+    wasmHmrSubscribe(identifier, callback);
+  }
+
+  updateInfoSubscribe(aggregationMs: number, callback: (message: UpdateMessage) => void) {
+    wasmUpdateInfoSubscribe(aggregationMs, callback);
   }
 }
 

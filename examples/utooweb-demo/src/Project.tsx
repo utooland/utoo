@@ -97,7 +97,6 @@ const Project = () => {
     error: devError,
     startDev,
     stopDev,
-    rebuild,
   } = useDev(project, fileTree, handleDirectoryExpand, {
     onBuildComplete: () => {
       if (previewRef.current) {
@@ -192,7 +191,7 @@ const Project = () => {
 
   const devButton = (
     <button
-      onClick={isDevMode ? rebuild : startDev}
+      onClick={isDevMode ? stopDev : startDev}
       disabled={isBuilding || !project}
       style={{
         padding: "0.25rem 0.75rem",
@@ -211,7 +210,7 @@ const Project = () => {
         marginLeft: "0.5rem",
       }}
     >
-      {isDevBuilding ? "Building..." : isDevMode ? "Rebuild" : "Dev"}
+      {isDevBuilding ? "Building..." : isDevMode ? "Watching" : "Dev"}
     </button>
   );
 
