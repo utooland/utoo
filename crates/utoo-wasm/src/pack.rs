@@ -310,7 +310,22 @@ pub async fn init_pack_project(dev_mode: bool) -> Result<()> {
     };
     let project_path: RcStr = partial_options.project_path.into();
 
-    let config = partial_options.config.unwrap_or("{}".to_string()).into();
+    // Parse config JSON and inject mode based on dev_mode
+    let config_str = partial_options.config.unwrap_or("{}".to_string());
+    let mut config_json: serde_json::Value =
+        serde_json::from_str(&config_str).unwrap_or(serde_json::json!({}));
+
+    // Set mode based on dev_mode flag
+    config_json["mode"] = serde_json::json!(if dev_mode {
+        "development"
+    } else {
+        "production"
+    });
+
+    let config: RcStr = serde_json::to_string(&config_json)
+        .unwrap_or("{}".to_string())
+        .into();
+
     let options = ProjectOptions {
         root_path: project_path.clone(),
         project_path: project_path.clone(),
@@ -326,6 +341,8 @@ pub async fn init_pack_project(dev_mode: bool) -> Result<()> {
         process_env: Default::default(),
     };
 
+    tracing::info!("[pack] ProjectOptions: {:?}", options);
+
     let rt = TOKIO_RUNTIME
         .get()
         .ok_or_else(|| anyhow::anyhow!("tokio runtime not initialized"))?;
@@ -340,9 +357,9 @@ pub async fn init_pack_project(dev_mode: bool) -> Result<()> {
     Ok(())
 }
 
-/// Run build with the current pack project.
+/// Run pack with the current pack project.
 /// Returns the build result as a TurbopackResult.
-pub async fn run_build() -> Result<TurbopackResult> {
+pub async fn run_pack() -> Result<TurbopackResult> {
     let pack_project = GLOBAL_PACK_PROJECT
         .read()
         .as_ref()
@@ -358,18 +375,34 @@ pub async fn run_build() -> Result<TurbopackResult> {
         .context("failed to spawn build task")?
 }
 
-/// WASM API for build/dev operations.
-/// This is the entry point called from project.rs
-pub async fn pack(
-    dev_mode: bool,
-) -> std::result::Result<wasm_bindgen::JsValue, wasm_bindgen::JsError> {
+/// WASM API for build operation.
+pub async fn build() -> std::result::Result<wasm_bindgen::JsValue, wasm_bindgen::JsError> {
     use wasm_bindgen::JsError;
 
-    init_pack_project(dev_mode)
+    init_pack_project(false)
         .await
         .map_err(|e| JsError::new(&PrettyPrintError(&e).to_string()))?;
 
-    run_build().await.map_or_else(
+    run_pack().await.map_or_else(
+        |e| Err(JsError::new(&PrettyPrintError(&e).to_string())),
+        |result| {
+            let json_str =
+                serde_json::to_string(&result).map_err(|e| JsError::new(&e.to_string()))?;
+            js_sys::JSON::parse(&json_str)
+                .map_err(|e| JsError::new(&format!("Failed to parse JSON: {:?}", e)))
+        },
+    )
+}
+
+/// WASM API for dev operation.
+pub async fn dev() -> std::result::Result<wasm_bindgen::JsValue, wasm_bindgen::JsError> {
+    use wasm_bindgen::JsError;
+
+    init_pack_project(true)
+        .await
+        .map_err(|e| JsError::new(&PrettyPrintError(&e).to_string()))?;
+
+    run_pack().await.map_or_else(
         |e| Err(JsError::new(&PrettyPrintError(&e).to_string())),
         |result| {
             let json_str =

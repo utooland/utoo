@@ -85,13 +85,13 @@ impl Project {
     #[cfg(feature = "utoopack")]
     #[wasm_bindgen]
     pub async fn build() -> Result<JsValue, JsError> {
-        pack::pack(false).await
+        pack::build().await
     }
 
     #[cfg(feature = "utoopack")]
     #[wasm_bindgen]
     pub async fn dev() -> Result<JsValue, JsError> {
-        pack::pack(true).await
+        pack::dev().await
     }
 
     #[cfg(not(feature = "utoopack"))]
