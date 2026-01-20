@@ -1,4 +1,4 @@
-(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([typeof document === "object" ? document.currentScript : undefined,
+(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
 "[project]/optimization/remove_unused_imports_reexport/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 

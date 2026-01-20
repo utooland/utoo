@@ -307,6 +307,15 @@ pub struct SchemaOutputConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Copy files configuration")]
     pub copy: Option<Vec<SchemaCopyItem>>,
+
+    /// The global variable name used by the runtime for loading chunks.
+    /// This is similar to webpack's `output.chunkLoadingGlobal`.
+    /// Default: "TURBOPACK"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "The global variable name used by the runtime for loading chunks. Default: 'TURBOPACK'"
+    )]
+    pub chunk_loading_global: Option<String>,
 }
 
 /// Output type

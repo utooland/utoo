@@ -8,7 +8,7 @@ use turbo_esregex::EsRegex;
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{FxIndexMap, OperationValue, ResolvedVc, Vc};
 use turbo_tasks_env::EnvMap;
-use turbo_tasks_fs::FileSystemPath;
+use turbo_tasks_fs::{FileJsonContent, FileSystemPath};
 use turbopack::module_options::{
     ConditionItem, ConditionPath, LoaderRuleItem, WebpackRules,
     module_options_context::MdxTransformOptions,
@@ -353,6 +353,10 @@ pub struct OutputConfig {
     /// Note: This path will not appear in chunk paths or chunk data on disk,
     /// it only affects the URLs used by the browser to fetch resources.
     pub public_path: Option<RcStr>,
+    /// The global variable name used by the runtime for loading chunks.
+    /// This is similar to webpack's `output.chunkLoadingGlobal`.
+    /// Default: "TURBOPACK"
+    pub chunk_loading_global: Option<RcStr>,
 }
 
 #[turbo_tasks::value]
@@ -877,6 +881,39 @@ impl Issue for InvalidLoaderRuleConditionIssue {
     }
 }
 
+fn camel_to_snake_case(s: &str) -> String {
+    // Remove @ prefix and replace / and - with underscores
+    let cleaned = s.trim_start_matches('@').replace(['/', '-'], "_");
+
+    let mut result = String::with_capacity(cleaned.len() + 4);
+    let mut prev_was_upper = false;
+    let mut prev_was_underscore = true; // Start true to avoid leading underscore
+
+    for c in cleaned.chars() {
+        if c == '_' {
+            if !prev_was_underscore {
+                result.push('_');
+            }
+            prev_was_underscore = true;
+            prev_was_upper = false;
+        } else if c.is_uppercase() {
+            // Add underscore before uppercase if previous wasn't underscore or uppercase
+            if !prev_was_underscore && !prev_was_upper {
+                result.push('_');
+            }
+            result.push(c.to_ascii_lowercase());
+            prev_was_upper = true;
+            prev_was_underscore = false;
+        } else {
+            result.push(c);
+            prev_was_upper = false;
+            prev_was_underscore = false;
+        }
+    }
+
+    result
+}
+
 #[turbo_tasks::value_impl]
 impl Config {
     #[turbo_tasks::function]
@@ -922,6 +959,45 @@ impl Config {
     #[turbo_tasks::function]
     pub fn output(&self) -> Vc<OutputConfig> {
         self.output.clone().unwrap_or_default().cell()
+    }
+
+    // refer to: https://github.com/utooland/utoo/issues/2526
+    #[turbo_tasks::function]
+    pub async fn chunk_loading_global(
+        &self,
+        project_path: FileSystemPath,
+    ) -> Result<Vc<Option<RcStr>>> {
+        // 1. Check if user explicitly configured chunkLoadingGlobal
+        if let Some(chunk_loading_global) = self
+            .output
+            .as_ref()
+            .and_then(|o| o.chunk_loading_global.as_ref())
+        {
+            return Ok(Vc::cell(Some(
+                format!("utooChunk_{}", chunk_loading_global).into(),
+            )));
+        }
+
+        // TODO: support it when this feature is stable
+        // // 2. Check entry[].name from the first entry
+        // if let Some(entry_name) = self.entry.first().and_then(|e| e.name.as_ref()) {
+        //     let global_name = camel_to_snake_case(entry_name);
+        //     return Ok(Vc::cell(Some(global_name.into())));
+        // }
+
+        // 3. Read package.json and get name field
+        let package_json_path = project_path.join("package.json")?;
+        let package_json_content = package_json_path.read_json().await?;
+
+        if let FileJsonContent::Content(json) = &*package_json_content
+            && let Some(name) = json.get("name").and_then(|n| n.as_str())
+        {
+            let global_name = camel_to_snake_case(name);
+            return Ok(Vc::cell(Some(format!("utooChunk_{}", global_name).into())));
+        }
+
+        // 4. No name found, return None to let the runtime use its default
+        Ok(Vc::cell(None))
     }
 
     #[turbo_tasks::function]
