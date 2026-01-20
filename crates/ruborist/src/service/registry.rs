@@ -623,7 +623,7 @@ mod tests {
     #[test]
     fn test_unified_registry_builder() {
         // Default registry (npmmirror)
-        let registry = UnifiedRegistry::builder().build().unwrap();
+        let registry = UnifiedRegistry::builder().build().expect("Building default registry should succeed");
         assert!(registry.supports_semver());
         assert_eq!(registry.registry_url(), "https://registry.npmmirror.com/");
 
