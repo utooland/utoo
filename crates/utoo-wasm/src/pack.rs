@@ -6,12 +6,13 @@ use pack_api::{
     tasks::BundlerTurboTasks,
     utils::StyledStringSerialize,
 };
+use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use std::{ops::Deref, path::PathBuf, str::FromStr, sync::Arc};
 use tokio::time::Instant;
-use turbo_rcstr::RcStr;
+use turbo_rcstr::{rcstr, RcStr};
 use turbo_tasks::{OperationVc, ReadConsistency, ResolvedVc, TurboTasks};
 use turbo_tasks_backend::{
     noop_backing_storage, BackendOptions, NoopBackingStorage, TurboTasksBackend,
@@ -25,9 +26,15 @@ use turbopack_core::{
 };
 use wasm_bindgen::prelude::wasm_bindgen;
 
+use crate::fs::Fs;
+use crate::tokio_runtime::TOKIO_RUNTIME;
+
 unsafe extern "C" {
     pub fn __wasm_call_ctors();
 }
+
+/// Global pack project instance
+static GLOBAL_PACK_PROJECT: RwLock<Option<Arc<PackProject>>> = RwLock::new(None);
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq)]
 pub struct PartialProjectOptions {
@@ -265,4 +272,110 @@ pub fn register_worker_scheduler(creator: js_sys::Function, terminator: js_sys::
 #[wasm_bindgen(js_name = "workerCreated")]
 pub fn worker_created(worker_id: u32) {
     turbopack_node::worker_pool::web_worker::worker_created(worker_id);
+}
+
+/// Initialize or reinitialize the pack project with the given dev mode.
+/// This will clean up any previous turbo-tasks before creating a new project.
+pub async fn init_pack_project(dev_mode: bool) -> Result<()> {
+    // Clean up previous turbo-tasks and reset the project
+    {
+        let mut pack_project_guard = GLOBAL_PACK_PROJECT.write();
+        if let Some(old_project) = pack_project_guard.take() {
+            // Drop the write guard before stopping turbo-tasks to avoid deadlock
+            drop(pack_project_guard);
+            old_project.turbo_tasks.stop_and_wait().await;
+        }
+    }
+
+    let cwd = opfs_project::get_cwd().to_string_lossy().to_string();
+    let project_root = if cwd.starts_with('/') {
+        cwd
+    } else {
+        tokio_fs_ext::current_dir()?
+            .join(cwd)
+            .to_string_lossy()
+            .to_string()
+    };
+
+    let config_path = std::path::PathBuf::from(&project_root)
+        .join("utoopack.json")
+        .to_string_lossy()
+        .to_string();
+
+    let config = Fs::read_to_string(&config_path).await.ok();
+
+    let partial_options = PartialProjectOptions {
+        project_path: project_root,
+        config,
+    };
+    let project_path: RcStr = partial_options.project_path.into();
+
+    let config = partial_options.config.unwrap_or("{}".to_string()).into();
+    let options = ProjectOptions {
+        root_path: project_path.clone(),
+        project_path: project_path.clone(),
+        config,
+        build_id: project_path.clone(),
+        watch: WatchOptions {
+            enable: dev_mode,
+            ..Default::default()
+        },
+        define_env: Default::default(),
+        dev: dev_mode,
+        pack_path: rcstr!("./"),
+        process_env: Default::default(),
+    };
+
+    let rt = TOKIO_RUNTIME
+        .get()
+        .ok_or_else(|| anyhow::anyhow!("tokio runtime not initialized"))?;
+    let pack_context = rt
+        .spawn(PackProject::initialize(options))
+        .await
+        .context("fail to initialize pack project")??;
+
+    let mut pack_project_guard = GLOBAL_PACK_PROJECT.write();
+    *pack_project_guard = Some(Arc::new(pack_context));
+
+    Ok(())
+}
+
+/// Run build with the current pack project.
+/// Returns the build result as a TurbopackResult.
+pub async fn run_build() -> Result<TurbopackResult> {
+    let pack_project = GLOBAL_PACK_PROJECT
+        .read()
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("pack project not initialized"))?;
+
+    let rt = TOKIO_RUNTIME
+        .get()
+        .ok_or_else(|| anyhow::anyhow!("tokio runtime not initialized"))?;
+
+    rt.spawn(async move { pack_project.build().await })
+        .await
+        .context("failed to spawn build task")?
+}
+
+/// WASM API for build/dev operations.
+/// This is the entry point called from project.rs
+pub async fn pack(
+    dev_mode: bool,
+) -> std::result::Result<wasm_bindgen::JsValue, wasm_bindgen::JsError> {
+    use wasm_bindgen::JsError;
+
+    init_pack_project(dev_mode)
+        .await
+        .map_err(|e| JsError::new(&PrettyPrintError(&e).to_string()))?;
+
+    run_build().await.map_or_else(
+        |e| Err(JsError::new(&PrettyPrintError(&e).to_string())),
+        |result| {
+            let json_str =
+                serde_json::to_string(&result).map_err(|e| JsError::new(&e.to_string()))?;
+            js_sys::JSON::parse(&json_str)
+                .map_err(|e| JsError::new(&format!("Failed to parse JSON: {:?}", e)))
+        },
+    )
 }

@@ -1,4 +1,3 @@
-import fs from "fs";
 import { IncomingMessage } from "http";
 import { nanoid } from "nanoid";
 import type { Socket } from "net";

@@ -74,17 +74,11 @@ export class Project {
     static build(): Promise<any>;
     /**
      * Generate package-lock.json by resolving dependencies.
-     *
-     * # Arguments
-     * * `registry` - Optional registry URL. If None, uses npmmirror.
-     *   - "https://registry.npmmirror.com" - supports semver queries (faster)
-     *   - "https://registry.npmjs.org" - official npm registry (slower, fetches full manifest)
-     * * `concurrency` - Optional concurrency limit (defaults to 20)
      */
     static deps(registry?: string | null, concurrency?: number | null): Promise<string>;
+    static dev(): Promise<any>;
     /**
      * Create a tar.gz archive and return bytes (no file I/O)
-     * This is useful for main thread execution without OPFS access
      */
     static gzip(files: any): Promise<Uint8Array>;
     static init(thread_url: string): void;
@@ -194,6 +188,7 @@ export interface InitOutput {
     readonly project_build: () => any;
     readonly project_cwd: () => [number, number];
     readonly project_deps: (a: number, b: number, c: number) => any;
+    readonly project_dev: () => any;
     readonly project_gzip: (a: any) => any;
     readonly project_init: (a: number, b: number) => void;
     readonly project_install: (a: number, b: number, c: number) => any;

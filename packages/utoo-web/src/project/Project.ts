@@ -1,5 +1,6 @@
 import { handleIssues } from "@utoo/pack-shared";
 import * as comlink from "comlink";
+import { HmrClient, HmrServer } from "../hmr";
 import { Fork, HandShake } from "../message";
 import { installServiceWorker } from "../serviceWorker/install";
 import {
@@ -28,6 +29,9 @@ export class Project implements ProjectEndpoint {
 
   public readonly serviceWorkerOptions?: ServiceWorkerOptions;
 
+  /** HMR server for managing hot module replacement with preview iframes */
+  public readonly hmrServer: HmrServer;
+
   private remote: comlink.Remote<
     ProjectEndpoint & {
       mount: (
@@ -49,6 +53,7 @@ export class Project implements ProjectEndpoint {
 
     this.cwd = cwd;
     this.serviceWorkerOptions = serviceWorker;
+    this.hmrServer = new HmrServer();
 
     const { port1, port2 } = new MessageChannel();
 
@@ -100,17 +105,31 @@ export class Project implements ProjectEndpoint {
 
   public async deps(options?: DepsOptions) {
     await this.#mount;
-    return await this.remote.deps(options);
+    // Pass simple types to avoid comlink serialization issues
+    return await this.remote.deps({
+      registry: options?.registry ?? undefined,
+      concurrency: options?.concurrency ?? undefined,
+    });
   }
 
   public async install(packageLock: string, options?: InstallOptions) {
     await this.#mount;
-    return await this.remote.install(packageLock, options);
+    // Pass simple types to avoid comlink serialization issues
+    return await this.remote.install(packageLock, {
+      maxConcurrentDownloads: options?.maxConcurrentDownloads,
+    });
   }
 
   public async build(): Promise<BuildOutput> {
     await this.#mount;
     const res = await this.remote.build();
+    handleIssues(res.issues, false, false);
+    return res;
+  }
+
+  public async dev(): Promise<BuildOutput> {
+    await this.#mount;
+    const res = await this.remote.dev();
     handleIssues(res.issues, false, false);
     return res;
   }
@@ -178,6 +197,20 @@ export class Project implements ProjectEndpoint {
   public async sigMd5(content: Uint8Array): Promise<string> {
     await this.#mount;
     return await this.remote.sigMd5(content);
+  }
+
+  /**
+   * Connect an iframe to the HMR server for hot module replacement.
+   *
+   * @param iframe The iframe element to connect
+   * @param origin Optional origin for postMessage (default: "*")
+   * @returns The HMR client instance, or null if connection failed
+   */
+  public connectHmrIframe(
+    iframe: HTMLIFrameElement,
+    origin?: string,
+  ): HmrClient | null {
+    return this.hmrServer.connectIframe(iframe, origin);
   }
 
   public static fork(

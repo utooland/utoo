@@ -29,6 +29,7 @@ pub(crate) mod errors;
 mod fs;
 #[cfg(feature = "utoopack")]
 mod opfs_offload;
+mod pm;
 mod project;
 mod wasm_shim;
 

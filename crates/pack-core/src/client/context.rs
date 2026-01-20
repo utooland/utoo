@@ -227,9 +227,14 @@ pub async fn get_client_runtime_entries(
     }
 
     if is_development && watch && hot {
+        #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+        let hmr_bootstrap_path = rcstr!("hmr/bootstrap-messageport.ts");
+        #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+        let hmr_bootstrap_path = rcstr!("hmr/bootstrap.ts");
+
         runtime_entries.push(
             RuntimeEntry::Source(ResolvedVc::upcast(
-                FileSource::new(embed_file_path(rcstr!("hmr/bootstrap.ts")).owned().await?)
+                FileSource::new(embed_file_path(hmr_bootstrap_path).owned().await?)
                     .to_resolved()
                     .await?,
             ))

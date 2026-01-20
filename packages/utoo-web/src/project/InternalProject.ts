@@ -43,15 +43,16 @@ class InternalEndpoint implements ProjectEndpoint {
 
   async deps(options?: DepsOptions) {
     await this.wasmInit!;
-    return await ProjectInternal.deps(
-      options?.registry ?? undefined,
-      options?.concurrency ?? undefined,
-    );
+    // Ensure we pass undefined (not null) for missing values
+    const registry = options?.registry ?? undefined;
+    const concurrency = options?.concurrency ?? undefined;
+    return await ProjectInternal.deps(registry, concurrency);
   }
 
   async install(packageLock: string, options?: InstallOptions) {
     await this.wasmInit!;
-    await ProjectInternal.install(packageLock, options?.maxConcurrentDownloads);
+    const concurrency = options?.maxConcurrentDownloads ?? undefined;
+    await ProjectInternal.install(packageLock, concurrency);
     return;
   }
 
@@ -68,6 +69,21 @@ class InternalEndpoint implements ProjectEndpoint {
     }
 
     return await ProjectInternal.build();
+  }
+
+  async dev() {
+    await this.wasmInit!;
+
+    if (this.options?.loaderWorkerUrl && !this.loaderWorkerPoolInitialized) {
+      runLoaderWorkerPool(
+        this.options.cwd,
+        this.options!.loaderWorkerUrl,
+        this.options?.loadersImportMap,
+      );
+      this.loaderWorkerPoolInitialized = true;
+    }
+
+    return await ProjectInternal.dev();
   }
 
   async readFile(path: string, encoding?: "utf8") {

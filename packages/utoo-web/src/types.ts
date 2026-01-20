@@ -119,6 +119,7 @@ export interface ProjectEndpoint {
   deps: (options?: DepsOptions) => Promise<string>;
   install: (packageLock: string, options?: InstallOptions) => Promise<void>;
   build: () => Promise<BuildOutput>;
+  dev: () => Promise<BuildOutput>;
   readFile(path: string): Promise<Uint8Array>;
   readFile(path: string, encoding?: "utf8"): Promise<string>;
   writeFile(

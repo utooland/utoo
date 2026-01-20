@@ -6,6 +6,7 @@ import { MenuItem, MoreMenu } from "./components/MoreMenu";
 import { Panel } from "./components/Panel";
 import { Preview } from "./components/Preview";
 import { useBuild } from "./hooks/useBuild";
+import { useDev } from "./hooks/useDev";
 import { useFileContent } from "./hooks/useFileContent";
 import { useFileTree } from "./hooks/useFileTree";
 import { useGzip } from "./hooks/useGzip";
@@ -72,7 +73,22 @@ const Project = () => {
   };
 
   const {
-    isBuilding,
+    isDevMode,
+    isBuilding: isDevBuilding,
+    error: devError,
+    startDev,
+    stopDev,
+    rebuild,
+  } = useDev(project, fileTree, handleDirectoryExpand, {
+    onBuildComplete: () => {
+      if (previewRef.current) {
+        previewRef.current.reload();
+      }
+    },
+  });
+
+  const {
+    isBuilding: isBuildingOnce,
     handleBuild,
     error: buildError,
   } = useBuild(project, fileTree, handleDirectoryExpand, () => {
@@ -94,10 +110,13 @@ const Project = () => {
     error: uploadError,
   } = useUpload(project, refreshFileTree);
 
+  const isBuilding = isDevBuilding || isBuildingOnce;
+
   const error =
     projectError ||
     fileContentError ||
     installError ||
+    devError ||
     buildError ||
     gzipError ||
     uploadError;
@@ -140,7 +159,7 @@ const Project = () => {
         borderRadius: "0.375rem",
         border: "none",
         fontSize: "0.875rem",
-        background: isBuilding ? "#d1d5db" : "#2563eb",
+        background: isBuildingOnce ? "#d1d5db" : "#6366f1",
         color: "#fff",
         fontWeight: 500,
         cursor: isBuilding ? "not-allowed" : "pointer",
@@ -148,7 +167,32 @@ const Project = () => {
         marginLeft: "0.5rem",
       }}
     >
-      {isBuilding ? "Building..." : "Build"}
+      {isBuildingOnce ? "Building..." : "Build"}
+    </button>
+  );
+
+  const devButton = (
+    <button
+      onClick={isDevMode ? rebuild : startDev}
+      disabled={isBuilding || !project}
+      style={{
+        padding: "0.25rem 0.75rem",
+        borderRadius: "0.375rem",
+        border: "none",
+        fontSize: "0.875rem",
+        background: isDevBuilding
+          ? "#d1d5db"
+          : isDevMode
+            ? "#10b981"
+            : "#2563eb",
+        color: "#fff",
+        fontWeight: 500,
+        cursor: isBuilding ? "not-allowed" : "pointer",
+        transition: "background 0.2s",
+        marginLeft: "0.5rem",
+      }}
+    >
+      {isDevBuilding ? "Building..." : isDevMode ? "Rebuild" : "Dev"}
     </button>
   );
 
@@ -226,6 +270,7 @@ const Project = () => {
           <>
             {installButton}
             {buildButton}
+            {devButton}
             <MoreMenu items={moreMenuItems} disabled={!project} />
           </>
         }
@@ -294,7 +339,7 @@ const Project = () => {
         style={{ width: "35%", minWidth: "320px" }}
         contentStyle={{ padding: "1rem" }}
       >
-        <Preview ref={previewRef} url={previewUrl} />
+        <Preview ref={previewRef} url={previewUrl} project={project} />
       </Panel>
     </div>
   );
