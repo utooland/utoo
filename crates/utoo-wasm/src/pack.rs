@@ -277,14 +277,10 @@ pub fn worker_created(worker_id: u32) {
 /// Initialize or reinitialize the pack project with the given dev mode.
 /// This will clean up any previous turbo-tasks before creating a new project.
 pub async fn init_pack_project(dev_mode: bool) -> Result<()> {
-    // Clean up previous turbo-tasks and reset the project
+    // Take and drop the old project (don't call stop_and_wait as it causes issues in WASM)
     {
         let mut pack_project_guard = GLOBAL_PACK_PROJECT.write();
-        if let Some(old_project) = pack_project_guard.take() {
-            // Drop the write guard before stopping turbo-tasks to avoid deadlock
-            drop(pack_project_guard);
-            old_project.turbo_tasks.stop_and_wait().await;
-        }
+        let _ = pack_project_guard.take();
     }
 
     let cwd = opfs_project::get_cwd().to_string_lossy().to_string();
