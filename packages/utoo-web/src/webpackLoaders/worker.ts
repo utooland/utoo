@@ -1,4 +1,5 @@
 import initWasm, {
+  Fs,
   Project,
   recvTaskMessageInWorker,
   sendTaskMessage,
@@ -23,7 +24,7 @@ declare let self: DedicatedWorkerGlobalScope & {
     cwd: string;
     projectRoot: string;
     binding: typeof binding;
-    fs?: Project;
+    fs?: typeof Fs;
   };
 };
 
@@ -50,7 +51,7 @@ export function startLoaderWorker() {
       cwd: meta.workerData.cwd,
       projectRoot: meta.workerData.projectRoot,
       binding,
-      fs: Project as any,
+      fs: Fs,
     };
 
     self.process = {

@@ -8,5 +8,6 @@
       "name": "index"
     }
   ],
+  "nodePolyFill": true,
   "stats": true
 }

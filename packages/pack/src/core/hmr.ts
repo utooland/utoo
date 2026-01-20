@@ -14,6 +14,7 @@ import {
 } from "../utils/common";
 import { getInitialAssetsFromStats } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
+import { validateEntryPaths } from "../utils/validateEntry";
 import { projectFactory } from "./project";
 import { BundleOptions, Project, Update as TurbopackUpdate } from "./types";
 
@@ -135,7 +136,9 @@ export async function createHotReloader(
   projectPath?: string,
   rootPath?: string,
 ): Promise<HotReloaderInterface> {
-  processHtmlEntry(bundleOptions.config, projectPath || process.cwd());
+  const resolvedProjectPath = projectPath || process.cwd();
+  processHtmlEntry(bundleOptions.config, resolvedProjectPath);
+  validateEntryPaths(bundleOptions.config, resolvedProjectPath);
 
   const createProject = projectFactory();
 
