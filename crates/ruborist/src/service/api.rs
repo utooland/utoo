@@ -239,7 +239,7 @@ where
     let registry = UnifiedRegistry::builder()
         .registry(&registry_url)
         .cache(package_cache)
-        .build();
+        .build()?;
 
     tracing::debug!(
         "Using registry: {} (semver: {}, disk cache: {})",

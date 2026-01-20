@@ -19,7 +19,7 @@ pub async fn view(package_spec: &str) -> Result<()> {
     tracing::debug!("Resolved package: {name} (spec: {version_spec})");
 
     // Create registry client
-    let registry = Context::registry();
+    let registry = Context::registry()?;
 
     // Get complete package information (like npm view)
     let full_manifest = registry

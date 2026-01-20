@@ -1,5 +1,6 @@
 //! Tokio-based glob implementation for ruborist's Glob trait.
 
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 use utoo_ruborist::service::{BuildDepsOptions, Glob, UnifiedRegistry};
 
@@ -48,7 +49,7 @@ impl Context {
     }
 
     /// Create a UnifiedRegistry with standard configuration.
-    pub fn registry() -> Registry {
+    pub fn registry() -> Result<Registry> {
         UnifiedRegistry::builder()
             .registry(get_registry())
             .cache_dir(get_cache_dir())

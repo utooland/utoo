@@ -1,4 +1,5 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
@@ -188,7 +189,7 @@ static CACHE_DIR: LazyLock<ConfigValue<String>> = LazyLock::new(|| {
     ConfigValue::new("cache-dir", default_cache)
 });
 
-pub async fn set_registry(registry: Option<String>) {
+pub async fn set_registry(registry: Option<String>) -> Result<()> {
     // Priority: CLI argument > UTOO_REGISTRY env > config > default
     let final_registry = if let Some(reg) = registry {
         Some(reg)
@@ -204,7 +205,16 @@ pub async fn set_registry(registry: Option<String>) {
             .and_then(|config| config.get("registry").ok().flatten())
     };
 
+    // Normalize registry URL
+    let final_registry = if let Some(r) = final_registry {
+        let url = Url::parse(&r).context(format!("Failed to parse registry URL '{}'", r))?;
+        Some(url.to_string())
+    } else {
+        None
+    };
+
     REGISTRY.set(final_registry);
+    Ok(())
 }
 
 pub fn get_registry() -> String {

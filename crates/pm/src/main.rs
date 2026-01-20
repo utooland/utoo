@@ -302,7 +302,7 @@ async fn async_main() -> Result<()> {
     );
 
     // global registry
-    set_registry(cli.registry).await;
+    set_registry(cli.registry).await?;
 
     // set cache directory
     set_cache_dir(cli.cache_dir).await;

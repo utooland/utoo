@@ -19,7 +19,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Context, Result, anyhow};
+use reqwest::Url;
 
 /// Get current timestamp in seconds since UNIX epoch.
 /// Works on both native and WASM targets.
@@ -106,10 +107,14 @@ impl UnifiedRegistryBuilder {
     }
 
     /// Build the registry client.
-    pub fn build(self) -> UnifiedRegistry {
+    pub fn build(self) -> Result<UnifiedRegistry> {
         let registry_url = self
             .registry_url
             .unwrap_or_else(|| "https://registry.npmmirror.com".to_string());
+        // Normalize registry URL
+        let registry_url = Url::parse(&registry_url)
+            .context(format!("Invalid registry URL '{}'", registry_url))?;
+        let registry_url = registry_url.to_string();
         let supports_semver = !is_npm_registry(&registry_url);
 
         // Priority: shared cache > cache_dir > new cache
@@ -121,11 +126,11 @@ impl UnifiedRegistryBuilder {
             }
         });
 
-        UnifiedRegistry {
+        Ok(UnifiedRegistry {
             registry_url,
             cache,
             supports_semver,
-        }
+        })
     }
 }
 
@@ -618,16 +623,17 @@ mod tests {
     #[test]
     fn test_unified_registry_builder() {
         // Default registry (npmmirror)
-        let registry = UnifiedRegistry::builder().build();
+        let registry = UnifiedRegistry::builder().build().unwrap();
         assert!(registry.supports_semver());
-        assert_eq!(registry.registry_url(), "https://registry.npmmirror.com");
+        assert_eq!(registry.registry_url(), "https://registry.npmmirror.com/");
 
         // Custom registry
         let registry = UnifiedRegistry::builder()
             .registry("https://registry.npmjs.org")
-            .build();
+            .build()
+            .unwrap();
         assert!(!registry.supports_semver());
-        assert_eq!(registry.registry_url(), "https://registry.npmjs.org");
+        assert_eq!(registry.registry_url(), "https://registry.npmjs.org/");
     }
 
     #[test]
@@ -635,7 +641,8 @@ mod tests {
         let registry = UnifiedRegistry::builder()
             .registry("https://registry.npmmirror.com")
             .cache_dir(PathBuf::from("/tmp/cache"))
-            .build();
+            .build()
+            .unwrap();
         assert!(registry.supports_semver());
         assert!(registry.cache().cache_dir().is_some());
     }
@@ -647,12 +654,14 @@ mod tests {
         let registry1 = UnifiedRegistry::builder()
             .registry("https://registry.npmmirror.com")
             .cache(Arc::clone(&shared_cache))
-            .build();
+            .build()
+            .unwrap();
 
         let registry2 = UnifiedRegistry::builder()
             .registry("https://registry.npmmirror.com")
             .cache(Arc::clone(&shared_cache))
-            .build();
+            .build()
+            .unwrap();
 
         // Both registries share the same cache
         assert!(Arc::ptr_eq(&registry1.cache, &registry2.cache));
