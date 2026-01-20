@@ -1,4 +1,4 @@
-(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([typeof document === "object" ? document.currentScript : undefined,
+(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
 "[project]/node_modules/jquery/index.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
 
 module.exports = function $(selector) {
