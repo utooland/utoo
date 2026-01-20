@@ -206,12 +206,13 @@ pub async fn set_registry(registry: Option<String>) -> Result<()> {
     };
 
     // Normalize registry URL
-    let final_registry = if let Some(r) = final_registry {
-        let url = Url::parse(&r).context(format!("Failed to parse registry URL '{}'", r))?;
-        Some(url.to_string())
-    } else {
-        None
-    };
+    let final_registry = final_registry.map(|r| {
+        Url::parse(&r)
+            .map(|url| url.to_string())
+            .context(format!("Failed to parse registry URL '{}'", r))
+    })
+    .transpose()?;
+
 
     REGISTRY.set(final_registry);
     Ok(())
