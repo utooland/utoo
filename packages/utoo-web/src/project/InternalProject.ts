@@ -14,10 +14,7 @@ import initWasm, {
   Fs,
   initLogFilter,
   Project as ProjectInternal,
-  WasmRootTask,
-  entrypointsSubscribe as wasmEntrypointsSubscribe,
-  hmrSubscribe as wasmHmrSubscribe,
-  updateInfoSubscribe as wasmUpdateInfoSubscribe,
+  RootTask,
 } from "../utoo";
 import { runLoaderWorkerPool } from "../webpackLoaders/loaderWorkerPool";
 
@@ -27,9 +24,9 @@ class InternalEndpoint implements ProjectEndpoint {
   loaderWorkerPoolInitialized = false;
 
   // Keep root task alive for the subscription to work
-  private rootTask?: WasmRootTask;
+  private rootTask?: RootTask;
   // Keep HMR root tasks alive (keyed by identifier)
-  private hmrRootTasks: Map<string, WasmRootTask> = new Map();
+  private hmrRootTasks: Map<string, RootTask> = new Map();
 
   // This should be called only once
   async mount(opt: Omit<ProjectOptions, "workerUrl" | "serviceWorker">) {
@@ -91,17 +88,11 @@ class InternalEndpoint implements ProjectEndpoint {
       this.loaderWorkerPoolInitialized = true;
     }
 
-    // Use entrypointsSubscribe which handles both initial build and watching for changes.
-    // The entrypointsSubscribe now uses get_all_written_entrypoints_with_issues_operation
-    // internally, which:
-    // 1. Reads all source files (registering them as dependencies)
-    // 2. Writes all output files to disk
-    // 3. Gets re-triggered automatically when source files change
-    // So we don't need to call writeAllToDisk separately anymore.
-    // Store the root task to keep the subscription alive
-    this.rootTask = await wasmEntrypointsSubscribe((result: any) => {
-      onUpdate?.(result);
-    });
+    this.rootTask = await ProjectInternal.entrypointsSubscribe(
+      (result: any) => {
+        onUpdate?.(result);
+      },
+    );
   }
 
   async readFile(path: string, encoding?: "utf8") {
@@ -202,7 +193,7 @@ class InternalEndpoint implements ProjectEndpoint {
   }
 
   async hmrSubscribe(identifier: string, callback: (update: unknown) => void) {
-    const rootTask = await wasmHmrSubscribe(identifier, callback);
+    const rootTask = await ProjectInternal.hmrEvents(identifier, callback);
     this.hmrRootTasks.set(identifier, rootTask);
   }
 
@@ -210,7 +201,7 @@ class InternalEndpoint implements ProjectEndpoint {
     aggregationMs: number,
     callback: (message: UpdateMessage) => void,
   ) {
-    wasmUpdateInfoSubscribe(aggregationMs, callback);
+    ProjectInternal.updateInfoSubscribe(aggregationMs, callback);
   }
 }
 

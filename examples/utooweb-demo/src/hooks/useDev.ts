@@ -99,14 +99,11 @@ export const useDev = (
       hmrServer?.sendBuilding();
 
       project.dev((result) => {
+        // Note: Accurate build duration should be obtained from updateInfoSubscribe
+        // The timing here is only accurate for the first build
         const duration = Math.round(performance.now() - buildStartTime.current);
-        buildStartTime.current = performance.now();
 
-        console.log(
-          `%cDev:%c Built in ${duration}ms`,
-          "color: blue;",
-          "color: green",
-        );
+        console.log(`%cDev:%c Build completed`, "color: blue;", "color: green");
 
         setIsBuilding(false);
         setBuildCount((c) => c + 1);

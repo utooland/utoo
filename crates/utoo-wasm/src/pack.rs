@@ -418,8 +418,7 @@ pub async fn build() -> std::result::Result<JsValue, wasm_bindgen::JsError> {
 /// This will watch for file changes and automatically rebuild, calling the callback with results.
 /// Should be used for dev mode instead of manually calling build after file saves.
 /// Returns a RootTask that must be held by JS to keep the subscription active.
-#[wasm_bindgen(js_name = "entrypointsSubscribe")]
-pub async fn entrypoints_subscribe(
+pub async fn project_entrypoints_subscribe(
     callback: js_sys::Function,
 ) -> Result<RootTask, wasm_bindgen::JsError> {
     use wasm_bindgen::JsError;
@@ -438,20 +437,8 @@ pub async fn entrypoints_subscribe(
     let turbo_tasks = pack_project.turbo_tasks.clone();
     let container = pack_project.container;
 
-    // Create a tokio mpsc channel to communicate between turbo-tasks and JS
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
-    // Spawn the root task inside tokio runtime.
-    // Unlike run_once, spawn_root_task creates a persistent task that:
-    // 1. Participates in the turbo-tasks dependency tracking system
-    // 2. Gets re-executed automatically when its dependencies (file reads) are invalidated
-    // 3. Registers file dependencies via read_strongly_consistent() calls
-    //
-    // IMPORTANT: We use get_all_written_entrypoints_with_issues_operation (not get_entrypoints_with_issues_operation)
-    // because it actually resolves and writes all assets to disk, which:
-    // - Reads source files (registering them as dependencies for invalidation)
-    // - Writes output files (the purpose of dev mode)
-    // This matches how NAPI's entrypointsSubscription + writeToDisk() pattern works.
     let turbo_tasks_clone = turbo_tasks.clone();
     let task_id = runtime()
         .spawn(async move {
@@ -460,8 +447,6 @@ pub async fn entrypoints_subscribe(
                 async move {
                     tracing::debug!("entrypointsSubscribe root task executing");
 
-                    // Get and write all entrypoints - this reads source files (registering dependencies)
-                    // and writes output to disk. When source files change, this root task will be re-executed.
                     let entrypoints_with_issues_op =
                         get_all_written_entrypoints_with_issues_operation(container);
                     let EntrypointsWithIssues {
@@ -513,8 +498,7 @@ pub async fn entrypoints_subscribe(
 
 /// Write all entrypoints to disk.
 /// Should be called after receiving entrypoints from entrypointsSubscribe callback.
-#[wasm_bindgen(js_name = "writeAllToDisk")]
-pub fn write_all_to_disk(callback: js_sys::Function) {
+pub fn project_write_all_to_disk(callback: js_sys::Function) {
     wasm_bindgen_futures::spawn_local(async move {
         let pack_project = match GLOBAL_PACK_PROJECT.read().as_ref().cloned() {
             Some(p) => p,
@@ -578,16 +562,7 @@ pub fn write_all_to_disk(callback: js_sys::Function) {
     });
 }
 
-/// Subscribe to HMR events for a specific identifier.
-/// The callback will be called with update data whenever changes are detected.
-/// This uses spawn_root_task for proper dependency tracking, so it will be
-/// re-executed when the identifier's dependencies change.
-/// Returns a RootTask that must be held by JS to keep the subscription active.
-///
-/// Matches NAPI signature: project_hmr_events(project, identifier, func) -> RootTask
-/// Callback receives: { result: ClientUpdateInstruction, issues: Issue[], diagnostics: Diagnostic[] }
-#[wasm_bindgen(js_name = "hmrSubscribe")]
-pub async fn hmr_subscribe(
+pub async fn project_hmr_events(
     identifier: String,
     callback: js_sys::Function,
 ) -> Result<RootTask, wasm_bindgen::JsError> {
@@ -654,16 +629,10 @@ pub async fn hmr_subscribe(
                         let issues_json: Vec<_> =
                             issues.iter().map(|issue| Issue::from(&**issue)).collect();
 
-                        // Convert diagnostics to JSON
                         let diagnostics_json: Vec<_> =
                             diagnostics.iter().map(|d| Diagnostic::from(d)).collect();
 
-                        // Build ClientUpdateInstruction (matching NAPI format)
-                        // resource: { path, headers? }
-                        // type: "restart" | "partial" | "issues" | "notFound"
-                        // instruction?: Value (for partial)
-                        // issues: Issue[]
-                        let result_json = match update.as_ref() {
+                        let result_json = match &**update {
                             Update::Missing => serde_json::json!({
                                 "type": "notFound",
                                 "resource": { "path": identifier.to_string() },
@@ -683,14 +652,12 @@ pub async fn hmr_subscribe(
                                 serde_json::json!({
                                     "type": "partial",
                                     "resource": { "path": identifier.to_string() },
-                                    "instruction": **instruction,
+                                    "instruction": *instruction,
                                     "issues": issues_json
                                 })
                             }
                         };
 
-                        // Build TurbopackResult format: { result, issues, diagnostics }
-                        // This matches NAPI's callback format
                         let turbopack_result = serde_json::json!({
                             "result": result_json,
                             "issues": issues_json,
@@ -730,8 +697,7 @@ pub async fn hmr_subscribe(
 /// Subscribe to compilation lifecycle events.
 /// Emits "start" when computation begins, "end" when idle for aggregation_ms.
 /// The callback receives { updateType: "start" | "end", value?: { duration: number, tasks: number } }
-#[wasm_bindgen(js_name = "updateInfoSubscribe")]
-pub fn update_info_subscribe(aggregation_ms: u32, callback: js_sys::Function) {
+pub fn project_update_info_subscribe(aggregation_ms: u32, callback: js_sys::Function) {
     wasm_bindgen_futures::spawn_local(async move {
         let pack_project = match GLOBAL_PACK_PROJECT.read().as_ref().cloned() {
             Some(p) => p,

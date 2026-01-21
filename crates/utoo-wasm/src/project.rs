@@ -13,7 +13,7 @@ use crate::pm;
 use crate::tokio_runtime::init_tokio_runtime;
 
 #[cfg(feature = "utoopack")]
-use crate::pack;
+use crate::pack::{self, RootTask};
 
 static GLOBAL_THREAD_URL: RwLock<Option<String>> = RwLock::new(None);
 
@@ -88,25 +88,44 @@ impl Project {
         pack::build().await
     }
 
-    #[cfg(feature = "utoopack")]
-    #[wasm_bindgen]
-    pub async fn dev() -> Result<JsValue, JsError> {
-        pack::dev().await
-    }
-
     #[cfg(not(feature = "utoopack"))]
     #[wasm_bindgen]
     pub async fn build() -> Result<(), JsValue> {
-        Err(JsValue::from_str(
-            "Build functionality requires the 'utoopack' feature to be enabled",
-        ))
+        unimplemented!()
     }
 
-    #[cfg(not(feature = "utoopack"))]
-    #[wasm_bindgen]
-    pub async fn dev() -> Result<(), JsValue> {
-        Err(JsValue::from_str(
-            "Dev functionality requires the 'utoopack' feature to be enabled",
-        ))
+    /// Subscribe to entrypoints changes with HMR support.
+    /// This will watch for file changes and automatically rebuild.
+    /// Returns a RootTask that must be held by JS to keep the subscription active.
+    #[cfg(feature = "utoopack")]
+    #[wasm_bindgen(js_name = entrypointsSubscribe)]
+    pub async fn entrypoints_subscribe(callback: js_sys::Function) -> Result<RootTask, JsError> {
+        pack::project_entrypoints_subscribe(callback).await
+    }
+
+    /// Subscribe to HMR events for a specific identifier.
+    /// Returns a RootTask that must be held by JS to keep the subscription active.
+    #[cfg(feature = "utoopack")]
+    #[wasm_bindgen(js_name = hmrEvents)]
+    pub async fn hmr_events(
+        identifier: String,
+        callback: js_sys::Function,
+    ) -> Result<RootTask, JsError> {
+        pack::project_hmr_events(identifier, callback).await
+    }
+
+    /// Subscribe to compilation lifecycle events.
+    /// Emits "start" when computation begins, "end" when idle for aggregation_ms.
+    #[cfg(feature = "utoopack")]
+    #[wasm_bindgen(js_name = updateInfoSubscribe)]
+    pub fn update_info_subscribe(aggregation_ms: u32, callback: js_sys::Function) {
+        pack::project_update_info_subscribe(aggregation_ms, callback)
+    }
+
+    /// Write all entrypoints to disk.
+    #[cfg(feature = "utoopack")]
+    #[wasm_bindgen(js_name = writeAllToDisk)]
+    pub fn write_all_to_disk(callback: js_sys::Function) {
+        pack::project_write_all_to_disk(callback)
     }
 }

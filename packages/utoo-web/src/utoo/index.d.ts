@@ -76,11 +76,21 @@ export class Project {
      * Generate package-lock.json by resolving dependencies.
      */
     static deps(registry?: string | null, concurrency?: number | null): Promise<string>;
-    static dev(): Promise<any>;
+    /**
+     * Subscribe to entrypoints changes with HMR support.
+     * This will watch for file changes and automatically rebuild.
+     * Returns a RootTask that must be held by JS to keep the subscription active.
+     */
+    static entrypointsSubscribe(callback: Function): Promise<RootTask>;
     /**
      * Create a tar.gz archive and return bytes (no file I/O)
      */
     static gzip(files: any): Promise<Uint8Array>;
+    /**
+     * Subscribe to HMR events for a specific identifier.
+     * Returns a RootTask that must be held by JS to keep the subscription active.
+     */
+    static hmrEvents(identifier: string, callback: Function): Promise<RootTask>;
     static init(thread_url: string): void;
     /**
      * Install dependencies - downloads tgz files only, extracts on-demand when files are read
@@ -91,6 +101,15 @@ export class Project {
      * Calculate MD5 hash of byte content (async for better thread scheduling)
      */
     static sigMd5(content: Uint8Array): Promise<string>;
+    /**
+     * Subscribe to compilation lifecycle events.
+     * Emits "start" when computation begins, "end" when idle for aggregation_ms.
+     */
+    static updateInfoSubscribe(aggregation_ms: number, callback: Function): void;
+    /**
+     * Write all entrypoints to disk.
+     */
+    static writeAllToDisk(callback: Function): void;
     static readonly cwd: string;
 }
 
@@ -98,7 +117,7 @@ export class Project {
  * A root task handle that keeps the turbo-tasks subscription alive.
  * This must be held by JS to keep the subscription active.
  */
-export class WasmRootTask {
+export class RootTask {
     private constructor();
     free(): void;
     [Symbol.dispose](): void;
@@ -135,29 +154,9 @@ export class WebWorkerTermination {
     workerId: number;
 }
 
-/**
- * Subscribe to entrypoints changes.
- * This will watch for file changes and automatically rebuild, calling the callback with results.
- * Should be used for dev mode instead of manually calling build after file saves.
- * Returns a WasmRootTask that must be held by JS to keep the subscription active.
- */
-export function entrypointsSubscribe(callback: Function): Promise<WasmRootTask>;
-
 export function getWasmMemory(): any;
 
 export function getWasmModule(): any;
-
-/**
- * Subscribe to HMR events for a specific identifier.
- * The callback will be called with update data whenever changes are detected.
- * This uses spawn_root_task for proper dependency tracking, so it will be
- * re-executed when the identifier's dependencies change.
- * Returns a WasmRootTask that must be held by JS to keep the subscription active.
- *
- * Matches NAPI signature: project_hmr_events(project, identifier, func) -> RootTask
- * Callback receives: { result: ClientUpdateInstruction, issues: Issue[], diagnostics: Diagnostic[] }
- */
-export function hmrSubscribe(identifier: string, callback: Function): Promise<WasmRootTask>;
 
 export function initLogFilter(filter: string): void;
 
@@ -170,24 +169,11 @@ export function registerWorkerScheduler(creator: Function, terminator: Function)
 export function sendTaskMessage(message: any): Promise<void>;
 
 /**
- * Subscribe to compilation lifecycle events.
- * Emits "start" when computation begins, "end" when idle for aggregation_ms.
- * The callback receives { updateType: "start" | "end", value?: { duration: number, tasks: number } }
- */
-export function updateInfoSubscribe(aggregation_ms: number, callback: Function): void;
-
-/**
  * Entry point for web workers
  */
 export function wasm_thread_entry_point(ptr: number): void;
 
 export function workerCreated(worker_id: number): void;
-
-/**
- * Write all entrypoints to disk.
- * Should be called after receiving entrypoints from entrypointsSubscribe callback.
- */
-export function writeAllToDisk(callback: Function): void;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -231,19 +217,18 @@ export interface InitOutput {
     readonly project_build: () => any;
     readonly project_cwd: () => [number, number];
     readonly project_deps: (a: number, b: number, c: number) => any;
-    readonly project_dev: () => any;
+    readonly project_entrypointsSubscribe: (a: any) => any;
     readonly project_gzip: (a: any) => any;
+    readonly project_hmrEvents: (a: number, b: number, c: any) => any;
     readonly project_init: (a: number, b: number) => void;
     readonly project_install: (a: number, b: number, c: number) => any;
     readonly project_setCwd: (a: number, b: number) => void;
     readonly project_sigMd5: (a: any) => any;
-    readonly __wbg_wasmroottask_free: (a: number, b: number) => void;
-    readonly entrypointsSubscribe: (a: any) => any;
-    readonly hmrSubscribe: (a: number, b: number, c: any) => void;
+    readonly project_updateInfoSubscribe: (a: number, b: any) => void;
+    readonly project_writeAllToDisk: (a: any) => void;
+    readonly __wbg_roottask_free: (a: number, b: number) => void;
     readonly registerWorkerScheduler: (a: any, b: any) => void;
-    readonly updateInfoSubscribe: (a: number, b: any) => void;
     readonly workerCreated: (a: number) => void;
-    readonly writeAllToDisk: (a: any) => void;
     readonly rust_mi_get_default_heap: () => number;
     readonly rust_mi_get_thread_id: () => number;
     readonly rust_mi_set_default_heap: (a: number) => void;
