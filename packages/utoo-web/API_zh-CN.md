@@ -273,38 +273,51 @@ const lockFile = await project.deps({
 
 ### 开发模式与 HMR
 
-#### `project.dev(options)`
+#### `project.dev(onUpdate?)`
 
 启动开发模式，支持文件监听和热模块替换（HMR）。与 `build()` 不同，`dev()` 会持续监听文件变化并自动触发增量构建。
 
-**选项:**
+**参数:**
 
 * `onUpdate` (function, 可选): 当构建完成时的回调函数，接收构建结果（包含 issues 和 diagnostics）。
-* `onUpdateStart` (function, 可选): 当构建开始时的回调函数。
-* `onUpdateEnd` (function, 可选): 当构建结束时的回调函数，接收构建耗时和任务数。
 
 **示例:**
 
 ```typescript
-await project.dev({
-  onUpdate: (result) => {
-    console.log('构建完成', result.issues);
-  },
-  onUpdateStart: () => {
-    console.log('构建开始...');
-  },
-  onUpdateEnd: ({ duration, tasks }) => {
-    console.log(`构建完成，耗时 ${duration}ms，任务数 ${tasks}`);
-  },
+project.dev((result) => {
+  console.log('构建完成', result.issues);
 });
 ```
 
-#### `project.connectHmr(iframe)`
+#### `project.updateInfoSubscribe(aggregationMs, callback)`
 
-将预览 iframe 连接到 HMR 服务器。返回一个 `disconnect` 函数用于断开连接。
+订阅编译生命周期事件。这取代了旧版本中的 `onUpdateStart` 和 `onUpdateEnd` 钩子。
+
+**参数:**
+
+* `aggregationMs` (number): 聚合时间（毫秒）。
+* `callback` (function): 接收 `UpdateMessage` 对象的回调函数。
+
+**示例:**
+
+```typescript
+project.updateInfoSubscribe(100, (message) => {
+  if (message.updateType === "start") {
+    console.log('构建开始...');
+  } else if (message.updateType === "end") {
+    const { duration, tasks } = message.value;
+    console.log(`构建完成，耗时 ${duration}ms，任务数 ${tasks}`);
+  }
+});
+```
+
+#### `project.connectHmrIframe(iframe, origin?)`
+
+将预览 iframe 连接到 HMR 服务器。返回一个 `HmrClient` 实例。
 
 * `iframe` (HTMLIFrameElement): 预览页面的 iframe 元素。
-* 返回: `{ disconnect: () => void }` - 调用 `disconnect()` 断开 HMR 连接。
+* `origin` (string, 可选): 预览页面的源（默认为 `*`）。
+* 返回: `HmrClient | null` - HMR 客户端实例，如果尚未调用 `dev()` 则返回 `null`。调用 `client.close()` 断开 HMR 连接。
 
 **示例:**
 
@@ -314,10 +327,10 @@ const iframeRef = useRef<HTMLIFrameElement>(null);
 useEffect(() => {
   if (!iframeRef.current) return;
   
-  const { disconnect } = project.connectHmr(iframeRef.current);
+  const client = project.connectHmrIframe(iframeRef.current);
   
   return () => {
-    disconnect();
+    client?.close();
   };
 }, [project]);
 ```
@@ -327,7 +340,7 @@ useEffect(() => {
 HMR 通过 MessagePort 实现主线程与预览 iframe 之间的通信：
 
 1. 调用 `project.dev()` 启动开发模式，这会启动文件监听和 HMR 服务器
-2. 调用 `project.connectHmr(iframe)` 将 iframe 连接到 HMR 服务器
+2. 调用 `project.connectHmrIframe(iframe)` 将 iframe 连接到 HMR 服务器
 3. 当文件变化时，Turbopack 自动触发增量构建
 4. HMR 更新通过 MessagePort 发送到 iframe
 5. iframe 中的 HMR 客户端应用更新，无需刷新页面

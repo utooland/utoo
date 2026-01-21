@@ -273,38 +273,51 @@ Triggers the build process in the thread worker. It reads the build configuratio
 
 ### Development Mode & HMR
 
-#### `project.dev(options)`
+#### `project.dev(onUpdate?)`
 
 Starts development mode with file watching and Hot Module Replacement (HMR). Unlike `build()`, `dev()` continuously watches for file changes and automatically triggers incremental builds.
 
-**Options:**
+**Arguments:**
 
 * `onUpdate` (function, optional): Callback when a build completes, receives the build result (including issues and diagnostics).
-* `onUpdateStart` (function, optional): Callback when a build starts.
-* `onUpdateEnd` (function, optional): Callback when a build ends, receives duration and task count.
 
 **Example:**
 
 ```typescript
-await project.dev({
-  onUpdate: (result) => {
-    console.log('Build completed', result.issues);
-  },
-  onUpdateStart: () => {
-    console.log('Build starting...');
-  },
-  onUpdateEnd: ({ duration, tasks }) => {
-    console.log(`Build completed in ${duration}ms with ${tasks} tasks`);
-  },
+project.dev((result) => {
+  console.log('Build completed', result.issues);
 });
 ```
 
-#### `project.connectHmr(iframe)`
+#### `project.updateInfoSubscribe(aggregationMs, callback)`
 
-Connects a preview iframe to the HMR server. Returns a `disconnect` function to close the connection.
+Subscribe to compilation lifecycle events. This replaces the old `onUpdateStart` and `onUpdateEnd` hooks.
+
+**Arguments:**
+
+* `aggregationMs` (number): Aggregation time in milliseconds.
+* `callback` (function): Receives an `UpdateMessage` object.
+
+**Example:**
+
+```typescript
+project.updateInfoSubscribe(100, (message) => {
+  if (message.updateType === "start") {
+    console.log('Build starting...');
+  } else if (message.updateType === "end") {
+    const { duration, tasks } = message.value;
+    console.log(`Build completed in ${duration}ms with ${tasks} tasks`);
+  }
+});
+```
+
+#### `project.connectHmrIframe(iframe, origin?)`
+
+Connects a preview iframe to the HMR server. Returns an `HmrClient` instance.
 
 * `iframe` (HTMLIFrameElement): The preview page's iframe element.
-* Returns: `{ disconnect: () => void }` - Call `disconnect()` to close the HMR connection.
+* `origin` (string, optional): The origin of the preview page (defaults to `*`).
+* Returns: `HmrClient | null` - The HMR client instance, or `null` if `dev()` has not been called. Call `client.close()` to disconnect.
 
 **Example:**
 
@@ -314,10 +327,10 @@ const iframeRef = useRef<HTMLIFrameElement>(null);
 useEffect(() => {
   if (!iframeRef.current) return;
   
-  const { disconnect } = project.connectHmr(iframeRef.current);
+  const client = project.connectHmrIframe(iframeRef.current);
   
   return () => {
-    disconnect();
+    client?.close();
   };
 }, [project]);
 ```
@@ -327,7 +340,7 @@ useEffect(() => {
 HMR uses MessagePort for communication between the main thread and the preview iframe:
 
 1. Call `project.dev()` to start development mode, which starts file watching and the HMR server
-2. Call `project.connectHmr(iframe)` to connect the iframe to the HMR server
+2. Call `project.connectHmrIframe(iframe)` to connect the iframe to the HMR server
 3. When files change, Turbopack automatically triggers incremental builds
 4. HMR updates are sent to the iframe via MessagePort
 5. The HMR client in the iframe applies updates without page refresh
