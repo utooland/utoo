@@ -1,6 +1,9 @@
+use std::sync::LazyLock;
+
 use anyhow::{Context, Result, bail};
 use bincode::{Decode, Encode};
 use either::Either;
+use regex::Regex;
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value as JsonValue;
@@ -881,37 +884,15 @@ impl Issue for InvalidLoaderRuleConditionIssue {
     }
 }
 
-fn camel_to_snake_case(s: &str) -> String {
-    // Remove @ prefix and replace / and - with underscores
-    let cleaned = s.trim_start_matches('@').replace(['/', '-'], "_");
+static IDENTIFIER_START_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^([^a-zA-Z$_])").unwrap());
+static IDENTIFIER_INVALID_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[^a-zA-Z0-9$]+").unwrap());
 
-    let mut result = String::with_capacity(cleaned.len() + 4);
-    let mut prev_was_upper = false;
-    let mut prev_was_underscore = true; // Start true to avoid leading underscore
-
-    for c in cleaned.chars() {
-        if c == '_' {
-            if !prev_was_underscore {
-                result.push('_');
-            }
-            prev_was_underscore = true;
-            prev_was_upper = false;
-        } else if c.is_uppercase() {
-            // Add underscore before uppercase if previous wasn't underscore or uppercase
-            if !prev_was_underscore && !prev_was_upper {
-                result.push('_');
-            }
-            result.push(c.to_ascii_lowercase());
-            prev_was_upper = true;
-            prev_was_underscore = false;
-        } else {
-            result.push(c);
-            prev_was_upper = false;
-            prev_was_underscore = false;
-        }
-    }
-
-    result
+// port from: https://github.com/webpack/webpack/blob/main/lib/Template.js#L104-L109
+fn to_identifier(s: &str) -> String {
+    let result = IDENTIFIER_START_RE.replace(s, "_$1");
+    IDENTIFIER_INVALID_RE.replace_all(&result, "_").into_owned()
 }
 
 #[turbo_tasks::value_impl]
@@ -981,7 +962,7 @@ impl Config {
         // TODO: support it when this feature is stable
         // // 2. Check entry[].name from the first entry
         // if let Some(entry_name) = self.entry.first().and_then(|e| e.name.as_ref()) {
-        //     let global_name = camel_to_snake_case(entry_name);
+        //     let global_name = to_identifier(entry_name);
         //     return Ok(Vc::cell(Some(global_name.into())));
         // }
 
@@ -992,7 +973,7 @@ impl Config {
         if let FileJsonContent::Content(json) = &*package_json_content
             && let Some(name) = json.get("name").and_then(|n| n.as_str())
         {
-            let global_name = camel_to_snake_case(name);
+            let global_name = to_identifier(name);
             return Ok(Vc::cell(Some(format!("utooChunk_{}", global_name).into())));
         }
 
