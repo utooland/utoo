@@ -584,7 +584,7 @@ pub async fn get_client_chunking_context(
     };
 
     let mut builder = BrowserChunkingContext::builder(
-        root_path,
+        root_path.clone(),
         output_root.clone(),
         output_root_to_root_path,
         output_root.clone(),
@@ -613,7 +613,9 @@ pub async fn get_client_chunking_context(
     .module_id_strategy(module_id_strategy.to_resolved().await?)
     .nested_async_availability(*nested_async_chunking.await?);
 
-    let output = config.output().await?;
+    if let Some(chunk_loading_global) = &*config.chunk_loading_global(root_path.clone()).await? {
+        builder = builder.chunk_loading_global(chunk_loading_global.clone());
+    }
 
     if mode.is_development() {
         builder = builder
@@ -621,6 +623,7 @@ pub async fn get_client_chunking_context(
             .source_map_source_type(SourceMapSourceType::AbsoluteFileUri)
             .dynamic_chunk_content_loading(true);
     } else {
+        let output = config.output().await?;
         let split_chunks = &config.optimization().await?.split_chunks;
 
         let (ecmascript_chunking_config, css_chunking_config) = (

@@ -1,0 +1,15 @@
+{
+    "config": {
+      "entry": [
+        {
+          "import": "input/index.js",
+          "name": "main"
+        }
+      ],
+      "output": {
+        "path": "./output",
+        "chunkLoadingGlobal": "myApp"
+      },
+      "stats": true
+    }
+  }
