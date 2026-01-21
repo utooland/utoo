@@ -1,12 +1,13 @@
 import {
+  type BuildingAction,
+  type BuiltAction,
+  type CompilationError,
+  type EntryOptions,
+  type HMR_ACTION_TYPES,
   HMR_ACTIONS_SENT_TO_BROWSER,
-} from "@utoo/pack-shared";
-import type {
-  CompilationError,
-  HMR_ACTION_TYPES,
-  ReloadAction,
-  SyncAction,
-  TurbopackConnectedAction,
+  type ReloadAction,
+  type SyncAction,
+  type TurbopackConnectedAction,
 } from "@utoo/pack-shared";
 import { IncomingMessage } from "http";
 import { nanoid } from "nanoid";
@@ -14,6 +15,7 @@ import type { Socket } from "net";
 import path from "path";
 import { Duplex } from "stream";
 import ws from "ws";
+import { BundleOptions } from "../config/types";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import {
   createDefineEnv,
@@ -25,7 +27,7 @@ import { getInitialAssetsFromStats } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
 import { validateEntryPaths } from "../utils/validateEntry";
 import { projectFactory } from "./project";
-import { BundleOptions, Project, Update as TurbopackUpdate } from "./types";
+import { Project, Update as TurbopackUpdate } from "./types";
 
 const wsServer = new ws.Server({ noServer: true });
 
@@ -121,7 +123,7 @@ export async function createHotReloader(
         stats:
           Boolean(process.env.ANALYZE) ||
           bundleOptions.config.stats ||
-          bundleOptions.config.entry.some((e) => !!e.html),
+          bundleOptions.config.entry.some((e: EntryOptions) => !!e.html),
         optimization: {
           ...bundleOptions.config.optimization,
           minify: false,
@@ -259,8 +261,8 @@ export async function createHotReloader(
             ? [(bundleOptions.config as any).html]
             : []),
         ...bundleOptions.config.entry
-          .filter((e) => !!e.html)
-          .map((e) => e.html!),
+          .filter((e: EntryOptions) => !!e.html)
+          .map((e: EntryOptions) => e.html!),
       ];
 
       if (htmlConfigs.length > 0) {

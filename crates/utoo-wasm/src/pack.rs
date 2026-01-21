@@ -658,11 +658,13 @@ pub async fn project_hmr_events(
                             }
                         };
 
-                        let turbopack_result = serde_json::json!({
-                            "result": result_json,
-                            "issues": issues_json,
-                            "diagnostics": diagnostics_json
-                        });
+                        let mut turbopack_result = result_json;
+                        if let Some(obj) = turbopack_result.as_object_mut() {
+                            obj.insert(
+                                "diagnostics".to_string(),
+                                serde_json::to_value(diagnostics_json).unwrap(),
+                            );
+                        }
 
                         tracing::debug!("hmrSubscribe sending update for {}", identifier);
                         if let Ok(json_str) = serde_json::to_string(&turbopack_result) {

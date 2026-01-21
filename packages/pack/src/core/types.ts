@@ -60,8 +60,6 @@ export interface ProjectOptions extends BundleOptions {
   projectPath: string;
 }
 
-export { BundleOptions };
-
 export interface Project {
   update(options: Partial<ProjectOptions>): Promise<void>;
 

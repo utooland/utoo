@@ -1,11 +1,11 @@
-import { handleIssues } from "@utoo/pack-shared";
+import { EntryOptions, handleIssues } from "@utoo/pack-shared";
 import { spawn } from "child_process";
 import fs from "fs";
 import { nanoid } from "nanoid";
 import path from "path";
+import { BundleOptions } from "../config/types";
 import { resolveBundleOptions, WebpackConfig } from "../config/webpackCompat";
 import { projectFactory } from "../core/project";
-import { BundleOptions } from "../core/types";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import { blockStdout, createDefineEnv, getPackPath } from "../utils/common";
 import { findRootDir } from "../utils/findRoot";
@@ -62,7 +62,7 @@ async function buildInternal(
         stats:
           Boolean(process.env.ANALYZE) ||
           bundleOptions.config.stats ||
-          bundleOptions.config.entry.some((e) => !!e.html),
+          bundleOptions.config.entry.some((e: EntryOptions) => !!e.html),
       },
       projectPath: projectPath || process.cwd(),
       rootPath: rootPath || projectPath || process.cwd(),
@@ -83,7 +83,9 @@ async function buildInternal(
       : (bundleOptions.config as any).html
         ? [(bundleOptions.config as any).html]
         : []),
-    ...bundleOptions.config.entry.filter((e) => !!e.html).map((e) => e.html!),
+    ...bundleOptions.config.entry
+      .filter((e: EntryOptions) => !!e.html)
+      .map((e: EntryOptions) => e.html!),
   ];
 
   if (htmlConfigs.length > 0) {
@@ -116,7 +118,7 @@ async function buildInternal(
 }
 
 async function analyzeBundle(outputPath: string): Promise<void> {
-  const statsPath = join(outputPath, "stats.json");
+  const statsPath = path.join(outputPath, "stats.json");
 
   if (!fs.existsSync(statsPath)) {
     console.warn(
