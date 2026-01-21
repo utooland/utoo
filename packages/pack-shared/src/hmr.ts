@@ -85,32 +85,31 @@ export type TurbopackUpdate =
 // HMR Actions (Server -> Client)
 // ============================================================================
 
-export const HMR_ACTIONS_SENT_TO_BROWSER = {
-  RELOAD: "reload",
-  CLIENT_CHANGES: "clientChanges",
-  SERVER_ONLY_CHANGES: "serverOnlyChanges",
-  SYNC: "sync",
-  BUILT: "built",
-  BUILDING: "building",
-  TURBOPACK_MESSAGE: "turbopack-message",
-  TURBOPACK_CONNECTED: "turbopack-connected",
-} as const;
+export enum HMR_ACTIONS_SENT_TO_BROWSER {
+  RELOAD = "reload",
+  CLIENT_CHANGES = "clientChanges",
+  SERVER_ONLY_CHANGES = "serverOnlyChanges",
+  SYNC = "sync",
+  BUILT = "built",
+  BUILDING = "building",
+  TURBOPACK_MESSAGE = "turbopack-message",
+  TURBOPACK_CONNECTED = "turbopack-connected",
+}
 
-export type HmrActionType =
-  (typeof HMR_ACTIONS_SENT_TO_BROWSER)[keyof typeof HMR_ACTIONS_SENT_TO_BROWSER];
+export type HmrActionType = HMR_ACTIONS_SENT_TO_BROWSER;
 
 export interface TurbopackMessageAction {
-  action: typeof HMR_ACTIONS_SENT_TO_BROWSER.TURBOPACK_MESSAGE;
+  action: HMR_ACTIONS_SENT_TO_BROWSER.TURBOPACK_MESSAGE;
   data: TurbopackUpdate | TurbopackUpdate[];
 }
 
 export interface TurbopackConnectedAction {
-  action: typeof HMR_ACTIONS_SENT_TO_BROWSER.TURBOPACK_CONNECTED;
+  action: HMR_ACTIONS_SENT_TO_BROWSER.TURBOPACK_CONNECTED;
   data: { sessionId: number };
 }
 
 export interface BuildingAction {
-  action: typeof HMR_ACTIONS_SENT_TO_BROWSER.BUILDING;
+  action: HMR_ACTIONS_SENT_TO_BROWSER.BUILDING;
 }
 
 export interface CompilationError {
@@ -122,7 +121,7 @@ export interface CompilationError {
 }
 
 export interface SyncAction {
-  action: typeof HMR_ACTIONS_SENT_TO_BROWSER.SYNC;
+  action: HMR_ACTIONS_SENT_TO_BROWSER.SYNC;
   hash: string;
   errors: ReadonlyArray<CompilationError>;
   warnings: ReadonlyArray<CompilationError>;
@@ -130,7 +129,7 @@ export interface SyncAction {
 }
 
 export interface BuiltAction {
-  action: typeof HMR_ACTIONS_SENT_TO_BROWSER.BUILT;
+  action: HMR_ACTIONS_SENT_TO_BROWSER.BUILT;
   hash: string;
   errors: ReadonlyArray<CompilationError>;
   warnings: ReadonlyArray<CompilationError>;
@@ -138,7 +137,7 @@ export interface BuiltAction {
 }
 
 export interface ReloadAction {
-  action: typeof HMR_ACTIONS_SENT_TO_BROWSER.RELOAD;
+  action: HMR_ACTIONS_SENT_TO_BROWSER.RELOAD;
   data: string;
 }
 

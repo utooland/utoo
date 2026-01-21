@@ -8,11 +8,11 @@
  * - Main Thread (Project) -> HmrServer -> MessagePort -> Preview Iframe (HMR Client)
  */
 
-import {
-  type HMR_ACTION_TYPES,
-  HMR_ACTIONS_SENT_TO_BROWSER,
-  type HmrClientMessage,
-  type TurbopackUpdate,
+import { HMR_ACTIONS_SENT_TO_BROWSER } from "@utoo/pack-shared";
+import type {
+  HMR_ACTION_TYPES,
+  HmrClientMessage,
+  TurbopackUpdate,
 } from "@utoo/pack-shared";
 
 export interface HmrServerOptions {

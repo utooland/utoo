@@ -2,7 +2,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "paths": {
-      "@utoo/pack-shared": ["../pack-shared/esm/index.d.ts"]
+      "@utoo/pack-shared": ["../pack-shared"]
     }
   }
 }
