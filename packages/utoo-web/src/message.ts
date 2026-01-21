@@ -1,5 +1,22 @@
-export const HandShake = "__handshake__";
+export enum WorkerMessageType {
+  InitConnection = 0x574d0000, // "WM" in hex
+  RequestFork,
+}
 
-export const ServiceWorkerHandShake = "__service_worker_handshake__";
+/** @deprecated use WorkerMessageType.InitConnection */
+export const HandShake = WorkerMessageType.InitConnection;
+/** @deprecated use WorkerMessageType.RequestFork */
+export const Fork = WorkerMessageType.RequestFork;
 
-export const Fork = "__fork__";
+export enum SWMessageType {
+  HandShake = 0x53570000, // "SW" in hex
+  HeartbeatPing,
+  HeartbeatPong,
+}
+
+/** @deprecated use SWMessageType */
+export const ServiceWorkerHandShake = SWMessageType.HandShake;
+/** @deprecated use SWMessageType */
+export const ServiceWorkerHeartbeatPing = SWMessageType.HeartbeatPing;
+/** @deprecated use SWMessageType */
+export const ServiceWorkerHeartbeatPong = SWMessageType.HeartbeatPong;

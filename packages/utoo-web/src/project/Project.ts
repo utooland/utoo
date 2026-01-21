@@ -1,6 +1,6 @@
 import { handleIssues } from "@utoo/pack-shared";
 import * as comlink from "comlink";
-import { Fork, HandShake } from "../message";
+import { WorkerMessageType } from "../message";
 import { installServiceWorker } from "../serviceWorker/install";
 import {
   BuildOutput,
@@ -67,7 +67,7 @@ export class Project implements ProjectEndpoint {
       }
     }
 
-    ProjectWorker.postMessage(HandShake, [port2]);
+    ProjectWorker.postMessage(WorkerMessageType.InitConnection, [port2]);
 
     this.#mount ??= this.remote.mount({
       cwd,
@@ -81,8 +81,8 @@ export class Project implements ProjectEndpoint {
 
   private connectWorker(e: MessageEvent) {
     const port = e.ports[0];
-    if (e.data === Fork && !ConnectedPorts.has(port)) {
-      ProjectWorker.postMessage(HandShake, [port]);
+    if (e.data === WorkerMessageType.RequestFork && !ConnectedPorts.has(port)) {
+      ProjectWorker.postMessage(WorkerMessageType.InitConnection, [port]);
     }
   }
 
@@ -184,9 +184,12 @@ export class Project implements ProjectEndpoint {
     channel: MessageChannel,
     eventSource?: Client | DedicatedWorkerGlobalScope,
   ): ProjectEndpoint {
-    (eventSource || (self as DedicatedWorkerGlobalScope)).postMessage(Fork, {
-      transfer: [channel.port2],
-    });
+    (eventSource || (self as DedicatedWorkerGlobalScope)).postMessage(
+      WorkerMessageType.RequestFork,
+      {
+        transfer: [channel.port2],
+      },
+    );
 
     return new ForkedProject(channel.port1);
   }
