@@ -271,6 +271,67 @@ const lockFile = await project.deps({
 
 * 返回: `Promise<void>` - 当构建完成时，Promise 会解决。如果构建失败，则会拒绝。
 
+### 开发模式与 HMR
+
+#### `project.dev(options)`
+
+启动开发模式，支持文件监听和热模块替换（HMR）。与 `build()` 不同，`dev()` 会持续监听文件变化并自动触发增量构建。
+
+**选项:**
+
+* `onUpdate` (function, 可选): 当构建完成时的回调函数，接收构建结果（包含 issues 和 diagnostics）。
+* `onUpdateStart` (function, 可选): 当构建开始时的回调函数。
+* `onUpdateEnd` (function, 可选): 当构建结束时的回调函数，接收构建耗时和任务数。
+
+**示例:**
+
+```typescript
+await project.dev({
+  onUpdate: (result) => {
+    console.log('构建完成', result.issues);
+  },
+  onUpdateStart: () => {
+    console.log('构建开始...');
+  },
+  onUpdateEnd: ({ duration, tasks }) => {
+    console.log(`构建完成，耗时 ${duration}ms，任务数 ${tasks}`);
+  },
+});
+```
+
+#### `project.connectHmr(iframe)`
+
+将预览 iframe 连接到 HMR 服务器。返回一个 `disconnect` 函数用于断开连接。
+
+* `iframe` (HTMLIFrameElement): 预览页面的 iframe 元素。
+* 返回: `{ disconnect: () => void }` - 调用 `disconnect()` 断开 HMR 连接。
+
+**示例:**
+
+```typescript
+const iframeRef = useRef<HTMLIFrameElement>(null);
+
+useEffect(() => {
+  if (!iframeRef.current) return;
+  
+  const { disconnect } = project.connectHmr(iframeRef.current);
+  
+  return () => {
+    disconnect();
+  };
+}, [project]);
+```
+
+#### HMR 工作原理
+
+HMR 通过 MessagePort 实现主线程与预览 iframe 之间的通信：
+
+1. 调用 `project.dev()` 启动开发模式，这会启动文件监听和 HMR 服务器
+2. 调用 `project.connectHmr(iframe)` 将 iframe 连接到 HMR 服务器
+3. 当文件变化时，Turbopack 自动触发增量构建
+4. HMR 更新通过 MessagePort 发送到 iframe
+5. iframe 中的 HMR 客户端应用更新，无需刷新页面
+
 ---
 
 ## 示例工作流：构建和预览
@@ -397,6 +458,5 @@ import "@utoo/web/esm/loaderWorker";
 ## 注意
 
 * 由于当前 Rust 上默认的内存分配器 [`dlmalloc`](https://github.com/alexcrichton/dlmalloc-rs) 在多线程 `wasm` 上性能不够理想，我们将 [`mimalloc`](https://github.com/microsoft/mimalloc) 移植到了 wasm32-unknown-unknown 平台，以支持开启 CPU 核心数量的线程来运行构建。因此在浏览器环境和在操作系统环境，构建的性能差异十分微小。
-* 未来我们也会在浏览器中支持 [`HMR`](https://webpack.js.org/concepts/hot-module-replacement/) 功能;
 * turbopack 的部分高级功能如[`持久化缓存`](https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopackPersistentCaching)，目前也在计划之中，未来会在浏览器内直接支持。
 

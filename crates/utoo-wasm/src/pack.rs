@@ -17,7 +17,6 @@ use serde_json::{json, Value};
 use std::{ops::Deref, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 use tokio::time::Instant;
 use turbo_rcstr::{rcstr, RcStr};
-use turbo_tasks::trace::TraceRawVcs;
 use turbo_tasks::TaskId;
 use turbo_tasks::{
     Completion, OperationVc, ReadConsistency, ResolvedVc, TransientInstance, TurboTasks, Vc,
@@ -38,6 +37,7 @@ use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
 use crate::fs::Fs;
 use crate::tokio_runtime::runtime;
 
+// https://github.com/dtolnay/inventory/blob/f1be63af0ab00ce41c39f1dd190a624de949c684/src/lib.rs#L105-L148
 unsafe extern "C" {
     pub fn __wasm_call_ctors();
 }
@@ -75,11 +75,11 @@ pub struct PackProject {
 }
 
 impl PackProject {
-    pub async fn initialize(options: ProjectOptions, dev: bool) -> Result<Self> {
+    pub async fn initialize(options: ProjectOptions) -> Result<Self> {
         let turbo_tasks = create_turbo_tasks()?;
         let container = turbo_tasks
             .run_once(async move {
-                let project_container = ProjectContainer::new("utoopack-web".into(), dev);
+                let project_container = ProjectContainer::new("utoopack-web".into(), options.dev);
                 let project_container = project_container.to_resolved().await?;
                 project_container.initialize(options).await?;
                 Ok(project_container)
@@ -152,7 +152,7 @@ pub fn create_turbo_tasks() -> Result<BundlerTurboTasks> {
     )))
 }
 
-#[derive(Serialize, Deserialize, TraceRawVcs)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Issue {
     pub severity: String,
@@ -188,7 +188,7 @@ impl From<&PlainIssue> for Issue {
     }
 }
 
-#[derive(Serialize, Deserialize, TraceRawVcs)]
+#[derive(Serialize, Deserialize)]
 pub struct IssueSource {
     pub source: Source,
     pub range: Option<IssueSourceRange>,
@@ -208,7 +208,7 @@ impl From<&PlainIssueSource> for IssueSource {
     }
 }
 
-#[derive(Serialize, Deserialize, TraceRawVcs)]
+#[derive(Serialize, Deserialize)]
 pub struct Source {
     pub ident: String,
     pub content: Option<String>,
@@ -229,7 +229,7 @@ impl From<&PlainSource> for Source {
     }
 }
 
-#[derive(Serialize, Deserialize, TraceRawVcs)]
+#[derive(Serialize, Deserialize)]
 pub struct IssueSourceRange {
     pub start: SourcePos,
     pub end: SourcePos,
@@ -244,7 +244,7 @@ impl From<&(SourcePosInner, SourcePosInner)> for IssueSourceRange {
     }
 }
 
-#[derive(Serialize, Deserialize, TraceRawVcs)]
+#[derive(Serialize, Deserialize)]
 pub struct SourcePos {
     pub line: u32,
     pub column: u32,
@@ -259,7 +259,7 @@ impl From<SourcePosInner> for SourcePos {
     }
 }
 
-#[derive(Serialize, Deserialize, TraceRawVcs)]
+#[derive(Serialize, Deserialize)]
 pub struct Diagnostic {
     pub category: String,
     pub name: String,
@@ -280,7 +280,7 @@ impl Diagnostic {
     }
 }
 
-#[derive(Serialize, Deserialize, TraceRawVcs)]
+#[derive(Serialize, Deserialize)]
 pub struct TurbopackResult {
     pub issues: Vec<Issue>,
     pub diagnostics: Vec<Diagnostic>,
@@ -302,7 +302,7 @@ pub fn worker_created(worker_id: u32) {
 
 /// Initialize or reinitialize the pack project with the given dev mode.
 /// This will clean up any previous turbo-tasks before creating a new project.
-pub async fn init_pack_project(dev_mode: bool) -> Result<()> {
+pub async fn init_pack_project(hmr: bool) -> Result<()> {
     // Take and drop the old project (don't call stop_and_wait as it causes issues in browser)
     {
         let mut pack_project_guard = GLOBAL_PACK_PROJECT.write();
@@ -338,14 +338,10 @@ pub async fn init_pack_project(dev_mode: bool) -> Result<()> {
         serde_json::from_str(&config_str).unwrap_or(serde_json::json!({}));
 
     // Set mode based on dev_mode flag
-    config_json["mode"] = serde_json::json!(if dev_mode {
-        "development"
-    } else {
-        "production"
-    });
+    config_json["mode"] = serde_json::json!(if hmr { "development" } else { "production" });
 
     // Set devServer.hot for HMR in dev mode
-    if dev_mode {
+    if hmr {
         if config_json.get("devServer").is_none() {
             config_json["devServer"] = serde_json::json!({});
         }
@@ -362,11 +358,11 @@ pub async fn init_pack_project(dev_mode: bool) -> Result<()> {
         config,
         build_id: project_path.clone(),
         watch: WatchOptions {
-            enable: dev_mode,
+            enable: hmr,
             ..Default::default()
         },
         define_env: Default::default(),
-        dev: dev_mode,
+        dev: hmr,
         pack_path: rcstr!("./"),
         process_env: Default::default(),
     };
@@ -374,7 +370,7 @@ pub async fn init_pack_project(dev_mode: bool) -> Result<()> {
     tracing::debug!("ProjectOptions: {:?}", options);
 
     let pack_context = runtime()
-        .spawn(PackProject::initialize(options, dev_mode))
+        .spawn(PackProject::initialize(options))
         .await
         .context("fail to initialize pack project")??;
 
@@ -404,25 +400,6 @@ pub async fn build() -> std::result::Result<JsValue, wasm_bindgen::JsError> {
     use wasm_bindgen::JsError;
 
     init_pack_project(false)
-        .await
-        .map_err(|e| JsError::new(&PrettyPrintError(&e).to_string()))?;
-
-    run_pack().await.map_or_else(
-        |e| Err(JsError::new(&PrettyPrintError(&e).to_string())),
-        |result| {
-            let json_str =
-                serde_json::to_string(&result).map_err(|e| JsError::new(&e.to_string()))?;
-            js_sys::JSON::parse(&json_str)
-                .map_err(|e| JsError::new(&format!("Failed to parse JSON: {:?}", e)))
-        },
-    )
-}
-
-/// Dev operation.
-pub async fn dev() -> std::result::Result<JsValue, wasm_bindgen::JsError> {
-    use wasm_bindgen::JsError;
-
-    init_pack_project(true)
         .await
         .map_err(|e| JsError::new(&PrettyPrintError(&e).to_string()))?;
 

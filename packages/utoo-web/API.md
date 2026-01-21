@@ -271,6 +271,67 @@ Triggers the build process in the thread worker. It reads the build configuratio
 
 * Returns: `Promise<void>` - The promise resolves when the build is complete. It will reject if the build fails.
 
+### Development Mode & HMR
+
+#### `project.dev(options)`
+
+Starts development mode with file watching and Hot Module Replacement (HMR). Unlike `build()`, `dev()` continuously watches for file changes and automatically triggers incremental builds.
+
+**Options:**
+
+* `onUpdate` (function, optional): Callback when a build completes, receives the build result (including issues and diagnostics).
+* `onUpdateStart` (function, optional): Callback when a build starts.
+* `onUpdateEnd` (function, optional): Callback when a build ends, receives duration and task count.
+
+**Example:**
+
+```typescript
+await project.dev({
+  onUpdate: (result) => {
+    console.log('Build completed', result.issues);
+  },
+  onUpdateStart: () => {
+    console.log('Build starting...');
+  },
+  onUpdateEnd: ({ duration, tasks }) => {
+    console.log(`Build completed in ${duration}ms with ${tasks} tasks`);
+  },
+});
+```
+
+#### `project.connectHmr(iframe)`
+
+Connects a preview iframe to the HMR server. Returns a `disconnect` function to close the connection.
+
+* `iframe` (HTMLIFrameElement): The preview page's iframe element.
+* Returns: `{ disconnect: () => void }` - Call `disconnect()` to close the HMR connection.
+
+**Example:**
+
+```typescript
+const iframeRef = useRef<HTMLIFrameElement>(null);
+
+useEffect(() => {
+  if (!iframeRef.current) return;
+  
+  const { disconnect } = project.connectHmr(iframeRef.current);
+  
+  return () => {
+    disconnect();
+  };
+}, [project]);
+```
+
+#### How HMR Works
+
+HMR uses MessagePort for communication between the main thread and the preview iframe:
+
+1. Call `project.dev()` to start development mode, which starts file watching and the HMR server
+2. Call `project.connectHmr(iframe)` to connect the iframe to the HMR server
+3. When files change, Turbopack automatically triggers incremental builds
+4. HMR updates are sent to the iframe via MessagePort
+5. The HMR client in the iframe applies updates without page refresh
+
 ---
 
 ## Example Workflow: Building and Previewing
@@ -397,5 +458,4 @@ Your build setup should be configured to output these files to a location that y
 ## Notes
 
 * Since the default memory allocator on Rust, [`dlmalloc`](https://github.com/alexcrichton/dlmalloc-rs), does not perform ideally on multi-threaded `wasm`, we have ported [`mimalloc`](https://github.com/microsoft/mimalloc) to the wasm32-unknown-unknown platform to support running builds with threads equal to the number of CPU cores. Therefore, the difference in build performance between the browser environment and the operating system environment is very small.
-* In the future, we will also support the [`HMR`](https://webpack.js.org/concepts/hot-module-replacement/) feature in the browser;
 * Advanced features of turbopack such as [`persistent caching`](https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopackPersistentCaching), are also in the plan and will be supported directly in the browser in the future.
