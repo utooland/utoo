@@ -1,4 +1,30 @@
-import { ServiceWorkerHandShake } from "../message";
+import {
+  ServiceWorkerHandShake,
+  ServiceWorkerHeartbeatPing,
+  ServiceWorkerHeartbeatPong,
+} from "../message";
+
+const HEARTBEAT_INTERVAL = 10000;
+
+function startHeartbeat(sw: ServiceWorker) {
+  let lastHeartbeat = Date.now();
+
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data && event.data[ServiceWorkerHeartbeatPong] === true) {
+      lastHeartbeat = Date.now();
+    }
+  });
+
+  setInterval(() => {
+    sw.postMessage({
+      [ServiceWorkerHeartbeatPing]: true,
+    });
+
+    if (Date.now() - lastHeartbeat > HEARTBEAT_INTERVAL * 2) {
+      console.error("Service Worker Heartbeat Timeout");
+    }
+  }, HEARTBEAT_INTERVAL);
+}
 
 export async function installServiceWorker(
   url: string,
@@ -23,6 +49,7 @@ export async function installServiceWorker(
       sw.postMessage({
         [ServiceWorkerHandShake]: true,
       });
+      startHeartbeat(sw);
       resolve();
     }
 

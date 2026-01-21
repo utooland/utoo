@@ -1,4 +1,8 @@
-import { ServiceWorkerHandShake } from "../message";
+import {
+  ServiceWorkerHandShake,
+  ServiceWorkerHeartbeatPing,
+  ServiceWorkerHeartbeatPong,
+} from "../message";
 import { Project } from "../project/Project";
 import { ProjectEndpoint } from "../types";
 
@@ -40,6 +44,10 @@ self.addEventListener("message", (event) => {
     );
     _resolve();
     console.log("[ServiceWorker] Handshake completed, ProjectEndpoint ready");
+  } else if (event.data && event.data[ServiceWorkerHeartbeatPing] === true) {
+    (event.source as Client).postMessage({
+      [ServiceWorkerHeartbeatPong]: true,
+    });
   }
 });
 
