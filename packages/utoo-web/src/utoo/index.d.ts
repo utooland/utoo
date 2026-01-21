@@ -150,7 +150,8 @@ export function getWasmModule(): any;
 /**
  * Subscribe to HMR events for a specific identifier.
  * The callback will be called with update data whenever changes are detected.
- * Returns a function to unsubscribe.
+ * This uses spawn_root_task for proper dependency tracking, so it will be
+ * re-executed when the identifier's dependencies change.
  */
 export function hmrSubscribe(identifier: string, callback: Function): void;
 

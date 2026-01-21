@@ -42,6 +42,7 @@ const Project = () => {
     saveFile,
     isSaving,
     hasUnsavedChanges,
+    justSaved,
     error: fileContentError,
   } = useFileContent(project);
 
@@ -98,11 +99,8 @@ const Project = () => {
     startDev,
     stopDev,
   } = useDev(project, fileTree, handleDirectoryExpand, {
-    onBuildComplete: () => {
-      if (previewRef.current) {
-        previewRef.current.reload();
-      }
-    },
+    // HMR will handle updates automatically, no need to manually reload
+    onBuildComplete: undefined,
   });
 
   const {
@@ -251,18 +249,29 @@ const Project = () => {
         borderRadius: "0.375rem",
         border: "none",
         fontSize: "0.875rem",
-        background:
-          isSaving || !hasUnsavedChanges || !project ? "#d1d5db" : "#10b981",
+        background: isSaving
+          ? "#fbbf24"
+          : justSaved
+            ? "#22c55e"
+            : hasUnsavedChanges
+              ? "#10b981"
+              : "#d1d5db",
         color: "#fff",
         fontWeight: 500,
         cursor:
           isSaving || !hasUnsavedChanges || !project
             ? "not-allowed"
             : "pointer",
-        transition: "background 0.2s",
+        transition: "background 0.3s",
       }}
     >
-      {isSaving ? "Saving..." : hasUnsavedChanges ? "Save" : "Saved"}
+      {isSaving
+        ? "Saving..."
+        : justSaved
+          ? "✓ Saved"
+          : hasUnsavedChanges
+            ? "Save"
+            : "—"}
     </button>
   );
 
@@ -349,6 +358,8 @@ const Project = () => {
           filePath={selectedFilePath}
           content={selectedFileContent}
           onContentChange={setSelectedFileContent}
+          onSave={saveFile}
+          autoSaveDelay={1000}
         />
       </Panel>
 

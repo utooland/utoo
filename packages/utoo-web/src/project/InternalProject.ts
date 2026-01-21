@@ -18,7 +18,6 @@ import initWasm, {
   entrypointsSubscribe as wasmEntrypointsSubscribe,
   hmrSubscribe as wasmHmrSubscribe,
   updateInfoSubscribe as wasmUpdateInfoSubscribe,
-  writeAllToDisk as wasmWriteAllToDisk,
 } from "../utoo";
 import { runLoaderWorkerPool } from "../webpackLoaders/loaderWorkerPool";
 
@@ -90,13 +89,16 @@ class InternalEndpoint implements ProjectEndpoint {
       this.loaderWorkerPoolInitialized = true;
     }
 
-    // Use entrypointsSubscribe which handles both initial build and watching for changes
+    // Use entrypointsSubscribe which handles both initial build and watching for changes.
+    // The WASM entrypointsSubscribe now uses get_all_written_entrypoints_with_issues_operation
+    // internally, which:
+    // 1. Reads all source files (registering them as dependencies)
+    // 2. Writes all output files to disk
+    // 3. Gets re-triggered automatically when source files change
+    // So we don't need to call writeAllToDisk separately anymore.
     // Store the root task to keep the subscription alive
-    this.rootTask = await wasmEntrypointsSubscribe((_result: any) => {
-      // Write all entrypoints to disk, then call onUpdate with the result
-      wasmWriteAllToDisk((writeResult: any) => {
-        onUpdate?.(writeResult);
-      });
+    this.rootTask = await wasmEntrypointsSubscribe((result: any) => {
+      onUpdate?.(result);
     });
   }
 

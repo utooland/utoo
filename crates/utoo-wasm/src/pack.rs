@@ -469,6 +469,12 @@ pub async fn entrypoints_subscribe(
     // 1. Participates in the turbo-tasks dependency tracking system
     // 2. Gets re-executed automatically when its dependencies (file reads) are invalidated
     // 3. Registers file dependencies via read_strongly_consistent() calls
+    //
+    // IMPORTANT: We use get_all_written_entrypoints_with_issues_operation (not get_entrypoints_with_issues_operation)
+    // because it actually resolves and writes all assets to disk, which:
+    // - Reads source files (registering them as dependencies for invalidation)
+    // - Writes output files (the purpose of dev mode)
+    // This matches how NAPI's entrypointsSubscription + writeToDisk() pattern works.
     let turbo_tasks_clone = turbo_tasks.clone();
     let task_id = runtime()
         .spawn(async move {
@@ -477,10 +483,10 @@ pub async fn entrypoints_subscribe(
                 async move {
                     tracing::info!("[entrypointsSubscribe] root task executing...");
 
-                    // Get entrypoints - this registers file dependencies via read_strongly_consistent
-                    // When any of these files change, this root task will be re-executed
+                    // Get and write all entrypoints - this reads source files (registering dependencies)
+                    // and writes output to disk. When source files change, this root task will be re-executed.
                     let entrypoints_with_issues_op =
-                        get_entrypoints_with_issues_operation(container);
+                        get_all_written_entrypoints_with_issues_operation(container);
                     let EntrypointsWithIssues {
                         entrypoints: _,
                         issues,
@@ -606,7 +612,8 @@ pub fn write_all_to_disk(callback: js_sys::Function) {
 
 /// Subscribe to HMR events for a specific identifier.
 /// The callback will be called with update data whenever changes are detected.
-/// Returns a function to unsubscribe.
+/// This uses spawn_root_task for proper dependency tracking, so it will be
+/// re-executed when the identifier's dependencies change.
 #[wasm_bindgen(js_name = "hmrSubscribe")]
 pub fn hmr_subscribe(identifier: String, callback: js_sys::Function) {
     let identifier: RcStr = identifier.into();
@@ -624,14 +631,26 @@ pub fn hmr_subscribe(identifier: String, callback: js_sys::Function) {
         let container = pack_project.container;
         let session = TransientInstance::new(());
 
-        // Run the subscription in the tokio runtime
-        let result = runtime()
+        // Create channel for communication between root task and JS callback
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+        // Spawn a root task that will be re-executed when dependencies change
+        let turbo_tasks_clone = turbo_tasks.clone();
+        let _task_id = runtime()
             .spawn({
                 let identifier = identifier.clone();
                 let session = session.clone();
                 async move {
-                    turbo_tasks
-                        .run_once(async move {
+                    turbo_tasks_clone.spawn_root_task(move || {
+                        let identifier = identifier.clone();
+                        let session = session.clone();
+                        let tx = tx.clone();
+                        async move {
+                            tracing::debug!(
+                                "[hmrSubscribe] root task executing for {}",
+                                identifier
+                            );
+
                             let project = container.project().to_resolved().await?;
                             let state = project
                                 .hmr_version_state(identifier.clone(), session)
@@ -646,52 +665,80 @@ pub fn hmr_subscribe(identifier: String, callback: js_sys::Function) {
                             let update = update_op.read_strongly_consistent().await?;
                             let HmrUpdateWithIssues {
                                 update,
-                                issues: _,
+                                issues,
                                 diagnostics: _,
                                 effects,
                             } = &*update;
                             effects.apply().await?;
 
-                            // Update the version state and generate JSON
-                            // None and Missing are ignored, don't send events to JS
+                            // Update the version state and generate JSON for the update
                             let update_json = match &**update {
-                                Update::None | Update::Missing => None,
+                                Update::None => {
+                                    // No update, but might have issues
+                                    if !issues.is_empty() {
+                                        let issues_json: Vec<_> = issues
+                                            .iter()
+                                            .map(|i| {
+                                                serde_json::json!({
+                                                    "severity": i.severity.as_str(),
+                                                    "filePath": i.file_path.to_string(),
+                                                    "title": format!("{:?}", i.title),
+                                                })
+                                            })
+                                            .collect();
+                                        Some(serde_json::json!({
+                                            "type": "issues",
+                                            "resource": { "path": identifier.to_string() },
+                                            "issues": issues_json,
+                                            "diagnostics": []
+                                        }))
+                                    } else {
+                                        None
+                                    }
+                                }
+                                Update::Missing => None,
                                 Update::Total(TotalUpdate { to }) => {
                                     state.set(to.clone()).await?;
-                                    Some(serde_json::json!({"type": "restart"}))
+                                    Some(serde_json::json!({
+                                        "type": "restart",
+                                        "resource": { "path": identifier.to_string() },
+                                        "issues": [],
+                                        "diagnostics": []
+                                    }))
                                 }
                                 Update::Partial(PartialUpdate { to, instruction }) => {
                                     state.set(to.clone()).await?;
+                                    // instruction is already Arc<serde_json::Value>
                                     Some(serde_json::json!({
                                         "type": "partial",
-                                        "instruction": format!("{:?}", instruction),
+                                        "resource": { "path": identifier.to_string() },
+                                        "instruction": **instruction,
+                                        "issues": [],
+                                        "diagnostics": []
                                     }))
                                 }
                             };
 
-                            Ok::<_, anyhow::Error>(update_json)
-                        })
-                        .await
+                            // Send update through channel if there's something to send
+                            if let Some(json) = update_json {
+                                tracing::debug!("[hmrSubscribe] sending update for {}", identifier);
+                                if let Ok(json_str) = serde_json::to_string(&json) {
+                                    let _ = tx.send(json_str);
+                                }
+                            }
+
+                            Ok(Completion::new())
+                        }
+                    })
                 }
             })
             .await;
 
-        match result {
-            Ok(Ok(Some(update_json))) => {
-                if let Ok(js_value) =
-                    js_sys::JSON::parse(&serde_json::to_string(&update_json).unwrap_or_default())
-                {
-                    let _ = callback.call1(&JsValue::NULL, &js_value);
-                }
-            }
-            Ok(Ok(None)) => {
-                // None or Missing update, ignore
-            }
-            Ok(Err(e)) => {
-                tracing::error!("[hmrSubscribe] error: {:?}", e);
-            }
-            Err(e) => {
-                tracing::error!("[hmrSubscribe] spawn error: {:?}", e);
+        // Receiver loop on main thread to forward messages to JS callback
+        while let Some(json_str) = rx.recv().await {
+            tracing::debug!("[hmrSubscribe] received update, calling JS callback");
+            if let Ok(js_value) = js_sys::JSON::parse(&json_str) {
+                let _ = callback.call1(&JsValue::NULL, &js_value);
             }
         }
     });
