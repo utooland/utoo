@@ -464,107 +464,53 @@ pub async fn entrypoints_subscribe(
     // Create a tokio mpsc channel to communicate between turbo-tasks and JS
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
-    // Spawn the root task inside tokio runtime - it will be re-executed when dependencies change
+    // Spawn the root task inside tokio runtime.
+    // Unlike run_once, spawn_root_task creates a persistent task that:
+    // 1. Participates in the turbo-tasks dependency tracking system
+    // 2. Gets re-executed automatically when its dependencies (file reads) are invalidated
+    // 3. Registers file dependencies via read_strongly_consistent() calls
     let turbo_tasks_clone = turbo_tasks.clone();
-    let container_clone = container;
-
-    // We use a loop that waits for aggregated updates instead of a pure root task
-    // because in the WASM environment, we need to ensure we capture all invalidations
-    // and push updates reliably.
-    let _loop_handle = runtime()
+    let task_id = runtime()
         .spawn(async move {
-            let mut delegation_duration = Duration::from_millis(100);
-
-            // Helper function to compute and send entrypoints
-            // Returns true if  successful, false if receiver closed (should stop loop)
-            let compute_and_send = |container: ResolvedVc<ProjectContainer>, tx: tokio::sync::mpsc::UnboundedSender<String>| {
-                let turbo_tasks_ref = GLOBAL_PACK_PROJECT.read().as_ref().map(|p| p.turbo_tasks.clone());
+            turbo_tasks_clone.spawn_root_task(move || {
+                let tx = tx.clone();
                 async move {
-                    let turbo_tasks = match turbo_tasks_ref {
-                        Some(t) => t,
-                        None => return false, // Should not happen
+                    tracing::info!("[entrypointsSubscribe] root task executing...");
+
+                    // Get entrypoints - this registers file dependencies via read_strongly_consistent
+                    // When any of these files change, this root task will be re-executed
+                    let entrypoints_with_issues_op =
+                        get_entrypoints_with_issues_operation(container);
+                    let EntrypointsWithIssues {
+                        entrypoints: _,
+                        issues,
+                        diagnostics,
+                        effects,
+                    } = &*entrypoints_with_issues_op
+                        .read_strongly_consistent()
+                        .await?;
+                    effects.apply().await?;
+
+                    let turbopack_result = TurbopackResult {
+                        issues: issues.iter().map(|i| Issue::from(&**i)).collect(),
+                        diagnostics: diagnostics.iter().map(|d| Diagnostic::from(d)).collect(),
                     };
 
-                    tracing::info!("[entrypointsSubscribe] computing entrypoints...");
-
-                    let run_result = turbo_tasks.run_once(async move {
-                        // Get entrypoints (does not write to disk)
-                        let entrypoints_with_issues_op =
-                            get_entrypoints_with_issues_operation(container);
-                        let EntrypointsWithIssues {
-                            entrypoints: _,
-                            issues,
-                            diagnostics,
-                            effects,
-                        } = &*entrypoints_with_issues_op.read_strongly_consistent().await?;
-                        effects.apply().await?;
-
-                        let turbopack_result = TurbopackResult {
-                            issues: issues.iter().map(|i| Issue::from(&**i)).collect(),
-                            diagnostics: diagnostics.iter().map(|d| Diagnostic::from(d)).collect(),
-                        };
-
-                        Ok::<_, anyhow::Error>(turbopack_result)
-                    }).await;
-
-                    match run_result {
-                        Ok(turbopack_result) => {
-                                tracing::info!("[entrypointsSubscribe] computation success, sending...");
-                                if let Ok(json_str) = serde_json::to_string(&turbopack_result) {
-                                if let Err(e) = tx.send(json_str) {
-                                    tracing::info!("[entrypointsSubscribe] receiver closed: {:?}", e);
-                                    return false;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                                tracing::error!("[entrypointsSubscribe] computation error: {:?}", e);
+                    // Send result through channel
+                    tracing::info!("[entrypointsSubscribe] sending result through channel");
+                    if let Ok(json_str) = serde_json::to_string(&turbopack_result) {
+                        if let Err(e) = tx.send(json_str) {
+                            tracing::error!("[entrypointsSubscribe] failed to send: {:?}", e);
                         }
                     }
-                    true
+
+                    // Return Completion to keep the task alive for re-execution
+                    Ok(Completion::new())
                 }
-            };
-
-            // Initial computation
-            if !compute_and_send(container_clone, tx.clone()).await {
-                return;
-            }
-
-            loop {
-                // 1. Wait for the graph to settle (debounce/aggregation)
-                let update_info = turbo_tasks_clone
-                    .get_or_wait_aggregated_update_info(delegation_duration)
-                    .await;
-
-                // Update delegation duration for next wait (adaptive)
-                delegation_duration = update_info.duration;
-
-                tracing::info!("[entrypointsSubscribe] update detected, computing entrypoints... (duration: {:?}, tasks: {})", update_info.duration, update_info.tasks);
-
-                // 2. Compute the entrypoints result
-                if !compute_and_send(container_clone, tx.clone()).await {
-                    break;
-                }
-            }
-
-        });
-
-    // We need to match the return type logic.
-    // The previous code waited for the Spawn execution which returned TaskId.
-    // Here we spawned a pervasive loop.
-    // We can't really return a valid TaskId that corresponds to this loop in the Turbo engine sense.
-    // Let's just spawn a dummy task to satisfy the struct,
-    // or just assume task_id is not strictly used for cancellation by the JS side yet (it relies on Drop).
-
-    // Let's spawn a dummy root task to give a valid ID, while our loop runs on the side.
-    // Must run in tokio runtime to avoid "no reactor running" error
-    let turbo_tasks_for_id = turbo_tasks.clone();
-    let dummy_task_id = runtime()
-        .spawn(
-            async move { turbo_tasks_for_id.spawn_root_task(|| async { Ok(Completion::new()) }) },
-        )
+            })
+        })
         .await
-        .map_err(|e| JsError::new(&format!("Failed to spawn dummy task: {:?}", e)))?;
+        .map_err(|e| JsError::new(&format!("Failed to spawn root task: {:?}", e)))?;
 
     // Spawn a receiver loop on the MAIN THREAD (local) to forward messages to JS callback.
     // We cannot use runtime().spawn() here because `callback` (js_sys::Function) is !Send.
@@ -581,10 +527,10 @@ pub async fn entrypoints_subscribe(
         drop(turbo_tasks_for_receiver); // Keep turbo_tasks alive until subscription ends
     });
 
-    tracing::info!("[entrypointsSubscribe] root task loop spawned, returning WasmRootTask");
+    tracing::info!("[entrypointsSubscribe] root task spawned, returning WasmRootTask");
     Ok(WasmRootTask {
         turbo_tasks,
-        task_id: dummy_task_id,
+        task_id,
     })
 }
 
