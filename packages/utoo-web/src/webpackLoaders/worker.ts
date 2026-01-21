@@ -1,6 +1,5 @@
 import initWasm, {
   Fs,
-  Project,
   recvTaskMessageInWorker,
   sendTaskMessage,
   workerCreated,
@@ -40,11 +39,6 @@ export function startLoaderWorker() {
       console.log(err);
       throw err;
     });
-
-    // Initialize the thread-local state (tokio runtime).
-    // We don't need to pass threadWorkerUrl here because it's already stored in a global static in Rust.
-    Project.init("");
-    Project.setCwd(meta.workerData.cwd);
 
     self.workerData = {
       threadId: meta.workerData.threadId,
