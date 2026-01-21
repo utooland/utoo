@@ -1,6 +1,7 @@
 import { handleIssues } from "@utoo/pack-shared";
 import * as comlink from "comlink";
 import { HmrClient, HmrServer } from "../hmr";
+import { UpdateMessage } from "../hmr/types";
 import { Fork, HandShake } from "../message";
 import { installServiceWorker } from "../serviceWorker/install";
 import {
@@ -16,7 +17,6 @@ import {
   ServiceWorkerOptions,
   Stats,
 } from "../types";
-import { UpdateMessage } from "../hmr/types";
 import { ForkedProject } from "./ForkedProject";
 
 let ProjectWorker: Worker;

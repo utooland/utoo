@@ -17,6 +17,8 @@ use serde_json::{json, Value};
 use std::{ops::Deref, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 use tokio::time::Instant;
 use turbo_rcstr::{rcstr, RcStr};
+use turbo_tasks::trace::TraceRawVcs;
+use turbo_tasks::TaskId;
 use turbo_tasks::{
     Completion, OperationVc, ReadConsistency, ResolvedVc, TransientInstance, TurboTasks, Vc,
 };
@@ -31,8 +33,7 @@ use turbopack_core::{
     source_pos::SourcePos as SourcePosInner,
     version::{PartialUpdate, TotalUpdate, Update, VersionState},
 };
-use turbo_tasks::TaskId;
-use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
+use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
 
 use crate::fs::Fs;
 use crate::tokio_runtime::runtime;
@@ -151,7 +152,7 @@ pub fn create_turbo_tasks() -> Result<BundlerTurboTasks> {
     )))
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TraceRawVcs)]
 #[serde(rename_all = "camelCase")]
 pub struct Issue {
     pub severity: String,
@@ -187,7 +188,7 @@ impl From<&PlainIssue> for Issue {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TraceRawVcs)]
 pub struct IssueSource {
     pub source: Source,
     pub range: Option<IssueSourceRange>,
@@ -207,7 +208,7 @@ impl From<&PlainIssueSource> for IssueSource {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TraceRawVcs)]
 pub struct Source {
     pub ident: String,
     pub content: Option<String>,
@@ -228,7 +229,7 @@ impl From<&PlainSource> for Source {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TraceRawVcs)]
 pub struct IssueSourceRange {
     pub start: SourcePos,
     pub end: SourcePos,
@@ -243,7 +244,7 @@ impl From<&(SourcePosInner, SourcePosInner)> for IssueSourceRange {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TraceRawVcs)]
 pub struct SourcePos {
     pub line: u32,
     pub column: u32,
@@ -258,7 +259,7 @@ impl From<SourcePosInner> for SourcePos {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TraceRawVcs)]
 pub struct Diagnostic {
     pub category: String,
     pub name: String,
@@ -279,7 +280,7 @@ impl Diagnostic {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TraceRawVcs)]
 pub struct TurbopackResult {
     pub issues: Vec<Issue>,
     pub diagnostics: Vec<Diagnostic>,
@@ -441,7 +442,9 @@ pub async fn dev() -> std::result::Result<JsValue, wasm_bindgen::JsError> {
 /// Should be used for dev mode instead of manually calling build after file saves.
 /// Returns a WasmRootTask that must be held by JS to keep the subscription active.
 #[wasm_bindgen(js_name = "entrypointsSubscribe")]
-pub async fn entrypoints_subscribe(callback: js_sys::Function) -> Result<WasmRootTask, wasm_bindgen::JsError> {
+pub async fn entrypoints_subscribe(
+    callback: js_sys::Function,
+) -> Result<WasmRootTask, wasm_bindgen::JsError> {
     use wasm_bindgen::JsError;
 
     // First initialize the project in dev mode
@@ -463,43 +466,105 @@ pub async fn entrypoints_subscribe(callback: js_sys::Function) -> Result<WasmRoo
 
     // Spawn the root task inside tokio runtime - it will be re-executed when dependencies change
     let turbo_tasks_clone = turbo_tasks.clone();
-    let task_id = runtime()
-        .spawn(async move {
-            turbo_tasks_clone.spawn_root_task(move || {
-                let tx = tx.clone();
-                async move {
-                    tracing::info!("[entrypointsSubscribe] root task executing...");
-                    
-                    // Get entrypoints (does not write to disk)
-                    let entrypoints_with_issues_op =
-                        get_entrypoints_with_issues_operation(container);
-                    let EntrypointsWithIssues {
-                        entrypoints: _,
-                        issues,
-                        diagnostics,
-                        effects,
-                    } = &*entrypoints_with_issues_op.read_strongly_consistent().await?;
-                    effects.apply().await?;
+    let container_clone = container;
 
-                    let turbopack_result = TurbopackResult {
-                        issues: issues.iter().map(|i| Issue::from(&**i)).collect(),
-                        diagnostics: diagnostics.iter().map(|d| Diagnostic::from(d)).collect(),
+    // We use a loop that waits for aggregated updates instead of a pure root task
+    // because in the WASM environment, we need to ensure we capture all invalidations
+    // and push updates reliably.
+    let _loop_handle = runtime()
+        .spawn(async move {
+            let mut delegation_duration = Duration::from_millis(100);
+
+            // Helper function to compute and send entrypoints
+            // Returns true if  successful, false if receiver closed (should stop loop)
+            let compute_and_send = |container: ResolvedVc<ProjectContainer>, tx: tokio::sync::mpsc::UnboundedSender<String>| {
+                let turbo_tasks_ref = GLOBAL_PACK_PROJECT.read().as_ref().map(|p| p.turbo_tasks.clone());
+                async move {
+                    let turbo_tasks = match turbo_tasks_ref {
+                        Some(t) => t,
+                        None => return false, // Should not happen
                     };
 
-                    // Send result through channel
-                    tracing::info!("[entrypointsSubscribe] sending result through channel");
-                    if let Ok(json_str) = serde_json::to_string(&turbopack_result) {
-                        if let Err(e) = tx.send(json_str) {
-                            tracing::error!("[entrypointsSubscribe] failed to send: {:?}", e);
+                    tracing::info!("[entrypointsSubscribe] computing entrypoints...");
+
+                    let run_result = turbo_tasks.run_once(async move {
+                        // Get entrypoints (does not write to disk)
+                        let entrypoints_with_issues_op =
+                            get_entrypoints_with_issues_operation(container);
+                        let EntrypointsWithIssues {
+                            entrypoints: _,
+                            issues,
+                            diagnostics,
+                            effects,
+                        } = &*entrypoints_with_issues_op.read_strongly_consistent().await?;
+                        effects.apply().await?;
+
+                        let turbopack_result = TurbopackResult {
+                            issues: issues.iter().map(|i| Issue::from(&**i)).collect(),
+                            diagnostics: diagnostics.iter().map(|d| Diagnostic::from(d)).collect(),
+                        };
+
+                        Ok::<_, anyhow::Error>(turbopack_result)
+                    }).await;
+
+                    match run_result {
+                        Ok(turbopack_result) => {
+                                tracing::info!("[entrypointsSubscribe] computation success, sending...");
+                                if let Ok(json_str) = serde_json::to_string(&turbopack_result) {
+                                if let Err(e) = tx.send(json_str) {
+                                    tracing::info!("[entrypointsSubscribe] receiver closed: {:?}", e);
+                                    return false;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                                tracing::error!("[entrypointsSubscribe] computation error: {:?}", e);
                         }
                     }
-
-                    Ok(Completion::new())
+                    true
                 }
-            })
-        })
+            };
+
+            // Initial computation
+            if !compute_and_send(container_clone, tx.clone()).await {
+                return;
+            }
+
+            loop {
+                // 1. Wait for the graph to settle (debounce/aggregation)
+                let update_info = turbo_tasks_clone
+                    .get_or_wait_aggregated_update_info(delegation_duration)
+                    .await;
+
+                // Update delegation duration for next wait (adaptive)
+                delegation_duration = update_info.duration;
+
+                tracing::info!("[entrypointsSubscribe] update detected, computing entrypoints... (duration: {:?}, tasks: {})", update_info.duration, update_info.tasks);
+
+                // 2. Compute the entrypoints result
+                if !compute_and_send(container_clone, tx.clone()).await {
+                    break;
+                }
+            }
+
+        });
+
+    // We need to match the return type logic.
+    // The previous code waited for the Spawn execution which returned TaskId.
+    // Here we spawned a pervasive loop.
+    // We can't really return a valid TaskId that corresponds to this loop in the Turbo engine sense.
+    // Let's just spawn a dummy task to satisfy the struct,
+    // or just assume task_id is not strictly used for cancellation by the JS side yet (it relies on Drop).
+
+    // Let's spawn a dummy root task to give a valid ID, while our loop runs on the side.
+    // Must run in tokio runtime to avoid "no reactor running" error
+    let turbo_tasks_for_id = turbo_tasks.clone();
+    let dummy_task_id = runtime()
+        .spawn(
+            async move { turbo_tasks_for_id.spawn_root_task(|| async { Ok(Completion::new()) }) },
+        )
         .await
-        .map_err(|e| JsError::new(&format!("Failed to spawn root task: {:?}", e)))?;
+        .map_err(|e| JsError::new(&format!("Failed to spawn dummy task: {:?}", e)))?;
 
     // Spawn a receiver loop on the MAIN THREAD (local) to forward messages to JS callback.
     // We cannot use runtime().spawn() here because `callback` (js_sys::Function) is !Send.
@@ -516,10 +581,10 @@ pub async fn entrypoints_subscribe(callback: js_sys::Function) -> Result<WasmRoo
         drop(turbo_tasks_for_receiver); // Keep turbo_tasks alive until subscription ends
     });
 
-    tracing::info!("[entrypointsSubscribe] root task spawned, returning WasmRootTask");
+    tracing::info!("[entrypointsSubscribe] root task loop spawned, returning WasmRootTask");
     Ok(WasmRootTask {
         turbo_tasks,
-        task_id,
+        task_id: dummy_task_id,
     })
 }
 
@@ -553,7 +618,9 @@ pub fn write_all_to_disk(callback: js_sys::Function) {
                             issues,
                             diagnostics,
                             effects,
-                        } = &*entrypoints_with_issues_op.read_strongly_consistent().await?;
+                        } = &*entrypoints_with_issues_op
+                            .read_strongly_consistent()
+                            .await?;
                         effects.apply().await?;
 
                         Ok::<_, anyhow::Error>((issues.clone(), diagnostics.clone()))

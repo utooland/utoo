@@ -1,3 +1,4 @@
+import { UpdateMessage } from "../hmr/types";
 import {
   DepsOptions,
   InstallOptions,
@@ -8,17 +9,16 @@ import {
   RawStats,
   Stats,
 } from "../types";
-import { UpdateMessage } from "../hmr/types";
 import initWasm, {
   DirEntryType,
-  entrypointsSubscribe as wasmEntrypointsSubscribe,
-  writeAllToDisk as wasmWriteAllToDisk,
   Fs,
-  hmrSubscribe as wasmHmrSubscribe,
-  updateInfoSubscribe as wasmUpdateInfoSubscribe,
   initLogFilter,
   Project as ProjectInternal,
   WasmRootTask,
+  entrypointsSubscribe as wasmEntrypointsSubscribe,
+  hmrSubscribe as wasmHmrSubscribe,
+  updateInfoSubscribe as wasmUpdateInfoSubscribe,
+  writeAllToDisk as wasmWriteAllToDisk,
 } from "../utoo";
 import { runLoaderWorkerPool } from "../webpackLoaders/loaderWorkerPool";
 
@@ -26,7 +26,7 @@ class InternalEndpoint implements ProjectEndpoint {
   wasmInit?: ReturnType<typeof initWasm>;
   options?: Omit<ProjectOptions, "workerUrl" | "serviceWorker">;
   loaderWorkerPoolInitialized = false;
-  
+
   // Keep root task alive for the subscription to work
   private rootTask?: WasmRootTask;
 
@@ -201,7 +201,10 @@ class InternalEndpoint implements ProjectEndpoint {
     wasmHmrSubscribe(identifier, callback);
   }
 
-  updateInfoSubscribe(aggregationMs: number, callback: (message: UpdateMessage) => void) {
+  updateInfoSubscribe(
+    aggregationMs: number,
+    callback: (message: UpdateMessage) => void,
+  ) {
     wasmUpdateInfoSubscribe(aggregationMs, callback);
   }
 }
