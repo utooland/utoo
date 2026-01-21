@@ -1,18 +1,15 @@
 import {
-  type BuildingAction,
-  type BuiltAction,
   type CompilationError,
   type HMR_ACTION_TYPES,
   HMR_ACTIONS_SENT_TO_BROWSER,
   type ReloadAction,
   type SyncAction,
   type TurbopackConnectedAction,
-  type TurbopackMessageAction,
 } from "@utoo/pack-shared";
 import { IncomingMessage } from "http";
 import { nanoid } from "nanoid";
 import type { Socket } from "net";
-import { join } from "path";
+import path from "path";
 import { Duplex } from "stream";
 import ws from "ws";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
@@ -266,7 +263,7 @@ export async function createHotReloader(
 
       if (htmlConfigs.length > 0) {
         const outputDir =
-          bundleOptions.config.output?.path || join(process.cwd(), "dist");
+          bundleOptions.config.output?.path || path.join(process.cwd(), "dist");
         const publicPath = bundleOptions.config.output?.publicPath;
 
         if (assets.js.length === 0 && assets.css.length === 0) {

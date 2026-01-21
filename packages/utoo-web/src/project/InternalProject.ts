@@ -1,4 +1,4 @@
-import { UpdateMessage } from "../hmr/types";
+import { type UpdateMessage } from "@utoo/pack-shared";
 import {
   DepsOptions,
   InstallOptions,

@@ -1,8 +1,8 @@
 import { handleIssues } from "@utoo/pack-shared";
 import { spawn } from "child_process";
-import fs, { existsSync } from "fs";
+import fs from "fs";
 import { nanoid } from "nanoid";
-import { join } from "path";
+import path from "path";
 import { resolveBundleOptions, WebpackConfig } from "../config/webpackCompat";
 import { projectFactory } from "../core/project";
 import { BundleOptions } from "../core/types";
@@ -90,7 +90,7 @@ async function buildInternal(
     const assets = { js: [] as string[], css: [] as string[] };
 
     const outputDir =
-      bundleOptions.config.output?.path || join(process.cwd(), "dist");
+      bundleOptions.config.output?.path || path.join(process.cwd(), "dist");
 
     if (assets.js.length === 0 && assets.css.length === 0) {
       const discovered = getInitialAssetsFromStats(outputDir);
@@ -118,7 +118,7 @@ async function buildInternal(
 async function analyzeBundle(outputPath: string): Promise<void> {
   const statsPath = join(outputPath, "stats.json");
 
-  if (!existsSync(statsPath)) {
+  if (!fs.existsSync(statsPath)) {
     console.warn(
       `Stats file not found at ${statsPath}. Make sure to enable stats in your configuration.`,
     );

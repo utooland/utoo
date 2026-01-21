@@ -1,8 +1,7 @@
-import { Issue } from "@utoo/pack-shared";
-import { UpdateMessage } from "./hmr/types";
+import { Issue, type UpdateMessage } from "@utoo/pack-shared";
 import initWasm, { DirEntryType } from "./utoo";
 
-export { UpdateMessage } from "./hmr/types";
+export { type UpdateMessage } from "@utoo/pack-shared";
 
 export interface RawDirent {
   name: string;

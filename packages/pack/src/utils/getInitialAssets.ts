@@ -1,5 +1,5 @@
 import fs from "fs";
-import { join } from "path";
+import path from "path";
 
 export interface Assets {
   js: string[];
@@ -8,7 +8,7 @@ export interface Assets {
 
 export function getInitialAssetsFromStats(outputDir: string): Assets {
   const assets = { js: [] as string[], css: [] as string[] };
-  const statsPath = join(outputDir, "stats.json");
+  const statsPath = path.join(outputDir, "stats.json");
   if (fs.existsSync(statsPath)) {
     try {
       const stats = JSON.parse(fs.readFileSync(statsPath, "utf-8"));

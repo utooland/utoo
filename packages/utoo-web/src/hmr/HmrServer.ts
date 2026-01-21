@@ -9,11 +9,11 @@
  */
 
 import {
-  HMR_ACTION_TYPES,
+  type HMR_ACTION_TYPES,
   HMR_ACTIONS_SENT_TO_BROWSER,
-  HmrClientMessage,
-  TurbopackUpdate,
-} from "./types";
+  type HmrClientMessage,
+  type TurbopackUpdate,
+} from "@utoo/pack-shared";
 
 export interface HmrServerOptions {
   /** Session ID for this HMR server instance */
