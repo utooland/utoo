@@ -48,16 +48,16 @@ static GLOBAL_PACK_PROJECT: RwLock<Option<Arc<PackProject>>> = RwLock::new(None)
 /// A root task handle that keeps the turbo-tasks subscription alive.
 /// This must be held by JS to keep the subscription active.
 #[wasm_bindgen]
-pub struct WasmRootTask {
+pub struct RootTask {
     #[allow(dead_code)]
     turbo_tasks: BundlerTurboTasks,
     #[allow(dead_code)]
     task_id: TaskId,
 }
 
-impl Drop for WasmRootTask {
+impl Drop for RootTask {
     fn drop(&mut self) {
-        tracing::info!("[WasmRootTask] dropped, subscription will be stopped");
+        tracing::debug!("RootTask dropped, subscription will be stopped");
         // TODO: dispose the root task
     }
 }
@@ -303,7 +303,7 @@ pub fn worker_created(worker_id: u32) {
 /// Initialize or reinitialize the pack project with the given dev mode.
 /// This will clean up any previous turbo-tasks before creating a new project.
 pub async fn init_pack_project(dev_mode: bool) -> Result<()> {
-    // Take and drop the old project (don't call stop_and_wait as it causes issues in WASM)
+    // Take and drop the old project (don't call stop_and_wait as it causes issues in browser)
     {
         let mut pack_project_guard = GLOBAL_PACK_PROJECT.write();
         let _ = pack_project_guard.take();
@@ -371,7 +371,7 @@ pub async fn init_pack_project(dev_mode: bool) -> Result<()> {
         process_env: Default::default(),
     };
 
-    tracing::info!("[pack] ProjectOptions: {:?}", options);
+    tracing::debug!("ProjectOptions: {:?}", options);
 
     let pack_context = runtime()
         .spawn(PackProject::initialize(options, dev_mode))
@@ -399,7 +399,7 @@ pub async fn run_pack() -> Result<TurbopackResult> {
         .context("failed to spawn build task")?
 }
 
-/// WASM API for build operation.
+/// Build operation.
 pub async fn build() -> std::result::Result<JsValue, wasm_bindgen::JsError> {
     use wasm_bindgen::JsError;
 
@@ -418,7 +418,7 @@ pub async fn build() -> std::result::Result<JsValue, wasm_bindgen::JsError> {
     )
 }
 
-/// WASM API for dev operation.
+/// Dev operation.
 pub async fn dev() -> std::result::Result<JsValue, wasm_bindgen::JsError> {
     use wasm_bindgen::JsError;
 
@@ -440,11 +440,11 @@ pub async fn dev() -> std::result::Result<JsValue, wasm_bindgen::JsError> {
 /// Subscribe to entrypoints changes.
 /// This will watch for file changes and automatically rebuild, calling the callback with results.
 /// Should be used for dev mode instead of manually calling build after file saves.
-/// Returns a WasmRootTask that must be held by JS to keep the subscription active.
+/// Returns a RootTask that must be held by JS to keep the subscription active.
 #[wasm_bindgen(js_name = "entrypointsSubscribe")]
 pub async fn entrypoints_subscribe(
     callback: js_sys::Function,
-) -> Result<WasmRootTask, wasm_bindgen::JsError> {
+) -> Result<RootTask, wasm_bindgen::JsError> {
     use wasm_bindgen::JsError;
 
     // First initialize the project in dev mode
@@ -481,7 +481,7 @@ pub async fn entrypoints_subscribe(
             turbo_tasks_clone.spawn_root_task(move || {
                 let tx = tx.clone();
                 async move {
-                    tracing::info!("[entrypointsSubscribe] root task executing...");
+                    tracing::debug!("entrypointsSubscribe root task executing");
 
                     // Get and write all entrypoints - this reads source files (registering dependencies)
                     // and writes output to disk. When source files change, this root task will be re-executed.
@@ -503,10 +503,9 @@ pub async fn entrypoints_subscribe(
                     };
 
                     // Send result through channel
-                    tracing::info!("[entrypointsSubscribe] sending result through channel");
                     if let Ok(json_str) = serde_json::to_string(&turbopack_result) {
                         if let Err(e) = tx.send(json_str) {
-                            tracing::error!("[entrypointsSubscribe] failed to send: {:?}", e);
+                            tracing::error!("entrypointsSubscribe failed to send: {:?}", e);
                         }
                     }
 
@@ -522,19 +521,14 @@ pub async fn entrypoints_subscribe(
     // We cannot use runtime().spawn() here because `callback` (js_sys::Function) is !Send.
     let turbo_tasks_for_receiver = turbo_tasks.clone();
     wasm_bindgen_futures::spawn_local(async move {
-        tracing::info!("[entrypointsSubscribe] receiver task started on main thread");
         while let Some(json_str) = rx.recv().await {
-            tracing::info!("[entrypointsSubscribe] received result, calling JS callback");
             if let Ok(js_value) = js_sys::JSON::parse(&json_str) {
                 let _ = callback.call1(&wasm_bindgen::JsValue::NULL, &js_value);
             }
         }
-        tracing::info!("[entrypointsSubscribe] receiver task ended");
         drop(turbo_tasks_for_receiver); // Keep turbo_tasks alive until subscription ends
     });
-
-    tracing::info!("[entrypointsSubscribe] root task spawned, returning WasmRootTask");
-    Ok(WasmRootTask {
+    Ok(RootTask {
         turbo_tasks,
         task_id,
     })
@@ -544,17 +538,15 @@ pub async fn entrypoints_subscribe(
 /// Should be called after receiving entrypoints from entrypointsSubscribe callback.
 #[wasm_bindgen(js_name = "writeAllToDisk")]
 pub fn write_all_to_disk(callback: js_sys::Function) {
-    tracing::info!("[writeAllToDisk] called");
     wasm_bindgen_futures::spawn_local(async move {
         let pack_project = match GLOBAL_PACK_PROJECT.read().as_ref().cloned() {
             Some(p) => p,
             None => {
-                tracing::warn!("[writeAllToDisk] pack project not initialized");
+                tracing::warn!("writeAllToDisk: pack project not initialized");
                 return;
             }
         };
 
-        tracing::info!("[writeAllToDisk] starting write operation");
         let turbo_tasks = pack_project.turbo_tasks.clone();
         let container = pack_project.container;
 
@@ -584,14 +576,13 @@ pub fn write_all_to_disk(callback: js_sys::Function) {
         let result = match result {
             Ok(inner) => inner,
             Err(e) => {
-                tracing::error!("[writeAllToDisk] spawn error: {:?}", e);
+                tracing::error!("writeAllToDisk spawn error: {:?}", e);
                 return;
             }
         };
 
         match result {
             Ok((issues, diags)) => {
-                tracing::info!("[writeAllToDisk] write completed successfully");
                 let turbopack_result = TurbopackResult {
                     issues: issues.iter().map(|i| Issue::from(&**i)).collect(),
                     diagnostics: diags.iter().map(|d| Diagnostic::from(d)).collect(),
@@ -604,7 +595,7 @@ pub fn write_all_to_disk(callback: js_sys::Function) {
                 }
             }
             Err(e) => {
-                tracing::error!("[writeAllToDisk] error: {:?}", e);
+                tracing::error!("writeAllToDisk error: {:?}", e);
             }
         }
     });
@@ -614,7 +605,7 @@ pub fn write_all_to_disk(callback: js_sys::Function) {
 /// The callback will be called with update data whenever changes are detected.
 /// This uses spawn_root_task for proper dependency tracking, so it will be
 /// re-executed when the identifier's dependencies change.
-/// Returns a WasmRootTask that must be held by JS to keep the subscription active.
+/// Returns a RootTask that must be held by JS to keep the subscription active.
 ///
 /// Matches NAPI signature: project_hmr_events(project, identifier, func) -> RootTask
 /// Callback receives: { result: ClientUpdateInstruction, issues: Issue[], diagnostics: Diagnostic[] }
@@ -622,7 +613,7 @@ pub fn write_all_to_disk(callback: js_sys::Function) {
 pub async fn hmr_subscribe(
     identifier: String,
     callback: js_sys::Function,
-) -> Result<WasmRootTask, wasm_bindgen::JsError> {
+) -> Result<RootTask, wasm_bindgen::JsError> {
     use wasm_bindgen::JsError;
 
     let identifier: RcStr = identifier.into();
@@ -652,7 +643,7 @@ pub async fn hmr_subscribe(
                     let session = session.clone();
                     let tx = tx.clone();
                     async move {
-                        tracing::debug!("[hmrSubscribe] root task executing for {}", identifier);
+                        tracing::debug!("hmrSubscribe root task executing for {}", identifier);
 
                         let project = container.project().to_resolved().await?;
                         let state = project
@@ -729,7 +720,7 @@ pub async fn hmr_subscribe(
                             "diagnostics": diagnostics_json
                         });
 
-                        tracing::debug!("[hmrSubscribe] sending update for {}", identifier);
+                        tracing::debug!("hmrSubscribe sending update for {}", identifier);
                         if let Ok(json_str) = serde_json::to_string(&turbopack_result) {
                             let _ = tx.send(json_str);
                         }
@@ -745,22 +736,15 @@ pub async fn hmr_subscribe(
     // Spawn receiver loop on main thread to forward messages to JS callback
     let turbo_tasks_for_receiver = turbo_tasks.clone();
     wasm_bindgen_futures::spawn_local(async move {
-        tracing::info!("[hmrSubscribe] receiver task started on main thread");
         while let Some(json_str) = rx.recv().await {
-            tracing::debug!("[hmrSubscribe] received update, calling JS callback");
+            tracing::debug!("hmrSubscribe received update, calling JS callback");
             if let Ok(js_value) = js_sys::JSON::parse(&json_str) {
                 let _ = callback.call1(&JsValue::NULL, &js_value);
             }
         }
-        tracing::info!("[hmrSubscribe] receiver task ended");
         drop(turbo_tasks_for_receiver);
     });
-
-    tracing::info!(
-        "[hmrSubscribe] root task spawned for {}, returning WasmRootTask",
-        identifier
-    );
-    Ok(WasmRootTask {
+    Ok(RootTask {
         turbo_tasks,
         task_id,
     })
@@ -775,7 +759,7 @@ pub fn update_info_subscribe(aggregation_ms: u32, callback: js_sys::Function) {
         let pack_project = match GLOBAL_PACK_PROJECT.read().as_ref().cloned() {
             Some(p) => p,
             None => {
-                tracing::warn!("[updateInfoSubscribe] pack project not initialized");
+                tracing::warn!("updateInfoSubscribe: pack project not initialized");
                 return;
             }
         };
@@ -822,7 +806,7 @@ pub fn update_info_subscribe(aggregation_ms: u32, callback: js_sys::Function) {
                     {
                         Ok(info) => info,
                         Err(e) => {
-                            tracing::error!("[updateInfoSubscribe] wait error: {:?}", e);
+                            tracing::error!("updateInfoSubscribe wait error: {:?}", e);
                             continue;
                         }
                     }

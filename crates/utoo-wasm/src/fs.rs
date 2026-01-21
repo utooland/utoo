@@ -1,4 +1,4 @@
-//! OPFS filesystem API and Glob implementation for WASM environment.
+//! OPFS filesystem API and Glob implementation.
 //!
 //! Provides filesystem operations and implements ruborist's `Glob` trait using `opfs_project` bindings.
 
@@ -28,7 +28,7 @@ where
         .map_err(|e| JsError::new(&format!("Recv error: {}", e)))
 }
 
-/// OPFS-backed glob for WASM environment.
+/// OPFS-backed glob implementation.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct OpfsGlob;
 

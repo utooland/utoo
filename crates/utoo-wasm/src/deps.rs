@@ -1,4 +1,4 @@
-//! WASM-compatible dependency resolution module.
+//! Dependency resolution module.
 //!
 //! Uses ruborist's unified `build_deps` API with OPFS file system.
 
@@ -11,7 +11,7 @@ use utoo_ruborist::service::{build_deps, BuildDepsOptions};
 
 use crate::fs::OpfsGlob;
 
-/// Default registry URL for WASM environment.
+/// Default registry URL.
 const DEFAULT_REGISTRY: &str = "https://registry.npmmirror.com";
 
 /// Default concurrency for browser environment.

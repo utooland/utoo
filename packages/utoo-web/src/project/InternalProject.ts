@@ -92,7 +92,7 @@ class InternalEndpoint implements ProjectEndpoint {
     }
 
     // Use entrypointsSubscribe which handles both initial build and watching for changes.
-    // The WASM entrypointsSubscribe now uses get_all_written_entrypoints_with_issues_operation
+    // The entrypointsSubscribe now uses get_all_written_entrypoints_with_issues_operation
     // internally, which:
     // 1. Reads all source files (registering them as dependencies)
     // 2. Writes all output files to disk
