@@ -6,18 +6,21 @@
  *
  * Usage:
  *
- * In the main application:
  * ```typescript
- * import { HmrServer } from "@utoo/web/hmr";
+ * import { Project } from "@utoo/web";
  *
- * const hmrServer = new HmrServer();
- * const client = hmrServer.connectIframe(iframeElement);
+ * const project = new Project({ ... });
  *
- * // When you receive HMR updates from the build system:
- * hmrServer.sendUpdate(path, update);
+ * // Start dev mode (creates HmrServer internally)
+ * project.dev((result) => {
+ *   console.log("Build complete", result);
+ * });
+ *
+ * // Connect iframe to receive HMR updates
+ * const client = project.connectHmrIframe(iframeElement);
  * ```
  *
- * The HMR client (bootstrap, client) is in crates/pack-core/js/src/hmr/
+ * The HMR client runtime is in crates/pack-core/js/src/hmr/
  * and is injected into the preview iframe by the build system.
  */
 

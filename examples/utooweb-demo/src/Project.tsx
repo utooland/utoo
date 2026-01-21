@@ -48,21 +48,11 @@ const Project = () => {
 
   const previewRef = React.useRef<{ reload: () => void }>(null);
 
-  // HMR iframe connection handler - access hmrServer directly here to avoid passing project to child
+  // HMR iframe connection handler
   const handleConnectHmrIframe = React.useCallback(
     (iframe: HTMLIFrameElement) => {
       if (!project) return null;
-      // Access hmrServer directly in the parent component
-      const hmrServer = (
-        project as unknown as {
-          hmrServer?: {
-            connectIframe: (
-              iframe: HTMLIFrameElement,
-            ) => { close: () => void } | null;
-          };
-        }
-      ).hmrServer;
-      return hmrServer?.connectIframe(iframe) ?? null;
+      return project.connectHmrIframe(iframe);
     },
     [project],
   );

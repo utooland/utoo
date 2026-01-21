@@ -3,13 +3,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { FileTreeNode } from "../types";
 import { generateHtml } from "../utils/htmlGenerator";
 
-// HMR server interface for type safety
-interface HmrServerLike {
-  sendBuilding: () => void;
-  sendBuilt: (errors?: readonly unknown[]) => void;
-  sendReload: (reason: string) => void;
-}
-
 export interface UseDevOptions {
   /** Auto start dev mode when project is ready */
   autoStart?: boolean;
@@ -32,12 +25,6 @@ export const useDev = (
 
   // Track if we've started dev mode
   const isStarting = useRef(false);
-  const buildStartTime = useRef<number>(0);
-
-  // Get HMR server if available
-  const getHmrServer = useCallback((): HmrServerLike | undefined => {
-    return (project as unknown as { hmrServer?: HmrServerLike })?.hmrServer;
-  }, [project]);
 
   // Process build output (generate HTML, refresh file tree)
   const processBuildOutput = useCallback(async () => {
@@ -90,38 +77,13 @@ export const useDev = (
         "color: gray",
       );
 
-      const hmrServer = getHmrServer();
-
-      // Start dev mode with onUpdate callback
-      // This will trigger initial build and watch for file changes
-      buildStartTime.current = performance.now();
       setIsBuilding(true);
-      hmrServer?.sendBuilding();
 
       project.dev((result) => {
-        // Note: Accurate build duration should be obtained from updateInfoSubscribe
-        // The timing here is only accurate for the first build
-        const duration = Math.round(performance.now() - buildStartTime.current);
-
         console.log(`%cDev:%c Build completed`, "color: blue;", "color: green");
 
         setIsBuilding(false);
         setBuildCount((c) => c + 1);
-
-        if (result.issues && result.issues.length > 0) {
-          const errorIssues = result.issues.filter(
-            (i: any) => i.severity === "error",
-          );
-          if (errorIssues.length > 0) {
-            hmrServer?.sendBuilt(
-              errorIssues.map((i: any) => ({ message: i.title })),
-            );
-          } else {
-            hmrServer?.sendBuilt();
-          }
-        } else {
-          hmrServer?.sendBuilt();
-        }
 
         // Process build output
         processBuildOutput();
@@ -138,14 +100,13 @@ export const useDev = (
 
         // Signal next build is starting
         setIsBuilding(true);
-        hmrServer?.sendBuilding();
       });
     } catch (e: any) {
       console.error("Failed to start dev mode:", e);
       setError(`Failed to start dev mode: ${e.message}`);
       isStarting.current = false;
     }
-  }, [project, isDevMode, getHmrServer, processBuildOutput]);
+  }, [project, isDevMode, processBuildOutput]);
 
   // Stop dev mode (note: currently no way to stop the subscription)
   const stopDev = useCallback(() => {
