@@ -11,15 +11,11 @@ use opfs_project::pack::PackFile;
 use std::path::Path;
 use wasm_bindgen::JsCast;
 
-use crate::tokio_runtime::TOKIO_RUNTIME;
+use crate::tokio_runtime::{runtime, TOKIO_RUNTIME};
 
 /// Calculate MD5 hash of byte content
 pub async fn sig_md5(content: Vec<u8>) -> Result<String> {
     let result = runtime()
-        .spawn_blocking(move || opfs_project::pack::sig_md5(&content))
-        .await?;
-
-    let result = rt
         .spawn_blocking(move || opfs_project::pack::sig_md5(&content))
         .await?;
     Ok(result)
