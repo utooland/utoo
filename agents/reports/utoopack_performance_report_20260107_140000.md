@@ -1,5 +1,13 @@
 # Utoopack Performance Optimization Report - 20260107_1400
 
+## 🛠 Build Context
+- **Target**: `examples/with-antd`
+- **Command**: `npm run build --prefix examples/with-antd`
+- **Trace Date**: 2026-01-07 14:00:00
+- **Trace File**: `.trace/trace_20260107_140000.json`
+
+---
+
 ## Overview
 
 This report details the implementation and impact of the Resolution Plugin system optimization. The goal was to reduce the "Task Explosion" in the `turbo_tasks` engine by allowing resolution plugins to short-circuit when inactive.
