@@ -1,3 +1,14 @@
+import {
+  type BuildingAction,
+  type BuiltAction,
+  type CompilationError,
+  type HMR_ACTION_TYPES,
+  HMR_ACTIONS_SENT_TO_BROWSER,
+  type ReloadAction,
+  type SyncAction,
+  type TurbopackConnectedAction,
+  type TurbopackMessageAction,
+} from "@utoo/pack-shared";
 import { IncomingMessage } from "http";
 import { nanoid } from "nanoid";
 import type { Socket } from "net";
@@ -21,67 +32,18 @@ const wsServer = new ws.Server({ noServer: true });
 
 const sessionId = Math.floor(Number.MAX_SAFE_INTEGER * Math.random());
 
-export const enum HMR_ACTIONS_SENT_TO_BROWSER {
-  RELOAD = "reload",
-  CLIENT_CHANGES = "clientChanges",
-  SERVER_ONLY_CHANGES = "serverOnlyChanges",
-  SYNC = "sync",
-  BUILT = "built",
-  BUILDING = "building",
-  TURBOPACK_MESSAGE = "turbopack-message",
-  TURBOPACK_CONNECTED = "turbopack-connected",
-}
-
-export interface TurbopackMessageAction {
-  action: HMR_ACTIONS_SENT_TO_BROWSER.TURBOPACK_MESSAGE;
-  data: TurbopackUpdate | TurbopackUpdate[];
-}
-
-export interface TurbopackConnectedAction {
-  action: HMR_ACTIONS_SENT_TO_BROWSER.TURBOPACK_CONNECTED;
-  data: { sessionId: number };
-}
-
-interface BuildingAction {
-  action: HMR_ACTIONS_SENT_TO_BROWSER.BUILDING;
-}
-
-export interface CompilationError {
-  moduleName?: string;
-  message: string;
-  details?: string;
-  moduleTrace?: Array<{ moduleName?: string }>;
-  stack?: string;
-}
-
-export interface SyncAction {
-  action: HMR_ACTIONS_SENT_TO_BROWSER.SYNC;
-  hash: string;
-  errors: ReadonlyArray<CompilationError>;
-  warnings: ReadonlyArray<CompilationError>;
-  updatedModules?: ReadonlyArray<string>;
-}
-
-export interface BuiltAction {
-  action: HMR_ACTIONS_SENT_TO_BROWSER.BUILT;
-  hash: string;
-  errors: ReadonlyArray<CompilationError>;
-  warnings: ReadonlyArray<CompilationError>;
-  updatedModules?: ReadonlyArray<string>;
-}
-
-export interface ReloadAction {
-  action: HMR_ACTIONS_SENT_TO_BROWSER.RELOAD;
-  data: string;
-}
-
-export type HMR_ACTION_TYPES =
-  | TurbopackMessageAction
-  | TurbopackConnectedAction
-  | BuildingAction
-  | SyncAction
-  | BuiltAction
-  | ReloadAction;
+// Re-export HMR types from pack-shared for backward compatibility
+export {
+  type BuildingAction,
+  type BuiltAction,
+  type CompilationError,
+  type HMR_ACTION_TYPES,
+  HMR_ACTIONS_SENT_TO_BROWSER,
+  type ReloadAction,
+  type SyncAction,
+  type TurbopackConnectedAction,
+  type TurbopackMessageAction,
+} from "@utoo/pack-shared";
 
 export interface WebpackStats {
   hash?: string;
