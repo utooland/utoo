@@ -124,10 +124,16 @@ export interface ProjectEndpoint {
   build: () => Promise<BuildOutput>;
   /** Start dev mode with file watching. onUpdate is called on each rebuild. */
   dev: (onUpdate?: (result: BuildOutput) => void) => void;
+  /**
+   * Subscribe to HMR events for a specific identifier.
+   * Returns a Promise that resolves when the subscription is set up.
+   * Matches NAPI signature: project_hmr_events(project, identifier, func) -> RootTask
+   * Callback receives: { result: ClientUpdateInstruction, issues: Issue[], diagnostics: Diagnostic[] }
+   */
   hmrSubscribe: (
     identifier: string,
     callback: (update: unknown) => void,
-  ) => void;
+  ) => void | Promise<void>;
   /** Subscribe to compilation lifecycle events (start/end). */
   updateInfoSubscribe: (
     aggregationMs: number,

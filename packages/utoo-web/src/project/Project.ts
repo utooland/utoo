@@ -131,8 +131,8 @@ export class Project implements ProjectEndpoint {
     // Create HmrServer lazily on first dev() call
     if (!this.hmrServer) {
       this.hmrServer = new HmrServer({
-        onSubscribe: (path, client) => {
-          this.hmrSubscribe(path, (update) => {
+        onSubscribe: async (path, client) => {
+          await this.hmrSubscribe(path, (update) => {
             this.hmrServer!.sendUpdate(path, update as any);
           });
         },
@@ -149,11 +149,11 @@ export class Project implements ProjectEndpoint {
     );
   }
 
-  public hmrSubscribe(
+  public async hmrSubscribe(
     identifier: string,
     callback: (update: unknown) => void,
-  ): void {
-    this.remote.hmrSubscribe(identifier, comlink.proxy(callback));
+  ): Promise<void> {
+    await this.remote.hmrSubscribe(identifier, comlink.proxy(callback));
   }
 
   public updateInfoSubscribe(

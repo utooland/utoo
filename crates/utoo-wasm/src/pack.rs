@@ -614,134 +614,156 @@ pub fn write_all_to_disk(callback: js_sys::Function) {
 /// The callback will be called with update data whenever changes are detected.
 /// This uses spawn_root_task for proper dependency tracking, so it will be
 /// re-executed when the identifier's dependencies change.
+/// Returns a WasmRootTask that must be held by JS to keep the subscription active.
+///
+/// Matches NAPI signature: project_hmr_events(project, identifier, func) -> RootTask
+/// Callback receives: { result: ClientUpdateInstruction, issues: Issue[], diagnostics: Diagnostic[] }
 #[wasm_bindgen(js_name = "hmrSubscribe")]
-pub fn hmr_subscribe(identifier: String, callback: js_sys::Function) {
+pub async fn hmr_subscribe(
+    identifier: String,
+    callback: js_sys::Function,
+) -> Result<WasmRootTask, wasm_bindgen::JsError> {
+    use wasm_bindgen::JsError;
+
     let identifier: RcStr = identifier.into();
 
-    wasm_bindgen_futures::spawn_local(async move {
-        let pack_project = match GLOBAL_PACK_PROJECT.read().as_ref().cloned() {
-            Some(p) => p,
-            None => {
-                tracing::warn!("[hmrSubscribe] pack project not initialized");
-                return;
-            }
-        };
+    let pack_project = GLOBAL_PACK_PROJECT
+        .read()
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| JsError::new("pack project not initialized"))?;
 
-        let turbo_tasks = pack_project.turbo_tasks.clone();
-        let container = pack_project.container;
-        let session = TransientInstance::new(());
+    let turbo_tasks = pack_project.turbo_tasks.clone();
+    let container = pack_project.container;
+    let session = TransientInstance::new(());
 
-        // Create channel for communication between root task and JS callback
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    // Create channel for communication between root task and JS callback
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
-        // Spawn a root task that will be re-executed when dependencies change
-        let turbo_tasks_clone = turbo_tasks.clone();
-        let _task_id = runtime()
-            .spawn({
-                let identifier = identifier.clone();
-                let session = session.clone();
-                async move {
-                    turbo_tasks_clone.spawn_root_task(move || {
-                        let identifier = identifier.clone();
-                        let session = session.clone();
-                        let tx = tx.clone();
-                        async move {
-                            tracing::debug!(
-                                "[hmrSubscribe] root task executing for {}",
-                                identifier
-                            );
+    // Spawn a root task that will be re-executed when dependencies change
+    let turbo_tasks_clone = turbo_tasks.clone();
+    let task_id = runtime()
+        .spawn({
+            let identifier = identifier.clone();
+            let session = session.clone();
+            async move {
+                turbo_tasks_clone.spawn_root_task(move || {
+                    let identifier = identifier.clone();
+                    let session = session.clone();
+                    let tx = tx.clone();
+                    async move {
+                        tracing::debug!("[hmrSubscribe] root task executing for {}", identifier);
 
-                            let project = container.project().to_resolved().await?;
-                            let state = project
-                                .hmr_version_state(identifier.clone(), session)
-                                .to_resolved()
-                                .await?;
+                        let project = container.project().to_resolved().await?;
+                        let state = project
+                            .hmr_version_state(identifier.clone(), session)
+                            .to_resolved()
+                            .await?;
 
-                            let update_op = hmr_update_with_issues_operation(
-                                project,
-                                identifier.clone(),
-                                state,
-                            );
-                            let update = update_op.read_strongly_consistent().await?;
-                            let HmrUpdateWithIssues {
-                                update,
-                                issues,
-                                diagnostics: _,
-                                effects,
-                            } = &*update;
-                            effects.apply().await?;
+                        let update_op =
+                            hmr_update_with_issues_operation(project, identifier.clone(), state);
+                        let update = update_op.read_strongly_consistent().await?;
+                        let HmrUpdateWithIssues {
+                            update,
+                            issues,
+                            diagnostics,
+                            effects,
+                        } = &*update;
+                        effects.apply().await?;
 
-                            // Update the version state and generate JSON for the update
-                            let update_json = match &**update {
-                                Update::None => {
-                                    // No update, but might have issues
-                                    if !issues.is_empty() {
-                                        let issues_json: Vec<_> = issues
-                                            .iter()
-                                            .map(|i| {
-                                                serde_json::json!({
-                                                    "severity": i.severity.as_str(),
-                                                    "filePath": i.file_path.to_string(),
-                                                    "title": format!("{:?}", i.title),
-                                                })
-                                            })
-                                            .collect();
-                                        Some(serde_json::json!({
-                                            "type": "issues",
-                                            "resource": { "path": identifier.to_string() },
-                                            "issues": issues_json,
-                                            "diagnostics": []
-                                        }))
-                                    } else {
-                                        None
-                                    }
-                                }
-                                Update::Missing => None,
-                                Update::Total(TotalUpdate { to }) => {
-                                    state.set(to.clone()).await?;
-                                    Some(serde_json::json!({
-                                        "type": "restart",
-                                        "resource": { "path": identifier.to_string() },
-                                        "issues": [],
-                                        "diagnostics": []
-                                    }))
-                                }
-                                Update::Partial(PartialUpdate { to, instruction }) => {
-                                    state.set(to.clone()).await?;
-                                    // instruction is already Arc<serde_json::Value>
-                                    Some(serde_json::json!({
-                                        "type": "partial",
-                                        "resource": { "path": identifier.to_string() },
-                                        "instruction": **instruction,
-                                        "issues": [],
-                                        "diagnostics": []
-                                    }))
-                                }
-                            };
-
-                            // Send update through channel if there's something to send
-                            if let Some(json) = update_json {
-                                tracing::debug!("[hmrSubscribe] sending update for {}", identifier);
-                                if let Ok(json_str) = serde_json::to_string(&json) {
-                                    let _ = tx.send(json_str);
-                                }
+                        // Update the version state (same as NAPI)
+                        match &**update {
+                            Update::Missing | Update::None => {}
+                            Update::Total(TotalUpdate { to }) => {
+                                state.set(to.clone()).await?;
                             }
-
-                            Ok(Completion::new())
+                            Update::Partial(PartialUpdate { to, .. }) => {
+                                state.set(to.clone()).await?;
+                            }
                         }
-                    })
-                }
-            })
-            .await;
 
-        // Receiver loop on main thread to forward messages to JS callback
+                        // Convert issues to JSON (matching NAPI's NapiIssue format)
+                        let issues_json: Vec<_> =
+                            issues.iter().map(|issue| Issue::from(&**issue)).collect();
+
+                        // Convert diagnostics to JSON
+                        let diagnostics_json: Vec<_> =
+                            diagnostics.iter().map(|d| Diagnostic::from(d)).collect();
+
+                        // Build ClientUpdateInstruction (matching NAPI format)
+                        // resource: { path, headers? }
+                        // type: "restart" | "partial" | "issues" | "notFound"
+                        // instruction?: Value (for partial)
+                        // issues: Issue[]
+                        let result_json = match update.as_ref() {
+                            Update::Missing => serde_json::json!({
+                                "type": "notFound",
+                                "resource": { "path": identifier.to_string() },
+                                "issues": []
+                            }),
+                            Update::None => serde_json::json!({
+                                "type": "issues",
+                                "resource": { "path": identifier.to_string() },
+                                "issues": issues_json
+                            }),
+                            Update::Total(_) => serde_json::json!({
+                                "type": "restart",
+                                "resource": { "path": identifier.to_string() },
+                                "issues": issues_json
+                            }),
+                            Update::Partial(PartialUpdate { instruction, .. }) => {
+                                serde_json::json!({
+                                    "type": "partial",
+                                    "resource": { "path": identifier.to_string() },
+                                    "instruction": **instruction,
+                                    "issues": issues_json
+                                })
+                            }
+                        };
+
+                        // Build TurbopackResult format: { result, issues, diagnostics }
+                        // This matches NAPI's callback format
+                        let turbopack_result = serde_json::json!({
+                            "result": result_json,
+                            "issues": issues_json,
+                            "diagnostics": diagnostics_json
+                        });
+
+                        tracing::debug!("[hmrSubscribe] sending update for {}", identifier);
+                        if let Ok(json_str) = serde_json::to_string(&turbopack_result) {
+                            let _ = tx.send(json_str);
+                        }
+
+                        Ok(Completion::new())
+                    }
+                })
+            }
+        })
+        .await
+        .map_err(|e| JsError::new(&format!("Failed to spawn root task: {:?}", e)))?;
+
+    // Spawn receiver loop on main thread to forward messages to JS callback
+    let turbo_tasks_for_receiver = turbo_tasks.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        tracing::info!("[hmrSubscribe] receiver task started on main thread");
         while let Some(json_str) = rx.recv().await {
             tracing::debug!("[hmrSubscribe] received update, calling JS callback");
             if let Ok(js_value) = js_sys::JSON::parse(&json_str) {
                 let _ = callback.call1(&JsValue::NULL, &js_value);
             }
         }
+        tracing::info!("[hmrSubscribe] receiver task ended");
+        drop(turbo_tasks_for_receiver);
     });
+
+    tracing::info!(
+        "[hmrSubscribe] root task spawned for {}, returning WasmRootTask",
+        identifier
+    );
+    Ok(WasmRootTask {
+        turbo_tasks,
+        task_id,
+    })
 }
 
 /// Subscribe to compilation lifecycle events.

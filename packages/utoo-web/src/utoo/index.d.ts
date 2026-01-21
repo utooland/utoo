@@ -152,8 +152,12 @@ export function getWasmModule(): any;
  * The callback will be called with update data whenever changes are detected.
  * This uses spawn_root_task for proper dependency tracking, so it will be
  * re-executed when the identifier's dependencies change.
+ * Returns a WasmRootTask that must be held by JS to keep the subscription active.
+ *
+ * Matches NAPI signature: project_hmr_events(project, identifier, func) -> RootTask
+ * Callback receives: { result: ClientUpdateInstruction, issues: Issue[], diagnostics: Diagnostic[] }
  */
-export function hmrSubscribe(identifier: string, callback: Function): void;
+export function hmrSubscribe(identifier: string, callback: Function): Promise<WasmRootTask>;
 
 export function initLogFilter(filter: string): void;
 

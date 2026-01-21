@@ -28,6 +28,8 @@ class InternalEndpoint implements ProjectEndpoint {
 
   // Keep root task alive for the subscription to work
   private rootTask?: WasmRootTask;
+  // Keep HMR root tasks alive (keyed by identifier)
+  private hmrRootTasks: Map<string, WasmRootTask> = new Map();
 
   // This should be called only once
   async mount(opt: Omit<ProjectOptions, "workerUrl" | "serviceWorker">) {
@@ -199,8 +201,9 @@ class InternalEndpoint implements ProjectEndpoint {
     return await ProjectInternal.sigMd5(content);
   }
 
-  hmrSubscribe(identifier: string, callback: (update: unknown) => void) {
-    wasmHmrSubscribe(identifier, callback);
+  async hmrSubscribe(identifier: string, callback: (update: unknown) => void) {
+    const rootTask = await wasmHmrSubscribe(identifier, callback);
+    this.hmrRootTasks.set(identifier, rootTask);
   }
 
   updateInfoSubscribe(

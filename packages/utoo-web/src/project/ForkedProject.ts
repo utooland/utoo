@@ -37,11 +37,11 @@ export class ForkedProject implements ProjectEndpoint {
     this.endpoint.dev(onUpdate ? comlink.proxy(onUpdate) : undefined);
   }
 
-  public hmrSubscribe(
+  public async hmrSubscribe(
     identifier: string,
     callback: (update: unknown) => void,
-  ): void {
-    this.endpoint.hmrSubscribe(identifier, comlink.proxy(callback));
+  ): Promise<void> {
+    await this.endpoint.hmrSubscribe(identifier, comlink.proxy(callback));
   }
 
   public updateInfoSubscribe(
