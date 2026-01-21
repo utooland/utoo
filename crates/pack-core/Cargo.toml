@@ -20,6 +20,7 @@ indoc               = { workspace = true }
 mime_guess          = "2.0.4"
 pathdiff            = { workspace = true }
 qstring             = "0.7.2"
+regex               = { workspace = true }
 rustc-hash          = { workspace = true }
 serde               = { workspace = true }
 serde_json          = { workspace = true }
