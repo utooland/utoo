@@ -81,10 +81,7 @@ export class Project implements ProjectEndpoint {
 
   private connectWorker(e: MessageEvent) {
     const port = e.ports[0];
-    if (
-      e.data === WorkerMessageType.RequestFork &&
-      !ConnectedPorts.has(port)
-    ) {
+    if (e.data === WorkerMessageType.RequestFork && !ConnectedPorts.has(port)) {
       ProjectWorker.postMessage(WorkerMessageType.InitConnection, [port]);
     }
   }
