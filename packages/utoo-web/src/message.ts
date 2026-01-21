@@ -1,8 +1,15 @@
 export const HandShake = "__handshake__";
-
-export const ServiceWorkerHandShake = "__service_worker_handshake__";
-
-export const ServiceWorkerHeartbeatPing = "__service_worker_heartbeat_ping__";
-export const ServiceWorkerHeartbeatPong = "__service_worker_heartbeat_pong__";
-
 export const Fork = "__fork__";
+
+export enum SWMessageType {
+  HandShake = 10000,
+  HeartbeatPing,
+  HeartbeatPong,
+}
+
+/** @deprecated use SWMessageType */
+export const ServiceWorkerHandShake = SWMessageType.HandShake;
+/** @deprecated use SWMessageType */
+export const ServiceWorkerHeartbeatPing = SWMessageType.HeartbeatPing;
+/** @deprecated use SWMessageType */
+export const ServiceWorkerHeartbeatPong = SWMessageType.HeartbeatPong;

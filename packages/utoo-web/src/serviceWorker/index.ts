@@ -1,8 +1,4 @@
-import {
-  ServiceWorkerHandShake,
-  ServiceWorkerHeartbeatPing,
-  ServiceWorkerHeartbeatPong,
-} from "../message";
+import { SWMessageType } from "../message";
 import { Project } from "../project/Project";
 import { ProjectEndpoint } from "../types";
 
@@ -36,7 +32,7 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("message", (event) => {
-  if (event.data && event.data[ServiceWorkerHandShake] === true) {
+  if (event.data && event.data[SWMessageType.HandShake] === true) {
     console.log("[ServiceWorker] Handshake message received");
     _projectEndpoint = Project.fork(
       new MessageChannel(),
@@ -44,9 +40,9 @@ self.addEventListener("message", (event) => {
     );
     _resolve();
     console.log("[ServiceWorker] Handshake completed, ProjectEndpoint ready");
-  } else if (event.data && event.data[ServiceWorkerHeartbeatPing] === true) {
+  } else if (event.data && event.data[SWMessageType.HeartbeatPing] === true) {
     (event.source as Client).postMessage({
-      [ServiceWorkerHeartbeatPong]: true,
+      [SWMessageType.HeartbeatPong]: true,
     });
   }
 });
