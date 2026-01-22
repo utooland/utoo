@@ -2,6 +2,7 @@
 76, ((__turbopack_context__) => {
 
 __turbopack_context__.v({
+  "displayName": "index-less__5KwGvG__displayName",
   "rowBox": "index-less__5KwGvG__rowBox",
 });
 }),
