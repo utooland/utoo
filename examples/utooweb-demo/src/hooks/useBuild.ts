@@ -3,6 +3,12 @@ import { useCallback, useState } from "react";
 import { FileTreeNode } from "../types";
 import { generateHtml } from "../utils/htmlGenerator";
 
+// HMR server interface for type safety (will be available after utoo-web is rebuilt)
+interface HmrServerLike {
+  sendBuilding: () => void;
+  sendBuilt: (errors?: readonly unknown[]) => void;
+}
+
 export const useBuild = (
   project: UtooProject | null,
   fileTree: FileTreeNode[],
@@ -16,6 +22,14 @@ export const useBuild = (
     if (!project) return;
     setIsBuilding(true);
     setError("");
+
+    // Get HMR server if available (type assertion for forward compatibility)
+    const hmrServer = (project as unknown as { hmrServer?: HmrServerLike })
+      .hmrServer;
+
+    // Notify HMR clients that build is starting
+    hmrServer?.sendBuilding();
+
     try {
       const start = performance.now();
       await project.build();
@@ -24,6 +38,10 @@ export const useBuild = (
         "color: blue;",
         "color: green",
       );
+
+      // Notify HMR clients that build completed
+      hmrServer?.sendBuilt();
+
       try {
         const statsContent = await project.readFile("dist/stats.json", "utf8");
         const stats = JSON.parse(statsContent);
@@ -58,6 +76,9 @@ export const useBuild = (
     } catch (e: any) {
       console.error("Build failed: ", e);
       setError(`Build failed: ${JSON.stringify(e)}`);
+
+      // Notify HMR clients about build error
+      hmrServer?.sendBuilt([{ message: e.message || String(e) }]);
     } finally {
       setIsBuilding(false);
     }

@@ -1,14 +1,14 @@
-(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([
+(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["runtime_app_build_runtime_input_index_c1a07ff7.js"],"runtimeModuleIds":[47]}
+    {"otherChunks":["input_index_45265639.js"],"runtimeModuleIds":[47]}
 ]);
 (() => {
-if (!Array.isArray(globalThis.TURBOPACK)) {
+if (!Array.isArray(globalThis["TURBOPACK"])) {
     return;
 }
 
 const CHUNK_BASE_PATH = "/";
-const RELATIVE_ROOT_PATH = "/ROOT";
+const RELATIVE_ROOT_PATH = "..";
 const RUNTIME_PUBLIC_PATH = "/";
 const CHUNK_SUFFIX = "";
 /**
@@ -994,8 +994,8 @@ let BACKEND;
         return fetch(getChunkRelativeUrl(wasmChunkPath));
     }
 })();
-const chunksToRegister = globalThis.TURBOPACK;
-globalThis.TURBOPACK = { push: registerChunk };
+const chunksToRegister = globalThis["TURBOPACK"];
+globalThis["TURBOPACK"] = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
 })();
 

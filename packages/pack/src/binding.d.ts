@@ -57,6 +57,11 @@ export interface NapiWatchOptions {
    * docker).
    */
   pollIntervalMs?: number
+  /**
+   * Paths to ignore when watching for file changes.
+   * By default, ignores: node_modules
+   */
+  ignored?: Array<string>
 }
 export interface NapiProjectOptions {
   /**

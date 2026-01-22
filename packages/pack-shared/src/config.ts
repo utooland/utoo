@@ -159,6 +159,7 @@ export interface ConfigComplete {
         };
     concatenateModules?: boolean;
     removeUnusedExports?: boolean;
+    removeUnusedImports?: boolean;
     nestedAsyncChunking?: boolean;
     wasmAsAsset?: boolean;
   };

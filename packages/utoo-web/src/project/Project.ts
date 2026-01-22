@@ -1,9 +1,13 @@
-import { handleIssues } from "@utoo/pack-shared";
+import { handleIssues, type UpdateMessage } from "@utoo/pack-shared";
 import * as comlink from "comlink";
+import { HmrClient, HmrServer } from "../hmr";
+import { WorkerMessageType } from "../message";
+import { installServiceWorker } from "../serviceWorker/install";
 import {
   BuildOutput,
   DepsOptions,
   Dirent,
+  InstallOptions,
   PackFile,
   ProjectEndpoint,
   ProjectOptions,
@@ -12,8 +16,6 @@ import {
   ServiceWorkerOptions,
   Stats,
 } from "../types";
-import { installServiceWorker } from "../utils/installServiceWorker";
-import { Fork, HandShake } from "../utils/message";
 import { ForkedProject } from "./ForkedProject";
 
 let ProjectWorker: Worker;
@@ -26,6 +28,9 @@ export class Project implements ProjectEndpoint {
   public readonly cwd: string;
 
   public readonly serviceWorkerOptions?: ServiceWorkerOptions;
+
+  /** HMR server for managing hot module replacement with preview iframes */
+  private hmrServer?: HmrServer;
 
   private remote: comlink.Remote<
     ProjectEndpoint & {
@@ -66,7 +71,7 @@ export class Project implements ProjectEndpoint {
       }
     }
 
-    ProjectWorker.postMessage(HandShake, [port2]);
+    ProjectWorker.postMessage(WorkerMessageType.InitConnection, [port2]);
 
     this.#mount ??= this.remote.mount({
       cwd,
@@ -80,8 +85,8 @@ export class Project implements ProjectEndpoint {
 
   private connectWorker(e: MessageEvent) {
     const port = e.ports[0];
-    if (e.data === Fork && !ConnectedPorts.has(port)) {
-      ProjectWorker.postMessage(HandShake, [port]);
+    if (e.data === WorkerMessageType.RequestFork && !ConnectedPorts.has(port)) {
+      ProjectWorker.postMessage(WorkerMessageType.InitConnection, [port]);
     }
   }
 
@@ -102,9 +107,9 @@ export class Project implements ProjectEndpoint {
     return await this.remote.deps(options);
   }
 
-  public async install(packageLock: string, maxConcurrentDownloads?: number) {
+  public async install(packageLock: string, options?: InstallOptions) {
     await this.#mount;
-    return await this.remote.install(packageLock, maxConcurrentDownloads);
+    return await this.remote.install(packageLock, options);
   }
 
   public async build(): Promise<BuildOutput> {
@@ -112,6 +117,42 @@ export class Project implements ProjectEndpoint {
     const res = await this.remote.build();
     handleIssues(res.issues, false, false);
     return res;
+  }
+
+  public dev(onUpdate?: (result: BuildOutput) => void): void {
+    // Create HmrServer lazily on first dev() call
+    if (!this.hmrServer) {
+      this.hmrServer = new HmrServer({
+        onSubscribe: async (path, client) => {
+          await this.hmrSubscribe(path, (update) => {
+            this.hmrServer!.sendUpdate(path, update as any);
+          });
+        },
+      });
+    }
+
+    this.remote.dev(
+      onUpdate
+        ? comlink.proxy((result: BuildOutput) => {
+            handleIssues(result.issues, false, false);
+            onUpdate(result);
+          })
+        : undefined,
+    );
+  }
+
+  public async hmrSubscribe(
+    identifier: string,
+    callback: (update: unknown) => void,
+  ): Promise<void> {
+    await this.remote.hmrSubscribe(identifier, comlink.proxy(callback));
+  }
+
+  public updateInfoSubscribe(
+    aggregationMs: number,
+    callback: (message: UpdateMessage) => void,
+  ): void {
+    this.remote.updateInfoSubscribe(aggregationMs, comlink.proxy(callback));
   }
 
   public async readFile(path: string, encoding?: "utf8") {
@@ -179,13 +220,34 @@ export class Project implements ProjectEndpoint {
     return await this.remote.sigMd5(content);
   }
 
+  /**
+   * Connect an iframe to the HMR server for hot module replacement.
+   * Only works after dev() has been called.
+   *
+   * @param iframe The iframe element to connect
+   * @param origin Optional origin for postMessage (default: "*")
+   * @returns The HMR client instance, or null if connection failed or dev() not called
+   */
+  public connectHmrIframe(
+    iframe: HTMLIFrameElement,
+    origin?: string,
+  ): HmrClient | null {
+    if (!this.hmrServer) {
+      return null;
+    }
+    return this.hmrServer.connectIframe(iframe, origin);
+  }
+
   public static fork(
     channel: MessageChannel,
     eventSource?: Client | DedicatedWorkerGlobalScope,
   ): ProjectEndpoint {
-    (eventSource || (self as DedicatedWorkerGlobalScope)).postMessage(Fork, {
-      transfer: [channel.port2],
-    });
+    (eventSource || (self as DedicatedWorkerGlobalScope)).postMessage(
+      WorkerMessageType.RequestFork,
+      {
+        transfer: [channel.port2],
+      },
+    );
 
     return new ForkedProject(channel.port1);
   }

@@ -31,7 +31,7 @@
 ## 📦 Installation
 
 ```bash
-npm install @utoo/pack
+ut install @utoo/pack --save-dev
 ```
 
 ## 🚀 Quick Start
@@ -46,50 +46,58 @@ const { build, dev } = require('@utoo/pack');
 // Production build
 async function runBuild() {
   await build({
-    root: process.cwd(),
-    config: {
-      entry: [
-        {
-          key: 'main',
-          value: './src/index.ts'
+    mode: "production",
+    entry: [
+      {
+        import: "./src/index.ts",
+        html: {
+          template: "./index.html"
         }
-      ],
-      mode: 'production'
-    }
+      }
+    ],
+    output: {
+      path: "./dist",
+      filename: "[name].[contenthash:8].js",
+      chunkFilename: "[name].[contenthash:8].js",
+      clean: true
+    },
+    sourceMaps: true
   });
 }
 
 // Development mode with HMR
 async function startDev() {
   const server = await dev({
-    root: process.cwd(),
-    config: {
-      mode: 'development'
-    }
+    mode: "development",
+    entry: [
+      {
+        import: "./src/index.ts",
+        html: {
+          template: "./index.html"
+        }
+      }
+    ],
+    output: {
+      path: "./dist",
+      filename: "[name].[contenthash:8].js",
+      chunkFilename: "[name].[contenthash:8].js",
+      clean: true
+    },
+    sourceMaps: true
   });
 }
 ```
 
 ## 🔌 Webpack Compatibility Mode
 
-`@utoo/pack` provides a partial compatibility layer for Webpack. This allows you to use your existing `webpack.config.js` with minimal changes.
-
-### Usage via CLI
-
-```bash
-up build --webpack
-```
-
-### Programmatic Usage
+`@utoo/pack` provides a partial compatibility layer for Webpack.
 
 ```javascript
 const { build } = require('@utoo/pack');
-const { compatOptionsFromWebpack } = require('@utoo/pack/webpack-compat');
 const webpackConfig = require('./webpack.config.js');
 
 async function run() {
-  const options = compatOptionsFromWebpack(webpackConfig);
-  await build(options);
+  await build({ ...webpackConfig, webpackMode: true });
 }
 ```
 

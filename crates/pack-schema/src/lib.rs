@@ -140,6 +140,11 @@ pub struct SchemaWatchOptions {
     /// Enable polling at a certain interval if the native file watching doesn't work (e.g. docker).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub poll_interval: Option<u64>,
+
+    /// Paths to ignore when watching for file changes.
+    /// By default, ignores: node_modules
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ignored: Option<Vec<String>>,
 }
 
 /// Environment variables for build-time injection
@@ -302,6 +307,15 @@ pub struct SchemaOutputConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Copy files configuration")]
     pub copy: Option<Vec<SchemaCopyItem>>,
+
+    /// The global variable name used by the runtime for loading chunks.
+    /// This is similar to webpack's `output.chunkLoadingGlobal`.
+    /// Default: "TURBOPACK"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "The global variable name used by the runtime for loading chunks. Default: 'TURBOPACK'"
+    )]
+    pub chunk_loading_global: Option<String>,
 }
 
 /// Output type

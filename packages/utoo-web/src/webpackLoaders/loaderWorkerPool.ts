@@ -1,5 +1,6 @@
-import { Binding } from "../types";
-import initWasm, {
+import {
+  getWasmMemory,
+  getWasmModule,
   registerWorkerScheduler,
   WebWorkerCreation,
   WebWorkerTermination,
@@ -12,7 +13,6 @@ let nextWorkerId = 0;
 const loaderWorkers: Record<string, Map<number, Worker>> = {};
 
 export const runLoaderWorkerPool = async (
-  binding: Binding,
   projectCwd: string,
   loaderWorkerUrl: string,
   loadersImportMap?: Record<string, string>,
@@ -59,9 +59,8 @@ export const runLoaderWorkerPool = async (
       }
 
       worker.postMessage([
-        // @ts-ignore
-        initWasm.__wbindgen_wasm_module,
-        binding.memory,
+        getWasmModule(),
+        getWasmMemory(),
         {
           workerData: {
             cwd: finalCwd,
@@ -69,7 +68,7 @@ export const runLoaderWorkerPool = async (
             threadId: workerId,
           },
           loaderAssets: {
-            importMaps: { ...loadersImportMap },
+            importMaps: loadersImportMap ?? {},
             entrypoint: finalFilename,
           },
         } as LoaderRunnerMeta,

@@ -6,6 +6,7 @@ import { MenuItem, MoreMenu } from "./components/MoreMenu";
 import { Panel } from "./components/Panel";
 import { Preview } from "./components/Preview";
 import { useBuild } from "./hooks/useBuild";
+import { useDev } from "./hooks/useDev";
 import { useFileContent } from "./hooks/useFileContent";
 import { useFileTree } from "./hooks/useFileTree";
 import { useGzip } from "./hooks/useGzip";
@@ -41,10 +42,20 @@ const Project = () => {
     saveFile,
     isSaving,
     hasUnsavedChanges,
+    justSaved,
     error: fileContentError,
   } = useFileContent(project);
 
   const previewRef = React.useRef<{ reload: () => void }>(null);
+
+  // HMR iframe connection handler
+  const handleConnectHmrIframe = React.useCallback(
+    (iframe: HTMLIFrameElement) => {
+      if (!project) return null;
+      return project.connectHmrIframe(iframe);
+    },
+    [project],
+  );
 
   const {
     isInstalling,
@@ -72,7 +83,18 @@ const Project = () => {
   };
 
   const {
-    isBuilding,
+    isDevMode,
+    isBuilding: isDevBuilding,
+    error: devError,
+    startDev,
+    stopDev,
+  } = useDev(project, fileTree, handleDirectoryExpand, {
+    // HMR will handle updates automatically, no need to manually reload
+    onBuildComplete: undefined,
+  });
+
+  const {
+    isBuilding: isBuildingOnce,
     handleBuild,
     error: buildError,
   } = useBuild(project, fileTree, handleDirectoryExpand, () => {
@@ -94,10 +116,13 @@ const Project = () => {
     error: uploadError,
   } = useUpload(project, refreshFileTree);
 
+  const isBuilding = isDevBuilding || isBuildingOnce;
+
   const error =
     projectError ||
     fileContentError ||
     installError ||
+    devError ||
     buildError ||
     gzipError ||
     uploadError;
@@ -140,7 +165,7 @@ const Project = () => {
         borderRadius: "0.375rem",
         border: "none",
         fontSize: "0.875rem",
-        background: isBuilding ? "#d1d5db" : "#2563eb",
+        background: isBuildingOnce ? "#d1d5db" : "#6366f1",
         color: "#fff",
         fontWeight: 500,
         cursor: isBuilding ? "not-allowed" : "pointer",
@@ -148,7 +173,32 @@ const Project = () => {
         marginLeft: "0.5rem",
       }}
     >
-      {isBuilding ? "Building..." : "Build"}
+      {isBuildingOnce ? "Building..." : "Build"}
+    </button>
+  );
+
+  const devButton = (
+    <button
+      onClick={isDevMode ? stopDev : startDev}
+      disabled={isBuilding || !project}
+      style={{
+        padding: "0.25rem 0.75rem",
+        borderRadius: "0.375rem",
+        border: "none",
+        fontSize: "0.875rem",
+        background: isDevBuilding
+          ? "#d1d5db"
+          : isDevMode
+            ? "#10b981"
+            : "#2563eb",
+        color: "#fff",
+        fontWeight: 500,
+        cursor: isBuilding ? "not-allowed" : "pointer",
+        transition: "background 0.2s",
+        marginLeft: "0.5rem",
+      }}
+    >
+      {isDevBuilding ? "Building..." : isDevMode ? "Watching" : "Dev"}
     </button>
   );
 
@@ -189,18 +239,29 @@ const Project = () => {
         borderRadius: "0.375rem",
         border: "none",
         fontSize: "0.875rem",
-        background:
-          isSaving || !hasUnsavedChanges || !project ? "#d1d5db" : "#10b981",
+        background: isSaving
+          ? "#fbbf24"
+          : justSaved
+            ? "#22c55e"
+            : hasUnsavedChanges
+              ? "#10b981"
+              : "#d1d5db",
         color: "#fff",
         fontWeight: 500,
         cursor:
           isSaving || !hasUnsavedChanges || !project
             ? "not-allowed"
             : "pointer",
-        transition: "background 0.2s",
+        transition: "background 0.3s",
       }}
     >
-      {isSaving ? "Saving..." : hasUnsavedChanges ? "Save" : "Saved"}
+      {isSaving
+        ? "Saving..."
+        : justSaved
+          ? "✓ Saved"
+          : hasUnsavedChanges
+            ? "Save"
+            : "—"}
     </button>
   );
 
@@ -226,6 +287,7 @@ const Project = () => {
           <>
             {installButton}
             {buildButton}
+            {devButton}
             <MoreMenu items={moreMenuItems} disabled={!project} />
           </>
         }
@@ -286,6 +348,8 @@ const Project = () => {
           filePath={selectedFilePath}
           content={selectedFileContent}
           onContentChange={setSelectedFileContent}
+          onSave={saveFile}
+          autoSaveDelay={1000}
         />
       </Panel>
 
@@ -294,7 +358,11 @@ const Project = () => {
         style={{ width: "35%", minWidth: "320px" }}
         contentStyle={{ padding: "1rem" }}
       >
-        <Preview ref={previewRef} url={previewUrl} />
+        <Preview
+          ref={previewRef}
+          url={previewUrl}
+          onIframeReady={handleConnectHmrIframe}
+        />
       </Panel>
     </div>
   );

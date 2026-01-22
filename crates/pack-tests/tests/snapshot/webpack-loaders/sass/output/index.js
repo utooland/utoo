@@ -1,5 +1,5 @@
-(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([
+(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["webpack-loaders_sass_input_style_sass_cf3fd10c.css","webpack-loaders_sass_input_index_ts_cb0ae599.js"],"runtimeModuleIds":[76]}
+    {"otherChunks":["input_style_sass_26b91c76.css","input_index_ts_67644e0e.js"],"runtimeModuleIds":[76]}
 ]);
 // Dummy runtime

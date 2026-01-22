@@ -1,5 +1,5 @@
 import initWasm, {
-  Project,
+  Fs,
   recvTaskMessageInWorker,
   sendTaskMessage,
   workerCreated,
@@ -23,7 +23,7 @@ declare let self: DedicatedWorkerGlobalScope & {
     cwd: string;
     projectRoot: string;
     binding: typeof binding;
-    fs?: Project;
+    fs?: typeof Fs;
   };
 };
 
@@ -40,17 +40,12 @@ export function startLoaderWorker() {
       throw err;
     });
 
-    // Initialize the thread-local state (tokio runtime).
-    // We don't need to pass threadWorkerUrl here because it's already stored in a global static in Rust.
-    Project.init("");
-    Project.setCwd(meta.workerData.cwd);
-
     self.workerData = {
       threadId: meta.workerData.threadId,
       cwd: meta.workerData.cwd,
       projectRoot: meta.workerData.projectRoot,
       binding,
-      fs: Project as any,
+      fs: Fs,
     };
 
     self.process = {

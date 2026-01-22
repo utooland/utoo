@@ -1,49 +1,21 @@
-use std::path::PathBuf;
-use std::str::FromStr;
-#[cfg(feature = "utoopack")]
-use std::sync::Arc;
+//! WASM API exports for Project operations.
+//!
+//! This module only contains wasm_bindgen API bindings.
+//! Core implementations are in:
+//! - `pack` module for build/dev operations
+//! - `pm` module for package manager operations (deps, install, gzip, md5)
 
-use anyhow::Context;
-use pack_api::project::WatchOptions;
-use serde_wasm_bindgen::to_value;
-use tokio_fs_ext::{DirEntry as RawDirEntry, Metadata as RawMetadata};
-use turbo_rcstr::rcstr;
+use parking_lot::RwLock;
 use wasm_bindgen::prelude::*;
-use wasm_bindgen::{JsCast, JsValue};
 
 use crate::errors::to_js_error;
+use crate::pm;
 use crate::tokio_runtime::init_tokio_runtime;
 
 #[cfg(feature = "utoopack")]
-use super::{
-    pack::{PackProject, PartialProjectOptions, TurbopackResult},
-    tokio_runtime::TOKIO_RUNTIME,
-};
+use crate::pack::{self, RootTask};
 
-use parking_lot::RwLock;
-use std::sync::Once;
-
-#[cfg(feature = "utoopack")]
-static GLOBAL_PACK_PROJECT: RwLock<Option<Arc<PackProject>>> = RwLock::new(None);
 static GLOBAL_THREAD_URL: RwLock<Option<String>> = RwLock::new(None);
-
-fn block_on<T>(fut: impl std::future::Future<Output = T> + Send + 'static) -> Result<T, JsError>
-where
-    T: Send + 'static,
-{
-    let (sender, receiver) = oneshot::channel();
-    let rt = crate::tokio_runtime::TOKIO_RUNTIME
-        .get()
-        .ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
-
-    rt.spawn(async move {
-        let _ = sender.send(fut.await);
-    });
-
-    receiver
-        .recv()
-        .map_err(|e| JsError::new(&format!("Recv error: {}", e)))
-}
 
 #[wasm_bindgen]
 pub struct Project;
@@ -77,538 +49,83 @@ impl Project {
     /// Calculate MD5 hash of byte content (async for better thread scheduling)
     #[wasm_bindgen(js_name = sigMd5)]
     pub async fn sig_md5(content: js_sys::Uint8Array) -> Result<String, JsError> {
-        let content = content.to_vec();
-        let rt = TOKIO_RUNTIME
-            .get()
-            .ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
-
-        let result = rt
-            .spawn_blocking(move || opfs_project::pack::sig_md5(&content))
-            .await
-            .map_err(to_js_error)?;
-        Ok(result)
+        pm::sig_md5(content.to_vec()).await.map_err(to_js_error)
     }
 
     /// Create a tar.gz archive and return bytes (no file I/O)
-    /// This is useful for main thread execution without OPFS access
     #[wasm_bindgen(js_name = gzip)]
     pub async fn gzip(files: JsValue) -> Result<js_sys::Uint8Array, JsError> {
-        use anyhow::anyhow;
-        use opfs_project::pack::PackFile;
-
-        let files_array: js_sys::Array = files
-            .dyn_into()
-            .map_err(|e| to_js_error(anyhow!("files must be an array: {:?}", e)))?;
-
-        let mut pack_files: Vec<PackFile> = Vec::with_capacity(files_array.length() as usize);
-
-        for i in 0..files_array.length() {
-            let item = files_array.get(i);
-            let path = js_sys::Reflect::get(&item, &"path".into())
-                .map_err(|e| to_js_error(anyhow!("missing path at index {}: {:?}", i, e)))?
-                .as_string()
-                .ok_or_else(|| to_js_error(anyhow!("path must be a string at index {}", i)))?;
-            let content_js = js_sys::Reflect::get(&item, &"content".into())
-                .map_err(|e| to_js_error(anyhow!("missing content at index {}: {:?}", i, e)))?;
-            let content_arr: js_sys::Uint8Array = content_js.dyn_into().map_err(|e| {
-                to_js_error(anyhow!(
-                    "content must be Uint8Array at index {}: {:?}",
-                    i,
-                    e
-                ))
-            })?;
-            pack_files.push(PackFile::new(path, content_arr.to_vec()));
-        }
-
-        let rt = TOKIO_RUNTIME
-            .get()
-            .ok_or_else(|| to_js_error(anyhow!("tokio runtime not initialized")))?;
-
-        let bytes = rt
-            .spawn_blocking(move || opfs_project::pack::gzip(&pack_files))
-            .await?
-            .map_err(to_js_error)?;
-
+        let bytes = pm::gzip(files).await.map_err(to_js_error)?;
         Ok(js_sys::Uint8Array::from(&bytes[..]))
     }
 
     /// Generate package-lock.json by resolving dependencies.
-    ///
-    /// # Arguments
-    /// * `registry` - Optional registry URL. If None, uses npmmirror.
-    ///   - "https://registry.npmmirror.com" - supports semver queries (faster)
-    ///   - "https://registry.npmjs.org" - official npm registry (slower, fetches full manifest)
-    /// * `concurrency` - Optional concurrency limit (defaults to 20)
     #[wasm_bindgen]
     pub async fn deps(
         registry: Option<String>,
         concurrency: Option<usize>,
     ) -> Result<String, String> {
-        use std::path::Path;
-
-        let cwd = opfs_project::get_cwd();
-        let package_lock =
-            crate::deps::build_deps_from_file(Path::new(&cwd), registry.as_deref(), concurrency)
-                .await
-                .map_err(|e| format!("{:#?}", e))?;
-
-        // Serialize to JSON string
-        serde_json::to_string_pretty(&package_lock)
-            .map_err(|e| format!("Failed to serialize package lock: {}", e))
+        pm::deps(registry.as_deref(), concurrency)
+            .await
+            .map_err(|e| format!("{:#?}", e))
     }
 
+    /// Install dependencies - downloads tgz files only, extracts on-demand when files are read
     #[wasm_bindgen]
     pub async fn install(
         package_lock: String,
         max_concurrent_downloads: Option<usize>,
     ) -> Result<(), JsError> {
-        const DEFAULT_MAX_CONCURRENT_DOWNLOADS: usize = 20;
-        let max_concurrent = max_concurrent_downloads.unwrap_or(DEFAULT_MAX_CONCURRENT_DOWNLOADS);
-        opfs_project::package_manager::install_deps(&package_lock, max_concurrent)
+        let concurrency = max_concurrent_downloads.unwrap_or(20);
+        pm::install(&package_lock, concurrency)
             .await
-            // format anyhow backtrace for better error display in JS
-            .map_err(to_js_error)?;
-        Ok(())
+            .map_err(to_js_error)
     }
 
     #[cfg(feature = "utoopack")]
     #[wasm_bindgen]
     pub async fn build() -> Result<JsValue, JsError> {
-        use turbopack_core::error::PrettyPrintError;
-
-        Self::init_pack_project().await.map_err(to_js_error)?;
-
-        let pack_project = match GLOBAL_PACK_PROJECT.read().as_ref() {
-            Some(pack_project) => pack_project.clone(),
-            None => return Err(JsError::new("invalid pack project")),
-        };
-
-        let rt = TOKIO_RUNTIME
-            .get()
-            .ok_or_else(|| JsError::new("tokio runtime not initialized"))?;
-
-        rt.spawn(async move { pack_project.build().await })
-            .await
-            .map_err(to_js_error)?
-            .map_or_else(
-                |e| Err(JsError::new(&PrettyPrintError(&e).to_string())),
-                |turbopack_result| {
-                    use serde::Serialize;
-
-                    (&turbopack_result)
-                        .serialize(
-                            &serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true),
-                        )
-                        .map_err(|e| JsError::new(&e.to_string()))
-                },
-            )
-    }
-
-    async fn init_pack_project() -> anyhow::Result<()> {
-        if GLOBAL_PACK_PROJECT.read().is_none() {
-            use pack_api::project::ProjectOptions;
-            use turbo_rcstr::RcStr;
-
-            let cwd = opfs_project::get_cwd().to_string_lossy().to_string();
-            let project_root = if cwd.starts_with('/') {
-                cwd
-            } else {
-                tokio_fs_ext::current_dir()?
-                    .join(cwd)
-                    .to_string_lossy()
-                    .to_string()
-            };
-
-            let config_path = std::path::PathBuf::from(&project_root)
-                .join("utoopack.json")
-                .to_string_lossy()
-                .to_string();
-
-            let config = Self::read_to_string(&config_path).await.ok();
-
-            let partial_options = PartialProjectOptions {
-                project_path: project_root,
-                config,
-            };
-            let project_path: RcStr = partial_options.project_path.into();
-
-            let config = partial_options.config.unwrap_or("{}".to_string()).into();
-            let options = ProjectOptions {
-                root_path: project_path.clone(),
-                project_path: project_path.clone(),
-                config,
-                build_id: project_path.clone(),
-                watch: WatchOptions {
-                    enable: true,
-                    ..Default::default()
-                },
-                define_env: Default::default(),
-                dev: false,
-                pack_path: rcstr!("./"),
-                process_env: Default::default(),
-            };
-
-            let rt = TOKIO_RUNTIME
-                .get()
-                .ok_or_else(|| anyhow::anyhow!("tokio runtime not initialized"))?;
-            let pack_context = rt
-                .spawn(PackProject::initialize(options))
-                .await
-                .context("fail to initialize pack project")??;
-
-            let mut pack_project_guard = GLOBAL_PACK_PROJECT.write();
-            *pack_project_guard = Some(Arc::new(pack_context));
-        }
-
-        Ok(())
+        pack::build().await
     }
 
     #[cfg(not(feature = "utoopack"))]
     #[wasm_bindgen]
     pub async fn build() -> Result<(), JsValue> {
-        Err(JsValue::from_str(
-            "Build functionality requires the 'utoopack' feature to be enabled",
-        ))
+        unimplemented!()
     }
 
-    #[wasm_bindgen]
-    pub async fn read(path: &str) -> Result<js_sys::Uint8Array, JsError> {
-        let bytes = opfs_project::read(path)
-            .await
-            .with_context(|| format!("Failed to read file: {}", path))
-            .map_err(to_js_error)?;
-        Ok(js_sys::Uint8Array::from(&bytes[..]))
+    /// Subscribe to entrypoints changes with HMR support.
+    /// This will watch for file changes and automatically rebuild.
+    /// Returns a RootTask that must be held by JS to keep the subscription active.
+    #[cfg(feature = "utoopack")]
+    #[wasm_bindgen(js_name = entrypointsSubscribe)]
+    pub async fn entrypoints_subscribe(callback: js_sys::Function) -> Result<RootTask, JsError> {
+        pack::project_entrypoints_subscribe(callback).await
     }
 
-    #[wasm_bindgen(js_name = readToString)]
-    pub async fn read_to_string(path: &str) -> Result<String, JsError> {
-        let buf = opfs_project::read(path)
-            .await
-            .with_context(|| format!("Failed to read file: {}", path))
-            .map_err(to_js_error)?;
-        Ok(unsafe { String::from_utf8_unchecked(buf) })
+    /// Subscribe to HMR events for a specific identifier.
+    /// Returns a RootTask that must be held by JS to keep the subscription active.
+    #[cfg(feature = "utoopack")]
+    #[wasm_bindgen(js_name = hmrEvents)]
+    pub async fn hmr_events(
+        identifier: String,
+        callback: js_sys::Function,
+    ) -> Result<RootTask, JsError> {
+        pack::project_hmr_events(identifier, callback).await
     }
 
-    #[wasm_bindgen]
-    pub async fn write(path: &str, content: js_sys::Uint8Array) -> Result<(), JsError> {
-        let content = content.to_vec();
-        opfs_project::write(path, &content)
-            .await
-            .with_context(|| format!("Failed to write file: {}", path))
-            .map_err(to_js_error)?;
-        Ok(())
+    /// Subscribe to compilation lifecycle events.
+    /// Emits "start" when computation begins, "end" when idle for aggregation_ms.
+    #[cfg(feature = "utoopack")]
+    #[wasm_bindgen(js_name = updateInfoSubscribe)]
+    pub fn update_info_subscribe(aggregation_ms: u32, callback: js_sys::Function) {
+        pack::project_update_info_subscribe(aggregation_ms, callback)
     }
 
-    #[wasm_bindgen(js_name = "writeString")]
-    pub async fn write_string(path: &str, content: &str) -> Result<(), JsError> {
-        opfs_project::write(path, content)
-            .await
-            .with_context(|| format!("Failed to write file: {}", path))
-            .map_err(to_js_error)?;
-        Ok(())
-    }
-
-    #[wasm_bindgen(js_name = readDir)]
-    pub async fn read_dir(path: &str) -> Result<Vec<DirEntry>, JsError> {
-        let read_dir = opfs_project::read_dir(path)
-            .await
-            .with_context(|| format!("Failed to read directory: {}", path))
-            .map_err(to_js_error)?;
-
-        let ret = read_dir
-            .into_iter()
-            .map(DirEntry::try_from)
-            .collect::<Result<Vec<_>, std::io::Error>>()
-            .with_context(|| format!("Failed to process directory entries: {}", path))
-            .map_err(to_js_error)?;
-
-        Ok(ret)
-    }
-
-    #[wasm_bindgen(js_name = createDir)]
-    pub async fn create_dir(path: &str) -> Result<(), JsError> {
-        opfs_project::create_dir(path)
-            .await
-            .with_context(|| format!("Failed to create directory: {}", path))
-            .map_err(to_js_error)?;
-        Ok(())
-    }
-
-    #[wasm_bindgen(js_name = createDirAll)]
-    pub async fn create_dir_all(path: &str) -> Result<(), JsError> {
-        opfs_project::create_dir_all(path)
-            .await
-            .with_context(|| format!("Failed to create directory recursively: {}", path))
-            .map_err(to_js_error)?;
-        Ok(())
-    }
-
-    #[wasm_bindgen(js_name = copyFile)]
-    pub async fn copy_file(src: &str, dst: &str) -> Result<(), JsError> {
-        opfs_project::copy(src, dst)
-            .await
-            .with_context(|| format!("Failed to copy file from {} to {}", src, dst))
-            .map_err(to_js_error)?;
-        Ok(())
-    }
-
-    #[wasm_bindgen(js_name = removeFile)]
-    pub async fn remove_file(path: &str) -> Result<(), JsError> {
-        opfs_project::remove_file(path)
-            .await
-            .with_context(|| format!("Failed to remove file: {}", path))
-            .map_err(to_js_error)?;
-        Ok(())
-    }
-
-    #[wasm_bindgen(js_name = removeDir)]
-    pub async fn remove_dir(path: &str, recursive: bool) -> Result<(), JsError> {
-        if recursive {
-            opfs_project::remove_dir_all(path)
-                .await
-                .with_context(|| format!("Failed to remove directory recursively: {}", path))
-                .map_err(to_js_error)?;
-        } else {
-            opfs_project::remove_dir(path)
-                .await
-                .with_context(|| format!("Failed to remove directory: {}", path))
-                .map_err(to_js_error)?;
-        }
-
-        Ok(())
-    }
-
-    #[wasm_bindgen(js_name = metadata)]
-    pub async fn metadata(path: &str) -> Result<Metadata, JsError> {
-        opfs_project::metadata(path)
-            .await
-            .and_then(Metadata::try_from)
-            .with_context(|| format!("Failed to get metadata: {}", path))
-            .map_err(to_js_error)
-    }
-
-    #[wasm_bindgen(js_name = readSync)]
-    pub fn read_sync(path: String) -> Result<js_sys::Uint8Array, JsError> {
-        let path_clone = path.clone();
-        let fut = async move {
-            turbo_tasks_fs::wasm_fs_offload::CLIENT
-                .read(&path_clone)
-                .await
-        };
-
-        let bytes = block_on(fut)?
-            .with_context(|| format!("Failed to read file: {}", path))
-            .map_err(to_js_error)?;
-
-        Ok(js_sys::Uint8Array::from(&bytes[..]))
-    }
-
-    #[wasm_bindgen(js_name = readDirSync)]
-    pub fn read_dir_sync(path: String) -> Result<Vec<DirEntry>, JsError> {
-        let path_clone = path.clone();
-        let fut = async move {
-            turbo_tasks_fs::wasm_fs_offload::CLIENT
-                .read_dir(&path_clone)
-                .await
-        };
-
-        let read_dir = block_on(fut)?
-            .with_context(|| format!("Failed to read directory: {}", path))
-            .map_err(to_js_error)?;
-
-        let ret = read_dir
-            .map(|res| {
-                let entry = res?;
-                DirEntry::try_from(entry)
-            })
-            .collect::<Result<Vec<_>, std::io::Error>>()
-            .with_context(|| format!("Failed to process directory entries: {}", path))
-            .map_err(to_js_error)?;
-
-        Ok(ret)
-    }
-
-    #[wasm_bindgen(js_name = writeSync)]
-    pub fn write_sync(path: String, content: js_sys::Uint8Array) -> Result<(), JsError> {
-        let content = content.to_vec();
-        let path_clone = path.clone();
-        let fut = async move {
-            turbo_tasks_fs::wasm_fs_offload::CLIENT
-                .write(&path_clone, &content)
-                .await
-        };
-
-        block_on(fut)?
-            .with_context(|| format!("Failed to write file: {}", path))
-            .map_err(to_js_error)?;
-
-        Ok(())
-    }
-
-    #[wasm_bindgen(js_name = createDirSync)]
-    pub fn create_dir_sync(path: String) -> Result<(), JsError> {
-        let path_clone = path.clone();
-        let fut = async move {
-            turbo_tasks_fs::wasm_fs_offload::CLIENT
-                .create_dir(&path_clone)
-                .await
-        };
-
-        block_on(fut)?
-            .with_context(|| format!("Failed to create directory: {}", path))
-            .map_err(to_js_error)?;
-
-        Ok(())
-    }
-
-    #[wasm_bindgen(js_name = createDirAllSync)]
-    pub fn create_dir_all_sync(path: String) -> Result<(), JsError> {
-        let path_clone = path.clone();
-        let fut = async move {
-            turbo_tasks_fs::wasm_fs_offload::CLIENT
-                .create_dir_all(&path_clone)
-                .await
-        };
-
-        block_on(fut)?
-            .with_context(|| format!("Failed to create directory recursively: {}", path))
-            .map_err(to_js_error)?;
-
-        Ok(())
-    }
-
-    #[wasm_bindgen(js_name = copyFileSync)]
-    pub fn copy_file_sync(src: String, dst: String) -> Result<(), JsError> {
-        let src_clone = src.clone();
-        let dst_clone = dst.clone();
-        let fut = async move {
-            // Client doesn't seem to expose copy, so we implement it manually
-            let content = turbo_tasks_fs::wasm_fs_offload::CLIENT
-                .read(&src_clone)
-                .await?;
-            turbo_tasks_fs::wasm_fs_offload::CLIENT
-                .write(&dst_clone, &content)
-                .await
-        };
-
-        block_on(fut)?
-            .with_context(|| format!("Failed to copy file from {} to {}", src, dst))
-            .map_err(to_js_error)?;
-
-        Ok(())
-    }
-
-    #[wasm_bindgen(js_name = removeFileSync)]
-    pub fn remove_file_sync(path: String) -> Result<(), JsError> {
-        let path_clone = path.clone();
-        let fut = async move {
-            turbo_tasks_fs::wasm_fs_offload::CLIENT
-                .remove_file(&path_clone)
-                .await
-        };
-
-        block_on(fut)?
-            .with_context(|| format!("Failed to remove file: {}", path))
-            .map_err(to_js_error)?;
-
-        Ok(())
-    }
-
-    #[wasm_bindgen(js_name = removeDirSync)]
-    pub fn remove_dir_sync(path: String, recursive: bool) -> Result<(), JsError> {
-        let path_clone = path.clone();
-        let fut = async move {
-            if recursive {
-                turbo_tasks_fs::wasm_fs_offload::CLIENT
-                    .remove_dir_all(&path_clone)
-                    .await
-            } else {
-                turbo_tasks_fs::wasm_fs_offload::CLIENT
-                    .remove_dir(&path_clone)
-                    .await
-            }
-        };
-
-        block_on(fut)?
-            .with_context(|| format!("Failed to remove directory: {}", path))
-            .map_err(to_js_error)?;
-
-        Ok(())
-    }
-
-    #[wasm_bindgen(js_name = metadataSync)]
-    pub fn metadata_sync(path: String) -> Result<Metadata, JsError> {
-        let path_clone = path.clone();
-        let fut = async move {
-            turbo_tasks_fs::wasm_fs_offload::CLIENT
-                .metadata(&path_clone)
-                .await
-        };
-
-        block_on(fut)?
-            .and_then(Metadata::try_from)
-            .with_context(|| format!("Failed to get metadata: {}", path))
-            .map_err(to_js_error)
-    }
-}
-
-#[wasm_bindgen(inspectable)]
-#[derive(Debug, Clone)]
-pub struct DirEntry {
-    #[wasm_bindgen(getter_with_clone)]
-    pub name: String,
-    #[wasm_bindgen]
-    pub r#type: DirEntryType,
-}
-
-#[wasm_bindgen]
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum DirEntryType {
-    File = "file",
-    Directory = "directory",
-}
-
-impl TryFrom<RawDirEntry> for DirEntry {
-    type Error = std::io::Error;
-
-    fn try_from(raw: RawDirEntry) -> Result<Self, Self::Error> {
-        Ok(DirEntry {
-            r#type: {
-                let file_type = raw.file_type()?;
-                if file_type.is_dir() {
-                    DirEntryType::Directory
-                } else if file_type.is_file() {
-                    DirEntryType::File
-                } else {
-                    return Err(std::io::Error::from(std::io::ErrorKind::Unsupported));
-                }
-            },
-            name: raw.file_name().to_string_lossy().to_string(),
-        })
-    }
-}
-
-#[wasm_bindgen(inspectable)]
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub struct Metadata {
-    #[wasm_bindgen]
-    pub r#type: DirEntryType,
-    pub file_size: u64,
-}
-
-impl TryFrom<RawMetadata> for Metadata {
-    type Error = std::io::Error;
-
-    fn try_from(raw: RawMetadata) -> Result<Self, Self::Error> {
-        Ok(Metadata {
-            r#type: if raw.is_file() {
-                DirEntryType::File
-            } else if raw.is_dir() {
-                DirEntryType::Directory
-            } else {
-                return Err(std::io::Error::from(std::io::ErrorKind::Unsupported));
-            },
-            file_size: raw.len(),
-        })
+    /// Write all entrypoints to disk.
+    #[cfg(feature = "utoopack")]
+    #[wasm_bindgen(js_name = writeAllToDisk)]
+    pub fn write_all_to_disk(callback: js_sys::Function) {
+        pack::project_write_all_to_disk(callback)
     }
 }

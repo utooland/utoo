@@ -1,10 +1,21 @@
-import fs from "fs";
+import {
+  type BuildingAction,
+  type BuiltAction,
+  type CompilationError,
+  type EntryOptions,
+  type HMR_ACTION_TYPES,
+  HMR_ACTIONS_SENT_TO_BROWSER,
+  type ReloadAction,
+  type SyncAction,
+  type TurbopackConnectedAction,
+} from "@utoo/pack-shared";
 import { IncomingMessage } from "http";
 import { nanoid } from "nanoid";
 import type { Socket } from "net";
-import { join } from "path";
+import path from "path";
 import { Duplex } from "stream";
 import ws from "ws";
+import { BundleOptions } from "../config/types";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import {
   createDefineEnv,
@@ -12,75 +23,28 @@ import {
   getPackPath,
   processIssues,
 } from "../utils/common";
-import { processHtmlEntry } from "../utils/html-entry";
+import { getInitialAssetsFromStats } from "../utils/getInitialAssets";
+import { processHtmlEntry } from "../utils/htmlEntry";
+import { validateEntryPaths } from "../utils/validateEntry";
 import { projectFactory } from "./project";
-import { BundleOptions, Project, Update as TurbopackUpdate } from "./types";
+import { Project, Update as TurbopackUpdate } from "./types";
 
 const wsServer = new ws.Server({ noServer: true });
 
 const sessionId = Math.floor(Number.MAX_SAFE_INTEGER * Math.random());
 
-export const enum HMR_ACTIONS_SENT_TO_BROWSER {
-  RELOAD = "reload",
-  CLIENT_CHANGES = "clientChanges",
-  SERVER_ONLY_CHANGES = "serverOnlyChanges",
-  SYNC = "sync",
-  BUILT = "built",
-  BUILDING = "building",
-  TURBOPACK_MESSAGE = "turbopack-message",
-  TURBOPACK_CONNECTED = "turbopack-connected",
-}
-
-export interface TurbopackMessageAction {
-  action: HMR_ACTIONS_SENT_TO_BROWSER.TURBOPACK_MESSAGE;
-  data: TurbopackUpdate | TurbopackUpdate[];
-}
-
-export interface TurbopackConnectedAction {
-  action: HMR_ACTIONS_SENT_TO_BROWSER.TURBOPACK_CONNECTED;
-  data: { sessionId: number };
-}
-
-interface BuildingAction {
-  action: HMR_ACTIONS_SENT_TO_BROWSER.BUILDING;
-}
-
-export interface CompilationError {
-  moduleName?: string;
-  message: string;
-  details?: string;
-  moduleTrace?: Array<{ moduleName?: string }>;
-  stack?: string;
-}
-
-export interface SyncAction {
-  action: HMR_ACTIONS_SENT_TO_BROWSER.SYNC;
-  hash: string;
-  errors: ReadonlyArray<CompilationError>;
-  warnings: ReadonlyArray<CompilationError>;
-  updatedModules?: ReadonlyArray<string>;
-}
-
-export interface BuiltAction {
-  action: HMR_ACTIONS_SENT_TO_BROWSER.BUILT;
-  hash: string;
-  errors: ReadonlyArray<CompilationError>;
-  warnings: ReadonlyArray<CompilationError>;
-  updatedModules?: ReadonlyArray<string>;
-}
-
-export interface ReloadAction {
-  action: HMR_ACTIONS_SENT_TO_BROWSER.RELOAD;
-  data: string;
-}
-
-export type HMR_ACTION_TYPES =
-  | TurbopackMessageAction
-  | TurbopackConnectedAction
-  | BuildingAction
-  | SyncAction
-  | BuiltAction
-  | ReloadAction;
+// Re-export HMR types from pack-shared for backward compatibility
+export {
+  type BuildingAction,
+  type BuiltAction,
+  type CompilationError,
+  type HMR_ACTION_TYPES,
+  HMR_ACTIONS_SENT_TO_BROWSER,
+  type ReloadAction,
+  type SyncAction,
+  type TurbopackConnectedAction,
+  type TurbopackMessageAction,
+} from "@utoo/pack-shared";
 
 export interface WebpackStats {
   hash?: string;
@@ -134,7 +98,9 @@ export async function createHotReloader(
   projectPath?: string,
   rootPath?: string,
 ): Promise<HotReloaderInterface> {
-  processHtmlEntry(bundleOptions.config, projectPath || process.cwd());
+  const resolvedProjectPath = projectPath || process.cwd();
+  processHtmlEntry(bundleOptions.config, resolvedProjectPath);
+  validateEntryPaths(bundleOptions.config, resolvedProjectPath);
 
   const createProject = projectFactory();
 
@@ -157,7 +123,7 @@ export async function createHotReloader(
         stats:
           Boolean(process.env.ANALYZE) ||
           bundleOptions.config.stats ||
-          bundleOptions.config.entry.some((e) => !!e.html),
+          bundleOptions.config.entry.some((e: EntryOptions) => !!e.html),
         optimization: {
           ...bundleOptions.config.optimization,
           minify: false,
@@ -284,10 +250,6 @@ export async function createHotReloader(
         entrypoints.apps.map((l) =>
           l.writeToDisk().then((res) => {
             processIssues(res, true, true);
-            res.clientPaths.forEach((p) => {
-              if (p.endsWith(".js")) assets.js.push(p);
-              if (p.endsWith(".css")) assets.css.push(p);
-            });
           }),
         ),
       );
@@ -299,30 +261,19 @@ export async function createHotReloader(
             ? [(bundleOptions.config as any).html]
             : []),
         ...bundleOptions.config.entry
-          .filter((e) => !!e.html)
-          .map((e) => e.html!),
+          .filter((e: EntryOptions) => !!e.html)
+          .map((e: EntryOptions) => e.html!),
       ];
 
       if (htmlConfigs.length > 0) {
         const outputDir =
-          bundleOptions.config.output?.path || join(process.cwd(), "dist");
+          bundleOptions.config.output?.path || path.join(process.cwd(), "dist");
         const publicPath = bundleOptions.config.output?.publicPath;
 
         if (assets.js.length === 0 && assets.css.length === 0) {
-          const statsPath = join(outputDir, "stats.json");
-          if (fs.existsSync(statsPath)) {
-            try {
-              const stats = JSON.parse(fs.readFileSync(statsPath, "utf-8"));
-              if (stats.assets) {
-                stats.assets.forEach((asset: any) => {
-                  if (asset.name.endsWith(".js")) assets.js.push(asset.name);
-                  if (asset.name.endsWith(".css")) assets.css.push(asset.name);
-                });
-              }
-            } catch (e) {
-              console.warn("Failed to read stats.json for assets discovery", e);
-            }
-          }
+          const discovered = getInitialAssetsFromStats(outputDir);
+          assets.js.push(...discovered.js);
+          assets.css.push(...discovered.css);
         }
 
         for (const config of htmlConfigs) {

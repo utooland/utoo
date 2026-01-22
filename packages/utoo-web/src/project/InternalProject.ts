@@ -1,5 +1,7 @@
+import { type UpdateMessage } from "@utoo/pack-shared";
 import {
   DepsOptions,
+  InstallOptions,
   PackFile,
   ProjectEndpoint,
   ProjectOptions,
@@ -9,8 +11,10 @@ import {
 } from "../types";
 import initWasm, {
   DirEntryType,
+  Fs,
   initLogFilter,
   Project as ProjectInternal,
+  RootTask,
 } from "../utoo";
 import { runLoaderWorkerPool } from "../webpackLoaders/loaderWorkerPool";
 
@@ -18,6 +22,11 @@ class InternalEndpoint implements ProjectEndpoint {
   wasmInit?: ReturnType<typeof initWasm>;
   options?: Omit<ProjectOptions, "workerUrl" | "serviceWorker">;
   loaderWorkerPoolInitialized = false;
+
+  // Keep root task alive for the subscription to work
+  private rootTask?: RootTask;
+  // Keep HMR root tasks alive (keyed by identifier)
+  private hmrRootTasks: Map<string, RootTask> = new Map();
 
   // This should be called only once
   async mount(opt: Omit<ProjectOptions, "workerUrl" | "serviceWorker">) {
@@ -41,24 +50,24 @@ class InternalEndpoint implements ProjectEndpoint {
 
   async deps(options?: DepsOptions) {
     await this.wasmInit!;
-    return await ProjectInternal.deps(
-      options?.registry ?? undefined,
-      options?.concurrency ?? undefined,
-    );
+    // Ensure we pass undefined (not null) for missing values
+    const registry = options?.registry ?? undefined;
+    const concurrency = options?.concurrency ?? undefined;
+    return await ProjectInternal.deps(registry, concurrency);
   }
 
-  async install(packageLock: string, maxConcurrentDownloads?: number) {
+  async install(packageLock: string, options?: InstallOptions) {
     await this.wasmInit!;
-    await ProjectInternal.install(packageLock, maxConcurrentDownloads);
+    const concurrency = options?.maxConcurrentDownloads ?? undefined;
+    await ProjectInternal.install(packageLock, concurrency);
     return;
   }
 
   async build() {
-    const binding = await this.wasmInit!;
+    await this.wasmInit!;
 
     if (this.options?.loaderWorkerUrl && !this.loaderWorkerPoolInitialized) {
       runLoaderWorkerPool(
-        binding,
         this.options.cwd,
         this.options!.loaderWorkerUrl,
         this.options?.loadersImportMap,
@@ -69,13 +78,30 @@ class InternalEndpoint implements ProjectEndpoint {
     return await ProjectInternal.build();
   }
 
+  async dev(onUpdate?: (result: any) => void) {
+    if (this.options?.loaderWorkerUrl && !this.loaderWorkerPoolInitialized) {
+      runLoaderWorkerPool(
+        this.options.cwd,
+        this.options!.loaderWorkerUrl,
+        this.options?.loadersImportMap,
+      );
+      this.loaderWorkerPoolInitialized = true;
+    }
+
+    this.rootTask = await ProjectInternal.entrypointsSubscribe(
+      (result: any) => {
+        onUpdate?.(result);
+      },
+    );
+  }
+
   async readFile(path: string, encoding?: "utf8") {
     await this.wasmInit!;
     let ret;
     if (encoding === "utf8") {
-      ret = await ProjectInternal.readToString(path);
+      ret = await Fs.readToString(path);
     } else {
-      return await ProjectInternal.read(path);
+      return await Fs.read(path);
     }
     return ret as any;
   }
@@ -87,20 +113,20 @@ class InternalEndpoint implements ProjectEndpoint {
   ) {
     await this.wasmInit!;
     if (typeof content === "string") {
-      return await ProjectInternal.writeString(path, content);
+      return await Fs.writeString(path, content);
     } else {
-      return await ProjectInternal.write(path, content);
+      return await Fs.write(path, content);
     }
   }
 
   async copyFile(src: string, dst: string) {
     await this.wasmInit!;
-    return await ProjectInternal.copyFile(src, dst);
+    return await Fs.copyFile(src, dst);
   }
 
   async stat(path: string): Promise<Stats> {
     await this.wasmInit!;
-    const metadata = await ProjectInternal.metadata(path);
+    const metadata = await Fs.metadata(path);
     const json = metadata.toJSON() as any;
     const raw: RawStats = {
       type: json.type as DirEntryType,
@@ -113,9 +139,9 @@ class InternalEndpoint implements ProjectEndpoint {
   async readdir(path: string, options?: { recursive?: boolean }) {
     await this.wasmInit!;
     const dirEntries = options?.recursive
-      ? await ProjectInternal.readDir(path)
+      ? await Fs.readDir(path)
       : // TODO: support recursive readDirAll
-        await ProjectInternal.readDir(path);
+        await Fs.readDir(path);
     const rawDirents: RawDirent[] = dirEntries.map((e: any) => {
       const dir = e.toJSON() as any;
       return {
@@ -130,21 +156,21 @@ class InternalEndpoint implements ProjectEndpoint {
   async mkdir(path: string, options?: { recursive?: boolean }) {
     await this.wasmInit!;
     if (options?.recursive) {
-      return await ProjectInternal.createDirAll(path);
+      return await Fs.createDirAll(path);
     } else {
-      return await ProjectInternal.createDir(path);
+      return await Fs.createDir(path);
     }
   }
 
   async rm(path: string, options?: { recursive?: boolean }) {
     await this.wasmInit!;
-    let metadata = (await ProjectInternal.metadata(path)).toJSON();
+    let metadata = (await Fs.metadata(path)).toJSON();
 
     switch ((metadata as any).type as DirEntryType) {
       case "file":
-        return await ProjectInternal.removeFile(path);
+        return await Fs.removeFile(path);
       case "directory":
-        return await ProjectInternal.removeDir(path, !!options?.recursive);
+        return await Fs.removeDir(path, !!options?.recursive);
       default:
         // nothing to remove now
         break;
@@ -153,7 +179,7 @@ class InternalEndpoint implements ProjectEndpoint {
 
   async rmdir(path: string, options?: { recursive?: boolean }) {
     await this.wasmInit!;
-    return await ProjectInternal.removeDir(path, !!options?.recursive);
+    return await Fs.removeDir(path, !!options?.recursive);
   }
 
   async gzip(files: PackFile[]) {
@@ -164,6 +190,18 @@ class InternalEndpoint implements ProjectEndpoint {
   async sigMd5(content: Uint8Array) {
     await this.wasmInit!;
     return await ProjectInternal.sigMd5(content);
+  }
+
+  async hmrSubscribe(identifier: string, callback: (update: unknown) => void) {
+    const rootTask = await ProjectInternal.hmrEvents(identifier, callback);
+    this.hmrRootTasks.set(identifier, rootTask);
+  }
+
+  updateInfoSubscribe(
+    aggregationMs: number,
+    callback: (message: UpdateMessage) => void,
+  ) {
+    ProjectInternal.updateInfoSubscribe(aggregationMs, callback);
   }
 }
 

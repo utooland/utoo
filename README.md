@@ -8,6 +8,7 @@
 [![License](https://img.shields.io/github/license/utooland/utoo?style=flat-square)](./LICENSE)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/utooland/utoo/ci.yml?style=flat-square)](https://github.com/utooland/utoo/actions)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](./CONTRIBUTING.md)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/utooland/utoo)
 
 </div>
 
@@ -39,10 +40,13 @@ Utoo is a modern, high-performance frontend toolchain designed to provide a unif
 # Install the core toolchain
 npm install -g utoo
 
-# Install the bundler (optional)
-ut install @utoo/pack --save
+# Install the bundler in nodejs environment
+ut install @utoo/pack --save-dev
 
-# Install the web version (optional)
+# Install the bundler cli in nodejs environment(Optional)
+ut install @utoo/pack-cli --save-dev
+
+# Install the web version
 ut install @utoo/web --save
 ```
 
@@ -55,11 +59,11 @@ ut add lodash       # Add a package (or use `ut add`)
 ut x create-react   # Execute a package (npx style, or use `ut x`)
 ```
 
-#### Bundling
+#### Bundling via @utoo/pack-cli
 ```bash
-up dev          # Start dev server with HMR
-up build        # Production build
-up build --webpack # Build using webpack.config.js
+utx up dev          # Start dev server with HMR
+utx up build        # Production build
+utx up build --webpack # Build using webpack.config.js
 ```
 
 ## ✨ Key Features

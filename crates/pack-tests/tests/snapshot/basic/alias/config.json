@@ -9,11 +9,13 @@
     "resolve": {
       "alias": {
         "hello-a": "./input/a.ts",
-        "@@/": "./input/"
+        "@@/": "./input/",
+        "@/*": "./input/*"
       }
     },
     "optimization": {
-      "minify": false
+      "minify": false,
+      "moduleIds": "named"
     }
   }
 }

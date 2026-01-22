@@ -227,9 +227,14 @@ pub async fn get_client_runtime_entries(
     }
 
     if is_development && watch && hot {
+        #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+        let hmr_bootstrap_path = rcstr!("hmr/bootstrap-messageport.ts");
+        #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+        let hmr_bootstrap_path = rcstr!("hmr/bootstrap.ts");
+
         runtime_entries.push(
             RuntimeEntry::Source(ResolvedVc::upcast(
-                FileSource::new(embed_file_path(rcstr!("hmr/bootstrap.ts")).owned().await?)
+                FileSource::new(embed_file_path(hmr_bootstrap_path).owned().await?)
                     .to_resolved()
                     .await?,
             ))
@@ -535,6 +540,7 @@ pub struct ClientChunkingContextOptions {
     pub no_mangling: Vc<bool>,
     pub config: Vc<Config>,
     pub export_usage: Vc<OptionBindingUsageInfo>,
+    pub unused_references: Vc<OptionBindingUsageInfo>,
 }
 
 #[turbo_tasks::function]
@@ -552,6 +558,7 @@ pub async fn get_client_chunking_context(
         no_mangling,
         config,
         export_usage,
+        unused_references,
     } = options;
 
     let minify = config.minify(mode);
@@ -577,7 +584,7 @@ pub async fn get_client_chunking_context(
     };
 
     let mut builder = BrowserChunkingContext::builder(
-        root_path,
+        root_path.clone(),
         output_root.clone(),
         output_root_to_root_path,
         output_root.clone(),
@@ -602,26 +609,21 @@ pub async fn get_client_chunking_context(
     .asset_base_path(Some(public_path))
     .current_chunk_method(CurrentChunkMethod::DocumentCurrentScript)
     .export_usage(*export_usage.await?)
+    .unused_references(*unused_references.await?)
     .module_id_strategy(module_id_strategy.to_resolved().await?)
     .nested_async_availability(*nested_async_chunking.await?);
 
-    let output = config.output().await?;
-
-    if !mode.is_development() {
-        if let Some(filename) = &output.filename {
-            builder = builder.filename(filename.clone());
-        }
-
-        if let Some(chunk_filename) = &output.chunk_filename {
-            builder = builder.chunk_filename(chunk_filename.clone());
-        }
+    if let Some(chunk_loading_global) = &*config.chunk_loading_global(root_path.clone()).await? {
+        builder = builder.chunk_loading_global(chunk_loading_global.clone());
     }
 
     if mode.is_development() {
         builder = builder
             .hot_module_replacement()
-            .source_map_source_type(SourceMapSourceType::AbsoluteFileUri);
+            .source_map_source_type(SourceMapSourceType::AbsoluteFileUri)
+            .dynamic_chunk_content_loading(true);
     } else {
+        let output = config.output().await?;
         let split_chunks = &config.optimization().await?.split_chunks;
 
         let (ecmascript_chunking_config, css_chunking_config) = (
@@ -642,6 +644,14 @@ pub async fn get_client_chunking_context(
                 Into::into,
             ),
         );
+
+        if let Some(filename) = &output.filename {
+            builder = builder.filename(filename.clone());
+        }
+
+        if let Some(chunk_filename) = &output.chunk_filename {
+            builder = builder.chunk_filename(chunk_filename.clone());
+        }
 
         builder = builder
             .chunking_config(

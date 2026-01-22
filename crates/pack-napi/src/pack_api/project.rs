@@ -82,6 +82,10 @@ pub struct NapiWatchOptions {
     /// Enable polling at a certain interval if the native file watching doesn't work (e.g.
     /// docker).
     pub poll_interval_ms: Option<f64>,
+
+    /// Paths to ignore when watching for file changes.
+    /// By default, ignores: node_modules
+    pub ignored: Option<Vec<String>>,
 }
 
 #[napi(object)]
@@ -178,6 +182,10 @@ impl From<NapiWatchOptions> for WatchOptions {
                 .poll_interval_ms
                 .filter(|interval| !interval.is_nan() && interval.is_finite() && *interval > 0.0)
                 .map(|interval| Duration::from_secs_f64(interval / 1000.0)),
+            ignored: val
+                .ignored
+                .map(|v| v.into_iter().map(|s| s.into()).collect())
+                .unwrap_or_else(pack_api::project::default_ignored_paths),
         }
     }
 }
@@ -268,7 +276,11 @@ pub async fn project_new(
         .ok()
         .filter(|v| !v.is_empty());
 
-    if cfg!(feature = "tokio-console") && trace.is_none() {
+    let tracing_chrome = std::env::var("TRACING_CHROME")
+        .ok()
+        .filter(|v| !v.is_empty());
+
+    if cfg!(feature = "tokio-console") && trace.is_none() && tracing_chrome.is_none() {
         // ensure `trace` is set to *something* so that the `tokio-console` feature works, otherwise
         // you just get empty output from `tokio-console`, which can be confusing.
         trace = Some("overview".to_owned());
@@ -335,6 +347,24 @@ pub async fn project_new(
 
         TRACING_INIT.call_once(|| {
             subscriber.init();
+        });
+    } else if let Some(chrome_file) = tracing_chrome {
+        let mut builder = tracing_chrome::ChromeLayerBuilder::new();
+        if chrome_file != "1" && chrome_file != "true" {
+            builder = builder.file(chrome_file);
+        }
+        let (chrome_layer, guard) = builder.build();
+        exit.on_exit(async move {
+            tokio::task::spawn_blocking(move || drop(guard))
+                .await
+                .unwrap();
+        });
+
+        TRACING_INIT.call_once(|| {
+            tracing_subscriber::registry()
+                .with(EnvFilter::new("trace"))
+                .with(chrome_layer)
+                .init();
         });
     } else {
         TRACING_INIT.call_once(|| {

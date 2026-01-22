@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/public_path/basic/input/index.js"],"sourcesContent":["import asset from \"./asset.jpg\";\nconsole.log('Main entry loaded with publicPath');\n\nexport async function loadLazyModule() {\n  const module = await import('./lazy.js');\n  return module.default();\n}\n\nexport function getImageUrl() {\n  return asset;\n}\n\nimport('./lazy.js').then(module => {\n  console.log(module.default());\n});\n\nconsole.log('Ready to load chunks from CDN');\n\n"],"names":[],"mappings":"AAAA;;AACA,QAAQ,GAAG,CAAC;AAEL,eAAe;IACpB,MAAM,SAAS;IACf,OAAO,OAAO,OAAO;AACvB;AAEO,SAAS;IACd,OAAO,8CAAK;AACd;AAEA,4BAAoB,IAAI,CAAC,CAAA;IACvB,QAAQ,GAAG,CAAC,OAAO,OAAO;AAC5B;AAEA,QAAQ,GAAG,CAAC"}}]
+}

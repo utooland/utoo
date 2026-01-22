@@ -1,5 +1,5 @@
-(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([
+(globalThis["utooChunk_async_chunk_test"] || (globalThis["utooChunk_async_chunk_test"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["async_chunk_input_427d2456.js"],"runtimeModuleIds":[545]}
+    {"otherChunks":["input_b9669e81.js"],"runtimeModuleIds":[545]}
 ]);
 // Dummy runtime

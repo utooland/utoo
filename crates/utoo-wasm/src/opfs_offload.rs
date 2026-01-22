@@ -5,7 +5,7 @@ pub struct OpfsOffload;
 
 impl offload::FsOffload for OpfsOffload {
     async fn read(&self, path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
-        opfs_project::read(path).await
+        opfs_project::read(path).await.map(|arc| (*arc).to_vec())
     }
 
     async fn write(&self, path: impl AsRef<Path>, content: impl AsRef<[u8]>) -> io::Result<()> {
