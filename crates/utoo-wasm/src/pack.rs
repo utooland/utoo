@@ -68,54 +68,6 @@ pub struct PackProject {
     pub dev: bool,
 }
 
-impl PackProject {
-    pub async fn build(&self) -> Result<TurbopackResult> {
-        let start = Instant::now();
-        let turbo_tasks = self.turbo_tasks.clone();
-        let container = self.container;
-        let (entrypoints, issues, diags) = turbo_tasks
-            .run_once(async move {
-                let entrypoints_with_issues_op =
-                    get_all_written_entrypoints_with_issues_operation(container);
-
-                let EntrypointsWithIssues {
-                    entrypoints,
-                    issues,
-                    diagnostics,
-                    effects,
-                } = &*entrypoints_with_issues_op
-                    .read_strongly_consistent()
-                    .await?;
-                effects.apply().await?;
-
-                Ok((entrypoints.clone(), issues.clone(), diagnostics.clone()))
-            })
-            .await?;
-
-        tracing::info!("all project entrypoints wrote to disk.");
-
-        tracing::info!(
-            "pack tasks with {} apps {} libraries finished in {:?}",
-            entrypoints
-                .apps
-                .as_ref()
-                .map(|apps| apps.0.len())
-                .unwrap_or_default(),
-            entrypoints
-                .libraries
-                .as_ref()
-                .map(|libraries| libraries.0.len())
-                .unwrap_or_default(),
-            start.elapsed()
-        );
-
-        Ok(TurbopackResult {
-            issues: issues.iter().map(|i| Issue::from(&**i)).collect(),
-            diagnostics: diags.iter().map(|d| Diagnostic::from(d)).collect(),
-        })
-    }
-}
-
 pub fn create_turbo_tasks() -> Result<BundlerTurboTasks> {
     Ok(BundlerTurboTasks::Memory(TurboTasks::new(
         turbo_tasks_backend::TurboTasksBackend::new(
@@ -376,7 +328,49 @@ pub async fn build() -> std::result::Result<JsValue, wasm_bindgen::JsError> {
 
     runtime()
         .spawn(async move {
-            let result = pack_project.build().await?;
+            let start = Instant::now();
+            let turbo_tasks = pack_project.turbo_tasks.clone();
+            let container = pack_project.container;
+            let (entrypoints, issues, diags) = turbo_tasks
+                .run_once(async move {
+                    let entrypoints_with_issues_op =
+                        get_all_written_entrypoints_with_issues_operation(container);
+
+                    let EntrypointsWithIssues {
+                        entrypoints,
+                        issues,
+                        diagnostics,
+                        effects,
+                    } = &*entrypoints_with_issues_op
+                        .read_strongly_consistent()
+                        .await?;
+                    effects.apply().await?;
+
+                    Ok((entrypoints.clone(), issues.clone(), diagnostics.clone()))
+                })
+                .await?;
+
+            tracing::info!("all project entrypoints wrote to disk.");
+
+            tracing::info!(
+                "pack tasks with {} apps {} libraries finished in {:?}",
+                entrypoints
+                    .apps
+                    .as_ref()
+                    .map(|apps| apps.0.len())
+                    .unwrap_or_default(),
+                entrypoints
+                    .libraries
+                    .as_ref()
+                    .map(|libraries| libraries.0.len())
+                    .unwrap_or_default(),
+                start.elapsed()
+            );
+
+            let result = TurbopackResult {
+                issues: issues.iter().map(|i| Issue::from(&**i)).collect(),
+                diagnostics: diags.iter().map(|d| Diagnostic::from(d)).collect(),
+            };
             let json_str =
                 serde_json::to_string(&result).map_err(|e| anyhow::anyhow!(e.to_string()))?;
             Ok::<String, anyhow::Error>(json_str)
