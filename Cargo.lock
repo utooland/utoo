@@ -461,7 +461,7 @@ dependencies = [
  "bitflags 2.9.4",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.12.1",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -3041,7 +3041,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b0f83760fb341a774ed326568e19f5a863af4a952def8c39f9ab92fd95b88e5"
 dependencies = [
  "equivalent",
- "hashbrown 0.16.0",
+ "hashbrown 0.15.5",
  "serde",
  "serde_core",
 ]
@@ -3441,8 +3441,8 @@ checksum = "0c6639b70a7ce854b79c70d7e83f16b5dc0137cc914f3d7d03803b513ecc67ac"
 
 [[package]]
 name = "lightningcss"
-version = "1.0.0-alpha.68"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#b472bc38a4c192fe99d97c72fdfd51975a2f412a"
+version = "1.0.0-alpha.70"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#af747bd5de2f2f7ff032927c013788fed23f2544"
 dependencies = [
  "ahash 0.8.12",
  "bitflags 2.9.4",
@@ -3471,7 +3471,7 @@ dependencies = [
 [[package]]
 name = "lightningcss-derive"
 version = "1.0.0-alpha.43"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#b472bc38a4c192fe99d97c72fdfd51975a2f412a"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#af747bd5de2f2f7ff032927c013788fed23f2544"
 dependencies = [
  "convert_case 0.6.0",
  "proc-macro2",
@@ -4464,7 +4464,7 @@ dependencies = [
 [[package]]
 name = "parcel_selectors"
 version = "0.28.2"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#b472bc38a4c192fe99d97c72fdfd51975a2f412a"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#af747bd5de2f2f7ff032927c013788fed23f2544"
 dependencies = [
  "bitflags 2.9.4",
  "cssparser",
@@ -4939,7 +4939,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.106",
@@ -6296,7 +6296,7 @@ dependencies = [
 [[package]]
 name = "static-self"
 version = "0.1.2"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#b472bc38a4c192fe99d97c72fdfd51975a2f412a"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#af747bd5de2f2f7ff032927c013788fed23f2544"
 dependencies = [
  "indexmap 2.11.4",
  "smallvec",
@@ -6306,7 +6306,7 @@ dependencies = [
 [[package]]
 name = "static-self-derive"
 version = "0.1.1"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#b472bc38a4c192fe99d97c72fdfd51975a2f412a"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#af747bd5de2f2f7ff032927c013788fed23f2544"
 dependencies = [
  "proc-macro2",
  "quote",
