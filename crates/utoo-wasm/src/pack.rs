@@ -62,36 +62,13 @@ impl Drop for RootTask {
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq)]
-pub struct PartialProjectOptions {
-    pub project_path: String,
-
-    pub config: Option<String>,
-}
-
 pub struct PackProject {
     pub turbo_tasks: BundlerTurboTasks,
     pub container: ResolvedVc<ProjectContainer>,
+    pub dev: bool,
 }
 
 impl PackProject {
-    pub async fn initialize(options: ProjectOptions) -> Result<Self> {
-        let turbo_tasks = create_turbo_tasks()?;
-        let container = turbo_tasks
-            .run_once(async move {
-                let project_container = ProjectContainer::new("utoopack-web".into(), options.dev);
-                let project_container = project_container.to_resolved().await?;
-                project_container.initialize(options).await?;
-                Ok(project_container)
-            })
-            .await?;
-
-        Ok(PackProject {
-            turbo_tasks,
-            container,
-        })
-    }
-
     pub async fn build(&self) -> Result<TurbopackResult> {
         let start = Instant::now();
         let turbo_tasks = self.turbo_tasks.clone();
@@ -302,12 +279,16 @@ pub fn worker_created(worker_id: u32) {
 
 /// Initialize or reinitialize the pack project with the given dev mode.
 /// This will clean up any previous turbo-tasks before creating a new project.
-pub async fn init_pack_project(hmr: bool) -> Result<()> {
-    // Take and drop the old project (don't call stop_and_wait as it causes issues in browser)
-    {
-        let mut pack_project_guard = GLOBAL_PACK_PROJECT.write();
-        let _ = pack_project_guard.take();
+pub async fn init_pack_project(dev: bool) -> Result<()> {
+    // Only reinitialize if the mode (build vs dev) has changed
+    if let Some(project) = &*GLOBAL_PACK_PROJECT.read() {
+        if project.dev == dev {
+            return Ok(());
+        }
     }
+
+    // Drop the old project
+    GLOBAL_PACK_PROJECT.write().take();
 
     let cwd = opfs_project::get_cwd().to_string_lossy().to_string();
     let project_root = if cwd.starts_with('/') {
@@ -319,50 +300,34 @@ pub async fn init_pack_project(hmr: bool) -> Result<()> {
             .to_string()
     };
 
-    let config_path = std::path::PathBuf::from(&project_root)
-        .join("utoopack.json")
-        .to_string_lossy()
-        .to_string();
+    let config_path = PathBuf::from(&project_root).join("utoopack.json");
+    let config_str = Fs::read_to_string(&config_path.to_string_lossy())
+        .await
+        .ok()
+        .unwrap_or_default();
+    let mut config: Value = serde_json::from_str(&config_str).unwrap_or(json!({}));
 
-    let config = Fs::read_to_string(&config_path).await.ok();
-
-    let partial_options = PartialProjectOptions {
-        project_path: project_root,
-        config,
-    };
-    let project_path: RcStr = partial_options.project_path.into();
-
-    // Parse config JSON and inject mode based on dev_mode
-    let config_str = partial_options.config.unwrap_or("{}".to_string());
-    let mut config_json: serde_json::Value =
-        serde_json::from_str(&config_str).unwrap_or(serde_json::json!({}));
-
-    // Set mode based on dev_mode flag
-    config_json["mode"] = serde_json::json!(if hmr { "development" } else { "production" });
-
-    // Set devServer.hot for HMR in dev mode
-    if hmr {
-        if config_json.get("devServer").is_none() {
-            config_json["devServer"] = serde_json::json!({});
+    // Inject mode and HMR settings
+    config["mode"] = json!(if dev { "development" } else { "production" });
+    if dev {
+        if config.get("devServer").is_none() {
+            config["devServer"] = json!({});
         }
-        config_json["devServer"]["hot"] = serde_json::json!(true);
+        config["devServer"]["hot"] = json!(true);
     }
 
-    let config: RcStr = serde_json::to_string(&config_json)
-        .unwrap_or("{}".to_string())
-        .into();
-
+    let project_path: RcStr = project_root.into();
     let options = ProjectOptions {
         root_path: project_path.clone(),
         project_path: project_path.clone(),
-        config,
+        config: serde_json::to_string(&config)?.into(),
         build_id: project_path.clone(),
         watch: WatchOptions {
-            enable: hmr,
+            enable: dev,
             ..Default::default()
         },
         define_env: Default::default(),
-        dev: hmr,
+        dev,
         pack_path: rcstr!("./"),
         process_env: Default::default(),
     };
@@ -370,13 +335,28 @@ pub async fn init_pack_project(hmr: bool) -> Result<()> {
     tracing::debug!("ProjectOptions: {:?}", options);
 
     let pack_context = runtime()
-        .spawn(PackProject::initialize(options))
+        .spawn(async move {
+            let turbo_tasks = create_turbo_tasks()?;
+            let container = turbo_tasks
+                .run_once(async move {
+                    let container = ProjectContainer::new("utoopack-web".into(), options.dev)
+                        .to_resolved()
+                        .await?;
+                    container.initialize(options).await?;
+                    Ok(container)
+                })
+                .await?;
+
+            Ok::<PackProject, anyhow::Error>(PackProject {
+                turbo_tasks,
+                container,
+                dev,
+            })
+        })
         .await
         .context("fail to initialize pack project")??;
 
-    let mut pack_project_guard = GLOBAL_PACK_PROJECT.write();
-    *pack_project_guard = Some(Arc::new(pack_context));
-
+    *GLOBAL_PACK_PROJECT.write() = Some(Arc::new(pack_context));
     Ok(())
 }
 

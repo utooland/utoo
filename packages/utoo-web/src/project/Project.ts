@@ -104,19 +104,12 @@ export class Project implements ProjectEndpoint {
 
   public async deps(options?: DepsOptions) {
     await this.#mount;
-    // Pass simple types to avoid comlink serialization issues
-    return await this.remote.deps({
-      registry: options?.registry ?? undefined,
-      concurrency: options?.concurrency ?? undefined,
-    });
+    return await this.remote.deps(options);
   }
 
   public async install(packageLock: string, options?: InstallOptions) {
     await this.#mount;
-    // Pass simple types to avoid comlink serialization issues
-    return await this.remote.install(packageLock, {
-      maxConcurrentDownloads: options?.maxConcurrentDownloads,
-    });
+    return await this.remote.install(packageLock, options);
   }
 
   public async build(): Promise<BuildOutput> {
