@@ -9,6 +9,8 @@ export const useFileContent = (project: UtooProject | null) => {
   const [previewUrl, setPreviewUrl] = useState<string>("");
   const [error, setError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
+  const justSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const hasUnsavedChanges = selectedFileContent !== originalContent;
 
@@ -17,6 +19,7 @@ export const useFileContent = (project: UtooProject | null) => {
       setSelectedFilePath(filePath);
       setSelectedFileContent("");
       setOriginalContent("");
+      setJustSaved(false);
       try {
         if (!project) throw new Error("Project not initialized.");
 
@@ -43,12 +46,30 @@ export const useFileContent = (project: UtooProject | null) => {
       await project.writeFile(selectedFilePath, selectedFileContent);
       setOriginalContent(selectedFileContent);
       console.log(`File ${selectedFilePath} saved successfully.`);
+
+      // Show "Saved" status briefly
+      setJustSaved(true);
+      if (justSavedTimerRef.current) {
+        clearTimeout(justSavedTimerRef.current);
+      }
+      justSavedTimerRef.current = setTimeout(() => {
+        setJustSaved(false);
+      }, 2000);
     } catch (e: any) {
       setError(`Error saving file: ${e.message}`);
     } finally {
       setIsSaving(false);
     }
   }, [project, selectedFilePath, selectedFileContent, hasUnsavedChanges]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (justSavedTimerRef.current) {
+        clearTimeout(justSavedTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (selectedFilePath) {
@@ -65,6 +86,7 @@ export const useFileContent = (project: UtooProject | null) => {
     saveFile,
     isSaving,
     hasUnsavedChanges,
+    justSaved,
     error,
   };
 };

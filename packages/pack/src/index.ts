@@ -10,6 +10,13 @@ export default utoopack;
 export * from "./config/types";
 export * from "./config/webpackCompat";
 export * from "./core/types";
+export {
+  BaseUpdate,
+  EcmascriptMergedUpdate,
+  IssuesUpdate,
+  PartialUpdate,
+  Update,
+} from "./core/types";
 export * from "./utils/findRoot";
 export type WebpackConfig = webpackCompat.WebpackConfig;
 namespace utoopack {

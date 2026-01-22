@@ -1,5 +1,6 @@
-import { handleIssues } from "@utoo/pack-shared";
+import { handleIssues, type UpdateMessage } from "@utoo/pack-shared";
 import * as comlink from "comlink";
+import { HmrClient, HmrServer } from "../hmr";
 import { WorkerMessageType } from "../message";
 import { installServiceWorker } from "../serviceWorker/install";
 import {
@@ -27,6 +28,9 @@ export class Project implements ProjectEndpoint {
   public readonly cwd: string;
 
   public readonly serviceWorkerOptions?: ServiceWorkerOptions;
+
+  /** HMR server for managing hot module replacement with preview iframes */
+  private hmrServer?: HmrServer;
 
   private remote: comlink.Remote<
     ProjectEndpoint & {
@@ -115,6 +119,42 @@ export class Project implements ProjectEndpoint {
     return res;
   }
 
+  public dev(onUpdate?: (result: BuildOutput) => void): void {
+    // Create HmrServer lazily on first dev() call
+    if (!this.hmrServer) {
+      this.hmrServer = new HmrServer({
+        onSubscribe: async (path, client) => {
+          await this.hmrSubscribe(path, (update) => {
+            this.hmrServer!.sendUpdate(path, update as any);
+          });
+        },
+      });
+    }
+
+    this.remote.dev(
+      onUpdate
+        ? comlink.proxy((result: BuildOutput) => {
+            handleIssues(result.issues, false, false);
+            onUpdate(result);
+          })
+        : undefined,
+    );
+  }
+
+  public async hmrSubscribe(
+    identifier: string,
+    callback: (update: unknown) => void,
+  ): Promise<void> {
+    await this.remote.hmrSubscribe(identifier, comlink.proxy(callback));
+  }
+
+  public updateInfoSubscribe(
+    aggregationMs: number,
+    callback: (message: UpdateMessage) => void,
+  ): void {
+    this.remote.updateInfoSubscribe(aggregationMs, comlink.proxy(callback));
+  }
+
   public async readFile(path: string, encoding?: "utf8") {
     await this.#mount;
     return (await this.remote.readFile(path, encoding)) as any;
@@ -178,6 +218,24 @@ export class Project implements ProjectEndpoint {
   public async sigMd5(content: Uint8Array): Promise<string> {
     await this.#mount;
     return await this.remote.sigMd5(content);
+  }
+
+  /**
+   * Connect an iframe to the HMR server for hot module replacement.
+   * Only works after dev() has been called.
+   *
+   * @param iframe The iframe element to connect
+   * @param origin Optional origin for postMessage (default: "*")
+   * @returns The HMR client instance, or null if connection failed or dev() not called
+   */
+  public connectHmrIframe(
+    iframe: HTMLIFrameElement,
+    origin?: string,
+  ): HmrClient | null {
+    if (!this.hmrServer) {
+      return null;
+    }
+    return this.hmrServer.connectIframe(iframe, origin);
   }
 
   public static fork(

@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from "util";
 import type {
   HmrIdentifiers,
   NapiPartialProjectOptions,
@@ -8,11 +7,7 @@ import type {
   StackFrame,
 } from "../binding";
 import * as binding from "../binding";
-import {
-  ConfigComplete,
-  TurbopackLoaderItem,
-  TurbopackRuleConfigItem,
-} from "../config/types";
+import { ConfigComplete } from "../config/types";
 import { rustifyEnv } from "../utils/common";
 import { runLoaderWorkerPool } from "./loaderWorkerPool";
 import {

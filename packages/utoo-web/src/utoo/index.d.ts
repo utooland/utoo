@@ -74,19 +74,23 @@ export class Project {
     static build(): Promise<any>;
     /**
      * Generate package-lock.json by resolving dependencies.
-     *
-     * # Arguments
-     * * `registry` - Optional registry URL. If None, uses npmmirror.
-     *   - "https://registry.npmmirror.com" - supports semver queries (faster)
-     *   - "https://registry.npmjs.org" - official npm registry (slower, fetches full manifest)
-     * * `concurrency` - Optional concurrency limit (defaults to 20)
      */
     static deps(registry?: string | null, concurrency?: number | null): Promise<string>;
     /**
+     * Subscribe to entrypoints changes with HMR support.
+     * This will watch for file changes and automatically rebuild.
+     * Returns a RootTask that must be held by JS to keep the subscription active.
+     */
+    static entrypointsSubscribe(callback: Function): Promise<RootTask>;
+    /**
      * Create a tar.gz archive and return bytes (no file I/O)
-     * This is useful for main thread execution without OPFS access
      */
     static gzip(files: any): Promise<Uint8Array>;
+    /**
+     * Subscribe to HMR events for a specific identifier.
+     * Returns a RootTask that must be held by JS to keep the subscription active.
+     */
+    static hmrEvents(identifier: string, callback: Function): Promise<RootTask>;
     static init(thread_url: string): void;
     /**
      * Install dependencies - downloads tgz files only, extracts on-demand when files are read
@@ -97,7 +101,26 @@ export class Project {
      * Calculate MD5 hash of byte content (async for better thread scheduling)
      */
     static sigMd5(content: Uint8Array): Promise<string>;
+    /**
+     * Subscribe to compilation lifecycle events.
+     * Emits "start" when computation begins, "end" when idle for aggregation_ms.
+     */
+    static updateInfoSubscribe(aggregation_ms: number, callback: Function): void;
+    /**
+     * Write all entrypoints to disk.
+     */
+    static writeAllToDisk(callback: Function): void;
     static readonly cwd: string;
+}
+
+/**
+ * A root task handle that keeps the turbo-tasks subscription alive.
+ * This must be held by JS to keep the subscription active.
+ */
+export class RootTask {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
 }
 
 export class WasmTaskMessage {
@@ -155,10 +178,23 @@ export function workerCreated(worker_id: number): void;
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
-    readonly initLogFilter: (a: number, b: number) => void;
-    readonly init_pack: () => void;
+    readonly __wbg_project_free: (a: number, b: number) => void;
+    readonly project_build: () => any;
+    readonly project_cwd: () => [number, number];
+    readonly project_deps: (a: number, b: number, c: number) => any;
+    readonly project_entrypointsSubscribe: (a: any) => any;
+    readonly project_gzip: (a: any) => any;
+    readonly project_hmrEvents: (a: number, b: number, c: any) => any;
+    readonly project_init: (a: number, b: number) => void;
+    readonly project_install: (a: number, b: number, c: number) => any;
+    readonly project_setCwd: (a: number, b: number) => void;
+    readonly project_sigMd5: (a: any) => any;
+    readonly project_updateInfoSubscribe: (a: number, b: any) => void;
+    readonly project_writeAllToDisk: (a: any) => void;
     readonly getWasmMemory: () => any;
     readonly getWasmModule: () => any;
+    readonly initLogFilter: (a: number, b: number) => void;
+    readonly init_pack: () => void;
     readonly __wbg_direntry_free: (a: number, b: number) => void;
     readonly __wbg_fs_free: (a: number, b: number) => void;
     readonly __wbg_get_direntry_name: (a: number) => [number, number];
@@ -190,15 +226,7 @@ export interface InitOutput {
     readonly fs_write: (a: number, b: number, c: any) => any;
     readonly fs_writeString: (a: number, b: number, c: number, d: number) => any;
     readonly fs_writeSync: (a: number, b: number, c: any) => [number, number];
-    readonly __wbg_project_free: (a: number, b: number) => void;
-    readonly project_build: () => any;
-    readonly project_cwd: () => [number, number];
-    readonly project_deps: (a: number, b: number, c: number) => any;
-    readonly project_gzip: (a: any) => any;
-    readonly project_init: (a: number, b: number) => void;
-    readonly project_install: (a: number, b: number, c: number) => any;
-    readonly project_setCwd: (a: number, b: number) => void;
-    readonly project_sigMd5: (a: any) => any;
+    readonly __wbg_roottask_free: (a: number, b: number) => void;
     readonly registerWorkerScheduler: (a: any, b: any) => void;
     readonly workerCreated: (a: number) => void;
     readonly rust_mi_get_default_heap: () => number;
@@ -230,12 +258,12 @@ export interface InitOutput {
     readonly wasm_bindgen__closure__destroy__h391e6789779e56da: (a: number, b: number) => void;
     readonly wasm_bindgen__closure__destroy__h96856d441dbabdfc: (a: number, b: number) => void;
     readonly wasm_bindgen__closure__destroy__hcd544267e9a8b41a: (a: number, b: number) => void;
-    readonly wasm_bindgen__closure__destroy__hcea912784bd75060: (a: number, b: number) => void;
+    readonly wasm_bindgen__closure__destroy__h72493b8ecc7a2fa9: (a: number, b: number) => void;
     readonly wasm_bindgen__convert__closures_____invoke__hb6c1c61344794a50: (a: number, b: number, c: any, d: any) => void;
     readonly wasm_bindgen__convert__closures_____invoke__h1c90b71c761ed3b8: (a: number, b: number, c: any) => void;
     readonly wasm_bindgen__convert__closures_____invoke__hf447be52ec002243: (a: number, b: number, c: any) => void;
     readonly wasm_bindgen__convert__closures________invoke__h717385505976dc94: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h69eaa04d23e30afb: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h3d4d60f9cefb0572: (a: number, b: number, c: any) => void;
     readonly wasm_bindgen__convert__closures_____invoke__hcdaa890baa3d79c0: (a: number, b: number) => void;
     readonly wasm_bindgen__convert__closures_____invoke__h3fb07518adc4b25d: (a: number, b: number) => void;
     readonly memory: WebAssembly.Memory;

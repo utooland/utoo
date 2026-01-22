@@ -1,5 +1,7 @@
-import { Issue } from "@utoo/pack-shared";
+import { Issue, type UpdateMessage } from "@utoo/pack-shared";
 import initWasm, { DirEntryType } from "./utoo";
+
+export { type UpdateMessage } from "@utoo/pack-shared";
 
 export interface RawDirent {
   name: string;
@@ -119,6 +121,23 @@ export interface ProjectEndpoint {
   deps: (options?: DepsOptions) => Promise<string>;
   install: (packageLock: string, options?: InstallOptions) => Promise<void>;
   build: () => Promise<BuildOutput>;
+  /** Start dev mode with file watching. onUpdate is called on each rebuild. */
+  dev: (onUpdate?: (result: BuildOutput) => void) => void;
+  /**
+   * Subscribe to HMR events for a specific identifier.
+   * Returns a Promise that resolves when the subscription is set up.
+   * Matches NAPI signature: project_hmr_events(project, identifier, func) -> RootTask
+   * Callback receives: { result: ClientUpdateInstruction, issues: Issue[], diagnostics: Diagnostic[] }
+   */
+  hmrSubscribe: (
+    identifier: string,
+    callback: (update: unknown) => void,
+  ) => void | Promise<void>;
+  /** Subscribe to compilation lifecycle events (start/end). */
+  updateInfoSubscribe: (
+    aggregationMs: number,
+    callback: (message: UpdateMessage) => void,
+  ) => void;
   readFile(path: string): Promise<Uint8Array>;
   readFile(path: string, encoding?: "utf8"): Promise<string>;
   writeFile(

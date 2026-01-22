@@ -1,11 +1,11 @@
-import { handleIssues } from "@utoo/pack-shared";
+import { EntryOptions, handleIssues } from "@utoo/pack-shared";
 import { spawn } from "child_process";
-import fs, { existsSync } from "fs";
+import fs from "fs";
 import { nanoid } from "nanoid";
-import { join } from "path";
+import path from "path";
+import { BundleOptions } from "../config/types";
 import { resolveBundleOptions, WebpackConfig } from "../config/webpackCompat";
 import { projectFactory } from "../core/project";
-import { BundleOptions } from "../core/types";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import { blockStdout, createDefineEnv, getPackPath } from "../utils/common";
 import { findRootDir } from "../utils/findRoot";
@@ -62,7 +62,7 @@ async function buildInternal(
         stats:
           Boolean(process.env.ANALYZE) ||
           bundleOptions.config.stats ||
-          bundleOptions.config.entry.some((e) => !!e.html),
+          bundleOptions.config.entry.some((e: EntryOptions) => !!e.html),
       },
       projectPath: projectPath || process.cwd(),
       rootPath: rootPath || projectPath || process.cwd(),
@@ -83,14 +83,16 @@ async function buildInternal(
       : (bundleOptions.config as any).html
         ? [(bundleOptions.config as any).html]
         : []),
-    ...bundleOptions.config.entry.filter((e) => !!e.html).map((e) => e.html!),
+    ...bundleOptions.config.entry
+      .filter((e: EntryOptions) => !!e.html)
+      .map((e: EntryOptions) => e.html!),
   ];
 
   if (htmlConfigs.length > 0) {
     const assets = { js: [] as string[], css: [] as string[] };
 
     const outputDir =
-      bundleOptions.config.output?.path || join(process.cwd(), "dist");
+      bundleOptions.config.output?.path || path.join(process.cwd(), "dist");
 
     if (assets.js.length === 0 && assets.css.length === 0) {
       const discovered = getInitialAssetsFromStats(outputDir);
@@ -116,9 +118,9 @@ async function buildInternal(
 }
 
 async function analyzeBundle(outputPath: string): Promise<void> {
-  const statsPath = join(outputPath, "stats.json");
+  const statsPath = path.join(outputPath, "stats.json");
 
-  if (!existsSync(statsPath)) {
+  if (!fs.existsSync(statsPath)) {
     console.warn(
       `Stats file not found at ${statsPath}. Make sure to enable stats in your configuration.`,
     );

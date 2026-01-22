@@ -29,6 +29,7 @@ pub(crate) mod errors;
 mod fs;
 #[cfg(feature = "utoopack")]
 mod opfs_offload;
+mod pm;
 mod project;
 mod wasm_shim;
 
@@ -67,6 +68,7 @@ pub fn init_log_filter(mut filter: String) {
         let fmt_layer = fmt::layer()
             .without_time()
             .with_span_events(fmt::format::FmtSpan::NONE)
+            // .with_span_events(fmt::format::FmtSpan::CLOSE)
             .with_writer(MakeWebConsoleWriter::new())
             .with_filter(EnvFilter::new(filter));
 

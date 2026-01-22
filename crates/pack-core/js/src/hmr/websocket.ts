@@ -146,7 +146,7 @@ export function connectHMR(options: HMROptions) {
 
     let url = `${protocol}://${hostname}:${port}`;
 
-    source = new window.WebSocket(`${url}${options.path}`);
+    source = new WebSocket(`${url}${options.path}`);
     source.onopen = handleOnline;
     source.onerror = handleDisconnect;
     source.onmessage = handleMessage;
