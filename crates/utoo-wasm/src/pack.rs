@@ -15,7 +15,7 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use std::{ops::Deref, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
-use tokio::time::Instant;
+use tokio::{sync::mpsc::unbounded_channel, time::Instant};
 use turbo_rcstr::{rcstr, RcStr};
 use turbo_tasks::TaskId;
 use turbo_tasks::{
@@ -323,7 +323,7 @@ pub async fn init_pack_project(dev: bool) -> Result<()> {
         config: serde_json::to_string(&config)?.into(),
         build_id: project_path.clone(),
         watch: WatchOptions {
-            enable: dev,
+            enable: true,
             ..Default::default()
         },
         define_env: Default::default(),
@@ -360,21 +360,6 @@ pub async fn init_pack_project(dev: bool) -> Result<()> {
     Ok(())
 }
 
-/// Run pack with the current pack project.
-/// Returns the build result as a TurbopackResult.
-pub async fn run_pack() -> Result<TurbopackResult> {
-    let pack_project = GLOBAL_PACK_PROJECT
-        .read()
-        .as_ref()
-        .cloned()
-        .ok_or_else(|| anyhow::anyhow!("pack project not initialized"))?;
-
-    runtime()
-        .spawn(async move { pack_project.build().await })
-        .await
-        .context("failed to spawn build task")?
-}
-
 /// Build operation.
 pub async fn build() -> std::result::Result<JsValue, wasm_bindgen::JsError> {
     use wasm_bindgen::JsError;
@@ -383,15 +368,28 @@ pub async fn build() -> std::result::Result<JsValue, wasm_bindgen::JsError> {
         .await
         .map_err(|e| JsError::new(&PrettyPrintError(&e).to_string()))?;
 
-    run_pack().await.map_or_else(
-        |e| Err(JsError::new(&PrettyPrintError(&e).to_string())),
-        |result| {
+    let pack_project = GLOBAL_PACK_PROJECT
+        .read()
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| JsError::new("pack project not initialized"))?;
+
+    runtime()
+        .spawn(async move {
+            let result = pack_project.build().await?;
             let json_str =
-                serde_json::to_string(&result).map_err(|e| JsError::new(&e.to_string()))?;
-            js_sys::JSON::parse(&json_str)
-                .map_err(|e| JsError::new(&format!("Failed to parse JSON: {:?}", e)))
-        },
-    )
+                serde_json::to_string(&result).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            Ok::<String, anyhow::Error>(json_str)
+        })
+        .await
+        .map_err(|e| JsError::new(&format!("Failed to spawn build task: {:?}", e)))?
+        .map_or_else(
+            |e| Err(JsError::new(&PrettyPrintError(&e).to_string())),
+            |json_str| {
+                js_sys::JSON::parse(&json_str)
+                    .map_err(|e| JsError::new(&format!("Failed to parse JSON: {:?}", e)))
+            },
+        )
 }
 
 /// Subscribe to entrypoints changes.
@@ -417,7 +415,7 @@ pub async fn project_entrypoints_subscribe(
     let turbo_tasks = pack_project.turbo_tasks.clone();
     let container = pack_project.container;
 
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (tx, mut rx) = unbounded_channel::<String>();
 
     let turbo_tasks_clone = turbo_tasks.clone();
     let task_id = runtime()
@@ -561,7 +559,7 @@ pub async fn project_hmr_events(
     let session = TransientInstance::new(());
 
     // Create channel for communication between root task and JS callback
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (tx, mut rx) = unbounded_channel::<String>();
 
     // Spawn a root task that will be re-executed when dependencies change
     let turbo_tasks_clone = turbo_tasks.clone();
