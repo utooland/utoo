@@ -92,6 +92,8 @@ var __TURBOPACK__imported__module__706__ = __turbopack_context__.i(706);
 ;
 ;
 ;
+;
+console.log('style', void 0);
 console.log(__TURBOPACK__imported__module__706__["a"], __TURBOPACK__imported__module__790__["foo"], __TURBOPACK__imported__module__611__["aliasPkg"], __TURBOPACK__imported__module__790__["bar"]);
 console.log('a from alias-pkg', __TURBOPACK__imported__module__521__["aliasA"]);
 console.log('b from alias-pkg', __TURBOPACK__imported__module__554__["aliasB"]);
