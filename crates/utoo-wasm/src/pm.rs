@@ -23,11 +23,7 @@ pub async fn sig_md5(content: Vec<u8>) -> Result<String> {
 
 /// Create a tar.gz archive from a list of files (internal)
 async fn gzip_files(pack_files: Vec<PackFile>) -> Result<Vec<u8>> {
-    let rt = TOKIO_RUNTIME
-        .get()
-        .ok_or_else(|| anyhow!("tokio runtime not initialized"))?;
-
-    let bytes = rt
+    let bytes = runtime()
         .spawn_blocking(move || opfs_project::pack::gzip(&pack_files))
         .await??;
 
