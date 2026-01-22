@@ -14,7 +14,8 @@
       }
     },
     "optimization": {
-      "minify": false
+      "minify": false,
+      "moduleIds": "named"
     }
   }
 }
