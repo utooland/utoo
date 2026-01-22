@@ -1,4 +1,4 @@
 [submodule "next.js"]
 	path = next.js
-	url = git@github.com:utooland/next.js.git
+	url = https://github.com/utooland/next.js.git
   branch = utoo
