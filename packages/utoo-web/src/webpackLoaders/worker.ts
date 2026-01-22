@@ -1,5 +1,6 @@
-import initWasm, {
+import {
   Fs,
+  initSync,
   recvTaskMessageInWorker,
   sendTaskMessage,
   workerCreated,
@@ -28,17 +29,19 @@ declare let self: DedicatedWorkerGlobalScope & {
 };
 
 export function startLoaderWorker() {
-  self.onmessage = async (event) => {
+  self.onmessage = (event) => {
     let [module, memory, meta] = event.data as [
       WebAssembly.Module,
       WebAssembly.Memory,
       LoaderRunnerMeta,
     ];
 
-    await initWasm(module, memory).catch((err: Error) => {
-      console.log(err);
+    try {
+      initSync({ module, memory });
+    } catch (err) {
+      console.error(err);
       throw err;
-    });
+    }
 
     self.workerData = {
       threadId: meta.workerData.threadId,
