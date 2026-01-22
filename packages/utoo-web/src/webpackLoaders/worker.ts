@@ -39,7 +39,7 @@ export function startLoaderWorker() {
     try {
       initSync({ module, memory });
     } catch (err) {
-      console.log(err);
+      console.error(err);
       throw err;
     }
 
