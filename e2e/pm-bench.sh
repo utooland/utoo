@@ -174,11 +174,17 @@ run_benchmark() {
   fi
 
   local cmd=""
+  # bun cold install needs --no-cache to disable HTTP 304 caching
+  local bun_cache_flag=""
+  if [ "$install_type" = "cold" ]; then
+    bun_cache_flag="--no-cache"
+  fi
+
   case $pm in
     utoo) cmd="utoo install --ignore-scripts --registry=$registry" ;;
     yarn) cmd="yarn install --ignore-scripts --registry $registry" ;;
     pnpm) cmd="npm_config_package_manager_strict=false pnpm install --ignore-scripts --registry $registry" ;;
-    bun)  cmd="bun install --ignore-scripts --registry $registry" ;;
+    bun)  cmd="bun install --ignore-scripts --registry $registry $bun_cache_flag" ;;
   esac
 
   local start=$(date +%s.%N)
