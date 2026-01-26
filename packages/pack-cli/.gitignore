@@ -1,3 +1,4 @@
 **/.DS_Store
 /cjs
-/node_modulesgs
+/node_modules
+*.tsbuildinfo
