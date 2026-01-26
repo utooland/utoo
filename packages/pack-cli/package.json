@@ -7,12 +7,11 @@
     "up": "./bin/run.js"
   },
   "dependencies": {
-    "@oclif/core": "^4",
+    "citty": "^0.1.6",
     "@utoo/pack": "*"
   },
   "devDependencies": {
     "@types/node": "^20.3.0",
-    "oclif": "^4",
     "typescript": "^5"
   },
   "engines": {
@@ -20,28 +19,14 @@
   },
   "files": [
     "./bin",
-    "./dist",
-    "./oclif.manifest.json"
+    "./cjs"
   ],
   "license": "MIT",
-  "main": "dist/index.js",
-  "oclif": {
-    "bin": "up",
-    "commands": "./dist/commands",
-    "topicSeparator": " ",
-    "topics": {
-      "build": {
-        "description": "Build with production"
-      },
-      "dev": {
-        "description": "Build with development and HMR"
-      }
-    }
-  },
+  "main": "cjs/index.js",
   "scripts": {
-    "build": "rm -rf dist && tsc -b",
-    "clean": "rm -rf dist",
+    "build": "rm -rf cjs && tsc -b",
+    "clean": "rm -rf cjs",
     "prepublishOnly": "npm run build"
   },
-  "types": "dist/index.d.ts"
+  "types": "cjs/index.d.ts"
 }

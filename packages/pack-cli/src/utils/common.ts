@@ -1,27 +1,6 @@
-import { Flags } from "@oclif/core";
 import * as utooPack from "@utoo/pack";
 import fs from "fs";
 import path from "path";
-
-export const commonFlags = {
-  project: Flags.string({
-    char: "p",
-    description: "Set the project path",
-    required: false,
-    aliases: ["projectPath"],
-  }),
-  root: Flags.string({
-    char: "r",
-    description: "Set the root path",
-    required: false,
-    aliases: ["rootPath"],
-  }),
-  webpack: Flags.boolean({
-    name: "webpack",
-    description: "Enable webpack mode",
-    required: false,
-  }),
-};
 
 export interface BuildOptions {
   projectPath: string;

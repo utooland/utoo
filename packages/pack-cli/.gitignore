@@ -1,5 +1,3 @@
 **/.DS_Store
-/dist
-/node_modules
-oclif.manifest.json
-tsconfig.tsbuildinfo
+/cjs
+/node_modulesgs

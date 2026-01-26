@@ -3,15 +3,12 @@
     "declaration": true,
     "module": "commonjs",
     "esModuleInterop": true,
-    "outDir": "dist",
+    "outDir": "cjs",
     "rootDir": "src",
     "strict": true,
     "target": "es2022",
     "moduleResolution": "node",
     "skipLibCheck": true
   },
-  "include": ["./src/**/*"],
-  "ts-node": {
-    "esm": true
-  }
+  "include": ["./src/**/*"]
 }
