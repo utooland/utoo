@@ -1,0 +1,77 @@
+name: utoopack-perf
+
+on:
+  push:
+    branches: [ main, next ]
+  pull_request:
+    branches: [ main, next ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  performance:
+    name: Run Performance Benchmarks
+    if: (github.event_name == 'push' && !contains(github.event.head_commit.message, '(pm)')) || (github.event_name == 'pull_request' && !contains(github.event.pull_request.title, '(pm)'))
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/share/miniconda
+          sudo docker image prune --all --force
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2025-10-27
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: utoopack-perf
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Bundler (Local)
+        run: npm run build:local --workspace @utoo/pack
+
+      - name: Run Benchmark - with-antd
+        run: |
+          mkdir -p .trace
+          TRACING_CHROME=$PWD/.trace/trace_antd.json npm run build --prefix examples/with-antd
+        env:
+          NODE_ENV: production
+
+      - name: Analyze Traces
+        run: |
+          echo "## Performance Report - with-antd" >> $GITHUB_STEP_SUMMARY
+          python3 agents/tools/analyze_trace.py .trace/trace_antd.json .trace/report_antd.md
+          cat .trace/report_antd.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Traces
+        uses: actions/upload-artifact@v4
+        with:
+          name: utoopack-perf-traces
+          path: .trace/*.json
+          retention-days: 7
