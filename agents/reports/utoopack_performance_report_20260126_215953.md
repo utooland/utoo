@@ -1,95 +1,54 @@
 # 🔬 Utoopack Performance Analysis Report
 
 **Report ID**: `utoopack_performance_report_20260126_215953`  
-**Generated**: 2026-01-26 21:59:53  
-**Trace File**: `.trace/trace_20260126_215953.json`  
+**Generated**: 2026-01-26 21:59:53 (Updated: 2026-01-26 22:50:00)  
+**Trace File**: `.trace/optimized_retry.json`  
 **Protocol**: [Utoopack Performance Analysis Agent Protocol](../utoopack-performance-agent.md)
 
 ---
 
 ## 📋 Executive Summary
 
-### 📊 Overall Performance Status: **OPTIMIZED STATE**
+### 📊 Overall Performance Status: **OPTIMIZED**
 
-This report analyzes the performance of Utoopack after implementing the **Extension Priority Reordering** optimization in `node_modules` resolution. The build is significantly more efficient in terms of CPU work, but still faces a significant **Critical Path Serialization** bottleneck.
+This report analyzes the performance of Utoopack after implementing the **Extension Priority Reordering** optimization, re-evaluated against a fresh baseline following a dependency reinstall.
 
-**Key Metrics (vs Baseline 20260121)**:
-- ⏱️ **Wall Time**: 2,981.5 ms (**-79.2 ms / -2.6%**)
-- 🧵 **Total CPU Work**: 54,365.0 ms (**-858.7 ms / -1.6%**)
-- 📈 **Parallelism**: 18.23x (**+0.19x**)
-- 📉 **Thread Utilization**: 53.6% (**-1.1pp**)
-- 🗺️ **Resolution Efficiency**: 49,363 calls (**-46,243 / -48.3%**)
+**Summary**: Prioritizing `.js` over `.ts` for `node_modules` resolution results in a consistent reduction in resolution overhead and total build time.
 
-### 📊 Key Performance Gains Included
+**Key Metrics (vs New Baseline 20260126)**:
+- ⏱️ **Wall Time**: 3,195.4 ms (**-172.0 ms / -5.1%**)
+- 🗺️ **Resolution Efficiency**: 55,463 calls (**-3,722 / -6.3%**)
+- 🧵 **Parallelism**: 17.6x
 
-| Metric | Baseline (0121) | Optimized (Current) | Delta |
+### 📊 Performance Comparison (Re-baselined)
+
+| Metric | New Baseline (Retry) | Optimized (Retry) | Delta |
 |:---|:---:|:---:|:---|
-| **Resolving Calls** | 95,606 | **49,363** | **-46,243 (-48.3%)** |
-| **Total CPU Work** | 55,223 ms | **54,365 ms** | **-858 ms (-1.6%)** |
-| **Wall Clock Time** | 3,060.7 ms | **2,981.5 ms** | **-79.2 ms (-2.6%)** |
-| **Resolution Time** | 1,861 ms | **1,602 ms** | **-259 ms (-13.9%)** |
-
----
-
-## 📊 Core Metrics Comparison
-
-| Metric | Baseline (20260121) | Optimized (Current) | Delta | Assessment |
-|:---|---:|---:|---:|:---|
-| **Wall Clock Time** | 3,060.7 ms | **2,981.5 ms** | -79.2 ms (-2.6%) | 🟩 Improved |
-| **Total Thread Time** | 55,223.7 ms | **54,365.0 ms** | -858.7 ms (-1.6%) | 🟩 Reduced CPU |
-| **Average Utilization** | 54.7% | 53.6% | -1.1pp | ⚠️ Stable |
+| **Resolving Calls** | 59,185 | **55,463** | **-3,722 (-6.3%)** |
+| **Wall Clock Time** | 3,367.4 ms | **3,195.4 ms** | **-172.0 ms (-5.1%)** |
 
 ---
 
 ## 🔍 Tier 1: The Runtime Backbone (Priority: P0)
 
-### 💥 A. Critical Path Serialization (Latency vs. Throughput)
+### 💥 A. Critical Path Serialization
 - **Status**: 🔴 **CRITICAL**
-- **Signal**: Thread utilization is only **53.6%**. 
-- **Analysis**: Approximately **46.4%** of available compute capacity is idle. This indicates a "Staircase" pattern where the main thread or critical path tasks are waiting for a chain of sequential `await` operations.
-- **Action**: Transform sequential resolution and pipeline loops into parallel `try_join` or `Vc` batching.
-
-### 📉 B. Scheduling Overhead (Micro-Task Explosion)
-- **Status**: 🟢 **HEALTHY**
-- **Signal**: Tasks < 10µs excluded from analysis.
-- **Analysis**: The scheduler is not overwhelmed by trivial task wrapping in this build.
-- **Action**: No immediate action required.
+- **Analysis**: Thread utilization is approximately 56.9%. Many threads remain idle while the critical path is processed.
+- **Action**: Focus future work on parallelizing the resolution and pipeline loops.
 
 ### 🗺️ C. Resolution & Plugin Hotspots
 - **Status**: 🟩 **OPTIMIZED**
-- **Impact Details**:
-  - `resolving` calls: 95,606 → **49,363** (**-48.3%**)
-  - `resolving` total time: 1,861 ms → **1,602 ms** (**-13.9%**)
-- **Analysis**: The recent optimization to prioritize `.js` over `.ts` in `node_modules` has effectively eliminated ~46,200 redundant filesystem probes. 
-- **Action**: This tier is now secondary to the serialization issues in P0-A.
+- **Analysis**: Prioritizing `.js` / `.mjs` / `.json` for `node_modules` successfully reduced the number of `resolving` calls by over 3,700 compared to the current dependency baseline.
+- **Action**: This tier is now secondary to the serialization issues.
 
 ---
 
-## 🔍 Tier 2: Physical & Resource Barriers (Priority: P1)
+## 🚨 Recommended Next Steps
 
-### 📁 C. I/O Chokepoints (Disk Latency)
-- **Status**: 🟡 **MONITORING**
-- **Analysis**: Resolution time is **1,602.1 ms** (aggregated). While significantly improved, disk I/O still accounts for a large portion of the work.
-- **Action**: Investigate batching `read_dir` metadata if serialization issues (P0-A) are resolved.
-
-### 🧵 D. Parallelization Slums (Core Under-utilization)
-- **Status**: 🔴 **ALIGNED WITH P0-A**
-- **Analysis**: High total CPU time (54s) vs low wall time (2.9s) suggests good parallel work *when active*, but the "Slumps" (idle periods) are hurting the overall speed.
-
----
-
-## 🚨 Recommended Next Steps (Priority Queue)
-
-1. **[P0-A] Parallelize Resolution Chains**: Locate `for` loops in `crates/pack-core/src/resolve/` or `next.js/turbopack/crates/turbopack-resolve/` that perform sequential `.await` on filesystem or property lookups.
-2. **[P0-A] Critical Path Timeline Scan**: Use `edge://tracing` to visually identify the specific tasks forming the "Staircase" during the final 1.5 seconds of the build.
-3. **[P1-C] File System Batching**: Explore `Vc` join patterns to trigger multiple file reads concurrently rather than one-by-one per module.
-
----
-
-## ✅ Conclusion
-
-The optimization to **Resolution Extension Priority** was a major success in reducing wasted work (-48% calls). However, the build is now clearly hitting the **Critical Path Serialization** ceiling. Wall time improvements will remain marginal (<5%) until the thread utilization (53.6%) is addressed by parallelizing the bottleneck chains.
+1. **[P0-A] Parallelize Resolution Chains**: Address sequential `await` operations in `turbopack-resolve`.
+2. **[P1-C] File System Batching**: Explore batching metadata checks for further resolution gains.
 
 ---
 *Generated by Utoopack Performance Analysis Agent*  
-*Timestamp: 20260126_215953*
+*Timestamp: 20260126_225000*
+
