@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   performance:
@@ -65,9 +66,19 @@ jobs:
 
       - name: Analyze Traces
         run: |
-          echo "## Performance Report - with-antd" >> $GITHUB_STEP_SUMMARY
           python3 agents/tools/analyze_trace.py .trace/trace_antd.json .trace/report_antd.md
-          cat .trace/report_antd.md >> $GITHUB_STEP_SUMMARY
+          # Prepare PR comment content
+          echo "## 📊 Performance Benchmark Report (with-antd)" > .trace/pr_comment.md
+          cat .trace/report_antd.md >> .trace/pr_comment.md
+          # Add to Job Summary
+          cat .trace/pr_comment.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Post PR Comment
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: utoopack-perf-report
+          path: .trace/pr_comment.md
 
       - name: Upload Traces
         uses: actions/upload-artifact@v4
