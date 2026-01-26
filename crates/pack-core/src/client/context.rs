@@ -504,12 +504,12 @@ pub async fn get_client_resolve_options_context(
     // For node_modules: manually specify extensions to avoid parsing their tsconfig.json
     let foreign_resolve_options = ResolveOptionsContext {
         custom_extensions: Some(vec![
-            rcstr!(".tsx"),
-            rcstr!(".ts"),
-            rcstr!(".jsx"),
             rcstr!(".js"),
             rcstr!(".mjs"),
             rcstr!(".json"),
+            rcstr!(".jsx"),
+            rcstr!(".ts"),
+            rcstr!(".tsx"),
         ]),
         ..resolve_options_context.clone()
     };
