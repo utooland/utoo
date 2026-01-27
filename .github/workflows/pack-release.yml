@@ -198,9 +198,9 @@ jobs:
           fi
           echo "Publishing with tag: $TAG"
 
-          npm version --workspace=@utoo/pack-shared "${VERSION}" --no-git-tag-version &&
-          npm version --workspace=@utoo/pack "${VERSION}" --no-git-tag-version &&
-          npm version --workspace=@utoo/pack-cli "${VERSION}" --no-git-tag-version &&
+          npm version --workspace=@utoo/pack-shared "${VERSION}" --no-git-tag-version --workspaces-update=false &&
+          npm version --workspace=@utoo/pack "${VERSION}" --no-git-tag-version --workspaces-update=false &&
+          npm version --workspace=@utoo/pack-cli "${VERSION}" --no-git-tag-version --workspaces-update=false &&
           npm pkg set dependencies.@utoo/pack-shared="${VERSION}" --workspace=@utoo/pack &&
           npm pkg set dependencies.@utoo/pack="${VERSION}" --workspace=@utoo/pack-cli &&
           npm publish --workspace=@utoo/pack-shared --access public --tag "${TAG}" &&
