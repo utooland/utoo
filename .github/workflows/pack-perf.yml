@@ -82,27 +82,31 @@ jobs:
         id: findPr
         run: |
           echo "debug: Event name: ${{ github.event_name }}"
+          echo "debug: Ref: ${{ github.ref }}"
           echo "debug: Ref name: ${{ github.ref_name }}"
-          echo "debug: Repository: ${{ github.repository }}"
+          
+          PR_NUMBER=""
           
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+            echo "debug: Found PR number from event: $PR_NUMBER"
           else
-            # Use GH_REPO env var to ensure gh knows which repo to query
-            # 1. Try to match by branch name
+            # Try to match by branch name
+            echo "debug: Trying to find PR for branch '${{ github.ref_name }}'..."
             PR_NUMBER=$(gh pr list --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number')
             
-            # 2. If not found, try to match by commit SHA
+            # If not found, try to match by commit SHA
             if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" == "null" ]; then
-              echo "debug: Branch match failed, trying commit SHA match"
+              echo "debug: Branch match failed, trying commit SHA match for ${{ github.sha }}..."
               PR_NUMBER=$(gh pr list --search "${{ github.sha }}" --state open --json number --jq '.[0].number')
             fi
-
-            echo "debug: Found PR number from gh: $PR_NUMBER"
-            
-            if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
-              echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
-            fi
+          fi
+          
+          if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+            echo "debug: Final PR number: $PR_NUMBER"
+            echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          else
+            echo "debug: No PR number found."
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -115,6 +119,7 @@ jobs:
           header: utoopack-perf-report
           path: .trace/pr_comment.md
           number: ${{ steps.findPr.outputs.number }}
+          recreate: true
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Traces
