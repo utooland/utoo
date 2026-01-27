@@ -2,6 +2,7 @@ use std::{collections::BTreeSet, str::FromStr};
 
 use anyhow::Result;
 use bincode::{Decode, Encode};
+use futures;
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{
     FxIndexMap, ResolvedVc, TaskInput, TryJoinIterExt, ValueToString, Vc, trace::TraceRawVcs,
@@ -333,11 +334,9 @@ pub async fn get_client_module_options_context(
     let tree_shaking_mode_for_foreign_code = *tree_shaking_mode_for_foreign_code;
     let target_browsers = env.runtime_versions();
 
-    // Parallelize client rules retrieval
-    let (mut client_rules, mut foreign_client_rules) = futures::try_join!(
-        get_client_transforms_rules(config),
-        get_client_transforms_rules(config),
-    )?;
+    // Get client rules once and clone for foreign use
+    let mut client_rules = get_client_transforms_rules(config).await?;
+    let mut foreign_client_rules = client_rules.clone();
 
     // Ignore .d.ts files - they are TypeScript declaration files and should not be bundled
     let ignore_dts_rule = ModuleRule::new(
