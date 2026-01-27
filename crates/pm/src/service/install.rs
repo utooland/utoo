@@ -19,14 +19,13 @@ use crate::service::pipeline::download_package;
 use crate::service::rebuild::RebuildService;
 use crate::util::cache::get_cache_dir;
 use crate::util::cloner::clone_package;
+use crate::util::config::get_manifests_concurrency_limit_sync;
 use crate::util::linker::link;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
 use crate::util::save_type::{OmitType, PackageAction, SaveType};
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 
 use super::binary::update_package_binary;
-
-static CONCURRENT_LIMIT: usize = 40;
 
 /// Check if a package should be omitted based on omit config
 fn should_omit_package(package: &Package, omit: &std::collections::HashSet<OmitType>) -> bool {
@@ -471,10 +470,11 @@ impl InstallService {
             PROGRESS_BAR.set_length(package_lock.packages.len() as u64);
         }
 
-        // Set concurrent limit for clone operations only
+        // Set concurrent limit for clone operations
         // Downloads are controlled by global DOWNLOAD_SEMAPHORE in pipeline.rs
-        tracing::debug!("Setting clone concurrent limit to {CONCURRENT_LIMIT}");
-        let semaphore = Arc::new(Semaphore::new(CONCURRENT_LIMIT));
+        let concurrency_limit = get_manifests_concurrency_limit_sync();
+        tracing::debug!("Setting clone concurrent limit to {concurrency_limit}");
+        let semaphore = Arc::new(Semaphore::new(concurrency_limit));
 
         install_packages(&groups, &cache_dir, root_path, semaphore)
             .await
