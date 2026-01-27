@@ -174,10 +174,7 @@ jobs:
         run: cd packages/pack && ls -R ./npm
         shell: bash
       - name: Build JS
-        run: |
-          npm run build --workspace=@utoo/pack-shared
-          npm run build:js --workspace=@utoo/pack
-          npm run build --workspace=@utoo/pack-cli
+        run: npx turbo run build --filter=@utoo/pack-shared build:js --filter=@utoo/pack build --filter=@utoo/pack-cli
       - name: Get version from release or use alpha version
         id: get_version
         shell: bash
@@ -198,14 +195,14 @@ jobs:
           fi
           echo "Publishing with tag: $TAG"
 
-          npm version --workspace=@utoo/pack-shared "${VERSION}" --no-git-tag-version &&
-          npm version --workspace=@utoo/pack "${VERSION}" --no-git-tag-version &&
-          npm version --workspace=@utoo/pack-cli "${VERSION}" --no-git-tag-version &&
+          for pkg in @utoo/pack-shared @utoo/pack @utoo/pack-cli; do
+            npm version --workspace=$pkg "${VERSION}" --no-git-tag-version --workspaces-update=false
+          done &&
           npm pkg set dependencies.@utoo/pack-shared="${VERSION}" --workspace=@utoo/pack &&
           npm pkg set dependencies.@utoo/pack="${VERSION}" --workspace=@utoo/pack-cli &&
-          npm publish --workspace=@utoo/pack-shared --access public --tag "${TAG}" &&
-          npm publish --workspace=@utoo/pack --access public --tag "${TAG}" &&
-          npm publish --workspace=@utoo/pack-cli --access public --tag "${TAG}"
+          for pkg in @utoo/pack-shared @utoo/pack @utoo/pack-cli; do
+            npm publish --workspace=$pkg --access public --tag "${TAG}"
+          done
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
