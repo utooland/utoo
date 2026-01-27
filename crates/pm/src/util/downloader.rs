@@ -79,7 +79,7 @@ fn estimate_uncompressed_size(gzip_data: &[u8]) -> usize {
     let last_4 = &gzip_data[gzip_data.len() - 4..];
     let size = u32::from_le_bytes([last_4[0], last_4[1], last_4[2], last_4[3]]) as usize;
     // Sanity check: if size is 0 or too small, use a reasonable estimate
-    if size < 16 || size > 512 * 1024 * 1024 {
+    if !(16..=512 * 1024 * 1024).contains(&size) {
         gzip_data.len() * 10
     } else {
         size

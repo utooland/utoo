@@ -71,10 +71,10 @@ where
         Fut: Future<Output = Option<V>>,
     {
         // Fast path: check if already done
-        if let Some(entry) = self.map.get(&key) {
-            if let Value::Done(result) = entry.value() {
-                return Some(Arc::clone(result));
-            }
+        if let Some(entry) = self.map.get(&key)
+            && let Value::Done(result) = entry.value()
+        {
+            return Some(Arc::clone(result));
         }
 
         // Try to register as the worker
@@ -98,10 +98,10 @@ where
                         notified.await;
 
                         // Check the result
-                        if let Some(entry) = self.map.get(&key) {
-                            if let Value::Done(result) = entry.value() {
-                                return Some(Arc::clone(result));
-                            }
+                        if let Some(entry) = self.map.get(&key)
+                            && let Value::Done(result) = entry.value()
+                        {
+                            return Some(Arc::clone(result));
                         }
                         return None;
                     }
@@ -132,7 +132,6 @@ where
             }
         }
     }
-
 }
 
 #[cfg(test)]

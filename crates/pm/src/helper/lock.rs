@@ -426,7 +426,8 @@ async fn build_deps_with_download(cwd: &Path) -> Result<PackageLock> {
     let _download_handle = installer.start_download_worker(download_rx);
 
     // Build deps with pipeline receiver - triggers tarball downloads during preload
-    let options = Context::build_deps_options_with_receiver(cwd.to_path_buf(), pipeline_receiver).await;
+    let options =
+        Context::build_deps_options_with_receiver(cwd.to_path_buf(), pipeline_receiver).await;
     let package_lock = ruborist_build_deps(options).await?;
 
     // Don't wait for downloads - install phase will wait via OnceMap as needed

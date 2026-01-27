@@ -15,8 +15,8 @@ use crate::helper::lock::{
 };
 use crate::helper::workspace;
 use crate::model::package::PackageInfo;
-use crate::service::rebuild::RebuildService;
 use crate::service::pipeline::download_package;
+use crate::service::rebuild::RebuildService;
 use crate::util::cache::get_cache_dir;
 use crate::util::cloner::clone_package;
 use crate::util::linker::link;
