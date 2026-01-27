@@ -650,9 +650,9 @@ checksum = "8f1fe948ff07f4bd06c30984e69f5b4899c516a3ef74f34df92a2df2ab535495"
 
 [[package]]
 name = "bytes"
-version = "1.10.1"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
+checksum = "b35204fbdc0b3f4446b89fc1ac2cf84a8a68971995d0bf2e925ec7cd960f9cb3"
 dependencies = [
  "serde",
 ]
@@ -9570,6 +9570,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "atty",
+ "bytes",
  "chrono",
  "clap",
  "colored 2.2.0",
@@ -9588,6 +9589,7 @@ dependencies = [
  "openssl",
  "owo-colors",
  "petgraph 0.6.5",
+ "rayon",
  "regex",
  "reqwest",
  "serde",
@@ -10042,7 +10044,7 @@ dependencies = [
 [[package]]
 name = "wasm_thread"
 version = "0.3.3"
-source = "git+https://github.com/utooland/wasm_thread.git#1155d645aedfdbe55f8ea336a9e8a8150239beb0"
+source = "git+https://github.com/utooland/wasm_thread.git#fd53c2f5a20e9f899d9216dee045472f50d97219"
 dependencies = [
  "futures",
  "js-sys",

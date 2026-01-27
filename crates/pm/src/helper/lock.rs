@@ -9,7 +9,8 @@ use crate::util::config::get_legacy_peer_deps;
 use crate::util::json::{load_package_json_from_path, load_package_lock_json_from_path};
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
 use crate::util::save_type::{PackageAction, SaveType};
-use crate::util::{cloner::clone_package, downloader::download};
+use crate::util::cloner::clone_package;
+use crate::util::downloader::{download_bytes, extract_and_write};
 use utoo_ruborist::lock::{LockPackage, PackageLock};
 use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::registry::resolve_package;
@@ -244,9 +245,12 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
     // Download if not cached
     if !crate::fs::try_exists(&cache_flag_path).await? {
         tracing::debug!("Downloading {} to {}", tarball_url, cache_path.display());
-        download(tarball_url, &cache_path)
+        let bytes = download_bytes(tarball_url)
             .await
             .context("Failed to download package")?;
+        extract_and_write(bytes, &cache_path)
+            .await
+            .context("Failed to extract package")?;
 
         // If the package has install scripts, create a flag file
         // in linux, we can use hardlink when FICLONE is not supported
