@@ -308,25 +308,29 @@ pub async fn get_client_module_options_context(
 
     // Parallelize webpack loader options and tree shaking mode calls
     let (
-        foreign_enable_webpack_loaders,
-        enable_webpack_loaders,
-        tree_shaking_mode_for_user_code,
-        tree_shaking_mode_for_foreign_code,
+        foreign_enable_webpack_loaders_ref,
+        enable_webpack_loaders_ref,
+        tree_shaking_mode_for_user_code_ref,
+        tree_shaking_mode_for_foreign_code_ref,
     ) = try_join!(
-        async { *webpack_loader_options(project_path.clone(), config, foreign_conditions).await? },
-        async { *webpack_loader_options(project_path.clone(), config, loader_conditions).await? },
+        async { webpack_loader_options(project_path.clone(), config, foreign_conditions).await },
+        async { webpack_loader_options(project_path.clone(), config, loader_conditions).await },
         async {
-            *config
+            config
                 .tree_shaking_mode_for_user_code(mode_ref.is_development())
-                .await?
+                .await
         },
         async {
-            *config
+            config
                 .tree_shaking_mode_for_foreign_code(mode_ref.is_development())
-                .await?
+                .await
         },
     )?;
 
+    let foreign_enable_webpack_loaders = *foreign_enable_webpack_loaders_ref;
+    let enable_webpack_loaders = *enable_webpack_loaders_ref;
+    let tree_shaking_mode_for_user_code = *tree_shaking_mode_for_user_code_ref;
+    let tree_shaking_mode_for_foreign_code = *tree_shaking_mode_for_foreign_code_ref;
     let target_browsers = env.runtime_versions();
 
     // Get client rules once and clone for foreign use
@@ -532,7 +536,7 @@ pub async fn get_client_resolve_options_context(
                     .await
             },
             async {
-                ExternalsPlugin::new(project_path.clone(), project_root, external_config)
+                ExternalsPlugin::new(project_path.clone(), project_root.clone(), external_config)
                     .to_resolved()
                     .await
             },
