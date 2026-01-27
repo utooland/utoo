@@ -1,0 +1,130 @@
+name: utoopack-perf
+
+on:
+  push:
+    branches: [ main, next ]
+  pull_request:
+    branches: [ main, next ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  performance:
+    name: Run Performance Benchmarks
+    if: (github.event_name == 'push' && !contains(github.event.head_commit.message, '(pm)')) || (github.event_name == 'pull_request' && !contains(github.event.pull_request.title, '(pm)'))
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/share/miniconda
+          sudo docker image prune --all --force
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2025-10-27
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: utoopack-perf
+          cache-directories: |
+            target/release-local
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Bundler
+        run: |
+          # Build packages
+          npm run build --workspace @utoo/pack-shared
+          npm run build:local --workspace @utoo/pack
+          npm run build --workspace @utoo/pack-cli
+
+      - name: Run Benchmark - with-antd
+        run: |
+          mkdir -p .trace
+          TRACING_CHROME=$PWD/.trace/trace_antd.json npm run build --prefix examples/with-antd
+        env:
+          NODE_ENV: production
+
+      - name: Analyze Traces
+        run: |
+          python3 agents/tools/analyze_trace.py .trace/trace_antd.json .trace/report_antd.md
+          # Prepare PR comment content
+          echo "## 📊 Performance Benchmark Report (with-antd)" > .trace/pr_comment.md
+          cat .trace/report_antd.md >> .trace/pr_comment.md
+          # Add to Job Summary
+          cat .trace/pr_comment.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Find Current PR
+        id: findPr
+        run: |
+          echo "debug: Event name: ${{ github.event_name }}"
+          echo "debug: Ref: ${{ github.ref }}"
+          echo "debug: Ref name: ${{ github.ref_name }}"
+          
+          PR_NUMBER=""
+          
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+            echo "debug: Found PR number from event: $PR_NUMBER"
+          else
+            # Try to match by branch name
+            echo "debug: Trying to find PR for branch '${{ github.ref_name }}'..."
+            PR_NUMBER=$(gh pr list --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number')
+            
+            # If not found, try to match by commit SHA
+            if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" == "null" ]; then
+              echo "debug: Branch match failed, trying commit SHA match for ${{ github.sha }}..."
+              PR_NUMBER=$(gh pr list --search "${{ github.sha }}" --state open --json number --jq '.[0].number')
+            fi
+          fi
+          
+          if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+            echo "debug: Final PR number: $PR_NUMBER"
+            echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          else
+            echo "debug: No PR number found."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+
+      - name: Post PR Comment
+        if: steps.findPr.outputs.number
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: utoopack-perf-report
+          path: .trace/pr_comment.md
+          number: ${{ steps.findPr.outputs.number }}
+          recreate: true
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Traces
+        uses: actions/upload-artifact@v4
+        with:
+          name: utoopack-perf-traces
+          path: .trace/
+          retention-days: 7
