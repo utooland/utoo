@@ -88,8 +88,8 @@ jobs:
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             echo "number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
           else
-            # 使用 GH_REPO 环境变量确保 gh 知道查哪个仓库
-            # 尝试列出当前分支关联的 PR
+            # Use GH_REPO env var to ensure gh knows which repo to query
+            # Try to list PRs associated with the current branch
             PR_NUMBER=$(gh pr list --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number')
             
             echo "debug: Found PR number from gh: $PR_NUMBER"
