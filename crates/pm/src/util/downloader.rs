@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use once_cell::sync::Lazy;
-use reqwest::StatusCode;
 use reqwest::Client;
+use reqwest::StatusCode;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -92,7 +92,12 @@ pub async fn download_bytes(url: &str) -> Result<Bytes> {
             let response = match DOWNLOADER_CLIENT.get(url).send().await {
                 Ok(r) => r,
                 Err(e) => {
-                    tracing::warn!("Retry {}/10 - Network error: {}, url: {}", attempt + 1, e, url);
+                    tracing::warn!(
+                        "Retry {}/10 - Network error: {}, url: {}",
+                        attempt + 1,
+                        e,
+                        url
+                    );
                     return Err(RetryableError::Temporary(format!("Network error: {e}")));
                 }
             };
@@ -103,7 +108,12 @@ pub async fn download_bytes(url: &str) -> Result<Bytes> {
                     let network_start = std::time::Instant::now();
                     let bytes = response.bytes().await.map_err(|e| {
                         STATS.downloading.fetch_sub(1, Ordering::Relaxed);
-                        tracing::warn!("Retry {}/10 - Stream error: {}, url: {}", attempt + 1, e, url);
+                        tracing::warn!(
+                            "Retry {}/10 - Stream error: {}, url: {}",
+                            attempt + 1,
+                            e,
+                            url
+                        );
                         RetryableError::Temporary(format!("Stream error: {e}"))
                     })?;
                     STATS.add_network_time(network_start.elapsed().as_micros() as u64);
@@ -121,7 +131,9 @@ pub async fn download_bytes(url: &str) -> Result<Bytes> {
                 }
                 status => {
                     tracing::warn!("Retry {}/10 - HTTP {}, url: {}", attempt + 1, status, url);
-                    Err(RetryableError::Temporary(format!("HTTP error: {status}, url: {url}")))
+                    Err(RetryableError::Temporary(format!(
+                        "HTTP error: {status}, url: {url}"
+                    )))
                 }
             }
         },
