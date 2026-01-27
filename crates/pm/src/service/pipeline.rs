@@ -6,20 +6,18 @@
 //! - Uses global OnceMap to deduplicate requests and share results across phases
 
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use once_cell::sync::Lazy;
 use tokio::sync::{Semaphore, mpsc};
 use utoo_ruborist::progress::{BuildEvent, EventReceiver, PackageResolvedInfo};
 
 use crate::util::cache::get_cache_dir;
+use crate::util::config::get_manifests_concurrency_limit_sync;
 use crate::util::downloader::download;
 use crate::util::oncemap::OnceMap;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
-
-/// Default concurrent limit for tarball downloads
-const DEFAULT_CONCURRENCY: usize = 64;
 
 // ============ Pipeline Statistics ============
 
@@ -72,9 +70,16 @@ pub static STATS: Lazy<PipelineStats> = Lazy::new(PipelineStats::new);
 /// 2. Install phase can wait for and reuse ongoing pipeline downloads
 static DOWNLOAD_CACHE: Lazy<OnceMap<String, PathBuf>> = Lazy::new(OnceMap::new);
 
-/// Global semaphore for download concurrency control
-static DOWNLOAD_SEMAPHORE: Lazy<Arc<Semaphore>> =
-    Lazy::new(|| Arc::new(Semaphore::new(DEFAULT_CONCURRENCY)));
+/// Global semaphore for download concurrency control (initialized at runtime)
+static DOWNLOAD_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
+
+fn get_download_semaphore() -> &'static Arc<Semaphore> {
+    DOWNLOAD_SEMAPHORE.get_or_init(|| {
+        let limit = get_manifests_concurrency_limit_sync();
+        tracing::debug!("Initializing download semaphore with limit: {}", limit);
+        Arc::new(Semaphore::new(limit))
+    })
+}
 
 /// Download a package tarball, using global OnceMap for deduplication.
 /// Can be called from both pipeline and install phases.
@@ -87,7 +92,7 @@ pub async fn download_package(name: &str, version: &str, tarball_url: &str) -> O
 
     DOWNLOAD_CACHE
         .get_or_init(key, || async move {
-            let _permit = DOWNLOAD_SEMAPHORE.acquire().await.ok()?;
+            let _permit = get_download_semaphore().acquire().await.ok()?;
             let cache_path = cache_dir.join(&name).join(&version);
 
             // Stats are tracked inside download() for accurate timing
