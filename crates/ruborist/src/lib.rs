@@ -66,7 +66,9 @@ pub mod builder {
 
 /// Progress events for build process.
 pub mod progress {
-    pub use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver, PackageResolvedInfo};
+    pub use crate::traits::progress::{
+        BuildEvent, EventReceiver, NoopReceiver, PackageResolvedInfo,
+    };
 }
 
 /// Platform compatibility checks.

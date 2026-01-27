@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use once_cell::sync::Lazy;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::{Semaphore, mpsc};
 use utoo_ruborist::progress::{BuildEvent, EventReceiver, PackageResolvedInfo};
 
 use crate::util::cache::get_cache_dir;
@@ -131,17 +131,17 @@ impl<R: EventReceiver> EventReceiver for PipelineReceiver<R> {
             // Only send if we have a tarball URL and platform is compatible
             if info.tarball_url.is_some() {
                 // Skip packages that are incompatible with current platform
-                if let Some(ref os) = info.os {
-                    if !is_os_compatible(os) {
-                        tracing::debug!("Pipeline skip (os): {}@{}", info.name, info.version);
-                        return;
-                    }
+                if let Some(ref os) = info.os
+                    && !is_os_compatible(os)
+                {
+                    tracing::debug!("Pipeline skip (os): {}@{}", info.name, info.version);
+                    return;
                 }
-                if let Some(ref cpu) = info.cpu {
-                    if !is_cpu_compatible(cpu) {
-                        tracing::debug!("Pipeline skip (cpu): {}@{}", info.name, info.version);
-                        return;
-                    }
+                if let Some(ref cpu) = info.cpu
+                    && !is_cpu_compatible(cpu)
+                {
+                    tracing::debug!("Pipeline skip (cpu): {}@{}", info.name, info.version);
+                    return;
                 }
                 let _ = self.tx.send(info);
             }
