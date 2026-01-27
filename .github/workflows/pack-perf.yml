@@ -55,7 +55,11 @@ jobs:
         run: npm install
 
       - name: Build Bundler (Local)
-        run: npm run build:local --workspace @utoo/pack
+        run: |
+          # Build packages
+          npm run build --workspace @utoo/pack-shared
+          npm run build:local --workspace @utoo/pack
+          npm run build --workspace @utoo/pack-cli
 
       - name: Run Benchmark - with-antd
         run: |
