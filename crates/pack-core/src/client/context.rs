@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, str::FromStr};
 
 use anyhow::Result;
 use bincode::{Decode, Encode};
-use futures;
+use futures::try_join;
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{
     FxIndexMap, ResolvedVc, TaskInput, TryJoinIterExt, ValueToString, Vc, trace::TraceRawVcs,
@@ -268,18 +268,17 @@ pub async fn get_client_module_options_context(
     );
 
     // Parallelize independent async operations
-    let (tsconfig, watch_value, mode_value) = futures::try_join!(
+    let (tsconfig, watch_value) = try_join!(
         async {
             get_typescript_transform_options(project_path.clone())
                 .to_resolved()
                 .await
         },
         async { watch.await },
-        async { mode.await },
     )?;
 
     let decorators_options = get_decorators_transform_options(project_path.clone());
-    let is_react_development = mode_value.is_react_development();
+    let is_react_development = mode_ref.is_react_development();
     let enable_react_refresh = if *watch_value && is_react_development {
         assert_can_resolve_react_refresh(project_path.clone(), resolve_options_context)
             .await?
@@ -299,7 +298,7 @@ pub async fn get_client_module_options_context(
 
     let mut loader_conditions = BTreeSet::new();
     loader_conditions.insert(WebpackLoaderBuiltinCondition::Browser);
-    loader_conditions.extend(mode_value.webpack_loader_conditions());
+    loader_conditions.extend(mode_ref.webpack_loader_conditions());
 
     // A separate webpack rules will be applied to codes matching foreign_code_context_condition.
     // This allows to import codes from node_modules that requires webpack loaders, which dev
@@ -313,7 +312,7 @@ pub async fn get_client_module_options_context(
         enable_webpack_loaders,
         tree_shaking_mode_for_user_code,
         tree_shaking_mode_for_foreign_code,
-    ) = futures::try_join!(
+    ) = try_join!(
         async { webpack_loader_options(project_path.clone(), config, foreign_conditions).await },
         async { webpack_loader_options(project_path.clone(), config, loader_conditions).await },
         async {
@@ -355,7 +354,13 @@ pub async fn get_client_module_options_context(
     }
 
     // Parallelize additional rules collection
-    let additional_rules_results = futures::try_join!(
+    let (
+        swc_ecma_transform_plugin_rule,
+        emotion_transform_rule,
+        styled_components_transform_rule,
+        styled_jsx_transform_rule,
+        remove_console_transform_rule,
+    ) = try_join!(
         get_swc_ecma_transform_plugin_rule(config, project_path.clone()),
         get_emotion_transform_rule(config),
         get_styled_components_transform_rule(config),
@@ -364,11 +369,11 @@ pub async fn get_client_module_options_context(
     )?;
 
     let additional_rules: Vec<ModuleRule> = vec![
-        additional_rules_results.0,
-        additional_rules_results.1,
-        additional_rules_results.2,
-        additional_rules_results.3,
-        additional_rules_results.4,
+        swc_ecma_transform_plugin_rule,
+        emotion_transform_rule,
+        styled_components_transform_rule,
+        styled_jsx_transform_rule,
+        remove_console_transform_rule,
     ]
     .into_iter()
     .flatten()
@@ -502,7 +507,7 @@ pub async fn get_client_resolve_options_context(
         mode_ref,
         external_config,
         project_root,
-    ) = futures::try_join!(
+    ) = try_join!(
         async {
             get_client_import_map(project_path.clone(), config, execution_context, pack_path)
                 .to_resolved()
@@ -519,7 +524,7 @@ pub async fn get_client_resolve_options_context(
 
     // Parallelize the next batch of independent operations
     let (client_fallback_import_map, client_resolved_map, externals_plugin) =
-        futures::try_join!(
+        try_join!(
             async {
                 get_client_fallback_import_map(enable_node_polyfill)
                     .to_resolved()
@@ -565,7 +570,7 @@ pub async fn get_client_resolve_options_context(
     };
 
     // Parallelize final awaits for custom_extensions and foreign_code_context_condition
-    let (custom_extensions, foreign_code_condition) = futures::try_join!(
+    let (custom_extensions, foreign_code_condition) = try_join!(
         async { config.resolve_extension().owned().await },
         async { foreign_code_context_condition(config).await },
     )?;
@@ -619,7 +624,7 @@ pub async fn get_client_chunking_context(
     let nested_async_chunking = config.nested_async_chunking(mode);
 
     // Parallelize initial awaits
-    let (mode_value, public_path_value, environment_resolved) = futures::try_join!(
+    let (mode_value, public_path_value, environment_resolved) = try_join!(
         async { mode.await },
         async { public_path.owned().await },
         async { environment.to_resolved().await },
@@ -653,7 +658,7 @@ pub async fn get_client_chunking_context(
         unused_references_value,
         module_id_strategy_resolved,
         nested_async_chunking_value,
-    ) = futures::try_join!(
+    ) = try_join!(
         async { minify.await },
         async { no_mangling.await },
         async { config.source_maps().await },
