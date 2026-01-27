@@ -130,12 +130,44 @@ def analyze_trace(trace_path, output_path):
     trace_file = os.path.basename(trace_path)
     trace_size_gb = os.path.getsize(trace_path) / (1024**3)
     
+    # Try to infer project name
+    project_name = "Unknown Project"
+    abs_path = os.path.abspath(trace_path)
+    path_parts = abs_path.split(os.sep)
+    if "examples" in path_parts:
+        try:
+            idx = path_parts.index("examples")
+            if idx + 1 < len(path_parts):
+                project_name = f"examples/{path_parts[idx+1]}"
+        except ValueError:
+            pass
+    
+    # Pre-calculate derived metrics
+    max_thread_work = max(thread_work, 1) # Avoid division by zero
+    total_tasks_safe = max(total_tasks, 1)
+
+    # Utilization status
+    if utilization < 60:
+        util_status = '⚠️ Suboptimal'
+    elif utilization > 80:
+        util_status = '✅ Good'
+    else:
+        util_status = '🆗 Average'
+
+    # Workload Distribution Table Rows
+    workload_rows = ""
+    for cat_name in ['P0: Runtime/Resolution', 'P1: I/O & Heavy Tasks', 'P3: Asset Pipeline', 'P4: Bridge/Interop', 'Other']:
+        stats = cat_stats[cat_name]
+        dur_ms = stats['duration'] / 1000.0
+        pct = (stats['duration'] * 100) / max_thread_work
+        workload_rows += f"| {cat_name} | {stats['count']:,} | {dur_ms:,.1f} | {pct:.1f}% |\n"
+
     report = f"""# 🚀 Utoopack Performance Report: Async Task Scheduling Overhead Analysis
 
 **Report ID**: `{report_id}`  
 **Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  
 **Trace File**: `{trace_file}` ({trace_size_gb:.1f}GB, {len(events)/1e6:.2f}M events)  
-**Test Project**: `examples/with-antd`
+**Test Project**: `{project_name}`
 
 ---
 
@@ -149,20 +181,16 @@ This report analyzes the performance of Utoopack/Turbopack, covering the full sp
 |--------|-------|------------|
 | Total Wall Time | **{wall_time_ms:,.1f} ms** | Baseline |
 | Total Thread Work | **{thread_work_ms:,.1f} ms** | ~{parallelism:.1f}x parallelism |
-| Thread Utilization | **{utilization:.1f}%** | {'⚠️ Suboptimal' if utilization < 60 else '✅ Good' if utilization > 80 else '🆗 Average'} |
+| Thread Utilization | **{utilization:.1f}%** | {util_status} |
 | turbo_tasks::function Invocations | **{total_tasks:,}** | Total count |
-| Meaningful Tasks (≥ 10µs) | **{meaningful_count:,}** | ({meaningful_count*100/max(total_tasks,1):.1f}% of total) |
-| Tracing Noise (< 10µs) | **{noise_count:,}** | ({noise_count*100/max(total_tasks,1):.1f}% of total) |
+| Meaningful Tasks (≥ 10µs) | **{meaningful_count:,}** | ({meaningful_count*100/total_tasks_safe:.1f}% of total) |
+| Tracing Noise (< 10µs) | **{noise_count:,}** | ({noise_count*100/total_tasks_safe:.1f}% of total) |
 
 ### Workload Distribution by Tier
 
-| Tier | Category | Tasks | Total Time (ms) | % of Work |
-|------|----------|-------|-----------------|-----------|
-| P0 | Runtime/Resolution | {cat_stats['P0: Runtime/Resolution']['count']:,} | {cat_stats['P0: Runtime/Resolution']['duration']/1000:,.1f} | {cat_stats['P0: Runtime/Resolution']['duration']*100/max(thread_work,1):.1f}% |
-| P1 | I/O & Heavy Tasks | {cat_stats['P1: I/O & Heavy Tasks']['count']:,} | {cat_stats['P1: I/O & Heavy Tasks']['duration']/1000:,.1f} | {cat_stats['P1: I/O & Heavy Tasks']['duration']*100/max(thread_work,1):.1f}% |
-| P3 | Asset Pipeline | {cat_stats['P3: Asset Pipeline']['count']:,} | {cat_stats['P3: Asset Pipeline']['duration']/1000:,.1f} | {cat_stats['P3: Asset Pipeline']['duration']*100/max(thread_work,1):.1f}% |
-| P4 | Bridge/Interop | {cat_stats['P4: Bridge/Interop']['count']:,} | {cat_stats['P4: Bridge/Interop']['duration']/1000:,.1f} | {cat_stats['P4: Bridge/Interop']['duration']*100/max(thread_work,1):.1f}% |
-| - | Other | {cat_stats['Other']['count']:,} | {cat_stats['Other']['duration']/1000:,.1f} | {cat_stats['Other']['duration']*100/max(thread_work,1):.1f}% |
+| Category | Tasks | Total Time (ms) | % of Work |
+|----------|-------|-----------------|-----------|
+{workload_rows}
 
 ---
 
@@ -186,16 +214,17 @@ This report analyzes the performance of Utoopack/Turbopack, covering the full sp
 
 These are the most significant tasks by total duration:
 
-| Total (ms) | Count | Avg (µs) | Task Name |
-|------------|-------|----------|-----------|
+| Total (ms) | Count | Avg (µs) | % Work | Task Name |
+|------------|-------|----------|--------|-----------|
 """
     
     for name, stats in by_duration[:20]:
         avg_us = stats['duration'] / stats['count']
         total_ms = stats['duration'] / 1000.0
-        report += f"| {total_ms:,.1f} | {stats['count']:,} | {avg_us:.1f} | `{name}` |\n"
+        pct_work = (stats['duration'] * 100) / max_thread_work
+        report += f"| {total_ms:,.1f} | {stats['count']:,} | {avg_us:.1f} | {pct_work:.1f}% | `{name}` |\n"
     
-    report += """
+    report += f"""
 ---
 
 ## 🔍 Deep Dive by Tier
@@ -205,19 +234,19 @@ These are the most significant tasks by total duration:
 
 | Metric | Value | Status |
 |--------|-------|--------|
-| Total Scheduling Time | {cat_stats['P0: Runtime/Resolution']['duration']/1000:,.1f} ms | {'⚠️ High' if cat_stats['P0: Runtime/Resolution']['duration']/(max(thread_work,1)) > 0.4 else '✅ Normal'} |
+| Total Scheduling Time | {cat_stats['P0: Runtime/Resolution']['duration']/1000:,.1f} ms | {'⚠️ High' if cat_stats['P0: Runtime/Resolution']['duration']/max_thread_work > 0.4 else '✅ Normal'} |
 | Resolution Hotspots | {len([n for n in meaningful_tasks if 'resolve' in n.lower()])} tasks | 🔍 Check Top Tasks |
 
 **Potential P0 Issues**: 
 - Low thread utilization ({utilization:.1f}%) suggests critical path serialization or lock contention.
-- {noise_count:,} tasks < 10µs ({noise_count*100/max(total_tasks,1):.1f}%) contribute to scheduler pressure.
+- {noise_count:,} tasks < 10µs ({noise_count*100/total_tasks_safe:.1f}%) contribute to scheduler pressure.
 
 ### 🟠 Tier 2: Physical & Resource Barriers (P1)
 *Focus: Hardware utilization, I/O, and heavy monoliths.*
 
 | Metric | Value | Status |
 |--------|-------|--------|
-| I/O Work (Estimated) | {cat_stats['P1: I/O & Heavy Tasks']['duration']/1000:,.1f} ms | {'⚠️ Bound' if cat_stats['P1: I/O & Heavy Tasks']['duration']/(max(thread_work,1)) > 0.3 else '✅ Healthy'} |
+| I/O Work (Estimated) | {cat_stats['P1: I/O & Heavy Tasks']['duration']/1000:,.1f} ms | {'⚠️ Bound' if cat_stats['P1: I/O & Heavy Tasks']['duration']/max_thread_work > 0.3 else '✅ Healthy'} |
 | Large Tasks (> 100ms) | {buckets['>100ms']} | {'🚨 Critical' if buckets['>100ms'] > 5 else '✅ Minimal'} |
 
 **Potential P1 Issues**:
@@ -228,8 +257,8 @@ These are the most significant tasks by total duration:
 
 | Metric | Value | Status |
 |--------|-------|--------|
-| Asset Processing (P3) | {cat_stats['P3: Asset Pipeline']['duration']/1000:,.1f} ms | {cat_stats['P3: Asset Pipeline']['duration']*100/max(thread_work,1):.1f}% of work |
-| Bridge Overhead (P4) | {cat_stats['P4: Bridge/Interop']['duration']/1000:,.1f} ms | {'⚠️ High' if cat_stats['P4: Bridge/Interop']['duration']/(max(thread_work,1)) > 0.1 else '✅ Low'} |
+| Asset Processing (P3) | {cat_stats['P3: Asset Pipeline']['duration']/1000:,.1f} ms | {cat_stats['P3: Asset Pipeline']['duration']*100/max_thread_work:.1f}% of work |
+| Bridge Overhead (P4) | {cat_stats['P4: Bridge/Interop']['duration']/1000:,.1f} ms | {'⚠️ High' if cat_stats['P4: Bridge/Interop']['duration']/max_thread_work > 0.1 else '✅ Low'} |
 
 ---
 
@@ -262,12 +291,12 @@ These are the most significant tasks by total duration:
 | Signal | Status | Finding |
 |--------|--------|---------|"""
     
-    noise_pct = (noise_count * 100) / max(total_tasks, 1)
+    noise_pct = (noise_count * 100) / total_tasks_safe
     report += f"\n| Tracing Noise (P0) | {'⚠️ **Significant**' if noise_pct > 60 else '✅ Acceptable'} | {noise_pct:.1f}% of tasks < 10µs |"
     report += f"\n| Thread Utilization (P0) | {'🚨 **Low**' if utilization < 60 else '✅ Good'} | {utilization:.1f}% utilization |"
     report += f"\n| Heavy Monoliths (P1) | {'⚠️ **Detected**' if buckets['>100ms'] > 5 else '✅ Minimal'} | {buckets['>100ms']} tasks > 100ms |"
     report += f"\n| Asset Pipeline (P3) | 🔍 **Review** | {cat_stats['P3: Asset Pipeline']['duration']/1000:,.1f} ms total |"
-    report += f"\n| Bridge/Interop (P4) | {'⚠️ **Examine**' if cat_stats['P4: Bridge/Interop']['duration']/max(thread_work, 1) > 0.1 else '✅ Low'} | {cat_stats['P4: Bridge/Interop']['duration']/1000:,.1f} ms total |"
+    report += f"\n| Bridge/Interop (P4) | {'⚠️ **Examine**' if cat_stats['P4: Bridge/Interop']['duration']/max_thread_work > 0.1 else '✅ Low'} | {cat_stats['P4: Bridge/Interop']['duration']/1000:,.1f} ms total |"
     
     report += """
 
