@@ -32,7 +32,7 @@ def analyze_trace(trace_path, output_path):
     noise_count = 0
     
     # Duration buckets
-    buckets = {'<10us': 0, '10us-100us': 0, '100us-1ms': 0, '1ms-10ms': 0, '>10ms': 0, '>100ms': 0}
+    buckets = {'<10us': 0, '10us-100us': 0, '100us-1ms': 0, '1ms-10ms': 0, '10ms-100ms': 0, '>100ms': 0}
     
     # Stack for B/E events
     stacks = defaultdict(list)
@@ -61,7 +61,7 @@ def analyze_trace(trace_path, output_path):
                 if dur < 100: buckets['10us-100us'] += 1
                 elif dur < 1000: buckets['100us-1ms'] += 1
                 elif dur < 10000: buckets['1ms-10ms'] += 1
-                elif dur < 100000: buckets['>10ms'] += 1
+                elif dur < 100000: buckets['10ms-100ms'] += 1
                 else: buckets['>100ms'] += 1
                 
                 meaningful_tasks[name]['count'] += 1
@@ -83,7 +83,7 @@ def analyze_trace(trace_path, output_path):
                     if dur < 100: buckets['10us-100us'] += 1
                     elif dur < 1000: buckets['100us-1ms'] += 1
                     elif dur < 10000: buckets['1ms-10ms'] += 1
-                    elif dur < 100000: buckets['>10ms'] += 1
+                    elif dur < 100000: buckets['10ms-100ms'] += 1
                     else: buckets['>100ms'] += 1
                     
                     meaningful_tasks[start_name]['count'] += 1
@@ -103,23 +103,77 @@ def analyze_trace(trace_path, output_path):
     by_count = sorted(meaningful_tasks.items(), key=lambda x: x[1]['count'], reverse=True)
     by_duration = sorted(meaningful_tasks.items(), key=lambda x: x[1]['duration'], reverse=True)
     
+    # Categorize tasks for Tiered analysis
+    categories = {
+        'P0: Runtime/Resolution': ['resolve', 'plugin', 'turbo_tasks'],
+        'P1: I/O & Heavy Tasks': ['read', 'stat', 'fs', 'analyze ecmascript'],
+        'P3: Asset Pipeline': ['parse', 'transform', 'analyze', 'chunk', 'minify', 'generate', 'swc'],
+        'P4: Bridge/Interop': ['napi', 'wasm', 'bridge']
+    }
+    
+    cat_stats = defaultdict(lambda: {'count': 0, 'duration': 0.0})
+    for name, stats in meaningful_tasks.items():
+        matched = False
+        lower_name = name.lower()
+        for cat, keywords in categories.items():
+            if any(kw in lower_name for kw in keywords):
+                cat_stats[cat]['count'] += stats['count']
+                cat_stats[cat]['duration'] += stats['duration']
+                matched = True
+                break
+        if not matched:
+            cat_stats['Other']['count'] += stats['count']
+            cat_stats['Other']['duration'] += stats['duration']
+
     # Generate report
     report_id = f"utoopack_performance_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     trace_file = os.path.basename(trace_path)
     trace_size_gb = os.path.getsize(trace_path) / (1024**3)
     
+    # Try to infer project name
+    project_name = "Unknown Project"
+    abs_path = os.path.abspath(trace_path)
+    path_parts = abs_path.split(os.sep)
+    if "examples" in path_parts:
+        try:
+            idx = path_parts.index("examples")
+            if idx + 1 < len(path_parts):
+                project_name = f"examples/{path_parts[idx+1]}"
+        except ValueError:
+            pass
+    
+    # Pre-calculate derived metrics
+    max_thread_work = max(thread_work, 1) # Avoid division by zero
+    total_tasks_safe = max(total_tasks, 1)
+
+    # Utilization status
+    if utilization < 60:
+        util_status = '⚠️ Suboptimal'
+    elif utilization > 80:
+        util_status = '✅ Good'
+    else:
+        util_status = '🆗 Average'
+
+    # Workload Distribution Table Rows
+    workload_rows = ""
+    for cat_name in ['P0: Runtime/Resolution', 'P1: I/O & Heavy Tasks', 'P3: Asset Pipeline', 'P4: Bridge/Interop', 'Other']:
+        stats = cat_stats[cat_name]
+        dur_ms = stats['duration'] / 1000.0
+        pct = (stats['duration'] * 100) / max_thread_work
+        workload_rows += f"| {cat_name} | {stats['count']:,} | {dur_ms:,.1f} | {pct:.1f}% |\n"
+
     report = f"""# 🚀 Utoopack Performance Report: Async Task Scheduling Overhead Analysis
 
 **Report ID**: `{report_id}`  
 **Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  
 **Trace File**: `{trace_file}` ({trace_size_gb:.1f}GB, {len(events)/1e6:.2f}M events)  
-**Test Project**: `examples/with-antd`
+**Test Project**: `{project_name}`
 
 ---
 
 ## 📊 Executive Summary
 
-This report analyzes the async task scheduling overhead in Utoopack/Turbopack, focusing on the **Tier 1: Runtime Backbone (P0)** issues as defined in the performance agent protocol.
+This report analyzes the performance of Utoopack/Turbopack, covering the full spectrum of the Performance Analysis Protocol (P0-P4).
 
 ### Key Findings
 
@@ -127,33 +181,20 @@ This report analyzes the async task scheduling overhead in Utoopack/Turbopack, f
 |--------|-------|------------|
 | Total Wall Time | **{wall_time_ms:,.1f} ms** | Baseline |
 | Total Thread Work | **{thread_work_ms:,.1f} ms** | ~{parallelism:.1f}x parallelism |
-| Thread Utilization | **{utilization:.1f}%** | {'⚠️ Suboptimal' if utilization < 60 else '✅ Good'} |
+| Thread Utilization | **{utilization:.1f}%** | {util_status} |
 | turbo_tasks::function Invocations | **{total_tasks:,}** | Total count |
-| Meaningful Tasks (≥ 10µs) | **{meaningful_count:,} ({meaningful_count*100/max(total_tasks,1):.1f}%)** | ✅ Analyzed |
-| Tracing Noise (< 10µs) | **{noise_count:,} ({noise_count*100/max(total_tasks,1):.1f}%)** | ⚠️ Excluded from analysis |
+| Meaningful Tasks (≥ 10µs) | **{meaningful_count:,}** | ({meaningful_count*100/total_tasks_safe:.1f}% of total) |
+| Tracing Noise (< 10µs) | **{noise_count:,}** | ({noise_count*100/total_tasks_safe:.1f}% of total) |
+
+### Workload Distribution by Tier
+
+| Category | Tasks | Total Time (ms) | % of Work |
+|----------|-------|-----------------|-----------|
+{workload_rows}
 
 ---
 
-## 🔧 turbo_tasks::function Analysis
-
-The `turbo_tasks::function` is the core task scheduling primitive. Here's the detailed breakdown:
-
-### Duration Distribution
-
-| Range | Count | Status |
-|-------|-------|--------|
-| < 10µs | {buckets['<10us']:,} | ⚠️ **Tracing noise** - Excluded from analysis (instrumentation overhead) |
-| 10µs - 100µs | {buckets['10us-100us']:,} | ✅ Normal micro-tasks |
-| 100µs - 1ms | {buckets['100us-1ms']:,} | ✅ Normal |
-| 1ms - 10ms | {buckets['1ms-10ms']:,} | ✅ Normal |
-| > 10ms | {buckets['>10ms']:,} | 🐢 Heavy tasks |
-| > 100ms | {buckets['>100ms']:,} | 🐌 Very heavy tasks |
-
-**Key Insight**: {noise_count*100/max(total_tasks,1):.1f}% of tasks complete in under 10µs, but these are **excluded from analysis** as they are likely dominated by tracing instrumentation overhead rather than actual work. The remaining **{meaningful_count:,} tasks (≥ 10µs)** represent meaningful work for optimization analysis.
-
----
-
-## ⚡ Parallelization Analysis
+## ⚡ Parallelization Analysis (P0-P2)
 
 ### Thread Utilization
 
@@ -165,88 +206,83 @@ The `turbo_tasks::function` is the core task scheduling primitive. Here's the de
 | Theoretical Parallelism | {parallelism:.2f}x |
 | Thread Utilization | **{utilization:.1f}%** |
 
-**Assessment**: With {num_threads} threads available, achieving {parallelism:.1f}x parallelism """
-    
-    if utilization < 70:
-        lost_pct = int((1 - utilization/100) * 100)
-        report += f"indicates **~{lost_pct}% of potential parallelism is lost** to:"
-    else:
-        report += "is reasonable. Potential areas:"
-    
-    report += """
-1. Task scheduling overhead
-2. Lock contention
-3. Sequential dependencies (critical path serialization)
+**Assessment**: With {num_threads} threads available, achieving {parallelism:.1f}x parallelism indicates {'**reasonable** throughput' if utilization > 70 else '**significant loss** of potential parallelism'}.
 
 ---
 
-## 📈 Top Tasks by Invocation Count
+## 📈 Top 20 Tasks (Global)
 
-These are the most frequently invoked tasks. Tasks with avg < 10µs are marked as potential tracing noise:
+These are the most significant tasks by total duration:
 
-| Count | Total (ms) | Avg (µs) | Task Name | Status |
-|-------|------------|----------|-----------|--------|
+| Total (ms) | Count | Avg (µs) | % Work | Task Name |
+|------------|-------|----------|--------|-----------|
 """
     
-    for name, stats in by_count[:15]:
+    for name, stats in by_duration[:20]:
         avg_us = stats['duration'] / stats['count']
         total_ms = stats['duration'] / 1000.0
-        status = '✅ Meaningful' if avg_us >= 10 else '⚠️ Tracing noise'
-        report += f"| {stats['count']:,} | {total_ms:,.1f} | {avg_us:.1f} | `{name}` | {status} |\n"
+        pct_work = (stats['duration'] * 100) / max_thread_work
+        report += f"| {total_ms:,.1f} | {stats['count']:,} | {avg_us:.1f} | {pct_work:.1f}% | `{name}` |\n"
     
-    report += """
+    report += f"""
 ---
 
-## ⚠️ Task Analysis (P0: Scheduling Overhead)
+## 🔍 Deep Dive by Tier
 
-> **Note**: Tasks with avg duration < 10µs are excluded from this analysis, as they are likely dominated by **tracing instrumentation overhead** rather than actual scheduling cost.
+### 🔴 Tier 1: Runtime & Resolution (P0)
+*Focus: Task scheduling and dependency resolution.*
 
-Tasks with avg duration ≥ 10µs and count > 1000 are candidates for optimization:
+| Metric | Value | Status |
+|--------|-------|--------|
+| Total Scheduling Time | {cat_stats['P0: Runtime/Resolution']['duration']/1000:,.1f} ms | {'⚠️ High' if cat_stats['P0: Runtime/Resolution']['duration']/max_thread_work > 0.4 else '✅ Normal'} |
+| Resolution Hotspots | {len([n for n in meaningful_tasks if 'resolve' in n.lower()])} tasks | 🔍 Check Top Tasks |
 
-| Count | Avg (µs) | Total (ms) | Task Name |
-|-------|----------|------------|-----------|
-"""
-    
-    candidates = [(n, s) for n, s in meaningful_tasks.items() if s['count'] > 1000]
-    candidates.sort(key=lambda x: x[1]['duration'], reverse=True)
-    
-    for name, stats in candidates[:15]:
-        avg_us = stats['duration'] / stats['count']
-        total_ms = stats['duration'] / 1000.0
-        report += f"| {stats['count']:,} | {avg_us:.1f} | {total_ms:,.1f} | `{name}` |\n"
-    
-    report += """
-**Meaningful Task Analysis**: Focusing on tasks ≥ 10µs reveals the actual work distribution without tracing noise.
+**Potential P0 Issues**: 
+- Low thread utilization ({utilization:.1f}%) suggests critical path serialization or lock contention.
+- {noise_count:,} tasks < 10µs ({noise_count*100/total_tasks_safe:.1f}%) contribute to scheduler pressure.
+
+### 🟠 Tier 2: Physical & Resource Barriers (P1)
+*Focus: Hardware utilization, I/O, and heavy monoliths.*
+
+| Metric | Value | Status |
+|--------|-------|--------|
+| I/O Work (Estimated) | {cat_stats['P1: I/O & Heavy Tasks']['duration']/1000:,.1f} ms | {'⚠️ Bound' if cat_stats['P1: I/O & Heavy Tasks']['duration']/max_thread_work > 0.3 else '✅ Healthy'} |
+| Large Tasks (> 100ms) | {buckets['>100ms']} | {'🚨 Critical' if buckets['>100ms'] > 5 else '✅ Minimal'} |
+
+**Potential P1 Issues**:
+- {buckets['>100ms']} tasks exceed 100ms. These "Heavy Monoliths" are prime candidates for splitting.
+
+### 🟡 Tier 3: Architecture & Asset Pipeline (P2-P3)
+*Focus: Global state and transformation pipeline.*
+
+| Metric | Value | Status |
+|--------|-------|--------|
+| Asset Processing (P3) | {cat_stats['P3: Asset Pipeline']['duration']/1000:,.1f} ms | {cat_stats['P3: Asset Pipeline']['duration']*100/max_thread_work:.1f}% of work |
+| Bridge Overhead (P4) | {cat_stats['P4: Bridge/Interop']['duration']/1000:,.1f} ms | {'⚠️ High' if cat_stats['P4: Bridge/Interop']['duration']/max_thread_work > 0.1 else '✅ Low'} |
 
 ---
 
-## 💡 Recommendations
+## 💡 Recommendations (Prioritized P0-P2)
 
-> **⚠️ Methodology Note**: Tasks with avg duration < 10µs are excluded from optimization recommendations, as their measured duration is likely dominated by tracing instrumentation overhead (~5-10µs per span).
+### 🚨 Critical: (P0) Improvement
 
-### 1. 🚨 Critical: Thread Utilization Improvement (P0)
+**Problem**: {utilization:.1f}% thread utilization.
+**Action**: 
+1. Profile lock contention if utilization < 60%.
+2. Convert sequential `await` chains to `try_join`.
 
-**Problem**: {:.1f}% thread utilization with {} threads available.
+### ⚠️ High Priority: (P1) Optimization
 
-**Impact**: ~{:.0f}% of potential parallelism is lost, adding significant overhead to wall time.
+**Problem**: {buckets['>100ms']} heavy tasks detected.
+**Action**:
+1. Identify module-level bottlenecks (e.g., barrel files).
+2. Optimize I/O batching for metadata.
 
-**Recommendations**:
-1. **Profile lock contention**: Use `parking_lot` profiling to identify contested mutexes
-2. **Reduce critical path depth**: Convert sequential `await` chains to `try_join` where possible
-3. **Investigate scheduler gaps**: Look for empty timeline bands indicating threads waiting
+### ⚠️ Medium Priority: (P3) Pipeline Efficiency
 
-### 2. ⚠️ High Priority: Resolution Pipeline Optimization (P0)
-
-**Recommendations**:
-1. **Resolution caching**: Cache resolution results at package/directory level
-2. **Batch resolution requests**: Group multiple resolve operations into single tasks
-3. **Fast-path for common patterns**: Bypass task scheduling for trivial patterns
-
-### 3. ⚠️ Medium Priority: Code Generation Pipeline (P1)
-
-**Recommendations**:
-1. **Consolidate pipeline stages**: Merge sequential processing steps where dependencies allow
-2. **Use `try_join` for parallel operations**: Convert sequential awaits to parallel when possible
+**Action**:
+1. Review transformation logic for frequently changed assets.
+2. Minimize cross-language serialization (P4) if overhead exceeds 10%.
 
 ---
 
@@ -255,32 +291,31 @@ Tasks with avg duration ≥ 10µs and count > 1000 are candidates for optimizati
 | Signal | Status | Finding |
 |--------|--------|---------|"""
     
-    noise_pct = noise_count*100/max(total_tasks,1)
-    report += f"\n| Tracing Noise | {'⚠️ **Significant**' if noise_pct > 60 else '✅ Acceptable'} | {noise_pct:.1f}% of tasks < 10µs (excluded from analysis) |"
-    report += f"\n| Critical Path Serialization | {'🚨 **Detected**' if utilization < 60 else '✅ Good'} | {utilization:.1f}% thread utilization |"
-    report += "\n| Resolution Work | 🔍 **Check** | Review `resolving` task metrics |"
-    report += "\n| Code Generation | 🔍 **Check** | Review pipeline tasks |"
-    report += f"\n| Heavy Monoliths | {'⚠️ **Detected**' if buckets['>100ms'] > 5 else '✅ Minimal'} | {buckets['>100ms']} tasks > 100ms |"
-    report += f"\n| Lock Contention | {'🔍 **Likely**' if utilization < 60 else '✅ Unlikely'} | Low thread utilization suggests contention |"
+    noise_pct = (noise_count * 100) / total_tasks_safe
+    report += f"\n| Tracing Noise (P0) | {'⚠️ **Significant**' if noise_pct > 60 else '✅ Acceptable'} | {noise_pct:.1f}% of tasks < 10µs |"
+    report += f"\n| Thread Utilization (P0) | {'🚨 **Low**' if utilization < 60 else '✅ Good'} | {utilization:.1f}% utilization |"
+    report += f"\n| Heavy Monoliths (P1) | {'⚠️ **Detected**' if buckets['>100ms'] > 5 else '✅ Minimal'} | {buckets['>100ms']} tasks > 100ms |"
+    report += f"\n| Asset Pipeline (P3) | 🔍 **Review** | {cat_stats['P3: Asset Pipeline']['duration']/1000:,.1f} ms total |"
+    report += f"\n| Bridge/Interop (P4) | {'⚠️ **Examine**' if cat_stats['P4: Bridge/Interop']['duration']/max_thread_work > 0.1 else '✅ Low'} | {cat_stats['P4: Bridge/Interop']['duration']/1000:,.1f} ms total |"
     
     report += """
 
 ---
 
-## 🎯 Action Items (Priority Order)
+## 🎯 Action Items (Comprehensive P0-P4)
 
 """
     
     lost_parallelism = int((1 - utilization/100) * 100)
     if utilization < 70:
-        report += f"1. **[P0]** Profile lock contention to explain {lost_parallelism}% lost parallelism\n"
+        report += f"1. **[P0]** Profile lock contention to address {lost_parallelism}% lost parallelism\n"
     else:
-        report += "1. **[P0]** Maintain current parallelism levels\n"
+        report += "1. **[P0]** Investigate task scheduling gaps for incremental gains\n"
     
-    report += """2. **[P0]** Investigate high-frequency tasks for batching/caching opportunities  
-3. **[P1]** Optimize code generation pipeline
-4. **[P1]** Convert sequential `await` chains to `try_join` in hot paths
-5. **[P2]** Identify and optimize tasks exceeding 100ms
+    report += """2. **[P1]** Breakdown heavy monolith tasks (>100ms) to improve granularity  
+3. **[P1]** Review I/O patterns for potential batching opportunities  
+4. **[P3]** Optimize asset transformation pipeline hot-spots  
+5. **[P4]** Reduce "chatty" bridge operations if interop overhead is significant  
 
 ---
 
