@@ -89,9 +89,15 @@ jobs:
             echo "number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
           else
             # Use GH_REPO env var to ensure gh knows which repo to query
-            # Try to list PRs associated with the current branch
+            # 1. Try to match by branch name
             PR_NUMBER=$(gh pr list --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number')
             
+            # 2. If not found, try to match by commit SHA
+            if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" == "null" ]; then
+              echo "debug: Branch match failed, trying commit SHA match"
+              PR_NUMBER=$(gh pr list --search "${{ github.sha }}" --state open --json number --jq '.[0].number')
+            fi
+
             echo "debug: Found PR number from gh: $PR_NUMBER"
             
             if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
