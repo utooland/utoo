@@ -13,7 +13,8 @@ REGISTRY_MODE=${1:-both}
 
 # Configuration
 PROJECTS=("ant-design" "ant-design-x")
-PACKAGE_MANAGERS=("utoo" "yarn" "pnpm" "bun")
+PACKAGE_MANAGERS=("utoo" "pnpm" "bun")
+# PACKAGE_MANAGERS=("utoo" "yarn" "pnpm" "bun")  # yarn is too slow, disabled for now
 REGISTRIES=()
 
 if [ "$REGISTRY_MODE" = "both" ] || [ "$REGISTRY_MODE" = "npmjs" ]; then
