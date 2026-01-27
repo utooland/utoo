@@ -32,7 +32,7 @@ def analyze_trace(trace_path, output_path):
     noise_count = 0
     
     # Duration buckets
-    buckets = {'<10us': 0, '10us-100us': 0, '100us-1ms': 0, 'q-10ms': 0, '>10ms': 0, '>100ms': 0}
+    buckets = {'<10us': 0, '10us-100us': 0, '100us-1ms': 0, '1ms-10ms': 0, '10ms-100ms': 0, '>100ms': 0}
     
     # Stack for B/E events
     stacks = defaultdict(list)
@@ -61,7 +61,7 @@ def analyze_trace(trace_path, output_path):
                 if dur < 100: buckets['10us-100us'] += 1
                 elif dur < 1000: buckets['100us-1ms'] += 1
                 elif dur < 10000: buckets['1ms-10ms'] += 1
-                elif dur < 100000: buckets['>10ms'] += 1
+                elif dur < 100000: buckets['10ms-100ms'] += 1
                 else: buckets['>100ms'] += 1
                 
                 meaningful_tasks[name]['count'] += 1
@@ -83,7 +83,7 @@ def analyze_trace(trace_path, output_path):
                     if dur < 100: buckets['10us-100us'] += 1
                     elif dur < 1000: buckets['100us-1ms'] += 1
                     elif dur < 10000: buckets['1ms-10ms'] += 1
-                    elif dur < 100000: buckets['>10ms'] += 1
+                    elif dur < 100000: buckets['10ms-100ms'] += 1
                     else: buckets['>100ms'] += 1
                     
                     meaningful_tasks[start_name]['count'] += 1
