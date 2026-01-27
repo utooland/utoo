@@ -96,23 +96,40 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
         return Ok(());
     }
 
+    let retry_count = std::sync::atomic::AtomicU32::new(0);
     RetryIf::spawn(
         create_retry_strategy(),
         || async {
-            let response = DOWNLOADER_CLIENT
-                .get(url)
-                .send()
-                .await
-                .with_context(|| format!("Failed to send HTTP request to {url}"))
-                .map_err(|e| RetryableError::Temporary(format!("Network error: {e}")))?;
+            let attempt = retry_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+            let response = match DOWNLOADER_CLIENT.get(url).send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!(
+                        "Retry {}/10 - Network error: {}, url: {}",
+                        attempt + 1,
+                        e,
+                        url
+                    );
+                    return Err(RetryableError::Temporary(format!("Network error: {e}")));
+                }
+            };
 
             match response.status() {
                 StatusCode::OK => {
                     if let Err(e) = try_unpack_stream_direct(response, dest).await {
-                        tracing::debug!("Stream unpacking failed {}: {:#}", dest.display(), e);
+                        tracing::warn!(
+                            "Retry {}/10 - Stream error: {:#}, url: {}",
+                            attempt + 1,
+                            e,
+                            url
+                        );
                         return Err(RetryableError::Temporary(format!(
                             "Network error during streaming: {e:#}"
                         )));
+                    }
+                    if attempt > 0 {
+                        tracing::info!("Retry succeeded on attempt {}, url: {}", attempt + 1, url);
                     }
                     Ok(())
                 }
@@ -121,7 +138,7 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
                     Err(RetryableError::Permanent(format!("URL not found {url}")))
                 }
                 status => {
-                    tracing::debug!("Error: {status}, url: {url}, retrying");
+                    tracing::warn!("Retry {}/10 - HTTP {}, url: {}", attempt + 1, status, url);
                     Err(RetryableError::Temporary(format!(
                         "HTTP error: {status}, url: {url}"
                     )))
@@ -135,6 +152,10 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
 
     let duration = start.elapsed();
     tracing::debug!("Download task took: {duration:?}, url: {url:?}");
+    // Log slow packages for analysis
+    if duration.as_millis() > 500 {
+        tracing::info!("Slow package: {}ms - {}", duration.as_millis(), url);
+    }
     Ok(())
 }
 
@@ -165,15 +186,20 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
 
     // 1. Download complete tarball to memory
     STATS.downloading.fetch_add(1, Ordering::Relaxed);
+    let network_start = std::time::Instant::now();
     let gzip_bytes = response
         .bytes()
         .await
         .with_context(|| "Failed to download tarball")?;
+    let network_time = network_start.elapsed();
+    STATS.add_network_time(network_time.as_micros() as u64);
+    STATS.add_bytes_downloaded(gzip_bytes.len() as u64);
     STATS.downloading.fetch_sub(1, Ordering::Relaxed);
     STATS.downloaded.fetch_add(1, Ordering::Relaxed);
 
     // 2. Decompress and parse tar in a single blocking task (with buffer pool)
     STATS.extracting.fetch_add(1, Ordering::Relaxed);
+    let decompress_start = std::time::Instant::now();
     let estimated_size = estimate_uncompressed_size(&gzip_bytes);
     let gzip_len = gzip_bytes.len();
     let dest_owned = dest.to_path_buf();
@@ -259,9 +285,15 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
     .await
     .with_context(|| "Decompression/extraction task panicked")??;
 
+    // Record decompress time
+    let decompress_time = decompress_start.elapsed();
+    STATS.add_decompress_time(decompress_time.as_micros() as u64);
+
     // 4. Write files concurrently
+    let write_start = std::time::Instant::now();
     let semaphore = Arc::new(Semaphore::new(16));
     let created_dirs = Arc::new(DashSet::<std::path::PathBuf>::new());
+    let total_bytes: u64 = entries.iter().map(|e| e.content.len() as u64).sum();
     let mut write_tasks = Vec::with_capacity(entries.len());
 
     for entry in entries {
@@ -298,6 +330,23 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
     for task in write_tasks {
         task.await??;
     }
+
+    // Record write time and bytes
+    let write_time = write_start.elapsed();
+    STATS.add_write_time(write_time.as_micros() as u64);
+    STATS.add_bytes_written(total_bytes);
+
+    // Per-package timing breakdown for analysis
+    let network_ms = network_time.as_millis();
+    let decompress_ms = decompress_time.as_millis();
+    let write_ms = write_time.as_millis();
+    tracing::debug!(
+        "Package timing: net={}ms, decomp={}ms, write={}ms, path={}",
+        network_ms,
+        decompress_ms,
+        write_ms,
+        dest.display()
+    );
 
     // Set directory permissions and create resolution marker
     set_dir_permissions(dest).await?;

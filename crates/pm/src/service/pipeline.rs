@@ -6,7 +6,7 @@
 //! - Uses global OnceMap to deduplicate requests and share results across phases
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use once_cell::sync::Lazy;
@@ -21,7 +21,7 @@ use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 
 // ============ Pipeline Statistics ============
 
-/// Statistics for pipeline stages
+/// Statistics for pipeline stages with timing information
 pub struct PipelineStats {
     /// Number of packages currently downloading
     pub downloading: AtomicUsize,
@@ -31,6 +31,18 @@ pub struct PipelineStats {
     pub downloaded: AtomicUsize,
     /// Total extractions completed
     pub extracted: AtomicUsize,
+
+    // Timing stats (in microseconds for precision)
+    /// Total time spent on network downloads (µs)
+    pub network_time_us: AtomicU64,
+    /// Total time spent on decompression (µs)
+    pub decompress_time_us: AtomicU64,
+    /// Total time spent on file writes (µs)
+    pub write_time_us: AtomicU64,
+    /// Total bytes downloaded
+    pub bytes_downloaded: AtomicU64,
+    /// Total bytes written
+    pub bytes_written: AtomicU64,
 }
 
 impl PipelineStats {
@@ -40,6 +52,11 @@ impl PipelineStats {
             extracting: AtomicUsize::new(0),
             downloaded: AtomicUsize::new(0),
             extracted: AtomicUsize::new(0),
+            network_time_us: AtomicU64::new(0),
+            decompress_time_us: AtomicU64::new(0),
+            write_time_us: AtomicU64::new(0),
+            bytes_downloaded: AtomicU64::new(0),
+            bytes_written: AtomicU64::new(0),
         }
     }
 
@@ -57,6 +74,44 @@ impl PipelineStats {
 
     pub fn extracted(&self) -> usize {
         self.extracted.load(Ordering::Relaxed)
+    }
+
+    pub fn add_network_time(&self, us: u64) {
+        self.network_time_us.fetch_add(us, Ordering::Relaxed);
+    }
+
+    pub fn add_decompress_time(&self, us: u64) {
+        self.decompress_time_us.fetch_add(us, Ordering::Relaxed);
+    }
+
+    pub fn add_write_time(&self, us: u64) {
+        self.write_time_us.fetch_add(us, Ordering::Relaxed);
+    }
+
+    pub fn add_bytes_downloaded(&self, bytes: u64) {
+        self.bytes_downloaded.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn add_bytes_written(&self, bytes: u64) {
+        self.bytes_written.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    /// Print timing summary
+    pub fn print_summary(&self) {
+        let network_ms = self.network_time_us.load(Ordering::Relaxed) / 1000;
+        let decompress_ms = self.decompress_time_us.load(Ordering::Relaxed) / 1000;
+        let write_ms = self.write_time_us.load(Ordering::Relaxed) / 1000;
+        let downloaded_mb = self.bytes_downloaded.load(Ordering::Relaxed) as f64 / 1024.0 / 1024.0;
+        let written_mb = self.bytes_written.load(Ordering::Relaxed) as f64 / 1024.0 / 1024.0;
+
+        tracing::info!(
+            "Pipeline stats: network={}ms, decompress={}ms, write={}ms, downloaded={:.1}MB, written={:.1}MB",
+            network_ms,
+            decompress_ms,
+            write_ms,
+            downloaded_mb,
+            written_mb
+        );
     }
 }
 

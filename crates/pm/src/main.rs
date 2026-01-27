@@ -251,15 +251,15 @@ enum Commands {
 }
 
 fn main() {
-    let parallelism = std::thread::available_parallelism()
+    let cpu_cores = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4);
-    // Minimum 12 blocking threads for CI environments with fewer cores
-    let blocking_threads = (parallelism * 2).max(12);
+    let worker_threads = cpu_cores * 2;
+    let blocking_threads = cpu_cores * 2; // For spawn_blocking: decompression, file cloning
 
     let result = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .worker_threads(parallelism)
+        .worker_threads(worker_threads)
         .max_blocking_threads(blocking_threads)
         .thread_name("utoo-worker")
         .on_thread_stop(|| {})
