@@ -313,24 +313,20 @@ pub async fn get_client_module_options_context(
         tree_shaking_mode_for_user_code,
         tree_shaking_mode_for_foreign_code,
     ) = try_join!(
-        async { webpack_loader_options(project_path.clone(), config, foreign_conditions).await },
-        async { webpack_loader_options(project_path.clone(), config, loader_conditions).await },
+        async { *webpack_loader_options(project_path.clone(), config, foreign_conditions).await? },
+        async { *webpack_loader_options(project_path.clone(), config, loader_conditions).await? },
         async {
-            config
+            *config
                 .tree_shaking_mode_for_user_code(mode_ref.is_development())
-                .await
+                .await?
         },
         async {
-            config
+            *config
                 .tree_shaking_mode_for_foreign_code(mode_ref.is_development())
-                .await
+                .await?
         },
     )?;
 
-    let foreign_enable_webpack_loaders = *foreign_enable_webpack_loaders;
-    let enable_webpack_loaders = *enable_webpack_loaders;
-    let tree_shaking_mode_for_user_code = *tree_shaking_mode_for_user_code;
-    let tree_shaking_mode_for_foreign_code = *tree_shaking_mode_for_foreign_code;
     let target_browsers = env.runtime_versions();
 
     // Get client rules once and clone for foreign use
