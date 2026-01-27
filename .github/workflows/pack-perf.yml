@@ -50,6 +50,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: utoopack-perf
+          cache-directories: |
+            target/release-local
 
       - name: Install dependencies
         run: npm install
@@ -58,9 +60,8 @@ jobs:
         run: |
           # Build packages
           npm run build --workspace @utoo/pack-shared
-          npm run build --workspace @utoo/pack          # Ensure native bindings are available in the cjs/esm directories for the benchmark
-          cp packages/pack/src/*.node packages/pack/cjs/ || true
-          cp packages/pack/src/*.node packages/pack/esm/ || true          npm run build --workspace @utoo/pack-cli
+          npm run build:local --workspace @utoo/pack
+          npm run build --workspace @utoo/pack-cli
 
       - name: Run Benchmark - with-antd
         run: |
