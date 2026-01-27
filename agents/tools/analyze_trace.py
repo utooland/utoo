@@ -32,7 +32,7 @@ def analyze_trace(trace_path, output_path):
     noise_count = 0
     
     # Duration buckets
-    buckets = {'<10us': 0, '10us-100us': 0, '100us-1ms': 0, '1ms-10ms': 0, '>10ms': 0, '>100ms': 0}
+    buckets = {'<10us': 0, '10us-100us': 0, '100us-1ms': 0, 'q-10ms': 0, '>10ms': 0, '>100ms': 0}
     
     # Stack for B/E events
     stacks = defaultdict(list)
@@ -215,7 +215,7 @@ Tasks with avg duration ≥ 10µs and count > 1000 are candidates for optimizati
         total_ms = stats['duration'] / 1000.0
         report += f"| {stats['count']:,} | {avg_us:.1f} | {total_ms:,.1f} | `{name}` |\n"
     
-    report += """
+    report += f"""
 **Meaningful Task Analysis**: Focusing on tasks ≥ 10µs reveals the actual work distribution without tracing noise.
 
 ---
@@ -226,9 +226,9 @@ Tasks with avg duration ≥ 10µs and count > 1000 are candidates for optimizati
 
 ### 1. 🚨 Critical: Thread Utilization Improvement (P0)
 
-**Problem**: {:.1f}% thread utilization with {} threads available.
+**Problem**: {utilization:.1f}% thread utilization with {num_threads} threads available.
 
-**Impact**: ~{:.0f}% of potential parallelism is lost, adding significant overhead to wall time.
+**Impact**: ~{100 - utilization:.0f}% of potential parallelism is lost, adding significant overhead to wall time.
 
 **Recommendations**:
 1. **Profile lock contention**: Use `parking_lot` profiling to identify contested mutexes
