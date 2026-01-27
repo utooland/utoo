@@ -80,10 +80,18 @@ jobs:
           cat .trace/pr_comment.md >> $GITHUB_STEP_SUMMARY
 
       - name: Find Current PR
-        uses: jwalton/gh-find-current-pr@v1
         id: findPr
-        with:
-          state: open
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          else
+            PR_NUMBER=$(gh pr list --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number')
+            if [ -n "$PR_NUMBER" ]; then
+              echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
+            fi
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Post PR Comment
         if: steps.findPr.outputs.number
@@ -92,6 +100,7 @@ jobs:
           header: utoopack-perf-report
           path: .trace/pr_comment.md
           number: ${{ steps.findPr.outputs.number }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Traces
         uses: actions/upload-artifact@v4
