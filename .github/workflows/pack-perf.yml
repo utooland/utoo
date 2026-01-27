@@ -79,16 +79,23 @@ jobs:
           # Add to Job Summary
           cat .trace/pr_comment.md >> $GITHUB_STEP_SUMMARY
 
+      - name: Find Current PR
+        uses: jwalton/gh-find-current-pr@v1
+        id: findPr
+        with:
+          state: open
+
       - name: Post PR Comment
-        if: github.event_name == 'pull_request'
+        if: steps.findPr.outputs.number
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: utoopack-perf-report
           path: .trace/pr_comment.md
+          number: ${{ steps.findPr.outputs.number }}
 
       - name: Upload Traces
         uses: actions/upload-artifact@v4
         with:
           name: utoopack-perf-traces
-          path: .trace/*.json
+          path: .trace/
           retention-days: 7
