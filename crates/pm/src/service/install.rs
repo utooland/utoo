@@ -15,7 +15,7 @@ use crate::helper::lock::{
 };
 use crate::helper::workspace;
 use crate::model::package::PackageInfo;
-use crate::service::pipeline::download_package;
+use crate::service::pipeline::{STATS, download_package};
 use crate::service::rebuild::RebuildService;
 use crate::util::cache::get_cache_dir;
 use crate::util::cloner::clone_package;
@@ -481,6 +481,9 @@ impl InstallService {
             .context("Failed to install packages")?;
 
         finish_progress_bar("node_modules cloned");
+
+        // Print pipeline performance stats
+        STATS.print_summary();
 
         RebuildService::rebuild(&package_lock, root_path, ignore_scripts).await?;
         Ok(())
