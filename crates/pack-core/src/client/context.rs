@@ -501,13 +501,7 @@ pub async fn get_client_resolve_options_context(
     pack_path: FileSystemPath,
 ) -> Result<Vc<ResolveOptionsContext>> {
     // Parallelize independent async operations to improve thread utilization
-    let (
-        client_import_map,
-        enable_node_polyfill,
-        mode_ref,
-        external_config,
-        project_root,
-    ) = try_join!(
+    let (client_import_map, enable_node_polyfill, mode_ref, external_config, project_root) = try_join!(
         async {
             get_client_import_map(project_path.clone(), config, execution_context, pack_path)
                 .to_resolved()
@@ -523,24 +517,23 @@ pub async fn get_client_resolve_options_context(
     let external_config = *external_config;
 
     // Parallelize the next batch of independent operations
-    let (client_fallback_import_map, client_resolved_map, externals_plugin) =
-        try_join!(
-            async {
-                get_client_fallback_import_map(enable_node_polyfill)
-                    .to_resolved()
-                    .await
-            },
-            async {
-                get_client_resolved_map(project_path.clone(), project_path.clone(), *mode_ref)
-                    .to_resolved()
-                    .await
-            },
-            async {
-                ExternalsPlugin::new(project_path.clone(), project_root.clone(), external_config)
-                    .to_resolved()
-                    .await
-            },
-        )?;
+    let (client_fallback_import_map, client_resolved_map, externals_plugin) = try_join!(
+        async {
+            get_client_fallback_import_map(enable_node_polyfill)
+                .to_resolved()
+                .await
+        },
+        async {
+            get_client_resolved_map(project_path.clone(), project_path.clone(), *mode_ref)
+                .to_resolved()
+                .await
+        },
+        async {
+            ExternalsPlugin::new(project_path.clone(), project_root.clone(), external_config)
+                .to_resolved()
+                .await
+        },
+    )?;
 
     let custom_conditions = vec![mode_ref.condition().into()];
     let resolve_options_context = ResolveOptionsContext {
@@ -570,17 +563,20 @@ pub async fn get_client_resolve_options_context(
     };
 
     // Parallelize final awaits for custom_extensions and foreign_code_context_condition
-    let (custom_extensions, foreign_code_condition) = try_join!(
-        async { config.resolve_extension().owned().await },
-        async { foreign_code_context_condition(config).await },
-    )?;
+    let (custom_extensions, foreign_code_condition) =
+        try_join!(async { config.resolve_extension().owned().await }, async {
+            foreign_code_context_condition(config).await
+        },)?;
 
     Ok(ResolveOptionsContext {
         enable_typescript: true,
         enable_react: true,
         enable_mjs_extension: true,
         custom_extensions,
-        rules: vec![(foreign_code_condition, foreign_resolve_options.resolved_cell())],
+        rules: vec![(
+            foreign_code_condition,
+            foreign_resolve_options.resolved_cell(),
+        )],
         ..resolve_options_context
     }
     .cell())
