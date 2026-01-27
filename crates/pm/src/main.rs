@@ -255,7 +255,8 @@ fn main() {
         .map(|n| n.get())
         .unwrap_or(4);
     let worker_threads = cpu_cores * 2;
-    let blocking_threads = cpu_cores * 2; // For spawn_blocking: decompression, file cloning
+    // 2x CPU for blocking: decompress is CPU-bound but file write has I/O wait
+    let blocking_threads = cpu_cores * 2;
 
     let result = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

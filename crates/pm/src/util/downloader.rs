@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
+use bytes::Bytes;
 use once_cell::sync::Lazy;
 use reqwest::StatusCode;
-use reqwest::{Client, Response};
+use reqwest::Client;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -9,10 +10,6 @@ use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 use tokio::fs::File;
 use tokio_retry::RetryIf;
-
-// Threshold for file preallocation (only worthwhile for large files)
-#[cfg(target_os = "linux")]
-const PREALLOCATE_THRESHOLD: usize = 1_000_000; // 1MB
 
 use super::retry::build_dns_cached_client;
 use super::retry::{RetryableError, create_retry_strategy};
@@ -83,19 +80,9 @@ fn release_buffer(mut buf: Vec<u8>) {
     }
 }
 
-/// Download and extract a tarball to the destination directory.
-/// Deduplication is handled by the caller via OnceMap.
-/// For warm cache scenarios, checks _resolved flag to skip already-downloaded packages.
-pub async fn download(url: &str, dest: &Path) -> Result<()> {
-    let start = std::time::Instant::now();
-
-    // Check if already resolved (warm cache scenario)
-    let resolved_path = dest.join("_resolved");
-    if crate::fs::try_exists(&resolved_path).await? {
-        tracing::debug!("Download skipped, already resolved: {}", dest.display());
-        return Ok(());
-    }
-
+/// Download tarball bytes only (network phase).
+/// Returns the downloaded bytes for extraction.
+pub async fn download_bytes(url: &str) -> Result<Bytes> {
     let retry_count = std::sync::atomic::AtomicU32::new(0);
     RetryIf::spawn(
         create_retry_strategy(),
@@ -105,33 +92,28 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
             let response = match DOWNLOADER_CLIENT.get(url).send().await {
                 Ok(r) => r,
                 Err(e) => {
-                    tracing::warn!(
-                        "Retry {}/10 - Network error: {}, url: {}",
-                        attempt + 1,
-                        e,
-                        url
-                    );
+                    tracing::warn!("Retry {}/10 - Network error: {}, url: {}", attempt + 1, e, url);
                     return Err(RetryableError::Temporary(format!("Network error: {e}")));
                 }
             };
 
             match response.status() {
                 StatusCode::OK => {
-                    if let Err(e) = try_unpack_stream_direct(response, dest).await {
-                        tracing::warn!(
-                            "Retry {}/10 - Stream error: {:#}, url: {}",
-                            attempt + 1,
-                            e,
-                            url
-                        );
-                        return Err(RetryableError::Temporary(format!(
-                            "Network error during streaming: {e:#}"
-                        )));
-                    }
+                    STATS.downloading.fetch_add(1, Ordering::Relaxed);
+                    let network_start = std::time::Instant::now();
+                    let bytes = response.bytes().await.map_err(|e| {
+                        STATS.downloading.fetch_sub(1, Ordering::Relaxed);
+                        tracing::warn!("Retry {}/10 - Stream error: {}, url: {}", attempt + 1, e, url);
+                        RetryableError::Temporary(format!("Stream error: {e}"))
+                    })?;
+                    STATS.add_network_time(network_start.elapsed().as_micros() as u64);
+                    STATS.add_bytes_downloaded(bytes.len() as u64);
+                    STATS.downloading.fetch_sub(1, Ordering::Relaxed);
+                    STATS.downloaded.fetch_add(1, Ordering::Relaxed);
                     if attempt > 0 {
                         tracing::info!("Retry succeeded on attempt {}, url: {}", attempt + 1, url);
                     }
-                    Ok(())
+                    Ok(bytes)
                 }
                 StatusCode::NOT_FOUND => {
                     tracing::debug!("URL not found {url}");
@@ -139,24 +121,30 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
                 }
                 status => {
                     tracing::warn!("Retry {}/10 - HTTP {}, url: {}", attempt + 1, status, url);
-                    Err(RetryableError::Temporary(format!(
-                        "HTTP error: {status}, url: {url}"
-                    )))
+                    Err(RetryableError::Temporary(format!("HTTP error: {status}, url: {url}")))
                 }
             }
         },
         |e: &RetryableError| matches!(e, RetryableError::Temporary(_)),
     )
     .await
-    .context("Download failed after retries")?;
+    .context("Download failed after retries")
+}
 
-    let duration = start.elapsed();
-    tracing::debug!("Download task took: {duration:?}, url: {url:?}");
-    // Log slow packages for analysis
-    if duration.as_millis() > 500 {
-        tracing::info!("Slow package: {}ms - {}", duration.as_millis(), url);
+/// Extract and write tarball to destination (CPU + IO phase, no network).
+pub async fn extract_and_write(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
+    // Check if already resolved (warm cache scenario)
+    let resolved_path = dest.join("_resolved");
+    if crate::fs::try_exists(&resolved_path).await? {
+        tracing::debug!("Extract skipped, already resolved: {}", dest.display());
+        return Ok(());
     }
-    Ok(())
+
+    crate::fs::create_dir_all(dest)
+        .await
+        .with_context(|| format!("Failed to create destination directory: {}", dest.display()))?;
+
+    extract_tarball(gzip_bytes, dest).await
 }
 
 /// Estimate uncompressed size from gzip footer (last 4 bytes store original size mod 2^32)
@@ -174,30 +162,9 @@ fn estimate_uncompressed_size(gzip_data: &[u8]) -> usize {
     }
 }
 
-// Batch unpacking using libdeflate for better performance
-async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()> {
-    use dashmap::DashSet;
-    use std::sync::Arc;
-    use tokio::sync::Semaphore;
-
-    crate::fs::create_dir_all(dest)
-        .await
-        .with_context(|| format!("Failed to create destination directory: {}", dest.display()))?;
-
-    // 1. Download complete tarball to memory
-    STATS.downloading.fetch_add(1, Ordering::Relaxed);
-    let network_start = std::time::Instant::now();
-    let gzip_bytes = response
-        .bytes()
-        .await
-        .with_context(|| "Failed to download tarball")?;
-    let network_time = network_start.elapsed();
-    STATS.add_network_time(network_time.as_micros() as u64);
-    STATS.add_bytes_downloaded(gzip_bytes.len() as u64);
-    STATS.downloading.fetch_sub(1, Ordering::Relaxed);
-    STATS.downloaded.fetch_add(1, Ordering::Relaxed);
-
-    // 2. Decompress and parse tar in a single blocking task (with buffer pool)
+// Extract tarball using libdeflate for better performance
+async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
+    // 1. Decompress and parse tar in a single blocking task (with buffer pool)
     STATS.extracting.fetch_add(1, Ordering::Relaxed);
     let decompress_start = std::time::Instant::now();
     let estimated_size = estimate_uncompressed_size(&gzip_bytes);
@@ -289,47 +256,45 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
     let decompress_time = decompress_start.elapsed();
     STATS.add_decompress_time(decompress_time.as_micros() as u64);
 
-    // 4. Write files concurrently
+    // 4. Write files using rayon for parallelism within spawn_blocking
     let write_start = std::time::Instant::now();
-    let semaphore = Arc::new(Semaphore::new(16));
-    let created_dirs = Arc::new(DashSet::<std::path::PathBuf>::new());
     let total_bytes: u64 = entries.iter().map(|e| e.content.len() as u64).sum();
-    let mut write_tasks = Vec::with_capacity(entries.len());
 
-    for entry in entries {
-        let semaphore = Arc::clone(&semaphore);
-        let created_dirs = Arc::clone(&created_dirs);
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        use rayon::prelude::*;
+        use std::collections::HashSet;
+        use std::fs;
+        use std::io::Write;
 
-        let task = tokio::spawn(async move {
-            let _permit = semaphore.acquire().await.unwrap();
-
-            // Ensure parent directory exists using cache
+        // First, create all directories (sequential to avoid race conditions)
+        let mut created_dirs = HashSet::new();
+        for entry in entries.iter() {
             if let Some(parent) = entry.path.parent() {
-                let parent_path = parent.to_path_buf();
-                if !created_dirs.contains(&parent_path) {
-                    crate::fs::create_dir_all(&parent_path).await.ok();
-                    created_dirs.insert(parent_path);
+                if !created_dirs.contains(parent) {
+                    fs::create_dir_all(parent).ok();
+                    created_dirs.insert(parent.to_path_buf());
                 }
             }
+        }
 
-            // Write file content (with preallocation on Linux for large files)
-            write_file_optimized(&entry.path, &entry.content)
-                .await
+        // Then write files in parallel using rayon
+        entries.par_iter().try_for_each(|entry| -> Result<()> {
+            let mut file = fs::File::create(&entry.path)
+                .with_context(|| format!("Failed to create: {}", entry.path.display()))?;
+            file.write_all(&entry.content)
                 .with_context(|| format!("Failed to write: {}", entry.path.display()))?;
 
-            // Set file permissions (Unix only)
-            set_file_permissions(&entry.path, entry.mode).await?;
-
-            Ok::<(), anyhow::Error>(())
-        });
-
-        write_tasks.push(task);
-    }
-
-    // Wait for all writes to complete
-    for task in write_tasks {
-        task.await??;
-    }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let perms = fs::Permissions::from_mode(entry.mode);
+                fs::set_permissions(&entry.path, perms).ok();
+            }
+            Ok(())
+        })
+    })
+    .await
+    .with_context(|| "Write task panicked")??;
 
     // Record write time and bytes
     let write_time = write_start.elapsed();
@@ -337,12 +302,10 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
     STATS.add_bytes_written(total_bytes);
 
     // Per-package timing breakdown for analysis
-    let network_ms = network_time.as_millis();
     let decompress_ms = decompress_time.as_millis();
     let write_ms = write_time.as_millis();
     tracing::debug!(
-        "Package timing: net={}ms, decomp={}ms, write={}ms, path={}",
-        network_ms,
+        "Package timing: decomp={}ms, write={}ms, path={}",
         decompress_ms,
         write_ms,
         dest.display()
@@ -358,58 +321,6 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
     STATS.extracting.fetch_sub(1, Ordering::Relaxed);
     STATS.extracted.fetch_add(1, Ordering::Relaxed);
 
-    Ok(())
-}
-
-/// Write file with optional preallocation (Linux only for large files)
-/// On Linux, fallocate() can improve write performance for files >1MB
-/// by pre-reserving disk space and reducing fragmentation.
-#[cfg(target_os = "linux")]
-async fn write_file_optimized(path: &Path, content: &[u8]) -> Result<()> {
-    use std::os::unix::io::AsRawFd;
-    use tokio::io::AsyncWriteExt;
-
-    let mut file = tokio::fs::File::create(path).await?;
-
-    // Preallocate for large files (>1MB)
-    if content.len() > PREALLOCATE_THRESHOLD {
-        let fd = file.as_raw_fd();
-        // fallocate(fd, mode=0, offset=0, len)
-        // mode=0 means default allocation (allocate disk space)
-        unsafe {
-            libc::fallocate(fd, 0, 0, content.len() as libc::off_t);
-        }
-        tracing::trace!(
-            "preallocate: {} bytes for {}",
-            content.len(),
-            path.display()
-        );
-    }
-
-    file.write_all(content).await?;
-    Ok(())
-}
-
-#[cfg(not(target_os = "linux"))]
-async fn write_file_optimized(path: &Path, content: &[u8]) -> Result<()> {
-    crate::fs::write(path, content).await?;
-    Ok(())
-}
-
-/// Set file permissions (cross-platform)
-#[cfg(unix)]
-async fn set_file_permissions(path: &Path, mode: u32) -> Result<()> {
-    use std::fs::Permissions;
-    let permissions = Permissions::from_mode(mode);
-    crate::fs::set_permissions(path, permissions)
-        .await
-        .with_context(|| format!("Failed to set permissions for: {}", path.display()))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-async fn set_file_permissions(_path: &Path, _mode: u32) -> Result<()> {
-    // Windows doesn't need Unix-style permissions
     Ok(())
 }
 
@@ -488,7 +399,8 @@ mod tests {
             let url = url.clone();
             let dest = dest.clone();
             handles.push(task::spawn(async move {
-                download(&url, &dest).await.unwrap();
+                let bytes = download_bytes(&url).await.unwrap();
+                extract_and_write(bytes, &dest).await.unwrap();
             }));
         }
         for h in handles {

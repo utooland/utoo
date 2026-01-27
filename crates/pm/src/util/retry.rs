@@ -21,15 +21,17 @@ impl fmt::Display for RetryableError {
 
 impl std::error::Error for RetryableError {}
 
-/// Build a reqwest::Client with timeout config.
-/// Connection pool is unlimited - concurrency is controlled by semaphore instead.
+/// Build a reqwest::Client optimized for high-concurrency package downloads.
 pub fn build_dns_cached_client() -> reqwest::Client {
     reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(5)) // TLS + TCP handshake
-        .read_timeout(std::time::Duration::from_secs(30)) // Timeout for individual read operations
-        // No total timeout - large files (e.g. node binary ~100MB) need longer download time
-        // No pool_max_idle_per_host - let reqwest manage connections freely
-        // Concurrency is controlled by semaphore in preload service
+        // Timeouts - keep short for fast retry on slow networks
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .read_timeout(std::time::Duration::from_secs(30))
+        // Connection pool - match bun's 64 socket pool
+        .pool_max_idle_per_host(64)
+        .pool_idle_timeout(std::time::Duration::from_secs(90))
+        // TCP keepalive - keep connections alive for reuse
+        .tcp_keepalive(std::time::Duration::from_secs(60))
         .build()
         .expect("Failed to build reqwest client")
 }

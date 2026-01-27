@@ -15,7 +15,7 @@ use utoo_ruborist::progress::{BuildEvent, EventReceiver, PackageResolvedInfo};
 
 use crate::util::cache::get_cache_dir;
 use crate::util::config::get_manifests_concurrency_limit_sync;
-use crate::util::downloader::download;
+use crate::util::downloader::{download_bytes, extract_and_write};
 use crate::util::oncemap::OnceMap;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 
@@ -138,6 +138,9 @@ fn get_download_semaphore() -> &'static Arc<Semaphore> {
 
 /// Download a package tarball, using global OnceMap for deduplication.
 /// Can be called from both pipeline and install phases.
+///
+/// Architecture: semaphore only controls network download, not extraction.
+/// This allows more parallelism: 64 downloads + unlimited extractions.
 pub async fn download_package(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
     let key = format!("{}@{}", name, version);
     let cache_dir = get_cache_dir();
@@ -147,17 +150,28 @@ pub async fn download_package(name: &str, version: &str, tarball_url: &str) -> O
 
     DOWNLOAD_CACHE
         .get_or_init(key, || async move {
-            let _permit = get_download_semaphore().acquire().await.ok()?;
             let cache_path = cache_dir.join(&name).join(&version);
 
-            // Stats are tracked inside download() for accurate timing
-            match download(&tarball_url, &cache_path).await {
+            // Phase 1: Network download (semaphore controlled)
+            let bytes = {
+                let _permit = get_download_semaphore().acquire().await.ok()?;
+                match download_bytes(&tarball_url).await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        tracing::warn!("Download failed: {}@{}: {}", name, version, e);
+                        return None;
+                    }
+                }
+            }; // permit released here
+
+            // Phase 2: Extract and write (no semaphore, uses blocking threads)
+            match extract_and_write(bytes, &cache_path).await {
                 Ok(()) => {
-                    tracing::debug!("Downloaded: {}@{}", name, version);
+                    tracing::debug!("Extracted: {}@{}", name, version);
                     Some(cache_path)
                 }
                 Err(e) => {
-                    tracing::warn!("Download failed: {}@{}: {}", name, version, e);
+                    tracing::warn!("Extract failed: {}@{}: {}", name, version, e);
                     None
                 }
             }
