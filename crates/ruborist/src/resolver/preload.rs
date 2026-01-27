@@ -9,11 +9,11 @@ use futures::stream::{FuturesUnordered, StreamExt};
 
 use crate::model::manifest::VersionManifest;
 use crate::resolver::registry::resolve_package;
-use crate::traits::progress::{BuildEvent, EventReceiver};
+use crate::traits::progress::{BuildEvent, EventReceiver, PackageResolvedInfo};
 use crate::traits::registry::RegistryClient;
 
 /// Default concurrency limit for manifest fetching
-pub const DEFAULT_CONCURRENCY: usize = 20;
+pub const DEFAULT_CONCURRENCY: usize = 64;
 
 /// A dependency spec: (name, version_spec)
 pub type Dep = (String, String);
@@ -198,6 +198,17 @@ where
                     version: resolved.version.clone(),
                     current: stats.success_count,
                 });
+
+                // Send PackageResolved event for pipeline downloading
+                let dist = &resolved.manifest.dist;
+                receiver.on_event(BuildEvent::PackageResolved(PackageResolvedInfo {
+                    name: name.clone(),
+                    version: resolved.version.clone(),
+                    tarball_url: dist.tarball.clone(),
+                    integrity: dist.integrity.clone(),
+                    os: resolved.manifest.os.clone(),
+                    cpu: resolved.manifest.cpu.clone(),
+                }));
 
                 pending.extend(extract_transitive_deps(&resolved.manifest, &config));
                 on_manifest(&name, resolved.manifest);

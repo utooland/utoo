@@ -16,9 +16,9 @@ use crate::helper::lock::{
 use crate::helper::workspace;
 use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
+use crate::service::pipeline::download_package;
 use crate::util::cache::get_cache_dir;
 use crate::util::cloner::clone_package;
-use crate::util::downloader::download;
 use crate::util::linker::link;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
 use crate::util::save_type::{OmitType, PackageAction, SaveType};
@@ -345,33 +345,27 @@ pub async fn install_packages(
                     let semaphore = Arc::clone(&semaphore);
 
                     let task = tokio::spawn(async move {
+                        // Download first - uses global DOWNLOAD_SEMAPHORE via OnceMap
+                        // Pipeline may have already started/completed this download
+                        if should_resolve {
+                            tracing::debug!("Downloading {path} to {name}");
+                            if download_package(&name, &version, &resolved).await.is_none() {
+                                return Err(anyhow::anyhow!("{name} download failed"));
+                            }
+                            log_progress(&format!("{name} downloaded"));
+                            if package.has_install_script.is_some() {
+                                tracing::debug!("{name} has install script");
+                                let has_install_script_flag_path =
+                                    cache_path.join("_hasInstallScript");
+                                crate::fs::write(has_install_script_flag_path, "").await?;
+                            }
+                        }
+
+                        // Clone with semaphore - only clone operations need local concurrency limit
                         let _permit = semaphore
                             .acquire()
                             .await
                             .expect("semaphore should not be closed");
-                        if should_resolve {
-                            tracing::debug!("Downloading {path} to {name}");
-                            match download(&resolved, &cache_path).await {
-                                Ok(_) => {
-                                    log_progress(&format!("{name} downloaded"));
-                                    if package.has_install_script.is_some() {
-                                        tracing::debug!("{name} has install script");
-                                        let has_install_script_flag_path =
-                                            cache_path.join("_hasInstallScript");
-                                        crate::fs::write(has_install_script_flag_path, "").await?;
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::debug!(
-                                        "Download failed: source={}, target={}, error={}",
-                                        resolved,
-                                        cache_path.display(),
-                                        e
-                                    );
-                                    return Err(anyhow::anyhow!("{name} download failed: {e}"));
-                                }
-                            }
-                        }
 
                         tracing::debug!("{name} clone");
                         match clone_package(&cache_path, &cwd_clone.join(&path), &name, &version)
@@ -477,8 +471,9 @@ impl InstallService {
             PROGRESS_BAR.set_length(package_lock.packages.len() as u64);
         }
 
-        // Set concurrent limit for package installation
-        tracing::debug!("Setting concurrent limit to {CONCURRENT_LIMIT}");
+        // Set concurrent limit for clone operations only
+        // Downloads are controlled by global DOWNLOAD_SEMAPHORE in pipeline.rs
+        tracing::debug!("Setting clone concurrent limit to {CONCURRENT_LIMIT}");
         let semaphore = Arc::new(Semaphore::new(CONCURRENT_LIMIT));
 
         install_packages(&groups, &cache_dir, root_path, semaphore)
