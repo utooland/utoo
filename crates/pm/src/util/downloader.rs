@@ -5,9 +5,14 @@ use reqwest::{Client, Response};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 use tokio::fs::File;
 use tokio_retry::RetryIf;
+
+// Threshold for file preallocation (only worthwhile for large files)
+#[cfg(target_os = "linux")]
+const PREALLOCATE_THRESHOLD: usize = 1_000_000; // 1MB
 
 use super::retry::build_dns_cached_client;
 use super::retry::{RetryableError, create_retry_strategy};
@@ -15,6 +20,68 @@ use crate::service::pipeline::STATS;
 
 // Global downloader client - no pool limit, concurrency controlled by OnceMap
 static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
+
+// ============ Buffer Pool ============
+// Reuse decompression buffers to reduce allocation overhead
+// Similar to Bun's ObjectPool pattern
+
+const BUFFER_POOL_MAX_SIZE: usize = 8;
+const BUFFER_POOL_MIN_CAPACITY: usize = 2 * 1024 * 1024; // 2MB minimum
+
+/// Global buffer pool for decompression
+static BUFFER_POOL: Lazy<Mutex<Vec<Vec<u8>>>> =
+    Lazy::new(|| Mutex::new(Vec::with_capacity(BUFFER_POOL_MAX_SIZE)));
+
+/// Get a buffer from the pool or create a new one
+fn acquire_buffer(required_capacity: usize) -> Vec<u8> {
+    let capacity = required_capacity.max(BUFFER_POOL_MIN_CAPACITY);
+
+    // Try to get a buffer from the pool
+    if let Ok(mut pool) = BUFFER_POOL.lock() {
+        // Find a buffer with sufficient capacity
+        if let Some(idx) = pool.iter().position(|b| b.capacity() >= capacity) {
+            let mut buf = pool.swap_remove(idx);
+            buf.clear();
+            tracing::trace!(
+                "buffer pool: reused (capacity={}, pool_size={})",
+                buf.capacity(),
+                pool.len()
+            );
+            return buf;
+        }
+    }
+
+    // No suitable buffer found, create a new one
+    tracing::trace!("buffer pool: new allocation (capacity={})", capacity);
+    Vec::with_capacity(capacity)
+}
+
+/// Return a buffer to the pool for reuse
+fn release_buffer(mut buf: Vec<u8>) {
+    // Only keep buffers that are reasonably sized
+    if buf.capacity() < BUFFER_POOL_MIN_CAPACITY || buf.capacity() > 64 * 1024 * 1024 {
+        tracing::trace!(
+            "buffer pool: dropped (capacity={}, too small or too large)",
+            buf.capacity()
+        );
+        return;
+    }
+
+    buf.clear();
+
+    if let Ok(mut pool) = BUFFER_POOL.lock() {
+        if pool.len() < BUFFER_POOL_MAX_SIZE {
+            tracing::trace!(
+                "buffer pool: returned (capacity={}, pool_size={})",
+                buf.capacity(),
+                pool.len() + 1
+            );
+            pool.push(buf);
+        } else {
+            tracing::trace!("buffer pool: dropped (pool full)");
+        }
+    }
+}
 
 /// Download and extract a tarball to the destination directory.
 /// Deduplication is handled by the caller via OnceMap.
@@ -89,7 +156,6 @@ fn estimate_uncompressed_size(gzip_data: &[u8]) -> usize {
 // Batch unpacking using libdeflate for better performance
 async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()> {
     use dashmap::DashSet;
-    use std::io::Read;
     use std::sync::Arc;
     use tokio::sync::Semaphore;
 
@@ -106,37 +172,58 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
     STATS.downloading.fetch_sub(1, Ordering::Relaxed);
     STATS.downloaded.fetch_add(1, Ordering::Relaxed);
 
-    // 2. Decompress using libdeflate (much faster than flate2)
+    // 2. Decompress and parse tar in a single blocking task (with buffer pool)
     STATS.extracting.fetch_add(1, Ordering::Relaxed);
     let estimated_size = estimate_uncompressed_size(&gzip_bytes);
-    let tar_bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
-        let mut decompressor = libdeflater::Decompressor::new();
-        let mut output = vec![0u8; estimated_size];
+    let gzip_len = gzip_bytes.len();
+    let dest_owned = dest.to_path_buf();
 
-        match decompressor.gzip_decompress(&gzip_bytes, &mut output) {
-            Ok(actual_size) => {
-                output.truncate(actual_size);
-                Ok(output)
+    let entries: Vec<ExtractedEntry> = tokio::task::spawn_blocking(move || -> Result<Vec<_>> {
+        use std::io::Read;
+
+        // Acquire buffer from pool
+        let mut output = acquire_buffer(estimated_size);
+        // SAFETY: libdeflater will write to the buffer, we don't need to initialize
+        if output.capacity() < estimated_size {
+            output.reserve(estimated_size - output.capacity());
+        }
+        unsafe { output.set_len(estimated_size) };
+
+        let mut decompressor = libdeflater::Decompressor::new();
+
+        let actual_size = match decompressor.gzip_decompress(&gzip_bytes, &mut output) {
+            Ok(size) => {
+                tracing::trace!(
+                    "decompress: gzip={}, estimated={}, actual={}",
+                    gzip_len,
+                    estimated_size,
+                    size
+                );
+                size
             }
             Err(libdeflater::DecompressionError::InsufficientSpace) => {
                 // Buffer too small, retry with larger buffer
-                let mut output = vec![0u8; estimated_size * 2];
-                let actual_size = decompressor
+                tracing::debug!(
+                    "decompress retry: gzip={}, estimated={} (insufficient)",
+                    gzip_len,
+                    estimated_size
+                );
+                let new_size = estimated_size * 4;
+                output.reserve(new_size - output.len());
+                unsafe { output.set_len(new_size) };
+                decompressor
                     .gzip_decompress(&gzip_bytes, &mut output)
-                    .with_context(|| "gzip decompression failed")?;
-                output.truncate(actual_size);
-                Ok(output)
+                    .with_context(|| "gzip decompression failed")?
             }
-            Err(e) => Err(anyhow::anyhow!("gzip decompression failed: {}", e)),
-        }
-    })
-    .await
-    .with_context(|| "Decompression task panicked")??;
+            Err(e) => {
+                release_buffer(output);
+                return Err(anyhow::anyhow!("gzip decompression failed: {}", e));
+            }
+        };
+        output.truncate(actual_size);
 
-    // 3. Parse tar and extract files
-    let dest_owned = dest.to_path_buf();
-    let entries: Vec<ExtractedEntry> = tokio::task::spawn_blocking(move || -> Result<Vec<_>> {
-        let cursor = std::io::Cursor::new(tar_bytes);
+        // Parse tar entries
+        let cursor = std::io::Cursor::new(&output[..]);
         let mut archive = tar::Archive::new(cursor);
         let mut entries = Vec::new();
 
@@ -163,10 +250,14 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
                 });
             }
         }
+
+        // Release buffer back to pool
+        release_buffer(output);
+
         Ok(entries)
     })
     .await
-    .with_context(|| "Tar extraction task panicked")??;
+    .with_context(|| "Decompression/extraction task panicked")??;
 
     // 4. Write files concurrently
     let semaphore = Arc::new(Semaphore::new(16));
@@ -189,8 +280,8 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
                 }
             }
 
-            // Write file content
-            crate::fs::write(&entry.path, &entry.content)
+            // Write file content (with preallocation on Linux for large files)
+            write_file_optimized(&entry.path, &entry.content)
                 .await
                 .with_context(|| format!("Failed to write: {}", entry.path.display()))?;
 
@@ -218,6 +309,41 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
     STATS.extracting.fetch_sub(1, Ordering::Relaxed);
     STATS.extracted.fetch_add(1, Ordering::Relaxed);
 
+    Ok(())
+}
+
+/// Write file with optional preallocation (Linux only for large files)
+/// On Linux, fallocate() can improve write performance for files >1MB
+/// by pre-reserving disk space and reducing fragmentation.
+#[cfg(target_os = "linux")]
+async fn write_file_optimized(path: &Path, content: &[u8]) -> Result<()> {
+    use std::os::unix::io::AsRawFd;
+    use tokio::io::AsyncWriteExt;
+
+    let mut file = tokio::fs::File::create(path).await?;
+
+    // Preallocate for large files (>1MB)
+    if content.len() > PREALLOCATE_THRESHOLD {
+        let fd = file.as_raw_fd();
+        // fallocate(fd, mode=0, offset=0, len)
+        // mode=0 means default allocation (allocate disk space)
+        unsafe {
+            libc::fallocate(fd, 0, 0, content.len() as libc::off_t);
+        }
+        tracing::trace!(
+            "preallocate: {} bytes for {}",
+            content.len(),
+            path.display()
+        );
+    }
+
+    file.write_all(content).await?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn write_file_optimized(path: &Path, content: &[u8]) -> Result<()> {
+    crate::fs::write(path, content).await?;
     Ok(())
 }
 
