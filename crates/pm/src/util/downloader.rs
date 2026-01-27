@@ -5,39 +5,24 @@ use reqwest::{Client, Response};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::sync::atomic::Ordering;
 use tokio::fs::File;
 use tokio_retry::RetryIf;
 
 use super::retry::build_dns_cached_client;
 use super::retry::{RetryableError, create_retry_strategy};
+use crate::service::pipeline::STATS;
 
-use dashmap::DashMap;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::sync::Arc;
-use tokio::sync::Mutex;
-
-// Global downloader client - no pool limit, concurrency controlled by semaphore
+// Global downloader client - no pool limit, concurrency controlled by OnceMap
 static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
 
-static DOWNLOAD_LOCKS: Lazy<DashMap<u64, Arc<Mutex<()>>>> = Lazy::new(DashMap::new);
-
-fn lock_key(url: &str, dest: &Path) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    url.hash(&mut hasher);
-    dest.to_string_lossy().hash(&mut hasher);
-    hasher.finish()
-}
-
+/// Download and extract a tarball to the destination directory.
+/// Deduplication is handled by the caller via OnceMap.
+/// For warm cache scenarios, checks _resolved flag to skip already-downloaded packages.
 pub async fn download(url: &str, dest: &Path) -> Result<()> {
     let start = std::time::Instant::now();
-    let key = lock_key(url, dest);
-    let lock = DOWNLOAD_LOCKS
-        .entry(key)
-        .or_insert_with(|| Arc::new(Mutex::new(())))
-        .clone();
-    let _guard = lock.lock().await;
 
+    // Check if already resolved (warm cache scenario)
     let resolved_path = dest.join("_resolved");
     if crate::fs::try_exists(&resolved_path).await? {
         tracing::debug!("Download skipped, already resolved: {}", dest.display());
@@ -113,12 +98,16 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
         .with_context(|| format!("Failed to create destination directory: {}", dest.display()))?;
 
     // 1. Download complete tarball to memory
+    STATS.downloading.fetch_add(1, Ordering::Relaxed);
     let gzip_bytes = response
         .bytes()
         .await
         .with_context(|| "Failed to download tarball")?;
+    STATS.downloading.fetch_sub(1, Ordering::Relaxed);
+    STATS.downloaded.fetch_add(1, Ordering::Relaxed);
 
     // 2. Decompress using libdeflate (much faster than flate2)
+    STATS.extracting.fetch_add(1, Ordering::Relaxed);
     let estimated_size = estimate_uncompressed_size(&gzip_bytes);
     let tar_bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
         let mut decompressor = libdeflater::Decompressor::new();
@@ -224,6 +213,10 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
     File::create(&dest.join("_resolved"))
         .await
         .with_context(|| format!("Failed to create resolution marker in: {}", dest.display()))?;
+
+    // Track extraction complete
+    STATS.extracting.fetch_sub(1, Ordering::Relaxed);
+    STATS.extracted.fetch_add(1, Ordering::Relaxed);
 
     Ok(())
 }

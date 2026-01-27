@@ -12,6 +12,8 @@ use tracing_subscriber::{
     EnvFilter, Layer, Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
 
+use crate::service::pipeline::STATS;
+
 pub static PROGRESS_BAR: Lazy<ProgressBar> = Lazy::new(|| {
     let pb = ProgressBar::new(0).with_style(
         ProgressStyle::with_template("{spinner:.blue} +{pos:.green} ~{len:.magenta} {wide_msg}")
@@ -167,11 +169,11 @@ impl utoo_ruborist::progress::EventReceiver for ProgressReceiver {
                 PROGRESS_BAR.inc_length(count as u64);
             }
             BuildEvent::PreloadFetching { name } => {
-                log_progress(&format!("fetching {}", name));
+                update_progress_with_stats(&format!("fetching {}", name));
             }
             BuildEvent::PreloadProgress { name, .. } => {
                 PROGRESS_BAR.inc(1);
-                log_progress(&format!("resolved {}", name));
+                update_progress_with_stats(&format!("resolved {}", name));
             }
             BuildEvent::PreloadComplete { success, failed } => {
                 PROGRESS_BAR.set_position(0);
@@ -182,7 +184,7 @@ impl utoo_ruborist::progress::EventReceiver for ProgressReceiver {
                 PROGRESS_BAR.inc_length(count as u64);
             }
             BuildEvent::Resolving { name } => {
-                log_progress(&format!("resolving {}", name));
+                update_progress_with_stats(&format!("resolving {}", name));
             }
             BuildEvent::Resolved { .. }
             | BuildEvent::Reused { .. }
@@ -192,6 +194,19 @@ impl utoo_ruborist::progress::EventReceiver for ProgressReceiver {
             _ => {}
         }
     }
+}
+
+/// Update progress bar with pipeline stats
+fn update_progress_with_stats(msg: &str) {
+    let downloading = STATS.downloading();
+    let extracting = STATS.extracting();
+    let downloaded = STATS.downloaded();
+    let extracted = STATS.extracted();
+
+    PROGRESS_BAR.set_message(format!(
+        "{} | dl:{}/{} ext:{}/{}",
+        msg, downloading, downloaded, extracting, extracted
+    ));
 }
 
 #[cfg(test)]

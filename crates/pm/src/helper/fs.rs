@@ -1,6 +1,7 @@
 //! Tokio-based glob implementation for ruborist's Glob trait.
 
 use std::path::{Path, PathBuf};
+use utoo_ruborist::progress::EventReceiver;
 use utoo_ruborist::service::{BuildDepsOptions, Glob, UnifiedRegistry};
 
 use crate::util::cache::get_cache_dir;
@@ -44,6 +45,22 @@ impl Context {
             legacy_peer_deps: get_legacy_peer_deps().await,
             glob: TokioGlob,
             receiver: ProgressReceiver,
+        }
+    }
+
+    /// Create BuildDepsOptions with a custom event receiver.
+    pub async fn build_deps_options_with_receiver<R: EventReceiver>(
+        cwd: PathBuf,
+        receiver: R,
+    ) -> BuildDepsOptions<GlobImpl, R> {
+        BuildDepsOptions {
+            cwd,
+            registry_url: get_registry(),
+            cache_dir: Some(get_cache_dir()),
+            concurrency: get_manifests_concurrency_limit().await,
+            legacy_peer_deps: get_legacy_peer_deps().await,
+            glob: TokioGlob,
+            receiver,
         }
     }
 

@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! OnceMap: A concurrent map that ensures each key's work is done exactly once.
 //!
 //! Based on the pattern from uv package manager:
@@ -8,35 +7,7 @@
 //! - First caller executes the work
 //! - Other callers wait and receive the shared result
 //! - No duplicate work is performed
-//!
-//! # Typical Use Case in Package Manager
-//!
-//! ```text
-//!                    Dependency Graph
-//!
-//!           ┌─────────┐
-//!           │  app    │
-//!           └────┬────┘
-//!         ┌──────┼──────┐
-//!         ▼      ▼      ▼
-//!     ┌───────┐ ┌───┐ ┌───────┐
-//!     │ lib-a │ │...│ │ lib-z │
-//!     └───┬───┘ └───┘ └───┬───┘
-//!         │               │
-//!         └───────┬───────┘
-//!                 ▼
-//!            ┌─────────┐
-//!            │  react  │  ◄── requested by multiple deps
-//!            └─────────┘
-//!
-//!     Without OnceMap:
-//!       lib-a fetches react ──► network request
-//!       lib-z fetches react ──► network request (duplicate!)
-//!
-//!     With OnceMap:
-//!       lib-a fetches react ──► network request
-//!       lib-z waits on lib-a ──► shares result (no duplicate!)
-//! ```
+
 
 use dashmap::{DashMap, mapref::entry::Entry};
 use std::future::Future;
@@ -280,42 +251,6 @@ mod tests {
     }
 
     /// Test that waiters don't miss notifications due to race conditions.
-    ///
-    /// This test verifies the fix for a race condition where a waiter could
-    /// miss the notification if the worker completed between the waiter
-    /// releasing the lock and registering for notifications.
-    ///
-    /// Timeline of the race condition (before fix):
-    /// ```text
-    /// Worker                          Waiter
-    /// ──────                          ──────
-    /// 1. register key
-    ///    insert Waiting(notify)
-    ///    start work...
-    ///                                 2. sees Waiting state
-    ///                                    clone notify
-    ///                                    drop(lock) ← release lock
-    ///
-    ///                                    ┌─────────────────┐
-    ///                                    │  DANGER WINDOW  │
-    ///                                    │  (not listening │
-    ///                                    │   for notify)   │
-    ///                                    └─────────────────┘
-    ///
-    /// 3. work done!
-    ///    insert Done(value)
-    ///    notify_waiters() ← sent!
-    ///    (but no one listening)
-    ///
-    ///                                 4. notified = notify.notified()
-    ///                                    ← too late! already notified
-    ///
-    ///                                 5. notified.await
-    ///                                    ← waits forever, deadlock!
-    /// ```
-    ///
-    /// The fix: register `notified()` BEFORE releasing the lock, then
-    /// double-check if the value was inserted.
     #[tokio::test]
     async fn test_no_missed_notifications() {
         use tokio::sync::Barrier;

@@ -409,11 +409,28 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
     Ok(false)
 }
 
-/// Build dependencies with tgz download.
-/// Used by `utoo install` command for faster installation.
+/// Build dependencies with tgz download using pipeline architecture.
+/// Manifest fetching and tarball downloading happen concurrently.
 async fn build_deps_with_download(cwd: &Path) -> Result<PackageLock> {
-    let options = Context::build_deps_options(cwd.to_path_buf()).await;
-    ruborist_build_deps(options).await
+    use crate::service::pipeline::{PipelineInstaller, PipelineReceiver};
+    use crate::util::logger::ProgressReceiver;
+
+    // Create pipeline installer for concurrent tarball downloads
+    let installer = PipelineInstaller::new();
+
+    // Create pipeline receiver that wraps ProgressReceiver for UI updates
+    let (pipeline_receiver, download_rx) = PipelineReceiver::new(ProgressReceiver);
+
+    // Start the download worker - fire-and-forget, downloads tarballs as packages are resolved
+    // Install phase will wait for needed packages via OnceMap
+    let _download_handle = installer.start_download_worker(download_rx);
+
+    // Build deps with pipeline receiver - triggers tarball downloads during preload
+    let options = Context::build_deps_options_with_receiver(cwd.to_path_buf(), pipeline_receiver).await;
+    let package_lock = ruborist_build_deps(options).await?;
+
+    // Don't wait for downloads - install phase will wait via OnceMap as needed
+    Ok(package_lock)
 }
 
 /// Save PackageLock to disk synchronously

@@ -3,6 +3,23 @@
 //! This module provides an event-driven approach for tracking dependency
 //! resolution progress without adding any I/O to ruborist itself.
 
+/// Package resolution info for pipeline downloading.
+#[derive(Debug, Clone)]
+pub struct PackageResolvedInfo {
+    /// Package name
+    pub name: String,
+    /// Resolved version
+    pub version: String,
+    /// Tarball URL for downloading
+    pub tarball_url: Option<String>,
+    /// Integrity hash for verification
+    pub integrity: Option<String>,
+    /// OS compatibility constraint (if specified)
+    pub os: Option<serde_json::Value>,
+    /// CPU compatibility constraint (if specified)
+    pub cpu: Option<serde_json::Value>,
+}
+
 /// Events emitted during dependency resolution.
 #[derive(Debug, Clone)]
 pub enum BuildEvent {
@@ -22,6 +39,11 @@ pub enum BuildEvent {
         /// Current count of preloaded packages
         current: usize,
     },
+
+    /// A package was fully resolved with download info.
+    /// This event enables pipeline downloading - tarball can be downloaded
+    /// immediately while other manifests are still being fetched.
+    PackageResolved(PackageResolvedInfo),
 
     /// Preload phase completed with success/failed counts.
     PreloadComplete { success: usize, failed: usize },
