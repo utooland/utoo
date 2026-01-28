@@ -20,8 +20,7 @@ mod linux_clone {
     use anyhow::{Context, Result};
     use std::fs;
     use std::io;
-    use std::os::unix::fs::PermissionsExt;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     // Check if the package has install scripts (sync version)
     fn has_install_script_sync(src: &Path) -> bool {
@@ -73,6 +72,8 @@ mod linux_clone {
 
     // Entry point: clone directory using spawn_blocking
     pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
+        // Pre-format for error message (avoid clone)
+        let err_msg = format!("Failed to clone {:?} to {:?}", src, dst);
         let src = src.to_path_buf();
         let dst = dst.to_path_buf();
 
@@ -94,7 +95,7 @@ mod linux_clone {
             clone_dir_sync(&src, &dst, use_copy)
         })
         .await?
-        .with_context(|| format!("Failed to clone {} to {}", src.display(), dst.display()))
+        .with_context(|| err_msg)
     }
 }
 
@@ -119,7 +120,7 @@ mod windows_clone {
     // Fast copy directory (internal recursive version)
     async fn fast_copy_inner(src: &Path, dst: &Path) -> Result<()> {
         // Use create_dir since parent already exists
-        fs::create_dir(dst).await.ok();
+        tokio::fs::create_dir(dst).await.ok();
 
         // Copy all files in the directory
         let mut read_dir = fs::read_dir(src).await?;
@@ -157,7 +158,7 @@ mod windows_clone {
     // Internal recursive clone (parent directory already exists)
     async fn clone_dir_inner(src: &Path, dst: &Path) -> Result<()> {
         // Use create_dir since parent already exists
-        fs::create_dir(dst).await.ok();
+        tokio::fs::create_dir(dst).await.ok();
 
         let mut read_dir = fs::read_dir(src).await?;
         while let Some(entry) = read_dir.next_entry().await? {

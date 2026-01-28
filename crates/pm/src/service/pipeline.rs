@@ -103,14 +103,20 @@ impl PipelineStats {
         let write_ms = self.write_time_us.load(Ordering::Relaxed) / 1000;
         let downloaded_mb = self.bytes_downloaded.load(Ordering::Relaxed) as f64 / 1024.0 / 1024.0;
         let written_mb = self.bytes_written.load(Ordering::Relaxed) as f64 / 1024.0 / 1024.0;
+        let num_cpus = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+        let max_blocking = num_cpus * 2; // same as main.rs config
 
         tracing::info!(
-            "Pipeline stats: network={}ms, decompress={}ms, write={}ms, downloaded={:.1}MB, written={:.1}MB",
+            "Pipeline stats: network={}ms, decompress={}ms, write={}ms, downloaded={:.1}MB, written={:.1}MB, cpus={}, max_blocking={}",
             network_ms,
             decompress_ms,
             write_ms,
             downloaded_mb,
-            written_mb
+            written_mb,
+            num_cpus,
+            max_blocking
         );
     }
 }
