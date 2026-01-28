@@ -106,7 +106,7 @@ impl PipelineStats {
         let num_cpus = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(1);
-        let max_blocking = num_cpus * 2; // same as main.rs config
+        let max_blocking = (num_cpus * 2).max(12); // same as main.rs config
 
         tracing::info!(
             "Pipeline stats: network={}ms, decompress={}ms, write={}ms, downloaded={:.1}MB, written={:.1}MB, cpus={}, max_blocking={}",
