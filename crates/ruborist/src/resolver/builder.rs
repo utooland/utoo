@@ -23,6 +23,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
+use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
 use crate::resolver::preload::{PreloadConfig, preload_manifests};
@@ -549,9 +550,12 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
     legacy_peer_deps: bool,
     receiver: &E,
 ) -> Result<(), ResolveError<R::Error>> {
+    use crate::traits::progress::PackagePlacedInfo;
+
     let start = tokio::time::Instant::now();
 
     let mut current_level = vec![graph.root_index];
+    let mut depth: usize = 0;
 
     while !current_level.is_empty() {
         receiver.on_event(BuildEvent::LevelStart {
@@ -583,13 +587,40 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
                     .await?
                 {
                     ProcessResult::Created(idx) => {
-                        receiver.on_event(BuildEvent::Resolved {
-                            name: edge_info.name,
-                            version: graph
-                                .get_node(idx)
-                                .map(|n| n.version.clone())
-                                .unwrap_or_default(),
-                        });
+                        // Extract node info for events
+                        if let Some(node) = graph.get_node(idx) {
+                            let version = node.version.clone();
+                            let path = node.path.to_string_lossy().to_string();
+
+                            // Extract tarball_url, os, cpu from manifest if it's a Registry package
+                            let (tarball_url, os, cpu) =
+                                if let NodeManifest::Registry(ref manifest) = node.manifest {
+                                    (
+                                        manifest.dist.tarball.clone(),
+                                        manifest.os.clone(),
+                                        manifest.cpu.clone(),
+                                    )
+                                } else {
+                                    (None, None, None)
+                                };
+
+                            receiver.on_event(BuildEvent::Resolved {
+                                name: edge_info.name.clone(),
+                                version: version.clone(),
+                            });
+
+                            // Send PackagePlaced for pipeline cloning
+                            receiver.on_event(BuildEvent::PackagePlaced(PackagePlacedInfo {
+                                name: edge_info.name,
+                                version,
+                                tarball_url,
+                                path,
+                                depth,
+                                os,
+                                cpu,
+                            }));
+                        }
+
                         next_level.push(idx);
                     }
                     ProcessResult::Reused(idx) => {
@@ -615,6 +646,7 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
             next_level_count: next_level.len(),
         });
         current_level = next_level;
+        depth += 1;
     }
 
     tracing::debug!("Build phase: {:?}", start.elapsed());

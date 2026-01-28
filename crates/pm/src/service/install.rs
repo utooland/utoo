@@ -5,8 +5,6 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::Arc;
-use tokio::sync::Semaphore;
 
 use crate::helper::global_bin::get_global_bin_dir;
 use crate::helper::lock::{
@@ -15,11 +13,9 @@ use crate::helper::lock::{
 };
 use crate::helper::workspace;
 use crate::model::package::PackageInfo;
-use crate::service::pipeline::{STATS, download_package};
+use crate::service::pipeline::{STATS, clone_package_once};
 use crate::service::rebuild::RebuildService;
 use crate::util::cache::get_cache_dir;
-use crate::util::cloner::clone_package;
-use crate::util::config::get_manifests_concurrency_limit_sync;
 use crate::util::linker::link;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
 use crate::util::save_type::{OmitType, PackageAction, SaveType};
@@ -273,7 +269,6 @@ pub async fn install_packages(
     groups: &HashMap<usize, Vec<(std::string::String, Package)>>,
     cache_dir: &Path,
     cwd: &Path,
-    semaphore: Arc<Semaphore>,
 ) -> Result<()> {
     // clean unused deps
     clean_deps(groups, cwd).await?;
@@ -338,65 +333,33 @@ pub async fn install_packages(
                         .clone()
                         .ok_or_else(|| anyhow::anyhow!("package {name} missing version"))?;
                     let cache_path = cache_dir.join(format!("{name}/{version}"));
-                    let cache_flag_path = cache_dir.join(format!("{name}/{version}/_resolved"));
                     let cwd_clone = cwd.to_path_buf();
-                    let should_resolve = !crate::fs::try_exists(&cache_flag_path).await?;
-                    let semaphore = Arc::clone(&semaphore);
 
                     // Check if this is an optional dependency
                     let is_optional =
                         package.optional == Some(true) || package.dev_optional == Some(true);
 
                     let task = tokio::spawn(async move {
-                        // Download first - uses global DOWNLOAD_SEMAPHORE via OnceMap
-                        // Pipeline may have already started/completed this download
-                        if should_resolve {
-                            tracing::debug!("Downloading {path} to {name}");
-                            if download_package(&name, &version, &resolved).await.is_none() {
-                                return Err(anyhow::anyhow!("{name} download failed"));
-                            }
-                            log_progress(&format!("{name} downloaded"));
-                            if package.has_install_script.is_some() {
-                                tracing::debug!("{name} has install script");
-                                let has_install_script_flag_path =
-                                    cache_path.join("_hasInstallScript");
-                                crate::fs::write(has_install_script_flag_path, "").await?;
-                            }
+                        let target_path = cwd_clone.join(&path);
+
+                        // Clone via OnceMap - handles download + clone with deduplication
+                        // Pipeline may have already started/completed this clone
+                        if !clone_package_once(&name, &version, &resolved, &target_path).await {
+                            return Err(anyhow::anyhow!("{name} clone failed"));
                         }
 
-                        // Clone with semaphore - only clone operations need local concurrency limit
-                        let _permit = semaphore
-                            .acquire()
-                            .await
-                            .expect("semaphore should not be closed");
-
-                        tracing::debug!("{name} clone");
-                        match clone_package(&cache_path, &cwd_clone.join(&path), &name, &version)
-                            .await
-                        {
-                            Ok(_) => {
-                                tracing::debug!("{name} resolved");
-                                PROGRESS_BAR.inc(1);
-                                log_progress(&format!("{name} resolved"));
-                                update_package_binary(&cwd_clone.join(&path), &name).await?;
-                                Ok(())
-                            }
-                            Err(e) => {
-                                if is_optional {
-                                    tracing::warn!(
-                                        "Optional dependency {name} clone failed (ignored): {e}"
-                                    );
-                                    PROGRESS_BAR.inc(1);
-                                    return Ok(());
-                                }
-                                Err(anyhow::anyhow!(
-                                    "Copy failed {} to {}: {}",
-                                    cache_path.display(),
-                                    cwd_clone.join(&path).display(),
-                                    e
-                                ))
-                            }
+                        // Handle install script flag
+                        if package.has_install_script.is_some() {
+                            tracing::debug!("{name} has install script");
+                            let has_install_script_flag_path = cache_path.join("_hasInstallScript");
+                            crate::fs::write(has_install_script_flag_path, "").await?;
                         }
+
+                        tracing::debug!("{name} resolved");
+                        PROGRESS_BAR.inc(1);
+                        log_progress(&format!("{name} resolved"));
+                        update_package_binary(&target_path, &name).await?;
+                        Ok(())
                     });
                     tasks.push(task);
                 } else {
@@ -483,13 +446,8 @@ impl InstallService {
             PROGRESS_BAR.set_length(package_lock.packages.len() as u64);
         }
 
-        // Set concurrent limit for clone operations
-        // Downloads are controlled by global DOWNLOAD_SEMAPHORE in pipeline.rs
-        let concurrency_limit = get_manifests_concurrency_limit_sync();
-        tracing::debug!("Setting clone concurrent limit to {concurrency_limit}");
-        let semaphore = Arc::new(Semaphore::new(concurrency_limit));
-
-        install_packages(&groups, &cache_dir, root_path, semaphore)
+        // Clone concurrency is controlled by global CLONE_SEMAPHORE in pipeline.rs
+        install_packages(&groups, &cache_dir, root_path)
             .await
             .context("Failed to install packages")?;
 

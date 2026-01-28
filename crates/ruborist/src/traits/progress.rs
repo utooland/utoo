@@ -20,6 +20,26 @@ pub struct PackageResolvedInfo {
     pub cpu: Option<serde_json::Value>,
 }
 
+/// Package placement info for pipeline cloning.
+/// Sent when a package node is placed in the dependency tree.
+#[derive(Debug, Clone)]
+pub struct PackagePlacedInfo {
+    /// Package name
+    pub name: String,
+    /// Resolved version
+    pub version: String,
+    /// Tarball URL for downloading
+    pub tarball_url: Option<String>,
+    /// Target path in node_modules (e.g., "node_modules/lodash")
+    pub path: String,
+    /// Depth in the dependency tree (0 = direct dependency)
+    pub depth: usize,
+    /// OS compatibility constraint (if specified)
+    pub os: Option<serde_json::Value>,
+    /// CPU compatibility constraint (if specified)
+    pub cpu: Option<serde_json::Value>,
+}
+
 /// Events emitted during dependency resolution.
 #[derive(Debug, Clone)]
 pub enum BuildEvent {
@@ -62,6 +82,11 @@ pub enum BuildEvent {
 
     /// Successfully resolved a package (created new node).
     Resolved { name: String, version: String },
+
+    /// A package node was placed in the dependency tree.
+    /// This enables pipeline cloning - the package can be cloned
+    /// immediately after download, without waiting for full tree build.
+    PackagePlaced(PackagePlacedInfo),
 
     /// Skipped an optional dependency.
     Skipped { name: String, spec: String },
