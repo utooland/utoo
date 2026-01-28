@@ -5,7 +5,7 @@ use reqwest::Client;
 use reqwest::StatusCode;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 use tokio::fs::File;
@@ -78,6 +78,41 @@ fn release_buffer(mut buf: Vec<u8>) {
             tracing::trace!("buffer pool: dropped (pool full)");
         }
     }
+}
+
+/// Sanitize a path for Windows compatibility.
+/// Windows doesn't allow: < > : " | ? * and control characters (0-31)
+/// We replace them with underscore to avoid extraction failures.
+#[cfg(windows)]
+fn sanitize_path_for_windows(base: &Path, relative: &Path) -> PathBuf {
+    let mut result = base.to_path_buf();
+    for comp in relative.components() {
+        match comp {
+            std::path::Component::Normal(os_str) => {
+                let s = os_str.to_string_lossy();
+                let sanitized: String = s
+                    .chars()
+                    .map(|c| {
+                        if matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*') || (c as u32) < 32 {
+                            '_'
+                        } else {
+                            c
+                        }
+                    })
+                    .collect();
+                result.push(&sanitized);
+            }
+            std::path::Component::ParentDir => result.push(".."),
+            std::path::Component::CurDir => result.push("."),
+            _ => {}
+        }
+    }
+    result
+}
+
+#[cfg(not(windows))]
+fn sanitize_path_for_windows(base: &Path, relative: &Path) -> PathBuf {
+    base.join(relative)
 }
 
 /// Download tarball bytes only (network phase).
@@ -238,7 +273,7 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
                 .path()
                 .with_context(|| "Failed to get entry path")?
                 .into_owned();
-            let full_path = dest_owned.join(&path);
+            let full_path = sanitize_path_for_windows(&dest_owned, &path);
 
             if !entry.header().entry_type().is_dir() {
                 let mut content = Vec::new();

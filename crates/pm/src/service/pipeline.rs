@@ -11,7 +11,7 @@ use std::sync::{Arc, OnceLock};
 
 use once_cell::sync::Lazy;
 use tokio::sync::{Semaphore, mpsc};
-use utoo_ruborist::progress::{BuildEvent, EventReceiver, PackageResolvedInfo};
+use utoo_ruborist::progress::{BuildEvent, EventReceiver, PackagePlacedInfo, PackageResolvedInfo};
 
 use crate::util::cache::get_cache_dir;
 use crate::util::config::get_manifests_concurrency_limit_sync;
@@ -125,8 +125,35 @@ pub static STATS: Lazy<PipelineStats> = Lazy::new(PipelineStats::new);
 /// 2. Install phase can wait for and reuse ongoing pipeline downloads
 static DOWNLOAD_CACHE: Lazy<OnceMap<String, PathBuf>> = Lazy::new(OnceMap::new);
 
+/// Global clone cache shared between pipeline and install phases.
+/// Key: target path (e.g., "node_modules/lodash"), Value: ()
+/// This ensures:
+/// 1. Pipeline clones are deduplicated
+/// 2. Install phase can wait for and skip ongoing pipeline clones
+static CLONE_CACHE: Lazy<OnceMap<String, ()>> = Lazy::new(OnceMap::new);
+
 /// Global semaphore for download concurrency control (initialized at runtime)
 static DOWNLOAD_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
+
+/// Global semaphore for clone concurrency control (initialized at runtime)
+static CLONE_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
+
+fn get_clone_semaphore() -> &'static Arc<Semaphore> {
+    CLONE_SEMAPHORE.get_or_init(|| {
+        let limit = get_manifests_concurrency_limit_sync();
+        tracing::debug!("Initializing clone semaphore with limit: {}", limit);
+        Arc::new(Semaphore::new(limit))
+    })
+}
+
+/// Message types for clone worker
+#[derive(Debug)]
+pub enum CloneMessage {
+    /// A package to clone
+    Package(PackagePlacedInfo),
+    /// Signal that current level is complete
+    LevelComplete,
+}
 
 fn get_download_semaphore() -> &'static Arc<Semaphore> {
     DOWNLOAD_SEMAPHORE.get_or_init(|| {
@@ -180,18 +207,90 @@ pub async fn download_package(name: &str, version: &str, tarball_url: &str) -> O
         .map(|arc| (*arc).clone())
 }
 
+/// Clone a package to target path, using global OnceMap for deduplication.
+/// Returns true if clone was successful (or already done), false if failed.
+///
+/// Note: Caller is responsible for ensuring correct clone order (parent before child).
+/// The clone worker handles this by processing levels sequentially.
+pub async fn clone_package_once(
+    name: &str,
+    version: &str,
+    tarball_url: &str,
+    target_path: &std::path::Path,
+) -> bool {
+    use crate::util::cloner::clone_package;
+
+    let key = target_path.to_string_lossy().to_string();
+    let name = name.to_string();
+    let version = version.to_string();
+    let tarball_url = tarball_url.to_string();
+    let target_path = target_path.to_path_buf();
+
+    let result = CLONE_CACHE
+        .get_or_init(key, || async move {
+            // Phase 1: Download (via OnceMap, may already be downloaded)
+            let cache_path = match download_package(&name, &version, &tarball_url).await {
+                Some(p) => p,
+                None => {
+                    tracing::warn!("Clone failed: download failed {}@{}", name, version);
+                    return None;
+                }
+            };
+
+            // Phase 2: Clone with semaphore
+            let _permit = get_clone_semaphore().acquire().await.ok()?;
+            match clone_package(&cache_path, &target_path, &name, &version).await {
+                Ok(()) => {
+                    tracing::debug!("Cloned: {}@{} to {}", name, version, target_path.display());
+                    Some(())
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Clone failed: {}@{} to {}: {}",
+                        name,
+                        version,
+                        target_path.display(),
+                        e
+                    );
+                    None
+                }
+            }
+        })
+        .await;
+
+    result.is_some()
+}
+
 /// Pipeline receiver that wraps an inner receiver and forwards events to both
-/// the inner receiver (for UI progress) and a channel (for tarball downloads).
+/// the inner receiver (for UI progress) and channels (for downloads and clones).
 pub struct PipelineReceiver<R: EventReceiver> {
-    tx: mpsc::UnboundedSender<PackageResolvedInfo>,
+    download_tx: mpsc::UnboundedSender<PackageResolvedInfo>,
+    clone_tx: mpsc::UnboundedSender<CloneMessage>,
     inner: R,
+}
+
+/// Channels returned when creating a PipelineReceiver
+pub struct PipelineChannels {
+    pub download_rx: mpsc::UnboundedReceiver<PackageResolvedInfo>,
+    pub clone_rx: mpsc::UnboundedReceiver<CloneMessage>,
 }
 
 impl<R: EventReceiver> PipelineReceiver<R> {
     /// Create a new pipeline receiver wrapping an inner receiver
-    pub fn new(inner: R) -> (Self, mpsc::UnboundedReceiver<PackageResolvedInfo>) {
-        let (tx, rx) = mpsc::unbounded_channel();
-        (Self { tx, inner }, rx)
+    pub fn new(inner: R) -> (Self, PipelineChannels) {
+        let (download_tx, download_rx) = mpsc::unbounded_channel();
+        let (clone_tx, clone_rx) = mpsc::unbounded_channel();
+        (
+            Self {
+                download_tx,
+                clone_tx,
+                inner,
+            },
+            PipelineChannels {
+                download_rx,
+                clone_rx,
+            },
+        )
     }
 }
 
@@ -200,30 +299,59 @@ impl<R: EventReceiver> EventReceiver for PipelineReceiver<R> {
         // Forward to inner receiver first (for progress bar updates)
         self.inner.on_event(event.clone());
 
-        // Then handle PackageResolved for pipeline downloading
-        if let BuildEvent::PackageResolved(info) = event {
-            // Only send if we have a tarball URL and platform is compatible
-            if info.tarball_url.is_some() {
-                // Skip packages that are incompatible with current platform
-                if let Some(ref os) = info.os
-                    && !is_os_compatible(os)
-                {
-                    tracing::debug!("Pipeline skip (os): {}@{}", info.name, info.version);
-                    return;
+        match event {
+            // Handle PackageResolved for preload phase downloading
+            BuildEvent::PackageResolved(info) => {
+                if info.tarball_url.is_some() {
+                    // Skip packages that are incompatible with current platform
+                    if let Some(ref os) = info.os
+                        && !is_os_compatible(os)
+                    {
+                        tracing::debug!("Pipeline skip (os): {}@{}", info.name, info.version);
+                        return;
+                    }
+                    if let Some(ref cpu) = info.cpu
+                        && !is_cpu_compatible(cpu)
+                    {
+                        tracing::debug!("Pipeline skip (cpu): {}@{}", info.name, info.version);
+                        return;
+                    }
+                    let _ = self.download_tx.send(info);
                 }
-                if let Some(ref cpu) = info.cpu
-                    && !is_cpu_compatible(cpu)
-                {
-                    tracing::debug!("Pipeline skip (cpu): {}@{}", info.name, info.version);
-                    return;
-                }
-                let _ = self.tx.send(info);
             }
+            // Handle PackagePlaced for BFS phase cloning
+            BuildEvent::PackagePlaced(info) => {
+                if info.tarball_url.is_some() {
+                    // Skip packages that are incompatible with current platform
+                    if let Some(ref os) = info.os
+                        && !is_os_compatible(os)
+                    {
+                        tracing::debug!("Pipeline clone skip (os): {}@{}", info.name, info.version);
+                        return;
+                    }
+                    if let Some(ref cpu) = info.cpu
+                        && !is_cpu_compatible(cpu)
+                    {
+                        tracing::debug!(
+                            "Pipeline clone skip (cpu): {}@{}",
+                            info.name,
+                            info.version
+                        );
+                        return;
+                    }
+                    let _ = self.clone_tx.send(CloneMessage::Package(info));
+                }
+            }
+            // Handle LevelComplete to signal clone worker to process current level
+            BuildEvent::LevelComplete { .. } => {
+                let _ = self.clone_tx.send(CloneMessage::LevelComplete);
+            }
+            _ => {}
         }
     }
 }
 
-/// Pipeline installer that runs manifest resolution and tarball downloading concurrently
+/// Pipeline installer that runs manifest resolution, tarball downloading, and cloning concurrently
 pub struct PipelineInstaller;
 
 impl PipelineInstaller {
@@ -232,10 +360,10 @@ impl PipelineInstaller {
         Self
     }
 
-    /// Start the download worker that processes resolved packages
+    /// Start the download worker that processes resolved packages (preload phase)
     ///
     /// Fire-and-forget: spawns download tasks without waiting.
-    /// Install phase will wait for needed packages via OnceMap.
+    /// Clone phase will wait for needed packages via OnceMap.
     pub fn start_download_worker(
         &self,
         mut rx: mpsc::UnboundedReceiver<PackageResolvedInfo>,
@@ -249,10 +377,66 @@ impl PipelineInstaller {
                 let name = info.name;
                 let version = info.version;
 
-                // Fire-and-forget: install phase will wait via OnceMap
+                // Fire-and-forget: clone phase will wait via OnceMap
                 tokio::spawn(async move {
                     download_package(&name, &version, &tarball_url).await;
                 });
+            }
+        })
+    }
+
+    /// Start the clone worker that processes placed packages during BFS phase.
+    ///
+    /// Processes packages level by level:
+    /// 1. Collect all packages for current level
+    /// 2. On LevelComplete, clone all collected packages concurrently
+    /// 3. Wait for all clones to complete before processing next level
+    pub fn start_clone_worker(
+        &self,
+        mut rx: mpsc::UnboundedReceiver<CloneMessage>,
+        cwd: std::path::PathBuf,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut current_level: usize = 0;
+            let mut pending: Vec<PackagePlacedInfo> = Vec::new();
+
+            while let Some(msg) = rx.recv().await {
+                match msg {
+                    CloneMessage::Package(info) => {
+                        // Collect packages for current level
+                        pending.push(info);
+                    }
+                    CloneMessage::LevelComplete => {
+                        // Clone all packages in current level concurrently
+                        let tasks: Vec<_> = pending
+                            .drain(..)
+                            .filter_map(|info| {
+                                let tarball_url = info.tarball_url?;
+                                let name = info.name;
+                                let version = info.version;
+                                let target_path = cwd.join(&info.path);
+
+                                Some(tokio::spawn(async move {
+                                    clone_package_once(&name, &version, &tarball_url, &target_path)
+                                        .await
+                                }))
+                            })
+                            .collect();
+
+                        // Wait for all clones in this level to complete
+                        for task in tasks {
+                            let _ = task.await;
+                        }
+
+                        tracing::debug!("Clone level {} complete", current_level);
+                        current_level += 1;
+                    }
+                }
+            }
+
+            // Handle any remaining packages (shouldn't happen normally)
+            if !pending.is_empty() {
+                tracing::warn!("Clone worker ended with {} pending packages", pending.len());
             }
         })
     }
@@ -271,7 +455,7 @@ mod tests {
 
     #[test]
     fn test_pipeline_receiver_filters_events() {
-        let (receiver, mut rx) = PipelineReceiver::new(NoopReceiver);
+        let (receiver, mut channels) = PipelineReceiver::new(NoopReceiver);
 
         // Should forward PackageResolved with tarball_url
         receiver.on_event(BuildEvent::PackageResolved(PackageResolvedInfo {
@@ -296,8 +480,8 @@ mod tests {
         // Should not forward other events
         receiver.on_event(BuildEvent::PreloadStart { count: 10 });
 
-        // Only one message should be in the channel
-        assert!(rx.try_recv().is_ok());
-        assert!(rx.try_recv().is_err());
+        // Only one message should be in the download channel
+        assert!(channels.download_rx.try_recv().is_ok());
+        assert!(channels.download_rx.try_recv().is_err());
     }
 }

@@ -413,28 +413,30 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
     Ok(false)
 }
 
-/// Build dependencies with tgz download using pipeline architecture.
-/// Manifest fetching and tarball downloading happen concurrently.
+/// Build dependencies with tgz download and clone using pipeline architecture.
+/// Manifest fetching, tarball downloading, and cloning happen concurrently.
 async fn build_deps_with_download(cwd: &Path) -> Result<PackageLock> {
     use crate::service::pipeline::{PipelineInstaller, PipelineReceiver};
     use crate::util::logger::ProgressReceiver;
 
-    // Create pipeline installer for concurrent tarball downloads
+    // Create pipeline installer for concurrent operations
     let installer = PipelineInstaller::new();
 
     // Create pipeline receiver that wraps ProgressReceiver for UI updates
-    let (pipeline_receiver, download_rx) = PipelineReceiver::new(ProgressReceiver);
+    let (pipeline_receiver, channels) = PipelineReceiver::new(ProgressReceiver);
 
-    // Start the download worker - fire-and-forget, downloads tarballs as packages are resolved
-    // Install phase will wait for needed packages via OnceMap
-    let _download_handle = installer.start_download_worker(download_rx);
+    // Start the download worker - downloads tarballs as packages are resolved (preload phase)
+    let _download_handle = installer.start_download_worker(channels.download_rx);
 
-    // Build deps with pipeline receiver - triggers tarball downloads during preload
+    // Start the clone worker - clones packages as they are placed (respects depth order)
+    let _clone_handle = installer.start_clone_worker(channels.clone_rx, cwd.to_path_buf());
+
+    // Build deps with pipeline receiver - triggers downloads during preload, clones during BFS
     let options =
         Context::build_deps_options_with_receiver(cwd.to_path_buf(), pipeline_receiver).await;
     let package_lock = ruborist_build_deps(options).await?;
 
-    // Don't wait for downloads - install phase will wait via OnceMap as needed
+    // Don't wait for workers - install phase will handle any remaining work
     Ok(package_lock)
 }
 
