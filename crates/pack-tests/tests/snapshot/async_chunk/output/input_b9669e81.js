@@ -1,4 +1,4 @@
-(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([typeof document === "object" ? document.currentScript : undefined,
+(globalThis["utooChunk_async_chunk_test"] || (globalThis["utooChunk_async_chunk_test"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
 192, ((__turbopack_context__) => {
 
 __turbopack_context__.v((parentImport) => {

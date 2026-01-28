@@ -11,9 +11,10 @@ Empower AI agents to identify and resolve performance bottlenecks in Utoopack/Tu
 - **Build**: **First**, run `npm run build:local --workspace @utoo/pack` to compile utoopack.
 - **Trace Generation**: Run Utoopack with `TRACING_CHROME=$PWD/.trace/trace_$(date +%Y%m%d_%H%M%S).json`.
   - *Example*: `TRACING_CHROME=$PWD/.trace/trace_$(date +%Y%m%d_%H%M%S).json npm run build --prefix examples/with-antd`
-- **Intermediate Files**: All diagnostic scripts (Python/Node), filtered JSON fragments, and analytical results **MUST** be placed in the `./.trace/` directory.
+- **Intermediate Files**: All filtered JSON fragments and analytical results **MUST** be placed in the `./.trace/` directory. Diagnostic scripts (Python/Node) are maintained in the `./agents/tools/` directory for versioning and CI usage.
 - **Workspace Hygiene**: Ensure `./.trace/` is in `.gitignore`. Never upload too huge raw trace data (> 2000MB) directly; share filtered summaries or key findings.
 - **Search Tooling**: You **MUST** use `ripgrep` (command: `rg`) for all code searches. It is significantly faster and respects `.gitignore`, which is crucial for large Rust/JS monorepos.
+- **⚠️ Tracing Overhead**: Chrome Trace instrumentation itself introduces overhead. Tasks with duration **< 10µs** are likely dominated by tracing instrumentation cost rather than actual work. **Exclude these from statistical analysis** to avoid misleading conclusions about micro-task explosion.
 
 ---
 
@@ -30,7 +31,8 @@ Follow this tiered hierarchy. Solve P0 before descending to P1, as high-level sc
   - **Action**: Identify long chains of `await` calls (e.g., `resolve` -> `fs` -> `plugin` -> `resolve`). Convert sequential loops to `try_join` or parallel iterators.
 
 - **📉 B. Scheduling Overhead (Micro-Task Explosion)**
-  - **Signal**: Millions of `turbo_tasks::function` spans with minuscule self-times (< 1µs), dominating the timeline visual noise.
+  - **Signal**: Millions of `turbo_tasks::function` spans with minuscule self-times.
+  - **⚠️ Note**: Tasks < 10µs are likely dominated by **tracing instrumentation overhead**, not actual scheduling cost. Focus analysis on tasks ≥ 10µs.
   - **Expert Logic**: While high counts are acceptable, excessive wrapping of trivial logic (like `bool` checks) adds unnecessary scheduler pressure. 
   - **Action**: Bypass `#[turbo_tasks::function]` only for extremely frequent, low-cost operations (e.g., plugin matching conditions).
 
@@ -95,8 +97,8 @@ Follow this tiered hierarchy. Solve P0 before descending to P1, as high-level sc
 ---
 
 ## 🚀 Step 3: Actionable Diagnostic Workflow
-1. **Quantitative Baseline**: Run a summary script (Python/Node) in `.trace/` to list Top 20 tasks by `count` and `sum(duration)`.
-2. **Qualitative Timeline Scan**: Open the trace in `edge://tracing`. Look for "Wall-like" structures (Parallelism) vs "Staircase" structures (Serialism).
+1. **Quantitative Baseline**: Run the summary script `python3 agents/tools/analyze_trace.py <trace_file> <output_report>` to list Top 20 tasks by `count` and `sum(duration)`.
+2. **Qualitative Timeline Scan**: Open the trace in `chrome://tracing` or `edge://tracing`. Look for "Wall-like" structures (Parallelism) vs "Staircase" structures (Serialism).
 3. **Causal Attribution**: Identify the `Parent Span` of the top bottlenecks to understand *why* they were invoked.
 4. **Final Reporting**: Summarize findings and save the report to `./agents/reports/utoopack_performance_report_YYYYMMDD_HHMMSS.md`. Include specific Tiered signals and recommended actions.
 

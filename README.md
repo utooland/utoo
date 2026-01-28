@@ -8,6 +8,7 @@
 [![License](https://img.shields.io/github/license/utooland/utoo?style=flat-square)](./LICENSE)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/utooland/utoo/ci.yml?style=flat-square)](https://github.com/utooland/utoo/actions)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](./CONTRIBUTING.md)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/utooland/utoo)
 
 </div>
 

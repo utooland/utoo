@@ -1,6 +1,6 @@
 import findUp from "find-up";
-import { readFileSync } from "fs";
-import { dirname } from "path";
+import fs from "fs";
+import path from "path";
 
 export function findRootLockFile(cwd: string) {
   return findUp.sync(
@@ -25,7 +25,7 @@ export function findPackageJson(cwd: string) {
 }
 
 function isWorkspaceRoot(pkgPath: string) {
-  const pkgJson = readFileSync(pkgPath, "utf-8");
+  const pkgJson = fs.readFileSync(pkgPath, "utf-8");
   const pkgJsonContent = JSON.parse(pkgJson);
   return Boolean(pkgJsonContent.workspaces);
 }
@@ -39,8 +39,8 @@ export function findWorkspacesRoot(cwd: string) {
   while (true) {
     const lastPkgJson = pkgJsonFiles[pkgJsonFiles.length - 1];
 
-    const currentDir = dirname(lastPkgJson);
-    const parentDir = dirname(currentDir);
+    const currentDir = path.dirname(lastPkgJson);
+    const parentDir = path.dirname(currentDir);
 
     if (parentDir === currentDir) break;
 
@@ -52,7 +52,7 @@ export function findWorkspacesRoot(cwd: string) {
     pkgJsonFiles.push(newPkgJson);
   }
 
-  return dirname(pkgJsonFiles[pkgJsonFiles.length - 1]);
+  return path.dirname(pkgJsonFiles[pkgJsonFiles.length - 1]);
 }
 
 export function findRootDir(cwd: string): string {
@@ -62,10 +62,10 @@ export function findRootDir(cwd: string): string {
   const lockFiles = [lockFile];
   while (true) {
     const lastLockFile = lockFiles[lockFiles.length - 1];
-    const currentDir = dirname(lastLockFile);
-    const parentDir = dirname(currentDir);
+    const currentDir = path.dirname(lastLockFile);
+    const parentDir = path.dirname(currentDir);
 
-    // dirname('/')==='/' so if we happen to reach the FS root (as might happen in a container we need to quit to avoid looping forever
+    // path.dirname('/')==='/' so if we happen to reach the FS root (as might happen in a container we need to quit to avoid looping forever
     if (parentDir === currentDir) break;
 
     const newLockFile = findRootLockFile(parentDir);
@@ -75,5 +75,5 @@ export function findRootDir(cwd: string): string {
     lockFiles.push(newLockFile);
   }
 
-  return dirname(lockFiles[lockFiles.length - 1]);
+  return path.dirname(lockFiles[lockFiles.length - 1]);
 }

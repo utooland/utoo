@@ -1,18 +1,26 @@
 use anyhow::{Context, Result};
 use pack_api::{
     endpoint::Endpoint,
-    entrypoint::{get_all_written_entrypoints_with_issues_operation, EntrypointsWithIssues},
+    entrypoint::{
+        get_all_written_entrypoints_with_issues_operation, get_entrypoints_with_issues_operation,
+        EntrypointsWithIssues,
+    },
+    hmr::{hmr_update_with_issues_operation, HmrUpdateWithIssues},
     project::{ProjectContainer, ProjectOptions, WatchOptions},
     tasks::BundlerTurboTasks,
     utils::StyledStringSerialize,
 };
+use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
-use std::{ops::Deref, path::PathBuf, str::FromStr, sync::Arc};
-use tokio::time::Instant;
-use turbo_rcstr::RcStr;
-use turbo_tasks::{OperationVc, ReadConsistency, ResolvedVc, TurboTasks};
+use std::{ops::Deref, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
+use tokio::{sync::mpsc::unbounded_channel, time::Instant};
+use turbo_rcstr::{rcstr, RcStr};
+use turbo_tasks::TaskId;
+use turbo_tasks::{
+    Completion, OperationVc, ReadConsistency, ResolvedVc, TransientInstance, TurboTasks, Vc,
+};
 use turbo_tasks_backend::{
     noop_backing_storage, BackendOptions, NoopBackingStorage, TurboTasksBackend,
 };
@@ -22,88 +30,42 @@ use turbopack_core::{
     error::PrettyPrintError,
     issue::{PlainIssue, PlainIssueSource, PlainSource},
     source_pos::SourcePos as SourcePosInner,
+    version::{PartialUpdate, TotalUpdate, Update, VersionState},
 };
-use wasm_bindgen::prelude::wasm_bindgen;
+use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
 
+use crate::fs::Fs;
+use crate::tokio_runtime::runtime;
+
+// https://github.com/dtolnay/inventory/blob/f1be63af0ab00ce41c39f1dd190a624de949c684/src/lib.rs#L105-L148
 unsafe extern "C" {
     pub fn __wasm_call_ctors();
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq)]
-pub struct PartialProjectOptions {
-    pub project_path: String,
+/// Global pack project instance
+static GLOBAL_PACK_PROJECT: RwLock<Option<Arc<PackProject>>> = RwLock::new(None);
 
-    pub config: Option<String>,
+/// A root task handle that keeps the turbo-tasks subscription alive.
+/// This must be held by JS to keep the subscription active.
+#[wasm_bindgen]
+pub struct RootTask {
+    #[allow(dead_code)]
+    turbo_tasks: BundlerTurboTasks,
+    #[allow(dead_code)]
+    task_id: TaskId,
+}
+
+impl Drop for RootTask {
+    fn drop(&mut self) {
+        tracing::debug!("RootTask dropped, subscription will be stopped");
+        // TODO: dispose the root task
+    }
 }
 
 pub struct PackProject {
     pub turbo_tasks: BundlerTurboTasks,
     pub container: ResolvedVc<ProjectContainer>,
-}
-
-impl PackProject {
-    pub async fn initialize(options: ProjectOptions) -> Result<Self> {
-        let turbo_tasks = create_turbo_tasks()?;
-        let container = turbo_tasks
-            .run_once(async move {
-                let project_container = ProjectContainer::new("utoopack-web".into(), false);
-                let project_container = project_container.to_resolved().await?;
-                project_container.initialize(options).await?;
-                Ok(project_container)
-            })
-            .await?;
-
-        Ok(PackProject {
-            turbo_tasks,
-            container,
-        })
-    }
-
-    pub async fn build(&self) -> Result<TurbopackResult> {
-        let start = Instant::now();
-        let turbo_tasks = self.turbo_tasks.clone();
-        let container = self.container;
-        let (entrypoints, issues, diags) = turbo_tasks
-            .run_once(async move {
-                let entrypoints_with_issues_op =
-                    get_all_written_entrypoints_with_issues_operation(container);
-
-                let EntrypointsWithIssues {
-                    entrypoints,
-                    issues,
-                    diagnostics,
-                    effects,
-                } = &*entrypoints_with_issues_op
-                    .read_strongly_consistent()
-                    .await?;
-                effects.apply().await?;
-
-                Ok((entrypoints.clone(), issues.clone(), diagnostics.clone()))
-            })
-            .await?;
-
-        tracing::info!("all project entrypoints wrote to disk.");
-
-        tracing::info!(
-            "pack tasks with {} apps {} libraries finished in {:?}",
-            entrypoints
-                .apps
-                .as_ref()
-                .map(|apps| apps.0.len())
-                .unwrap_or_default(),
-            entrypoints
-                .libraries
-                .as_ref()
-                .map(|libraries| libraries.0.len())
-                .unwrap_or_default(),
-            start.elapsed()
-        );
-
-        Ok(TurbopackResult {
-            issues: issues.iter().map(|i| Issue::from(&**i)).collect(),
-            diagnostics: diags.iter().map(|d| Diagnostic::from(d)).collect(),
-        })
-    }
+    pub dev: bool,
 }
 
 pub fn create_turbo_tasks() -> Result<BundlerTurboTasks> {
@@ -265,4 +227,522 @@ pub fn register_worker_scheduler(creator: js_sys::Function, terminator: js_sys::
 #[wasm_bindgen(js_name = "workerCreated")]
 pub fn worker_created(worker_id: u32) {
     turbopack_node::worker_pool::web_worker::worker_created(worker_id);
+}
+
+/// Initialize or reinitialize the pack project with the given dev mode.
+/// This will clean up any previous turbo-tasks before creating a new project.
+pub async fn init_pack_project(dev: bool) -> Result<()> {
+    // Only reinitialize if the mode (build vs dev) has changed
+    if let Some(project) = &*GLOBAL_PACK_PROJECT.read() {
+        if project.dev == dev {
+            return Ok(());
+        }
+    }
+
+    // Drop the old project
+    GLOBAL_PACK_PROJECT.write().take();
+
+    let cwd = opfs_project::get_cwd().to_string_lossy().to_string();
+    let project_root = if cwd.starts_with('/') {
+        cwd
+    } else {
+        tokio_fs_ext::current_dir()?
+            .join(cwd)
+            .to_string_lossy()
+            .to_string()
+    };
+
+    let config_path = PathBuf::from(&project_root).join("utoopack.json");
+    let config_str = Fs::read_to_string(&config_path.to_string_lossy())
+        .await
+        .ok()
+        .unwrap_or_default();
+    let mut config: Value = serde_json::from_str(&config_str).unwrap_or(json!({}));
+
+    // Inject mode and HMR settings
+    config["mode"] = json!(if dev { "development" } else { "production" });
+    if dev {
+        if config.get("devServer").is_none() {
+            config["devServer"] = json!({});
+        }
+        config["devServer"]["hot"] = json!(true);
+    }
+
+    let project_path: RcStr = project_root.into();
+    let options = ProjectOptions {
+        root_path: project_path.clone(),
+        project_path: project_path.clone(),
+        config: serde_json::to_string(&config)?.into(),
+        build_id: project_path.clone(),
+        watch: WatchOptions {
+            enable: true,
+            ..Default::default()
+        },
+        define_env: Default::default(),
+        dev,
+        pack_path: rcstr!("./"),
+        process_env: Default::default(),
+    };
+
+    tracing::debug!("ProjectOptions: {:?}", options);
+
+    let pack_context = runtime()
+        .spawn(async move {
+            let turbo_tasks = create_turbo_tasks()?;
+            let container = turbo_tasks
+                .run_once(async move {
+                    let container = ProjectContainer::new("utoopack-web".into(), options.dev)
+                        .to_resolved()
+                        .await?;
+                    container.initialize(options).await?;
+                    Ok(container)
+                })
+                .await?;
+
+            Ok::<PackProject, anyhow::Error>(PackProject {
+                turbo_tasks,
+                container,
+                dev,
+            })
+        })
+        .await
+        .context("fail to initialize pack project")??;
+
+    *GLOBAL_PACK_PROJECT.write() = Some(Arc::new(pack_context));
+    Ok(())
+}
+
+/// Build operation.
+pub async fn build() -> std::result::Result<JsValue, wasm_bindgen::JsError> {
+    use wasm_bindgen::JsError;
+
+    init_pack_project(false)
+        .await
+        .map_err(|e| JsError::new(&PrettyPrintError(&e).to_string()))?;
+
+    let pack_project = GLOBAL_PACK_PROJECT
+        .read()
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| JsError::new("pack project not initialized"))?;
+
+    runtime()
+        .spawn(async move {
+            let start = Instant::now();
+            let turbo_tasks = pack_project.turbo_tasks.clone();
+            let container = pack_project.container;
+            let (entrypoints, issues, diags) = turbo_tasks
+                .run_once(async move {
+                    let entrypoints_with_issues_op =
+                        get_all_written_entrypoints_with_issues_operation(container);
+
+                    let EntrypointsWithIssues {
+                        entrypoints,
+                        issues,
+                        diagnostics,
+                        effects,
+                    } = &*entrypoints_with_issues_op
+                        .read_strongly_consistent()
+                        .await?;
+                    effects.apply().await?;
+
+                    Ok((entrypoints.clone(), issues.clone(), diagnostics.clone()))
+                })
+                .await?;
+
+            tracing::info!("all project entrypoints wrote to disk.");
+
+            tracing::info!(
+                "pack tasks with {} apps {} libraries finished in {:?}",
+                entrypoints
+                    .apps
+                    .as_ref()
+                    .map(|apps| apps.0.len())
+                    .unwrap_or_default(),
+                entrypoints
+                    .libraries
+                    .as_ref()
+                    .map(|libraries| libraries.0.len())
+                    .unwrap_or_default(),
+                start.elapsed()
+            );
+
+            let result = TurbopackResult {
+                issues: issues.iter().map(|i| Issue::from(&**i)).collect(),
+                diagnostics: diags.iter().map(|d| Diagnostic::from(d)).collect(),
+            };
+            let json_str =
+                serde_json::to_string(&result).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            Ok::<String, anyhow::Error>(json_str)
+        })
+        .await
+        .map_err(|e| JsError::new(&format!("Failed to spawn build task: {:?}", e)))?
+        .map_or_else(
+            |e| Err(JsError::new(&PrettyPrintError(&e).to_string())),
+            |json_str| {
+                js_sys::JSON::parse(&json_str)
+                    .map_err(|e| JsError::new(&format!("Failed to parse JSON: {:?}", e)))
+            },
+        )
+}
+
+/// Subscribe to entrypoints changes.
+/// This will watch for file changes and automatically rebuild, calling the callback with results.
+/// Should be used for dev mode instead of manually calling build after file saves.
+/// Returns a RootTask that must be held by JS to keep the subscription active.
+pub async fn project_entrypoints_subscribe(
+    callback: js_sys::Function,
+) -> Result<RootTask, wasm_bindgen::JsError> {
+    use wasm_bindgen::JsError;
+
+    // First initialize the project in dev mode
+    init_pack_project(true)
+        .await
+        .map_err(|e| JsError::new(&PrettyPrintError(&e).to_string()))?;
+
+    let pack_project = GLOBAL_PACK_PROJECT
+        .read()
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| JsError::new("pack project not initialized"))?;
+
+    let turbo_tasks = pack_project.turbo_tasks.clone();
+    let container = pack_project.container;
+
+    let (tx, mut rx) = unbounded_channel::<String>();
+
+    let turbo_tasks_clone = turbo_tasks.clone();
+    let task_id = runtime()
+        .spawn(async move {
+            turbo_tasks_clone.spawn_root_task(move || {
+                let tx = tx.clone();
+                async move {
+                    tracing::debug!("entrypointsSubscribe root task executing");
+
+                    let entrypoints_with_issues_op =
+                        get_all_written_entrypoints_with_issues_operation(container);
+                    let EntrypointsWithIssues {
+                        entrypoints: _,
+                        issues,
+                        diagnostics,
+                        effects,
+                    } = &*entrypoints_with_issues_op
+                        .read_strongly_consistent()
+                        .await?;
+                    effects.apply().await?;
+
+                    let turbopack_result = TurbopackResult {
+                        issues: issues.iter().map(|i| Issue::from(&**i)).collect(),
+                        diagnostics: diagnostics.iter().map(|d| Diagnostic::from(d)).collect(),
+                    };
+
+                    // Send result through channel
+                    if let Ok(json_str) = serde_json::to_string(&turbopack_result) {
+                        if let Err(e) = tx.send(json_str) {
+                            tracing::error!("entrypointsSubscribe failed to send: {:?}", e);
+                        }
+                    }
+
+                    // Return Completion to keep the task alive for re-execution
+                    Ok(Completion::new())
+                }
+            })
+        })
+        .await
+        .map_err(|e| JsError::new(&format!("Failed to spawn root task: {:?}", e)))?;
+
+    // Spawn a receiver loop on the MAIN THREAD (local) to forward messages to JS callback.
+    // We cannot use runtime().spawn() here because `callback` (js_sys::Function) is !Send.
+    let turbo_tasks_for_receiver = turbo_tasks.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        while let Some(json_str) = rx.recv().await {
+            if let Ok(js_value) = js_sys::JSON::parse(&json_str) {
+                let _ = callback.call1(&wasm_bindgen::JsValue::NULL, &js_value);
+            }
+        }
+        drop(turbo_tasks_for_receiver); // Keep turbo_tasks alive until subscription ends
+    });
+    Ok(RootTask {
+        turbo_tasks,
+        task_id,
+    })
+}
+
+/// Write all entrypoints to disk.
+/// Should be called after receiving entrypoints from entrypointsSubscribe callback.
+pub fn project_write_all_to_disk(callback: js_sys::Function) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let pack_project = match GLOBAL_PACK_PROJECT.read().as_ref().cloned() {
+            Some(p) => p,
+            None => {
+                tracing::warn!("writeAllToDisk: pack project not initialized");
+                return;
+            }
+        };
+
+        let turbo_tasks = pack_project.turbo_tasks.clone();
+        let container = pack_project.container;
+
+        let result = runtime()
+            .spawn(async move {
+                turbo_tasks
+                    .run_once(async move {
+                        // Use get_all_written_entrypoints_with_issues_operation to write output to disk
+                        let entrypoints_with_issues_op =
+                            get_all_written_entrypoints_with_issues_operation(container);
+                        let EntrypointsWithIssues {
+                            entrypoints: _,
+                            issues,
+                            diagnostics,
+                            effects,
+                        } = &*entrypoints_with_issues_op
+                            .read_strongly_consistent()
+                            .await?;
+                        effects.apply().await?;
+
+                        Ok::<_, anyhow::Error>((issues.clone(), diagnostics.clone()))
+                    })
+                    .await
+            })
+            .await;
+
+        let result = match result {
+            Ok(inner) => inner,
+            Err(e) => {
+                tracing::error!("writeAllToDisk spawn error: {:?}", e);
+                return;
+            }
+        };
+
+        match result {
+            Ok((issues, diags)) => {
+                let turbopack_result = TurbopackResult {
+                    issues: issues.iter().map(|i| Issue::from(&**i)).collect(),
+                    diagnostics: diags.iter().map(|d| Diagnostic::from(d)).collect(),
+                };
+
+                if let Ok(json_str) = serde_json::to_string(&turbopack_result) {
+                    if let Ok(js_value) = js_sys::JSON::parse(&json_str) {
+                        let _ = callback.call1(&wasm_bindgen::JsValue::NULL, &js_value);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("writeAllToDisk error: {:?}", e);
+            }
+        }
+    });
+}
+
+pub async fn project_hmr_events(
+    identifier: String,
+    callback: js_sys::Function,
+) -> Result<RootTask, wasm_bindgen::JsError> {
+    use wasm_bindgen::JsError;
+
+    let identifier: RcStr = identifier.into();
+
+    let pack_project = GLOBAL_PACK_PROJECT
+        .read()
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| JsError::new("pack project not initialized"))?;
+
+    let turbo_tasks = pack_project.turbo_tasks.clone();
+    let container = pack_project.container;
+    let session = TransientInstance::new(());
+
+    // Create channel for communication between root task and JS callback
+    let (tx, mut rx) = unbounded_channel::<String>();
+
+    // Spawn a root task that will be re-executed when dependencies change
+    let turbo_tasks_clone = turbo_tasks.clone();
+    let task_id = runtime()
+        .spawn({
+            let identifier = identifier.clone();
+            let session = session.clone();
+            async move {
+                turbo_tasks_clone.spawn_root_task(move || {
+                    let identifier = identifier.clone();
+                    let session = session.clone();
+                    let tx = tx.clone();
+                    async move {
+                        tracing::debug!("hmrSubscribe root task executing for {}", identifier);
+
+                        let project = container.project().to_resolved().await?;
+                        let state = project
+                            .hmr_version_state(identifier.clone(), session)
+                            .to_resolved()
+                            .await?;
+
+                        let update_op =
+                            hmr_update_with_issues_operation(project, identifier.clone(), state);
+                        let update = update_op.read_strongly_consistent().await?;
+                        let HmrUpdateWithIssues {
+                            update,
+                            issues,
+                            diagnostics,
+                            effects,
+                        } = &*update;
+                        effects.apply().await?;
+
+                        // Update the version state (same as NAPI)
+                        match &**update {
+                            Update::Missing | Update::None => {}
+                            Update::Total(TotalUpdate { to }) => {
+                                state.set(to.clone()).await?;
+                            }
+                            Update::Partial(PartialUpdate { to, .. }) => {
+                                state.set(to.clone()).await?;
+                            }
+                        }
+
+                        // Convert issues to JSON (matching NAPI's NapiIssue format)
+                        let issues_json: Vec<_> =
+                            issues.iter().map(|issue| Issue::from(&**issue)).collect();
+
+                        let diagnostics_json: Vec<_> =
+                            diagnostics.iter().map(|d| Diagnostic::from(d)).collect();
+
+                        let result_json = match &**update {
+                            Update::Missing => serde_json::json!({
+                                "type": "notFound",
+                                "resource": { "path": identifier.to_string() },
+                                "issues": []
+                            }),
+                            Update::None => serde_json::json!({
+                                "type": "issues",
+                                "resource": { "path": identifier.to_string() },
+                                "issues": issues_json
+                            }),
+                            Update::Total(_) => serde_json::json!({
+                                "type": "restart",
+                                "resource": { "path": identifier.to_string() },
+                                "issues": issues_json
+                            }),
+                            Update::Partial(PartialUpdate { instruction, .. }) => {
+                                serde_json::json!({
+                                    "type": "partial",
+                                    "resource": { "path": identifier.to_string() },
+                                    "instruction": *instruction,
+                                    "issues": issues_json
+                                })
+                            }
+                        };
+
+                        let mut turbopack_result = result_json;
+                        if let Some(obj) = turbopack_result.as_object_mut() {
+                            obj.insert(
+                                "diagnostics".to_string(),
+                                serde_json::to_value(diagnostics_json).unwrap(),
+                            );
+                        }
+
+                        tracing::debug!("hmrSubscribe sending update for {}", identifier);
+                        if let Ok(json_str) = serde_json::to_string(&turbopack_result) {
+                            let _ = tx.send(json_str);
+                        }
+
+                        Ok(Completion::new())
+                    }
+                })
+            }
+        })
+        .await
+        .map_err(|e| JsError::new(&format!("Failed to spawn root task: {:?}", e)))?;
+
+    // Spawn receiver loop on main thread to forward messages to JS callback
+    let turbo_tasks_for_receiver = turbo_tasks.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        while let Some(json_str) = rx.recv().await {
+            tracing::debug!("hmrSubscribe received update, calling JS callback");
+            if let Ok(js_value) = js_sys::JSON::parse(&json_str) {
+                let _ = callback.call1(&JsValue::NULL, &js_value);
+            }
+        }
+        drop(turbo_tasks_for_receiver);
+    });
+    Ok(RootTask {
+        turbo_tasks,
+        task_id,
+    })
+}
+
+/// Subscribe to compilation lifecycle events.
+/// Emits "start" when computation begins, "end" when idle for aggregation_ms.
+/// The callback receives { updateType: "start" | "end", value?: { duration: number, tasks: number } }
+pub fn project_update_info_subscribe(aggregation_ms: u32, callback: js_sys::Function) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let pack_project = match GLOBAL_PACK_PROJECT.read().as_ref().cloned() {
+            Some(p) => p,
+            None => {
+                tracing::warn!("updateInfoSubscribe: pack project not initialized");
+                return;
+            }
+        };
+
+        let turbo_tasks = pack_project.turbo_tasks.clone();
+
+        loop {
+            // Wait for update info
+            let turbo_tasks_clone = turbo_tasks.clone();
+            let update_info = runtime()
+                .spawn(async move {
+                    turbo_tasks_clone
+                        .aggregated_update_info(Duration::ZERO, Duration::ZERO)
+                        .await
+                })
+                .await;
+
+            // Emit start event
+            let start_json = serde_json::json!({
+                "updateType": "start",
+                "value": null
+            });
+            if let Ok(js_value) =
+                js_sys::JSON::parse(&serde_json::to_string(&start_json).unwrap_or_default())
+            {
+                let _ = callback.call1(&JsValue::NULL, &js_value);
+            }
+
+            // Get or wait for update info
+            let update_info = match update_info {
+                Ok(Some(info)) => info,
+                _ => {
+                    let turbo_tasks_clone = turbo_tasks.clone();
+                    let aggregation_ms = aggregation_ms;
+                    match runtime()
+                        .spawn(async move {
+                            turbo_tasks_clone
+                                .get_or_wait_aggregated_update_info(Duration::from_millis(
+                                    aggregation_ms.into(),
+                                ))
+                                .await
+                        })
+                        .await
+                    {
+                        Ok(info) => info,
+                        Err(e) => {
+                            tracing::error!("updateInfoSubscribe wait error: {:?}", e);
+                            continue;
+                        }
+                    }
+                }
+            };
+
+            // Emit end event with duration and tasks
+            let end_json = serde_json::json!({
+                "updateType": "end",
+                "value": {
+                    "duration": update_info.duration.as_millis() as u32,
+                    "tasks": update_info.tasks as u32
+                }
+            });
+            if let Ok(js_value) =
+                js_sys::JSON::parse(&serde_json::to_string(&end_json).unwrap_or_default())
+            {
+                let _ = callback.call1(&JsValue::NULL, &js_value);
+            }
+        }
+    });
 }

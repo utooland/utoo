@@ -1,3 +1,4 @@
+import { type UpdateMessage } from "@utoo/pack-shared";
 import {
   DepsOptions,
   InstallOptions,
@@ -13,6 +14,7 @@ import initWasm, {
   Fs,
   initLogFilter,
   Project as ProjectInternal,
+  RootTask,
 } from "../utoo";
 import { runLoaderWorkerPool } from "../webpackLoaders/loaderWorkerPool";
 
@@ -20,6 +22,11 @@ class InternalEndpoint implements ProjectEndpoint {
   wasmInit?: ReturnType<typeof initWasm>;
   options?: Omit<ProjectOptions, "workerUrl" | "serviceWorker">;
   loaderWorkerPoolInitialized = false;
+
+  // Keep root task alive for the subscription to work
+  private rootTask?: RootTask;
+  // Keep HMR root tasks alive (keyed by identifier)
+  private hmrRootTasks: Map<string, RootTask> = new Map();
 
   // This should be called only once
   async mount(opt: Omit<ProjectOptions, "workerUrl" | "serviceWorker">) {
@@ -43,15 +50,16 @@ class InternalEndpoint implements ProjectEndpoint {
 
   async deps(options?: DepsOptions) {
     await this.wasmInit!;
-    return await ProjectInternal.deps(
-      options?.registry ?? undefined,
-      options?.concurrency ?? undefined,
-    );
+    // Ensure we pass undefined (not null) for missing values
+    const registry = options?.registry ?? undefined;
+    const concurrency = options?.concurrency ?? undefined;
+    return await ProjectInternal.deps(registry, concurrency);
   }
 
   async install(packageLock: string, options?: InstallOptions) {
     await this.wasmInit!;
-    await ProjectInternal.install(packageLock, options?.maxConcurrentDownloads);
+    const concurrency = options?.maxConcurrentDownloads ?? undefined;
+    await ProjectInternal.install(packageLock, concurrency);
     return;
   }
 
@@ -68,6 +76,23 @@ class InternalEndpoint implements ProjectEndpoint {
     }
 
     return await ProjectInternal.build();
+  }
+
+  async dev(onUpdate?: (result: any) => void) {
+    if (this.options?.loaderWorkerUrl && !this.loaderWorkerPoolInitialized) {
+      runLoaderWorkerPool(
+        this.options.cwd,
+        this.options!.loaderWorkerUrl,
+        this.options?.loadersImportMap,
+      );
+      this.loaderWorkerPoolInitialized = true;
+    }
+
+    this.rootTask = await ProjectInternal.entrypointsSubscribe(
+      (result: any) => {
+        onUpdate?.(result);
+      },
+    );
   }
 
   async readFile(path: string, encoding?: "utf8") {
@@ -165,6 +190,18 @@ class InternalEndpoint implements ProjectEndpoint {
   async sigMd5(content: Uint8Array) {
     await this.wasmInit!;
     return await ProjectInternal.sigMd5(content);
+  }
+
+  async hmrSubscribe(identifier: string, callback: (update: unknown) => void) {
+    const rootTask = await ProjectInternal.hmrEvents(identifier, callback);
+    this.hmrRootTasks.set(identifier, rootTask);
+  }
+
+  updateInfoSubscribe(
+    aggregationMs: number,
+    callback: (message: UpdateMessage) => void,
+  ) {
+    ProjectInternal.updateInfoSubscribe(aggregationMs, callback);
   }
 }
 

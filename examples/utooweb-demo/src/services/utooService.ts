@@ -151,7 +151,7 @@ export const updateDependencies = async (
 
   // Install with lazy extraction
   console.log("Installing...");
-  await project.install(packageLock, concurrency);
+  await project.install(packageLock, { maxConcurrentDownloads: concurrency });
   console.log("Update complete");
 };
 
@@ -202,7 +202,7 @@ export const installDependencies = async (
       await project.writeFile("package-lock.json", packageLock, "utf8");
     }
     console.log("Installing...");
-    await project.install(packageLock, concurrency);
+    await project.install(packageLock, { maxConcurrentDownloads: concurrency });
   } catch (e) {
     console.error("Failed to install dependencies:", e);
     throw e;

@@ -12,4 +12,5 @@ trace-*.json.gz
 *.cpuprofile
 *.heapprofile
 .trace/
+*.tsbuildinfo
 

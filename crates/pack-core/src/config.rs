@@ -1,6 +1,9 @@
+use std::sync::LazyLock;
+
 use anyhow::{Context, Result, bail};
 use bincode::{Decode, Encode};
 use either::Either;
+use regex::Regex;
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value as JsonValue;
@@ -8,7 +11,7 @@ use turbo_esregex::EsRegex;
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{FxIndexMap, OperationValue, ResolvedVc, Vc};
 use turbo_tasks_env::EnvMap;
-use turbo_tasks_fs::FileSystemPath;
+use turbo_tasks_fs::{FileJsonContent, FileSystemPath};
 use turbopack::module_options::{
     ConditionItem, ConditionPath, LoaderRuleItem, WebpackRules,
     module_options_context::MdxTransformOptions,
@@ -353,6 +356,10 @@ pub struct OutputConfig {
     /// Note: This path will not appear in chunk paths or chunk data on disk,
     /// it only affects the URLs used by the browser to fetch resources.
     pub public_path: Option<RcStr>,
+    /// The global variable name used by the runtime for loading chunks.
+    /// This is similar to webpack's `output.chunkLoadingGlobal`.
+    /// Default: "TURBOPACK"
+    pub chunk_loading_global: Option<RcStr>,
 }
 
 #[turbo_tasks::value]
@@ -877,6 +884,17 @@ impl Issue for InvalidLoaderRuleConditionIssue {
     }
 }
 
+static IDENTIFIER_START_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^([^a-zA-Z$_])").unwrap());
+static IDENTIFIER_INVALID_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[^a-zA-Z0-9$]+").unwrap());
+
+// port from: https://github.com/webpack/webpack/blob/main/lib/Template.js#L104-L109
+fn to_identifier(s: &str) -> String {
+    let result = IDENTIFIER_START_RE.replace(s, "_$1");
+    IDENTIFIER_INVALID_RE.replace_all(&result, "_").into_owned()
+}
+
 #[turbo_tasks::value_impl]
 impl Config {
     #[turbo_tasks::function]
@@ -922,6 +940,45 @@ impl Config {
     #[turbo_tasks::function]
     pub fn output(&self) -> Vc<OutputConfig> {
         self.output.clone().unwrap_or_default().cell()
+    }
+
+    // refer to: https://github.com/utooland/utoo/issues/2526
+    #[turbo_tasks::function]
+    pub async fn chunk_loading_global(
+        &self,
+        project_path: FileSystemPath,
+    ) -> Result<Vc<Option<RcStr>>> {
+        // 1. Check if user explicitly configured chunkLoadingGlobal
+        if let Some(chunk_loading_global) = self
+            .output
+            .as_ref()
+            .and_then(|o| o.chunk_loading_global.as_ref())
+        {
+            return Ok(Vc::cell(Some(
+                format!("utooChunk_{}", chunk_loading_global).into(),
+            )));
+        }
+
+        // TODO: support it when this feature is stable
+        // // 2. Check entry[].name from the first entry
+        // if let Some(entry_name) = self.entry.first().and_then(|e| e.name.as_ref()) {
+        //     let global_name = to_identifier(entry_name);
+        //     return Ok(Vc::cell(Some(global_name.into())));
+        // }
+
+        // 3. Read package.json and get name field
+        let package_json_path = project_path.join("package.json")?;
+        let package_json_content = package_json_path.read_json().await?;
+
+        if let FileJsonContent::Content(json) = &*package_json_content
+            && let Some(name) = json.get("name").and_then(|n| n.as_str())
+        {
+            let global_name = to_identifier(name);
+            return Ok(Vc::cell(Some(format!("utooChunk_{}", global_name).into())));
+        }
+
+        // 4. No name found, return None to let the runtime use its default
+        Ok(Vc::cell(None))
     }
 
     #[turbo_tasks::function]

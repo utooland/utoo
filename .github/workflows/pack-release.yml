@@ -84,15 +84,8 @@ jobs:
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: false
-      - name: Add SSH private keys for submodule repositories
-        uses: webfactory/ssh-agent@v0.7.0
-        with:
-          ssh-private-key: |
-            ${{ secrets.CI_SUBMODULE }}
       - name: Init git submodules
-        run: git submodule update --init --depth 1
+        run: git submodule update --init --recursive --depth 1
       - name: Free disk space
         if: matrix.settings.host == 'ubuntu-latest'
         run: |
@@ -100,7 +93,6 @@ jobs:
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
           sudo rm -rf "/usr/local/share/boost"
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
           sudo rm -rf /usr/share/swift
           sudo rm -rf /usr/local/share/powershell
           sudo rm -rf /usr/share/miniconda
@@ -205,9 +197,9 @@ jobs:
           fi
           echo "Publishing with tag: $TAG"
 
-          npm version --workspace=@utoo/pack-shared "${VERSION}" --no-git-tag-version &&
-          npm version --workspace=@utoo/pack "${VERSION}" --no-git-tag-version &&
-          npm version --workspace=@utoo/pack-cli "${VERSION}" --no-git-tag-version &&
+          npm version --workspace=@utoo/pack-shared "${VERSION}" --no-git-tag-version --workspaces-update=false &&
+          npm version --workspace=@utoo/pack "${VERSION}" --no-git-tag-version --workspaces-update=false &&
+          npm version --workspace=@utoo/pack-cli "${VERSION}" --no-git-tag-version --workspaces-update=false &&
           npm pkg set dependencies.@utoo/pack-shared="${VERSION}" --workspace=@utoo/pack &&
           npm pkg set dependencies.@utoo/pack="${VERSION}" --workspace=@utoo/pack-cli &&
           npm publish --workspace=@utoo/pack-shared --access public --tag "${TAG}" &&

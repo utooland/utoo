@@ -461,7 +461,7 @@ dependencies = [
  "bitflags 2.9.4",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.12.1",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -935,7 +935,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -944,7 +944,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -2814,7 +2814,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -3041,7 +3041,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b0f83760fb341a774ed326568e19f5a863af4a952def8c39f9ab92fd95b88e5"
 dependencies = [
  "equivalent",
- "hashbrown 0.16.0",
+ "hashbrown 0.15.5",
  "serde",
  "serde_core",
 ]
@@ -3218,7 +3218,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3441,8 +3441,8 @@ checksum = "0c6639b70a7ce854b79c70d7e83f16b5dc0137cc914f3d7d03803b513ecc67ac"
 
 [[package]]
 name = "lightningcss"
-version = "1.0.0-alpha.68"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#b472bc38a4c192fe99d97c72fdfd51975a2f412a"
+version = "1.0.0-alpha.70"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#af747bd5de2f2f7ff032927c013788fed23f2544"
 dependencies = [
  "ahash 0.8.12",
  "bitflags 2.9.4",
@@ -3471,7 +3471,7 @@ dependencies = [
 [[package]]
 name = "lightningcss-derive"
 version = "1.0.0-alpha.43"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#b472bc38a4c192fe99d97c72fdfd51975a2f412a"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#af747bd5de2f2f7ff032927c013788fed23f2544"
 dependencies = [
  "convert_case 0.6.0",
  "proc-macro2",
@@ -4327,6 +4327,7 @@ dependencies = [
  "modularize_imports",
  "pathdiff",
  "qstring",
+ "regex",
  "remove_console",
  "rustc-hash 2.1.1",
  "serde",
@@ -4463,7 +4464,7 @@ dependencies = [
 [[package]]
 name = "parcel_selectors"
 version = "0.28.2"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#b472bc38a4c192fe99d97c72fdfd51975a2f412a"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#af747bd5de2f2f7ff032927c013788fed23f2544"
 dependencies = [
  "bitflags 2.9.4",
  "cssparser",
@@ -4938,7 +4939,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.106",
@@ -5067,7 +5068,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.1",
  "rustls",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
@@ -5104,7 +5105,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -5571,7 +5572,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6278,6 +6279,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
+ "windows-sys 0.52.0",
  "windows-sys 0.59.0",
 ]
 
@@ -6295,7 +6297,7 @@ dependencies = [
 [[package]]
 name = "static-self"
 version = "0.1.2"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#b472bc38a4c192fe99d97c72fdfd51975a2f412a"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#af747bd5de2f2f7ff032927c013788fed23f2544"
 dependencies = [
  "indexmap 2.11.4",
  "smallvec",
@@ -6305,7 +6307,7 @@ dependencies = [
 [[package]]
 name = "static-self-derive"
 version = "0.1.1"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#b472bc38a4c192fe99d97c72fdfd51975a2f412a"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#af747bd5de2f2f7ff032927c013788fed23f2544"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8163,7 +8165,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 [[package]]
 name = "tokio"
 version = "1.47.1"
-source = "git+https://github.com/utooland/tokio.git#0b9f7720e2b65634e0fb7d7d8be9073fc21d96a1"
+source = "git+https://github.com/utooland/tokio.git#863a78f4869e327c88997156e6bb852e069589b3"
 dependencies = [
  "backtrace",
  "bytes",
@@ -8206,7 +8208,7 @@ dependencies = [
 [[package]]
 name = "tokio-macros"
 version = "2.5.0"
-source = "git+https://github.com/utooland/tokio.git#0b9f7720e2b65634e0fb7d7d8be9073fc21d96a1"
+source = "git+https://github.com/utooland/tokio.git#863a78f4869e327c88997156e6bb852e069589b3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8286,7 +8288,7 @@ dependencies = [
 [[package]]
 name = "tokio-util"
 version = "0.7.16"
-source = "git+https://github.com/utooland/tokio.git#0b9f7720e2b65634e0fb7d7d8be9073fc21d96a1"
+source = "git+https://github.com/utooland/tokio.git#863a78f4869e327c88997156e6bb852e069589b3"
 dependencies = [
  "bytes",
  "futures-core",
@@ -10061,7 +10063,7 @@ dependencies = [
 [[package]]
 name = "wasm_thread"
 version = "0.3.3"
-source = "git+https://github.com/utooland/wasm_thread.git#1155d645aedfdbe55f8ea336a9e8a8150239beb0"
+source = "git+https://github.com/utooland/wasm_thread.git#fd53c2f5a20e9f899d9216dee045472f50d97219"
 dependencies = [
  "futures",
  "js-sys",

@@ -227,9 +227,14 @@ pub async fn get_client_runtime_entries(
     }
 
     if is_development && watch && hot {
+        #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+        let hmr_bootstrap_path = rcstr!("hmr/bootstrap-messageport.ts");
+        #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+        let hmr_bootstrap_path = rcstr!("hmr/bootstrap.ts");
+
         runtime_entries.push(
             RuntimeEntry::Source(ResolvedVc::upcast(
-                FileSource::new(embed_file_path(rcstr!("hmr/bootstrap.ts")).owned().await?)
+                FileSource::new(embed_file_path(hmr_bootstrap_path).owned().await?)
                     .to_resolved()
                     .await?,
             ))
@@ -499,12 +504,12 @@ pub async fn get_client_resolve_options_context(
     // For node_modules: manually specify extensions to avoid parsing their tsconfig.json
     let foreign_resolve_options = ResolveOptionsContext {
         custom_extensions: Some(vec![
-            rcstr!(".tsx"),
-            rcstr!(".ts"),
-            rcstr!(".jsx"),
             rcstr!(".js"),
             rcstr!(".mjs"),
             rcstr!(".json"),
+            rcstr!(".jsx"),
+            rcstr!(".ts"),
+            rcstr!(".tsx"),
         ]),
         ..resolve_options_context.clone()
     };
@@ -579,7 +584,7 @@ pub async fn get_client_chunking_context(
     };
 
     let mut builder = BrowserChunkingContext::builder(
-        root_path,
+        root_path.clone(),
         output_root.clone(),
         output_root_to_root_path,
         output_root.clone(),
@@ -608,7 +613,9 @@ pub async fn get_client_chunking_context(
     .module_id_strategy(module_id_strategy.to_resolved().await?)
     .nested_async_availability(*nested_async_chunking.await?);
 
-    let output = config.output().await?;
+    if let Some(chunk_loading_global) = &*config.chunk_loading_global(root_path.clone()).await? {
+        builder = builder.chunk_loading_global(chunk_loading_global.clone());
+    }
 
     if mode.is_development() {
         builder = builder
@@ -616,6 +623,7 @@ pub async fn get_client_chunking_context(
             .source_map_source_type(SourceMapSourceType::AbsoluteFileUri)
             .dynamic_chunk_content_loading(true);
     } else {
+        let output = config.output().await?;
         let split_chunks = &config.optimization().await?.split_chunks;
 
         let (ecmascript_chunking_config, css_chunking_config) = (

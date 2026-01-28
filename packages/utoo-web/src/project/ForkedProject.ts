@@ -6,6 +6,7 @@ import {
   ProjectEndpoint,
   RawStats,
   Stats,
+  UpdateMessage,
 } from "../types";
 
 export class ForkedProject implements ProjectEndpoint {
@@ -16,15 +17,38 @@ export class ForkedProject implements ProjectEndpoint {
   }
 
   public async deps(options?: DepsOptions) {
-    return await this.endpoint.deps(options);
+    return await this.endpoint.deps({
+      registry: options?.registry ?? undefined,
+      concurrency: options?.concurrency ?? undefined,
+    });
   }
 
   public async install(packageLock: string, options?: InstallOptions) {
-    return await this.endpoint.install(packageLock, options);
+    return await this.endpoint.install(packageLock, {
+      maxConcurrentDownloads: options?.maxConcurrentDownloads,
+    });
   }
 
   public async build() {
     return await this.endpoint.build();
+  }
+
+  public dev(onUpdate?: (result: any) => void): void {
+    this.endpoint.dev(onUpdate ? comlink.proxy(onUpdate) : undefined);
+  }
+
+  public async hmrSubscribe(
+    identifier: string,
+    callback: (update: unknown) => void,
+  ): Promise<void> {
+    await this.endpoint.hmrSubscribe(identifier, comlink.proxy(callback));
+  }
+
+  public updateInfoSubscribe(
+    aggregationMs: number,
+    callback: (message: UpdateMessage) => void,
+  ): void {
+    this.endpoint.updateInfoSubscribe(aggregationMs, comlink.proxy(callback));
   }
 
   public async readFile(path: string, encoding?: "utf8") {

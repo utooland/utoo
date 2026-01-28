@@ -1,4 +1,4 @@
-(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([typeof document === "object" ? document.currentScript : undefined,
+(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
 83, ((__turbopack_context__) => {
 
 __turbopack_context__.v(__turbopack_context__.p() + "asset.c77b3abb.jpg");}),

@@ -6,21 +6,17 @@ on:
   pull_request:
     types: [opened, synchronize]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: utooweb-ci-build-wasm
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: false
-      - name: Add SSH private keys for submodule repositories
-        uses: webfactory/ssh-agent@v0.7.0
-        with:
-          ssh-private-key: |
-            ${{ secrets.CI_SUBMODULE }}
       - name: Init git submodules
-        run: git submodule update --init --depth 1
+        run: git submodule update --init --recursive --depth 1
       - name: Setup node
         uses: actions/setup-node@v4
         with:
