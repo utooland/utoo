@@ -153,10 +153,10 @@ mod linux_clone {
         Ok(())
     }
 
-    // Fast copy using the best available method
-    async fn fast_copy(src: &Path, dst: &Path) -> Result<()> {
-        // Create destination directory
-        fs::create_dir_all(dst).await?;
+    // Fast copy using the best available method (internal recursive version)
+    async fn fast_copy_inner(src: &Path, dst: &Path) -> Result<()> {
+        // Use create_dir since parent already exists (called from fast_copy)
+        fs::create_dir(dst).await.ok();
 
         // Copy all files in the directory
         let mut read_dir = fs::read_dir(src).await?;
@@ -166,12 +166,18 @@ mod linux_clone {
             let target_path = dst.join(file_name);
 
             if entry.metadata().await?.is_dir() {
-                Box::pin(fast_copy(&entry_path, &target_path)).await?;
+                Box::pin(fast_copy_inner(&entry_path, &target_path)).await?;
             } else {
                 fast_copy_file(&entry_path, &target_path).await?;
             }
         }
         Ok(())
+    }
+
+    // Fast copy entry point - ensures parent directory exists
+    async fn fast_copy(src: &Path, dst: &Path) -> Result<()> {
+        fs::create_dir_all(dst).await?;
+        fast_copy_inner(src, dst).await
     }
 
     // Check if the package has install scripts
@@ -185,25 +191,11 @@ mod linux_clone {
         false
     }
 
-    pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
-        if !fs::metadata(src).await?.is_dir() {
-            return Err(anyhow::anyhow!("Source is not a directory"));
-        }
+    // Internal recursive clone (parent directory already exists)
+    async fn clone_dir_inner(src: &Path, dst: &Path) -> Result<()> {
+        // Use create_dir since parent already exists
+        fs::create_dir(dst).await.ok();
 
-        // Create destination directory
-        fs::create_dir_all(dst).await?;
-
-        // Check if the package has install scripts
-        if has_install_script(src).await {
-            tracing::debug!(
-                "Package has install scripts, using fast copy for directory {} to {}",
-                src.display(),
-                dst.display()
-            );
-            return fast_copy(src, dst).await;
-        }
-
-        // For directories without install scripts, recursively create the directory structure
         let mut read_dir = fs::read_dir(src).await?;
         while let Some(entry) = read_dir.next_entry().await? {
             let entry_path = entry.path();
@@ -211,11 +203,11 @@ mod linux_clone {
             let target_path = dst.join(file_name);
 
             if entry.metadata().await?.is_dir() {
-                Box::pin(clone_dir(&entry_path, &target_path)).await?;
+                Box::pin(clone_dir_inner(&entry_path, &target_path)).await?;
             } else {
                 // Try hardlink first for files in packages without install scripts
                 if let Err(e) = fs::hard_link(&entry_path, &target_path).await {
-                    eprintln!(
+                    tracing::debug!(
                         "Failed to create hardlink for file from {} to {}: {}, trying fast copy",
                         entry_path.display(),
                         target_path.display(),
@@ -228,6 +220,28 @@ mod linux_clone {
         }
 
         Ok(())
+    }
+
+    pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
+        if !fs::metadata(src).await?.is_dir() {
+            return Err(anyhow::anyhow!("Source is not a directory"));
+        }
+
+        // Create destination directory (entry point, use create_dir_all)
+        fs::create_dir_all(dst).await?;
+
+        // Check if the package has install scripts
+        if has_install_script(src).await {
+            tracing::debug!(
+                "Package has install scripts, using fast copy for directory {} to {}",
+                src.display(),
+                dst.display()
+            );
+            return fast_copy_inner(src, dst).await;
+        }
+
+        // For directories without install scripts, use hardlink strategy
+        clone_dir_inner(src, dst).await
     }
 }
 
@@ -249,10 +263,10 @@ mod windows_clone {
         Ok(())
     }
 
-    // Fast copy directory using regular copy for packages with install scripts
-    async fn fast_copy(src: &Path, dst: &Path) -> Result<()> {
-        // Create destination directory
-        fs::create_dir_all(dst).await?;
+    // Fast copy directory (internal recursive version)
+    async fn fast_copy_inner(src: &Path, dst: &Path) -> Result<()> {
+        // Use create_dir since parent already exists
+        fs::create_dir(dst).await.ok();
 
         // Copy all files in the directory
         let mut read_dir = fs::read_dir(src).await?;
@@ -262,12 +276,18 @@ mod windows_clone {
             let target_path = dst.join(file_name);
 
             if entry.metadata().await?.is_dir() {
-                Box::pin(fast_copy(&entry_path, &target_path)).await?;
+                Box::pin(fast_copy_inner(&entry_path, &target_path)).await?;
             } else {
                 fast_copy_file(&entry_path, &target_path).await?;
             }
         }
         Ok(())
+    }
+
+    // Fast copy entry point
+    async fn fast_copy(src: &Path, dst: &Path) -> Result<()> {
+        fs::create_dir_all(dst).await?;
+        fast_copy_inner(src, dst).await
     }
 
     // Check if the package has install scripts
@@ -281,26 +301,11 @@ mod windows_clone {
         false
     }
 
-    pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
-        if !fs::metadata(src).await?.is_dir() {
-            return Err(anyhow::anyhow!("Source is not a directory"));
-        }
+    // Internal recursive clone (parent directory already exists)
+    async fn clone_dir_inner(src: &Path, dst: &Path) -> Result<()> {
+        // Use create_dir since parent already exists
+        fs::create_dir(dst).await.ok();
 
-        // Create destination directory
-        fs::create_dir_all(dst).await?;
-
-        // Check if the package has install scripts
-        if has_install_script(src).await {
-            tracing::debug!(
-                "Package has install scripts, using fast copy for directory {} to {}",
-                src.display(),
-                dst.display()
-            );
-            return fast_copy(src, dst).await;
-        }
-
-        // For directories without install scripts, recursively create the directory structure
-        // and use hardlinks where possible
         let mut read_dir = fs::read_dir(src).await?;
         while let Some(entry) = read_dir.next_entry().await? {
             let entry_path = entry.path();
@@ -308,7 +313,7 @@ mod windows_clone {
             let target_path = dst.join(file_name);
 
             if entry.metadata().await?.is_dir() {
-                Box::pin(clone_dir(&entry_path, &target_path)).await?;
+                Box::pin(clone_dir_inner(&entry_path, &target_path)).await?;
             } else {
                 // Try hardlink first for files in packages without install scripts
                 if let Err(e) = fs::hard_link(&entry_path, &target_path).await {
@@ -333,6 +338,28 @@ mod windows_clone {
         }
 
         Ok(())
+    }
+
+    pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
+        if !fs::metadata(src).await?.is_dir() {
+            return Err(anyhow::anyhow!("Source is not a directory"));
+        }
+
+        // Create destination directory (entry point, use create_dir_all)
+        fs::create_dir_all(dst).await?;
+
+        // Check if the package has install scripts
+        if has_install_script(src).await {
+            tracing::debug!(
+                "Package has install scripts, using fast copy for directory {} to {}",
+                src.display(),
+                dst.display()
+            );
+            return fast_copy_inner(src, dst).await;
+        }
+
+        // For directories without install scripts, use hardlink strategy
+        clone_dir_inner(src, dst).await
     }
 }
 
