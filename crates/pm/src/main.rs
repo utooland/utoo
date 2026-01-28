@@ -255,8 +255,8 @@ fn main() {
         .map(|n| n.get())
         .unwrap_or(4);
     let worker_threads = cpu_cores * 2;
-    // 2x CPU for blocking: decompress is CPU-bound but file write has I/O wait
-    let blocking_threads = cpu_cores * 2;
+    // Minimum 12 blocking threads for CI environments with fewer cores
+    let blocking_threads = (cpu_cores * 2).max(12);
 
     let result = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
