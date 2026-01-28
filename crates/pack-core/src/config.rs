@@ -360,6 +360,14 @@ pub struct OutputConfig {
     /// This is similar to webpack's `output.chunkLoadingGlobal`.
     /// Default: "TURBOPACK"
     pub chunk_loading_global: Option<RcStr>,
+    /// Expose entry module exports to global scope.
+    /// When enabled, all named exports from the entry module will be available on `window`/`globalThis`.
+    /// Default: false
+    pub expose_entry_exports: Option<bool>,
+    /// Expose entry module name to global scope based on package.json name.
+    /// When enabled, the entry module will be exposed under the package name.
+    /// Default: false
+    pub expose_entry_name: Option<bool>,
 }
 
 #[turbo_tasks::value]
@@ -978,6 +986,35 @@ impl Config {
         }
 
         // 4. No name found, return None to let the runtime use its default
+        Ok(Vc::cell(None))
+    }
+
+    #[turbo_tasks::function]
+    pub async fn expose_entry_name(
+        &self,
+        project_path: FileSystemPath,
+    ) -> Result<Vc<Option<RcStr>>> {
+        // Check if expose_entry_name is enabled
+        if !self
+            .output
+            .as_ref()
+            .and_then(|o| o.expose_entry_name)
+            .unwrap_or(false)
+        {
+            return Ok(Vc::cell(None));
+        }
+
+        // Read package.json and get name field
+        let package_json_path = project_path.join("package.json")?;
+        let package_json_content = package_json_path.read_json().await?;
+
+        if let FileJsonContent::Content(json) = &*package_json_content
+            && let Some(name) = json.get("name").and_then(|n| n.as_str())
+        {
+            return Ok(Vc::cell(Some(name.into())));
+        }
+
+        // No name found, return None
         Ok(Vc::cell(None))
     }
 
