@@ -1,0 +1,15 @@
+{
+    "config": {
+        "entry": [
+            {
+                "import": "input/index.ts",
+                "name": "main"
+            }
+        ],
+        "output": {
+            "path": "output",
+            "entryRootExport": "export-entry-exports"
+        }
+    },
+    "runtimeType": "Production"
+}

@@ -316,6 +316,13 @@ pub struct SchemaOutputConfig {
         description = "The global variable name used by the runtime for loading chunks. Default: 'TURBOPACK'"
     )]
     pub chunk_loading_global: Option<String>,
+
+    /// Expose entry module exports to global scope with the specified name
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Expose entry module exports to global scope with the specified name. When set, all named exports from the entry module will be available on window/globalThis under the specified name. If set to empty string, will use package.json name. Default: None (no exposure)"
+    )]
+    pub entry_root_export: Option<String>,
 }
 
 /// Output type
