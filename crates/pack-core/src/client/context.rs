@@ -617,6 +617,11 @@ pub async fn get_client_chunking_context(
         builder = builder.chunk_loading_global(chunk_loading_global.clone());
     }
 
+    // Read entry_root_export from config
+    if let Some(entry_root_export) = &*config.entry_root_export().await? {
+        builder = builder.entry_root_export(Some(entry_root_export.clone()));
+    }
+
     if mode.is_development() {
         builder = builder
             .hot_module_replacement()
