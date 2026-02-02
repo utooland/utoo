@@ -122,6 +122,7 @@ export interface ConfigComplete {
       | string
     >;
     publicPath?: string;
+    entryRootExport?: string;
   };
   target?: string;
   sourceMaps?: boolean;

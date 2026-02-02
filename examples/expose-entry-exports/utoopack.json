@@ -1,0 +1,21 @@
+{
+  "$schema": "../../packages/pack/config_schema.json",
+  "entry": [
+    {
+      "import": "./src/index.ts",
+      "html": {
+        "template": "./index.html"
+      }
+    }
+  ],
+  "output": {
+    "path": "./dist",
+    "filename": "[name].[contenthash:6].js",
+    "chunkFilename": "[name].[contenthash:8].js",
+    "clean": true,
+    "entryRootExport": "with-expose-entry-exports"
+  },
+  "optimization": {
+    "minify": false
+  }
+}
