@@ -71,7 +71,7 @@ jobs:
 
       - name: Analyze Traces
         run: |
-          python3 agents/tools/analyze_trace.py .trace/trace_antd.json .trace/report_antd.md
+          TRACE_PROJECT=examples/with-antd python3 agents/tools/analyze_trace.py .trace/trace_antd.json .trace/report_antd.md
           # Prepare PR comment content
           echo "## 📊 Performance Benchmark Report (with-antd)" > .trace/pr_comment.md
           cat .trace/report_antd.md >> .trace/pr_comment.md

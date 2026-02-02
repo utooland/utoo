@@ -12,7 +12,7 @@ import os
 from collections import defaultdict
 from datetime import datetime
 
-def analyze_trace(trace_path, output_path):
+def analyze_trace(trace_path, output_path, override_project_name=None):
     """Analyze Chrome Trace and generate performance report following the protocol"""
     
     print(f"📊 Loading trace: {trace_path}")
@@ -21,6 +21,9 @@ def analyze_trace(trace_path, output_path):
     
     events = data if isinstance(data, list) else data.get("traceEvents", [])
     print(f"✅ Analyzing {len(events):,} events...")
+
+    # Try to infer project name
+    project_name = override_project_name or os.environ.get("TRACE_PROJECT") or "Unknown Project"
     
     # Initialize metrics
     min_ts, max_ts = float('inf'), float('-inf')
@@ -129,18 +132,6 @@ def analyze_trace(trace_path, output_path):
     report_id = f"utoopack_performance_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     trace_file = os.path.basename(trace_path)
     trace_size_gb = os.path.getsize(trace_path) / (1024**3)
-    
-    # Try to infer project name
-    project_name = "Unknown Project"
-    abs_path = os.path.abspath(trace_path)
-    path_parts = abs_path.split(os.sep)
-    if "examples" in path_parts:
-        try:
-            idx = path_parts.index("examples")
-            if idx + 1 < len(path_parts):
-                project_name = f"examples/{path_parts[idx+1]}"
-        except ValueError:
-            pass
     
     # Pre-calculate derived metrics
     max_thread_work = max(thread_work, 1) # Avoid division by zero
@@ -336,14 +327,15 @@ These are the most significant tasks by total duration:
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python3 analyze_trace.py <trace_file> <output_report>")
+        print("Usage: python3 analyze_trace.py <trace_file> <output_report> [project_name]")
         sys.exit(1)
     
     trace_file = sys.argv[1]
     report_file = sys.argv[2]
+    override_project_name = sys.argv[3] if len(sys.argv) > 3 else None
     
     if not os.path.exists(trace_file):
         print(f"Error: Trace file not found: {trace_file}")
         sys.exit(1)
     
-    analyze_trace(trace_file, report_file)
+    analyze_trace(trace_file, report_file, override_project_name)
