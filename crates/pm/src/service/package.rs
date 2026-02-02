@@ -13,12 +13,14 @@ use utoo_ruborist::model::package_json::parse_bin_field;
 use super::script::ScriptService;
 
 /// Execution queues for package scripts and binary linking
+/// Each entry is (PackageInfo, is_optional) where is_optional indicates if the package
+/// is an optional dependency (based on edge type in dependency graph)
 #[derive(Default)]
 pub struct ExecutionQueues {
-    pub preinstall: Vec<Rc<PackageInfo>>,
-    pub bin_linking: Vec<Rc<PackageInfo>>,
-    pub install: Vec<Rc<PackageInfo>>,
-    pub postinstall: Vec<Rc<PackageInfo>>,
+    pub preinstall: Vec<(Rc<PackageInfo>, bool)>,
+    pub bin_linking: Vec<(Rc<PackageInfo>, bool)>,
+    pub install: Vec<(Rc<PackageInfo>, bool)>,
+    pub postinstall: Vec<(Rc<PackageInfo>, bool)>,
 }
 
 pub struct PackageService;
@@ -141,11 +143,12 @@ impl PackageService {
     }
 
     /// Collect packages from memory PackageLock object with early filtering
+    /// Returns Vec<(PackageInfo, is_optional)> where is_optional is determined by the edge type
     pub async fn collect_packages_from_lock(
         package_lock: &PackageLock,
         root_path: &Path,
         ignore_scripts: bool,
-    ) -> Result<Vec<PackageInfo>> {
+    ) -> Result<Vec<(PackageInfo, bool)>> {
         tracing::debug!("Collecting packages from memory lock...");
 
         let mut packages = Vec::new();
@@ -216,6 +219,10 @@ impl PackageService {
                 }
             };
 
+            // Check if this package is an optional dependency (based on edge type)
+            let is_optional =
+                lock_package.optional == Some(true) || lock_package.dev_optional == Some(true);
+
             let package_info = PackageInfo {
                 path: package_path,
                 bin_files,
@@ -224,42 +231,43 @@ impl PackageService {
                 fullname,
             };
 
-            packages.push(package_info);
+            packages.push((package_info, is_optional));
         }
         Ok(packages)
     }
 
     /// Create execution queues with bins_only parameter support
+    /// Takes Vec<(PackageInfo, is_optional)> where is_optional indicates edge type
     pub fn create_execution_queues_with_options(
-        packages: Vec<PackageInfo>,
+        packages: Vec<(PackageInfo, bool)>,
         ignore_scripts: bool,
     ) -> Result<ExecutionQueues> {
         tracing::debug!("Creating execution queues with options...");
         let mut queues = ExecutionQueues::default();
 
-        for package in packages {
+        for (package, is_optional) in packages {
             let package = Rc::new(package);
 
             // Script queues - skip in bins_only mode
             if !ignore_scripts {
                 if package.scripts.preinstall.is_some() {
                     tracing::debug!("Adding {} to preinstall queue", package.path.display());
-                    queues.preinstall.push(Rc::clone(&package));
+                    queues.preinstall.push((Rc::clone(&package), is_optional));
                 }
                 if package.scripts.install.is_some() {
                     tracing::debug!("Adding {} to install queue", package.path.display());
-                    queues.install.push(Rc::clone(&package));
+                    queues.install.push((Rc::clone(&package), is_optional));
                 }
                 if package.scripts.postinstall.is_some() {
                     tracing::debug!("Adding {} to postinstall queue", package.path.display());
-                    queues.postinstall.push(Rc::clone(&package));
+                    queues.postinstall.push((Rc::clone(&package), is_optional));
                 }
             }
 
             // Binary linking queue - always process if package has bin files
             if !package.bin_files.is_empty() {
                 tracing::debug!("Adding {} to bin linking queue", package.path.display());
-                queues.bin_linking.push(Rc::clone(&package));
+                queues.bin_linking.push((Rc::clone(&package), is_optional));
             }
         }
 
@@ -311,7 +319,11 @@ impl PackageService {
     }
 
     /// Execute script queue for a specific script type
-    async fn execute_script_queue(queue: &[Rc<PackageInfo>], script_name: &str) -> Result<()> {
+    /// Queue contains (PackageInfo, is_optional) tuples where is_optional indicates edge type
+    async fn execute_script_queue(
+        queue: &[(Rc<PackageInfo>, bool)],
+        script_name: &str,
+    ) -> Result<()> {
         use futures;
 
         let queue_start = std::time::Instant::now();
@@ -323,7 +335,7 @@ impl PackageService {
 
         let script_tasks: Vec<_> = queue
             .iter()
-            .filter_map(|package| {
+            .filter_map(|(package, is_optional)| {
                 let script_option = match script_name {
                     "preinstall" => &package.scripts.preinstall,
                     "install" => &package.scripts.install,
@@ -334,6 +346,7 @@ impl PackageService {
                 script_option.as_ref().map(|script| {
                     let package = Rc::clone(package);
                     let script = script.clone();
+                    let is_optional = *is_optional;
                     async move {
                         log_progress(&format!("{} {}", package.fullname, script_name));
                         let start = std::time::Instant::now();
@@ -355,16 +368,22 @@ impl PackageService {
                             script
                         );
                         PROGRESS_BAR.inc(1);
-                        result
+                        (is_optional, result)
                     }
                 })
             })
             .collect();
 
         // Wait for all script tasks to complete
-        let script_results: Vec<Result<()>> = futures::future::join_all(script_tasks).await;
-        for result in script_results {
-            result?;
+        let script_results: Vec<(bool, Result<()>)> = futures::future::join_all(script_tasks).await;
+        for (is_optional, result) in script_results {
+            if let Err(e) = result {
+                if is_optional {
+                    tracing::warn!("Optional dependency script failed (ignored): {e}");
+                } else {
+                    return Err(e);
+                }
+            }
         }
 
         let queue_elapsed = queue_start.elapsed();
@@ -378,8 +397,10 @@ impl PackageService {
     }
 
     /// Execute binary file linking for packages
-    async fn execute_binary_linking(queue: &[Rc<PackageInfo>]) -> Result<()> {
-        for package in queue {
+    /// Queue contains (PackageInfo, is_optional) tuples - is_optional is not used here
+    /// as binary linking happens only for successfully installed packages
+    async fn execute_binary_linking(queue: &[(Rc<PackageInfo>, bool)]) -> Result<()> {
+        for (package, _is_optional) in queue {
             if !package.bin_files.is_empty() {
                 tracing::debug!("Linking binary files for {}", package.fullname);
                 for (bin_name, relative_path) in &package.bin_files {
@@ -792,8 +813,9 @@ mod tests {
         };
 
         // Prepare queues: only bin linking queue has this package
+        // The bool indicates is_optional (false = not optional)
         let queues = ExecutionQueues {
-            bin_linking: vec![Rc::new(package_info)],
+            bin_linking: vec![(Rc::new(package_info), false)],
             ..Default::default()
         };
 
@@ -904,7 +926,7 @@ mod tests {
         assert_eq!(packages_bins_only.len(), 2); // full-package, bin-only (script-only and no-hooks excluded)
 
         // Verify the collected packages have correct bin_files
-        for package_info in &packages_bins_only {
+        for (package_info, _is_optional) in &packages_bins_only {
             assert!(
                 !package_info.bin_files.is_empty(),
                 "Package {} should have bin_files in ignore_scripts mode",
@@ -983,6 +1005,6 @@ mod tests {
 
         // Should only collect the cross-platform package (win-only filtered out by platform check)
         assert_eq!(packages_collected.len(), 1);
-        assert_eq!(packages_collected[0].fullname, "cross-platform");
+        assert_eq!(packages_collected[0].0.fullname, "cross-platform");
     }
 }

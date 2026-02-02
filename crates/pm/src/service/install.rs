@@ -344,6 +344,10 @@ pub async fn install_packages(
                     let should_resolve = !crate::fs::try_exists(&cache_flag_path).await?;
                     let semaphore = Arc::clone(&semaphore);
 
+                    // Check if this is an optional dependency
+                    let is_optional =
+                        package.optional == Some(true) || package.dev_optional == Some(true);
+
                     let task = tokio::spawn(async move {
                         let _permit = semaphore
                             .acquire()
@@ -368,6 +372,13 @@ pub async fn install_packages(
                                         cache_path.display(),
                                         e
                                     );
+                                    if is_optional {
+                                        tracing::warn!(
+                                            "Optional dependency {name} download failed (ignored): {e}"
+                                        );
+                                        PROGRESS_BAR.inc(1);
+                                        return Ok(());
+                                    }
                                     return Err(anyhow::anyhow!("{name} download failed: {e}"));
                                 }
                             }
@@ -384,12 +395,21 @@ pub async fn install_packages(
                                 update_package_binary(&cwd_clone.join(&path), &name).await?;
                                 Ok(())
                             }
-                            Err(e) => Err(anyhow::anyhow!(
-                                "Copy failed {} to {}: {}",
-                                cache_path.display(),
-                                cwd_clone.join(&path).display(),
-                                e
-                            )),
+                            Err(e) => {
+                                if is_optional {
+                                    tracing::warn!(
+                                        "Optional dependency {name} clone failed (ignored): {e}"
+                                    );
+                                    PROGRESS_BAR.inc(1);
+                                    return Ok(());
+                                }
+                                Err(anyhow::anyhow!(
+                                    "Copy failed {} to {}: {}",
+                                    cache_path.display(),
+                                    cwd_clone.join(&path).display(),
+                                    e
+                                ))
+                            }
                         }
                     });
                     tasks.push(task);
