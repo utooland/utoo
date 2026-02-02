@@ -97,7 +97,8 @@ Follow this tiered hierarchy. Solve P0 before descending to P1, as high-level sc
 ---
 
 ## 🚀 Step 3: Actionable Diagnostic Workflow
-1. **Quantitative Baseline**: Run the summary script `python3 agents/tools/analyze_trace.py <trace_file> <output_report>` to list Top 20 tasks by `count` and `sum(duration)`.
+1. **Quantitative Baseline**: Run the summary script with the **`TRACE_PROJECT`** environment variable to identify the build target.
+   - *Command*: `TRACE_PROJECT=examples/with-antd python3 agents/tools/analyze_trace.py <trace_file> <output_report>`
 2. **Qualitative Timeline Scan**: Open the trace in `chrome://tracing` or `edge://tracing`. Look for "Wall-like" structures (Parallelism) vs "Staircase" structures (Serialism).
 3. **Causal Attribution**: Identify the `Parent Span` of the top bottlenecks to understand *why* they were invoked.
 4. **Final Reporting**: Summarize findings and save the report to `./agents/reports/utoopack_performance_report_YYYYMMDD_HHMMSS.md`. Include specific Tiered signals and recommended actions.
