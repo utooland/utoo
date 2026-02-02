@@ -344,6 +344,10 @@ pub async fn install_packages(
                     let should_resolve = !crate::fs::try_exists(&cache_flag_path).await?;
                     let semaphore = Arc::clone(&semaphore);
 
+                    // Check if this is an optional dependency
+                    let is_optional =
+                        package.optional == Some(true) || package.dev_optional == Some(true);
+
                     let task = tokio::spawn(async move {
                         let _permit = semaphore
                             .acquire()
@@ -368,6 +372,13 @@ pub async fn install_packages(
                                         cache_path.display(),
                                         e
                                     );
+                                    if is_optional {
+                                        tracing::warn!(
+                                            "Optional dependency {name} download failed (ignored): {e}"
+                                        );
+                                        PROGRESS_BAR.inc(1);
+                                        return Ok(());
+                                    }
                                     return Err(anyhow::anyhow!("{name} download failed: {e}"));
                                 }
                             }
@@ -384,12 +395,21 @@ pub async fn install_packages(
                                 update_package_binary(&cwd_clone.join(&path), &name).await?;
                                 Ok(())
                             }
-                            Err(e) => Err(anyhow::anyhow!(
-                                "Copy failed {} to {}: {}",
-                                cache_path.display(),
-                                cwd_clone.join(&path).display(),
-                                e
-                            )),
+                            Err(e) => {
+                                if is_optional {
+                                    tracing::warn!(
+                                        "Optional dependency {name} clone failed (ignored): {e}"
+                                    );
+                                    PROGRESS_BAR.inc(1);
+                                    return Ok(());
+                                }
+                                Err(anyhow::anyhow!(
+                                    "Copy failed {} to {}: {}",
+                                    cache_path.display(),
+                                    cwd_clone.join(&path).display(),
+                                    e
+                                ))
+                            }
                         }
                     });
                     tasks.push(task);
@@ -685,5 +705,50 @@ mod tests {
         omit_dev_optional.insert(OmitType::Dev);
         omit_dev_optional.insert(OmitType::Optional);
         assert!(should_omit_package(&dev_optional_pkg, &omit_dev_optional));
+    }
+
+    #[test]
+    fn test_is_optional_dependency() {
+        // Test helper to verify is_optional detection logic
+        // This mirrors the logic used in install_packages
+
+        // Regular package - not optional
+        let regular_pkg = Package::default();
+        let is_optional =
+            regular_pkg.optional == Some(true) || regular_pkg.dev_optional == Some(true);
+        assert!(!is_optional, "Regular package should not be optional");
+
+        // Optional package
+        let optional_pkg = Package {
+            optional: Some(true),
+            ..Package::default()
+        };
+        let is_optional =
+            optional_pkg.optional == Some(true) || optional_pkg.dev_optional == Some(true);
+        assert!(is_optional, "Package with optional=true should be optional");
+
+        // Dev optional package
+        let dev_optional_pkg = Package {
+            dev_optional: Some(true),
+            ..Package::default()
+        };
+        let is_optional =
+            dev_optional_pkg.optional == Some(true) || dev_optional_pkg.dev_optional == Some(true);
+        assert!(
+            is_optional,
+            "Package with dev_optional=true should be optional"
+        );
+
+        // Package with optional=false explicitly
+        let not_optional_pkg = Package {
+            optional: Some(false),
+            ..Package::default()
+        };
+        let is_optional =
+            not_optional_pkg.optional == Some(true) || not_optional_pkg.dev_optional == Some(true);
+        assert!(
+            !is_optional,
+            "Package with optional=false should not be optional"
+        );
     }
 }
