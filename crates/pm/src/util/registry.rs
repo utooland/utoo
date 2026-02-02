@@ -19,28 +19,17 @@ struct PingResult {
 }
 
 /// Ping a registry and measure latency
-async fn ping_registry(registry_url: &str) -> PingResult {
+async fn ping_registry(client: &reqwest::Client, registry_url: &str) -> PingResult {
     let ping_url = format!("{}/-/ping", registry_url);
     let start = std::time::Instant::now();
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_millis(PING_TIMEOUT_MS))
-        .build();
-
-    match client {
-        Ok(client) => match client.get(&ping_url).send().await {
-            Ok(resp) if resp.status().is_success() => PingResult {
-                registry: registry_url.to_string(),
-                latency_ms: start.elapsed().as_millis() as u64,
-                success: true,
-            },
-            _ => PingResult {
-                registry: registry_url.to_string(),
-                latency_ms: u64::MAX,
-                success: false,
-            },
+    match client.get(&ping_url).send().await {
+        Ok(resp) if resp.status().is_success() => PingResult {
+            registry: registry_url.to_string(),
+            latency_ms: start.elapsed().as_millis() as u64,
+            success: true,
         },
-        Err(_) => PingResult {
+        _ => PingResult {
             registry: registry_url.to_string(),
             latency_ms: u64::MAX,
             success: false,
@@ -50,43 +39,56 @@ async fn ping_registry(registry_url: &str) -> PingResult {
 
 /// Select fastest registry by concurrent ping
 pub async fn select_fastest_registry() -> String {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(PING_TIMEOUT_MS))
+        .build();
+
+    let client = match client {
+        Ok(c) => c,
+        Err(_) => {
+            tracing::debug!("Failed to create HTTP client, using default registry");
+            return REGISTRY_NPMMIRROR.to_string();
+        }
+    };
+
     let registries = [REGISTRY_NPMMIRROR, REGISTRY_NPMJS];
-    let futures: Vec<_> = registries.iter().map(|r| ping_registry(r)).collect();
+    let futures: Vec<_> = registries
+        .iter()
+        .map(|r| ping_registry(&client, r))
+        .collect();
     let results = futures::future::join_all(futures).await;
 
-    match results
+    let (registry, latency_info) = match results
         .into_iter()
         .filter(|r| r.success)
         .min_by_key(|r| r.latency_ms)
     {
         Some(r) => {
-            println!(
-                "{} {} ({})",
-                "Registry:".dimmed(),
-                r.registry.cyan(),
-                format!("{}ms", r.latency_ms).green()
-            );
-            println!(
-                "{} {}",
-                "Tip:".dimmed(),
-                format!("ut config set registry {} --global", r.registry).yellow()
-            );
-            r.registry
+            tracing::debug!("Auto-selected registry {} ({}ms)", r.registry, r.latency_ms);
+            (
+                r.registry,
+                format!("{}ms", r.latency_ms).green().to_string(),
+            )
         }
         None => {
-            println!(
-                "{} {} (ping failed)",
-                "Registry:".dimmed(),
-                REGISTRY_NPMMIRROR.cyan()
-            );
-            println!(
-                "{} {}",
-                "Tip:".dimmed(),
-                format!("ut config set registry {} --global", REGISTRY_NPMMIRROR).yellow()
-            );
-            REGISTRY_NPMMIRROR.to_string()
+            tracing::debug!("All registry pings failed, using default");
+            (REGISTRY_NPMMIRROR.to_string(), "ping failed".to_string())
         }
-    }
+    };
+
+    println!(
+        "{} {} ({})",
+        "Registry:".dimmed(),
+        registry.cyan(),
+        latency_info
+    );
+    println!(
+        "{} {}",
+        "Tip:".dimmed(),
+        format!("ut config set registry {} --global", registry).yellow()
+    );
+
+    registry
 }
 
 #[cfg(test)]
@@ -99,9 +101,17 @@ mod tests {
         assert_eq!(REGISTRY_NPMJS, "https://registry.npmjs.org");
     }
 
+    fn create_test_client() -> reqwest::Client {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(PING_TIMEOUT_MS))
+            .build()
+            .unwrap()
+    }
+
     #[tokio::test]
     async fn test_ping_registry_invalid_url() {
-        let result = ping_registry("http://invalid.registry.test").await;
+        let client = create_test_client();
+        let result = ping_registry(&client, "http://invalid.registry.test").await;
         assert!(!result.success);
         assert_eq!(result.latency_ms, u64::MAX);
     }
@@ -109,7 +119,8 @@ mod tests {
     #[tokio::test]
     async fn test_ping_registry_timeout() {
         // Use a non-routable IP to trigger timeout
-        let result = ping_registry("http://10.255.255.1").await;
+        let client = create_test_client();
+        let result = ping_registry(&client, "http://10.255.255.1").await;
         assert!(!result.success);
         assert_eq!(result.latency_ms, u64::MAX);
     }
@@ -117,7 +128,8 @@ mod tests {
     #[tokio::test]
     #[ignore] // Requires network access
     async fn test_ping_registry_npmmirror() {
-        let result = ping_registry(REGISTRY_NPMMIRROR).await;
+        let client = create_test_client();
+        let result = ping_registry(&client, REGISTRY_NPMMIRROR).await;
         assert!(result.success);
         assert!(result.latency_ms < PING_TIMEOUT_MS);
     }
@@ -125,7 +137,8 @@ mod tests {
     #[tokio::test]
     #[ignore] // Requires network access
     async fn test_ping_registry_npmjs() {
-        let result = ping_registry(REGISTRY_NPMJS).await;
+        let client = create_test_client();
+        let result = ping_registry(&client, REGISTRY_NPMJS).await;
         assert!(result.success);
         assert!(result.latency_ms < PING_TIMEOUT_MS);
     }
