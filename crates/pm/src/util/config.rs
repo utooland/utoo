@@ -193,10 +193,15 @@ pub async fn set_registry(registry: Option<String>) -> Result<()> {
     // Priority: CLI argument > UTOO_REGISTRY env > config > default
     let final_registry = if let Some(reg) = registry {
         Some(reg)
-    } else if let Ok(env_reg) = std::env::var("UTOO_REGISTRY")
-        && !env_reg.is_empty()
-    {
-        Some(env_reg)
+    } else if let Ok(env_reg) = std::env::var("UTOO_REGISTRY") {
+        if !env_reg.is_empty() {
+            Some(env_reg)
+        } else {
+            Config::load(false)
+                .await
+                .ok()
+                .and_then(|config| config.get("registry").ok().flatten())
+        }
     } else {
         // Read from config file if no CLI arg or env var
         Config::load(false)
@@ -206,13 +211,13 @@ pub async fn set_registry(registry: Option<String>) -> Result<()> {
     };
 
     // Normalize registry URL
-    let final_registry = final_registry.map(|r| {
-        Url::parse(&r)
-            .map(|url| url.to_string())
-            .context(format!("Failed to parse registry URL '{}'", r))
-    })
-    .transpose()?;
-
+    let final_registry = final_registry
+        .map(|r| {
+            Url::parse(&r)
+                .map(|url| url.to_string())
+                .context(format!("Failed to parse registry URL '{}'", r))
+        })
+        .transpose()?;
 
     REGISTRY.set(final_registry);
     Ok(())
@@ -259,10 +264,15 @@ pub async fn set_cache_dir(cache_dir: Option<String>) {
     // Priority: CLI argument > UTOO_CACHE_DIR env > config > default
     let final_cache_dir = if let Some(dir) = cache_dir {
         Some(dir)
-    } else if let Ok(env_dir) = std::env::var("UTOO_CACHE_DIR")
-        && !env_dir.is_empty()
-    {
-        Some(env_dir)
+    } else if let Ok(env_dir) = std::env::var("UTOO_CACHE_DIR") {
+        if !env_dir.is_empty() {
+            Some(env_dir)
+        } else {
+            Config::load(false)
+                .await
+                .ok()
+                .and_then(|config| config.get("cache-dir").ok().flatten())
+        }
     } else {
         // Read from config file if no CLI arg or env var
         Config::load(false)
