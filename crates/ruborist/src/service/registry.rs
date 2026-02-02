@@ -480,53 +480,53 @@ impl RegistryClient for UnifiedRegistry {
             })
         } else {
             // 1. Try to resolve using cached versions (avoid network request)
-            if let Some(versions_info) = self.cache.get_versions(&fetch_name) {
-                if let Ok(resolved_version) = resolve_target_version(
+            if let Some(versions_info) = self.cache.get_versions(&fetch_name)
+                && let Ok(resolved_version) = resolve_target_version(
                     &versions_info.versions.dist_tags,
                     &versions_info.versions.version_list,
                     &fetch_spec,
-                ) {
-                    // Check if we have the version manifest cached
-                    if let Some(manifest) = self
-                        .cache
-                        .get_version_manifest(&fetch_name, &resolved_version)
-                    {
-                        tracing::debug!(
-                            "Using cached versions + manifest for {}@{} => {}",
-                            fetch_name,
-                            fetch_spec,
-                            resolved_version
-                        );
-                        return Ok(ResolvedPackage {
-                            name: name.to_string(),
-                            version: resolved_version,
-                            manifest,
-                        });
-                    }
+                )
+            {
+                // Check if we have the version manifest cached
+                if let Some(manifest) = self
+                    .cache
+                    .get_version_manifest(&fetch_name, &resolved_version)
+                {
+                    tracing::debug!(
+                        "Using cached versions + manifest for {}@{} => {}",
+                        fetch_name,
+                        fetch_spec,
+                        resolved_version
+                    );
+                    return Ok(ResolvedPackage {
+                        name: name.to_string(),
+                        version: resolved_version,
+                        manifest,
+                    });
+                }
 
-                    // Have versions cache but not version manifest, fetch it
-                    if let Ok(manifest) = self
-                        .resolve_version_manifest(&fetch_name, &resolved_version)
-                        .await
-                    {
-                        tracing::debug!(
-                            "Using cached versions, fetched manifest for {}@{} => {}",
-                            fetch_name,
-                            fetch_spec,
-                            resolved_version
-                        );
-                        // Cache for project cache export
-                        self.cache.set_version_manifest(
-                            fetch_name.to_string(),
-                            fetch_spec.to_string(),
-                            manifest.clone(),
-                        );
-                        return Ok(ResolvedPackage {
-                            name: name.to_string(),
-                            version: resolved_version,
-                            manifest,
-                        });
-                    }
+                // Have versions cache but not version manifest, fetch it
+                if let Ok(manifest) = self
+                    .resolve_version_manifest(&fetch_name, &resolved_version)
+                    .await
+                {
+                    tracing::debug!(
+                        "Using cached versions, fetched manifest for {}@{} => {}",
+                        fetch_name,
+                        fetch_spec,
+                        resolved_version
+                    );
+                    // Cache for project cache export
+                    self.cache.set_version_manifest(
+                        fetch_name.to_string(),
+                        fetch_spec.to_string(),
+                        manifest.clone(),
+                    );
+                    return Ok(ResolvedPackage {
+                        name: name.to_string(),
+                        version: resolved_version,
+                        manifest,
+                    });
                 }
             }
 
