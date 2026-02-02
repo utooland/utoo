@@ -6,6 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, OnceLock};
 
+use super::registry::{REGISTRY_NPMMIRROR, select_fastest_registry};
 use super::save_type::OmitType;
 
 pub type ConfigResult<T> = Result<T>;
@@ -174,7 +175,7 @@ impl ConfigValueParser<usize> for ConfigValue<usize> {
 }
 
 static REGISTRY: LazyLock<ConfigValue<String>> =
-    LazyLock::new(|| ConfigValue::new("registry", "https://registry.npmmirror.com".to_string()));
+    LazyLock::new(|| ConfigValue::new("registry", REGISTRY_NPMMIRROR.to_string()));
 
 static LEGACY_PEER_DEPS: LazyLock<ConfigValue<bool>> =
     LazyLock::new(|| ConfigValue::new("legacy-peer-deps", true));
@@ -189,19 +190,28 @@ static CACHE_DIR: LazyLock<ConfigValue<String>> = LazyLock::new(|| {
 });
 
 pub async fn set_registry(registry: Option<String>) {
-    // Priority: CLI argument > UTOO_REGISTRY env > config > default
+    // Priority: CLI argument > UTOO_REGISTRY env > config > auto-select
     let final_registry = if let Some(reg) = registry {
+        tracing::debug!("Using registry from CLI: {}", reg);
         Some(reg)
     } else if let Ok(env_reg) = std::env::var("UTOO_REGISTRY")
         && !env_reg.is_empty()
     {
+        tracing::debug!("Using registry from env: {}", env_reg);
         Some(env_reg)
     } else {
-        // Read from config file if no CLI arg or env var
-        Config::load(false)
+        let config_registry = Config::load(false)
             .await
             .ok()
-            .and_then(|config| config.get("registry").ok().flatten())
+            .and_then(|c| c.get("registry").ok().flatten());
+
+        if let Some(ref reg) = config_registry {
+            tracing::debug!("Using registry from config: {}", reg);
+            config_registry
+        } else {
+            // No config, auto-select fastest registry
+            Some(select_fastest_registry().await)
+        }
     };
 
     REGISTRY.set(final_registry);
