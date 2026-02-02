@@ -1007,4 +1007,160 @@ mod tests {
         assert_eq!(packages_collected.len(), 1);
         assert_eq!(packages_collected[0].0.fullname, "cross-platform");
     }
+
+    #[tokio::test]
+    async fn test_collect_packages_from_lock_optional_flag() {
+        use serde_json::json;
+        use std::collections::HashMap;
+        use tempfile::TempDir;
+        use utoo_ruborist::lock::{LockPackage, PackageLock};
+
+        let temp_dir = TempDir::new().unwrap();
+
+        let mut packages = HashMap::new();
+
+        // Regular (non-optional) package
+        packages.insert(
+            "node_modules/regular-pkg".to_string(),
+            LockPackage {
+                name: Some("regular-pkg".to_string()),
+                version: Some("1.0.0".to_string()),
+                resolved: Some("registry-url".to_string()),
+                bin: Some(json!({"tool": "index.js"})),
+                has_install_script: Some(false),
+                optional: None,
+                ..LockPackage::default()
+            },
+        );
+
+        // Optional package
+        packages.insert(
+            "node_modules/optional-pkg".to_string(),
+            LockPackage {
+                name: Some("optional-pkg".to_string()),
+                version: Some("1.0.0".to_string()),
+                resolved: Some("registry-url".to_string()),
+                bin: Some(json!({"tool": "index.js"})),
+                has_install_script: Some(false),
+                optional: Some(true),
+                ..LockPackage::default()
+            },
+        );
+
+        // Dev optional package
+        packages.insert(
+            "node_modules/dev-optional-pkg".to_string(),
+            LockPackage {
+                name: Some("dev-optional-pkg".to_string()),
+                version: Some("1.0.0".to_string()),
+                resolved: Some("registry-url".to_string()),
+                bin: Some(json!({"tool": "index.js"})),
+                has_install_script: Some(false),
+                dev_optional: Some(true),
+                ..LockPackage::default()
+            },
+        );
+
+        let package_lock =
+            PackageLock::new("test-project".to_string(), "1.0.0".to_string(), packages);
+
+        // Create package directories
+        let node_modules = temp_dir.path().join("node_modules");
+        std::fs::create_dir_all(&node_modules).unwrap();
+
+        for pkg_name in &["regular-pkg", "optional-pkg", "dev-optional-pkg"] {
+            let package_dir = node_modules.join(pkg_name);
+            std::fs::create_dir_all(&package_dir).unwrap();
+            let package_json = json!({
+                "name": pkg_name,
+                "version": "1.0.0"
+            });
+            std::fs::write(
+                package_dir.join("package.json"),
+                serde_json::to_string_pretty(&package_json).unwrap(),
+            )
+            .unwrap();
+        }
+
+        // Collect packages
+        let result =
+            PackageService::collect_packages_from_lock(&package_lock, temp_dir.path(), true).await;
+        assert!(result.is_ok());
+        let packages_collected = result.unwrap();
+        assert_eq!(packages_collected.len(), 3);
+
+        // Verify is_optional flags are correctly set
+        for (pkg_info, is_optional) in &packages_collected {
+            match pkg_info.fullname.as_str() {
+                "regular-pkg" => {
+                    assert!(!is_optional, "regular-pkg should not be optional");
+                }
+                "optional-pkg" => {
+                    assert!(is_optional, "optional-pkg should be optional");
+                }
+                "dev-optional-pkg" => {
+                    assert!(is_optional, "dev-optional-pkg should be optional");
+                }
+                _ => panic!("Unexpected package: {}", pkg_info.fullname),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_script_queue_optional_failure_ignored() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        // Create a temporary directory for the test package
+        let temp_dir = TempDir::new().unwrap();
+        let package_path = temp_dir.path();
+
+        // Create a package.json with a failing script
+        let package_json = serde_json::json!({
+            "name": "test-optional-fail",
+            "version": "1.0.0",
+            "scripts": {
+                "postinstall": "exit 1"
+            }
+        });
+        fs::write(
+            package_path.join("package.json"),
+            serde_json::to_string_pretty(&package_json).unwrap(),
+        )
+        .unwrap();
+
+        // Create PackageInfo with failing script
+        let package_info = PackageInfo {
+            path: package_path.to_path_buf(),
+            bin_files: vec![],
+            scripts: Scripts {
+                preinstall: None,
+                install: None,
+                postinstall: Some("exit 1".to_string()),
+                prepare: None,
+                preprepare: None,
+                postprepare: None,
+                prepublish: None,
+            },
+            name: "test-optional-fail".to_string(),
+            fullname: "test-optional-fail".to_string(),
+        };
+
+        // Test with is_optional = true: should NOT return error
+        let queue_optional: Vec<(Rc<PackageInfo>, bool)> =
+            vec![(Rc::new(package_info.clone()), true)];
+        let result = PackageService::execute_script_queue(&queue_optional, "postinstall").await;
+        assert!(
+            result.is_ok(),
+            "Optional dependency script failure should be ignored"
+        );
+
+        // Test with is_optional = false: should return error
+        let queue_required: Vec<(Rc<PackageInfo>, bool)> = vec![(Rc::new(package_info), false)];
+        let result = PackageService::execute_script_queue(&queue_required, "postinstall").await;
+        assert!(
+            result.is_err(),
+            "Required dependency script failure should return error"
+        );
+    }
 }

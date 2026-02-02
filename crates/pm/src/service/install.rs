@@ -706,4 +706,49 @@ mod tests {
         omit_dev_optional.insert(OmitType::Optional);
         assert!(should_omit_package(&dev_optional_pkg, &omit_dev_optional));
     }
+
+    #[test]
+    fn test_is_optional_dependency() {
+        // Test helper to verify is_optional detection logic
+        // This mirrors the logic used in install_packages
+
+        // Regular package - not optional
+        let regular_pkg = Package::default();
+        let is_optional =
+            regular_pkg.optional == Some(true) || regular_pkg.dev_optional == Some(true);
+        assert!(!is_optional, "Regular package should not be optional");
+
+        // Optional package
+        let optional_pkg = Package {
+            optional: Some(true),
+            ..Package::default()
+        };
+        let is_optional =
+            optional_pkg.optional == Some(true) || optional_pkg.dev_optional == Some(true);
+        assert!(is_optional, "Package with optional=true should be optional");
+
+        // Dev optional package
+        let dev_optional_pkg = Package {
+            dev_optional: Some(true),
+            ..Package::default()
+        };
+        let is_optional =
+            dev_optional_pkg.optional == Some(true) || dev_optional_pkg.dev_optional == Some(true);
+        assert!(
+            is_optional,
+            "Package with dev_optional=true should be optional"
+        );
+
+        // Package with optional=false explicitly
+        let not_optional_pkg = Package {
+            optional: Some(false),
+            ..Package::default()
+        };
+        let is_optional =
+            not_optional_pkg.optional == Some(true) || not_optional_pkg.dev_optional == Some(true);
+        assert!(
+            !is_optional,
+            "Package with optional=false should not be optional"
+        );
+    }
 }
