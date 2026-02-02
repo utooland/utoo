@@ -1,0 +1,14 @@
+{
+  "name": "with-expose-entry-exports",
+  "version": "1.0.0",
+  "description": "Expose entry exports",
+  "author": "zoomdong",
+  "license": "MIT",
+  "scripts": {
+    "build": "up build",
+    "dev": "up dev"
+  },
+  "devDependencies": {
+    "@utoo/pack-cli": "*"
+  }
+}

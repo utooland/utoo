@@ -360,6 +360,11 @@ pub struct OutputConfig {
     /// This is similar to webpack's `output.chunkLoadingGlobal`.
     /// Default: "TURBOPACK"
     pub chunk_loading_global: Option<RcStr>,
+    /// Expose entry module exports to global scope with the specified name.
+    /// When set, all named exports from the entry module will be available on `window`/`globalThis`
+    /// under the specified name. If set to empty string, will use package.json name.
+    /// Default: None (no exposure)
+    pub entry_root_export: Option<RcStr>,
 }
 
 #[turbo_tasks::value]
@@ -979,6 +984,20 @@ impl Config {
 
         // 4. No name found, return None to let the runtime use its default
         Ok(Vc::cell(None))
+    }
+
+    #[turbo_tasks::function]
+    pub async fn entry_root_export(&self) -> Result<Vc<Option<RcStr>>> {
+        // Check if entry_root_export is configured
+        let entry_root_export = self
+            .output
+            .as_ref()
+            .and_then(|o| o.entry_root_export.as_ref());
+
+        match entry_root_export {
+            Some(name) if !name.is_empty() => Ok(Vc::cell(Some(name.clone()))),
+            _ => Ok(Vc::cell(None)),
+        }
     }
 
     #[turbo_tasks::function]
