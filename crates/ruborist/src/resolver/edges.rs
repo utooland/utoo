@@ -80,18 +80,21 @@ impl DependencySource for VersionManifest {
     where
         F: FnMut(EdgeType, &str, &str),
     {
-        iter_deps(self.dependencies.as_ref(), EdgeType::Prod, &mut f);
+        // npm registry may copy optionalDependencies into dependencies (legacy bug)
+        // Skip deps that also appear in optionalDependencies to avoid duplicate edges
+        let optional_deps = self.optional_dependencies.as_ref();
+        for (name, spec) in self.dependencies.as_ref().into_iter().flatten() {
+            if !optional_deps.is_some_and(|opt| opt.contains_key(name)) {
+                f(EdgeType::Prod, name, spec);
+            }
+        }
         if include_dev {
             iter_deps(self.dev_dependencies.as_ref(), EdgeType::Dev, &mut f);
         }
         if !legacy_peer_deps {
             iter_deps(self.peer_dependencies.as_ref(), EdgeType::Peer, &mut f);
         }
-        iter_deps(
-            self.optional_dependencies.as_ref(),
-            EdgeType::Optional,
-            &mut f,
-        );
+        iter_deps(optional_deps, EdgeType::Optional, &mut f);
     }
 }
 
