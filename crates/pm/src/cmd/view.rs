@@ -3,10 +3,11 @@ use chrono::Utc;
 use owo_colors::OwoColorize;
 use utoo_ruborist::manifest::{FullManifest, VersionManifest};
 use utoo_ruborist::registry::resolve_package;
-use utoo_ruborist::traits::registry::RegistryClient;
+use utoo_ruborist::service::fetch_full_manifest;
 use utoo_ruborist::util::parse_package_spec;
 
 use crate::helper::fs::Context;
+use crate::util::config::get_registry;
 use crate::util::format_print::print_grid;
 
 /// View package information from registry, similar to npm view
@@ -18,16 +19,16 @@ pub async fn view(package_spec: &str) -> Result<()> {
 
     tracing::debug!("Resolved package: {name} (spec: {version_spec})");
 
-    // Create registry client
-    let registry = Context::registry();
-
-    // Get complete package information (like npm view)
-    let full_manifest = registry
-        .fetch_full_manifest(name)
+    // Fetch full manifest directly from registry (no ETag/304 caching)
+    let registry_url = get_registry();
+    let (full_manifest, _etag) = fetch_full_manifest(&registry_url, name, false, None)
         .await
         .map_err(|e| anyhow!("Failed to fetch package info for {}: {}", package_spec, e))?;
 
     tracing::debug!("Fetched package info: {full_manifest:?}");
+
+    // Create registry client for version resolution
+    let registry = Context::registry();
 
     // Get the specific version manifest
     let resolved_package = resolve_package(&registry, name, version_spec)
@@ -340,5 +341,19 @@ mod tests {
         // This test just ensures the function doesn't panic
         let result = print_package_info(&full_manifest, &version_manifest);
         assert!(result.is_ok());
+    }
+
+    /// E2E test: verify that calling view twice works correctly.
+    /// Previously, the second call would fail with "304 Not Modified" error
+    /// because the registry service used ETag caching.
+    #[tokio::test]
+    async fn test_view_twice_no_304_error() {
+        // First view - should succeed
+        let result1 = view("is-odd").await;
+        assert!(result1.is_ok(), "First view failed: {:?}", result1.err());
+
+        // Second view - should also succeed (not fail with 304 error)
+        let result2 = view("is-odd").await;
+        assert!(result2.is_ok(), "Second view failed: {:?}", result2.err());
     }
 }
