@@ -213,23 +213,44 @@ impl UnifiedRegistry {
                 Ok(manifest)
             }
             Err(e) if e.to_string().contains("Not modified") => {
-                // 304 Not Modified - use disk cache versions info
+                // 304 Not Modified - use cached versions info
                 tracing::debug!("ETag cache hit (304) for: {}", name);
 
-                if let Some(versions_info) = disk_versions {
+                // First, try memory cache for full manifest (preload phase may have cached it)
+                if let Some(cached) = self.cache.get_full_manifest(name) {
+                    tracing::debug!("Using memory-cached full manifest for: {}", name);
+                    return Ok(cached);
+                }
+
+                // Second, use versions cache if available
+                if let Some(versions_info) = disk_versions.or_else(|| self.cache.get_versions(name)) {
                     // Cache versions in memory for later use
                     self.cache
                         .set_versions(name.to_string(), versions_info.clone());
 
-                    // Return a placeholder FullManifest with just versions info
-                    // The actual version manifests will be fetched individually when needed
-                    // This avoids fetching the entire full manifest again
-                    Err(RegistryError(anyhow!(
-                        "304 Not Modified - use versions cache for {}",
-                        name
-                    )))
+                    // Build a minimal FullManifest from cached versions info
+                    // This allows callers to get dist_tags and version list
+                    let mut minimal_manifest = FullManifest {
+                        name: name.to_string(),
+                        dist_tags: versions_info.versions.dist_tags.clone(),
+                        ..Default::default()
+                    };
+
+                    // Try to populate version manifests from disk cache
+                    for v in &versions_info.versions.version_list {
+                        if let Some(manifest) = self.cache.get_version_manifest_from_disk(name, v).await {
+                            minimal_manifest.versions.insert(v.clone(), manifest);
+                        }
+                    }
+
+                    // Cache the minimal manifest in memory
+                    self.cache
+                        .set_full_manifest(name.to_string(), minimal_manifest.clone());
+
+                    Ok(minimal_manifest)
                 } else {
-                    // Disk cache corrupted, fetch fresh
+                    // No cache available, fetch fresh
+                    tracing::debug!("No cache available for {}, fetching fresh", name);
                     let (manifest, new_etag) =
                         http::fetch_full_manifest(&self.registry_url, name, use_abbreviated, None)
                             .await
