@@ -2,6 +2,8 @@
 //!
 //! Provides functions for selecting the fastest npm registry by ping latency.
 
+use colored::Colorize;
+
 /// Default registries for auto-selection
 pub const REGISTRY_NPMMIRROR: &str = "https://registry.npmmirror.com";
 pub const REGISTRY_NPMJS: &str = "https://registry.npmjs.org";
@@ -58,17 +60,29 @@ pub async fn select_fastest_registry() -> String {
         .min_by_key(|r| r.latency_ms)
     {
         Some(r) => {
-            tracing::info!(
-                "Auto-selected registry: {} ({}ms)",
-                r.registry,
-                r.latency_ms
+            println!(
+                "{} {} ({})",
+                "Registry:".dimmed(),
+                r.registry.cyan(),
+                format!("{}ms", r.latency_ms).green()
+            );
+            println!(
+                "{} {}",
+                "Tip:".dimmed(),
+                format!("ut config set registry {} --global", r.registry).yellow()
             );
             r.registry
         }
         None => {
-            tracing::warn!(
-                "All registry pings failed, using default: {}",
-                REGISTRY_NPMMIRROR
+            println!(
+                "{} {} (ping failed)",
+                "Registry:".dimmed(),
+                REGISTRY_NPMMIRROR.cyan()
+            );
+            println!(
+                "{} {}",
+                "Tip:".dimmed(),
+                format!("ut config set registry {} --global", REGISTRY_NPMMIRROR).yellow()
             );
             REGISTRY_NPMMIRROR.to_string()
         }
