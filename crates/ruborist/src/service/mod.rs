@@ -55,4 +55,5 @@ pub use cache::{
     load_project_cache, save_project_cache,
 };
 pub use fs::{Glob, NoopGlob, exists, read_to_string};
+pub use http::fetch_full_manifest;
 pub use registry::UnifiedRegistry;
