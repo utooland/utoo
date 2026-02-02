@@ -732,10 +732,10 @@ mod tests {
         let mut package_json: Value = serde_json::from_str(&content).unwrap();
 
         // Simulate adding a package
-        if let Some(deps) = package_json.get_mut("dependencies") {
-            if let Some(deps_obj) = deps.as_object_mut() {
-                deps_obj.insert("lodash".to_string(), Value::String("^4.17.21".to_string()));
-            }
+        if let Some(deps) = package_json.get_mut("dependencies")
+            && let Some(deps_obj) = deps.as_object_mut()
+        {
+            deps_obj.insert("lodash".to_string(), Value::String("^4.17.21".to_string()));
         }
 
         // Write back preserving trailing newline
@@ -760,10 +760,10 @@ mod tests {
         let has_trailing_newline = content.ends_with(LINE_ENDING) || content.ends_with('\n');
         let mut package_json: Value = serde_json::from_str(&content).unwrap();
 
-        if let Some(deps) = package_json.get_mut("dependencies") {
-            if let Some(deps_obj) = deps.as_object_mut() {
-                deps_obj.insert("react".to_string(), Value::String("^18.0.0".to_string()));
-            }
+        if let Some(deps) = package_json.get_mut("dependencies")
+            && let Some(deps_obj) = deps.as_object_mut()
+        {
+            deps_obj.insert("react".to_string(), Value::String("^18.0.0".to_string()));
         }
 
         let mut output = serde_json::to_string_pretty(&package_json).unwrap();
