@@ -40,7 +40,8 @@
     "examples/with-tailwind",
     "examples/resolve",
     "examples/react",
-    "examples/utooweb-demo"
+    "examples/utooweb-demo",
+    "examples/expose-entry-exports"
   ],
   "repository": "https://github.com/utooland/utoo"
 }

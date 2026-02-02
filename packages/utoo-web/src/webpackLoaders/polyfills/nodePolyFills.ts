@@ -1,4 +1,4 @@
-import * as fs from "./fsPolyfill/sync";
+import * as fs from "./fsPolyfill";
 import * as workerThreads from "./workerThreadsPolyfill";
 
 const buffer = require("buffer");
