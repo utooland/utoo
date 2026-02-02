@@ -13,21 +13,6 @@ use wasm_bindgen::prelude::*;
 use crate::errors::to_js_error;
 use crate::tokio_runtime::runtime;
 
-fn block_on<T>(fut: impl std::future::Future<Output = T> + Send + 'static) -> Result<T, JsError>
-where
-    T: Send + 'static,
-{
-    let (sender, receiver) = oneshot::channel();
-
-    runtime().spawn(async move {
-        let _ = sender.send(fut.await);
-    });
-
-    receiver
-        .recv()
-        .map_err(|e| JsError::new(&format!("Recv error: {}", e)))
-}
-
 /// OPFS-backed glob implementation.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct OpfsGlob;
@@ -237,7 +222,8 @@ impl Fs {
                 .await
         };
 
-        let bytes = block_on(fut)?
+        let bytes = runtime()
+            .block_on(fut)
             .with_context(|| format!("Failed to read file: {}", path))
             .map_err(to_js_error)?;
 
@@ -253,7 +239,8 @@ impl Fs {
                 .await
         };
 
-        let read_dir = block_on(fut)?
+        let read_dir = runtime()
+            .block_on(fut)
             .with_context(|| format!("Failed to read directory: {}", path))
             .map_err(to_js_error)?;
 
@@ -279,7 +266,8 @@ impl Fs {
                 .await
         };
 
-        block_on(fut)?
+        runtime()
+            .block_on(fut)
             .with_context(|| format!("Failed to write file: {}", path))
             .map_err(to_js_error)?;
 
@@ -295,7 +283,8 @@ impl Fs {
                 .await
         };
 
-        block_on(fut)?
+        runtime()
+            .block_on(fut)
             .with_context(|| format!("Failed to create directory: {}", path))
             .map_err(to_js_error)?;
 
@@ -311,7 +300,8 @@ impl Fs {
                 .await
         };
 
-        block_on(fut)?
+        runtime()
+            .block_on(fut)
             .with_context(|| format!("Failed to create directory recursively: {}", path))
             .map_err(to_js_error)?;
 
@@ -332,7 +322,8 @@ impl Fs {
                 .await
         };
 
-        block_on(fut)?
+        runtime()
+            .block_on(fut)
             .with_context(|| format!("Failed to copy file from {} to {}", src, dst))
             .map_err(to_js_error)?;
 
@@ -348,7 +339,8 @@ impl Fs {
                 .await
         };
 
-        block_on(fut)?
+        runtime()
+            .block_on(fut)
             .with_context(|| format!("Failed to remove file: {}", path))
             .map_err(to_js_error)?;
 
@@ -370,7 +362,8 @@ impl Fs {
             }
         };
 
-        block_on(fut)?
+        runtime()
+            .block_on(fut)
             .with_context(|| format!("Failed to remove directory: {}", path))
             .map_err(to_js_error)?;
 
@@ -386,7 +379,8 @@ impl Fs {
                 .await
         };
 
-        block_on(fut)?
+        runtime()
+            .block_on(fut)
             .and_then(Metadata::try_from)
             .with_context(|| format!("Failed to get metadata: {}", path))
             .map_err(to_js_error)
