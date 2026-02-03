@@ -1,6 +1,6 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["input_bf6c0d42.js"],"runtimeModuleIds":[48]}
+    {"otherChunks":["input_f34f5e12.js"],"runtimeModuleIds":[48]}
 ]);
 (() => {
 if (!Array.isArray(globalThis["TURBOPACK"])) {
@@ -10,7 +10,8 @@ if (!Array.isArray(globalThis["TURBOPACK"])) {
 const CHUNK_BASE_PATH = "__RUNTIME_PUBLIC_PATH__";
 const RELATIVE_ROOT_PATH = "..";
 const RUNTIME_PUBLIC_PATH = "__RUNTIME_PUBLIC_PATH__";
-const CHUNK_SUFFIX = "";
+const ASSET_SUFFIX = "";
+const WORKER_FORWARDED_GLOBALS = [];
 /**
  * This file contains runtime types and functions that are shared between all
  * TurboPack ECMAScript runtimes.
@@ -525,13 +526,13 @@ function applyModuleFactoryName(factory) {
 }
 /**
  * This file contains runtime types and functions that are shared between all
- * Turbopack *development* ECMAScript runtimes.
+ * Turbopack *browser* ECMAScript runtimes.
  *
  * It will be appended to the runtime code of each runtime right after the
  * shared runtime utils.
  */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="../base/globals.d.ts" />
 /// <reference path="../../../shared/runtime-utils.ts" />
-// Used in WebWorkers to tell the runtime about the chunk base path
+// Used in WebWorkers to tell the runtime about the chunk suffix
 // Support runtime public path from window.publicPath
 function getRuntimeChunkBasePath() {
     if (CHUNK_BASE_PATH === '__RUNTIME_PUBLIC_PATH__') {
@@ -701,23 +702,41 @@ browserContextPrototype.R = resolvePathFromModule;
 }
 browserContextPrototype.P = resolveAbsolutePath;
 /**
- * Returns a blob URL for the worker.
- * @param chunks list of chunks to load
- */ function getWorkerBlobURL(chunks) {
-    // It is important to reverse the array so when bootstrapping we can infer what chunk is being
-    // evaluated by poping urls off of this array.  See `getPathFromScript`
-    let bootstrap = `self.TURBOPACK_WORKER_LOCATION = ${JSON.stringify(location.origin)};
-self.TURBOPACK_CHUNK_SUFFIX = ${JSON.stringify(CHUNK_SUFFIX)};
-self.TURBOPACK_NEXT_CHUNK_URLS = ${JSON.stringify(chunks.reverse().map(getChunkRelativeUrl), null, 2)};
-importScripts(...self.TURBOPACK_NEXT_CHUNK_URLS.map(c => self.TURBOPACK_WORKER_LOCATION + c).reverse());`;
-    let blob = new Blob([
-        bootstrap
-    ], {
-        type: 'text/javascript'
-    });
-    return URL.createObjectURL(blob);
+ * Exports a URL with the static suffix appended.
+ */ function exportUrl(url, id) {
+    exportValue.call(this, `${url}${ASSET_SUFFIX}`, id);
 }
-browserContextPrototype.b = getWorkerBlobURL;
+browserContextPrototype.q = exportUrl;
+/**
+ * Returns a URL for the worker.
+ * The entrypoint is a pre-compiled worker runtime file. The params configure
+ * which module chunks to load and which module to run as the entry point.
+ *
+ * The params are a JSON array of the following structure:
+ * `[TURBOPACK_NEXT_CHUNK_URLS, ASSET_SUFFIX, ...WORKER_FORWARDED_GLOBALS values]`
+ *
+ * @param entrypoint URL path to the worker entrypoint chunk
+ * @param moduleChunks list of module chunk paths to load
+ * @param shared whether this is a SharedWorker (uses querystring for URL identity)
+ */ function getWorkerURL(entrypoint, moduleChunks, shared) {
+    const chunkUrls = moduleChunks.map((chunk)=>getChunkRelativeUrl(chunk)).reverse();
+    const params = [
+        chunkUrls,
+        ASSET_SUFFIX
+    ];
+    for (const globalName of WORKER_FORWARDED_GLOBALS){
+        params.push(globalThis[globalName]);
+    }
+    const url = new URL(getChunkRelativeUrl(entrypoint), location.origin);
+    const paramsJson = JSON.stringify(params);
+    if (shared) {
+        url.searchParams.set('params', paramsJson);
+    } else {
+        url.hash = '#params=' + encodeURIComponent(paramsJson);
+    }
+    return url;
+}
+browserContextPrototype.b = getWorkerURL;
 /**
  * Instantiates a runtime module.
  */ function instantiateRuntimeModule(moduleId, chunkPath) {
@@ -726,13 +745,13 @@ browserContextPrototype.b = getWorkerBlobURL;
 /**
  * Returns the URL relative to the origin where a chunk can be fetched from.
  */ function getChunkRelativeUrl(chunkPath) {
-    return `${getRuntimeChunkBasePath()}${chunkPath.split('/').map((p)=>encodeURIComponent(p)).join('/')}${CHUNK_SUFFIX}`;
+    return `${getRuntimeChunkBasePath()}${chunkPath.split('/').map((p)=>encodeURIComponent(p)).join('/')}${ASSET_SUFFIX}`;
 }
 function getPathFromScript(chunkScript) {
     if (typeof chunkScript === 'string') {
         return chunkScript;
     }
-    const chunkUrl = typeof TURBOPACK_NEXT_CHUNK_URLS !== 'undefined' ? TURBOPACK_NEXT_CHUNK_URLS.pop() : chunkScript.getAttribute('src');
+    const chunkUrl = chunkScript.src;
     const src = decodeURIComponent(chunkUrl.replace(/[?#].*$/, ''));
     const runtimeBasePath = getRuntimeChunkBasePath();
     let path = src.startsWith(runtimeBasePath) ? src.slice(runtimeBasePath.length) : src;
@@ -740,6 +759,35 @@ function getPathFromScript(chunkScript) {
         path = path.slice(1);
     }
     return path;
+}
+/**
+ * Return the ChunkUrl from a ChunkScript.
+ */ function getUrlFromScript(chunk) {
+    if (typeof chunk === 'string') {
+        return getChunkRelativeUrl(chunk);
+    } else {
+        // This is already exactly what we want
+        return chunk.src;
+    }
+}
+/**
+ * Determine the chunk to register. Note that this function has side-effects!
+ */ function getChunkFromRegistration(chunk) {
+    if (typeof chunk === 'string') {
+        return chunk;
+    } else if (!chunk) {
+        if (typeof TURBOPACK_NEXT_CHUNK_URLS !== 'undefined') {
+            return {
+                src: TURBOPACK_NEXT_CHUNK_URLS.pop()
+            };
+        } else {
+            throw new Error('chunk path empty but not in a worker');
+        }
+    } else {
+        return {
+            src: chunk.getAttribute('src')
+        };
+    }
 }
 const regexJsUrl = /\.js(?:\?[^#]*)?(?:#.*)?$/;
 /**
@@ -821,7 +869,7 @@ function instantiateModule(id, sourceType, sourceData) {
 }
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function registerChunk(registration) {
-    const chunkPath = getPathFromScript(registration[0]);
+    const chunk = getChunkFromRegistration(registration[0]);
     let runtimeParams;
     // When bootstrapping we are passed a single runtimeParams object so we can distinguish purely based on length
     if (registration.length === 2) {
@@ -830,23 +878,27 @@ function registerChunk(registration) {
         runtimeParams = undefined;
         installCompressedModuleFactories(registration, /* offset= */ 1, moduleFactories);
     }
-    return BACKEND.registerChunk(chunkPath, runtimeParams);
+    return BACKEND.registerChunk(chunk, runtimeParams);
 }
 /**
- * This file contains the runtime code specific to the Turbopack development
- * ECMAScript DOM runtime.
+ * This file contains the runtime code specific to the Turbopack ECMAScript DOM runtime.
  *
- * It will be appended to the base development runtime code.
+ * It will be appended to the base runtime code.
  */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="../../../browser/runtime/base/runtime-base.ts" />
 /// <reference path="../../../shared/runtime-types.d.ts" />
+function getAssetSuffixFromScriptSrc() {
+    // TURBOPACK_ASSET_SUFFIX is set in web workers
+    return (self.TURBOPACK_ASSET_SUFFIX ?? document?.currentScript?.getAttribute?.('src')?.replace(/^(.*(?=\?)|^.*$)/, '')) || '';
+}
 let BACKEND;
 /**
  * Maps chunk paths to the corresponding resolver.
  */ const chunkResolvers = new Map();
 (()=>{
     BACKEND = {
-        async registerChunk (chunkPath, params) {
-            const chunkUrl = getChunkRelativeUrl(chunkPath);
+        async registerChunk (chunk, params) {
+            let chunkPath = getPathFromScript(chunk);
+            let chunkUrl = getUrlFromScript(chunk);
             const resolver = getOrCreateResolver(chunkUrl);
             resolver.resolve();
             if (params == null) {
@@ -933,7 +985,7 @@ let BACKEND;
             // ignore
             } else if (isJs(chunkUrl)) {
                 self.TURBOPACK_NEXT_CHUNK_URLS.push(chunkUrl);
-                importScripts(TURBOPACK_WORKER_LOCATION + chunkUrl);
+                importScripts(chunkUrl);
             } else {
                 throw new Error(`can't infer type of chunk from URL ${chunkUrl} in worker`);
             }
