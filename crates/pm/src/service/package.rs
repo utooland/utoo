@@ -176,15 +176,8 @@ impl PackageService {
             }
 
             // Check platform compatibility
-            let is_compatible = if let Some(cpu) = &lock_package.cpu {
-                is_cpu_compatible(cpu)
-            } else {
-                true
-            } && if let Some(os) = &lock_package.os {
-                is_os_compatible(os)
-            } else {
-                true
-            };
+            let is_compatible = lock_package.cpu.as_ref().is_none_or(is_cpu_compatible)
+                && lock_package.os.as_ref().is_none_or(is_os_compatible);
 
             if !is_compatible {
                 tracing::debug!("Package {path} is not compatible with current platform");

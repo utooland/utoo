@@ -246,22 +246,16 @@ pub async fn update_package_binary(dir: &Path, name: &str) -> Result<()> {
         let mut pkg = load_package_json_from_path(dir).await?;
 
         // has install script and not replaceHostFiles
-        let should_update_binary = if let Some(scripts) = pkg["scripts"].as_object() {
+        let should_update_binary = pkg["scripts"].as_object().is_some_and(|scripts| {
             scripts.contains_key("install") && !binary_mirror.contains_key("replaceHostFiles")
-        } else {
-            false
-        };
+        });
 
         // detect node-pre-gyp
-        let should_handle_node_pre_gyp = if let Some(scripts) = pkg["scripts"].as_object() {
-            scripts
-                .get("install")
-                .and_then(|s| s.as_str())
-                .map(|s| s.contains("node-pre-gyp install"))
-                .unwrap_or(false)
-        } else {
-            false
-        };
+        let should_handle_node_pre_gyp = pkg["scripts"]
+            .as_object()
+            .and_then(|scripts| scripts.get("install"))
+            .and_then(|s| s.as_str())
+            .is_some_and(|s| s.contains("node-pre-gyp install"));
 
         // update binary config
         if should_update_binary {

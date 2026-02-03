@@ -17,217 +17,85 @@ use std::os::unix::ffi::OsStrExt;
 
 #[cfg(target_os = "linux")]
 mod linux_clone {
-    use crate::fs;
     use anyhow::{Context, Result};
-    use std::os::unix::io::AsRawFd;
+    use std::fs;
+    use std::io;
     use std::path::Path;
-    use std::sync::atomic::{AtomicBool, Ordering};
 
-    // Cache for copy_file_range support
-    static COPY_FILE_RANGE_SUPPORTED: AtomicBool = AtomicBool::new(true);
-
-    // Cache for FICLONE support
-    static FICLONE_SUPPORTED: AtomicBool = AtomicBool::new(true);
-
-    // Check if FICLONE is supported
-    fn is_ficlone_supported() -> bool {
-        FICLONE_SUPPORTED.load(Ordering::Relaxed)
-    }
-
-    // Check if copy_file_range is supported
-    fn is_copy_file_range_supported() -> bool {
-        COPY_FILE_RANGE_SUPPORTED.load(Ordering::Relaxed)
-    }
-
-    // Copy a single file using FICLONE
-    async fn copy_file_with_ficlone(src: &Path, dst: &Path) -> Result<()> {
-        let src_file = crate::fs::File::open(src).await?;
-        let src_metadata = src_file.metadata().await?;
-        let src_permissions = src_metadata.permissions();
-
-        // Create destination file
-        let dst_file = crate::fs::File::create(dst).await?;
-
-        let src_fd = src_file.as_raw_fd();
-        let dst_fd = dst_file.as_raw_fd();
-
-        // Use spawn_blocking to avoid blocking the async runtime
-        let result = tokio::task::spawn_blocking(move || {
-            let ret = unsafe { libc::ioctl(dst_fd, libc::FICLONE, src_fd) };
-
-            if ret < 0 {
-                let err = std::io::Error::last_os_error();
-                Err(err)
-            } else {
-                Ok(())
-            }
+    // Check if the package has install scripts (sync version)
+    fn has_install_script_sync(src: &Path) -> bool {
+        src.parent().is_some_and(|parent| {
+            fs::metadata(parent.join("_hasInstallScript")).is_ok_and(|m| m.is_file())
         })
-        .await?;
+    }
 
-        if let Err(e) = result {
-            FICLONE_SUPPORTED.store(false, Ordering::Relaxed);
-            return Err(anyhow::anyhow!("FICLONE not supported: {}", e));
-        }
-
-        // Preserve permissions after successful copy
-        fs::set_permissions(dst, src_permissions).await?;
-
+    // Copy a single file, preserving permissions (sync version)
+    fn copy_file_sync(src: &Path, dst: &Path) -> io::Result<()> {
+        fs::copy(src, dst)?;
+        // Preserve permissions
+        let src_perms = fs::metadata(src)?.permissions();
+        fs::set_permissions(dst, src_perms)?;
         Ok(())
     }
 
-    // Copy a single file using copy_file_range
-    async fn copy_file_with_range(src: &Path, dst: &Path) -> Result<()> {
-        let src_file = crate::fs::File::open(src).await?;
-        let metadata = src_file.metadata().await?;
-        let file_size = metadata.len() as usize;
-        let src_permissions = metadata.permissions();
-
-        // Create destination file
-        let dst_file = crate::fs::File::create(dst).await?;
-
-        let src_fd = src_file.as_raw_fd();
-        let dst_fd = dst_file.as_raw_fd();
-
-        // Use spawn_blocking to avoid blocking the async runtime
-        let result = tokio::task::spawn_blocking(move || {
-            let mut offset: i64 = 0;
-            let ret = unsafe {
-                libc::copy_file_range(src_fd, &mut offset, dst_fd, &mut offset, file_size, 0)
-            };
-
-            if ret < 0 {
-                let err = std::io::Error::last_os_error();
-                Err(err)
-            } else {
-                Ok(())
-            }
-        })
-        .await?;
-
-        if let Err(e) = result {
-            COPY_FILE_RANGE_SUPPORTED.store(false, Ordering::Relaxed);
-            return Err(anyhow::anyhow!("copy_file_range not supported: {}", e));
-        }
-
-        // Preserve permissions after successful copy
-        fs::set_permissions(dst, src_permissions).await?;
-
-        Ok(())
-    }
-
-    // Fast copy a single file using the best available method
-    async fn fast_copy_file(src: &Path, dst: &Path) -> Result<()> {
-        // Try FICLONE if supported
-        if is_ficlone_supported() {
-            match copy_file_with_ficlone(src, dst).await {
-                Ok(_) => return Ok(()),
-                Err(e) => {
-                    tracing::debug!("FICLONE failed: {e}, trying copy_file_range");
-                }
-            }
-        }
-
-        // Try copy_file_range if supported
-        if is_copy_file_range_supported() {
-            match copy_file_with_range(src, dst).await {
-                Ok(_) => return Ok(()),
-                Err(e) => {
-                    tracing::debug!("copy_file_range failed: {e}, using regular copy");
-                }
-            }
-        }
-
-        // Fallback to regular copy
-        crate::fs::copy(src, dst).await.with_context(|| {
-            format!(
-                "Failed to copy file from {} to {}",
-                src.display(),
-                dst.display()
-            )
-        })?;
-
-        // Preserve permissions for regular copy fallback
-        let src_metadata = fs::metadata(src).await?;
-        fs::set_permissions(dst, src_metadata.permissions()).await?;
-
-        Ok(())
-    }
-
-    // Fast copy using the best available method
-    async fn fast_copy(src: &Path, dst: &Path) -> Result<()> {
+    // Recursive directory copy with hardlink strategy (sync version)
+    fn clone_dir_sync(src: &Path, dst: &Path, use_copy: bool) -> io::Result<()> {
         // Create destination directory
-        fs::create_dir_all(dst).await?;
+        if let Err(e) = fs::create_dir(dst)
+            && e.kind() != io::ErrorKind::AlreadyExists
+        {
+            return Err(e);
+        }
 
-        // Copy all files in the directory
-        let mut read_dir = fs::read_dir(src).await?;
-        while let Some(entry) = read_dir.next_entry().await? {
+        for entry in fs::read_dir(src)? {
+            let entry = entry?;
             let entry_path = entry.path();
-            let file_name = entry_path.file_name().unwrap();
-            let target_path = dst.join(file_name);
+            let file_name = entry.file_name();
+            let target_path = dst.join(&file_name);
 
-            if entry.metadata().await?.is_dir() {
-                Box::pin(fast_copy(&entry_path, &target_path)).await?;
+            if entry.file_type()?.is_dir() {
+                clone_dir_sync(&entry_path, &target_path, use_copy)?;
+            } else if use_copy {
+                // For packages with install scripts, always copy
+                copy_file_sync(&entry_path, &target_path)?;
             } else {
-                fast_copy_file(&entry_path, &target_path).await?;
+                // Try hardlink first
+                if fs::hard_link(&entry_path, &target_path).is_err() {
+                    // Fallback to copy
+                    copy_file_sync(&entry_path, &target_path)?;
+                }
             }
         }
+
         Ok(())
     }
 
-    // Check if the package has install scripts
-    async fn has_install_script(src: &Path) -> bool {
-        if let Some(parent) = src.parent() {
-            let flag_path = parent.join("_hasInstallScript");
-            if let Ok(metadata) = fs::metadata(&flag_path).await {
-                return metadata.is_file();
-            }
-        }
-        false
-    }
-
+    // Entry point: clone directory using spawn_blocking
     pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
-        if !fs::metadata(src).await?.is_dir() {
-            return Err(anyhow::anyhow!("Source is not a directory"));
-        }
+        // Pre-format for error message (avoid clone)
+        let err_msg = format!("Failed to clone {} to {}", src.display(), dst.display());
+        let src = src.to_path_buf();
+        let dst = dst.to_path_buf();
 
-        // Create destination directory
-        fs::create_dir_all(dst).await?;
-
-        // Check if the package has install scripts
-        if has_install_script(src).await {
-            tracing::debug!(
-                "Package has install scripts, using fast copy for directory {} to {}",
-                src.display(),
-                dst.display()
-            );
-            return fast_copy(src, dst).await;
-        }
-
-        // For directories without install scripts, recursively create the directory structure
-        let mut read_dir = fs::read_dir(src).await?;
-        while let Some(entry) = read_dir.next_entry().await? {
-            let entry_path = entry.path();
-            let file_name = entry_path.file_name().unwrap();
-            let target_path = dst.join(file_name);
-
-            if entry.metadata().await?.is_dir() {
-                Box::pin(clone_dir(&entry_path, &target_path)).await?;
-            } else {
-                // Try hardlink first for files in packages without install scripts
-                if let Err(e) = fs::hard_link(&entry_path, &target_path).await {
-                    eprintln!(
-                        "Failed to create hardlink for file from {} to {}: {}, trying fast copy",
-                        entry_path.display(),
-                        target_path.display(),
-                        e
-                    );
-                    // If hardlink fails, fallback to fast copy
-                    fast_copy_file(&entry_path, &target_path).await?;
-                }
+        tokio::task::spawn_blocking(move || {
+            if !fs::metadata(&src)?.is_dir() {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotADirectory,
+                    "Source is not a directory",
+                ));
             }
-        }
 
-        Ok(())
+            // Create destination directory (entry point)
+            fs::create_dir_all(&dst)?;
+
+            // Check if the package has install scripts
+            let use_copy = has_install_script_sync(&src);
+
+            // Clone directory recursively
+            clone_dir_sync(&src, &dst, use_copy)
+        })
+        .await?
+        .with_context(|| err_msg)
     }
 }
 
@@ -249,10 +117,14 @@ mod windows_clone {
         Ok(())
     }
 
-    // Fast copy directory using regular copy for packages with install scripts
-    async fn fast_copy(src: &Path, dst: &Path) -> Result<()> {
-        // Create destination directory
-        fs::create_dir_all(dst).await?;
+    // Fast copy directory (internal recursive version)
+    async fn fast_copy_inner(src: &Path, dst: &Path) -> Result<()> {
+        // Use create_dir since parent already exists
+        if let Err(e) = tokio::fs::create_dir(dst).await
+            && e.kind() != std::io::ErrorKind::AlreadyExists
+        {
+            return Err(e.into());
+        }
 
         // Copy all files in the directory
         let mut read_dir = fs::read_dir(src).await?;
@@ -262,12 +134,18 @@ mod windows_clone {
             let target_path = dst.join(file_name);
 
             if entry.metadata().await?.is_dir() {
-                Box::pin(fast_copy(&entry_path, &target_path)).await?;
+                Box::pin(fast_copy_inner(&entry_path, &target_path)).await?;
             } else {
                 fast_copy_file(&entry_path, &target_path).await?;
             }
         }
         Ok(())
+    }
+
+    // Fast copy entry point
+    async fn fast_copy(src: &Path, dst: &Path) -> Result<()> {
+        fs::create_dir_all(dst).await?;
+        fast_copy_inner(src, dst).await
     }
 
     // Check if the package has install scripts
@@ -281,26 +159,15 @@ mod windows_clone {
         false
     }
 
-    pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
-        if !fs::metadata(src).await?.is_dir() {
-            return Err(anyhow::anyhow!("Source is not a directory"));
+    // Internal recursive clone (parent directory already exists)
+    async fn clone_dir_inner(src: &Path, dst: &Path) -> Result<()> {
+        // Use create_dir since parent already exists
+        if let Err(e) = tokio::fs::create_dir(dst).await
+            && e.kind() != std::io::ErrorKind::AlreadyExists
+        {
+            return Err(e.into());
         }
 
-        // Create destination directory
-        fs::create_dir_all(dst).await?;
-
-        // Check if the package has install scripts
-        if has_install_script(src).await {
-            tracing::debug!(
-                "Package has install scripts, using fast copy for directory {} to {}",
-                src.display(),
-                dst.display()
-            );
-            return fast_copy(src, dst).await;
-        }
-
-        // For directories without install scripts, recursively create the directory structure
-        // and use hardlinks where possible
         let mut read_dir = fs::read_dir(src).await?;
         while let Some(entry) = read_dir.next_entry().await? {
             let entry_path = entry.path();
@@ -308,7 +175,7 @@ mod windows_clone {
             let target_path = dst.join(file_name);
 
             if entry.metadata().await?.is_dir() {
-                Box::pin(clone_dir(&entry_path, &target_path)).await?;
+                Box::pin(clone_dir_inner(&entry_path, &target_path)).await?;
             } else {
                 // Try hardlink first for files in packages without install scripts
                 if let Err(e) = fs::hard_link(&entry_path, &target_path).await {
@@ -333,6 +200,28 @@ mod windows_clone {
         }
 
         Ok(())
+    }
+
+    pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
+        if !fs::metadata(src).await?.is_dir() {
+            return Err(anyhow::anyhow!("Source is not a directory"));
+        }
+
+        // Create destination directory (entry point, use create_dir_all)
+        fs::create_dir_all(dst).await?;
+
+        // Check if the package has install scripts
+        if has_install_script(src).await {
+            tracing::debug!(
+                "Package has install scripts, using fast copy for directory {} to {}",
+                src.display(),
+                dst.display()
+            );
+            return fast_copy_inner(src, dst).await;
+        }
+
+        // For directories without install scripts, use hardlink strategy
+        clone_dir_inner(src, dst).await
     }
 }
 
