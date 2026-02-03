@@ -251,11 +251,16 @@ enum Commands {
 }
 
 fn main() {
-    let worker_threads = 20;
+    let parallelism = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    // Minimum 12 blocking threads for CI environments with fewer cores
+    let blocking_threads = (parallelism * 2).max(12);
+
     let result = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .worker_threads(worker_threads)
-        .max_blocking_threads(4) // Limit blocking threads for file operations
+        .worker_threads(parallelism)
+        .max_blocking_threads(blocking_threads)
         .thread_name("utoo-worker")
         .on_thread_stop(|| {})
         .on_thread_park(|| {})
