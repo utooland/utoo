@@ -37,10 +37,9 @@
 //!       lib-z waits on lib-a ──► shares result (no duplicate!)
 //! ```
 
-use dashmap::DashMap;
+use dashmap::{mapref::entry::Entry, DashMap};
 use std::future::Future;
 use std::hash::Hash;
-use std::pin::pin;
 use std::sync::Arc;
 use tokio::sync::Notify;
 
@@ -111,7 +110,7 @@ where
         let entry = self.map.entry(key.clone());
 
         match entry {
-            dashmap::mapref::entry::Entry::Occupied(occupied) => {
+            Entry::Occupied(occupied) => {
                 // Someone else is working on it or it's done
                 match occupied.get() {
                     Value::Done(result) => {
@@ -119,11 +118,26 @@ where
                     }
                     Value::Waiting(existing_notify) => {
                         let existing_notify = Arc::clone(existing_notify);
+
+                        // Register the waiter BEFORE releasing the lock.
+                        // This prevents a race condition where the worker completes
+                        // and calls notify_waiters() between dropping the lock and
+                        // registering the waiter - which would cause us to miss the
+                        // notification and wait forever.
+                        let notified = existing_notify.notified();
+
+                        // Now safe to release the lock
                         drop(occupied);
 
+                        // Double-check: the value might have been inserted between
+                        // releasing the lock and here. If so, return it directly.
+                        if let Some(entry) = self.map.get(&key)
+                            && let Value::Done(result) = entry.value()
+                        {
+                            return Some(Arc::clone(result));
+                        }
+
                         // Wait for the worker to complete
-                        // Use pin! to ensure the future is pinned before registering
-                        let notified = pin!(existing_notify.notified());
                         notified.await;
 
                         // Check the result
@@ -136,7 +150,7 @@ where
                     }
                 }
             }
-            dashmap::mapref::entry::Entry::Vacant(vacant) => {
+            Entry::Vacant(vacant) => {
                 // We are the worker
                 vacant.insert(Value::Waiting(Arc::clone(&notify)));
             }
@@ -262,5 +276,96 @@ mod tests {
             .await;
         assert_eq!(*result.unwrap(), 42);
         assert_eq!(attempt.load(Ordering::SeqCst), 2);
+    }
+
+    /// Test that waiters don't miss notifications due to race conditions.
+    ///
+    /// This test verifies the fix for a race condition where a waiter could
+    /// miss the notification if the worker completed between the waiter
+    /// releasing the lock and registering for notifications.
+    ///
+    /// Timeline of the race condition (before fix):
+    /// ```text
+    /// Worker                          Waiter
+    /// ──────                          ──────
+    /// 1. register key
+    ///    insert Waiting(notify)
+    ///    start work...
+    ///                                 2. sees Waiting state
+    ///                                    clone notify
+    ///                                    drop(lock) ← release lock
+    ///
+    ///                                    ┌─────────────────┐
+    ///                                    │  DANGER WINDOW  │
+    ///                                    │  (not listening │
+    ///                                    │   for notify)   │
+    ///                                    └─────────────────┘
+    ///
+    /// 3. work done!
+    ///    insert Done(value)
+    ///    notify_waiters() ← sent!
+    ///    (but no one listening)
+    ///
+    ///                                 4. notified = notify.notified()
+    ///                                    ← too late! already notified
+    ///
+    ///                                 5. notified.await
+    ///                                    ← waits forever, deadlock!
+    /// ```
+    ///
+    /// The fix: register `notified()` BEFORE releasing the lock, then
+    /// double-check if the value was inserted.
+    #[tokio::test]
+    async fn test_no_missed_notifications() {
+        use tokio::sync::Barrier;
+
+        let map = Arc::new(OnceMap::<String, i32>::new());
+        let barrier = Arc::new(Barrier::new(2));
+
+        // Spawn the worker task
+        let map_clone = Arc::clone(&map);
+        let barrier_clone = Arc::clone(&barrier);
+        let worker = tokio::spawn(async move {
+            map_clone
+                .get_or_init("key".to_string(), || async move {
+                    // Wait for waiter to be ready
+                    barrier_clone.wait().await;
+                    // Small delay to let waiter release lock
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    Some(42)
+                })
+                .await
+        });
+
+        // Spawn waiter task
+        let map_clone = Arc::clone(&map);
+        let barrier_clone = Arc::clone(&barrier);
+        let waiter = tokio::spawn(async move {
+            // Small delay to ensure worker registers first
+            tokio::time::sleep(Duration::from_millis(1)).await;
+
+            // Signal worker to proceed
+            barrier_clone.wait().await;
+
+            // This should not hang - if it does, the race condition exists
+            map_clone
+                .get_or_init("key".to_string(), || async move {
+                    panic!("Waiter should not execute work");
+                })
+                .await
+        });
+
+        // Use timeout to detect deadlock
+        let timeout = Duration::from_secs(2);
+        let results = tokio::time::timeout(
+            timeout,
+            futures::future::join(worker, waiter),
+        )
+        .await
+        .expect("Test timed out - possible deadlock due to missed notification");
+
+        // Both should get the same result
+        assert_eq!(*results.0.unwrap().unwrap(), 42);
+        assert_eq!(*results.1.unwrap().unwrap(), 42);
     }
 }
