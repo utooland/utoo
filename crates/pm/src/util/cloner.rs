@@ -45,10 +45,10 @@ mod linux_clone {
     // Recursive directory copy with hardlink strategy (sync version)
     fn clone_dir_sync(src: &Path, dst: &Path, use_copy: bool) -> io::Result<()> {
         // Create destination directory
-        if let Err(e) = fs::create_dir(dst) {
-            if e.kind() != io::ErrorKind::AlreadyExists {
-                return Err(e);
-            }
+        if let Err(e) = fs::create_dir(dst)
+            && e.kind() != io::ErrorKind::AlreadyExists
+        {
+            return Err(e);
         }
 
         for entry in fs::read_dir(src)? {
@@ -124,10 +124,10 @@ mod windows_clone {
     // Fast copy directory (internal recursive version)
     async fn fast_copy_inner(src: &Path, dst: &Path) -> Result<()> {
         // Use create_dir since parent already exists
-        if let Err(e) = tokio::fs::create_dir(dst).await {
-            if e.kind() != std::io::ErrorKind::AlreadyExists {
-                return Err(e.into());
-            }
+        if let Err(e) = tokio::fs::create_dir(dst).await
+            && e.kind() != std::io::ErrorKind::AlreadyExists
+        {
+            return Err(e.into());
         }
 
         // Copy all files in the directory
@@ -166,10 +166,10 @@ mod windows_clone {
     // Internal recursive clone (parent directory already exists)
     async fn clone_dir_inner(src: &Path, dst: &Path) -> Result<()> {
         // Use create_dir since parent already exists
-        if let Err(e) = tokio::fs::create_dir(dst).await {
-            if e.kind() != std::io::ErrorKind::AlreadyExists {
-                return Err(e.into());
-            }
+        if let Err(e) = tokio::fs::create_dir(dst).await
+            && e.kind() != std::io::ErrorKind::AlreadyExists
+        {
+            return Err(e.into());
         }
 
         let mut read_dir = fs::read_dir(src).await?;
