@@ -45,7 +45,11 @@ mod linux_clone {
     // Recursive directory copy with hardlink strategy (sync version)
     fn clone_dir_sync(src: &Path, dst: &Path, use_copy: bool) -> io::Result<()> {
         // Create destination directory
-        fs::create_dir(dst).ok();
+        if let Err(e) = fs::create_dir(dst) {
+            if e.kind() != io::ErrorKind::AlreadyExists {
+                return Err(e);
+            }
+        }
 
         for entry in fs::read_dir(src)? {
             let entry = entry?;
@@ -73,7 +77,7 @@ mod linux_clone {
     // Entry point: clone directory using spawn_blocking
     pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
         // Pre-format for error message (avoid clone)
-        let err_msg = format!("Failed to clone {:?} to {:?}", src, dst);
+        let err_msg = format!("Failed to clone {} to {}", src.display(), dst.display());
         let src = src.to_path_buf();
         let dst = dst.to_path_buf();
 
@@ -120,7 +124,11 @@ mod windows_clone {
     // Fast copy directory (internal recursive version)
     async fn fast_copy_inner(src: &Path, dst: &Path) -> Result<()> {
         // Use create_dir since parent already exists
-        tokio::fs::create_dir(dst).await.ok();
+        if let Err(e) = tokio::fs::create_dir(dst).await {
+            if e.kind() != std::io::ErrorKind::AlreadyExists {
+                return Err(e.into());
+            }
+        }
 
         // Copy all files in the directory
         let mut read_dir = fs::read_dir(src).await?;
@@ -158,7 +166,11 @@ mod windows_clone {
     // Internal recursive clone (parent directory already exists)
     async fn clone_dir_inner(src: &Path, dst: &Path) -> Result<()> {
         // Use create_dir since parent already exists
-        tokio::fs::create_dir(dst).await.ok();
+        if let Err(e) = tokio::fs::create_dir(dst).await {
+            if e.kind() != std::io::ErrorKind::AlreadyExists {
+                return Err(e.into());
+            }
+        }
 
         let mut read_dir = fs::read_dir(src).await?;
         while let Some(entry) = read_dir.next_entry().await? {
