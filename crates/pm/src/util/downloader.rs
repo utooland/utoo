@@ -3,20 +3,18 @@ use bytes::Bytes;
 use once_cell::sync::Lazy;
 use reqwest::Client;
 use reqwest::StatusCode;
+use std::io::Cursor;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;
 use tokio::fs::File;
 use tokio_retry::RetryIf;
 
 use super::oncemap::OnceMap;
-use super::retry::build_dns_cached_client;
-use super::retry::{RetryableError, create_retry_strategy};
-use crate::service::pipeline::STATS;
+use super::retry::{RetryableError, build_dns_cached_client, create_retry_strategy};
 
 // Global downloader client - no pool limit, concurrency controlled by OnceMap
 static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
@@ -137,6 +135,7 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
             Some(())
         })
         .await
+        .map(|_| ())
         .ok_or_else(|| anyhow::anyhow!("Download failed: {}", url))
 }
 
@@ -164,10 +163,7 @@ pub async fn download_bytes(url: &str) -> Result<Bytes> {
 
             match response.status() {
                 StatusCode::OK => {
-                    STATS.downloading.fetch_add(1, Ordering::Relaxed);
-                    let network_start = Instant::now();
                     let bytes = response.bytes().await.map_err(|e| {
-                        STATS.downloading.fetch_sub(1, Ordering::Relaxed);
                         tracing::warn!(
                             "Retry {}/10 - Stream error: {}, url: {}",
                             attempt + 1,
@@ -176,10 +172,6 @@ pub async fn download_bytes(url: &str) -> Result<Bytes> {
                         );
                         RetryableError::Temporary(format!("Stream error: {e}"))
                     })?;
-                    STATS.add_network_time(network_start.elapsed().as_micros() as u64);
-                    STATS.add_bytes_downloaded(bytes.len() as u64);
-                    STATS.downloading.fetch_sub(1, Ordering::Relaxed);
-                    STATS.downloaded.fetch_add(1, Ordering::Relaxed);
                     if attempt > 0 {
                         tracing::info!("Retry succeeded on attempt {}, url: {}", attempt + 1, url);
                     }
@@ -237,7 +229,6 @@ fn estimate_uncompressed_size(gzip_data: &[u8]) -> usize {
 // Extract tarball using libdeflate for better performance
 async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
     // 1. Decompress and parse tar in a single blocking task (with buffer pool)
-    STATS.extracting.fetch_add(1, Ordering::Relaxed);
     let decompress_start = Instant::now();
     let estimated_size = estimate_uncompressed_size(&gzip_bytes);
     let gzip_len = gzip_bytes.len();
@@ -326,11 +317,9 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
 
     // Record decompress time
     let decompress_time = decompress_start.elapsed();
-    STATS.add_decompress_time(decompress_time.as_micros() as u64);
 
     // 4. Write files using rayon for parallelism within spawn_blocking
     let write_start = Instant::now();
-    let total_bytes: u64 = entries.iter().map(|e| e.content.len() as u64).sum();
 
     tokio::task::spawn_blocking(move || -> Result<()> {
         use rayon::prelude::*;
@@ -368,10 +357,8 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
     .await
     .with_context(|| "Write task panicked")??;
 
-    // Record write time and bytes
+    // Record write time
     let write_time = write_start.elapsed();
-    STATS.add_write_time(write_time.as_micros() as u64);
-    STATS.add_bytes_written(total_bytes);
 
     // Per-package timing breakdown for analysis
     let decompress_ms = decompress_time.as_millis();
@@ -388,10 +375,6 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
     File::create(&dest.join("_resolved"))
         .await
         .with_context(|| format!("Failed to create resolution marker in: {}", dest.display()))?;
-
-    // Track extraction complete
-    STATS.extracting.fetch_sub(1, Ordering::Relaxed);
-    STATS.extracted.fetch_add(1, Ordering::Relaxed);
 
     Ok(())
 }
