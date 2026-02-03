@@ -24,13 +24,9 @@ mod linux_clone {
 
     // Check if the package has install scripts (sync version)
     fn has_install_script_sync(src: &Path) -> bool {
-        if let Some(parent) = src.parent() {
-            let flag_path = parent.join("_hasInstallScript");
-            if let Ok(metadata) = fs::metadata(&flag_path) {
-                return metadata.is_file();
-            }
-        }
-        false
+        src.parent().is_some_and(|parent| {
+            fs::metadata(parent.join("_hasInstallScript")).is_ok_and(|m| m.is_file())
+        })
     }
 
     // Copy a single file, preserving permissions (sync version)
