@@ -7,6 +7,7 @@ pub mod format_print;
 pub mod json;
 pub mod linker;
 pub mod logger;
+pub mod oncemap;
 pub mod registry;
 pub mod retry;
 pub mod save_type;

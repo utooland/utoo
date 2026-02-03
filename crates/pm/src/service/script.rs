@@ -17,14 +17,12 @@ impl ScriptService {
     /// Check if node-gyp exists in PATH by searching directories
     fn has_node_gyp_in_path() -> bool {
         let path_separator = if cfg!(windows) { ';' } else { ':' };
-        if let Ok(paths) = env::var("PATH") {
+        env::var("PATH").is_ok_and(|paths| {
             paths
                 .split(path_separator)
                 .map(|dir| Path::new(dir).join("node-gyp"))
                 .any(|path| path.exists())
-        } else {
-            false
-        }
+        })
     }
 
     /// Ensure node-gyp is available in PATH, install globally if not.
