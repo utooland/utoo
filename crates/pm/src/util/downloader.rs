@@ -5,18 +5,24 @@ use reqwest::Client;
 use reqwest::StatusCode;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
-use std::sync::atomic::Ordering;
+use std::time::Instant;
 use tokio::fs::File;
 use tokio_retry::RetryIf;
 
+use super::oncemap::OnceMap;
 use super::retry::build_dns_cached_client;
 use super::retry::{RetryableError, create_retry_strategy};
 use crate::service::pipeline::STATS;
 
 // Global downloader client - no pool limit, concurrency controlled by OnceMap
 static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
+
+// OnceMap to ensure each (url, dest) pair is only downloaded once
+static DOWNLOAD_ONCE: Lazy<OnceMap<String, ()>> = Lazy::new(OnceMap::new);
 
 // ============ Buffer Pool ============
 // Reuse decompression buffers to reduce allocation overhead
@@ -85,10 +91,12 @@ fn release_buffer(mut buf: Vec<u8>) {
 /// We replace them with underscore to avoid extraction failures.
 #[cfg(windows)]
 fn sanitize_path_for_windows(base: &Path, relative: &Path) -> PathBuf {
+    use std::path::Component;
+
     let mut result = base.to_path_buf();
     for comp in relative.components() {
         match comp {
-            std::path::Component::Normal(os_str) => {
+            Component::Normal(os_str) => {
                 let s = os_str.to_string_lossy();
                 let sanitized: String = s
                     .chars()
@@ -102,8 +110,8 @@ fn sanitize_path_for_windows(base: &Path, relative: &Path) -> PathBuf {
                     .collect();
                 result.push(&sanitized);
             }
-            std::path::Component::ParentDir => result.push(".."),
-            std::path::Component::CurDir => result.push("."),
+            Component::ParentDir => result.push(".."),
+            Component::CurDir => result.push("."),
             _ => {}
         }
     }
@@ -115,14 +123,31 @@ fn sanitize_path_for_windows(base: &Path, relative: &Path) -> PathBuf {
     base.join(relative)
 }
 
+/// Download and extract a tarball to the destination directory.
+///
+/// Uses OnceMap to ensure each URL is only downloaded once,
+/// even when called concurrently from multiple tasks.
+pub async fn download(url: &str, dest: &Path) -> Result<()> {
+    let key = url.to_string();
+
+    DOWNLOAD_ONCE
+        .get_or_init(key, || async {
+            let bytes = download_bytes(url).await.ok()?;
+            extract_and_write(bytes, dest).await.ok()?;
+            Some(())
+        })
+        .await
+        .ok_or_else(|| anyhow::anyhow!("Download failed: {}", url))
+}
+
 /// Download tarball bytes only (network phase).
 /// Returns the downloaded bytes for extraction.
 pub async fn download_bytes(url: &str) -> Result<Bytes> {
-    let retry_count = std::sync::atomic::AtomicU32::new(0);
+    let retry_count = AtomicU32::new(0);
     RetryIf::spawn(
         create_retry_strategy(),
         || async {
-            let attempt = retry_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let attempt = retry_count.fetch_add(1, Ordering::Relaxed);
 
             let response = match DOWNLOADER_CLIENT.get(url).send().await {
                 Ok(r) => r,
@@ -140,7 +165,7 @@ pub async fn download_bytes(url: &str) -> Result<Bytes> {
             match response.status() {
                 StatusCode::OK => {
                     STATS.downloading.fetch_add(1, Ordering::Relaxed);
-                    let network_start = std::time::Instant::now();
+                    let network_start = Instant::now();
                     let bytes = response.bytes().await.map_err(|e| {
                         STATS.downloading.fetch_sub(1, Ordering::Relaxed);
                         tracing::warn!(
@@ -213,7 +238,7 @@ fn estimate_uncompressed_size(gzip_data: &[u8]) -> usize {
 async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
     // 1. Decompress and parse tar in a single blocking task (with buffer pool)
     STATS.extracting.fetch_add(1, Ordering::Relaxed);
-    let decompress_start = std::time::Instant::now();
+    let decompress_start = Instant::now();
     let estimated_size = estimate_uncompressed_size(&gzip_bytes);
     let gzip_len = gzip_bytes.len();
     let dest_owned = dest.to_path_buf();
@@ -263,7 +288,7 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
         output.truncate(actual_size);
 
         // Parse tar entries
-        let cursor = std::io::Cursor::new(&output[..]);
+        let cursor = Cursor::new(&output[..]);
         let mut archive = tar::Archive::new(cursor);
         let mut entries = Vec::new();
 
@@ -304,7 +329,7 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
     STATS.add_decompress_time(decompress_time.as_micros() as u64);
 
     // 4. Write files using rayon for parallelism within spawn_blocking
-    let write_start = std::time::Instant::now();
+    let write_start = Instant::now();
     let total_bytes: u64 = entries.iter().map(|e| e.content.len() as u64).sum();
 
     tokio::task::spawn_blocking(move || -> Result<()> {
@@ -374,8 +399,7 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
 /// Set directory permissions (cross-platform)
 #[cfg(unix)]
 async fn set_dir_permissions(path: &Path) -> Result<()> {
-    use std::fs::Permissions;
-    let permissions = Permissions::from_mode(0o755);
+    let permissions = std::fs::Permissions::from_mode(0o755);
     crate::fs::set_permissions(path, permissions)
         .await
         .with_context(|| format!("Failed to set directory permissions: {}", path.display()))?;
@@ -390,7 +414,7 @@ async fn set_dir_permissions(_path: &Path) -> Result<()> {
 
 #[derive(Debug)]
 struct ExtractedEntry {
-    path: std::path::PathBuf,
+    path: PathBuf,
     content: Vec<u8>,
     mode: u32, // File permission mode
 }
