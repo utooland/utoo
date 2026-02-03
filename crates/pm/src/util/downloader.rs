@@ -1,79 +1,171 @@
 use anyhow::{Context, Result};
-use async_compression::tokio::bufread::GzipDecoder;
-use futures::StreamExt;
+use bytes::Bytes;
 use once_cell::sync::Lazy;
+use reqwest::Client;
 use reqwest::StatusCode;
-use reqwest::{Client, Response};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
-use tokio::{fs::File, io::AsyncReadExt};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::atomic::Ordering;
+use tokio::fs::File;
 use tokio_retry::RetryIf;
-use tokio_tar::Archive;
-use tokio_util::io::StreamReader;
 
 use super::retry::build_dns_cached_client;
 use super::retry::{RetryableError, create_retry_strategy};
+use crate::service::pipeline::STATS;
 
-use dashmap::DashMap;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::sync::Arc;
-use tokio::sync::Mutex;
-
-// Global downloader client - no pool limit, concurrency controlled by semaphore
+// Global downloader client - no pool limit, concurrency controlled by OnceMap
 static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
 
-static DOWNLOAD_LOCKS: Lazy<DashMap<u64, Arc<Mutex<()>>>> = Lazy::new(DashMap::new);
+// ============ Buffer Pool ============
+// Reuse decompression buffers to reduce allocation overhead
+// Similar to Bun's ObjectPool pattern
 
-fn lock_key(url: &str, dest: &Path) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    url.hash(&mut hasher);
-    dest.to_string_lossy().hash(&mut hasher);
-    hasher.finish()
-}
+const BUFFER_POOL_MAX_SIZE: usize = 8;
+const BUFFER_POOL_MIN_CAPACITY: usize = 2 * 1024 * 1024; // 2MB minimum
 
-pub async fn download(url: &str, dest: &Path) -> Result<()> {
-    let start = std::time::Instant::now();
-    let key = lock_key(url, dest);
-    let lock = DOWNLOAD_LOCKS
-        .entry(key)
-        .or_insert_with(|| Arc::new(Mutex::new(())))
-        .clone();
-    let _guard = lock.lock().await;
+/// Global buffer pool for decompression
+static BUFFER_POOL: Lazy<Mutex<Vec<Vec<u8>>>> =
+    Lazy::new(|| Mutex::new(Vec::with_capacity(BUFFER_POOL_MAX_SIZE)));
 
-    let resolved_path = dest.join("_resolved");
-    if crate::fs::try_exists(&resolved_path).await? {
-        tracing::debug!("Download skipped, already resolved: {}", dest.display());
-        return Ok(());
+/// Get a buffer from the pool or create a new one
+fn acquire_buffer(required_capacity: usize) -> Vec<u8> {
+    let capacity = required_capacity.max(BUFFER_POOL_MIN_CAPACITY);
+
+    // Try to get a buffer from the pool
+    if let Ok(mut pool) = BUFFER_POOL.lock() {
+        // Find a buffer with sufficient capacity
+        if let Some(idx) = pool.iter().position(|b| b.capacity() >= capacity) {
+            let mut buf = pool.swap_remove(idx);
+            buf.clear();
+            tracing::trace!(
+                "buffer pool: reused (capacity={}, pool_size={})",
+                buf.capacity(),
+                pool.len()
+            );
+            return buf;
+        }
     }
 
+    // No suitable buffer found, create a new one
+    tracing::trace!("buffer pool: new allocation (capacity={})", capacity);
+    Vec::with_capacity(capacity)
+}
+
+/// Return a buffer to the pool for reuse
+fn release_buffer(mut buf: Vec<u8>) {
+    // Only keep buffers that are reasonably sized
+    if buf.capacity() < BUFFER_POOL_MIN_CAPACITY || buf.capacity() > 64 * 1024 * 1024 {
+        tracing::trace!(
+            "buffer pool: dropped (capacity={}, too small or too large)",
+            buf.capacity()
+        );
+        return;
+    }
+
+    buf.clear();
+
+    if let Ok(mut pool) = BUFFER_POOL.lock() {
+        if pool.len() < BUFFER_POOL_MAX_SIZE {
+            tracing::trace!(
+                "buffer pool: returned (capacity={}, pool_size={})",
+                buf.capacity(),
+                pool.len() + 1
+            );
+            pool.push(buf);
+        } else {
+            tracing::trace!("buffer pool: dropped (pool full)");
+        }
+    }
+}
+
+/// Sanitize a path for Windows compatibility.
+/// Windows doesn't allow: < > : " | ? * and control characters (0-31)
+/// We replace them with underscore to avoid extraction failures.
+#[cfg(windows)]
+fn sanitize_path_for_windows(base: &Path, relative: &Path) -> PathBuf {
+    let mut result = base.to_path_buf();
+    for comp in relative.components() {
+        match comp {
+            std::path::Component::Normal(os_str) => {
+                let s = os_str.to_string_lossy();
+                let sanitized: String = s
+                    .chars()
+                    .map(|c| {
+                        if matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*') || (c as u32) < 32 {
+                            '_'
+                        } else {
+                            c
+                        }
+                    })
+                    .collect();
+                result.push(&sanitized);
+            }
+            std::path::Component::ParentDir => result.push(".."),
+            std::path::Component::CurDir => result.push("."),
+            _ => {}
+        }
+    }
+    result
+}
+
+#[cfg(not(windows))]
+fn sanitize_path_for_windows(base: &Path, relative: &Path) -> PathBuf {
+    base.join(relative)
+}
+
+/// Download tarball bytes only (network phase).
+/// Returns the downloaded bytes for extraction.
+pub async fn download_bytes(url: &str) -> Result<Bytes> {
+    let retry_count = std::sync::atomic::AtomicU32::new(0);
     RetryIf::spawn(
         create_retry_strategy(),
         || async {
-            let response = DOWNLOADER_CLIENT
-                .get(url)
-                .send()
-                .await
-                .with_context(|| format!("Failed to send HTTP request to {url}"))
-                .map_err(|e| RetryableError::Temporary(format!("Network error: {e}")))?;
+            let attempt = retry_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+            let response = match DOWNLOADER_CLIENT.get(url).send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!(
+                        "Retry {}/10 - Network error: {}, url: {}",
+                        attempt + 1,
+                        e,
+                        url
+                    );
+                    return Err(RetryableError::Temporary(format!("Network error: {e}")));
+                }
+            };
 
             match response.status() {
                 StatusCode::OK => {
-                    if let Err(e) = try_unpack_stream_direct(response, dest).await {
-                        tracing::debug!("Stream unpacking failed {}: {:#}", dest.display(), e);
-                        return Err(RetryableError::Temporary(format!(
-                            "Network error during streaming: {e:#}"
-                        )));
+                    STATS.downloading.fetch_add(1, Ordering::Relaxed);
+                    let network_start = std::time::Instant::now();
+                    let bytes = response.bytes().await.map_err(|e| {
+                        STATS.downloading.fetch_sub(1, Ordering::Relaxed);
+                        tracing::warn!(
+                            "Retry {}/10 - Stream error: {}, url: {}",
+                            attempt + 1,
+                            e,
+                            url
+                        );
+                        RetryableError::Temporary(format!("Stream error: {e}"))
+                    })?;
+                    STATS.add_network_time(network_start.elapsed().as_micros() as u64);
+                    STATS.add_bytes_downloaded(bytes.len() as u64);
+                    STATS.downloading.fetch_sub(1, Ordering::Relaxed);
+                    STATS.downloaded.fetch_add(1, Ordering::Relaxed);
+                    if attempt > 0 {
+                        tracing::info!("Retry succeeded on attempt {}, url: {}", attempt + 1, url);
                     }
-                    Ok(())
+                    Ok(bytes)
                 }
                 StatusCode::NOT_FOUND => {
                     tracing::debug!("URL not found {url}");
                     Err(RetryableError::Permanent(format!("URL not found {url}")))
                 }
                 status => {
-                    tracing::debug!("Error: {status}, url: {url}, retrying");
+                    tracing::warn!("Retry {}/10 - HTTP {}, url: {}", attempt + 1, status, url);
                     Err(RetryableError::Temporary(format!(
                         "HTTP error: {status}, url: {url}"
                     )))
@@ -83,196 +175,199 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
         |e: &RetryableError| matches!(e, RetryableError::Temporary(_)),
     )
     .await
-    .context("Download failed after retries")?;
-
-    let duration = start.elapsed();
-    tracing::debug!("Download task took: {duration:?}, url: {url:?}");
-    Ok(())
+    .context("Download failed after retries")
 }
 
-// Stream-based unpacking directly from HTTP Response
-async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()> {
-    use std::sync::Arc;
-    use tokio::sync::{Semaphore, mpsc};
+/// Extract and write tarball to destination (CPU + IO phase, no network).
+pub async fn extract_and_write(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
+    // Check if already resolved (warm cache scenario)
+    let resolved_path = dest.join("_resolved");
+    if crate::fs::try_exists(&resolved_path).await? {
+        tracing::debug!("Extract skipped, already resolved: {}", dest.display());
+        return Ok(());
+    }
 
     crate::fs::create_dir_all(dest)
         .await
         .with_context(|| format!("Failed to create destination directory: {}", dest.display()))?;
 
-    // Convert HTTP response stream to AsyncRead for streaming processing
-    let stream = response
-        .bytes_stream()
-        .map(|result| result.map_err(std::io::Error::other));
-    let stream_reader = StreamReader::new(stream);
+    extract_tarball(gzip_bytes, dest).await
+}
 
-    // Create pipeline processing channels
-    let (entry_tx, mut entry_rx) = mpsc::channel::<ExtractedEntry>(500);
+/// Estimate uncompressed size from gzip footer (last 4 bytes store original size mod 2^32)
+fn estimate_uncompressed_size(gzip_data: &[u8]) -> usize {
+    if gzip_data.len() < 4 {
+        return gzip_data.len() * 10; // fallback estimate
+    }
+    let last_4 = &gzip_data[gzip_data.len() - 4..];
+    let size = u32::from_le_bytes([last_4[0], last_4[1], last_4[2], last_4[3]]) as usize;
+    // Sanity check: if size is 0 or too small, use a reasonable estimate
+    if !(16..=512 * 1024 * 1024).contains(&size) {
+        gzip_data.len() * 10
+    } else {
+        size
+    }
+}
 
-    let dest = dest.to_path_buf();
+// Extract tarball using libdeflate for better performance
+async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
+    // 1. Decompress and parse tar in a single blocking task (with buffer pool)
+    STATS.extracting.fetch_add(1, Ordering::Relaxed);
+    let decompress_start = std::time::Instant::now();
+    let estimated_size = estimate_uncompressed_size(&gzip_bytes);
+    let gzip_len = gzip_bytes.len();
+    let dest_owned = dest.to_path_buf();
 
-    // Stage 1: Streaming tar extraction
-    let extraction_task = {
-        let entry_tx = entry_tx.clone();
-        let dest = dest.clone();
+    let entries: Vec<ExtractedEntry> = tokio::task::spawn_blocking(move || -> Result<Vec<_>> {
+        use std::io::Read;
 
-        tokio::spawn(async move {
-            // Create streaming gzip decoder
-            let gzip_decoder = GzipDecoder::new(stream_reader);
-            let mut tar_archive = Archive::new(gzip_decoder);
-            let mut entries = tar_archive.entries()?;
+        // Acquire buffer from pool
+        let mut output = acquire_buffer(estimated_size);
+        // SAFETY: libdeflater will write to the buffer, we don't need to initialize
+        if output.capacity() < estimated_size {
+            output.reserve(estimated_size - output.capacity());
+        }
+        unsafe { output.set_len(estimated_size) };
 
-            while let Some(entry_result) = entries.next().await {
-                let mut entry = entry_result.with_context(|| "Failed to read tar entry")?;
-                let path = entry
-                    .path()
-                    .with_context(|| "Failed to get entry path")?
-                    .into_owned();
-                let full_path = dest.join(&path);
-                let is_dir = entry.header().entry_type().is_dir();
+        let mut decompressor = libdeflater::Decompressor::new();
 
-                // Only process files, skip directories (they'll be created when writing files)
-                if !is_dir {
-                    // Stream file content
-                    let mut content = Vec::new();
-                    entry
-                        .read_to_end(&mut content)
-                        .await
-                        .with_context(|| format!("Failed to read tar entry: {}", path.display()))?;
-
-                    // Extract file permission mode
-                    let mode = entry.header().mode().unwrap_or(0o644);
-
-                    let size = content.len();
-                    let extracted_entry = ExtractedEntry {
-                        path: full_path,
-                        content,
-                        size,
-                        mode,
-                    };
-
-                    if entry_tx.send(extracted_entry).await.is_err() {
-                        break;
-                    }
-                }
+        let actual_size = match decompressor.gzip_decompress(&gzip_bytes, &mut output) {
+            Ok(size) => {
+                tracing::trace!(
+                    "decompress: gzip={}, estimated={}, actual={}",
+                    gzip_len,
+                    estimated_size,
+                    size
+                );
+                size
             }
+            Err(libdeflater::DecompressionError::InsufficientSpace) => {
+                // Buffer too small, retry with larger buffer
+                tracing::debug!(
+                    "decompress retry: gzip={}, estimated={} (insufficient)",
+                    gzip_len,
+                    estimated_size
+                );
+                let new_size = estimated_size * 4;
+                output.reserve(new_size - output.len());
+                unsafe { output.set_len(new_size) };
+                decompressor
+                    .gzip_decompress(&gzip_bytes, &mut output)
+                    .with_context(|| "gzip decompression failed")?
+            }
+            Err(e) => {
+                release_buffer(output);
+                return Err(anyhow::anyhow!("gzip decompression failed: {}", e));
+            }
+        };
+        output.truncate(actual_size);
 
-            Ok::<(), anyhow::Error>(())
-        })
-    };
+        // Parse tar entries
+        let cursor = std::io::Cursor::new(&output[..]);
+        let mut archive = tar::Archive::new(cursor);
+        let mut entries = Vec::new();
 
-    // Stage 2: Concurrent file writing with cached directory creation
-    let file_writing_task = {
-        tokio::spawn(async move {
-            use dashmap::DashSet;
+        for entry_result in archive.entries()? {
+            let mut entry = entry_result.with_context(|| "Failed to read tar entry")?;
+            let path = entry
+                .path()
+                .with_context(|| "Failed to get entry path")?
+                .into_owned();
+            let full_path = sanitize_path_for_windows(&dest_owned, &path);
 
-            let semaphore = Arc::new(Semaphore::new(16));
-            let created_dirs = Arc::new(DashSet::<std::path::PathBuf>::new());
-            let mut write_tasks = Vec::new();
-            let mut batch_size = 0;
-            let mut total_bytes = 0;
-            const MAX_BATCH_SIZE: usize = 100;
-            const MAX_BATCH_BYTES: usize = 50 * 1024 * 1024; // 50MB
+            if !entry.header().entry_type().is_dir() {
+                let mut content = Vec::new();
+                entry
+                    .read_to_end(&mut content)
+                    .with_context(|| format!("Failed to read tar entry: {}", path.display()))?;
 
-            while let Some(entry) = entry_rx.recv().await {
-                let semaphore = Arc::clone(&semaphore);
-                let created_dirs = Arc::clone(&created_dirs);
-                batch_size += 1;
-                total_bytes += entry.size;
+                let mode = entry.header().mode().unwrap_or(0o644);
 
-                let task = tokio::spawn(async move {
-                    let _permit = semaphore.acquire().await.unwrap();
-
-                    // Ensure parent directory exists using cache
-                    if let Some(parent) = entry.path.parent() {
-                        let parent_path = parent.to_path_buf();
-
-                        // Check cache first to avoid duplicate directory creation
-                        if !created_dirs.contains(&parent_path) {
-                            if let Err(e) = crate::fs::create_dir_all(&parent_path).await {
-                                tracing::debug!(
-                                    "Failed to create parent dir {}: {}",
-                                    parent_path.display(),
-                                    e
-                                );
-                                return Err(anyhow::anyhow!(
-                                    "Failed to create parent directory: {e}"
-                                )
-                                .context(format!("Parent directory: {}", parent_path.display())));
-                            }
-
-                            created_dirs.insert(parent_path);
-                        }
-                    }
-
-                    // Write file content
-                    if let Err(e) = crate::fs::write(&entry.path, &entry.content).await {
-                        tracing::debug!("Failed to write file {}: {}", entry.path.display(), e);
-                        return Err(anyhow::anyhow!("Write failed: {e}")
-                            .context(format!("File path: {}", entry.path.display())));
-                    }
-
-                    // Set original file permissions from tar entry (Unix only)
-                    set_file_permissions(&entry.path, entry.mode).await?;
-
-                    Ok::<(), anyhow::Error>(())
+                entries.push(ExtractedEntry {
+                    path: full_path,
+                    content,
+                    mode,
                 });
+            }
+        }
 
-                write_tasks.push(task);
+        // Release buffer back to pool
+        release_buffer(output);
 
-                // Process in batches to manage memory and concurrency
-                if batch_size >= MAX_BATCH_SIZE
-                    || total_bytes >= MAX_BATCH_BYTES
-                    || entry_rx.is_empty()
-                {
-                    for task in write_tasks.drain(..) {
-                        task.await??;
-                    }
-                    batch_size = 0;
-                    total_bytes = 0;
+        Ok(entries)
+    })
+    .await
+    .with_context(|| "Decompression/extraction task panicked")??;
+
+    // Record decompress time
+    let decompress_time = decompress_start.elapsed();
+    STATS.add_decompress_time(decompress_time.as_micros() as u64);
+
+    // 4. Write files using rayon for parallelism within spawn_blocking
+    let write_start = std::time::Instant::now();
+    let total_bytes: u64 = entries.iter().map(|e| e.content.len() as u64).sum();
+
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        use rayon::prelude::*;
+        use std::collections::HashSet;
+        use std::fs;
+        use std::io::Write;
+
+        // First, create all directories (sequential to avoid race conditions)
+        let mut created_dirs = HashSet::new();
+        for entry in entries.iter() {
+            if let Some(parent) = entry.path.parent() {
+                if !created_dirs.contains(parent) {
+                    fs::create_dir_all(parent).ok();
+                    created_dirs.insert(parent.to_path_buf());
                 }
             }
+        }
 
-            // Wait for remaining tasks
-            for task in write_tasks {
-                task.await??;
+        // Then write files in parallel using rayon
+        entries.par_iter().try_for_each(|entry| -> Result<()> {
+            let mut file = fs::File::create(&entry.path)
+                .with_context(|| format!("Failed to create: {}", entry.path.display()))?;
+            file.write_all(&entry.content)
+                .with_context(|| format!("Failed to write: {}", entry.path.display()))?;
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let perms = fs::Permissions::from_mode(entry.mode);
+                fs::set_permissions(&entry.path, perms).ok();
             }
-
-            Ok::<(), anyhow::Error>(())
+            Ok(())
         })
-    };
+    })
+    .await
+    .with_context(|| "Write task panicked")??;
 
-    // Close sender channel
-    drop(entry_tx);
+    // Record write time and bytes
+    let write_time = write_start.elapsed();
+    STATS.add_write_time(write_time.as_micros() as u64);
+    STATS.add_bytes_written(total_bytes);
 
-    // Wait for both stages to complete
-    let (extract_result, write_result) = tokio::try_join!(extraction_task, file_writing_task)?;
-
-    extract_result?;
-    write_result?;
+    // Per-package timing breakdown for analysis
+    let decompress_ms = decompress_time.as_millis();
+    let write_ms = write_time.as_millis();
+    tracing::debug!(
+        "Package timing: decomp={}ms, write={}ms, path={}",
+        decompress_ms,
+        write_ms,
+        dest.display()
+    );
 
     // Set directory permissions and create resolution marker
-    set_dir_permissions(&dest).await?;
+    set_dir_permissions(dest).await?;
     File::create(&dest.join("_resolved"))
         .await
         .with_context(|| format!("Failed to create resolution marker in: {}", dest.display()))?;
 
-    Ok(())
-}
+    // Track extraction complete
+    STATS.extracting.fetch_sub(1, Ordering::Relaxed);
+    STATS.extracted.fetch_add(1, Ordering::Relaxed);
 
-/// Set file permissions (cross-platform)
-#[cfg(unix)]
-async fn set_file_permissions(path: &Path, mode: u32) -> Result<()> {
-    use std::fs::Permissions;
-    let permissions = Permissions::from_mode(mode);
-    crate::fs::set_permissions(path, permissions)
-        .await
-        .with_context(|| format!("Failed to set permissions for: {}", path.display()))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-async fn set_file_permissions(_path: &Path, _mode: u32) -> Result<()> {
-    // Windows doesn't need Unix-style permissions
     Ok(())
 }
 
@@ -297,7 +392,6 @@ async fn set_dir_permissions(_path: &Path) -> Result<()> {
 struct ExtractedEntry {
     path: std::path::PathBuf,
     content: Vec<u8>,
-    size: usize,
     mode: u32, // File permission mode
 }
 
@@ -352,7 +446,8 @@ mod tests {
             let url = url.clone();
             let dest = dest.clone();
             handles.push(task::spawn(async move {
-                download(&url, &dest).await.unwrap();
+                let bytes = download_bytes(&url).await.unwrap();
+                extract_and_write(bytes, &dest).await.unwrap();
             }));
         }
         for h in handles {
