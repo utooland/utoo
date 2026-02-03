@@ -2,24 +2,81 @@ name: utoopm-benchmark
 
 on:
   workflow_dispatch:
+    inputs:
+      registry:
+        description: 'Registry to test'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - npmjs
+          - npmmirror
+  pull_request:
+    types: [labeled]
 
 jobs:
-  build:
-    runs-on: macos-latest
-
+  benchmark:
+    # Run on manual trigger or when PR is labeled with 'benchmark'
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'benchmark')
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: nightly-2025-10-27
-          components: rustfmt, clippy
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: pm-bench
+          shared-key: pm-bench-${{ matrix.os }}
 
-      - name: Run Benchmark
-        run: cargo bench -p utoo-pm
+      - name: Build utoo-pm
+        run: cargo build --release --bin utoo -p utoo-pm
+
+      - name: Update PATH
+        run: echo "${{ github.workspace }}/target/release" >> $GITHUB_PATH
+
+      - name: Create ut symlink
+        run: ln -sf utoo $(dirname $(which utoo))/ut
+
+      - name: Install yarn
+        run: npm install -g yarn
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Verify package managers
+        run: |
+          echo "utoo: $(utoo --version)"
+          echo "yarn: $(yarn --version)"
+          echo "pnpm: $(pnpm --version)"
+          echo "bun: $(bun --version)"
+
+      - name: Run benchmark
+        run: |
+          chmod +x e2e/pm-bench.sh
+          bash e2e/pm-bench.sh ${{ github.event.inputs.registry || 'both' }}
