@@ -198,7 +198,7 @@ impl LibraryEndpoint {
         let ty = ReferenceType::Entry(EntryReferenceSubType::Undefined);
 
         Ok(origin
-            .resolve_asset(entry_request, origin.resolve_options(ty.clone()), ty)
+            .resolve_asset(entry_request, origin.resolve_options(), ty)
             .await?
             .primary_modules())
     }
@@ -252,8 +252,8 @@ impl LibraryEndpoint {
                 runtime_root,
                 runtime_export,
                 config: project.config(),
-                export_usage: *project.export_usage().await?,
-                unused_references: *project.unused_references().await?,
+                export_usage: project.export_usage(),
+                unused_references: project.unused_references(),
             },
         ))
     }

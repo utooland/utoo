@@ -1,15 +1,15 @@
 use anyhow::Result;
 use bincode::{Decode, Encode};
 use turbo_rcstr::RcStr;
-use turbo_tasks::{ResolvedVc, TaskInput, Vc, trace::TraceRawVcs};
+use turbo_tasks::{TaskInput, Vc, trace::TraceRawVcs};
 use turbo_tasks_fs::FileSystemPath;
 use turbopack_core::{
     chunk::{
         ChunkingContext, MangleType, MinifyType, SourceMapSourceType, SourceMapsType,
-        module_id_strategies::ModuleIdStrategy,
+        UnusedReferences, chunk_id_strategy::ModuleIdStrategy,
     },
     environment::{EdgeWorkerEnvironment, Environment, ExecutionEnvironment, NodeJsVersion},
-    module_graph::binding_usage_info::BindingUsageInfo,
+    module_graph::binding_usage_info::OptionBindingUsageInfo,
 };
 
 use crate::{config::Config, mode::Mode};
@@ -26,13 +26,13 @@ pub struct LibraryChunkingContextOptions {
     /// an EdgeWorker environment to disable async chunk splitting. See
     /// `get_library_chunking_context` for details.
     pub environment: Vc<Environment>,
-    pub module_id_strategy: Vc<Box<dyn ModuleIdStrategy>>,
+    pub module_id_strategy: Vc<ModuleIdStrategy>,
     pub no_mangling: Vc<bool>,
     pub runtime_root: Vc<Option<RcStr>>,
     pub runtime_export: Vc<Vec<RcStr>>,
     pub config: Vc<Config>,
-    pub export_usage: Option<ResolvedVc<BindingUsageInfo>>,
-    pub unused_references: Option<ResolvedVc<BindingUsageInfo>>,
+    pub export_usage: Vc<OptionBindingUsageInfo>,
+    pub unused_references: Vc<UnusedReferences>,
 }
 
 #[turbo_tasks::function]
@@ -109,8 +109,8 @@ pub async fn get_library_chunking_context(
         SourceMapsType::None
     })
     .module_id_strategy(module_id_strategy.to_resolved().await?)
-    .export_usage(export_usage)
-    .unused_references(unused_references)
+    .export_usage(*export_usage.await?)
+    .unused_references(unused_references.to_resolved().await?)
     .nested_async_availability(*nested_async_chunking.await?);
 
     if !mode.is_development()

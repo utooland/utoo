@@ -13,7 +13,7 @@ use pack_api::{
 use rustc_hash::FxHashMap;
 use serde::Serialize;
 use turbo_tasks::{
-    OperationVc, TurboTasks, TurboTasksApi, Vc,
+    OperationVc, PrettyPrintError, TurboTasks, TurboTasksApi, Vc,
     message_queue::{CompilationEvent, Severity},
 };
 use turbo_tasks_backend::{
@@ -23,7 +23,6 @@ use turbo_tasks_backend::{
 use turbo_tasks_fs::FileContent;
 use turbopack_core::{
     diagnostics::PlainDiagnostic,
-    error::PrettyPrintError,
     issue::{PlainIssue, PlainIssueSource, PlainSource},
     source_pos::SourcePos,
 };

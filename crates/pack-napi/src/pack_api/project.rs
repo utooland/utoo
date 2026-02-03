@@ -36,14 +36,13 @@ use tracing::Instrument;
 use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
 use turbo_rcstr::RcStr;
 use turbo_tasks::{
-    NonLocalValue, OperationValue, ReadRef, ResolvedVc, TaskInput, TransientInstance, UpdateInfo,
-    Vc, trace::TraceRawVcs,
+    NonLocalValue, OperationValue, PrettyPrintError, ReadRef, ResolvedVc, TaskInput,
+    TransientInstance, UpdateInfo, Vc, trace::TraceRawVcs,
 };
 use turbo_tasks_fs::{FileContent, FileSystem, util::uri_from_file};
 use turbo_unix_path::get_relative_path_to;
 use turbopack_core::{
     PROJECT_FILESYSTEM_NAME, SOURCE_URL_PROTOCOL,
-    error::PrettyPrintError,
     source_map::{SourceMap, Token},
     version::{PartialUpdate, TotalUpdate, Update},
 };
