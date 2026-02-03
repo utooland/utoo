@@ -47,28 +47,31 @@ function instantiateModule(
   sourceType: SourceType,
   sourceData: SourceData,
 ): Module {
-  const moduleFactory = moduleFactories[id];
+  const moduleFactory = moduleFactories.get(id);
   if (typeof moduleFactory !== "function") {
     // This can happen if modules incorrectly handle HMR disposes/updates,
     // e.g. when they keep a `setTimeout` around which still executes old code
     // and contains e.g. a `require("something")` call.
-    factoryNotAvailable(id, sourceType, sourceData);
+    throw new Error(factoryNotAvailableMessage(id, sourceType, sourceData));
   }
 
   const module: Module = createModuleObject(id);
+  const exports = module.exports;
 
   moduleCache[id] = module;
 
   // NOTE(alexkirsz) This can fail when the module encounters a runtime error.
+  const context = new (Context as any as ContextConstructor<Module>)(
+    module,
+    exports,
+  );
   try {
-    const context = new (Context as any as ContextConstructor<Module>)(module);
-    moduleFactory(context);
+    moduleFactory(context, module, exports);
   } catch (error) {
     module.error = error as any;
     throw error;
   }
 
-  module.loaded = true;
   if (module.namespaceObject && module.exports !== module.namespaceObject) {
     // in case of a circular dependency: cjs1 -> esm2 -> cjs1
     interopEsm(module.exports, module.namespaceObject);
@@ -78,14 +81,19 @@ function instantiateModule(
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-function registerChunk([
-  chunkScript,
-  chunkModules,
-  runtimeParams,
-]: ChunkRegistration) {
-  const chunkPath = getPathFromScript(chunkScript);
-  for (const [moduleId, moduleFactory] of Object.entries(chunkModules)) {
-    registerCompressedModuleFactory(moduleId, moduleFactory);
+function registerChunk(registration: ChunkRegistration) {
+  const chunkPath = getPathFromScript(registration[0]);
+  let runtimeParams: RuntimeParams | undefined;
+  // When bootstrapping we are passed a single runtimeParams object so we can distinguish purely based on length
+  if (registration.length === 3) {
+    runtimeParams = registration[2] as RuntimeParams;
+  } else {
+    runtimeParams = undefined;
+    installCompressedModuleFactories(
+      registration as CompressedModuleFactories,
+      /* offset= */ 1,
+      moduleFactories,
+    );
   }
 
   return BACKEND.registerChunk(chunkPath, runtimeParams);

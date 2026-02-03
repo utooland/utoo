@@ -146,7 +146,7 @@ impl EcmascriptLibraryEvaluateChunk {
         writedoc!(
             code,
             r#"
-                }})([[{chunk_path}, {{
+                }})([[{chunk_path}, [
             "#,
             chunk_path = StringifyJs(chunk_public_path)
         )?;
@@ -154,10 +154,39 @@ impl EcmascriptLibraryEvaluateChunk {
         let content = this.chunk.chunk_content().await?;
         let chunk_items = content.chunk_item_code_and_ids().await?;
         for item in chunk_items {
-            for (id, item_code) in item {
-                write!(code, "\n{}: ", StringifyJs(&id))?;
-                code.push_code(item_code);
-                write!(code, ",")?;
+            // Group ids by their code (for scope hoisting, multiple ids can share the same code)
+            // We use the code's source content as the key to group identical codes
+            let mut ids_by_code: std::collections::HashMap<
+                String,
+                Vec<(ReadRef<ModuleId>, ReadRef<Code>)>,
+            > = std::collections::HashMap::new();
+            for (id, item_code) in item.iter() {
+                // Use the code's source content as the key
+                let code_key = item_code
+                    .source_code()
+                    .to_str()
+                    .map_err(|e| anyhow::anyhow!("Failed to convert code to string: {}", e))?
+                    .to_string();
+                // Clone the ReadRef values to store in the HashMap
+                let id_clone = ReadRef::clone(id);
+                let item_code_clone = ReadRef::clone(item_code);
+                ids_by_code
+                    .entry(code_key)
+                    .or_insert_with(Vec::new)
+                    .push((id_clone, item_code_clone));
+            }
+
+            // Output in CompressedModuleFactories format: [id1, id2, ..., factory, id3, factory2, ...]
+            for (_, ids_and_codes) in ids_by_code {
+                // First output all ids that share the same code
+                for (id, _) in &ids_and_codes {
+                    write!(code, "\n{}, ", StringifyJs(id))?;
+                }
+                // Then output the code (factory function)
+                if let Some((_, item_code)) = ids_and_codes.first() {
+                    code.push_code(item_code);
+                    write!(code, ",")?;
+                }
             }
         }
 
@@ -166,7 +195,7 @@ impl EcmascriptLibraryEvaluateChunk {
             runtime_module_ids,
         };
 
-        write!(code, "\n}},")?;
+        write!(code, "\n],")?;
         write!(code, "\n{},", StringifyJs(&params))?;
         writeln!(code, "\n]]);")?;
 
