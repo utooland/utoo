@@ -3,9 +3,47 @@
 //! This module provides an event-driven approach for tracking dependency
 //! resolution progress without adding any I/O to ruborist itself.
 
+use std::path::Path;
+
+use crate::model::manifest::VersionManifest;
+
+/// Package tarball information for downloading.
+///
+/// A lightweight structure containing only the fields needed for
+/// downloading and verifying a package tarball. Uses references to
+/// avoid cloning data from the source manifest.
+#[derive(Debug, Clone, Copy)]
+pub struct PackageTarballInfo<'a> {
+    /// Package name
+    pub name: &'a str,
+    /// Resolved version
+    pub version: &'a str,
+    /// Tarball URL for downloading
+    pub tarball_url: Option<&'a str>,
+    /// Integrity hash for verification
+    pub integrity: Option<&'a str>,
+    /// OS compatibility constraint (if specified)
+    pub os: Option<&'a serde_json::Value>,
+    /// CPU compatibility constraint (if specified)
+    pub cpu: Option<&'a serde_json::Value>,
+}
+
+impl<'a> From<&'a VersionManifest> for PackageTarballInfo<'a> {
+    fn from(m: &'a VersionManifest) -> Self {
+        Self {
+            name: &m.name,
+            version: &m.version,
+            tarball_url: m.dist.tarball.as_deref(),
+            integrity: m.dist.integrity.as_deref(),
+            os: m.os.as_ref(),
+            cpu: m.cpu.as_ref(),
+        }
+    }
+}
+
 /// Events emitted during dependency resolution.
-#[derive(Debug, Clone)]
-pub enum BuildEvent {
+#[derive(Debug, Clone, Copy)]
+pub enum BuildEvent<'a> {
     /// Starting preload phase with N initial dependencies.
     PreloadStart { count: usize },
 
@@ -13,15 +51,20 @@ pub enum BuildEvent {
     PreloadQueued { count: usize },
 
     /// A fetch task was started for a package.
-    PreloadFetching { name: String },
+    PreloadFetching { name: &'a str },
 
     /// A package was preloaded successfully.
     PreloadProgress {
-        name: String,
-        version: String,
+        name: &'a str,
+        version: &'a str,
         /// Current count of preloaded packages
         current: usize,
     },
+
+    /// A package was fully resolved with download info.
+    /// This event enables pipeline downloading - tarball can be downloaded
+    /// immediately while other manifests are still being fetched.
+    PackageResolved(PackageTarballInfo<'a>),
 
     /// Preload phase completed with success/failed counts.
     PreloadComplete { success: usize, failed: usize },
@@ -33,16 +76,27 @@ pub enum BuildEvent {
     DependencyCount { count: usize },
 
     /// Starting to resolve a specific package.
-    Resolving { name: String },
+    Resolving { name: &'a str },
 
     /// Successfully resolved a package (reused existing).
-    Reused { name: String, version: String },
+    Reused { name: &'a str, version: &'a str },
 
     /// Successfully resolved a package (created new node).
-    Resolved { name: String, version: String },
+    Resolved { name: &'a str, version: &'a str },
+
+    /// A package node was placed in the dependency tree.
+    /// This enables pipeline cloning - the package can be cloned
+    /// immediately after download, without waiting for full tree build.
+    PackagePlaced {
+        package: PackageTarballInfo<'a>,
+        /// Target path in node_modules (e.g., "node_modules/lodash")
+        path: &'a Path,
+        /// Depth in the dependency tree (0 = direct dependency)
+        depth: usize,
+    },
 
     /// Skipped an optional dependency.
-    Skipped { name: String, spec: String },
+    Skipped { name: &'a str, spec: &'a str },
 
     /// Completed a BFS level, next level has N nodes.
     LevelComplete { next_level_count: usize },
@@ -64,7 +118,7 @@ pub enum BuildEvent {
 /// struct MyReceiver;
 ///
 /// impl EventReceiver for MyReceiver {
-///     fn on_event(&self, event: BuildEvent) {
+///     fn on_event(&self, event: BuildEvent<'_>) {
 ///         match event {
 ///             BuildEvent::Resolving { name } => println!("Resolving {}...", name),
 ///             BuildEvent::Resolved { name, version } => println!("  {}@{}", name, version),
@@ -75,12 +129,12 @@ pub enum BuildEvent {
 /// ```
 pub trait EventReceiver: Send + Sync {
     /// Called when a build event occurs.
-    fn on_event(&self, event: BuildEvent);
+    fn on_event(&self, event: BuildEvent<'_>);
 }
 
 /// A no-op event receiver for when event tracking is not needed.
 pub struct NoopReceiver;
 
 impl EventReceiver for NoopReceiver {
-    fn on_event(&self, _event: BuildEvent) {}
+    fn on_event(&self, _event: BuildEvent<'_>) {}
 }

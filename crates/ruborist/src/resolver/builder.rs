@@ -23,6 +23,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
+use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
 use crate::resolver::preload::{PreloadConfig, preload_manifests};
@@ -552,6 +553,7 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
     let start = tokio::time::Instant::now();
 
     let mut current_level = vec![graph.root_index];
+    let mut depth: usize = 0;
 
     while !current_level.is_empty() {
         receiver.on_event(BuildEvent::LevelStart {
@@ -583,28 +585,37 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
                     .await?
                 {
                     ProcessResult::Created(idx) => {
-                        receiver.on_event(BuildEvent::Resolved {
-                            name: edge_info.name,
-                            version: graph
-                                .get_node(idx)
-                                .map(|n| n.version.clone())
-                                .unwrap_or_default(),
-                        });
+                        // Extract node info for events
+                        if let Some(node) = graph.get_node(idx) {
+                            receiver.on_event(BuildEvent::Resolved {
+                                name: &edge_info.name,
+                                version: &node.version,
+                            });
+
+                            // Send PackagePlaced for pipeline cloning
+                            if let NodeManifest::Registry(ref manifest) = node.manifest {
+                                receiver.on_event(BuildEvent::PackagePlaced {
+                                    package: manifest.into(),
+                                    path: &node.path,
+                                    depth,
+                                });
+                            }
+                        }
+
                         next_level.push(idx);
                     }
                     ProcessResult::Reused(idx) => {
-                        receiver.on_event(BuildEvent::Reused {
-                            name: edge_info.name,
-                            version: graph
-                                .get_node(idx)
-                                .map(|n| n.version.clone())
-                                .unwrap_or_default(),
-                        });
+                        if let Some(node) = graph.get_node(idx) {
+                            receiver.on_event(BuildEvent::Reused {
+                                name: &edge_info.name,
+                                version: &node.version,
+                            });
+                        }
                     }
                     ProcessResult::Skipped => {
                         receiver.on_event(BuildEvent::Skipped {
-                            name: edge_info.name,
-                            spec: edge_info.spec,
+                            name: &edge_info.name,
+                            spec: &edge_info.spec,
                         });
                     }
                 }
@@ -615,6 +626,7 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
             next_level_count: next_level.len(),
         });
         current_level = next_level;
+        depth += 1;
     }
 
     tracing::debug!("Build phase: {:?}", start.elapsed());
