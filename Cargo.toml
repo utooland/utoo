@@ -44,7 +44,7 @@ serde_path_to_error = "0.1.16"
 simd-json           = "0.17.0"
 thiserror           = "1.0"
 tokio               = { version = "1.47.1" }
-tokio-fs-ext        = "0.7.1"
+tokio-fs-ext        = "0.7.3"
 toml                = "0.8"
 tracing             = "0.1.41"
 tracing-subscriber  = { version = "0.3.19", features = ["env-filter", "fmt"] }
