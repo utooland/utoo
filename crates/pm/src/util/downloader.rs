@@ -20,7 +20,7 @@ use super::retry::{RetryableError, build_dns_cached_client, create_retry_strateg
 static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
 
 // OnceMap to ensure each (url, dest) pair is only downloaded once
-static DOWNLOAD_ONCE: Lazy<OnceMap<String, ()>> = Lazy::new(OnceMap::new);
+static DOWNLOAD_ONCE: Lazy<OnceMap<(String, PathBuf), ()>> = Lazy::new(OnceMap::new);
 
 // ============ Buffer Pool ============
 // Reuse decompression buffers to reduce allocation overhead
@@ -28,6 +28,10 @@ static DOWNLOAD_ONCE: Lazy<OnceMap<String, ()>> = Lazy::new(OnceMap::new);
 
 const BUFFER_POOL_MAX_SIZE: usize = 8;
 const BUFFER_POOL_MIN_CAPACITY: usize = 2 * 1024 * 1024; // 2MB minimum
+const BUFFER_POOL_MAX_CAPACITY: usize = 64 * 1024 * 1024; // 64MB maximum
+const MIN_ESTIMATED_SIZE: usize = 16;
+const MAX_ESTIMATED_SIZE: usize = 512 * 1024 * 1024; // 512MB
+const DECOMPRESSION_RETRY_FACTOR: usize = 4;
 
 /// Global buffer pool for decompression
 static BUFFER_POOL: Lazy<Mutex<Vec<Vec<u8>>>> =
@@ -60,7 +64,7 @@ fn acquire_buffer(required_capacity: usize) -> Vec<u8> {
 /// Return a buffer to the pool for reuse
 fn release_buffer(mut buf: Vec<u8>) {
     // Only keep buffers that are reasonably sized
-    if buf.capacity() < BUFFER_POOL_MIN_CAPACITY || buf.capacity() > 64 * 1024 * 1024 {
+    if buf.capacity() < BUFFER_POOL_MIN_CAPACITY || buf.capacity() > BUFFER_POOL_MAX_CAPACITY {
         tracing::trace!(
             "buffer pool: dropped (capacity={}, too small or too large)",
             buf.capacity()
@@ -123,10 +127,10 @@ fn sanitize_path_for_windows(base: &Path, relative: &Path) -> PathBuf {
 
 /// Download and extract a tarball to the destination directory.
 ///
-/// Uses OnceMap to ensure each URL is only downloaded once,
+/// Uses OnceMap to ensure each (url, dest) pair is only downloaded once,
 /// even when called concurrently from multiple tasks.
 pub async fn download(url: &str, dest: &Path) -> Result<()> {
-    let key = url.to_string();
+    let key = (url.to_string(), dest.to_path_buf());
 
     DOWNLOAD_ONCE
         .get_or_init(key, || async {
@@ -219,7 +223,7 @@ fn estimate_uncompressed_size(gzip_data: &[u8]) -> usize {
     let last_4 = &gzip_data[gzip_data.len() - 4..];
     let size = u32::from_le_bytes([last_4[0], last_4[1], last_4[2], last_4[3]]) as usize;
     // Sanity check: if size is 0 or too small, use a reasonable estimate
-    if !(16..=512 * 1024 * 1024).contains(&size) {
+    if !(MIN_ESTIMATED_SIZE..=MAX_ESTIMATED_SIZE).contains(&size) {
         gzip_data.len() * 10
     } else {
         size
@@ -264,9 +268,8 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
                     gzip_len,
                     estimated_size
                 );
-                let new_size = estimated_size * 4;
-                output.reserve(new_size - output.len());
-                unsafe { output.set_len(new_size) };
+                let new_size = estimated_size * DECOMPRESSION_RETRY_FACTOR;
+                output.resize(new_size, 0);
                 decompressor
                     .gzip_decompress(&gzip_bytes, &mut output)
                     .with_context(|| "gzip decompression failed")?
@@ -330,11 +333,11 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
         // First, create all directories (sequential to avoid race conditions)
         let mut created_dirs = HashSet::new();
         for entry in entries.iter() {
-            if let Some(parent) = entry.path.parent() {
-                if !created_dirs.contains(parent) {
-                    fs::create_dir_all(parent).ok();
-                    created_dirs.insert(parent.to_path_buf());
-                }
+            if let Some(parent) = entry.path.parent()
+                && created_dirs.insert(parent.to_path_buf())
+            {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("Failed to create directory: {}", parent.display()))?;
             }
         }
 
@@ -349,7 +352,9 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
             {
                 use std::os::unix::fs::PermissionsExt;
                 let perms = fs::Permissions::from_mode(entry.mode);
-                fs::set_permissions(&entry.path, perms).ok();
+                fs::set_permissions(&entry.path, perms).with_context(|| {
+                    format!("Failed to set permissions: {}", entry.path.display())
+                })?;
             }
             Ok(())
         })
@@ -453,8 +458,7 @@ mod tests {
             let url = url.clone();
             let dest = dest.clone();
             handles.push(task::spawn(async move {
-                let bytes = download_bytes(&url).await.unwrap();
-                extract_and_write(bytes, &dest).await.unwrap();
+                download(&url, &dest).await.unwrap();
             }));
         }
         for h in handles {
