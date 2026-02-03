@@ -3,6 +3,7 @@
 //! Provides functions for selecting the fastest npm registry by ping latency.
 
 use colored::Colorize;
+use tracing::instrument;
 
 /// Default registries for auto-selection
 pub const REGISTRY_NPMMIRROR: &str = "https://registry.npmmirror.com";
@@ -19,6 +20,7 @@ struct PingResult {
 }
 
 /// Ping a registry and measure latency
+#[instrument(name = "ping_registry", skip(client), fields(registry = %registry_url))]
 async fn ping_registry(client: &reqwest::Client, registry_url: &str) -> PingResult {
     let ping_url = format!("{}/-/ping", registry_url);
     let start = std::time::Instant::now();
@@ -38,6 +40,7 @@ async fn ping_registry(client: &reqwest::Client, registry_url: &str) -> PingResu
 }
 
 /// Select fastest registry by concurrent ping
+#[instrument(name = "select_registry")]
 pub async fn select_fastest_registry() -> String {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_millis(PING_TIMEOUT_MS))

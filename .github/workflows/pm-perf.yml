@@ -1,0 +1,218 @@
+name: utoopm-perf
+
+on:
+  push:
+    branches: [main, next]
+  pull_request:
+    branches: [main, next]
+  workflow_dispatch:
+    inputs:
+      registry:
+        description: 'Registry to test'
+        required: false
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - npmjs
+          - npmmirror
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  REGISTRY_MODE: ${{ github.event.inputs.registry || 'both' }}
+
+jobs:
+  performance:
+    name: PM Performance Analysis
+    # Only run for PM-related changes (contains '(pm)' in commit/PR title)
+    # or manual trigger
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
+
+      - name: Free disk space (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2025-10-27
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pm-perf-${{ matrix.os }}
+
+      - name: Build utoo-pm with tracing
+        run: cargo build --release --bin utoo -p utoo-pm --features tracing-chrome
+
+      - name: Clone test projects
+        run: |
+          mkdir -p /tmp/pm-bench
+          cd /tmp/pm-bench
+
+          # Clone ant-design
+          if [ ! -d "ant-design" ]; then
+            echo "Cloning ant-design..."
+            git clone --depth=1 https://github.com/ant-design/ant-design.git
+          fi
+
+          # Clone ant-design-x (next branch)
+          if [ ! -d "ant-design-x" ]; then
+            echo "Cloning ant-design-x (next branch)..."
+            git clone --branch next --depth=1 https://github.com/ant-design/x.git ant-design-x
+          fi
+
+      - name: Setup trace directories
+        run: mkdir -p /tmp/pm-bench/.trace
+
+      - name: Run traced benchmarks
+        run: |
+          UTOO_BIN="${GITHUB_WORKSPACE}/target/release/utoo"
+          TRACE_DIR="/tmp/pm-bench/.trace"
+          BENCH_DIR="/tmp/pm-bench"
+
+          # Determine registries based on mode
+          REGISTRIES=()
+          if [ "$REGISTRY_MODE" = "both" ] || [ "$REGISTRY_MODE" = "npmjs" ]; then
+            REGISTRIES+=("https://registry.npmjs.org")
+          fi
+          if [ "$REGISTRY_MODE" = "both" ] || [ "$REGISTRY_MODE" = "npmmirror" ]; then
+            REGISTRIES+=("https://registry.npmmirror.com")
+          fi
+
+          PROJECTS=("ant-design" "ant-design-x")
+
+          for project in "${PROJECTS[@]}"; do
+            for registry in "${REGISTRIES[@]}"; do
+              registry_name=$(echo "$registry" | sed 's|https://registry.||' | sed 's|.org||' | sed 's|.com||')
+
+              echo "=========================================="
+              echo "Project: $project"
+              echo "Registry: $registry_name"
+              echo "=========================================="
+
+              cd "$BENCH_DIR/$project"
+
+              # Cold install (clean cache)
+              echo "--- Cold Install ---"
+              git clean -dfx
+              rm -rf ~/.cache/nm
+
+              trace_file="${TRACE_DIR}/${project}_${registry_name}_cold_${{ matrix.os }}.json"
+              TRACING_CHROME="$trace_file" "$UTOO_BIN" install --ignore-scripts --registry="$registry" || true
+
+              # Warm install (with cache)
+              echo "--- Warm Install ---"
+              git clean -dfx
+
+              trace_file="${TRACE_DIR}/${project}_${registry_name}_warm_${{ matrix.os }}.json"
+              TRACING_CHROME="$trace_file" "$UTOO_BIN" install --ignore-scripts --registry="$registry" || true
+
+              echo ""
+            done
+          done
+
+      - name: Analyze traces
+        run: |
+          TRACE_DIR="/tmp/pm-bench/.trace"
+
+          # Generate individual reports
+          for trace_file in "$TRACE_DIR"/*.json; do
+            if [ -f "$trace_file" ]; then
+              basename=$(basename "$trace_file" .json)
+              report_file="${TRACE_DIR}/${basename}_report.md"
+              echo "Analyzing: $basename"
+              python3 agents/tools/analyze_pm_trace.py "$trace_file" "$report_file" "$basename" || true
+            fi
+          done
+
+          # Generate combined summary report
+          python3 agents/tools/analyze_pm_trace.py --summary "$TRACE_DIR" "${TRACE_DIR}/summary_${{ matrix.os }}.md"
+
+      - name: Prepare PR comment
+        run: |
+          TRACE_DIR="/tmp/pm-bench/.trace"
+          COMMENT_FILE="${TRACE_DIR}/pr_comment_${{ matrix.os }}.md"
+
+          echo "## utoo-pm Performance Report (${{ matrix.os }})" > "$COMMENT_FILE"
+          echo "" >> "$COMMENT_FILE"
+          echo "<details>" >> "$COMMENT_FILE"
+          echo "<summary>Click to expand full report</summary>" >> "$COMMENT_FILE"
+          echo "" >> "$COMMENT_FILE"
+
+          if [ -f "${TRACE_DIR}/summary_${{ matrix.os }}.md" ]; then
+            cat "${TRACE_DIR}/summary_${{ matrix.os }}.md" >> "$COMMENT_FILE"
+          fi
+
+          echo "" >> "$COMMENT_FILE"
+          echo "</details>" >> "$COMMENT_FILE"
+
+          # Add to Job Summary
+          cat "$COMMENT_FILE" >> $GITHUB_STEP_SUMMARY
+
+      - name: Find Current PR
+        id: findPr
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          PR_NUMBER=""
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          else
+            # Try to match by branch name
+            PR_NUMBER=$(gh pr list --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number')
+
+            # If not found, try to match by commit SHA
+            if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" == "null" ]; then
+              PR_NUMBER=$(gh pr list --search "${{ github.sha }}" --state open --json number --jq '.[0].number')
+            fi
+          fi
+
+          if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+            echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+
+      - name: Post PR Comment
+        if: steps.findPr.outputs.number
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: utoopm-perf-report-${{ matrix.os }}
+          path: /tmp/pm-bench/.trace/pr_comment_${{ matrix.os }}.md
+          number: ${{ steps.findPr.outputs.number }}
+          recreate: true
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Traces
+        uses: actions/upload-artifact@v4
+        with:
+          name: utoopm-perf-traces-${{ matrix.os }}
+          path: /tmp/pm-bench/.trace/
+          retention-days: 7

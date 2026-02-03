@@ -9622,6 +9622,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-appender",
+ "tracing-chrome",
  "tracing-subscriber",
  "utoo-ruborist",
 ]

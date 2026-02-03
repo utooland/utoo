@@ -11,6 +11,7 @@ use tokio::{fs::File, io::AsyncReadExt};
 use tokio_retry::RetryIf;
 use tokio_tar::Archive;
 use tokio_util::io::StreamReader;
+use tracing::{Instrument, instrument};
 
 use super::retry::build_dns_cached_client;
 use super::retry::{RetryableError, create_retry_strategy};
@@ -33,6 +34,9 @@ fn lock_key(url: &str, dest: &Path) -> u64 {
     hasher.finish()
 }
 
+/// Download and extract a tarball from URL to destination directory.
+/// Uses streaming decompression pipeline for memory efficiency.
+#[instrument(name = "download", skip_all, fields(url = %url))]
 pub async fn download(url: &str, dest: &Path) -> Result<()> {
     let start = std::time::Instant::now();
     let key = lock_key(url, dest);
@@ -50,35 +54,39 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
 
     RetryIf::spawn(
         create_retry_strategy(),
-        || async {
-            let response = DOWNLOADER_CLIENT
-                .get(url)
-                .send()
-                .await
-                .with_context(|| format!("Failed to send HTTP request to {url}"))
-                .map_err(|e| RetryableError::Temporary(format!("Network error: {e}")))?;
+        || {
+            let http_span = tracing::trace_span!("http_request", url = %url);
+            async {
+                let response = DOWNLOADER_CLIENT
+                    .get(url)
+                    .send()
+                    .await
+                    .with_context(|| format!("Failed to send HTTP request to {url}"))
+                    .map_err(|e| RetryableError::Temporary(format!("Network error: {e}")))?;
 
-            match response.status() {
-                StatusCode::OK => {
-                    if let Err(e) = try_unpack_stream_direct(response, dest).await {
-                        tracing::debug!("Stream unpacking failed {}: {:#}", dest.display(), e);
-                        return Err(RetryableError::Temporary(format!(
-                            "Network error during streaming: {e:#}"
-                        )));
+                match response.status() {
+                    StatusCode::OK => {
+                        if let Err(e) = try_unpack_stream_direct(response, dest).await {
+                            tracing::debug!("Stream unpacking failed {}: {:#}", dest.display(), e);
+                            return Err(RetryableError::Temporary(format!(
+                                "Network error during streaming: {e:#}"
+                            )));
+                        }
+                        Ok(())
                     }
-                    Ok(())
-                }
-                StatusCode::NOT_FOUND => {
-                    tracing::debug!("URL not found {url}");
-                    Err(RetryableError::Permanent(format!("URL not found {url}")))
-                }
-                status => {
-                    tracing::debug!("Error: {status}, url: {url}, retrying");
-                    Err(RetryableError::Temporary(format!(
-                        "HTTP error: {status}, url: {url}"
-                    )))
+                    StatusCode::NOT_FOUND => {
+                        tracing::debug!("URL not found {url}");
+                        Err(RetryableError::Permanent(format!("URL not found {url}")))
+                    }
+                    status => {
+                        tracing::debug!("Error: {status}, url: {url}, retrying");
+                        Err(RetryableError::Temporary(format!(
+                            "HTTP error: {status}, url: {url}"
+                        )))
+                    }
                 }
             }
+            .instrument(http_span)
         },
         |e: &RetryableError| matches!(e, RetryableError::Temporary(_)),
     )
@@ -90,7 +98,9 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-// Stream-based unpacking directly from HTTP Response
+/// Stream-based unpacking directly from HTTP Response.
+/// Uses a two-stage pipeline: gzip decode + tar extract -> concurrent file write.
+#[instrument(name = "unpack_stream", skip_all)]
 async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()> {
     use std::sync::Arc;
     use tokio::sync::{Semaphore, mpsc};
@@ -110,135 +120,148 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
 
     let dest = dest.to_path_buf();
 
-    // Stage 1: Streaming tar extraction
+    // Stage 1: Streaming tar extraction (gzip decode + tar extract)
     let extraction_task = {
         let entry_tx = entry_tx.clone();
         let dest = dest.clone();
 
-        tokio::spawn(async move {
-            // Create streaming gzip decoder
-            let gzip_decoder = GzipDecoder::new(stream_reader);
-            let mut tar_archive = Archive::new(gzip_decoder);
-            let mut entries = tar_archive.entries()?;
+        tokio::spawn(
+            async move {
+                // Create streaming gzip decoder
+                let gzip_decoder = GzipDecoder::new(stream_reader);
+                let mut tar_archive = Archive::new(gzip_decoder);
+                let mut entries = tar_archive.entries()?;
+                let mut file_count = 0u32;
 
-            while let Some(entry_result) = entries.next().await {
-                let mut entry = entry_result.with_context(|| "Failed to read tar entry")?;
-                let path = entry
-                    .path()
-                    .with_context(|| "Failed to get entry path")?
-                    .into_owned();
-                let full_path = dest.join(&path);
-                let is_dir = entry.header().entry_type().is_dir();
+                while let Some(entry_result) = entries.next().await {
+                    let mut entry = entry_result.with_context(|| "Failed to read tar entry")?;
+                    let path = entry
+                        .path()
+                        .with_context(|| "Failed to get entry path")?
+                        .into_owned();
+                    let full_path = dest.join(&path);
+                    let is_dir = entry.header().entry_type().is_dir();
 
-                // Only process files, skip directories (they'll be created when writing files)
-                if !is_dir {
-                    // Stream file content
-                    let mut content = Vec::new();
-                    entry
-                        .read_to_end(&mut content)
-                        .await
-                        .with_context(|| format!("Failed to read tar entry: {}", path.display()))?;
+                    // Only process files, skip directories (they'll be created when writing files)
+                    if !is_dir {
+                        // Stream file content
+                        let mut content = Vec::new();
+                        entry.read_to_end(&mut content).await.with_context(|| {
+                            format!("Failed to read tar entry: {}", path.display())
+                        })?;
 
-                    // Extract file permission mode
-                    let mode = entry.header().mode().unwrap_or(0o644);
+                        // Extract file permission mode
+                        let mode = entry.header().mode().unwrap_or(0o644);
 
-                    let size = content.len();
-                    let extracted_entry = ExtractedEntry {
-                        path: full_path,
-                        content,
-                        size,
-                        mode,
-                    };
+                        let size = content.len();
+                        let extracted_entry = ExtractedEntry {
+                            path: full_path,
+                            content,
+                            size,
+                            mode,
+                        };
 
-                    if entry_tx.send(extracted_entry).await.is_err() {
-                        break;
+                        if entry_tx.send(extracted_entry).await.is_err() {
+                            break;
+                        }
+                        file_count += 1;
                     }
                 }
-            }
 
-            Ok::<(), anyhow::Error>(())
-        })
+                tracing::trace!(file_count, "tar extraction completed");
+                Ok::<(), anyhow::Error>(())
+            }
+            .instrument(tracing::trace_span!("tar_extract")),
+        )
     };
 
     // Stage 2: Concurrent file writing with cached directory creation
     let file_writing_task = {
-        tokio::spawn(async move {
-            use dashmap::DashSet;
+        tokio::spawn(
+            async move {
+                use dashmap::DashSet;
 
-            let semaphore = Arc::new(Semaphore::new(16));
-            let created_dirs = Arc::new(DashSet::<std::path::PathBuf>::new());
-            let mut write_tasks = Vec::new();
-            let mut batch_size = 0;
-            let mut total_bytes = 0;
-            const MAX_BATCH_SIZE: usize = 100;
-            const MAX_BATCH_BYTES: usize = 50 * 1024 * 1024; // 50MB
+                let semaphore = Arc::new(Semaphore::new(16));
+                let created_dirs = Arc::new(DashSet::<std::path::PathBuf>::new());
+                let mut write_tasks = Vec::new();
+                let mut batch_size = 0;
+                let mut total_bytes: usize = 0;
+                let mut total_files: u32 = 0;
+                const MAX_BATCH_SIZE: usize = 100;
+                const MAX_BATCH_BYTES: usize = 50 * 1024 * 1024; // 50MB
 
-            while let Some(entry) = entry_rx.recv().await {
-                let semaphore = Arc::clone(&semaphore);
-                let created_dirs = Arc::clone(&created_dirs);
-                batch_size += 1;
-                total_bytes += entry.size;
+                while let Some(entry) = entry_rx.recv().await {
+                    let semaphore = Arc::clone(&semaphore);
+                    let created_dirs = Arc::clone(&created_dirs);
+                    batch_size += 1;
+                    total_bytes += entry.size;
+                    total_files += 1;
 
-                let task = tokio::spawn(async move {
-                    let _permit = semaphore.acquire().await.unwrap();
+                    let task = tokio::spawn(async move {
+                        let _permit = semaphore.acquire().await.unwrap();
 
-                    // Ensure parent directory exists using cache
-                    if let Some(parent) = entry.path.parent() {
-                        let parent_path = parent.to_path_buf();
+                        // Ensure parent directory exists using cache
+                        if let Some(parent) = entry.path.parent() {
+                            let parent_path = parent.to_path_buf();
 
-                        // Check cache first to avoid duplicate directory creation
-                        if !created_dirs.contains(&parent_path) {
-                            if let Err(e) = crate::fs::create_dir_all(&parent_path).await {
-                                tracing::debug!(
-                                    "Failed to create parent dir {}: {}",
-                                    parent_path.display(),
-                                    e
-                                );
-                                return Err(anyhow::anyhow!(
-                                    "Failed to create parent directory: {e}"
-                                )
-                                .context(format!("Parent directory: {}", parent_path.display())));
+                            // Check cache first to avoid duplicate directory creation
+                            if !created_dirs.contains(&parent_path) {
+                                if let Err(e) = crate::fs::create_dir_all(&parent_path).await {
+                                    tracing::debug!(
+                                        "Failed to create parent dir {}: {}",
+                                        parent_path.display(),
+                                        e
+                                    );
+                                    return Err(anyhow::anyhow!(
+                                        "Failed to create parent directory: {e}"
+                                    )
+                                    .context(format!(
+                                        "Parent directory: {}",
+                                        parent_path.display()
+                                    )));
+                                }
+
+                                created_dirs.insert(parent_path);
                             }
-
-                            created_dirs.insert(parent_path);
                         }
+
+                        // Write file content
+                        if let Err(e) = crate::fs::write(&entry.path, &entry.content).await {
+                            tracing::debug!("Failed to write file {}: {}", entry.path.display(), e);
+                            return Err(anyhow::anyhow!("Write failed: {e}")
+                                .context(format!("File path: {}", entry.path.display())));
+                        }
+
+                        // Set original file permissions from tar entry (Unix only)
+                        set_file_permissions(&entry.path, entry.mode).await?;
+
+                        Ok::<(), anyhow::Error>(())
+                    });
+
+                    write_tasks.push(task);
+
+                    // Process in batches to manage memory and concurrency
+                    if batch_size >= MAX_BATCH_SIZE
+                        || total_bytes >= MAX_BATCH_BYTES
+                        || entry_rx.is_empty()
+                    {
+                        for task in write_tasks.drain(..) {
+                            task.await??;
+                        }
+                        batch_size = 0;
                     }
-
-                    // Write file content
-                    if let Err(e) = crate::fs::write(&entry.path, &entry.content).await {
-                        tracing::debug!("Failed to write file {}: {}", entry.path.display(), e);
-                        return Err(anyhow::anyhow!("Write failed: {e}")
-                            .context(format!("File path: {}", entry.path.display())));
-                    }
-
-                    // Set original file permissions from tar entry (Unix only)
-                    set_file_permissions(&entry.path, entry.mode).await?;
-
-                    Ok::<(), anyhow::Error>(())
-                });
-
-                write_tasks.push(task);
-
-                // Process in batches to manage memory and concurrency
-                if batch_size >= MAX_BATCH_SIZE
-                    || total_bytes >= MAX_BATCH_BYTES
-                    || entry_rx.is_empty()
-                {
-                    for task in write_tasks.drain(..) {
-                        task.await??;
-                    }
-                    batch_size = 0;
-                    total_bytes = 0;
                 }
-            }
 
-            // Wait for remaining tasks
-            for task in write_tasks {
-                task.await??;
-            }
+                // Wait for remaining tasks
+                for task in write_tasks {
+                    task.await??;
+                }
 
-            Ok::<(), anyhow::Error>(())
-        })
+                tracing::trace!(total_files, total_bytes, "file writing completed");
+                Ok::<(), anyhow::Error>(())
+            }
+            .instrument(tracing::trace_span!("file_write_batch")),
+        )
     };
 
     // Close sender channel

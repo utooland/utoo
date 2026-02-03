@@ -7,6 +7,7 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
+use tracing::instrument;
 
 use crate::helper::global_bin::get_global_bin_dir;
 use crate::helper::lock::{
@@ -238,6 +239,7 @@ async fn clean_unused_packages(
     Ok(())
 }
 
+#[instrument(name = "clean_deps", skip_all)]
 async fn clean_deps(groups: &HashMap<usize, Vec<(String, Package)>>, cwd: &Path) -> Result<()> {
     let mut valid_packages = std::collections::HashSet::new();
     for packages in groups.values() {
@@ -270,6 +272,8 @@ async fn clean_deps(groups: &HashMap<usize, Vec<(String, Package)>>, cwd: &Path)
     Ok(())
 }
 
+/// Install packages by dependency depth levels
+#[instrument(name = "install_packages", skip_all, fields(depth_levels = groups.len()))]
 pub async fn install_packages(
     groups: &HashMap<usize, Vec<(std::string::String, Package)>>,
     cache_dir: &Path,
@@ -482,6 +486,7 @@ impl InstallService {
         Ok(())
     }
 
+    #[instrument(name = "install", skip_all)]
     pub async fn install(ignore_scripts: bool, root_path: &Path) -> Result<()> {
         // Get PackageLock directly, avoiding redundant disk read/parse operations
         let package_lock = ensure_package_lock(root_path).await?;

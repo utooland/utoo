@@ -1,6 +1,7 @@
 use crate::service::package::PackageService;
 use anyhow::Result;
 use std::path::Path;
+use tracing::instrument;
 use utoo_ruborist::lock::PackageLock;
 
 pub struct RebuildService;
@@ -12,6 +13,7 @@ impl RebuildService {
     /// * `package_lock` - Package lock information in memory
     /// * `root_path` - Project root path
     /// * `bins_only` - Whether to only process binary file linking, skipping script execution
+    #[instrument(name = "rebuild", skip_all)]
     pub async fn rebuild(
         package_lock: &PackageLock,
         root_path: &Path,

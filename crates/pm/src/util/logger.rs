@@ -12,6 +12,20 @@ use tracing_subscriber::{
     EnvFilter, Layer, Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
 
+#[cfg(feature = "tracing-chrome")]
+use tracing_chrome::FlushGuard as ChromeFlushGuard;
+
+/// Unified guard for different tracing backends.
+/// The inner guards are kept alive via RAII pattern to ensure proper flushing.
+#[allow(dead_code)]
+pub enum TracingGuard {
+    /// Standard file logging guard
+    File(WorkerGuard),
+    /// Chrome trace format guard (for performance analysis)
+    #[cfg(feature = "tracing-chrome")]
+    Chrome(ChromeFlushGuard),
+}
+
 pub static PROGRESS_BAR: Lazy<ProgressBar> = Lazy::new(|| {
     let pb = ProgressBar::new(0).with_style(
         ProgressStyle::with_template("{spinner:.blue} +{pos:.green} ~{len:.magenta} {wide_msg}")
@@ -27,7 +41,61 @@ static LOG_FILE_PATH: OnceCell<PathBuf> = OnceCell::new();
 
 /// Initialize tracing subscriber with console and file output
 /// Returns (log_path, guard) - the guard must be kept alive for the duration of the program
-pub fn init_tracing(verbose: bool) -> Result<(PathBuf, WorkerGuard)> {
+///
+/// If `TRACING_CHROME` environment variable is set (requires `tracing-chrome` feature),
+/// outputs Chrome Trace format for performance analysis.
+/// The trace can be viewed in chrome://tracing.
+///
+/// Example: `TRACING_CHROME=./trace.json utoo install`
+pub fn init_tracing(verbose: bool) -> Result<(PathBuf, TracingGuard)> {
+    // Check for Chrome Trace mode (for performance analysis)
+    #[cfg(feature = "tracing-chrome")]
+    if let Ok(chrome_file) = env::var("TRACING_CHROME") {
+        return init_chrome_tracing(&chrome_file);
+    }
+
+    // Standard tracing mode
+    init_standard_tracing(verbose)
+}
+
+/// Initialize Chrome Trace format output for performance analysis
+#[cfg(feature = "tracing-chrome")]
+fn init_chrome_tracing(chrome_file: &str) -> Result<(PathBuf, TracingGuard)> {
+    use tracing_chrome::ChromeLayerBuilder;
+
+    let mut builder = ChromeLayerBuilder::new().include_args(true);
+
+    // If the value is not "1" or "true", treat it as a file path
+    let trace_path = if chrome_file != "1" && chrome_file != "true" {
+        let path = PathBuf::from(chrome_file);
+        // Ensure parent directory exists
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        builder = builder.file(&path);
+        path
+    } else {
+        // Default to temp directory
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        env::temp_dir().join(format!("utoo-trace-{timestamp}.json"))
+    };
+
+    let (chrome_layer, chrome_guard) = builder.build();
+
+    // Use trace level for Chrome output to capture all spans
+    Registry::default()
+        .with(chrome_layer)
+        .with(EnvFilter::new("utoo=trace"))
+        .init();
+
+    Ok((trace_path, TracingGuard::Chrome(chrome_guard)))
+}
+
+/// Initialize standard file and console tracing
+fn init_standard_tracing(verbose: bool) -> Result<(PathBuf, TracingGuard)> {
     // 1. Build environment filters
     // Note: Binary name is "utoo", so module paths start with "utoo::" not "utoo_pm::"
 
@@ -78,7 +146,7 @@ pub fn init_tracing(verbose: bool) -> Result<(PathBuf, WorkerGuard)> {
         )
         .init();
 
-    Ok((log_path, guard))
+    Ok((log_path, TracingGuard::File(guard)))
 }
 
 /// Get the path to the current log file

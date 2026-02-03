@@ -1,6 +1,7 @@
 use crate::fs;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+use tracing::instrument;
 
 /// Convert a path to absolute path
 fn to_absolute(path: &Path) -> Result<PathBuf> {
@@ -12,6 +13,7 @@ fn to_absolute(path: &Path) -> Result<PathBuf> {
     }
 }
 
+#[instrument(name = "link", skip_all)]
 pub async fn link(src: &Path, dst: &Path) -> Result<()> {
     // Convert to absolute paths
     let abs_src = to_absolute(src)?;

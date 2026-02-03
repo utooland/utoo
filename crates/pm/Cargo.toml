@@ -49,6 +49,7 @@ tokio-util = { version = "0.7", features = ["io"] }
 toml = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = "0.2"
+tracing-chrome = { version = "0.7.2", optional = true }
 tracing-subscriber = { workspace = true }
 utoo-ruborist = { path = "../ruborist" }
 
@@ -61,3 +62,7 @@ openssl = { version = "0.10", features = ["vendored"] }
 
 [dev-dependencies]
 mockito = "1.7.0"
+
+[features]
+default        = []
+tracing-chrome = ["dep:tracing-chrome"]

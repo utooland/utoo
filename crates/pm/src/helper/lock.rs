@@ -2,6 +2,7 @@ use anyhow::{Context as _, Result, anyhow};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use tracing::instrument;
 
 use super::fs::Context;
 use crate::helper::workspace::find_workspaces;
@@ -74,6 +75,7 @@ fn deps_map_equals_lock(pkg_deps: &HashMap<String, String>, lock_field: Option<&
     *pkg_deps == lock_deps
 }
 
+#[instrument(name = "ensure_package_lock", skip_all)]
 pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
     // Check package.json exists in project directory
     if crate::fs::metadata(root_path.join("package.json"))
@@ -411,6 +413,7 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
 
 /// Build dependencies with tgz download.
 /// Used by `utoo install` command for faster installation.
+#[instrument(name = "build_deps_with_download", skip_all)]
 async fn build_deps_with_download(cwd: &Path) -> Result<PackageLock> {
     let options = Context::build_deps_options(cwd.to_path_buf()).await;
     ruborist_build_deps(options).await

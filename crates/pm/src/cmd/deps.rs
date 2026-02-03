@@ -1,5 +1,6 @@
 use anyhow::{Context as _, Result};
 use std::path::Path;
+use tracing::instrument;
 use utoo_ruborist::lock::PackageLock;
 use utoo_ruborist::service::build_deps as ruborist_build_deps;
 
@@ -8,6 +9,8 @@ use crate::helper::lock::save_package_lock;
 use crate::service::workspace::WorkspaceService;
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
 
+/// Build dependency tree using ruborist
+#[instrument(name = "build_deps", skip_all)]
 pub async fn build_deps(cwd: &Path) -> Result<PackageLock> {
     start_progress_bar();
 

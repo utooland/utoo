@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+use tracing::{Instrument, instrument};
 
 use super::json::load_package_json_from_path;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -459,6 +460,8 @@ pub async fn find_real_src<P: AsRef<Path>>(src: P) -> Option<PathBuf> {
     None
 }
 
+/// Internal clone implementation with platform-specific optimizations
+#[instrument(name = "clone_dir", skip_all)]
 async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
     let real_src = if find_real {
         find_real_src(src)
@@ -499,36 +502,46 @@ async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
         let src_c = CString::new(real_src.as_os_str().as_bytes())?;
         let dst_c = CString::new(dst.as_os_str().as_bytes())?;
 
-        Retry::spawn(create_retry_strategy(), || async {
-            match unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) } {
-                0 => {
-                    tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
-                    Ok(())
-                }
-                _ => {
-                    let _ = fs::remove_dir_all(dst).await.map_err(|e| {
+        Retry::spawn(create_retry_strategy(), || {
+            async {
+                match unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) } {
+                    0 => {
                         tracing::debug!(
-                            "Failed to clean target directory {}: {}",
-                            dst.display(),
-                            e
+                            "clone {} to {} success",
+                            real_src.display(),
+                            dst.display()
                         );
-                    });
-                    Err(anyhow::anyhow!(
-                        "Failed to clone file: {}",
-                        std::io::Error::last_os_error()
-                    ))
+                        Ok(())
+                    }
+                    _ => {
+                        let _ = fs::remove_dir_all(dst).await.map_err(|e| {
+                            tracing::debug!(
+                                "Failed to clean target directory {}: {}",
+                                dst.display(),
+                                e
+                            );
+                        });
+                        Err(anyhow::anyhow!(
+                            "Failed to clone file: {}",
+                            std::io::Error::last_os_error()
+                        ))
+                    }
                 }
             }
+            .instrument(tracing::trace_span!("clonefile"))
         })
         .await?;
     }
 
     #[cfg(target_os = "linux")]
     {
-        Retry::spawn(create_retry_strategy(), || async {
-            linux_clone::clone_dir(&real_src, dst).await?;
-            tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
-            Ok::<(), anyhow::Error>(())
+        Retry::spawn(create_retry_strategy(), || {
+            async {
+                linux_clone::clone_dir(&real_src, dst).await?;
+                tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
+                Ok::<(), anyhow::Error>(())
+            }
+            .instrument(tracing::trace_span!("linux_clone"))
         })
         .await?;
     }
@@ -538,10 +551,13 @@ async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
         use super::retry::create_retry_strategy;
         use tokio_retry::Retry;
 
-        Retry::spawn(create_retry_strategy(), || async {
-            windows_clone::clone_dir(&real_src, dst).await?;
-            tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
-            Ok::<(), anyhow::Error>(())
+        Retry::spawn(create_retry_strategy(), || {
+            async {
+                windows_clone::clone_dir(&real_src, dst).await?;
+                tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
+                Ok::<(), anyhow::Error>(())
+            }
+            .instrument(tracing::trace_span!("windows_copy"))
         })
         .await?;
     }
@@ -566,6 +582,7 @@ async fn validate_name_version(dst: &Path, name: &str, version: &str) -> bool {
 }
 
 /// Clone a package from cache to destination with name/version validation
+#[instrument(name = "clone_package", skip_all, fields(pkg = %format!("{}@{}", name, version)))]
 pub async fn clone_package(src: &Path, dst: &Path, name: &str, version: &str) -> Result<()> {
     match crate::fs::try_exists(dst).await? {
         true if validate_name_version(dst, name, version).await => {
