@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! OnceMap: A concurrent map that ensures each key's work is done exactly once.
 //!
 //! Based on the pattern from uv package manager:
@@ -37,7 +38,7 @@
 //!       lib-z waits on lib-a ──► shares result (no duplicate!)
 //! ```
 
-use dashmap::{mapref::entry::Entry, DashMap};
+use dashmap::{DashMap, mapref::entry::Entry};
 use std::future::Future;
 use std::hash::Hash;
 use std::sync::Arc;
@@ -357,12 +358,9 @@ mod tests {
 
         // Use timeout to detect deadlock
         let timeout = Duration::from_secs(2);
-        let results = tokio::time::timeout(
-            timeout,
-            futures::future::join(worker, waiter),
-        )
-        .await
-        .expect("Test timed out - possible deadlock due to missed notification");
+        let results = tokio::time::timeout(timeout, futures::future::join(worker, waiter))
+            .await
+            .expect("Test timed out - possible deadlock due to missed notification");
 
         // Both should get the same result
         assert_eq!(*results.0.unwrap().unwrap(), 42);
