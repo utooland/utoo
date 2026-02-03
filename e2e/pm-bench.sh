@@ -1,6 +1,14 @@
 #!/bin/bash
 set -e
 
+# Check for required commands
+for cmd in git node bc utoo pnpm bun; do
+  if ! command -v "$cmd" &> /dev/null; then
+    echo "Error: Required command '$cmd' not found. Please install it." >&2
+    exit 1
+  fi
+done
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -97,23 +105,27 @@ clean_local() {
   git clean -dfx
 }
 
+# Cache path configuration
+UTOO_CACHE_DIR="${UTOO_CACHE_DIR:-$HOME/.cache/nm}"
+PNPM_STORE_DIR="${PNPM_STORE_DIR:-$(pnpm store path 2>/dev/null || echo "$HOME/.pnpm-store")}"
+BUN_INSTALL_DIR="${BUN_INSTALL_DIR:-$HOME/.bun/install}"
+
 # Clean global cache for each package manager (including manifest and tgz)
 clean_pm_cache() {
   local pm=$1
   echo -e "    ${YELLOW}Cleaning $pm global cache...${NC}"
   case $pm in
     utoo)
-      rm -rf ~/.cache/nm
+      rm -rf "$UTOO_CACHE_DIR"
       ;;
     yarn)
-      yarn cache clean 2>/dev/null || rm -rf ~/.yarn/cache $(yarn cache dir 2>/dev/null)
+      yarn cache clean 2>/dev/null || rm -rf ~/.yarn/cache "$(yarn cache dir 2>/dev/null)"
       ;;
     pnpm)
-      pnpm store prune 2>/dev/null || rm -rf ~/.pnpm-store $(pnpm store path 2>/dev/null)
+      pnpm store prune 2>/dev/null || rm -rf "$PNPM_STORE_DIR"
       ;;
     bun)
-      # bun cache is under ~/.bun/install, clean the entire install directory
-      rm -rf ~/.bun/install
+      rm -rf "$BUN_INSTALL_DIR"
       bun pm cache rm 2>/dev/null || true
       ;;
   esac
@@ -125,8 +137,7 @@ clean_manifest_cache() {
   echo -e "    ${YELLOW}Cleaning $pm manifest cache only...${NC}"
   case $pm in
     utoo)
-      # utoo manifest cache location (to be confirmed)
-      rm -rf ~/.cache/nm/manifests 2>/dev/null || true
+      rm -rf "$UTOO_CACHE_DIR/manifests" 2>/dev/null || true
       ;;
     yarn)
       # yarn v1 manifest cache
@@ -134,12 +145,11 @@ clean_manifest_cache() {
       ;;
     pnpm)
       # pnpm metadata cache
-      rm -rf ~/.pnpm-store/v3/metadata 2>/dev/null || true
-      rm -rf $(pnpm store path 2>/dev/null)/v3/metadata 2>/dev/null || true
+      rm -rf "$PNPM_STORE_DIR/v3/metadata" 2>/dev/null || true
       ;;
     bun)
       # bun manifest cache are .npm files
-      rm -f ~/.bun/install/cache/*.npm 2>/dev/null || true
+      rm -f "$BUN_INSTALL_DIR/cache/*.npm" 2>/dev/null || true
       ;;
   esac
 }
@@ -174,23 +184,34 @@ run_benchmark() {
     setup_pnpm_workspace "$BENCH_DIR/$project"
   fi
 
-  local cmd=""
+  local cmd=()
   # bun cold install needs --no-cache to disable HTTP 304 caching
   local bun_cache_flag=""
   if [ "$install_type" = "cold" ]; then
     bun_cache_flag="--no-cache"
   fi
 
+  local env_prefix=()
   case $pm in
-    utoo) cmd="utoo install --ignore-scripts --registry=$registry" ;;
-    yarn) cmd="yarn install --ignore-scripts --registry $registry" ;;
-    pnpm) cmd="npm_config_package_manager_strict=false pnpm install --ignore-scripts --registry $registry" ;;
-    bun)  cmd="bun install --ignore-scripts --registry $registry $bun_cache_flag" ;;
+    utoo) cmd=(utoo install --ignore-scripts "--registry=$registry") ;;
+    yarn) cmd=(yarn install --ignore-scripts --registry "$registry") ;;
+    pnpm) env_prefix=(env npm_config_package_manager_strict=false); cmd=(pnpm install --ignore-scripts --registry "$registry") ;;
+    bun)  cmd=(bun install --ignore-scripts --registry "$registry" $bun_cache_flag) ;;
   esac
 
   local start=$(date +%s.%N)
-  eval "$cmd" >/dev/null 2>&1 || true
+  local install_failed=0
+  if ! "${env_prefix[@]}" "${cmd[@]}" >/dev/null 2>&1; then
+    install_failed=1
+  fi
   local end=$(date +%s.%N)
+
+  if [ "$install_failed" -eq 1 ]; then
+    echo -e "  ${RED}$pm${NC} @ $registry ($install_type): ${RED}FAILED${NC}"
+    echo "$project,$pm,$registry,$install_type,FAILED" >> "$RESULTS_DIR/results.csv"
+    return
+  fi
+
   local duration=$(echo "$end - $start" | bc)
 
   # Output result
@@ -240,8 +261,7 @@ main() {
 
         # bun specific test: delete manifest cache and run again
         if [ "$pm" = "bun" ]; then
-          echo -e "    ${YELLOW}Cleaning bun manifest cache only...${NC}"
-          rm -f ~/.bun/install/cache/*.npm 2>/dev/null || true
+          clean_manifest_cache "bun"
           run_benchmark "$project" "$pm" "$registry" "hot"
         fi
       done
