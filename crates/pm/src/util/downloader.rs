@@ -269,7 +269,12 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
                     estimated_size
                 );
                 let new_size = estimated_size * DECOMPRESSION_RETRY_FACTOR;
-                output.resize(new_size, 0);
+                output.reserve(new_size - output.len());
+                // SAFETY: libdeflater will overwrite the entire buffer, no need to initialize
+                #[allow(clippy::uninit_vec)]
+                unsafe {
+                    output.set_len(new_size)
+                };
                 decompressor
                     .gzip_decompress(&gzip_bytes, &mut output)
                     .with_context(|| "gzip decompression failed")?
