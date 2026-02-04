@@ -136,13 +136,8 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
     let entries: Vec<ExtractedEntry> = tokio::task::spawn_blocking(move || -> Result<Vec<_>> {
         use std::io::Read;
 
-        // Allocate buffer for decompression
-        // SAFETY: libdeflater will write to the buffer, we don't need to initialize
-        let mut output = Vec::with_capacity(estimated_size);
-        #[allow(clippy::uninit_vec)]
-        unsafe {
-            output.set_len(estimated_size)
-        };
+        // Allocate zero-initialized buffer for decompression
+        let mut output = vec![0u8; estimated_size];
 
         let mut decompressor = libdeflater::Decompressor::new();
 
@@ -151,11 +146,7 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
             Err(libdeflater::DecompressionError::InsufficientSpace) => {
                 // Buffer too small, retry with larger buffer
                 let new_size = estimated_size * DECOMPRESSION_RETRY_FACTOR;
-                output.reserve(new_size - output.len());
-                #[allow(clippy::uninit_vec)]
-                unsafe {
-                    output.set_len(new_size)
-                };
+                output.resize(new_size, 0);
                 decompressor
                     .gzip_decompress(&gzip_bytes, &mut output)
                     .with_context(|| "gzip decompression failed")?
