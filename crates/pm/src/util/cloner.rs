@@ -18,9 +18,17 @@ use std::os::unix::ffi::OsStrExt;
 #[cfg(target_os = "linux")]
 mod linux_clone {
     use anyhow::{Context, Result};
+    use rayon::prelude::*;
+    use std::collections::HashSet;
     use std::fs;
     use std::io;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
+
+    // Entry to be cloned
+    struct CloneEntry {
+        src: PathBuf,
+        dst: PathBuf,
+    }
 
     // Check if the package has install scripts (sync version)
     fn has_install_script_sync(src: &Path) -> bool {
@@ -38,14 +46,14 @@ mod linux_clone {
         Ok(())
     }
 
-    // Recursive directory copy with hardlink strategy (sync version)
-    fn clone_dir_sync(src: &Path, dst: &Path, use_copy: bool) -> io::Result<()> {
-        // Create destination directory
-        if let Err(e) = fs::create_dir(dst)
-            && e.kind() != io::ErrorKind::AlreadyExists
-        {
-            return Err(e);
-        }
+    // Collect all files recursively (returns files and directories to create)
+    fn collect_entries(
+        src: &Path,
+        dst: &Path,
+        files: &mut Vec<CloneEntry>,
+        dirs: &mut Vec<PathBuf>,
+    ) -> io::Result<()> {
+        dirs.push(dst.to_path_buf());
 
         for entry in fs::read_dir(src)? {
             let entry = entry?;
@@ -54,25 +62,20 @@ mod linux_clone {
             let target_path = dst.join(&file_name);
 
             if entry.file_type()?.is_dir() {
-                clone_dir_sync(&entry_path, &target_path, use_copy)?;
-            } else if use_copy {
-                // For packages with install scripts, always copy
-                copy_file_sync(&entry_path, &target_path)?;
+                collect_entries(&entry_path, &target_path, files, dirs)?;
             } else {
-                // Try hardlink first
-                if fs::hard_link(&entry_path, &target_path).is_err() {
-                    // Fallback to copy
-                    copy_file_sync(&entry_path, &target_path)?;
-                }
+                files.push(CloneEntry {
+                    src: entry_path,
+                    dst: target_path,
+                });
             }
         }
 
         Ok(())
     }
 
-    // Entry point: clone directory using spawn_blocking
+    // Entry point: clone directory using spawn_blocking with rayon parallelism
     pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
-        // Pre-format for error message (avoid clone)
         let err_msg = format!("Failed to clone {} to {}", src.display(), dst.display());
         let src = src.to_path_buf();
         let dst = dst.to_path_buf();
@@ -85,14 +88,37 @@ mod linux_clone {
                 ));
             }
 
-            // Create destination directory (entry point)
-            fs::create_dir_all(&dst)?;
-
             // Check if the package has install scripts
             let use_copy = has_install_script_sync(&src);
 
-            // Clone directory recursively
-            clone_dir_sync(&src, &dst, use_copy)
+            // Phase 1: Collect all files and directories
+            let mut files = Vec::new();
+            let mut dirs = Vec::new();
+            collect_entries(&src, &dst, &mut files, &mut dirs)?;
+
+            // Phase 2: Create all directories (sequential to avoid race conditions)
+            let mut created_dirs = HashSet::new();
+            for dir in &dirs {
+                if created_dirs.insert(dir.clone())
+                    && let Err(e) = fs::create_dir_all(dir)
+                    && e.kind() != io::ErrorKind::AlreadyExists
+                {
+                    return Err(e);
+                }
+            }
+
+            // Phase 3: Clone files in parallel using rayon
+            files.par_iter().try_for_each(|entry| -> io::Result<()> {
+                if use_copy {
+                    copy_file_sync(&entry.src, &entry.dst)
+                } else {
+                    // Try hardlink first
+                    if fs::hard_link(&entry.src, &entry.dst).is_err() {
+                        copy_file_sync(&entry.src, &entry.dst)?;
+                    }
+                    Ok(())
+                }
+            })
         })
         .await?
         .with_context(|| err_msg)
