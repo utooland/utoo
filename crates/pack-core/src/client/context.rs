@@ -16,7 +16,7 @@ use turbopack_browser::{BrowserChunkingContext, CurrentChunkMethod};
 use turbopack_core::{
     chunk::{
         ChunkingConfig, ChunkingContext, MangleType, MinifyType, SourceMapSourceType,
-        SourceMapsType, module_id_strategies::ModuleIdStrategy,
+        SourceMapsType, UnusedReferences, chunk_id_strategy::ModuleIdStrategy,
     },
     compile_time_info::{
         CompileTimeDefineValue, CompileTimeDefines, CompileTimeInfo, DefinableNameSegment,
@@ -536,11 +536,11 @@ pub struct ClientChunkingContextOptions {
     pub output_root_to_root_path: RcStr,
     pub public_path: Vc<RcStr>,
     pub environment: Vc<Environment>,
-    pub module_id_strategy: Vc<Box<dyn ModuleIdStrategy>>,
+    pub module_id_strategy: Vc<ModuleIdStrategy>,
     pub no_mangling: Vc<bool>,
     pub config: Vc<Config>,
     pub export_usage: Vc<OptionBindingUsageInfo>,
-    pub unused_references: Vc<OptionBindingUsageInfo>,
+    pub unused_references: Vc<UnusedReferences>,
 }
 
 #[turbo_tasks::function]
@@ -608,9 +608,9 @@ pub async fn get_client_chunking_context(
     .chunk_base_path(Some(public_path.clone()))
     .asset_base_path(Some(public_path))
     .current_chunk_method(CurrentChunkMethod::DocumentCurrentScript)
-    .export_usage(*export_usage.await?)
-    .unused_references(*unused_references.await?)
     .module_id_strategy(module_id_strategy.to_resolved().await?)
+    .export_usage(*export_usage.await?)
+    .unused_references(unused_references.to_resolved().await?)
     .nested_async_availability(*nested_async_chunking.await?);
 
     if let Some(chunk_loading_global) = &*config.chunk_loading_global(root_path.clone()).await? {

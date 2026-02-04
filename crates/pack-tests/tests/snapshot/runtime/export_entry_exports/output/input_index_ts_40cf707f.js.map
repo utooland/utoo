@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/runtime/export_entry_exports/input/index.ts"],"sourcesContent":["export function setTernContainer(container: HTMLElement) {\n    console.log('Setting Tern container:', container);\n    return container;\n}\n\nexport function initializeApp(config: { theme: string }) {\n    console.log('Initializing app with config:', config);\n    return { success: true, config };\n}\n\nexport const APP_VERSION = '1.0.0';\n\nexport default {\n    setTernContainer,\n    initializeApp,\n    version: APP_VERSION\n};\n"],"names":[],"mappings":"AAAO,SAAS,iBAAiB,SAAsB;IACnD,QAAQ,GAAG,CAAC,2BAA2B;IACvC,OAAO;AACX;AAEO,SAAS,cAAc,MAAyB;IACnD,QAAQ,GAAG,CAAC,iCAAiC;IAC7C,OAAO;QAAE,SAAS;QAAM;IAAO;AACnC;AAEO,MAAM,cAAc;qCAEZ;IACX;IACA;IACA,SAAS;AACb"}}]
-}

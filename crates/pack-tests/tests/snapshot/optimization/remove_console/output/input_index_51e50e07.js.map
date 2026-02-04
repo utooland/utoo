@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/optimization/remove_console/input/index.js"],"sourcesContent":["export function main() {\n    console.log(\"LOG MSG\");\n    console.error(\"ERROR MSG\");\n}"],"names":["main","console","error"],"mappings":"AAAO,SAASA;;IAEZC,QAAQC,KAAK,CAAC;AAClB"}}]
+}

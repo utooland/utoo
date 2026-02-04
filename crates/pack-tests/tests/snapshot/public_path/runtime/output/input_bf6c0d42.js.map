@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 7, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/public_path/runtime/input/index.js"],"sourcesContent":["import asset from \"./asset.jpg\";\n\nexport function getImageUrl() {\n    return asset;\n  }"],"names":[],"mappings":"AAAA;;AAEO,SAAS;IACZ,OAAO,8CAAK;AACd"}}]
-}

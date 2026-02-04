@@ -11,8 +11,7 @@ use pack_api::{
     utils::{endpoint_client_changed_operation, subscribe_issues_and_diags_operation},
 };
 use tracing::Instrument;
-use turbo_tasks::ReadRef;
-use turbopack_core::error::PrettyPrintError;
+use turbo_tasks::{PrettyPrintError, ReadRef};
 
 use super::utils::{NapiDiagnostic, NapiIssue, TurbopackResult, VcArc, subscribe};
 
