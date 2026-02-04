@@ -1,0 +1,26 @@
+warning - [resolve] /style/invalid_pseudo_class/input/index.less.css:30:4  Module not found: Can't resolve ''
+  
+      26 |     margin-bottom: 12px;
+      27 | }
+      28 | 
+      29 | .layoutContainer {
+         +     v
+      30 +     background-image: url('');
+         +     ^
+      31 | }
+      32 | 
+      33 | .layoutContainer2 {
+      34 |     background-image: url(<path-to-image>) lightgray 50% / cover no-repeat
+  
+  
+  
+  | It was not possible to find the requested file.
+  | Parsed request as written in source code: empty
+  | Path where resolving has started: [project]/style/invalid_pseudo_class/input/index.less.css
+  | Type of request: url request
+  | 
+  Import trace:
+    Browser:
+      ./style/invalid_pseudo_class/input/index.less.css
+      ./style/invalid_pseudo_class/input/index.less
+      ./style/invalid_pseudo_class/input/index.ts
