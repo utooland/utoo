@@ -256,7 +256,8 @@ async fn set_dir_permissions(_path: &Path) -> Result<()> {
 struct ExtractedEntry {
     path: PathBuf,
     content: Vec<u8>,
-    mode: u32, // File permission mode
+    #[cfg_attr(not(unix), allow(dead_code))]
+    mode: u32,
 }
 
 #[cfg(test)]

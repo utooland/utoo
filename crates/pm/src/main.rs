@@ -250,20 +250,9 @@ enum Commands {
     },
 }
 
-fn main() {
-    let parallelism = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4);
-
-    let result = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .worker_threads(parallelism)
-        .thread_name("utoo-worker")
-        .build()
-        .expect("failed to build tokio runtime")
-        .block_on(async_main());
-
-    if let Err(e) = result {
+#[tokio::main]
+async fn main() {
+    if let Err(e) = async_main().await {
         tracing::error!("{:#}", e);
         if let Some(log_path) = get_log_file_path() {
             eprintln!("Full logs saved to: {}", log_path.display());

@@ -167,12 +167,6 @@ mod windows_clone {
         Ok(())
     }
 
-    // Fast copy entry point
-    async fn fast_copy(src: &Path, dst: &Path) -> Result<()> {
-        fs::create_dir_all(dst).await?;
-        fast_copy_inner(src, dst).await
-    }
-
     // Check if the package has install scripts
     async fn has_install_script(src: &Path) -> bool {
         if let Some(parent) = src.parent() {
