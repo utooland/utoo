@@ -141,21 +141,23 @@ pub struct DhatProfilerGuard;
 
 impl DhatProfilerGuard {
     /// Constructs an instance if we were compiled with dhat support.
+    #[cfg(feature = "__internal_dhat-heap")]
     pub fn try_init() -> Option<Self> {
-        #[cfg(feature = "__internal_dhat-heap")]
-        {
-            println!("[dhat-heap]: Initializing heap profiler");
-            Some(Self(dhat::Profiler::new_heap()))
-        }
-        #[cfg(feature = "__internal_dhat-ad-hoc")]
-        {
-            println!("[dhat-ad-hoc]: Initializing ad-hoc profiler");
-            Some(Self(dhat::Profiler::new_ad_hoc()))
-        }
-        #[cfg(not(any(feature = "__internal_dhat-heap", feature = "__internal_dhat-ad-hoc")))]
-        {
-            None
-        }
+        println!("[dhat-heap]: Initializing heap profiler");
+        Some(Self(dhat::Profiler::new_heap()))
+    }
+
+    /// Constructs an instance if we were compiled with dhat support.
+    #[cfg(all(feature = "__internal_dhat-ad-hoc", not(feature = "__internal_dhat-heap")))]
+    pub fn try_init() -> Option<Self> {
+        println!("[dhat-ad-hoc]: Initializing ad-hoc profiler");
+        Some(Self(dhat::Profiler::new_ad_hoc()))
+    }
+
+    /// Constructs an instance if we were compiled with dhat support.
+    #[cfg(not(any(feature = "__internal_dhat-heap", feature = "__internal_dhat-ad-hoc")))]
+    pub fn try_init() -> Option<Self> {
+        None
     }
 }
 
