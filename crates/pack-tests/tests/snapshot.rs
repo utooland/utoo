@@ -25,7 +25,7 @@ use turbo_tasks_backend::{BackendOptions, TurboTasksBackend, noop_backing_storag
 use turbo_tasks_fs::FileSystemPath;
 use turbopack_core::{
     asset::Asset,
-    issue::CollectibleIssuesExt,
+    issue::{CollectibleIssuesExt, IssueFilter},
     output::{OutputAsset, OutputAssetsReference},
 };
 use turbopack_test_utils::snapshot::{UPDATE, diff, expected, matches_expected, snapshot_issues};
@@ -136,7 +136,9 @@ async fn run_inner_options(resource: RcStr) -> Result<()> {
     let out_vc = out_op.resolve_strongly_consistent().await?.owned().await?;
 
     let captured_issues = out_op.peek_issues();
-    let plain_issues = captured_issues.get_plain_issues().await?;
+    let plain_issues = captured_issues
+        .get_plain_issues(IssueFilter::everything())
+        .await?;
 
     snapshot_issues(plain_issues, out_vc.join("issues")?, &REPO_ROOT)
         .await

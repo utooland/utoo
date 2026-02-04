@@ -18,13 +18,13 @@ use turbopack_core::{
     chunk::{
         Chunk, ChunkGroupResult, ChunkItem, ChunkableModule, ChunkingConfig, ChunkingConfigs,
         ChunkingContext, EntryChunkGroupResult, EvaluatableAsset, EvaluatableAssets, MinifyType,
-        ModuleId, SourceMapSourceType, SourceMapsType,
+        SourceMapSourceType, SourceMapsType, UnusedReferences,
         availability_info::AvailabilityInfo,
         chunk_group::{MakeChunkGroupResult, make_chunk_group},
-        module_id_strategies::{DevModuleIdStrategy, ModuleIdStrategy},
+        chunk_id_strategy::ModuleIdStrategy,
     },
     environment::Environment,
-    ident::{AssetIdent, clean_separators},
+    ident::{AssetIdent, escape_file_path},
     module::Module,
     module_graph::{
         ModuleGraph,
@@ -32,9 +32,9 @@ use turbopack_core::{
         chunk_group_info::ChunkGroup,
     },
     output::{OutputAsset, OutputAssets},
-    reference::ModuleReference,
 };
 use turbopack_ecmascript::{
+    async_chunk::module::AsyncLoaderModule,
     chunk::{EcmascriptChunk, EcmascriptChunkType},
     manifest::{chunk_asset::ManifestAsyncModule, loader_item::ManifestLoaderChunkItem},
 };
@@ -117,11 +117,8 @@ impl LibraryChunkingContextBuilder {
         self
     }
 
-    pub fn module_id_strategy(
-        mut self,
-        module_id_strategy: ResolvedVc<Box<dyn ModuleIdStrategy>>,
-    ) -> Self {
-        self.chunking_context.module_id_strategy = module_id_strategy;
+    pub fn module_id_strategy(mut self, module_id_strategy: ResolvedVc<ModuleIdStrategy>) -> Self {
+        self.chunking_context.module_id_strategy = Some(module_id_strategy);
         self
     }
 
@@ -130,11 +127,8 @@ impl LibraryChunkingContextBuilder {
         self
     }
 
-    pub fn unused_references(
-        mut self,
-        unused_references: Option<ResolvedVc<BindingUsageInfo>>,
-    ) -> Self {
-        self.chunking_context.unused_references = unused_references;
+    pub fn unused_references(mut self, unused_references: ResolvedVc<UnusedReferences>) -> Self {
+        self.chunking_context.unused_references = Some(unused_references);
         self
     }
 
@@ -153,6 +147,11 @@ impl LibraryChunkingContextBuilder {
         self
     }
 
+    pub fn debug_ids(mut self, debug_ids: bool) -> Self {
+        self.chunking_context.debug_ids = debug_ids;
+        self
+    }
+
     pub fn build(self) -> Vc<LibraryChunkingContext> {
         LibraryChunkingContext::cell(self.chunking_context)
     }
@@ -165,7 +164,7 @@ impl LibraryChunkingContextBuilder {
 /// It splits "node_modules" separately as these are less likely to change
 /// during development
 #[turbo_tasks::value]
-#[derive(Debug, Clone, Hash, TaskInput)]
+#[derive(Debug, Clone)]
 pub struct LibraryChunkingContext {
     name: Option<RcStr>,
     /// The library root name
@@ -195,15 +194,17 @@ pub struct LibraryChunkingContext {
     /// Whether to use manifest chunks for lazy compilation
     manifest_chunks: bool,
     /// The module id strategy to use
-    module_id_strategy: ResolvedVc<Box<dyn ModuleIdStrategy>>,
+    module_id_strategy: Option<ResolvedVc<ModuleIdStrategy>>,
     /// The module export usage info, if available.
     export_usage: Option<ResolvedVc<BindingUsageInfo>>,
     /// Which references are unused and should be skipped (e.g. during codegen).
-    unused_references: Option<ResolvedVc<BindingUsageInfo>>,
-    /// Evaluate chunk filename template
-    filename: Option<RcStr>,
+    unused_references: Option<ResolvedVc<UnusedReferences>>,
     /// Enable nested async availability for this chunking
     enable_nested_async_availability: bool,
+    /// Enable debug IDs for chunks and source maps.
+    debug_ids: bool,
+    /// Evaluate chunk filename template
+    filename: Option<RcStr>,
 }
 
 impl LibraryChunkingContext {
@@ -228,15 +229,16 @@ impl LibraryChunkingContext {
                 runtime_type,
                 minify_type: MinifyType::NoMinify,
                 source_maps_type: SourceMapsType::Full,
-                module_id_strategy: ResolvedVc::upcast(DevModuleIdStrategy::new_resolved()),
+                module_id_strategy: None,
                 export_usage: None,
                 unused_references: None,
                 filename: Default::default(),
                 runtime_root,
                 runtime_export,
                 enable_module_merging: false,
-                manifest_chunks: true,
+                manifest_chunks: false,
                 enable_nested_async_availability: false,
+                debug_ids: false,
             },
         }
     }
@@ -558,6 +560,8 @@ impl ChunkingContext for LibraryChunkingContext {
                     .collect::<Result<Vec<_>>>()?,
             );
 
+            let chunks = chunks.await?;
+
             let assets: Vec<ResolvedVc<Box<dyn OutputAsset>>> = chunks
                 .iter()
                 .map(|chunk| {
@@ -593,11 +597,6 @@ impl ChunkingContext for LibraryChunkingContext {
     }
 
     #[turbo_tasks::function]
-    fn chunk_item_id_from_ident(&self, ident: Vc<AssetIdent>) -> Vc<ModuleId> {
-        self.module_id_strategy.get_module_id(ident)
-    }
-
-    #[turbo_tasks::function]
     async fn async_loader_chunk_item(
         self: Vc<Self>,
         module: Vc<Box<dyn ChunkableModule>>,
@@ -614,11 +613,18 @@ impl ChunkingContext for LibraryChunkingContext {
     }
 
     #[turbo_tasks::function]
-    async fn async_loader_chunk_item_id(
+    fn chunk_item_id_strategy(&self) -> Vc<ModuleIdStrategy> {
+        *self
+            .module_id_strategy
+            .unwrap_or_else(|| ModuleIdStrategy::default().resolved_cell())
+    }
+
+    #[turbo_tasks::function]
+    async fn async_loader_chunk_item_ident(
         self: Vc<Self>,
         module: Vc<Box<dyn ChunkableModule>>,
-    ) -> Result<Vc<ModuleId>> {
-        Ok(self.chunk_item_id_from_ident(ManifestLoaderChunkItem::asset_ident_for(module)))
+    ) -> Result<Vc<AssetIdent>> {
+        Ok(AsyncLoaderModule::asset_ident_for(module))
     }
 
     #[turbo_tasks::function]
@@ -634,16 +640,11 @@ impl ChunkingContext for LibraryChunkingContext {
     }
 
     #[turbo_tasks::function]
-    async fn is_reference_unused(
-        self: Vc<Self>,
-        reference: ResolvedVc<Box<dyn ModuleReference>>,
-    ) -> Result<Vc<bool>> {
-        if let Some(unused_references) = self.await?.unused_references {
-            Ok(Vc::cell(
-                unused_references.await?.is_reference_unused(&reference),
-            ))
+    fn unused_references(&self) -> Vc<UnusedReferences> {
+        if let Some(unused_references) = self.unused_references {
+            *unused_references
         } else {
-            Ok(Vc::cell(false))
+            Vc::cell(Default::default())
         }
     }
 
@@ -668,9 +669,9 @@ async fn ident_to_output_filename(
 ) -> Result<Vc<RcStr>> {
     let ident = &*ident.await?;
     let mut name = if let Some(inner) = context_path.get_path_to(&ident.path) {
-        clean_separators(inner)
+        escape_file_path(inner)
     } else {
-        clean_separators(&ident.path.to_string())
+        escape_file_path(&ident.path.to_string())
     };
     let removed_extension = name.ends_with(&*expected_extension);
     if removed_extension {

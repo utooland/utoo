@@ -42,6 +42,7 @@ pub async fn get_style_loader_rules(
                 loaders,
                 rename_as: Some(rename),
                 condition: None,
+                module_type: None,
             },
         ))
     }

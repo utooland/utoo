@@ -135,7 +135,7 @@ impl AppEntrypoint {
         let ty = ReferenceType::Entry(EntryReferenceSubType::Undefined);
 
         Ok(origin
-            .resolve_asset(entry_request, origin.resolve_options(ty.clone()), ty)
+            .resolve_asset(entry_request, origin.resolve_options(), ty)
             .await?
             .primary_modules())
     }

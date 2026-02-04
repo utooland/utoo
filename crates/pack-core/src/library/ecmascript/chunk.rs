@@ -3,7 +3,7 @@ use indoc::writedoc;
 use serde::Serialize;
 use std::io::Write;
 use turbo_rcstr::{RcStr, rcstr};
-use turbo_tasks::{ReadRef, ResolvedVc, TryJoinIterExt, ValueToString, Vc};
+use turbo_tasks::{ResolvedVc, TryJoinIterExt, ValueToString, Vc};
 use turbo_tasks_fs::{File, FileContent, FileSystemPath, rope::RopeBuilder};
 use turbopack_core::{
     asset::{Asset, AssetContent},
@@ -71,7 +71,7 @@ impl EcmascriptLibraryEvaluateChunk {
             );
         };
 
-        let runtime_module_ids: Vec<ReadRef<turbopack_core::chunk::ModuleId>> = this
+        let runtime_module_ids: Vec<turbopack_core::chunk::ModuleId> = this
             .evaluatable_assets
             .await?
             .iter()
@@ -292,7 +292,7 @@ struct EcmascriptBrowserChunkRuntimeParams<'a, T> {
     /// instantiated.
     other_chunks: &'a [T],
     /// List of module IDs that this chunk should instantiate when executed.
-    runtime_module_ids: Vec<ReadRef<ModuleId>>,
+    runtime_module_ids: Vec<ModuleId>,
 }
 
 #[turbo_tasks::function]

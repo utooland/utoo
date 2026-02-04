@@ -55,20 +55,6 @@ impl BundlerTurboTasks {
         }
     }
 
-    pub fn spawn_once_task<T, Fut>(&self, future: Fut)
-    where
-        T: Send,
-        Fut: Future<Output = Result<Vc<T>>> + Send + 'static,
-    {
-        match self {
-            BundlerTurboTasks::Memory(turbo_tasks) => turbo_tasks.spawn_once_task(future),
-            #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-            BundlerTurboTasks::PersistentCaching(turbo_tasks) => {
-                turbo_tasks.spawn_once_task(future)
-            }
-        }
-    }
-
     pub async fn aggregated_update_info(
         &self,
         aggregation: Duration,

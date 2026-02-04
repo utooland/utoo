@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/public_path/basic/input/lazy.js"],"sourcesContent":["export default function lazyModule() {\n  console.log('Lazy module loaded from CDN!');\n  return { loaded: true, source: 'CDN' };\n}\n\nexport const lazyData = {\n  message: 'This chunk should be loaded from publicPath'\n};\n\n"],"names":["lazyModule","console","log","loaded","source","lazyData","message"],"mappings":"AAAe,SAASA;IACtBC,QAAQC,GAAG,CAAC;IACZ,OAAO;QAAEC,QAAQ;QAAMC,QAAQ;IAAM;AACvC;AAEO,MAAMC,WAAW;IACtBC,SAAS;AACX"}}]
+}

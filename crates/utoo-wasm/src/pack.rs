@@ -19,7 +19,8 @@ use tokio::{sync::mpsc::unbounded_channel, time::Instant};
 use turbo_rcstr::{rcstr, RcStr};
 use turbo_tasks::TaskId;
 use turbo_tasks::{
-    Completion, OperationVc, ReadConsistency, ResolvedVc, TransientInstance, TurboTasks, Vc,
+    Completion, OperationVc, PrettyPrintError, ReadConsistency, ResolvedVc, TransientInstance,
+    TurboTasks, Vc,
 };
 use turbo_tasks_backend::{
     noop_backing_storage, BackendOptions, NoopBackingStorage, TurboTasksBackend,
@@ -27,7 +28,6 @@ use turbo_tasks_backend::{
 use turbo_tasks_fs::FileContent;
 use turbopack_core::{
     diagnostics::PlainDiagnostic,
-    error::PrettyPrintError,
     issue::{PlainIssue, PlainIssueSource, PlainSource},
     source_pos::SourcePos as SourcePosInner,
     version::{PartialUpdate, TotalUpdate, Update, VersionState},

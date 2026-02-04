@@ -421,6 +421,8 @@ impl TryFrom<ConfigConditionItem> for ConditionItem {
                     .map(EsRegex::try_from)
                     .transpose()?
                     .map(EsRegex::resolved_cell),
+                content_type: None,
+                query: None,
             },
         })
     }
@@ -1097,6 +1099,7 @@ impl Config {
                                 loaders: transform_loaders(&mut [loaders].into_iter()),
                                 rename_as: None,
                                 condition: None,
+                                module_type: None,
                             },
                         ));
                     }
@@ -1144,6 +1147,7 @@ impl Config {
                                 loaders: transform_loaders(&mut loaders.iter()),
                                 rename_as: rename_as.clone(),
                                 condition,
+                                module_type: None,
                             },
                         ));
                     }
