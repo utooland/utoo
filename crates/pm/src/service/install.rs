@@ -5,8 +5,6 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::Arc;
-use tokio::sync::Semaphore;
 
 use crate::helper::global_bin::get_global_bin_dir;
 use crate::helper::lock::{
@@ -25,8 +23,6 @@ use crate::util::save_type::{OmitType, PackageAction, SaveType};
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 
 use super::binary::update_package_binary;
-
-static CONCURRENT_LIMIT: usize = 40;
 
 /// Check if a package should be omitted based on omit config
 fn should_omit_package(package: &Package, omit: &std::collections::HashSet<OmitType>) -> bool {
@@ -274,7 +270,6 @@ pub async fn install_packages(
     groups: &HashMap<usize, Vec<(std::string::String, Package)>>,
     cache_dir: &Path,
     cwd: &Path,
-    semaphore: Arc<Semaphore>,
 ) -> Result<()> {
     // clean unused deps
     clean_deps(groups, cwd).await?;
@@ -342,17 +337,12 @@ pub async fn install_packages(
                     let cache_flag_path = cache_dir.join(format!("{name}/{version}/_resolved"));
                     let cwd_clone = cwd.to_path_buf();
                     let should_resolve = !crate::fs::try_exists(&cache_flag_path).await?;
-                    let semaphore = Arc::clone(&semaphore);
 
                     // Check if this is an optional dependency
                     let is_optional =
                         package.optional == Some(true) || package.dev_optional == Some(true);
 
                     let task = tokio::spawn(async move {
-                        let _permit = semaphore
-                            .acquire()
-                            .await
-                            .expect("semaphore should not be closed");
                         if should_resolve {
                             tracing::debug!("Downloading {path} to {name}");
                             match download(&resolved, &cache_path).await {
@@ -497,11 +487,7 @@ impl InstallService {
             PROGRESS_BAR.set_length(package_lock.packages.len() as u64);
         }
 
-        // Set concurrent limit for package installation
-        tracing::debug!("Setting concurrent limit to {CONCURRENT_LIMIT}");
-        let semaphore = Arc::new(Semaphore::new(CONCURRENT_LIMIT));
-
-        install_packages(&groups, &cache_dir, root_path, semaphore)
+        install_packages(&groups, &cache_dir, root_path)
             .await
             .context("Failed to install packages")?;
 
