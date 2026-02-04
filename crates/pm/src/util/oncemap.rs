@@ -88,6 +88,20 @@ where
         }
     }
 
+    /// Register a key as pending (Waiting state) without starting work.
+    /// Returns the Notify handle if newly registered, None if already exists.
+    pub fn register(&self, key: K) -> Option<Arc<Notify>> {
+        use dashmap::mapref::entry::Entry;
+        match self.map.entry(key) {
+            Entry::Occupied(_) => None,
+            Entry::Vacant(vacant) => {
+                let notify = Arc::new(Notify::new());
+                vacant.insert(Value::Waiting(Arc::clone(&notify)));
+                Some(notify)
+            }
+        }
+    }
+
     /// Wait for a key to complete if it's currently being processed.
     /// Returns immediately if key doesn't exist or is already done.
     pub async fn wait_if_pending(&self, key: &K) {
@@ -101,6 +115,28 @@ where
             }
         };
         notify.notified().await;
+    }
+
+    /// Complete a pre-registered key with a value.
+    ///
+    /// This is used in conjunction with `register()` for the pre-registration pattern:
+    /// 1. Call `register(key)` synchronously to claim the key
+    /// 2. Do async work
+    /// 3. Call `complete(key, value, notify)` to store result and notify waiters
+    ///
+    /// The notify handle must be the one returned from `register()`.
+    pub fn complete(&self, key: K, value: Option<V>, notify: Arc<Notify>) {
+        match value {
+            Some(v) => {
+                self.map.insert(key, Value::Done(Arc::new(v)));
+                notify.notify_waiters();
+            }
+            None => {
+                // Work failed, remove the entry so others can retry
+                self.map.remove(&key);
+                notify.notify_waiters();
+            }
+        }
     }
 
     /// Get or initialize a value for the given key.
