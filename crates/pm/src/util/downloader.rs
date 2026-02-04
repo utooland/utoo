@@ -24,43 +24,6 @@ const MIN_ESTIMATED_SIZE: usize = 16;
 const MAX_ESTIMATED_SIZE: usize = 512 * 1024 * 1024; // 512MB
 const DECOMPRESSION_RETRY_FACTOR: usize = 4;
 
-/// Sanitize a path for Windows compatibility.
-/// Windows doesn't allow: < > : " | ? * and control characters (0-31)
-/// We replace them with underscore to avoid extraction failures.
-#[cfg(windows)]
-fn sanitize_path_for_windows(base: &Path, relative: &Path) -> PathBuf {
-    use std::path::Component;
-
-    let mut result = base.to_path_buf();
-    for comp in relative.components() {
-        match comp {
-            Component::Normal(os_str) => {
-                let s = os_str.to_string_lossy();
-                let sanitized: String = s
-                    .chars()
-                    .map(|c| {
-                        if matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*') || (c as u32) < 32 {
-                            '_'
-                        } else {
-                            c
-                        }
-                    })
-                    .collect();
-                result.push(&sanitized);
-            }
-            Component::ParentDir => result.push(".."),
-            Component::CurDir => result.push("."),
-            _ => {}
-        }
-    }
-    result
-}
-
-#[cfg(not(windows))]
-fn sanitize_path_for_windows(base: &Path, relative: &Path) -> PathBuf {
-    base.join(relative)
-}
-
 /// Download and extract a tarball to the destination directory.
 ///
 /// Uses OnceMap to ensure each (url, dest) pair is only downloaded once,
@@ -212,7 +175,7 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
                 .path()
                 .with_context(|| "Failed to get entry path")?
                 .into_owned();
-            let full_path = sanitize_path_for_windows(&dest_owned, &path);
+            let full_path = dest_owned.join(&path);
 
             if !entry.header().entry_type().is_dir() {
                 let mut content = Vec::new();
