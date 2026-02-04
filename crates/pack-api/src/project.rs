@@ -598,14 +598,13 @@ impl Project {
         }
 
         let root_turbopack_path = Path::new(".turbopack");
-        if let Some(path_str) = root_turbopack_path.to_str() {
-            let root_turbopack_path_normalized =
-                normalize_path(path_str).map_or_else(|| path_str.into(), RcStr::from);
-            if !root_turbopack_path_normalized.is_empty()
-                && !denied_paths.contains(&root_turbopack_path_normalized)
-            {
-                denied_paths.push(root_turbopack_path_normalized);
-            }
+        let path_str = root_turbopack_path.to_string_lossy();
+        let root_turbopack_path_normalized =
+            normalize_path(&path_str).map_or_else(|| path_str.into(), RcStr::from);
+        if !root_turbopack_path_normalized.is_empty()
+            && !denied_paths.contains(&root_turbopack_path_normalized)
+        {
+            denied_paths.push(root_turbopack_path_normalized);
         }
         // Get watched ignored paths from configuration
         let watched_ignored = self.watch.ignored.clone();
