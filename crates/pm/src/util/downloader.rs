@@ -33,6 +33,10 @@ const MIN_ESTIMATED_SIZE: usize = 16;
 const MAX_ESTIMATED_SIZE: usize = 512 * 1024 * 1024; // 512MB
 const DECOMPRESSION_RETRY_FACTOR: usize = 4;
 
+// Linux-specific: preallocate files larger than 1MB to reduce fragmentation
+#[cfg(target_os = "linux")]
+const PREALLOCATE_THRESHOLD: usize = 1_000_000; // 1MB
+
 /// Global buffer pool for decompression
 static BUFFER_POOL: Lazy<Mutex<Vec<Vec<u8>>>> =
     Lazy::new(|| Mutex::new(Vec::with_capacity(BUFFER_POOL_MAX_SIZE)));
@@ -348,8 +352,21 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
 
         // Then write files in parallel using rayon
         entries.par_iter().try_for_each(|entry| -> Result<()> {
-            let mut file = fs::File::create(&entry.path)
+            let file = fs::File::create(&entry.path)
                 .with_context(|| format!("Failed to create: {}", entry.path.display()))?;
+
+            // Linux: preallocate space for large files to reduce fragmentation
+            #[cfg(target_os = "linux")]
+            if entry.content.len() > PREALLOCATE_THRESHOLD {
+                use std::os::unix::io::AsRawFd;
+                let fd = file.as_raw_fd();
+                // SAFETY: fd is valid, fallocate is safe to call
+                unsafe {
+                    libc::fallocate(fd, 0, 0, entry.content.len() as libc::off_t);
+                }
+            }
+
+            let mut file = file;
             file.write_all(&entry.content)
                 .with_context(|| format!("Failed to write: {}", entry.path.display()))?;
 
