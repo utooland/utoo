@@ -5,6 +5,7 @@ pub mod execute;
 pub mod install;
 pub mod package;
 pub mod package_management;
+pub mod pipeline;
 pub mod rebuild;
 pub mod script;
 pub mod update;

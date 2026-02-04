@@ -594,9 +594,14 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
 
                             // Send PackagePlaced for pipeline cloning
                             if let NodeManifest::Registry(ref manifest) = node.manifest {
+                                // Get parent path for dependency ordering
+                                let parent_path = graph
+                                    .get_node(node_index)
+                                    .map(|parent| parent.path.as_path());
                                 receiver.on_event(BuildEvent::PackagePlaced {
                                     package: manifest.into(),
                                     path: &node.path,
+                                    parent_path,
                                     depth,
                                 });
                             }

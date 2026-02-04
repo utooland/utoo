@@ -91,6 +91,8 @@ pub enum BuildEvent<'a> {
         package: PackageTarballInfo<'a>,
         /// Target path in node_modules (e.g., "node_modules/lodash")
         path: &'a Path,
+        /// Parent package path (None for root-level dependencies)
+        parent_path: Option<&'a Path>,
         /// Depth in the dependency tree (0 = direct dependency)
         depth: usize,
     },

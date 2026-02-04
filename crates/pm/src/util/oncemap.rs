@@ -88,6 +88,21 @@ where
         }
     }
 
+    /// Wait for a key to complete if it's currently being processed.
+    /// Returns immediately if key doesn't exist or is already done.
+    pub async fn wait_if_pending(&self, key: &K) {
+        let notify = {
+            let Some(entry) = self.map.get(key) else {
+                return;
+            };
+            match entry.value() {
+                Value::Done(_) => return,
+                Value::Waiting(notify) => Arc::clone(notify),
+            }
+        };
+        notify.notified().await;
+    }
+
     /// Get or initialize a value for the given key.
     ///
     /// If the key doesn't exist, the provided async closure will be called to compute the value.

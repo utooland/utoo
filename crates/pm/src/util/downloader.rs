@@ -43,7 +43,7 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
 }
 
 /// Download tarball bytes (network phase)
-async fn download_bytes(url: &str) -> Result<Bytes> {
+pub async fn download_bytes(url: &str) -> Result<Bytes> {
     let retry_count = AtomicU32::new(0);
     RetryIf::spawn(
         create_retry_strategy(),
@@ -98,7 +98,7 @@ async fn download_bytes(url: &str) -> Result<Bytes> {
 }
 
 /// Extract gzip tarball and write to destination
-async fn extract_and_write(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
+pub async fn extract_and_write(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
     // Check if already resolved (warm cache scenario)
     let resolved_path = dest.join("_resolved");
     if crate::fs::try_exists(&resolved_path).await? {

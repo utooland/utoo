@@ -5,14 +5,23 @@ use utoo_ruborist::service::build_deps as ruborist_build_deps;
 
 use crate::helper::fs::Context;
 use crate::helper::lock::save_package_lock;
+use crate::service::pipeline::PipelineInstaller;
 use crate::service::workspace::WorkspaceService;
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
 
 pub async fn build_deps(cwd: &Path) -> Result<PackageLock> {
     start_progress_bar();
 
-    let options = Context::build_deps_options(cwd.to_path_buf()).await;
+    let (options, channels) = Context::build_deps_options(cwd.to_path_buf()).await;
+
+    // Start pipeline workers for concurrent tgz downloading
+    let installer = PipelineInstaller::new();
+    let handles = installer.start_workers(channels, cwd.to_path_buf());
+
     let package_lock = ruborist_build_deps(options).await?;
+
+    // Wait for all downloads to complete
+    handles.await_completion().await;
 
     finish_progress_bar("package-lock.json resolved");
 
