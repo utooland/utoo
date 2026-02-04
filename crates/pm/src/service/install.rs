@@ -5,6 +5,8 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
+use std::sync::Arc;
+use tokio::sync::Semaphore;
 
 use crate::helper::global_bin::get_global_bin_dir;
 use crate::helper::lock::{
@@ -16,6 +18,7 @@ use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
 use crate::util::cache::get_cache_dir;
 use crate::util::cloner::clone_package;
+use crate::util::config::get_manifests_concurrency_limit;
 use crate::util::downloader::download;
 use crate::util::linker::link;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
@@ -270,6 +273,7 @@ pub async fn install_packages(
     groups: &HashMap<usize, Vec<(std::string::String, Package)>>,
     cache_dir: &Path,
     cwd: &Path,
+    download_semaphore: Arc<Semaphore>,
 ) -> Result<()> {
     // clean unused deps
     clean_deps(groups, cwd).await?;
@@ -337,6 +341,7 @@ pub async fn install_packages(
                     let cache_flag_path = cache_dir.join(format!("{name}/{version}/_resolved"));
                     let cwd_clone = cwd.to_path_buf();
                     let should_resolve = !crate::fs::try_exists(&cache_flag_path).await?;
+                    let download_semaphore = Arc::clone(&download_semaphore);
 
                     // Check if this is an optional dependency
                     let is_optional =
@@ -344,6 +349,11 @@ pub async fn install_packages(
 
                     let task = tokio::spawn(async move {
                         if should_resolve {
+                            // Limit download concurrency, but not clone
+                            let _permit = download_semaphore
+                                .acquire()
+                                .await
+                                .expect("download semaphore should not be closed");
                             tracing::debug!("Downloading {path} to {name}");
                             match download(&resolved, &cache_path).await {
                                 Ok(_) => {
@@ -487,7 +497,11 @@ impl InstallService {
             PROGRESS_BAR.set_length(package_lock.packages.len() as u64);
         }
 
-        install_packages(&groups, &cache_dir, root_path)
+        // Use same concurrency limit as manifests for download, clone is unlimited
+        let download_limit = get_manifests_concurrency_limit().await;
+        let download_semaphore = Arc::new(Semaphore::new(download_limit));
+
+        install_packages(&groups, &cache_dir, root_path, download_semaphore)
             .await
             .context("Failed to install packages")?;
 
