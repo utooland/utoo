@@ -7,9 +7,7 @@ use std::io::Cursor;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::Instant;
 use tokio::fs::File;
 use tokio_retry::RetryIf;
 
@@ -22,71 +20,9 @@ static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
 // OnceMap to ensure each (url, dest) pair is only downloaded once
 static DOWNLOAD_ONCE: Lazy<OnceMap<(String, PathBuf), ()>> = Lazy::new(OnceMap::new);
 
-// ============ Buffer Pool ============
-// Reuse decompression buffers to reduce allocation overhead
-// Similar to Bun's ObjectPool pattern
-
-const BUFFER_POOL_MAX_SIZE: usize = 8;
-const BUFFER_POOL_MIN_CAPACITY: usize = 2 * 1024 * 1024; // 2MB minimum
-const BUFFER_POOL_MAX_CAPACITY: usize = 64 * 1024 * 1024; // 64MB maximum
 const MIN_ESTIMATED_SIZE: usize = 16;
 const MAX_ESTIMATED_SIZE: usize = 512 * 1024 * 1024; // 512MB
 const DECOMPRESSION_RETRY_FACTOR: usize = 4;
-
-/// Global buffer pool for decompression
-static BUFFER_POOL: Lazy<Mutex<Vec<Vec<u8>>>> =
-    Lazy::new(|| Mutex::new(Vec::with_capacity(BUFFER_POOL_MAX_SIZE)));
-
-/// Get a buffer from the pool or create a new one
-fn acquire_buffer(required_capacity: usize) -> Vec<u8> {
-    let capacity = required_capacity.max(BUFFER_POOL_MIN_CAPACITY);
-
-    // Try to get a buffer from the pool
-    if let Ok(mut pool) = BUFFER_POOL.lock() {
-        // Find a buffer with sufficient capacity
-        if let Some(idx) = pool.iter().position(|b| b.capacity() >= capacity) {
-            let mut buf = pool.swap_remove(idx);
-            buf.clear();
-            tracing::trace!(
-                "buffer pool: reused (capacity={}, pool_size={})",
-                buf.capacity(),
-                pool.len()
-            );
-            return buf;
-        }
-    }
-
-    // No suitable buffer found, create a new one
-    tracing::trace!("buffer pool: new allocation (capacity={})", capacity);
-    Vec::with_capacity(capacity)
-}
-
-/// Return a buffer to the pool for reuse
-fn release_buffer(mut buf: Vec<u8>) {
-    // Only keep buffers that are reasonably sized
-    if buf.capacity() < BUFFER_POOL_MIN_CAPACITY || buf.capacity() > BUFFER_POOL_MAX_CAPACITY {
-        tracing::trace!(
-            "buffer pool: dropped (capacity={}, too small or too large)",
-            buf.capacity()
-        );
-        return;
-    }
-
-    buf.clear();
-
-    if let Ok(mut pool) = BUFFER_POOL.lock() {
-        if pool.len() < BUFFER_POOL_MAX_SIZE {
-            tracing::trace!(
-                "buffer pool: returned (capacity={}, pool_size={})",
-                buf.capacity(),
-                pool.len() + 1
-            );
-            pool.push(buf);
-        } else {
-            tracing::trace!("buffer pool: dropped (pool full)");
-        }
-    }
-}
 
 /// Sanitize a path for Windows compatibility.
 /// Windows doesn't allow: < > : " | ? * and control characters (0-31)
@@ -143,9 +79,8 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Download failed: {}", url))
 }
 
-/// Download tarball bytes only (network phase).
-/// Returns the downloaded bytes for extraction.
-pub async fn download_bytes(url: &str) -> Result<Bytes> {
+/// Download tarball bytes (network phase)
+async fn download_bytes(url: &str) -> Result<Bytes> {
     let retry_count = AtomicU32::new(0);
     RetryIf::spawn(
         create_retry_strategy(),
@@ -199,8 +134,8 @@ pub async fn download_bytes(url: &str) -> Result<Bytes> {
     .context("Download failed after retries")
 }
 
-/// Extract and write tarball to destination (CPU + IO phase, no network).
-pub async fn extract_and_write(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
+/// Extract gzip tarball and write to destination
+async fn extract_and_write(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
     // Check if already resolved (warm cache scenario)
     let resolved_path = dest.join("_resolved");
     if crate::fs::try_exists(&resolved_path).await? {
@@ -230,47 +165,30 @@ fn estimate_uncompressed_size(gzip_data: &[u8]) -> usize {
     }
 }
 
-// Extract tarball using libdeflate for better performance
+/// Extract tarball using libdeflate for better performance
 async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
-    // 1. Decompress and parse tar in a single blocking task (with buffer pool)
-    let decompress_start = Instant::now();
     let estimated_size = estimate_uncompressed_size(&gzip_bytes);
-    let gzip_len = gzip_bytes.len();
     let dest_owned = dest.to_path_buf();
 
     let entries: Vec<ExtractedEntry> = tokio::task::spawn_blocking(move || -> Result<Vec<_>> {
         use std::io::Read;
 
-        // Acquire buffer from pool
-        let mut output = acquire_buffer(estimated_size);
+        // Allocate buffer for decompression
         // SAFETY: libdeflater will write to the buffer, we don't need to initialize
-        if output.capacity() < estimated_size {
-            output.reserve(estimated_size - output.capacity());
-        }
-        unsafe { output.set_len(estimated_size) };
+        let mut output = Vec::with_capacity(estimated_size);
+        #[allow(clippy::uninit_vec)]
+        unsafe {
+            output.set_len(estimated_size)
+        };
 
         let mut decompressor = libdeflater::Decompressor::new();
 
         let actual_size = match decompressor.gzip_decompress(&gzip_bytes, &mut output) {
-            Ok(size) => {
-                tracing::trace!(
-                    "decompress: gzip={}, estimated={}, actual={}",
-                    gzip_len,
-                    estimated_size,
-                    size
-                );
-                size
-            }
+            Ok(size) => size,
             Err(libdeflater::DecompressionError::InsufficientSpace) => {
                 // Buffer too small, retry with larger buffer
-                tracing::debug!(
-                    "decompress retry: gzip={}, estimated={} (insufficient)",
-                    gzip_len,
-                    estimated_size
-                );
                 let new_size = estimated_size * DECOMPRESSION_RETRY_FACTOR;
                 output.reserve(new_size - output.len());
-                // SAFETY: libdeflater will overwrite the entire buffer, no need to initialize
                 #[allow(clippy::uninit_vec)]
                 unsafe {
                     output.set_len(new_size)
@@ -279,10 +197,7 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
                     .gzip_decompress(&gzip_bytes, &mut output)
                     .with_context(|| "gzip decompression failed")?
             }
-            Err(e) => {
-                release_buffer(output);
-                return Err(anyhow::anyhow!("gzip decompression failed: {}", e));
-            }
+            Err(e) => return Err(anyhow::anyhow!("gzip decompression failed: {}", e)),
         };
         output.truncate(actual_size);
 
@@ -315,20 +230,12 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
             }
         }
 
-        // Release buffer back to pool
-        release_buffer(output);
-
         Ok(entries)
     })
     .await
-    .with_context(|| "Decompression/extraction task panicked")??;
+    .with_context(|| "Decompression task panicked")??;
 
-    // Record decompress time
-    let decompress_time = decompress_start.elapsed();
-
-    // 4. Write files sequentially within spawn_blocking
-    let write_start = Instant::now();
-
+    // Write files sequentially within spawn_blocking
     tokio::task::spawn_blocking(move || -> Result<()> {
         use std::collections::HashSet;
         use std::fs;
@@ -365,19 +272,6 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
     })
     .await
     .with_context(|| "Write task panicked")??;
-
-    // Record write time
-    let write_time = write_start.elapsed();
-
-    // Per-package timing breakdown for analysis
-    let decompress_ms = decompress_time.as_millis();
-    let write_ms = write_time.as_millis();
-    tracing::debug!(
-        "Package timing: decomp={}ms, write={}ms, path={}",
-        decompress_ms,
-        write_ms,
-        dest.display()
-    );
 
     // Set directory permissions and create resolution marker
     set_dir_permissions(dest).await?;

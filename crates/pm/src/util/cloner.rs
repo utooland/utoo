@@ -73,7 +73,7 @@ mod linux_clone {
         Ok(())
     }
 
-    // Entry point: clone directory using spawn_blocking with rayon parallelism
+    /// Clone directory using spawn_blocking for sync I/O
     pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
         let err_msg = format!("Failed to clone {} to {}", src.display(), dst.display());
         let src = src.to_path_buf();
