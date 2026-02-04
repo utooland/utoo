@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use async_compression::tokio::bufread::GzipDecoder;
 use futures::StreamExt;
 use once_cell::sync::Lazy;
-use rayon::prelude::*;
 use reqwest::StatusCode;
 use reqwest::{Client, Response};
 #[cfg(unix)]
@@ -153,7 +152,7 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
         })
     };
 
-    // Stage 2: Collect all entries, then rayon parallel write
+    // Stage 2: Collect all entries, then write files
     let file_writing_task = {
         tokio::spawn(async move {
             use std::collections::HashSet;
@@ -164,9 +163,9 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
                 entries.push(entry);
             }
 
-            // Write all files using spawn_blocking + rayon
+            // Write all files using spawn_blocking
             tokio::task::spawn_blocking(move || {
-                // Create all parent directories first (sequential)
+                // Create all parent directories first
                 let mut created_dirs = HashSet::new();
                 for entry in &entries {
                     if let Some(parent) = entry.path.parent()
@@ -176,14 +175,14 @@ async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()>
                     }
                 }
 
-                // Write files in parallel using rayon
-                entries.par_iter().try_for_each(|entry| {
+                // Write files sequentially
+                for entry in &entries {
                     std::fs::write(&entry.path, &entry.content).with_context(|| {
                         format!("Failed to write file: {}", entry.path.display())
                     })?;
                     set_file_permissions_sync(&entry.path, entry.mode)?;
-                    Ok::<(), anyhow::Error>(())
-                })
+                }
+                Ok::<(), anyhow::Error>(())
             })
             .await?
         })

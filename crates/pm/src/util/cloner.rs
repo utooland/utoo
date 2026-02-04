@@ -18,7 +18,6 @@ use std::os::unix::ffi::OsStrExt;
 #[cfg(target_os = "linux")]
 mod linux_clone {
     use anyhow::{Context, Result};
-    use rayon::prelude::*;
     use std::collections::HashSet;
     use std::fs;
     use std::io;
@@ -107,18 +106,18 @@ mod linux_clone {
                 }
             }
 
-            // Phase 3: Clone files in parallel using rayon
-            files.par_iter().try_for_each(|entry| -> io::Result<()> {
+            // Phase 3: Clone files sequentially
+            for entry in &files {
                 if use_copy {
-                    copy_file_sync(&entry.src, &entry.dst)
+                    copy_file_sync(&entry.src, &entry.dst)?;
                 } else {
                     // Try hardlink first
                     if fs::hard_link(&entry.src, &entry.dst).is_err() {
                         copy_file_sync(&entry.src, &entry.dst)?;
                     }
-                    Ok(())
                 }
-            })
+            }
+            Ok(())
         })
         .await?
         .with_context(|| err_msg)

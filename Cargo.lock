@@ -9595,7 +9595,6 @@ dependencies = [
  "openssl",
  "owo-colors",
  "petgraph 0.6.5",
- "rayon",
  "regex",
  "reqwest",
  "serde",
