@@ -249,8 +249,7 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
                     estimated_size
                 );
                 let new_size = estimated_size * 4;
-                output.reserve(new_size - output.len());
-                unsafe { output.set_len(new_size) };
+                output.resize(new_size, 0);
                 decompressor
                     .gzip_decompress(&gzip_bytes, &mut output)
                     .with_context(|| "gzip decompression failed")?
@@ -316,11 +315,11 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
         // First, create all directories (sequential to avoid race conditions)
         let mut created_dirs = HashSet::new();
         for entry in entries.iter() {
-            if let Some(parent) = entry.path.parent() {
-                if !created_dirs.contains(parent) {
-                    fs::create_dir_all(parent).ok();
-                    created_dirs.insert(parent.to_path_buf());
-                }
+            if let Some(parent) = entry.path.parent()
+                && !created_dirs.contains(parent)
+            {
+                fs::create_dir_all(parent).ok();
+                created_dirs.insert(parent.to_path_buf());
             }
         }
 

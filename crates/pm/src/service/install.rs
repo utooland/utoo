@@ -335,10 +335,6 @@ pub async fn install_packages(
                     let cache_path = cache_dir.join(format!("{name}/{version}"));
                     let cwd_clone = cwd.to_path_buf();
 
-                    // Check if this is an optional dependency
-                    let is_optional =
-                        package.optional == Some(true) || package.dev_optional == Some(true);
-
                     let task = tokio::spawn(async move {
                         let target_path = cwd_clone.join(&path);
 

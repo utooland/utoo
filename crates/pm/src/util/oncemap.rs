@@ -8,7 +8,6 @@
 //! - Other callers wait and receive the shared result
 //! - No duplicate work is performed
 
-
 use dashmap::{DashMap, mapref::entry::Entry};
 use std::future::Future;
 use std::hash::Hash;
