@@ -66,6 +66,9 @@ enum Value<V> {
 /// ```
 pub struct OnceMap<K, V> {
     map: DashMap<K, Value<V>>,
+    /// Waiters for keys that don't exist yet.
+    /// When get_or_init/complete finishes a key, it notifies and removes the entry.
+    waiters: DashMap<K, Arc<Notify>>,
 }
 
 impl<K, V> Default for OnceMap<K, V>
@@ -85,6 +88,7 @@ where
     pub fn new() -> Self {
         Self {
             map: DashMap::new(),
+            waiters: DashMap::new(),
         }
     }
 
@@ -102,19 +106,58 @@ where
         }
     }
 
-    /// Wait for a key to complete if it's currently being processed.
-    /// Returns immediately if key doesn't exist or is already done.
+    /// Wait for a key to complete.
+    ///
+    /// - If the key exists and is Done, returns immediately.
+    /// - If the key exists and is Waiting, waits for it to complete.
+    /// - If the key doesn't exist yet, waits for it to be created and completed.
+    ///
+    /// This enables parent-ordering in the clone pipeline: a child package
+    /// can wait for its parent's clone to finish even if the parent's
+    /// `get_or_init` hasn't been called yet.
     pub async fn wait_if_pending(&self, key: &K) {
-        let notify = {
-            let Some(entry) = self.map.get(key) else {
-                return;
-            };
+        // Fast path: key already exists
+        if let Some(entry) = self.map.get(key) {
             match entry.value() {
                 Value::Done(_) => return,
-                Value::Waiting(notify) => Arc::clone(notify),
+                Value::Waiting(notify) => {
+                    let notify = Arc::clone(notify);
+                    let notified = notify.notified();
+                    drop(entry);
+
+                    if let Some(entry) = self.map.get(key)
+                        && matches!(entry.value(), Value::Done(_))
+                    {
+                        return;
+                    }
+
+                    notified.await;
+                    return;
+                }
             }
-        };
-        notify.notified().await;
+        }
+
+        // Key doesn't exist yet — register a creation waiter.
+        // get_or_init/complete will notify this when the key reaches Done (or fails).
+        let creation_notify = self
+            .waiters
+            .entry(key.clone())
+            .or_insert_with(|| Arc::new(Notify::new()))
+            .clone();
+
+        // Register notified BEFORE double-checking to prevent missed notifications.
+        let notified = creation_notify.notified();
+
+        // Double-check: key might have been created and completed between
+        // the initial map.get and registering here.
+        if let Some(entry) = self.map.get(key)
+            && matches!(entry.value(), Value::Done(_))
+        {
+            return;
+        }
+
+        // Wait for the key to be created and completed
+        notified.await;
     }
 
     /// Complete a pre-registered key with a value.
@@ -128,13 +171,19 @@ where
     pub fn complete(&self, key: K, value: Option<V>, notify: Arc<Notify>) {
         match value {
             Some(v) => {
-                self.map.insert(key, Value::Done(Arc::new(v)));
+                self.map.insert(key.clone(), Value::Done(Arc::new(v)));
                 notify.notify_waiters();
+                if let Some((_, cn)) = self.waiters.remove(&key) {
+                    cn.notify_waiters();
+                }
             }
             None => {
                 // Work failed, remove the entry so others can retry
                 self.map.remove(&key);
                 notify.notify_waiters();
+                if let Some((_, cn)) = self.waiters.remove(&key) {
+                    cn.notify_waiters();
+                }
             }
         }
     }
@@ -215,14 +264,21 @@ where
         match result {
             Some(value) => {
                 let arc_value = Arc::new(value);
-                self.map.insert(key, Value::Done(Arc::clone(&arc_value)));
+                self.map
+                    .insert(key.clone(), Value::Done(Arc::clone(&arc_value)));
                 notify.notify_waiters();
+                if let Some((_, cn)) = self.waiters.remove(&key) {
+                    cn.notify_waiters();
+                }
                 Some(arc_value)
             }
             None => {
                 // Work failed, remove the entry so others can retry
                 self.map.remove(&key);
                 notify.notify_waiters();
+                if let Some((_, cn)) = self.waiters.remove(&key) {
+                    cn.notify_waiters();
+                }
                 None
             }
         }

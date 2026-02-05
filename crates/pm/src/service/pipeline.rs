@@ -106,7 +106,7 @@ impl OwnedPackageInfo {
     }
 }
 
-/// Message types for clone worker
+/// Message for clone worker
 #[derive(Debug)]
 pub struct CloneMessage {
     pub info: OwnedPackageInfo,
@@ -126,6 +126,13 @@ pub async fn download_package(name: &str, version: &str, tarball_url: &str) -> O
     DOWNLOAD_CACHE
         .get_or_init(key, || async move {
             let cache_path = cache_dir.join(&name).join(&version);
+
+            // Fast path: already extracted in cache (warm cache scenario)
+            let resolved_path = cache_path.join("_resolved");
+            if crate::fs::try_exists(&resolved_path).await.unwrap_or(false) {
+                tracing::debug!("Cache hit: {}@{}", name, version);
+                return Some(cache_path);
+            }
 
             // Phase 1: Network download (semaphore controlled)
             let bytes = {
@@ -156,19 +163,6 @@ pub async fn download_package(name: &str, version: &str, tarball_url: &str) -> O
         .map(|arc| (*arc).clone())
 }
 
-/// Validate that the package at target_path has matching name and version
-async fn validate_target_package(target_path: &std::path::Path, name: &str, version: &str) -> bool {
-    let pkg_json_path = target_path.join("package.json");
-    let Ok(content) = crate::fs::read_to_string(&pkg_json_path).await else {
-        return false;
-    };
-    let Ok(pkg) = serde_json::from_str::<serde_json::Value>(&content) else {
-        return false;
-    };
-    pkg.get("name").and_then(|v| v.as_str()) == Some(name)
-        && pkg.get("version").and_then(|v| v.as_str()) == Some(version)
-}
-
 /// Clone a package to target path, using global OnceMap for deduplication.
 pub async fn clone_package_once(
     name: &str,
@@ -177,12 +171,6 @@ pub async fn clone_package_once(
     target_path: &std::path::Path,
 ) -> bool {
     use crate::util::cloner::clone_package;
-
-    // Fast path: skip if target already exists with matching name/version
-    if validate_target_package(target_path, name, version).await {
-        tracing::debug!("Skip clone, already valid: {}@{}", name, version);
-        return true;
-    }
 
     let key = target_path.to_string_lossy().to_string();
     let name = name.to_string();
@@ -378,11 +366,14 @@ impl PipelineInstaller {
         })
     }
 
-    /// Start the clone worker (processes packages with pre-registration pattern)
+    /// Start the clone worker (per-package with parent ordering).
     ///
-    /// Uses synchronous pre-registration in CLONE_CACHE to ensure parent packages
-    /// are always registered before children, enabling proper dependency ordering
-    /// while maintaining maximum concurrency.
+    /// For each PackagePlaced message, spawns a task that:
+    /// 1. Waits for the parent package to be cloned (via CLONE_CACHE.wait_if_pending)
+    /// 2. Clones the package to the target path (via clone_package_once)
+    ///
+    /// This is fire-and-forget: install_packages will also call clone_package_once
+    /// and deduplicate via OnceMap.
     pub fn start_clone_worker(
         &self,
         mut rx: mpsc::UnboundedReceiver<CloneMessage>,
@@ -394,85 +385,18 @@ impl PipelineInstaller {
                     continue;
                 };
 
-                let target_path = cwd.join(&msg.path);
-                let key = target_path.to_string_lossy().to_string();
-
-                // Fast path: skip if target already exists with matching name/version
-                if validate_target_package(&target_path, &msg.info.name, &msg.info.version).await {
-                    tracing::debug!(
-                        "Skip clone, already valid: {}@{}",
-                        msg.info.name,
-                        msg.info.version
-                    );
-                    continue;
-                }
-
-                // Step 1: Pre-register synchronously to claim this key
-                // This ensures parent is always registered before child
-                let Some(notify) = CLONE_CACHE.register(key.clone()) else {
-                    // Already registered by someone else, skip
-                    tracing::debug!("Clone already registered: {}", key);
-                    continue;
-                };
-
-                // Step 2: Compute parent key if exists
-                let parent_key = msg
-                    .parent_path
-                    .map(|p| cwd.join(p).to_string_lossy().to_string());
-
                 let name = msg.info.name;
                 let version = msg.info.version;
+                let target = cwd.join(&msg.path);
+                let parent_path = msg.parent_path.map(|p| cwd.join(&p));
 
-                // Step 3: Spawn task to do async work
                 tokio::spawn(async move {
-                    // Wait for parent to complete (parent is guaranteed to be registered)
-                    if let Some(ref parent_key) = parent_key {
-                        CLONE_CACHE.wait_if_pending(parent_key).await;
+                    // Wait for parent to be cloned first
+                    if let Some(ref parent) = parent_path {
+                        let parent_key = parent.to_string_lossy().to_string();
+                        CLONE_CACHE.wait_if_pending(&parent_key).await;
                     }
-
-                    // Phase 1: Download (via OnceMap, may already be downloaded)
-                    let cache_path = match download_package(&name, &version, &tarball_url).await {
-                        Some(p) => p,
-                        None => {
-                            tracing::warn!("Clone failed: download failed {}@{}", name, version);
-                            CLONE_CACHE.complete(key, None, notify);
-                            return;
-                        }
-                    };
-
-                    // Phase 2: Clone with semaphore
-                    use crate::util::cloner::clone_package;
-                    let result = {
-                        let _permit = get_clone_semaphore().acquire().await.ok();
-                        if _permit.is_none() {
-                            CLONE_CACHE.complete(key, None, notify);
-                            return;
-                        }
-                        clone_package(&cache_path, &target_path, &name, &version).await
-                    };
-
-                    match result {
-                        Ok(()) => {
-                            STATS.cloned.fetch_add(1, Ordering::Relaxed);
-                            tracing::debug!(
-                                "Cloned: {}@{} to {}",
-                                name,
-                                version,
-                                target_path.display()
-                            );
-                            CLONE_CACHE.complete(key, Some(()), notify);
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                "Clone failed: {}@{} to {}: {}",
-                                name,
-                                version,
-                                target_path.display(),
-                                e
-                            );
-                            CLONE_CACHE.complete(key, None, notify);
-                        }
-                    }
+                    clone_package_once(&name, &version, &tarball_url, &target).await;
                 });
             }
         })

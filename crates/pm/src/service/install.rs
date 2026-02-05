@@ -274,14 +274,19 @@ pub async fn install_packages(
     // clean unused deps
     clean_deps(groups, cwd).await?;
 
+    let omit = crate::util::config::get_omit();
+
+    // Always process level-by-level to ensure parent directories exist before
+    // children. Within each level, tasks run concurrently. The pipeline's
+    // clone_worker may have already cloned some packages — clone_package_once
+    // deduplicates via CLONE_CACHE so no double work occurs.
     let mut depths: Vec<_> = groups.keys().cloned().collect();
     depths.sort_unstable();
 
-    let omit = crate::util::config::get_omit();
-
     for depth in depths.iter() {
+        let mut clone_tasks: Vec<tokio::task::JoinHandle<Result<()>>> = Vec::new();
+
         if let Some(packages) = groups.get(depth) {
-            let mut tasks: Vec<tokio::task::JoinHandle<Result<()>>> = Vec::new();
             for (path, package) in packages.iter() {
                 // Skip packages based on omit config
                 if should_omit_package(package, &omit) {
@@ -358,24 +363,25 @@ pub async fn install_packages(
                             Err(anyhow::anyhow!("{name} clone failed"))
                         }
                     });
-                    tasks.push(task);
+                    clone_tasks.push(task);
                 } else {
                     PROGRESS_BAR.inc(1);
                     tracing::debug!("{path} no resolved info skipped");
                 }
             }
+        }
 
-            for task in tasks {
-                match task.await {
-                    Ok(Ok(())) => continue,
-                    Ok(Err(e)) => {
-                        tracing::debug!("Task execution error: {e}");
-                        return Err(anyhow::anyhow!("Error during installation: {e}"));
-                    }
-                    Err(e) => {
-                        tracing::debug!("Task join error: {e}");
-                        return Err(anyhow::anyhow!("Task execution failed: {e}"));
-                    }
+        // Await all tasks for this depth before moving to next depth
+        for task in clone_tasks {
+            match task.await {
+                Ok(Ok(())) => continue,
+                Ok(Err(e)) => {
+                    tracing::debug!("Task execution error: {e}");
+                    return Err(anyhow::anyhow!("Error during installation: {e}"));
+                }
+                Err(e) => {
+                    tracing::debug!("Task join error: {e}");
+                    return Err(anyhow::anyhow!("Task execution failed: {e}"));
                 }
             }
         }

@@ -128,10 +128,6 @@ fn estimate_uncompressed_size(gzip_data: &[u8]) -> usize {
 }
 
 /// Extract tarball using libdeflate for better performance
-///
-/// Combines decompression and file writing in a single blocking task to:
-/// 1. Reduce memory usage by writing files immediately instead of buffering
-/// 2. Reduce task scheduling overhead
 async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
     let estimated_size = estimate_uncompressed_size(&gzip_bytes);
     let dest_owned = dest.to_path_buf();
@@ -148,7 +144,6 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
         let actual_size = match decompressor.gzip_decompress(&gzip_bytes, &mut output) {
             Ok(size) => size,
             Err(libdeflater::DecompressionError::InsufficientSpace) => {
-                // Buffer too small, retry with larger buffer
                 let new_size = estimated_size * DECOMPRESSION_RETRY_FACTOR;
                 output.resize(new_size, 0);
                 decompressor
@@ -159,7 +154,7 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
         };
         output.truncate(actual_size);
 
-        // Phase 2: Parse tar and write files directly (no intermediate buffer)
+        // Phase 2: Parse tar and write files
         let cursor = Cursor::new(&output[..]);
         let mut archive = tar::Archive::new(cursor);
         let mut created_dirs = HashSet::new();
@@ -176,7 +171,6 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
                 continue;
             }
 
-            // Create parent directory if needed
             if let Some(parent) = full_path.parent()
                 && created_dirs.insert(parent.to_path_buf())
             {
@@ -184,7 +178,6 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
                     .with_context(|| format!("Failed to create directory: {}", parent.display()))?;
             }
 
-            // Read and write file content
             let mut content = Vec::new();
             entry
                 .read_to_end(&mut content)
@@ -195,30 +188,22 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
             file.write_all(&content)
                 .with_context(|| format!("Failed to write: {}", full_path.display()))?;
 
-            // Set file permissions on Unix
             #[cfg(unix)]
             {
                 let mode = entry.header().mode().unwrap_or(0o644);
                 let perms = fs::Permissions::from_mode(mode);
-                fs::set_permissions(&full_path, perms).with_context(|| {
-                    format!("Failed to set permissions: {}", full_path.display())
-                })?;
+                fs::set_permissions(&full_path, perms).ok();
             }
         }
 
-        // Phase 3: Set directory permissions
+        // Set directory permissions
         #[cfg(unix)]
         {
             let perms = fs::Permissions::from_mode(0o755);
-            fs::set_permissions(&dest_owned, perms).with_context(|| {
-                format!(
-                    "Failed to set directory permissions: {}",
-                    dest_owned.display()
-                )
-            })?;
+            fs::set_permissions(&dest_owned, perms).ok();
         }
 
-        // Phase 4: Create resolution marker
+        // Create resolution marker
         fs::File::create(dest_owned.join("_resolved")).with_context(|| {
             format!(
                 "Failed to create resolution marker in: {}",
