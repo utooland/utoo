@@ -597,6 +597,10 @@ impl Project {
             }
         }
 
+        let root_turbopack_path = rcstr!(".turbopack");
+        if !denied_paths.contains(&root_turbopack_path) {
+            denied_paths.push(root_turbopack_path);
+        }
         // Get watched ignored paths from configuration
         let watched_ignored = self.watch.ignored.clone();
 
