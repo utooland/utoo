@@ -805,6 +805,7 @@ mod tests {
             Ok(())
         }
 
+        #[cfg(unix)]
         #[tokio::test]
         async fn test_fast_copy_preserves_permissions() -> Result<()> {
             use std::os::unix::fs::PermissionsExt;
@@ -842,6 +843,7 @@ mod tests {
             Ok(())
         }
 
+        #[cfg(unix)]
         #[tokio::test]
         async fn test_fast_copy_preserves_read_only_permissions() -> Result<()> {
             use std::os::unix::fs::PermissionsExt;
@@ -879,6 +881,7 @@ mod tests {
             Ok(())
         }
 
+        #[cfg(unix)]
         #[tokio::test]
         async fn test_clone_dir_preserves_executable_in_subdirs() -> Result<()> {
             use std::os::unix::fs::PermissionsExt;
