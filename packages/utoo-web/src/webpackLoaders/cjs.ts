@@ -11,6 +11,16 @@ const pkgJsonCache: Record<string, any> = {};
 const resolutionCache: Record<string, string> = {};
 const searchPathsCache: Record<string, string[]> = {};
 
+const RESOLUTION_EXTENSIONS = [
+  "",
+  ".js",
+  ".cjs",
+  ".json",
+  "/index.js",
+  "/index.cjs",
+  "/index.json",
+];
+
 const executeModule = (
   moduleCode: string,
   moduleId: string,
@@ -105,8 +115,8 @@ const loadModule = (
     try {
       const moduleCode = fs.readFileSync(cachedId, "utf8") as string;
       return executeModule(moduleCode, cachedId, id, importMaps, entrypoint);
-    } catch (e) {
-      // If read fails, fall back to full resolution
+    } catch {
+      // ignore
     }
   }
 
@@ -138,6 +148,43 @@ const loadModule = (
   // 4. Check importMaps & FS
   let moduleCode = importMaps[resolvedId] || importMaps[id];
   let moduleId = importMaps[resolvedId] ? resolvedId : id;
+
+  if (!moduleCode) {
+    // Try matching by stripping potential random prefix from absolute path
+    let longestKey = "";
+    for (const key in importMaps) {
+      // Normalize key for comparison (ignore leading ./ or /)
+      let sanitizedKey = key;
+      if (sanitizedKey.startsWith("./")) sanitizedKey = sanitizedKey.slice(2);
+      if (sanitizedKey.startsWith("/")) sanitizedKey = sanitizedKey.slice(1);
+      if (!sanitizedKey) continue;
+
+      const isSuffixOfId = id.startsWith("/") && id.endsWith(sanitizedKey);
+      const isSuffixOfResolvedId =
+        resolvedId.startsWith("/") && resolvedId.endsWith(sanitizedKey);
+
+      if (isSuffixOfId || isSuffixOfResolvedId) {
+        const checkId = isSuffixOfId ? id : resolvedId;
+        const prefixEnd = checkId.length - sanitizedKey.length;
+        // Ensure it's a true path segment match
+        if (prefixEnd === 0 || checkId[prefixEnd - 1] === "/") {
+          if (key.length > longestKey.length) {
+            longestKey = key;
+          }
+        }
+      }
+    }
+    if (longestKey) {
+      moduleCode = importMaps[longestKey];
+      // Important: Use the absolute path as moduleId so that context is correctly absolute for relative requires
+      let sanitizedKey = longestKey;
+      if (sanitizedKey.startsWith("./")) sanitizedKey = sanitizedKey.slice(2);
+      if (sanitizedKey.startsWith("/")) sanitizedKey = sanitizedKey.slice(1);
+
+      moduleId =
+        id.startsWith("/") && id.endsWith(sanitizedKey) ? id : resolvedId;
+    }
+  }
 
   // Fallback: Try resolving from node_modules
   if (!moduleCode && !id.startsWith(".") && !id.startsWith("/")) {
@@ -186,17 +233,20 @@ const loadModule = (
             const candidates = [
               path.resolve(nodeModulesPath, mainField),
               path.resolve(nodeModulesPath, mainField) + ".js",
+              path.resolve(nodeModulesPath, mainField) + ".cjs",
               path.resolve(nodeModulesPath, mainField) + ".json",
               path.resolve(nodeModulesPath, mainField, "index.js"),
+              path.resolve(nodeModulesPath, mainField, "index.cjs"),
+              path.resolve(nodeModulesPath, mainField, "index.json"),
             ];
             for (const candidate of candidates) {
               try {
-                // Try reading directly to bypass potential statSync issues
-                moduleCode = fs.readFileSync(candidate, "utf8") as string;
+                const content = fs.readFileSync(candidate, "utf8") as string;
+                moduleCode = content;
                 resolvedId = candidate;
                 moduleId = candidate;
                 break;
-              } catch (e) {
+              } catch {
                 // ignore
               }
             }
@@ -207,16 +257,15 @@ const loadModule = (
       }
 
       if (!moduleCode) {
-        const extensions = ["", ".js", ".json", "/index.js"];
-        for (const ext of extensions) {
+        for (const ext of RESOLUTION_EXTENSIONS) {
           const p = nodeModulesPath + ext;
           try {
-            // Try reading directly
-            moduleCode = fs.readFileSync(p, "utf8") as string;
+            const content = fs.readFileSync(p, "utf8") as string;
+            moduleCode = content;
             resolvedId = p;
             moduleId = p;
             break;
-          } catch (e) {
+          } catch {
             // ignore
           }
         }
@@ -226,28 +275,11 @@ const loadModule = (
     }
   }
 
-  // Fallback: Try resolving absolute path
-  if (!moduleCode && id.startsWith("/")) {
-    const extensions = ["", ".js", ".json", "/index.js"];
-    for (const ext of extensions) {
+  // Fallback: Try resolving absolute or relative path
+  if (!moduleCode && (id.startsWith("/") || id.startsWith("."))) {
+    for (const ext of RESOLUTION_EXTENSIONS) {
       if (ext === "/index.js" && id.endsWith(".js")) continue;
-      const p = id + ext;
-      try {
-        moduleCode = fs.readFileSync(p, "utf8") as string;
-        resolvedId = p;
-        moduleId = id;
-        break;
-      } catch (e) {
-        // ignore
-      }
-    }
-  }
-
-  if (!moduleCode) {
-    // Try extensions
-    const extensions = ["", ".js", ".json", "/index.js"];
-    for (const ext of extensions) {
-      if (ext === "/index.js" && id.endsWith(".js")) continue;
+      // Use resolvedId which handles both absolute paths and relative paths joined with context
       const p = resolvedId + ext;
       try {
         moduleCode = fs.readFileSync(p, "utf8") as string;
@@ -267,7 +299,10 @@ const loadModule = (
   }
 
   const error = new Error(
-    `Worker: Dependency ${id} (resolved: ${resolvedId}) not found. Context: ${context}`,
+    `Worker: Dependency ${id} (resolved: ${resolvedId}) not found. Context: ${context}. ` +
+      `ImportMaps count: ${Object.keys(importMaps).length}. ` +
+      `CWD: ${nodePolyFills.process.cwd()}. ` +
+      `Sample ImportMaps keys: ${Object.keys(importMaps).slice(0, 5).join(", ")}`,
   );
 
   console.error(error);

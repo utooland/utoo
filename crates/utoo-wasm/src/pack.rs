@@ -352,21 +352,6 @@ pub async fn build() -> std::result::Result<JsValue, wasm_bindgen::JsError> {
 
             tracing::info!("all project entrypoints wrote to disk.");
 
-            tracing::info!(
-                "pack tasks with {} apps {} libraries finished in {:?}",
-                entrypoints
-                    .apps
-                    .as_ref()
-                    .map(|apps| apps.0.len())
-                    .unwrap_or_default(),
-                entrypoints
-                    .libraries
-                    .as_ref()
-                    .map(|libraries| libraries.0.len())
-                    .unwrap_or_default(),
-                start.elapsed()
-            );
-
             let result = TurbopackResult {
                 issues: issues.iter().map(|i| Issue::from(&**i)).collect(),
                 diagnostics: diags.iter().map(|d| Diagnostic::from(d)).collect(),
