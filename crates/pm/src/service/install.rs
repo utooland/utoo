@@ -5,8 +5,7 @@ use std::path::Path;
 
 use crate::helper::global_bin::get_global_bin_dir;
 use crate::helper::lock::{
-    Package, extract_package_name, group_by_depth, prepare_global_package_json,
-    update_package_json,
+    Package, extract_package_name, group_by_depth, prepare_global_package_json, update_package_json,
 };
 use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
@@ -53,7 +52,7 @@ fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
 }
 
 pub async fn install_packages(
-    groups: &HashMap<usize, Vec<(std::string::String, Package)>>,
+    groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
     omit: &HashSet<OmitType>,
 ) -> Result<()> {
@@ -75,7 +74,7 @@ pub async fn install_packages(
         if let Some(packages) = groups.get(depth) {
             for (path, package) in packages.iter() {
                 // Skip packages based on omit config
-                if should_omit_package(package, &omit) {
+                if should_omit_package(package, omit) {
                     PROGRESS_BAR.inc(1);
                     tracing::debug!("Skipping omitted dependency: {}", path);
                     continue;
@@ -132,22 +131,17 @@ pub async fn install_packages(
                         package.optional == Some(true) || package.dev_optional == Some(true);
 
                     let task = tokio::spawn(async move {
-                        // Use unified clone_package_once which handles download + clone via OnceMap
-                        let success =
-                            clone_package_once(&name, &version, &resolved, &target_path).await;
-
-                        if success {
-                            PROGRESS_BAR.inc(1);
-                            log_progress(&format!("{name} resolved"));
-                            update_package_binary(&target_path, &name).await?;
-                            Ok(())
-                        } else if is_optional {
-                            tracing::warn!("Optional dependency {name} failed (ignored)");
-                            PROGRESS_BAR.inc(1);
-                            Ok(())
-                        } else {
-                            Err(anyhow::anyhow!("{name} clone failed"))
+                        if !clone_package_once(&name, &version, &resolved, &target_path).await {
+                            if is_optional {
+                                tracing::warn!("Optional dependency {name} failed (ignored)");
+                                PROGRESS_BAR.inc(1);
+                                return Ok(());
+                            }
+                            anyhow::bail!("{name} clone failed");
                         }
+                        PROGRESS_BAR.inc(1);
+                        log_progress(&format!("{name} resolved"));
+                        update_package_binary(&target_path, &name).await
                     });
                     clone_tasks.push(task);
                 } else {
@@ -157,19 +151,8 @@ pub async fn install_packages(
             }
         }
 
-        // Await all tasks for this depth before moving to next depth
         for task in clone_tasks {
-            match task.await {
-                Ok(Ok(())) => continue,
-                Ok(Err(e)) => {
-                    tracing::debug!("Task execution error: {e}");
-                    return Err(anyhow::anyhow!("Error during installation: {e}"));
-                }
-                Err(e) => {
-                    tracing::debug!("Task join error: {e}");
-                    return Err(anyhow::anyhow!("Task execution failed: {e}"));
-                }
-            }
+            task.await??;
         }
     }
 

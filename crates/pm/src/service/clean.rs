@@ -82,15 +82,15 @@ async fn clean_symlink(path: &Path) -> Result<()> {
 
 /// Clean up a directory, handling scoped packages and legacy npm install packages
 async fn clean_directory(path: &Path) -> Result<()> {
-    if let Some(file_name) = path.file_name() {
-        let name = file_name.to_string_lossy();
-        if name.starts_with('@') {
-            clean_scoped_package(path).await?;
-        } else {
-            clean_legacy_npminstall_package(path, &name).await?;
-        }
+    let Some(file_name) = path.file_name() else {
+        return Ok(());
+    };
+    let name = file_name.to_string_lossy();
+    if name.starts_with('@') {
+        clean_scoped_package(path).await
+    } else {
+        clean_legacy_npminstall_package(path, &name).await
     }
-    Ok(())
 }
 
 /// Clean up a scoped package directory
@@ -201,11 +201,11 @@ pub async fn clean_deps(groups: &HashMap<usize, Vec<(String, Package)>>, cwd: &P
     for (_, path, _) in workspaces {
         let workspace_node_modules = path.join("node_modules");
         if crate::fs::try_exists(&workspace_node_modules).await? {
-            node_modules_dirs.push(workspace_node_modules.clone());
             tracing::debug!(
                 "add workspace node_modules: {:?}",
                 workspace_node_modules.display()
             );
+            node_modules_dirs.push(workspace_node_modules);
         }
     }
 

@@ -172,19 +172,19 @@ where
         match value {
             Some(v) => {
                 self.map.insert(key.clone(), Value::Done(Arc::new(v)));
-                notify.notify_waiters();
-                if let Some((_, cn)) = self.waiters.remove(&key) {
-                    cn.notify_waiters();
-                }
             }
             None => {
-                // Work failed, remove the entry so others can retry
                 self.map.remove(&key);
-                notify.notify_waiters();
-                if let Some((_, cn)) = self.waiters.remove(&key) {
-                    cn.notify_waiters();
-                }
             }
+        }
+        self.notify_all(&key, &notify);
+    }
+
+    /// Notify both the work-notify and any creation waiters for a key.
+    fn notify_all(&self, key: &K, notify: &Notify) {
+        notify.notify_waiters();
+        if let Some((_, cn)) = self.waiters.remove(key) {
+            cn.notify_waiters();
         }
     }
 
@@ -261,27 +261,16 @@ where
         let result = init().await;
 
         // Update the map with the result
-        match result {
-            Some(value) => {
-                let arc_value = Arc::new(value);
-                self.map
-                    .insert(key.clone(), Value::Done(Arc::clone(&arc_value)));
-                notify.notify_waiters();
-                if let Some((_, cn)) = self.waiters.remove(&key) {
-                    cn.notify_waiters();
-                }
-                Some(arc_value)
-            }
-            None => {
-                // Work failed, remove the entry so others can retry
-                self.map.remove(&key);
-                notify.notify_waiters();
-                if let Some((_, cn)) = self.waiters.remove(&key) {
-                    cn.notify_waiters();
-                }
-                None
-            }
+        let arc_value = result.map(|v| {
+            let arc = Arc::new(v);
+            self.map.insert(key.clone(), Value::Done(Arc::clone(&arc)));
+            arc
+        });
+        if arc_value.is_none() {
+            self.map.remove(&key);
         }
+        self.notify_all(&key, &notify);
+        arc_value
     }
 }
 

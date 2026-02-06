@@ -17,7 +17,6 @@ use crate::util::cache::get_cache_dir;
 use crate::util::config::get_manifests_concurrency_limit_sync;
 use crate::util::downloader::{download_bytes, extract_and_write};
 use crate::util::oncemap::OnceMap;
-use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 
 // ============ Pipeline Statistics ============
 
@@ -56,7 +55,7 @@ impl PipelineStats {
 }
 
 /// Global pipeline statistics
-pub static STATS: Lazy<PipelineStats> = Lazy::new(PipelineStats::new);
+pub static STATS: PipelineStats = PipelineStats::new();
 
 /// Global download cache shared between pipeline and install phases.
 /// Key: "name@version", Value: cache path
@@ -127,37 +126,31 @@ pub async fn download_package(name: &str, version: &str, tarball_url: &str) -> O
         .get_or_init(key, || async move {
             let cache_path = cache_dir.join(&name).join(&version);
 
-            // Fast path: already extracted in cache (warm cache scenario)
-            let resolved_path = cache_path.join("_resolved");
-            if crate::fs::try_exists(&resolved_path).await.unwrap_or(false) {
+            // Fast path: already extracted in cache
+            if crate::fs::try_exists(&cache_path.join("_resolved"))
+                .await
+                .unwrap_or(false)
+            {
                 tracing::debug!("Cache hit: {}@{}", name, version);
                 return Some(cache_path);
             }
 
-            // Phase 1: Network download (semaphore controlled)
-            let bytes = {
-                let _permit = get_download_semaphore().acquire().await.ok()?;
-                match download_bytes(&tarball_url).await {
-                    Ok(b) => b,
-                    Err(e) => {
-                        tracing::warn!("Download failed: {}@{}: {}", name, version, e);
-                        return None;
-                    }
-                }
-            };
+            // Download (semaphore controlled)
+            let _permit = get_download_semaphore().acquire().await.ok()?;
+            let bytes = download_bytes(&tarball_url)
+                .await
+                .inspect_err(|e| tracing::warn!("Download failed: {}@{}: {}", name, version, e))
+                .ok()?;
 
-            // Phase 2: Extract and write
-            match extract_and_write(bytes, &cache_path).await {
-                Ok(()) => {
-                    STATS.downloaded.fetch_add(1, Ordering::Relaxed);
-                    tracing::debug!("Extracted: {}@{}", name, version);
-                    Some(cache_path)
-                }
-                Err(e) => {
-                    tracing::warn!("Extract failed: {}@{}: {}", name, version, e);
-                    None
-                }
-            }
+            // Extract
+            extract_and_write(bytes, &cache_path)
+                .await
+                .inspect_err(|e| tracing::warn!("Extract failed: {}@{}: {}", name, version, e))
+                .ok()?;
+
+            STATS.downloaded.fetch_add(1, Ordering::Relaxed);
+            tracing::debug!("Extracted: {}@{}", name, version);
+            Some(cache_path)
         })
         .await
         .map(|arc| (*arc).clone())
@@ -178,40 +171,30 @@ pub async fn clone_package_once(
     let tarball_url = tarball_url.to_string();
     let target_path = target_path.to_path_buf();
 
-    let result = CLONE_CACHE
+    CLONE_CACHE
         .get_or_init(key, || async move {
-            // Phase 1: Download (via OnceMap, may already be downloaded)
-            let cache_path = match download_package(&name, &version, &tarball_url).await {
-                Some(p) => p,
-                None => {
-                    tracing::warn!("Clone failed: download failed {}@{}", name, version);
-                    return None;
-                }
-            };
+            let cache_path = download_package(&name, &version, &tarball_url).await?;
 
-            // Phase 2: Clone with semaphore
             let _permit = get_clone_semaphore().acquire().await.ok()?;
-            match clone_package(&cache_path, &target_path, &name, &version).await {
-                Ok(()) => {
-                    STATS.cloned.fetch_add(1, Ordering::Relaxed);
-                    tracing::debug!("Cloned: {}@{} to {}", name, version, target_path.display());
-                    Some(())
-                }
-                Err(e) => {
+            clone_package(&cache_path, &target_path, &name, &version)
+                .await
+                .inspect_err(|e| {
                     tracing::warn!(
                         "Clone failed: {}@{} to {}: {}",
                         name,
                         version,
                         target_path.display(),
                         e
-                    );
-                    None
-                }
-            }
-        })
-        .await;
+                    )
+                })
+                .ok()?;
 
-    result.is_some()
+            STATS.cloned.fetch_add(1, Ordering::Relaxed);
+            tracing::debug!("Cloned: {}@{} to {}", name, version, target_path.display());
+            Some(())
+        })
+        .await
+        .is_some()
 }
 
 /// Pipeline receiver that wraps an inner receiver and forwards events to channels.
@@ -252,62 +235,23 @@ impl<R: EventReceiver> EventReceiver for PipelineReceiver<R> {
         self.inner.on_event(event);
 
         match event {
-            // Handle PackageResolved for preload phase downloading
-            BuildEvent::PackageResolved(info) => {
-                if info.tarball_url.is_some() {
-                    // Skip packages that are incompatible with current platform
-                    if let Some(os) = info.os
-                        && !is_os_compatible(os)
-                    {
-                        tracing::debug!("Pipeline skip (os): {}@{}", info.name, info.version);
-                        return;
-                    }
-                    if let Some(cpu) = info.cpu
-                        && !is_cpu_compatible(cpu)
-                    {
-                        tracing::debug!("Pipeline skip (cpu): {}@{}", info.name, info.version);
-                        return;
-                    }
-                    let _ = self
-                        .download_tx
-                        .send(OwnedPackageInfo::from_tarball_info(&info));
-                }
+            BuildEvent::PackageResolved(info)
+                if info.tarball_url.is_some() && info.is_platform_compatible() =>
+            {
+                let _ = self
+                    .download_tx
+                    .send(OwnedPackageInfo::from_tarball_info(&info));
             }
-            // Handle PackagePlaced for BFS phase cloning
             BuildEvent::PackagePlaced {
                 package,
                 path,
                 parent_path,
-                ..
-            } => {
-                if package.tarball_url.is_some() {
-                    // Skip packages that are incompatible with current platform
-                    if let Some(os) = package.os
-                        && !is_os_compatible(os)
-                    {
-                        tracing::debug!(
-                            "Pipeline clone skip (os): {}@{}",
-                            package.name,
-                            package.version
-                        );
-                        return;
-                    }
-                    if let Some(cpu) = package.cpu
-                        && !is_cpu_compatible(cpu)
-                    {
-                        tracing::debug!(
-                            "Pipeline clone skip (cpu): {}@{}",
-                            package.name,
-                            package.version
-                        );
-                        return;
-                    }
-                    let _ = self.clone_tx.send(CloneMessage {
-                        info: OwnedPackageInfo::from_tarball_info(&package),
-                        path: path.to_path_buf(),
-                        parent_path: parent_path.map(|p| p.to_path_buf()),
-                    });
-                }
+            } if package.tarball_url.is_some() && package.is_platform_compatible() => {
+                let _ = self.clone_tx.send(CloneMessage {
+                    info: OwnedPackageInfo::from_tarball_info(&package),
+                    path: path.to_path_buf(),
+                    parent_path: parent_path.map(|p| p.to_path_buf()),
+                });
             }
             _ => {}
         }
@@ -328,84 +272,46 @@ impl PipelineHandles {
     }
 }
 
-/// Pipeline installer
-pub struct PipelineInstaller;
-
-impl PipelineInstaller {
-    pub fn new() -> Self {
-        Self
-    }
-
-    /// Start all pipeline workers and return handles
-    pub fn start_workers(&self, channels: PipelineChannels, cwd: PathBuf) -> PipelineHandles {
-        PipelineHandles {
-            download_handle: self.start_download_worker(channels.download_rx),
-            clone_handle: self.start_clone_worker(channels.clone_rx, cwd),
+/// Start all pipeline workers and return handles.
+fn start_pipeline_workers(channels: PipelineChannels, cwd: PathBuf) -> PipelineHandles {
+    let download_handle = tokio::spawn(async move {
+        let mut rx = channels.download_rx;
+        while let Some(info) = rx.recv().await {
+            let Some(tarball_url) = info.tarball_url else {
+                continue;
+            };
+            let name = info.name;
+            let version = info.version;
+            tokio::spawn(async move {
+                download_package(&name, &version, &tarball_url).await;
+            });
         }
-    }
+    });
 
-    /// Start the download worker (fire-and-forget downloads)
-    pub fn start_download_worker(
-        &self,
-        mut rx: mpsc::UnboundedReceiver<OwnedPackageInfo>,
-    ) -> tokio::task::JoinHandle<()> {
-        tokio::spawn(async move {
-            while let Some(info) = rx.recv().await {
-                let Some(tarball_url) = info.tarball_url else {
-                    continue;
-                };
+    let clone_handle = tokio::spawn(async move {
+        let mut rx = channels.clone_rx;
+        while let Some(msg) = rx.recv().await {
+            let Some(tarball_url) = msg.info.tarball_url else {
+                continue;
+            };
+            let name = msg.info.name;
+            let version = msg.info.version;
+            let target = cwd.join(&msg.path);
+            let parent_path = msg.parent_path.map(|p| cwd.join(&p));
+            tokio::spawn(async move {
+                if let Some(ref parent) = parent_path {
+                    CLONE_CACHE
+                        .wait_if_pending(&parent.to_string_lossy().to_string())
+                        .await;
+                }
+                clone_package_once(&name, &version, &tarball_url, &target).await;
+            });
+        }
+    });
 
-                let name = info.name;
-                let version = info.version;
-
-                // Fire-and-forget: clone phase will wait via OnceMap
-                tokio::spawn(async move {
-                    download_package(&name, &version, &tarball_url).await;
-                });
-            }
-        })
-    }
-
-    /// Start the clone worker (per-package with parent ordering).
-    ///
-    /// For each PackagePlaced message, spawns a task that:
-    /// 1. Waits for the parent package to be cloned (via CLONE_CACHE.wait_if_pending)
-    /// 2. Clones the package to the target path (via clone_package_once)
-    ///
-    /// This is fire-and-forget: install_packages will also call clone_package_once
-    /// and deduplicate via OnceMap.
-    pub fn start_clone_worker(
-        &self,
-        mut rx: mpsc::UnboundedReceiver<CloneMessage>,
-        cwd: PathBuf,
-    ) -> tokio::task::JoinHandle<()> {
-        tokio::spawn(async move {
-            while let Some(msg) = rx.recv().await {
-                let Some(tarball_url) = msg.info.tarball_url else {
-                    continue;
-                };
-
-                let name = msg.info.name;
-                let version = msg.info.version;
-                let target = cwd.join(&msg.path);
-                let parent_path = msg.parent_path.map(|p| cwd.join(&p));
-
-                tokio::spawn(async move {
-                    // Wait for parent to be cloned first
-                    if let Some(ref parent) = parent_path {
-                        let parent_key = parent.to_string_lossy().to_string();
-                        CLONE_CACHE.wait_if_pending(&parent_key).await;
-                    }
-                    clone_package_once(&name, &version, &tarball_url, &target).await;
-                });
-            }
-        })
-    }
-}
-
-impl Default for PipelineInstaller {
-    fn default() -> Self {
-        Self::new()
+    PipelineHandles {
+        download_handle,
+        clone_handle,
     }
 }
 
@@ -430,9 +336,7 @@ pub async fn resolve_with_pipeline(root_path: &std::path::Path) -> anyhow::Resul
 
     let (receiver, channels) = PipelineReceiver::new(ProgressReceiver);
     let options = Context::deps_options(root_path.to_path_buf(), receiver).await;
-
-    let installer = PipelineInstaller::new();
-    let handles = installer.start_workers(channels, root_path.to_path_buf());
+    let handles = start_pipeline_workers(channels, root_path.to_path_buf());
 
     let package_lock = utoo_ruborist::service::build_deps(options).await?;
 

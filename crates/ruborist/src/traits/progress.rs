@@ -28,6 +28,24 @@ pub struct PackageTarballInfo<'a> {
     pub cpu: Option<&'a serde_json::Value>,
 }
 
+impl PackageTarballInfo<'_> {
+    /// Check if this package is compatible with the current platform (os + cpu).
+    pub fn is_platform_compatible(&self) -> bool {
+        use crate::compat::{is_cpu_compatible, is_os_compatible};
+        if let Some(os) = self.os {
+            if !is_os_compatible(os) {
+                return false;
+            }
+        }
+        if let Some(cpu) = self.cpu {
+            if !is_cpu_compatible(cpu) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 impl<'a> From<&'a VersionManifest> for PackageTarballInfo<'a> {
     fn from(m: &'a VersionManifest) -> Self {
         Self {
