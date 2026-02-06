@@ -93,8 +93,6 @@ pub enum BuildEvent<'a> {
         path: &'a Path,
         /// Parent package path (None for root-level dependencies)
         parent_path: Option<&'a Path>,
-        /// Depth in the dependency tree (0 = direct dependency)
-        depth: usize,
     },
 
     /// Skipped an optional dependency.

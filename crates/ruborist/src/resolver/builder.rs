@@ -553,7 +553,6 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
     let start = tokio::time::Instant::now();
 
     let mut current_level = vec![graph.root_index];
-    let mut depth: usize = 0;
 
     while !current_level.is_empty() {
         receiver.on_event(BuildEvent::LevelStart {
@@ -602,7 +601,6 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
                                     package: manifest.into(),
                                     path: &node.path,
                                     parent_path,
-                                    depth,
                                 });
                             }
                         }
@@ -631,7 +629,6 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
             next_level_count: next_level.len(),
         });
         current_level = next_level;
-        depth += 1;
     }
 
     tracing::debug!("Build phase: {:?}", start.elapsed());
