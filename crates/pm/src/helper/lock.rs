@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 
 use super::fs::Context;
 use crate::helper::workspace::find_workspaces;
-use crate::service::pipeline::{PipelineHandles, PipelineInstaller};
 use crate::util::config::get_legacy_peer_deps;
 use crate::util::json::{load_package_json_from_path, load_package_lock_json_from_path};
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
@@ -18,12 +17,6 @@ use utoo_ruborist::service::build_deps as ruborist_build_deps;
 use utoo_ruborist::util::parse_package_spec;
 
 use super::workspace::find_workspace_path;
-
-/// Result of ensure_package_lock with optional pipeline handles
-pub struct BuildDepsResult {
-    pub package_lock: PackageLock,
-    pub pipeline_handles: Option<PipelineHandles>,
-}
 
 // Platform-specific line endings
 #[cfg(target_os = "windows")]
@@ -81,7 +74,7 @@ fn deps_map_equals_lock(pkg_deps: &HashMap<String, String>, lock_field: Option<&
     *pkg_deps == lock_deps
 }
 
-pub async fn ensure_package_lock(root_path: &Path) -> Result<BuildDepsResult> {
+pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
     // Check package.json exists in project directory
     if crate::fs::metadata(root_path.join("package.json"))
         .await
@@ -100,8 +93,8 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<BuildDepsResult> {
         tracing::debug!("Resolving dependencies");
         start_progress_bar();
 
-        // Build deps with pipeline workers
-        let (package_lock, handles) = build_deps_with_pipeline(root_path).await?;
+        let options = Context::build_deps_options(root_path.to_path_buf()).await;
+        let package_lock = ruborist_build_deps(options).await?;
 
         finish_progress_bar("package-lock.json resolved");
 
@@ -112,10 +105,7 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<BuildDepsResult> {
             let _ = save_package_lock(&path, &lock_clone).await;
         });
 
-        return Ok(BuildDepsResult {
-            package_lock,
-            pipeline_handles: Some(handles),
-        });
+        return Ok(package_lock);
     }
 
     // Load existing package-lock.json only when it's valid and up-to-date
@@ -123,10 +113,7 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<BuildDepsResult> {
     let package_lock: PackageLock =
         crate::util::json::read_json_file(&root_path.join("package-lock.json")).await?;
 
-    Ok(BuildDepsResult {
-        package_lock,
-        pipeline_handles: None,
-    })
+    Ok(package_lock)
 }
 
 /// Batch update package.json for multiple package specifications to reduce file I/O operations
@@ -423,20 +410,6 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
     }
 
     Ok(false)
-}
-
-/// Build dependencies with pipeline for concurrent tgz downloading.
-/// Returns both the PackageLock and pipeline handles for awaiting workers.
-async fn build_deps_with_pipeline(cwd: &Path) -> Result<(PackageLock, PipelineHandles)> {
-    let (options, channels) = Context::build_deps_options(cwd.to_path_buf()).await;
-
-    // Start pipeline workers
-    let installer = PipelineInstaller::new();
-    let handles = installer.start_workers(channels, cwd.to_path_buf());
-
-    let package_lock = ruborist_build_deps(options).await?;
-
-    Ok((package_lock, handles))
 }
 
 /// Save PackageLock to disk synchronously

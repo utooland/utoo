@@ -133,7 +133,10 @@ struct ExtractedEntry {
     mode: u32,
 }
 
-/// Extract tarball using libdeflate + rayon (no tokio blocking pool)
+/// Extract tarball using libdeflate for decompression + rayon for parallel writes.
+///
+/// Uses rayon::spawn (not tokio blocking pool) to avoid thread storms.
+/// Rayon's global pool is configured with sufficient stack size at startup.
 async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
     let estimated_size = estimate_uncompressed_size(&gzip_bytes);
     let dest_owned = dest.to_path_buf();

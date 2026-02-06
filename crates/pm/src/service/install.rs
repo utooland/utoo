@@ -8,8 +8,8 @@ use std::pin::Pin;
 
 use crate::helper::global_bin::get_global_bin_dir;
 use crate::helper::lock::{
-    Package, ensure_package_lock, extract_package_name, group_by_depth, path_to_pkg_name,
-    prepare_global_package_json, update_package_json,
+    Package, extract_package_name, group_by_depth, path_to_pkg_name, prepare_global_package_json,
+    save_package_lock, update_package_json,
 };
 use crate::helper::workspace;
 use crate::model::package::PackageInfo;
@@ -435,17 +435,45 @@ impl InstallService {
     }
 
     pub async fn install(ignore_scripts: bool, root_path: &Path) -> Result<()> {
-        // Get PackageLock with pipeline handles
-        let build_result = ensure_package_lock(root_path).await?;
-        let package_lock = build_result.package_lock;
-        let pipeline_handles = build_result.pipeline_handles;
+        let lock_path = root_path.join("package-lock.json");
+
+        let (package_lock, pipeline_handles) =
+            if crate::fs::try_exists(&lock_path).await.unwrap_or(false) {
+                // Lock exists: install directly, skip manifest resolution
+                let lock: utoo_ruborist::lock::PackageLock =
+                    crate::util::json::read_json_file(&lock_path).await?;
+                (lock, None)
+            } else {
+                // No lock: full pipeline flow (resolve + concurrent download/clone)
+                start_progress_bar();
+
+                let (pipeline_receiver, channels) =
+                    super::pipeline::PipelineReceiver::new(crate::util::logger::ProgressReceiver);
+                let options = utoo_ruborist::service::BuildDepsOptions {
+                    cwd: root_path.to_path_buf(),
+                    registry_url: crate::util::config::get_registry(),
+                    cache_dir: Some(get_cache_dir()),
+                    concurrency: crate::util::config::get_manifests_concurrency_limit().await,
+                    legacy_peer_deps: crate::util::config::get_legacy_peer_deps().await,
+                    glob: crate::helper::fs::TokioGlob,
+                    receiver: pipeline_receiver,
+                };
+
+                let installer = super::pipeline::PipelineInstaller::new();
+                let handles = installer.start_workers(channels, root_path.to_path_buf());
+
+                let lock = utoo_ruborist::service::build_deps(options).await?;
+
+                finish_progress_bar("package-lock.json resolved");
+
+                save_package_lock(root_path, &lock).await?;
+
+                (lock, Some(handles))
+            };
 
         let cache_dir = get_cache_dir();
-
         let groups = group_by_depth(&package_lock.packages);
 
-        let mut depths: Vec<_> = groups.keys().cloned().collect();
-        depths.sort_unstable();
         if !package_lock.packages.is_empty() {
             start_progress_bar();
             PROGRESS_BAR.set_length(package_lock.packages.len() as u64);
