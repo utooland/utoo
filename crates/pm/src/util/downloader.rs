@@ -23,37 +23,6 @@ const MIN_ESTIMATED_SIZE: usize = 16;
 const MAX_ESTIMATED_SIZE: usize = 512 * 1024 * 1024; // 512MB
 const DECOMPRESSION_RETRY_FACTOR: usize = 4;
 
-// ============ Buffer Pool ============
-const BUFFER_POOL_MAX_SIZE: usize = 8;
-const BUFFER_POOL_MIN_CAPACITY: usize = 2 * 1024 * 1024; // 2MB minimum
-
-static BUFFER_POOL: Lazy<std::sync::Mutex<Vec<Vec<u8>>>> =
-    Lazy::new(|| std::sync::Mutex::new(Vec::with_capacity(BUFFER_POOL_MAX_SIZE)));
-
-fn acquire_buffer(required_capacity: usize) -> Vec<u8> {
-    let capacity = required_capacity.max(BUFFER_POOL_MIN_CAPACITY);
-    if let Ok(mut pool) = BUFFER_POOL.lock()
-        && let Some(idx) = pool.iter().position(|b| b.capacity() >= capacity)
-    {
-        let mut buf = pool.swap_remove(idx);
-        buf.clear();
-        return buf;
-    }
-    Vec::with_capacity(capacity)
-}
-
-fn release_buffer(mut buf: Vec<u8>) {
-    if buf.capacity() < BUFFER_POOL_MIN_CAPACITY || buf.capacity() > 64 * 1024 * 1024 {
-        return;
-    }
-    buf.clear();
-    if let Ok(mut pool) = BUFFER_POOL.lock()
-        && pool.len() < BUFFER_POOL_MAX_SIZE
-    {
-        pool.push(buf);
-    }
-}
-
 /// Download and extract a tarball to the destination directory.
 ///
 /// Uses OnceMap to ensure each (url, dest) pair is only downloaded once,
@@ -186,11 +155,8 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
     use std::fs;
     use std::io::{Read, Write};
 
-    // Decompress gzip using libdeflate (with buffer pool)
-    let mut output = acquire_buffer(estimated_size);
-    if output.len() < estimated_size {
-        output.resize(estimated_size, 0);
-    }
+    // Decompress gzip using libdeflate
+    let mut output = vec![0u8; estimated_size];
 
     let mut decompressor = libdeflater::Decompressor::new();
 
@@ -203,10 +169,7 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
                 .gzip_decompress(&gzip_bytes, &mut output)
                 .with_context(|| "gzip decompression failed")?
         }
-        Err(e) => {
-            release_buffer(output);
-            return Err(anyhow::anyhow!("gzip decompression failed: {}", e));
-        }
+        Err(e) => return Err(anyhow::anyhow!("gzip decompression failed: {}", e)),
     };
     output.truncate(actual_size);
 
@@ -237,8 +200,6 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
             });
         }
     }
-
-    release_buffer(output);
 
     // Create directories
     let mut created_dirs = HashSet::new();
@@ -273,12 +234,8 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
     }
 
     // Create resolution marker
-    fs::File::create(dest.join("_resolved")).with_context(|| {
-        format!(
-            "Failed to create resolution marker in: {}",
-            dest.display()
-        )
-    })?;
+    fs::File::create(dest.join("_resolved"))
+        .with_context(|| format!("Failed to create resolution marker in: {}", dest.display()))?;
 
     Ok(())
 }
