@@ -1,7 +1,7 @@
 use anyhow::Context;
 use anyhow::Result;
 use glob::glob;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
@@ -14,7 +14,6 @@ use crate::helper::lock::{
 use crate::helper::workspace;
 use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
-use crate::util::cache::get_cache_dir;
 use crate::util::linker::link;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
 use crate::util::save_type::{OmitType, PackageAction, SaveType};
@@ -23,7 +22,7 @@ use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 use super::binary::update_package_binary;
 
 /// Check if a package should be omitted based on omit config
-fn should_omit_package(package: &Package, omit: &std::collections::HashSet<OmitType>) -> bool {
+fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
     if omit.is_empty() {
         return false;
     }
@@ -266,15 +265,13 @@ async fn clean_deps(groups: &HashMap<usize, Vec<(String, Package)>>, cwd: &Path)
 
 pub async fn install_packages(
     groups: &HashMap<usize, Vec<(std::string::String, Package)>>,
-    _cache_dir: &Path,
     cwd: &Path,
+    omit: &HashSet<OmitType>,
 ) -> Result<()> {
     use super::pipeline::clone_package_once;
 
     // clean unused deps
     clean_deps(groups, cwd).await?;
-
-    let omit = crate::util::config::get_omit();
 
     // Always process level-by-level to ensure parent directories exist before
     // children. Within each level, tasks run concurrently. The pipeline's
@@ -399,6 +396,7 @@ impl InstallService {
         workspace: Option<String>,
         ignore_scripts: bool,
         save_type: SaveType,
+        omit: &HashSet<OmitType>,
     ) -> Result<()> {
         tracing::debug!(
             "update packages: {:?} {:?} {:?} {:?}",
@@ -427,14 +425,18 @@ impl InstallService {
             .await
             .context("Failed to build package-lock.json")?;
 
-        Self::install(ignore_scripts, &root_path)
+        Self::install(ignore_scripts, &root_path, omit)
             .await
             .context("Failed to install packages")?;
 
         Ok(())
     }
 
-    pub async fn install(ignore_scripts: bool, root_path: &Path) -> Result<()> {
+    pub async fn install(
+        ignore_scripts: bool,
+        root_path: &Path,
+        omit: &HashSet<OmitType>,
+    ) -> Result<()> {
         let lock_path = root_path.join("package-lock.json");
 
         let (package_lock, pipeline_handles) =
@@ -449,7 +451,6 @@ impl InstallService {
                 (result.package_lock, Some(result.handles))
             };
 
-        let cache_dir = get_cache_dir();
         let groups = group_by_depth(&package_lock.packages);
 
         if !package_lock.packages.is_empty() {
@@ -457,7 +458,7 @@ impl InstallService {
             PROGRESS_BAR.set_length(package_lock.packages.len() as u64);
         }
 
-        install_packages(&groups, &cache_dir, root_path)
+        install_packages(&groups, root_path, omit)
             .await
             .context("Failed to install packages")?;
 
@@ -481,8 +482,8 @@ impl InstallService {
 
         tracing::debug!("Installing global package: {npm_spec}");
 
-        // Install dependencies
-        Self::install(false, &package_path)
+        // Install dependencies (global install never omits)
+        Self::install(false, &package_path, &HashSet::new())
             .await
             .context("Failed to install global package dependencies")?;
 

@@ -1,6 +1,8 @@
 use anyhow::Result;
+use std::path::Path;
 
 use crate::service::install::InstallService;
+use crate::util::config::get_omit;
 use crate::util::save_type::{PackageAction, SaveType};
 
 pub async fn update_packages(
@@ -15,13 +17,14 @@ pub async fn update_packages(
         return Err(anyhow::anyhow!("No package specifications provided"));
     }
 
-    // Dispatch to service
-    InstallService::update_packages(action, specs, workspace, ignore_scripts, save_type).await
+    let omit = get_omit();
+    InstallService::update_packages(action, specs, workspace, ignore_scripts, save_type, &omit)
+        .await
 }
 
-pub async fn install(ignore_scripts: bool, root_path: &std::path::Path) -> Result<()> {
-    // Dispatch to service
-    InstallService::install(ignore_scripts, root_path).await
+pub async fn install(ignore_scripts: bool, root_path: &Path) -> Result<()> {
+    let omit = get_omit();
+    InstallService::install(ignore_scripts, root_path, &omit).await
 }
 
 pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Result<()> {
