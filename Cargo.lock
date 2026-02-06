@@ -9720,6 +9720,7 @@ dependencies = [
  "openssl",
  "owo-colors",
  "petgraph 0.6.5",
+ "rayon",
  "regex",
  "reqwest 0.12.24",
  "serde",

@@ -27,6 +27,7 @@ indicatif = "0.17.8"
 libc = "0.2"
 libdeflater = "1.25"
 once_cell = "1.19"
+rayon = { workspace = true }
 owo-colors = { workspace = true }
 petgraph = "0.6"
 regex = "1.10"
