@@ -32,12 +32,12 @@ static BUFFER_POOL: Lazy<std::sync::Mutex<Vec<Vec<u8>>>> =
 
 fn acquire_buffer(required_capacity: usize) -> Vec<u8> {
     let capacity = required_capacity.max(BUFFER_POOL_MIN_CAPACITY);
-    if let Ok(mut pool) = BUFFER_POOL.lock() {
-        if let Some(idx) = pool.iter().position(|b| b.capacity() >= capacity) {
-            let mut buf = pool.swap_remove(idx);
-            buf.clear();
-            return buf;
-        }
+    if let Ok(mut pool) = BUFFER_POOL.lock()
+        && let Some(idx) = pool.iter().position(|b| b.capacity() >= capacity)
+    {
+        let mut buf = pool.swap_remove(idx);
+        buf.clear();
+        return buf;
     }
     Vec::with_capacity(capacity)
 }
@@ -47,10 +47,10 @@ fn release_buffer(mut buf: Vec<u8>) {
         return;
     }
     buf.clear();
-    if let Ok(mut pool) = BUFFER_POOL.lock() {
-        if pool.len() < BUFFER_POOL_MAX_SIZE {
-            pool.push(buf);
-        }
+    if let Ok(mut pool) = BUFFER_POOL.lock()
+        && pool.len() < BUFFER_POOL_MAX_SIZE
+    {
+        pool.push(buf);
     }
 }
 
@@ -243,10 +243,10 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
     // Create directories
     let mut created_dirs = HashSet::new();
     for entry in entries.iter() {
-        if let Some(parent) = entry.path.parent() {
-            if created_dirs.insert(parent.to_path_buf()) {
-                fs::create_dir_all(parent).ok();
-            }
+        if let Some(parent) = entry.path.parent()
+            && created_dirs.insert(parent.to_path_buf())
+        {
+            fs::create_dir_all(parent).ok();
         }
     }
 
