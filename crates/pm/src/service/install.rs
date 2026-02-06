@@ -9,7 +9,7 @@ use std::pin::Pin;
 use crate::helper::global_bin::get_global_bin_dir;
 use crate::helper::lock::{
     Package, extract_package_name, group_by_depth, path_to_pkg_name, prepare_global_package_json,
-    save_package_lock, update_package_json,
+    update_package_json,
 };
 use crate::helper::workspace;
 use crate::model::package::PackageInfo;
@@ -445,30 +445,8 @@ impl InstallService {
                 (lock, None)
             } else {
                 // No lock: full pipeline flow (resolve + concurrent download/clone)
-                start_progress_bar();
-
-                let (pipeline_receiver, channels) =
-                    super::pipeline::PipelineReceiver::new(crate::util::logger::ProgressReceiver);
-                let options = utoo_ruborist::service::BuildDepsOptions {
-                    cwd: root_path.to_path_buf(),
-                    registry_url: crate::util::config::get_registry(),
-                    cache_dir: Some(get_cache_dir()),
-                    concurrency: crate::util::config::get_manifests_concurrency_limit().await,
-                    legacy_peer_deps: crate::util::config::get_legacy_peer_deps().await,
-                    glob: crate::helper::fs::TokioGlob,
-                    receiver: pipeline_receiver,
-                };
-
-                let installer = super::pipeline::PipelineInstaller::new();
-                let handles = installer.start_workers(channels, root_path.to_path_buf());
-
-                let lock = utoo_ruborist::service::build_deps(options).await?;
-
-                finish_progress_bar("package-lock.json resolved");
-
-                save_package_lock(root_path, &lock).await?;
-
-                (lock, Some(handles))
+                let result = super::pipeline::resolve_with_pipeline(root_path).await?;
+                (result.package_lock, Some(result.handles))
             };
 
         let cache_dir = get_cache_dir();

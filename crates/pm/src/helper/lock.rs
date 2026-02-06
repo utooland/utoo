@@ -13,7 +13,6 @@ use crate::util::{cloner::clone_package, downloader::download};
 use utoo_ruborist::lock::{LockPackage, PackageLock};
 use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::registry::resolve_package;
-use utoo_ruborist::service::build_deps as ruborist_build_deps;
 use utoo_ruborist::util::parse_package_spec;
 
 use super::workspace::find_workspace_path;
@@ -93,8 +92,7 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
         tracing::debug!("Resolving dependencies");
         start_progress_bar();
 
-        let options = Context::build_deps_options(root_path.to_path_buf()).await;
-        let package_lock = ruborist_build_deps(options).await?;
+        let package_lock = Context::build_deps(root_path.to_path_buf()).await?;
 
         finish_progress_bar("package-lock.json resolved");
 
