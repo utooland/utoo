@@ -6,8 +6,8 @@
 //! - Uses global OnceMap to deduplicate requests and share results across phases
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use once_cell::sync::Lazy;
 use tokio::sync::{Semaphore, mpsc};
@@ -133,7 +133,8 @@ pub async fn download_package(name: &str, version: &str, tarball_url: &str) -> O
             Some(cache_path)
         })
         .await
-        .as_deref().cloned()
+        .as_deref()
+        .cloned()
 }
 
 /// Clone a package to target path, using global OnceMap for deduplication.
@@ -216,9 +217,7 @@ impl<R: EventReceiver> EventReceiver for PipelineReceiver<R> {
             BuildEvent::PackageResolved(info)
                 if info.tarball_url.is_some() && info.is_platform_compatible() =>
             {
-                let _ = self
-                    .download_tx
-                    .send(OwnedPackageInfo::from(&info));
+                let _ = self.download_tx.send(OwnedPackageInfo::from(&info));
             }
             BuildEvent::PackagePlaced {
                 package,

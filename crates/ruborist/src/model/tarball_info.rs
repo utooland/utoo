@@ -27,15 +27,15 @@ pub struct PackageTarballInfo<'a> {
 impl PackageTarballInfo<'_> {
     /// Check if this package is compatible with the current platform (os + cpu).
     pub fn is_platform_compatible(&self) -> bool {
-        if let Some(os) = self.os {
-            if !is_os_compatible(os) {
-                return false;
-            }
+        if let Some(os) = self.os
+            && !is_os_compatible(os)
+        {
+            return false;
         }
-        if let Some(cpu) = self.cpu {
-            if !is_cpu_compatible(cpu) {
-                return false;
-            }
+        if let Some(cpu) = self.cpu
+            && !is_cpu_compatible(cpu)
+        {
+            return false;
         }
         true
     }
