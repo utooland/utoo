@@ -5,59 +5,7 @@
 
 use std::path::Path;
 
-use crate::model::manifest::VersionManifest;
-
-/// Package tarball information for downloading.
-///
-/// A lightweight structure containing only the fields needed for
-/// downloading and verifying a package tarball. Uses references to
-/// avoid cloning data from the source manifest.
-#[derive(Debug, Clone, Copy)]
-pub struct PackageTarballInfo<'a> {
-    /// Package name
-    pub name: &'a str,
-    /// Resolved version
-    pub version: &'a str,
-    /// Tarball URL for downloading
-    pub tarball_url: Option<&'a str>,
-    /// Integrity hash for verification
-    pub integrity: Option<&'a str>,
-    /// OS compatibility constraint (if specified)
-    pub os: Option<&'a serde_json::Value>,
-    /// CPU compatibility constraint (if specified)
-    pub cpu: Option<&'a serde_json::Value>,
-}
-
-impl PackageTarballInfo<'_> {
-    /// Check if this package is compatible with the current platform (os + cpu).
-    pub fn is_platform_compatible(&self) -> bool {
-        use crate::compat::{is_cpu_compatible, is_os_compatible};
-        if let Some(os) = self.os {
-            if !is_os_compatible(os) {
-                return false;
-            }
-        }
-        if let Some(cpu) = self.cpu {
-            if !is_cpu_compatible(cpu) {
-                return false;
-            }
-        }
-        true
-    }
-}
-
-impl<'a> From<&'a VersionManifest> for PackageTarballInfo<'a> {
-    fn from(m: &'a VersionManifest) -> Self {
-        Self {
-            name: &m.name,
-            version: &m.version,
-            tarball_url: m.dist.tarball.as_deref(),
-            integrity: m.dist.integrity.as_deref(),
-            os: m.os.as_ref(),
-            cpu: m.cpu.as_ref(),
-        }
-    }
-}
+pub use crate::model::tarball_info::PackageTarballInfo;
 
 /// Events emitted during dependency resolution.
 #[derive(Debug, Clone, Copy)]
