@@ -328,8 +328,8 @@ pub struct PipelineResult {
 /// Creates PipelineReceiver, starts workers, runs build_deps, saves lock file.
 /// Returns both the lock and worker handles for the caller to await after install.
 pub async fn resolve_with_pipeline(root_path: &std::path::Path) -> anyhow::Result<PipelineResult> {
-    use crate::helper::fs::Context;
     use crate::helper::lock::save_package_lock;
+    use crate::helper::ruborist_context::Context;
     use crate::util::logger::{ProgressReceiver, finish_progress_bar, start_progress_bar};
 
     start_progress_bar();

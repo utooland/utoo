@@ -1,4 +1,4 @@
-//! Tokio-based glob implementation for ruborist's Glob trait.
+//! Adapter layer bridging pm's configuration to ruborist's API.
 
 use std::path::{Path, PathBuf};
 use utoo_ruborist::service::{BuildDepsOptions, Glob, UnifiedRegistry};

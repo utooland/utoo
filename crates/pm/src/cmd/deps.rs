@@ -2,8 +2,8 @@ use anyhow::{Context as _, Result};
 use std::path::Path;
 use utoo_ruborist::lock::PackageLock;
 
-use crate::helper::fs::Context;
 use crate::helper::lock::save_package_lock;
+use crate::helper::ruborist_context::Context;
 use crate::service::workspace::WorkspaceService;
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
 
