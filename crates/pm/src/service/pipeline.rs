@@ -18,8 +18,6 @@ use crate::util::config::get_manifests_concurrency_limit_sync;
 use crate::util::downloader::{download_bytes, extract_and_write};
 use crate::util::oncemap::OnceMap;
 
-// ============ Pipeline Statistics ============
-
 /// Statistics for pipeline stages
 pub struct PipelineStats {
     /// Total downloads completed
@@ -65,26 +63,11 @@ static DOWNLOAD_CACHE: Lazy<OnceMap<String, PathBuf>> = Lazy::new(OnceMap::new);
 /// Key: target path, Value: ()
 static CLONE_CACHE: Lazy<OnceMap<String, ()>> = Lazy::new(OnceMap::new);
 
-/// Global semaphore for download concurrency control
 static DOWNLOAD_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
-
-/// Global semaphore for clone concurrency control
 static CLONE_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
 
-fn get_download_semaphore() -> &'static Arc<Semaphore> {
-    DOWNLOAD_SEMAPHORE.get_or_init(|| {
-        let limit = get_manifests_concurrency_limit_sync();
-        tracing::debug!("Initializing download semaphore with limit: {}", limit);
-        Arc::new(Semaphore::new(limit))
-    })
-}
-
-fn get_clone_semaphore() -> &'static Arc<Semaphore> {
-    CLONE_SEMAPHORE.get_or_init(|| {
-        let limit = get_manifests_concurrency_limit_sync();
-        tracing::debug!("Initializing clone semaphore with limit: {}", limit);
-        Arc::new(Semaphore::new(limit))
-    })
+fn init_semaphore(lock: &'static OnceLock<Arc<Semaphore>>) -> &'static Arc<Semaphore> {
+    lock.get_or_init(|| Arc::new(Semaphore::new(get_manifests_concurrency_limit_sync())))
 }
 
 /// Owned version of PackageTarballInfo for channel transmission
@@ -95,8 +78,8 @@ pub struct OwnedPackageInfo {
     pub tarball_url: Option<String>,
 }
 
-impl OwnedPackageInfo {
-    pub fn from_tarball_info(info: &PackageTarballInfo<'_>) -> Self {
+impl From<&PackageTarballInfo<'_>> for OwnedPackageInfo {
+    fn from(info: &PackageTarballInfo<'_>) -> Self {
         Self {
             name: info.name.to_string(),
             version: info.version.to_string(),
@@ -136,7 +119,7 @@ pub async fn download_package(name: &str, version: &str, tarball_url: &str) -> O
             }
 
             // Download (semaphore controlled)
-            let _permit = get_download_semaphore().acquire().await.ok()?;
+            let _permit = init_semaphore(&DOWNLOAD_SEMAPHORE).acquire().await.ok()?;
             let bytes = download_bytes(&tarball_url)
                 .await
                 .inspect_err(|e| tracing::warn!("Download failed: {}@{}: {}", name, version, e))
@@ -153,7 +136,7 @@ pub async fn download_package(name: &str, version: &str, tarball_url: &str) -> O
             Some(cache_path)
         })
         .await
-        .map(|arc| (*arc).clone())
+        .as_deref().cloned()
 }
 
 /// Clone a package to target path, using global OnceMap for deduplication.
@@ -175,7 +158,7 @@ pub async fn clone_package_once(
         .get_or_init(key, || async move {
             let cache_path = download_package(&name, &version, &tarball_url).await?;
 
-            let _permit = get_clone_semaphore().acquire().await.ok()?;
+            let _permit = init_semaphore(&CLONE_SEMAPHORE).acquire().await.ok()?;
             clone_package(&cache_path, &target_path, &name, &version)
                 .await
                 .inspect_err(|e| {
@@ -240,7 +223,7 @@ impl<R: EventReceiver> EventReceiver for PipelineReceiver<R> {
             {
                 let _ = self
                     .download_tx
-                    .send(OwnedPackageInfo::from_tarball_info(&info));
+                    .send(OwnedPackageInfo::from(&info));
             }
             BuildEvent::PackagePlaced {
                 package,
@@ -248,7 +231,7 @@ impl<R: EventReceiver> EventReceiver for PipelineReceiver<R> {
                 parent_path,
             } if package.tarball_url.is_some() && package.is_platform_compatible() => {
                 let _ = self.clone_tx.send(CloneMessage {
-                    info: OwnedPackageInfo::from_tarball_info(&package),
+                    info: OwnedPackageInfo::from(&package),
                     path: path.to_path_buf(),
                     parent_path: parent_path.map(|p| p.to_path_buf()),
                 });
@@ -314,8 +297,6 @@ fn start_pipeline_workers(channels: PipelineChannels, cwd: PathBuf) -> PipelineH
         clone_handle,
     }
 }
-
-// ============ Pipeline Resolve API ============
 
 /// Result of pipeline-based dependency resolution.
 pub struct PipelineResult {
