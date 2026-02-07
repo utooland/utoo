@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 use once_cell::sync::Lazy;
 use tokio::sync::{Semaphore, mpsc};
@@ -63,12 +63,7 @@ static DOWNLOAD_CACHE: Lazy<OnceMap<String, PathBuf>> = Lazy::new(OnceMap::new);
 /// Key: target path, Value: ()
 static CLONE_CACHE: Lazy<OnceMap<String, ()>> = Lazy::new(OnceMap::new);
 
-static DOWNLOAD_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
-static CLONE_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
-
-fn init_semaphore(lock: &'static OnceLock<Arc<Semaphore>>) -> &'static Arc<Semaphore> {
-    lock.get_or_init(|| Arc::new(Semaphore::new(get_manifests_concurrency_limit_sync())))
-}
+static DOWNLOAD_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
 
 /// Owned version of PackageTarballInfo for channel transmission
 #[derive(Debug, Clone)]
@@ -119,7 +114,9 @@ pub async fn download_package(name: &str, version: &str, tarball_url: &str) -> O
             }
 
             // Download (semaphore controlled)
-            let _permit = init_semaphore(&DOWNLOAD_SEMAPHORE).acquire().await.ok()?;
+            let semaphore = DOWNLOAD_SEMAPHORE
+                .get_or_init(|| Semaphore::new(get_manifests_concurrency_limit_sync()));
+            let _permit = semaphore.acquire().await.ok()?;
             let bytes = download_bytes(&tarball_url)
                 .await
                 .inspect_err(|e| tracing::warn!("Download failed: {}@{}: {}", name, version, e))
@@ -157,8 +154,6 @@ pub async fn clone_package_once(
     CLONE_CACHE
         .get_or_init(key, || async move {
             let cache_path = download_package(&name, &version, &tarball_url).await?;
-
-            let _permit = init_semaphore(&CLONE_SEMAPHORE).acquire().await.ok()?;
             clone_package(&cache_path, &target_path, &name, &version)
                 .await
                 .inspect_err(|e| {
