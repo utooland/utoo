@@ -26,7 +26,7 @@ pub struct PreloadConfig {
     pub legacy_peer_deps: bool,
     /// Maximum number of concurrent manifest fetches (cap for adaptive mode)
     pub max_concurrency: usize,
-    /// Whether to use adaptive concurrency control (AIMD)
+    /// Whether to use adaptive concurrency control
     pub adaptive: bool,
 }
 

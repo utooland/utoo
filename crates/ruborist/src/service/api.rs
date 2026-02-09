@@ -55,7 +55,7 @@ pub struct BuildDepsOptions<G, R> {
     pub concurrency: usize,
     /// Whether to skip peer dependencies (legacy mode)
     pub legacy_peer_deps: bool,
-    /// Whether to use adaptive concurrency control (AIMD) for preloading
+    /// Whether to use adaptive concurrency control for preloading
     pub adaptive_concurrency: bool,
     /// Glob implementation for workspace discovery
     pub glob: G,

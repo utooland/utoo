@@ -45,7 +45,7 @@ pub struct BuildDepsConfig {
     pub concurrency: usize,
     /// Whether to skip preload phase (useful when cache is already warm)
     pub skip_preload: bool,
-    /// Whether to use adaptive concurrency control (AIMD) for preloading
+    /// Whether to use adaptive concurrency control for preloading
     pub adaptive_concurrency: bool,
 }
 
@@ -79,7 +79,7 @@ impl BuildDepsConfig {
         self
     }
 
-    /// Enable or disable adaptive concurrency (AIMD) for preloading
+    /// Enable or disable adaptive concurrency for preloading
     pub fn with_adaptive_concurrency(mut self, adaptive: bool) -> Self {
         self.adaptive_concurrency = adaptive;
         self
