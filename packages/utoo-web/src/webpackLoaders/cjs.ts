@@ -152,6 +152,8 @@ const loadModule = (
   if (!moduleCode) {
     // Try matching by stripping potential random prefix from absolute path
     let longestKey = "";
+    let longestSanitizedKey = "";
+
     for (const key in importMaps) {
       // Normalize key for comparison (ignore leading ./ or /)
       let sanitizedKey = key;
@@ -170,6 +172,7 @@ const loadModule = (
         if (prefixEnd === 0 || checkId[prefixEnd - 1] === "/") {
           if (key.length > longestKey.length) {
             longestKey = key;
+            longestSanitizedKey = sanitizedKey;
           }
         }
       }
@@ -177,12 +180,10 @@ const loadModule = (
     if (longestKey) {
       moduleCode = importMaps[longestKey];
       // Important: Use the absolute path as moduleId so that context is correctly absolute for relative requires
-      let sanitizedKey = longestKey;
-      if (sanitizedKey.startsWith("./")) sanitizedKey = sanitizedKey.slice(2);
-      if (sanitizedKey.startsWith("/")) sanitizedKey = sanitizedKey.slice(1);
-
       moduleId =
-        id.startsWith("/") && id.endsWith(sanitizedKey) ? id : resolvedId;
+        id.startsWith("/") && id.endsWith(longestSanitizedKey)
+          ? id
+          : resolvedId;
     }
   }
 
@@ -230,16 +231,9 @@ const loadModule = (
         try {
           const mainField = pkg.main;
           if (mainField) {
-            const candidates = [
-              path.resolve(nodeModulesPath, mainField),
-              path.resolve(nodeModulesPath, mainField) + ".js",
-              path.resolve(nodeModulesPath, mainField) + ".cjs",
-              path.resolve(nodeModulesPath, mainField) + ".json",
-              path.resolve(nodeModulesPath, mainField, "index.js"),
-              path.resolve(nodeModulesPath, mainField, "index.cjs"),
-              path.resolve(nodeModulesPath, mainField, "index.json"),
-            ];
-            for (const candidate of candidates) {
+            const resolvedMain = path.resolve(nodeModulesPath, mainField);
+            for (const ext of RESOLUTION_EXTENSIONS) {
+              const candidate = resolvedMain + ext;
               try {
                 const content = fs.readFileSync(candidate, "utf8") as string;
                 moduleCode = content;
