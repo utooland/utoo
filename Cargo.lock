@@ -8312,9 +8312,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-fs-ext"
-version = "0.7.5"
+version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b81c90b384ee8b63048b511a09468ee9ee1338042a94e4888105f67648b05ab2"
+checksum = "912f3435ecb4330fed82d1b3a8cddf6354ea6472d40fadfb9063a3e9da1c6dec"
 dependencies = [
  "bitflags 2.9.4",
  "cfg-if",
