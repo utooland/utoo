@@ -1,18 +1,16 @@
 use anyhow::{Context as _, Result};
 use std::path::Path;
 use utoo_ruborist::lock::PackageLock;
-use utoo_ruborist::service::build_deps as ruborist_build_deps;
 
-use crate::helper::fs::Context;
 use crate::helper::lock::save_package_lock;
+use crate::helper::ruborist_context::Context;
 use crate::service::workspace::WorkspaceService;
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
 
 pub async fn build_deps(cwd: &Path) -> Result<PackageLock> {
     start_progress_bar();
 
-    let options = Context::build_deps_options(cwd.to_path_buf()).await;
-    let package_lock = ruborist_build_deps(options).await?;
+    let package_lock = Context::build_deps(cwd.to_path_buf()).await?;
 
     finish_progress_bar("package-lock.json resolved");
 

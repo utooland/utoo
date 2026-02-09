@@ -3,17 +3,16 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use super::fs::Context;
+use super::ruborist_context::Context;
 use crate::helper::workspace::find_workspaces;
 use crate::util::config::get_legacy_peer_deps;
 use crate::util::json::{load_package_json_from_path, load_package_lock_json_from_path};
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
 use crate::util::save_type::{PackageAction, SaveType};
-use crate::util::{cloner::clone_package, downloader::download};
+use crate::util::{cloner::clone_package, downloader::download_to_cache};
 use utoo_ruborist::lock::{LockPackage, PackageLock};
 use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::registry::resolve_package;
-use utoo_ruborist::service::build_deps as ruborist_build_deps;
 use utoo_ruborist::util::parse_package_spec;
 
 use super::workspace::find_workspace_path;
@@ -92,7 +91,9 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
     if needs_regenerate {
         tracing::debug!("Resolving dependencies");
         start_progress_bar();
-        let package_lock = build_deps_with_download(root_path).await?;
+
+        let package_lock = Context::build_deps(root_path.to_path_buf()).await?;
+
         finish_progress_bar("package-lock.json resolved");
 
         // Write to disk asynchronously in background
@@ -236,23 +237,20 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
         .as_ref()
         .ok_or_else(|| anyhow!("Failed to get tarball URL from manifest"))?;
 
-    // Download and extract package
-    let cache_dir = crate::util::cache::get_cache_dir();
-    let cache_path = cache_dir.join(format!("{}/{}", name, resolved.version));
-    let cache_flag_path = cache_dir.join(format!("{}/{}/_resolved", name, resolved.version));
+    // Download and extract package to cache
+    let cache_path = download_to_cache(&name, &resolved.version, tarball_url)
+        .await
+        .ok_or_else(|| anyhow!("Failed to download package {name}"))?;
 
-    // Download if not cached
-    if !crate::fs::try_exists(&cache_flag_path).await? {
-        tracing::debug!("Downloading {} to {}", tarball_url, cache_path.display());
-        download(tarball_url, &cache_path)
+    // If the package has install scripts, create a flag file
+    // in linux, we can use hardlink when FICLONE is not supported
+    // so we need to copy the file to the package directory to avoid effect other packages
+    if resolved.manifest.has_install_script == Some(true) {
+        let has_install_script_flag_path = cache_path.join("_hasInstallScript");
+        if !crate::fs::try_exists(&has_install_script_flag_path)
             .await
-            .context("Failed to download package")?;
-
-        // If the package has install scripts, create a flag file
-        // in linux, we can use hardlink when FICLONE is not supported
-        // so we need to copy the file to the package directory to avoid effect other packages
-        if resolved.manifest.has_install_script == Some(true) {
-            let has_install_script_flag_path = cache_path.join("_hasInstallScript");
+            .unwrap_or(false)
+        {
             crate::fs::write(has_install_script_flag_path, "").await?;
         }
     }
@@ -407,13 +405,6 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
     }
 
     Ok(false)
-}
-
-/// Build dependencies with tgz download.
-/// Used by `utoo install` command for faster installation.
-async fn build_deps_with_download(cwd: &Path) -> Result<PackageLock> {
-    let options = Context::build_deps_options(cwd.to_path_buf()).await;
-    ruborist_build_deps(options).await
 }
 
 /// Save PackageLock to disk synchronously

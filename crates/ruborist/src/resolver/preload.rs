@@ -13,7 +13,7 @@ use crate::traits::progress::{BuildEvent, EventReceiver};
 use crate::traits::registry::RegistryClient;
 
 /// Default concurrency limit for manifest fetching
-pub const DEFAULT_CONCURRENCY: usize = 20;
+pub const DEFAULT_CONCURRENCY: usize = 64;
 
 /// A dependency spec: (name, version_spec)
 pub type Dep = (String, String);
@@ -159,7 +159,7 @@ where
                 receiver.on_event(BuildEvent::PreloadQueued { count: 1 });
             }
 
-            receiver.on_event(BuildEvent::PreloadFetching { name: name.clone() });
+            receiver.on_event(BuildEvent::PreloadFetching { name: &name });
 
             futures.push(async move {
                 let start = tokio::time::Instant::now();
@@ -194,10 +194,13 @@ where
                 tracing::debug!("Preloaded {}@{}", name, resolved.version);
 
                 receiver.on_event(BuildEvent::PreloadProgress {
-                    name: name.clone(),
-                    version: resolved.version.clone(),
+                    name: &name,
+                    version: &resolved.version,
                     current: stats.success_count,
                 });
+
+                // Send PackageResolved event for pipeline downloading
+                receiver.on_event(BuildEvent::PackageResolved((&resolved.manifest).into()));
 
                 pending.extend(extract_transitive_deps(&resolved.manifest, &config));
                 on_manifest(&name, resolved.manifest);
