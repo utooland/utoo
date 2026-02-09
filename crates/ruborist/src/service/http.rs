@@ -19,7 +19,10 @@ fn get_client() -> &'static reqwest::Client {
 }
 
 /// Check if an error is retryable.
-/// Only retry on network errors or 5xx/429 server errors.
+/// Only retry on network errors or 5xx server errors.
+/// Note: 429 (rate limiting) is NOT retried here — it is handled by the
+/// adaptive concurrency controller (AIMD) at the preload layer, which
+/// reduces the concurrency window instead of blindly retrying.
 fn is_retryable_error(err: &anyhow::Error) -> bool {
     let err_str = err.to_string();
     // Retry on network/connection errors
@@ -29,16 +32,16 @@ fn is_retryable_error(err: &anyhow::Error) -> bool {
     {
         return true;
     }
-    // Retry on 5xx server errors and 429 rate limiting
-    if err_str.contains("HTTP 5") || err_str.contains("HTTP 429") {
+    // Retry on 5xx server errors only
+    if err_str.contains("HTTP 5") {
         return true;
     }
-    // Don't retry 3xx, 4xx (except 429), or other errors
+    // Don't retry 3xx, 4xx (including 429), or other errors
     false
 }
 
 /// Simple retry with exponential backoff.
-/// Only retries on network errors, 5xx server errors, and 429 rate limiting.
+/// Only retries on network errors and 5xx server errors.
 async fn with_retry<T, F, Fut>(max_retries: usize, mut f: F) -> Result<T>
 where
     F: FnMut() -> Fut,

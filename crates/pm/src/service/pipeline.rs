@@ -14,7 +14,7 @@ use tokio::sync::{Semaphore, mpsc};
 use utoo_ruborist::progress::{BuildEvent, EventReceiver, PackageTarballInfo};
 
 use crate::util::cache::get_cache_dir;
-use crate::util::config::get_manifests_concurrency_limit_sync;
+use crate::util::config::get_tarball_concurrency_limit_sync;
 use crate::util::downloader::{download_bytes, extract_and_write};
 use crate::util::oncemap::OnceMap;
 
@@ -115,7 +115,7 @@ pub async fn download_package(name: &str, version: &str, tarball_url: &str) -> O
 
             // Download (semaphore controlled)
             let semaphore = DOWNLOAD_SEMAPHORE
-                .get_or_init(|| Semaphore::new(get_manifests_concurrency_limit_sync()));
+                .get_or_init(|| Semaphore::new(get_tarball_concurrency_limit_sync()));
             let _permit = semaphore.acquire().await.ok()?;
             let bytes = download_bytes(&tarball_url)
                 .await

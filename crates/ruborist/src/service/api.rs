@@ -51,10 +51,12 @@ pub struct BuildDepsOptions<G, R> {
     pub registry_url: String,
     /// Cache directory for disk cache (None = pure in-memory mode)
     pub cache_dir: Option<PathBuf>,
-    /// Maximum concurrent network requests
+    /// Maximum concurrent network requests (cap for adaptive concurrency)
     pub concurrency: usize,
     /// Whether to skip peer dependencies (legacy mode)
     pub legacy_peer_deps: bool,
+    /// Whether to use adaptive concurrency control (AIMD) for preloading
+    pub adaptive_concurrency: bool,
     /// Glob implementation for workspace discovery
     pub glob: G,
     /// Progress event receiver
@@ -74,6 +76,7 @@ impl<G, R> BuildDepsOptions<G, R> {
             cache_dir: None,
             concurrency: 20,
             legacy_peer_deps: true,
+            adaptive_concurrency: true,
             glob,
             receiver,
         }
@@ -119,6 +122,7 @@ where
         cache_dir,
         concurrency,
         legacy_peer_deps,
+        adaptive_concurrency,
         glob,
         receiver,
     } = options;
@@ -254,7 +258,8 @@ where
     let config = BuildDepsConfig::default()
         .with_legacy_peer_deps(legacy_peer_deps)
         .with_concurrency(concurrency)
-        .with_skip_preload(skip_preload);
+        .with_skip_preload(skip_preload)
+        .with_adaptive_concurrency(adaptive_concurrency);
 
     if skip_preload {
         tracing::debug!(
@@ -315,12 +320,14 @@ mod tests {
             cache_dir: None,
             concurrency: 20,
             legacy_peer_deps: true,
+            adaptive_concurrency: true,
             glob: NoopGlob,
             receiver: NoopReceiver,
         };
 
         assert_eq!(options.concurrency, 20);
         assert!(options.legacy_peer_deps);
+        assert!(options.adaptive_concurrency);
     }
 
     #[test]

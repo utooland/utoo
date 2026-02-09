@@ -43,6 +43,7 @@ impl Context {
             cache_dir: Some(get_cache_dir()),
             concurrency: get_manifests_concurrency_limit().await,
             legacy_peer_deps: get_legacy_peer_deps().await,
+            adaptive_concurrency: true,
             glob: TokioGlob,
             receiver,
         }

@@ -1,5 +1,6 @@
 //! Version resolution algorithms.
 
+pub mod adaptive;
 pub mod builder;
 pub mod edges;
 pub mod preload;

@@ -45,6 +45,8 @@ pub struct BuildDepsConfig {
     pub concurrency: usize,
     /// Whether to skip preload phase (useful when cache is already warm)
     pub skip_preload: bool,
+    /// Whether to use adaptive concurrency control (AIMD) for preloading
+    pub adaptive_concurrency: bool,
 }
 
 impl Default for BuildDepsConfig {
@@ -53,6 +55,7 @@ impl Default for BuildDepsConfig {
             legacy_peer_deps: true,
             concurrency: crate::resolver::preload::DEFAULT_CONCURRENCY,
             skip_preload: false,
+            adaptive_concurrency: true,
         }
     }
 }
@@ -73,6 +76,12 @@ impl BuildDepsConfig {
     /// Create config that skips preload phase
     pub fn with_skip_preload(mut self, skip: bool) -> Self {
         self.skip_preload = skip;
+        self
+    }
+
+    /// Enable or disable adaptive concurrency (AIMD) for preloading
+    pub fn with_adaptive_concurrency(mut self, adaptive: bool) -> Self {
+        self.adaptive_concurrency = adaptive;
         self
     }
 }
@@ -516,7 +525,8 @@ async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
 
     let preload_config = PreloadConfig {
         legacy_peer_deps: config.legacy_peer_deps,
-        concurrency: config.concurrency,
+        max_concurrency: config.concurrency,
+        adaptive: config.adaptive_concurrency,
     };
 
     let stats = preload_manifests(

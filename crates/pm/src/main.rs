@@ -16,6 +16,7 @@ use cmd::{clean::clean, deps::build_workspace};
 use helper::auto_update::init_auto_update;
 use util::config::{
     set_cache_dir, set_legacy_peer_deps, set_manifests_concurrency_limit, set_omit, set_registry,
+    set_tarball_concurrency_limit,
 };
 use util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
 use util::save_type::{OmitType, PackageAction, SaveType, parse_save_type};
@@ -67,9 +68,13 @@ struct Cli {
     #[arg(long, global = true, action = clap::ArgAction::SetTrue)]
     legacy_peer_deps: Option<bool>,
 
-    /// Maximum concurrent manifest fetches (default: 64)
+    /// Maximum concurrent manifest fetches, used as cap for adaptive concurrency (default: 64)
     #[arg(long, global = true)]
     manifests_concurrency_limit: Option<usize>,
+
+    /// Maximum concurrent tarball downloads (default: 32)
+    #[arg(long, global = true)]
+    tarball_concurrency_limit: Option<usize>,
 
     /// Workspace to operate in
     #[arg(long, global = true, hide = true)]
@@ -321,6 +326,11 @@ async fn async_main() -> Result<()> {
     // set manifests concurrency limit if specified
     if cli.manifests_concurrency_limit.is_some() {
         set_manifests_concurrency_limit(cli.manifests_concurrency_limit);
+    }
+
+    // set tarball concurrency limit if specified
+    if cli.tarball_concurrency_limit.is_some() {
+        set_tarball_concurrency_limit(cli.tarball_concurrency_limit);
     }
 
     // Initialize auto update with immediate check and background monitoring

@@ -254,8 +254,16 @@ pub async fn get_manifests_concurrency_limit() -> usize {
     MANIFESTS_CONCURRENCY_LIMIT.get().await
 }
 
-pub fn get_manifests_concurrency_limit_sync() -> usize {
-    MANIFESTS_CONCURRENCY_LIMIT.get_sync()
+// Tarball download concurrency configuration (separate from manifest fetching)
+static TARBALL_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
+    LazyLock::new(|| ConfigValue::new("tarball-concurrency-limit", 32));
+
+pub fn set_tarball_concurrency_limit(value: Option<usize>) {
+    TARBALL_CONCURRENCY_LIMIT.set(value);
+}
+
+pub fn get_tarball_concurrency_limit_sync() -> usize {
+    TARBALL_CONCURRENCY_LIMIT.get_sync()
 }
 
 pub async fn set_cache_dir(cache_dir: Option<String>) {

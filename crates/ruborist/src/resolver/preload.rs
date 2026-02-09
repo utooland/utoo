@@ -8,6 +8,7 @@ use std::collections::{HashSet, VecDeque};
 use futures::stream::{FuturesUnordered, StreamExt};
 
 use crate::model::manifest::VersionManifest;
+use crate::resolver::adaptive::{AdaptiveConcurrency, FetchOutcome, classify_error};
 use crate::resolver::registry::resolve_package;
 use crate::traits::progress::{BuildEvent, EventReceiver};
 use crate::traits::registry::RegistryClient;
@@ -23,15 +24,18 @@ pub type Dep = (String, String);
 pub struct PreloadConfig {
     /// Whether to skip peer dependencies (legacy mode)
     pub legacy_peer_deps: bool,
-    /// Maximum number of concurrent manifest fetches
-    pub concurrency: usize,
+    /// Maximum number of concurrent manifest fetches (cap for adaptive mode)
+    pub max_concurrency: usize,
+    /// Whether to use adaptive concurrency control (AIMD)
+    pub adaptive: bool,
 }
 
 impl Default for PreloadConfig {
     fn default() -> Self {
         Self {
             legacy_peer_deps: true,
-            concurrency: DEFAULT_CONCURRENCY,
+            max_concurrency: DEFAULT_CONCURRENCY,
+            adaptive: true,
         }
     }
 }
@@ -45,6 +49,10 @@ pub struct PreloadStats {
     pub min_request_ms: u64,
     pub max_request_ms: u64,
     pub total_request_ms: u64,
+    /// Final adaptive concurrency window (for diagnostics)
+    pub final_window: usize,
+    /// Number of times the adaptive window was decreased
+    pub decrease_count: usize,
 }
 
 /// Check if a spec is a local dependency (file:, link:, workspace:, portal:)
@@ -122,12 +130,18 @@ where
     let mut stats = PreloadStats::default();
     let mut processed: HashSet<String> = HashSet::new();
     let mut pending: VecDeque<Dep> = initial_deps.into();
-    let concurrency = config.concurrency;
+
+    let mut controller = if config.adaptive {
+        AdaptiveConcurrency::new(config.max_concurrency)
+    } else {
+        AdaptiveConcurrency::fixed(config.max_concurrency)
+    };
 
     tracing::debug!(
-        "Preload: {} initial deps, concurrency={}",
+        "Preload: {} initial deps, max_concurrency={}, adaptive={}",
         pending.len(),
-        concurrency
+        config.max_concurrency,
+        config.adaptive,
     );
 
     let mut futures = FuturesUnordered::new();
@@ -135,8 +149,8 @@ where
     let mut started = false;
 
     loop {
-        // Fill up to concurrency limit
-        while in_flight < concurrency {
+        // Fill up to adaptive concurrency window
+        while in_flight < controller.window() {
             let item = loop {
                 let Some((name, spec)) = pending.pop_front() else {
                     break None;
@@ -190,6 +204,7 @@ where
 
         match result {
             Ok(resolved) => {
+                controller.on_success(elapsed_ms);
                 stats.success_count += 1;
                 tracing::debug!("Preloaded {}@{}", name, resolved.version);
 
@@ -207,12 +222,27 @@ where
             }
             Err(e) => {
                 stats.failed_count += 1;
-                tracing::debug!("Failed to preload {}: {}", name, e);
+                match classify_error(&e) {
+                    FetchOutcome::RateLimited => {
+                        let new_window = controller.on_rate_limited();
+                        tracing::debug!(
+                            "Adaptive: decreased window to {} after error: {}",
+                            new_window,
+                            e
+                        );
+                    }
+                    FetchOutcome::PermanentError => {
+                        controller.on_error();
+                        tracing::debug!("Failed to preload {}: {}", name, e);
+                    }
+                }
             }
         }
     }
 
     stats.total_processed = processed.len();
+    stats.final_window = controller.window();
+    stats.decrease_count = controller.decrease_count;
 
     receiver.on_event(BuildEvent::PreloadComplete {
         success: stats.success_count,
@@ -226,12 +256,14 @@ where
         0
     };
     tracing::debug!(
-        "Preload stats: {} requests, min={}ms, max={}ms, avg={}ms, total={}ms",
+        "Preload stats: {} requests, min={}ms, max={}ms, avg={}ms, total={}ms, final_window={}, decreases={}",
         total,
         stats.min_request_ms,
         stats.max_request_ms,
         avg,
-        stats.total_request_ms
+        stats.total_request_ms,
+        stats.final_window,
+        stats.decrease_count,
     );
 
     stats
