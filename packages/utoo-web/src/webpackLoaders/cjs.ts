@@ -21,6 +21,27 @@ const RESOLUTION_EXTENSIONS = [
   "/index.json",
 ];
 
+const tryReadFile = (p: string): string | null => {
+  try {
+    return fs.readFileSync(p, "utf8") as string;
+  } catch {
+    return null;
+  }
+};
+
+const resolveWithExtensions = (
+  p: string,
+  skipIndexJsIfJs = false,
+): { code: string; id: string } | null => {
+  for (const ext of RESOLUTION_EXTENSIONS) {
+    if (skipIndexJsIfJs && ext === "/index.js" && p.endsWith(".js")) continue;
+    const candidate = p + ext;
+    const code = tryReadFile(candidate);
+    if (code !== null) return { code, id: candidate };
+  }
+  return null;
+};
+
 const executeModule = (
   moduleCode: string,
   moduleId: string,
@@ -33,8 +54,8 @@ const executeModule = (
   }
 
   const context = path.dirname(moduleId);
-
   let finalExports = {};
+
   const moduleRequire = (childId: string) =>
     loadModule(childId, context, importMaps, entrypoint);
   moduleRequire.resolve = (request: string) => request;
@@ -44,7 +65,6 @@ const executeModule = (
     installedModules[moduleId] = module;
   }
 
-  // Hack for entrypoint
   if (moduleId === entrypoint) {
     moduleCode = "self.Buffer = require('buffer').Buffer;" + moduleCode;
   }
@@ -84,14 +104,14 @@ const executeModule = (
   const originalWarn = console.warn;
   console.warn = (...args: any[]) => {
     const msg = args[0]?.toString() || "";
-    if (msg.includes("(SystemJS Error#W3")) {
-      return;
+    if (!msg.includes("(SystemJS Error#W3")) {
+      originalWarn.apply(console, args);
     }
-    originalWarn.apply(console, args);
   };
+
   try {
     System.set(moduleId, { default: finalExports });
-  } catch (e) {
+  } catch {
     // ignore
   } finally {
     console.warn = originalWarn;
@@ -108,80 +128,52 @@ const loadModule = (
   const cacheKey = `${context}:${id}`;
   if (resolutionCache[cacheKey]) {
     const cachedId = resolutionCache[cacheKey];
-    if (installedModules[cachedId]) {
-      return installedModules[cachedId].exports;
-    }
-    // Fast path: if we know the resolved path, try to load it directly
-    try {
-      const moduleCode = fs.readFileSync(cachedId, "utf8") as string;
-      return executeModule(moduleCode, cachedId, id, importMaps, entrypoint);
-    } catch {
-      // ignore
+    if (installedModules[cachedId]) return installedModules[cachedId].exports;
+
+    const code = tryReadFile(cachedId);
+    if (code !== null) {
+      return executeModule(code, cachedId, id, importMaps, entrypoint);
     }
   }
 
   // 1. Resolve
-  let resolvedId = id;
-  if (id.startsWith(".")) {
-    resolvedId = path.join(context, id);
-  }
+  let resolvedId = id.startsWith(".") ? path.join(context, id) : id;
 
   // 2. Check Cache (SystemJS)
-  let dependency = System.get(resolvedId);
-  if (dependency) return dependency.default;
-
-  if (id !== resolvedId) {
-    dependency = System.get(id);
-    if (dependency) return dependency.default;
-  }
+  const sysDef =
+    System.get(resolvedId) || (id !== resolvedId && System.get(id));
+  if (sysDef) return sysDef.default;
 
   // 3. Check Node Polyfills
-  if (id in nodePolyFills) {
-    // @ts-ignore
-    return nodePolyFills[id];
-  }
-  if (resolvedId in nodePolyFills) {
-    // @ts-ignore
-    return nodePolyFills[resolvedId];
-  }
+  if (id in nodePolyFills) return (nodePolyFills as any)[id];
+  if (resolvedId in nodePolyFills) return (nodePolyFills as any)[resolvedId];
 
   // 4. Check importMaps & FS
   let moduleCode = importMaps[resolvedId] || importMaps[id];
   let moduleId = importMaps[resolvedId] ? resolvedId : id;
 
   if (!moduleCode) {
-    // Try matching by stripping potential random prefix from absolute path
-    let longestKey = "";
-    let longestSanitizedKey = "";
-
+    let longestMatch: { key: string; sanitized: string } | null = null;
     for (const key in importMaps) {
-      // Normalize key for comparison (ignore leading ./ or /)
-      let sanitizedKey = key;
-      if (sanitizedKey.startsWith("./")) sanitizedKey = sanitizedKey.slice(2);
-      if (sanitizedKey.startsWith("/")) sanitizedKey = sanitizedKey.slice(1);
-      if (!sanitizedKey) continue;
+      const sanitized = key.replace(/^\.?\//, "");
+      if (!sanitized) continue;
 
-      const isSuffixOfId = id.startsWith("/") && id.endsWith(sanitizedKey);
-      const isSuffixOfResolvedId =
-        resolvedId.startsWith("/") && resolvedId.endsWith(sanitizedKey);
+      const isMatch = [id, resolvedId].some(
+        (p) =>
+          p.startsWith("/") &&
+          p.endsWith(sanitized) &&
+          p[p.length - sanitized.length - 1] === "/",
+      );
 
-      if (isSuffixOfId || isSuffixOfResolvedId) {
-        const checkId = isSuffixOfId ? id : resolvedId;
-        const prefixEnd = checkId.length - sanitizedKey.length;
-        // Ensure it's a true path segment match
-        if (prefixEnd === 0 || checkId[prefixEnd - 1] === "/") {
-          if (key.length > longestKey.length) {
-            longestKey = key;
-            longestSanitizedKey = sanitizedKey;
-          }
-        }
+      if (isMatch && (!longestMatch || key.length > longestMatch.key.length)) {
+        longestMatch = { key, sanitized };
       }
     }
-    if (longestKey) {
-      moduleCode = importMaps[longestKey];
-      // Important: Use the absolute path as moduleId so that context is correctly absolute for relative requires
+
+    if (longestMatch) {
+      moduleCode = importMaps[longestMatch.key];
       moduleId =
-        id.startsWith("/") && id.endsWith(longestSanitizedKey)
+        id.startsWith("/") && id.endsWith(longestMatch.sanitized)
           ? id
           : resolvedId;
     }
@@ -195,100 +187,63 @@ const loadModule = (
       let currentDir = context;
       while (true) {
         if (path.basename(currentDir) !== "node_modules") {
-          const nodeModulesPath = path.join(currentDir, "node_modules");
-          if (!searchPaths.includes(nodeModulesPath)) {
-            searchPaths.push(nodeModulesPath);
-          }
+          const nmPath = path.join(currentDir, "node_modules");
+          if (!searchPaths.includes(nmPath)) searchPaths.push(nmPath);
         }
         const parent = path.dirname(currentDir);
         if (parent === currentDir) break;
         currentDir = parent;
       }
-      // Ensure cwd/node_modules is always included
-      const cwd = nodePolyFills.process.cwd();
-      const cwdNodeModules = path.join(cwd, "node_modules");
-      if (!searchPaths.includes(cwdNodeModules)) {
-        searchPaths.push(cwdNodeModules);
-      }
+      const cwdNm = path.join(nodePolyFills.process.cwd(), "node_modules");
+      if (!searchPaths.includes(cwdNm)) searchPaths.push(cwdNm);
       searchPathsCache[context] = searchPaths;
     }
 
     for (const nodeModulesDir of searchPaths) {
       const nodeModulesPath = path.join(nodeModulesDir, id);
+      const pkgPath = path.join(nodeModulesPath, "package.json");
 
-      // Check package.json first
-      const pkgJsonPath = path.join(nodeModulesPath, "package.json");
-      let pkg;
-      try {
-        const content = fs.readFileSync(pkgJsonPath, "utf8") as string;
-        pkg = JSON.parse(content);
-        pkgJsonCache[pkgJsonPath] = pkg;
-      } catch (e) {
-        // ignore
-      }
-
-      if (pkg) {
-        try {
-          const mainField = pkg.main;
-          if (mainField) {
-            const resolvedMain = path.resolve(nodeModulesPath, mainField);
-            for (const ext of RESOLUTION_EXTENSIONS) {
-              const candidate = resolvedMain + ext;
-              try {
-                const content = fs.readFileSync(candidate, "utf8") as string;
-                moduleCode = content;
-                resolvedId = candidate;
-                moduleId = candidate;
-                break;
-              } catch {
-                // ignore
-              }
-            }
-          }
-        } catch (e) {
-          // ignore
-        }
-      }
-
-      if (!moduleCode) {
-        for (const ext of RESOLUTION_EXTENSIONS) {
-          const p = nodeModulesPath + ext;
+      // Check package.json main
+      let pkgMain;
+      if (!pkgJsonCache[pkgPath]) {
+        const json = tryReadFile(pkgPath);
+        if (json) {
           try {
-            const content = fs.readFileSync(p, "utf8") as string;
-            moduleCode = content;
-            resolvedId = p;
-            moduleId = p;
-            break;
-          } catch {
-            // ignore
-          }
+            pkgJsonCache[pkgPath] = JSON.parse(json);
+          } catch {}
+        }
+      }
+      if (pkgJsonCache[pkgPath]?.main) {
+        pkgMain = path.resolve(nodeModulesPath, pkgJsonCache[pkgPath].main);
+        const res = resolveWithExtensions(pkgMain);
+        if (res) {
+          moduleCode = res.code;
+          moduleId = resolvedId = res.id;
+          break;
         }
       }
 
-      if (moduleCode) break;
+      // Check direct file/directory
+      const res = resolveWithExtensions(nodeModulesPath);
+      if (res) {
+        moduleCode = res.code;
+        moduleId = resolvedId = res.id;
+        break;
+      }
     }
   }
 
   // Fallback: Try resolving absolute or relative path
   if (!moduleCode && (id.startsWith("/") || id.startsWith("."))) {
-    for (const ext of RESOLUTION_EXTENSIONS) {
-      if (ext === "/index.js" && id.endsWith(".js")) continue;
-      // Use resolvedId which handles both absolute paths and relative paths joined with context
-      const p = resolvedId + ext;
-      try {
-        moduleCode = fs.readFileSync(p, "utf8") as string;
-        resolvedId = p;
-        moduleId = p;
-        break;
-      } catch (e) {
-        // ignore
-      }
+    const res = resolveWithExtensions(resolvedId, id.endsWith(".js"));
+    if (res) {
+      moduleCode = res.code;
+      moduleId = resolvedId = res.id;
     }
   }
 
   if (moduleCode) {
-    const cacheKey = `${context}:${id}`;
-    resolutionCache[cacheKey] = moduleId;
+    resolutionCache[`${context}:${id}`] = moduleId;
     return executeModule(moduleCode, moduleId, id, importMaps, entrypoint);
   }
 
@@ -298,9 +253,7 @@ const loadModule = (
       `CWD: ${nodePolyFills.process.cwd()}. ` +
       `Sample ImportMaps keys: ${Object.keys(importMaps).slice(0, 5).join(", ")}`,
   );
-
   console.error(error);
-
   throw error;
 };
 
@@ -308,11 +261,9 @@ export async function cjs(
   entrypoint: string,
   importMaps: Record<string, string>,
 ) {
-  // Clear caches to avoid stale data across runs
-  for (const key in statCache) delete statCache[key];
-  for (const key in pkgJsonCache) delete pkgJsonCache[key];
-  for (const key in resolutionCache) delete resolutionCache[key];
-  for (const key in searchPathsCache) delete searchPathsCache[key];
+  [statCache, pkgJsonCache, resolutionCache, searchPathsCache].forEach((c) => {
+    for (const key in c) delete c[key];
+  });
 
   await Promise.all(
     Object.entries(importMaps).map(async ([k, v]) => {
@@ -322,13 +273,11 @@ export async function cjs(
           if (response.ok) {
             importMaps[k] = await response.text();
           } else {
-            console.error(
-              `Failed to fetch loader '${k}' from ${v}: ${response.status} ${response.statusText}`,
-            );
+            console.error(`Failed to fetch loader '${k}': ${response.status}`);
             delete importMaps[k];
           }
         } catch (error) {
-          console.error(`Error fetching loader '${k}' from ${v}:`, error);
+          console.error(`Error fetching loader '${k}':`, error);
           delete importMaps[k];
         }
       }
@@ -336,7 +285,6 @@ export async function cjs(
   );
 
   // @ts-ignore
-  // a hack for loader-runner resolving
   self.__systemjs_require__ = (id: string) =>
     loadModule(id, path.dirname(entrypoint), importMaps, entrypoint);
   // @ts-ignore
