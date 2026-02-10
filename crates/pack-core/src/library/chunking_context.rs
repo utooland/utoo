@@ -273,22 +273,22 @@ impl LibraryChunkingContext {
         chunk: Vc<Box<dyn Chunk>>,
         evaluatable_assets: Vc<EvaluatableAssets>,
     ) -> Result<Vc<Box<dyn OutputAsset>>> {
+        let chunk = chunk.to_resolved().await?;
         Ok(
-            if let Some(ecmascript_chunk) =
-                Vc::try_resolve_downcast_type::<EcmascriptChunk>(chunk).await?
+            if let Some(ecmascript_chunk) = ResolvedVc::try_downcast_type::<EcmascriptChunk>(chunk)
             {
                 let ident =
-                    self.ecmascript_chunk_ident_with_filename_template(ident, ecmascript_chunk);
+                    self.ecmascript_chunk_ident_with_filename_template(ident, *ecmascript_chunk);
                 Vc::upcast(EcmascriptLibraryEvaluateChunk::new(
                     self,
                     ident,
-                    ecmascript_chunk,
+                    *ecmascript_chunk,
                     evaluatable_assets,
                 ))
             } else if let Some(output_asset) =
-                Vc::try_resolve_sidecast::<Box<dyn OutputAsset>>(chunk).await?
+                ResolvedVc::try_sidecast::<Box<dyn OutputAsset>>(chunk)
             {
-                output_asset
+                *output_asset
             } else {
                 bail!("Unable to generate output asset for chunk");
             },
