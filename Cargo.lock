@@ -8312,9 +8312,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-fs-ext"
-version = "0.7.3"
+version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e76a6a499b9517434351b923ebe4d3326c383ad8f415e946488085c947a64b04"
+checksum = "912f3435ecb4330fed82d1b3a8cddf6354ea6472d40fadfb9063a3e9da1c6dec"
 dependencies = [
  "bitflags 2.9.4",
  "cfg-if",
@@ -9796,6 +9796,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
+ "swc_core 54.0.0",
  "tar",
  "tokio",
  "tokio-fs-ext",
