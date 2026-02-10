@@ -580,6 +580,9 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
             });
 
             for edge_info in unresolved {
+                receiver.on_event(BuildEvent::Resolving {
+                    name: &edge_info.name,
+                });
                 match process_dependency(graph, registry, node_index, &edge_info, legacy_peer_deps)
                     .await?
                 {

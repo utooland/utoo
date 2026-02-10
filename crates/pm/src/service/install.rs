@@ -219,7 +219,9 @@ impl InstallService {
                 (lock, None)
             } else {
                 // No lock: full pipeline flow (resolve + concurrent download/clone)
+                start_progress_bar();
                 let result = super::pipeline::resolve_with_pipeline(root_path).await?;
+                finish_progress_bar("package-lock.json resolved");
                 (result.package_lock, Some(result.handles))
             };
 

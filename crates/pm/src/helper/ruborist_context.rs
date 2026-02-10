@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use utoo_ruborist::service::{BuildDepsOptions, Glob, UnifiedRegistry};
 
+use crate::service::pipeline::{PipelineChannels, PipelineReceiver};
 use crate::util::cache::get_cache_dir;
 use crate::util::config::{get_legacy_peer_deps, get_manifests_concurrency_limit, get_registry};
 use crate::util::logger::ProgressReceiver;
@@ -46,6 +47,19 @@ impl Context {
             glob: TokioGlob,
             receiver,
         }
+    }
+
+    /// Create BuildDepsOptions with PipelineReceiver for concurrent download/clone.
+    /// Returns (options, channels) where channels are used to start pipeline workers.
+    pub async fn pipeline_deps_options(
+        cwd: PathBuf,
+    ) -> (
+        BuildDepsOptions<GlobImpl, PipelineReceiver<ProgressReceiver>>,
+        PipelineChannels,
+    ) {
+        let (receiver, channels) = PipelineReceiver::new(ProgressReceiver);
+        let options = Self::deps_options(cwd, receiver).await;
+        (options, channels)
     }
 
     /// Resolve dependency tree with plain ProgressReceiver. Returns PackageLock.
