@@ -16,7 +16,7 @@ use crate::util::downloader::download_count;
 
 /// Print pipeline summary stats.
 pub fn print_pipeline_summary() {
-    tracing::info!(
+    tracing::debug!(
         "Pipeline stats: downloaded={}, cloned={}",
         download_count(),
         clone_count(),
