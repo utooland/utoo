@@ -69,7 +69,7 @@ impl<R: EventReceiver> PipelineReceiver<R> {
 impl<R: EventReceiver> EventReceiver for PipelineReceiver<R> {
     fn on_event(&self, event: BuildEvent<'_>) {
         // Forward to inner receiver first (for progress bar updates)
-        self.inner.on_event(event);
+        self.inner.on_event(event.clone());
 
         match event {
             BuildEvent::PackageResolved(info)

@@ -8,7 +8,7 @@ use std::path::Path;
 pub use crate::model::tarball_info::PackageTarballInfo;
 
 /// Events emitted during dependency resolution.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum BuildEvent<'a> {
     /// Starting preload phase with N initial dependencies.
     PreloadStart { count: usize },

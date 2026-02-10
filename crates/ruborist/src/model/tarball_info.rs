@@ -8,7 +8,7 @@ use crate::model::manifest::VersionManifest;
 /// A lightweight structure containing only the fields needed for
 /// downloading and verifying a package tarball. Uses references to
 /// avoid cloning data from the source manifest.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct PackageTarballInfo<'a> {
     /// Package name
     pub name: &'a str,
