@@ -21,10 +21,11 @@ pub async fn init(yes: bool, cwd: Option<&Path>) -> Result<()> {
         bail!("package.json already exists in {}", cwd.display());
     }
 
+    let cwd_clone = cwd.clone();
     let pkg = if yes {
-        build_default_package(&cwd)
+        tokio::task::spawn_blocking(move || build_default_package(&cwd_clone)).await?
     } else {
-        build_interactive_package(&cwd)?
+        tokio::task::spawn_blocking(move || build_interactive_package(&cwd_clone)).await??
     };
 
     let content = serde_json::to_string_pretty(&pkg)? + "\n";
@@ -33,11 +34,18 @@ pub async fn init(yes: bool, cwd: Option<&Path>) -> Result<()> {
     println!("{content}");
 
     if !yes {
-        let confirm: String = Input::new()
-            .with_prompt("Is this OK?")
-            .default("yes".to_string())
-            .interact_text()?;
-        if confirm.trim().to_lowercase() != "yes" && confirm.trim().to_lowercase() != "y" {
+        let confirmed = tokio::task::spawn_blocking(|| {
+            let confirm: String = Input::new()
+                .with_prompt("Is this OK?")
+                .default("yes".to_string())
+                .interact_text()?;
+            Ok::<bool, anyhow::Error>(matches!(
+                confirm.trim().to_lowercase().as_str(),
+                "yes" | "y"
+            ))
+        })
+        .await??;
+        if !confirmed {
             println!("Aborted.");
             return Ok(());
         }
