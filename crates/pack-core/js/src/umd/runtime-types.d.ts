@@ -53,6 +53,7 @@ type DynamicExport = (
 ) => void;
 
 type LoadChunkByUrl = (chunkUrl: ChunkUrl) => Promise<any> | undefined;
+type LoadScript = (scriptUrl: string) => Promise<void>;
 
 type ModuleCache<M> = Record<ModuleId, M>;
 // TODO properly type values here
@@ -119,6 +120,7 @@ interface TurbopackBaseContext<M> {
   n: ExportNamespace;
   m: Module;
   L: LoadChunkByUrl;
+  S: LoadScript;
   c: ModuleCache<M>;
   M: ModuleFactories;
   g: typeof globalThis;

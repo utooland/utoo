@@ -133,6 +133,36 @@ function loadChunkByUrl(
 }
 browserContextPrototype.L = loadChunkByUrl;
 
+const loadedScripts = new Map<string, Promise<void>>();
+
+/**
+ * Load an external script by creating a <script> tag.
+ * This is used for script externals that need to be loaded from CDN or other external sources.
+ */
+function loadScript(
+  this: TurbopackBrowserBaseContext<Module>,
+  scriptUrl: string,
+): Promise<void> {
+  // Return cached promise if script is already loading or loaded
+  let promise = loadedScripts.get(scriptUrl);
+  if (promise) {
+    return promise;
+  }
+
+  promise = new Promise<void>((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = scriptUrl;
+    script.onload = () => resolve();
+    script.onerror = () =>
+      reject(new Error(`Failed to load script: ${scriptUrl}`));
+    document.head.appendChild(script);
+  });
+
+  loadedScripts.set(scriptUrl, promise);
+  return promise;
+}
+browserContextPrototype.S = loadScript;
+
 // Do not make this async. React relies on referential equality of the returned Promise.
 function loadChunkByUrlInternal(
   sourceType: SourceType,
