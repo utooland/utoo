@@ -368,14 +368,15 @@ pub async fn get_client_module_options_context(
     let enable_foreign_postcss_transform = postcss_foreign_transform_options
         .map(|postcss_foreign_transform_options| postcss_foreign_transform_options.resolved_cell());
 
+    let source_maps = if *config.source_maps().await? {
+        SourceMapsType::Full
+    } else {
+        SourceMapsType::None
+    };
     let module_options_context = ModuleOptionsContext {
         ecmascript: EcmascriptOptionsContext {
             enable_typeof_window_inlining: Some(TypeofWindow::Object),
-            source_maps: if *config.source_maps().await? {
-                SourceMapsType::Full
-            } else {
-                SourceMapsType::None
-            },
+            source_maps,
             import_externals: *config.import_externals().await?,
             enable_typescript_transform: Some(
                 TypescriptTransformOptions::default().resolved_cell(),
@@ -385,11 +386,7 @@ pub async fn get_client_module_options_context(
             ..Default::default()
         },
         css: CssOptionsContext {
-            source_maps: if *config.source_maps().await? {
-                SourceMapsType::Full
-            } else {
-                SourceMapsType::None
-            },
+            source_maps,
             module_css_condition: Some(module_styles_rule_condition()),
             ..Default::default()
         },
