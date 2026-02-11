@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 use cmd::config::{handle_config_get, handle_config_list, handle_config_set};
 use cmd::deps::build_deps;
 use cmd::execute::execute;
+use cmd::init::init;
 use cmd::install::{install, install_global_package, update_packages};
 use cmd::link::{link_current_to_global, link_global_to_local};
 use cmd::list::list_dependencies;
@@ -30,11 +31,11 @@ mod util;
 
 use crate::constants::cmd::{
     CLEAN_ABOUT, CLEAN_ALIAS, CLEAN_NAME, CONFIG_ABOUT, CONFIG_ALIAS, CONFIG_NAME, DEPS_ABOUT,
-    DEPS_ALIAS, DEPS_NAME, EXECUTE_ABOUT, EXECUTE_ALIAS, EXECUTE_NAME, INSTALL_ABOUT,
-    INSTALL_ALIAS, INSTALL_NAME, LINK_ABOUT, LINK_ALIAS, LINK_NAME, LIST_ALIAS, LIST_NAME,
-    REBUILD_ABOUT, REBUILD_ALIAS, REBUILD_NAME, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT,
-    UNINSTALL_ALIAS, UNINSTALL_NAME, UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT,
-    VIEW_ALIAS, VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME,
+    DEPS_ALIAS, DEPS_NAME, EXECUTE_ABOUT, EXECUTE_ALIAS, EXECUTE_NAME, INIT_ABOUT, INIT_ALIAS,
+    INIT_NAME, INSTALL_ABOUT, INSTALL_ALIAS, INSTALL_NAME, LINK_ABOUT, LINK_ALIAS, LINK_NAME,
+    LIST_ALIAS, LIST_NAME, REBUILD_ABOUT, REBUILD_ALIAS, REBUILD_NAME, RUN_ALIAS, RUN_NAME,
+    UNINSTALL_ABOUT, UNINSTALL_ALIAS, UNINSTALL_NAME, UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME,
+    VIEW_ABOUT, VIEW_ALIAS, VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME,
 };
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
 use crate::helper::workspace::update_cwd_to_root;
@@ -247,6 +248,14 @@ enum Commands {
     Config {
         #[command(subcommand)]
         command: ConfigCommands,
+    },
+
+    /// Create a package.json file
+    #[command(name = INIT_NAME, alias = INIT_ALIAS, about = INIT_ABOUT)]
+    Init {
+        /// Skip prompts and use defaults
+        #[arg(long, short)]
+        yes: bool,
     },
 }
 
@@ -476,6 +485,10 @@ async fn async_main() -> Result<()> {
                     log_time_end(&format!("'{}' linked to local", packages.join(", ")));
                 }
             }
+        }
+        Some(Commands::Init { yes }) => {
+            init(yes, None).await?;
+            log_time_end("package.json created");
         }
         Some(Commands::Config { command }) => match command {
             ConfigCommands::Set { key, value, global } => {
