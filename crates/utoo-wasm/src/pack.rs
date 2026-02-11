@@ -350,22 +350,7 @@ pub async fn build() -> std::result::Result<JsValue, wasm_bindgen::JsError> {
                 })
                 .await?;
 
-            tracing::info!("all project entrypoints wrote to disk.");
-
-            tracing::info!(
-                "pack tasks with {} apps {} libraries finished in {:?}",
-                entrypoints
-                    .apps
-                    .as_ref()
-                    .map(|apps| apps.0.len())
-                    .unwrap_or_default(),
-                entrypoints
-                    .libraries
-                    .as_ref()
-                    .map(|libraries| libraries.0.len())
-                    .unwrap_or_default(),
-                start.elapsed()
-            );
+            tracing::info!("build finished in {:?}", start.elapsed());
 
             let result = TurbopackResult {
                 issues: issues.iter().map(|i| Issue::from(&**i)).collect(),
@@ -417,7 +402,8 @@ pub async fn project_entrypoints_subscribe(
             turbo_tasks_clone.spawn_root_task(move || {
                 let tx = tx.clone();
                 async move {
-                    tracing::debug!("entrypointsSubscribe root task executing");
+                    let start = Instant::now();
+                    tracing::info!("dev build started...");
 
                     let entrypoints_with_issues_op =
                         get_all_written_entrypoints_with_issues_operation(container);
@@ -430,6 +416,8 @@ pub async fn project_entrypoints_subscribe(
                         .read_strongly_consistent()
                         .await?;
                     effects.apply().await?;
+
+                    tracing::info!("dev build finished in {:?}", start.elapsed());
 
                     let turbopack_result = TurbopackResult {
                         issues: issues.iter().map(|i| Issue::from(&**i)).collect(),

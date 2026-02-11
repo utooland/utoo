@@ -2,5 +2,5 @@
   "version": 3,
   "sources": [],
   "sections": [
-    {"offset": {"line": 3, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/define/complex/input/index.ts"],"sourcesContent":["console.log(RoutePathEnum);\nconsole.log(RoutePathEnum.TEST20);"],"names":["console","log","RoutePathEnum","TEST20"],"mappings":"AAAAA,QAAQC,GAAG,CAACC;AACZF,QAAQC,GAAG,CAACC,cAAcC,MAAM"}}]
+    {"offset": {"line": 3, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/define/complex/input/index.ts"],"sourcesContent":["console.log(RoutePathEnum);\nconsole.log(RoutePathEnum.TEST20);"],"names":["console","log","TEST20"],"mappings":"AAAAA,QAAQC,GAAG;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;AACXD,QAAQC,GAAG,CAAC;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;GAAcC,MAAM"}}]
 }

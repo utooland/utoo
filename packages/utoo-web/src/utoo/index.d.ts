@@ -25,6 +25,22 @@ export class DirEntry {
     type: DirEntryType;
 }
 
+export function ERR_ABORT(): string;
+
+export function ERR_INVALID_STATE(): string;
+
+export function ERR_KEY_ALREADY_EXISTS(): string;
+
+export function ERR_NOT_ALLOWED(): string;
+
+export function ERR_NOT_FOUND(): string;
+
+export function ERR_NO_MODIFICATION_ALLOWED(): string;
+
+export function ERR_QUOTA_EXCEEDED(): string;
+
+export function ERR_TYPE_MISMATCH(): string;
+
 export class Fs {
     private constructor();
     free(): void;
@@ -183,8 +199,29 @@ export interface InitOutput {
     readonly workerCreated: (a: number) => void;
     readonly getWasmMemory: () => any;
     readonly getWasmModule: () => any;
+    readonly ERR_ABORT: () => [number, number];
+    readonly ERR_INVALID_STATE: () => [number, number];
+    readonly ERR_KEY_ALREADY_EXISTS: () => [number, number];
+    readonly ERR_NOT_ALLOWED: () => [number, number];
+    readonly ERR_NOT_FOUND: () => [number, number];
+    readonly ERR_NO_MODIFICATION_ALLOWED: () => [number, number];
+    readonly ERR_QUOTA_EXCEEDED: () => [number, number];
+    readonly ERR_TYPE_MISMATCH: () => [number, number];
     readonly initLogFilter: (a: number, b: number) => void;
     readonly init_pack: () => void;
+    readonly __wbg_project_free: (a: number, b: number) => void;
+    readonly project_build: () => any;
+    readonly project_cwd: () => [number, number];
+    readonly project_deps: (a: number, b: number, c: number) => any;
+    readonly project_entrypointsSubscribe: (a: any) => any;
+    readonly project_gzip: (a: any) => any;
+    readonly project_hmrEvents: (a: number, b: number, c: any) => any;
+    readonly project_init: (a: number, b: number) => void;
+    readonly project_install: (a: number, b: number, c: number) => any;
+    readonly project_setCwd: (a: number, b: number) => void;
+    readonly project_sigMd5: (a: any) => any;
+    readonly project_updateInfoSubscribe: (a: number, b: any) => void;
+    readonly project_writeAllToDisk: (a: any) => void;
     readonly __wbg_direntry_free: (a: number, b: number) => void;
     readonly __wbg_fs_free: (a: number, b: number) => void;
     readonly __wbg_get_direntry_name: (a: number) => [number, number];
@@ -216,19 +253,6 @@ export interface InitOutput {
     readonly fs_write: (a: number, b: number, c: any) => any;
     readonly fs_writeString: (a: number, b: number, c: number, d: number) => any;
     readonly fs_writeSync: (a: number, b: number, c: any) => [number, number];
-    readonly __wbg_project_free: (a: number, b: number) => void;
-    readonly project_build: () => any;
-    readonly project_cwd: () => [number, number];
-    readonly project_deps: (a: number, b: number, c: number) => any;
-    readonly project_entrypointsSubscribe: (a: any) => any;
-    readonly project_gzip: (a: any) => any;
-    readonly project_hmrEvents: (a: number, b: number, c: any) => any;
-    readonly project_init: (a: number, b: number) => void;
-    readonly project_install: (a: number, b: number, c: number) => any;
-    readonly project_setCwd: (a: number, b: number) => void;
-    readonly project_sigMd5: (a: any) => any;
-    readonly project_updateInfoSubscribe: (a: number, b: any) => void;
-    readonly project_writeAllToDisk: (a: any) => void;
     readonly rust_mi_get_default_heap: () => number;
     readonly rust_mi_get_thread_id: () => number;
     readonly rust_mi_set_default_heap: (a: number) => void;

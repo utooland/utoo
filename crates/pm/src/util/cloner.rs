@@ -1,12 +1,74 @@
 use anyhow::{Context, Result};
+use once_cell::sync::Lazy;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
+use super::downloader::download_to_cache;
 use super::json::load_package_json_from_path;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+use super::oncemap::OnceMap;
 use super::retry::create_retry_strategy;
 use crate::fs;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
 use tokio_retry::Retry;
+
+/// Global clone cache shared between pipeline and install phases.
+/// Key: target path, Value: ()
+static CLONE_CACHE: Lazy<OnceMap<String, ()>> = Lazy::new(OnceMap::new);
+
+/// Number of clones completed.
+static CLONE_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// Returns the number of fresh clones performed.
+pub fn clone_count() -> usize {
+    CLONE_COUNT.load(Ordering::Relaxed)
+}
+
+/// Wait for a pending clone at the given target path to complete (if any).
+///
+/// Used by the pipeline clone worker to ensure parent packages are
+/// cloned before their children.
+pub async fn wait_clone_if_pending(target_path: &str) {
+    CLONE_CACHE.wait_if_pending(&target_path.to_string()).await;
+}
+
+/// Clone a package to target path, downloading to cache first if needed.
+///
+/// Uses global `OnceMap` for deduplication: the same target path is only cloned once,
+/// even when called concurrently from pipeline workers and the install phase.
+pub async fn clone_package_once(
+    name: &str,
+    version: &str,
+    tarball_url: &str,
+    target_path: &Path,
+) -> bool {
+    let key = target_path.to_string_lossy().to_string();
+    let name = name.to_string();
+    let version = version.to_string();
+    let tarball_url = tarball_url.to_string();
+    let target_path = target_path.to_path_buf();
+
+    CLONE_CACHE
+        .get_or_init(key, || async move {
+            let cache_path = download_to_cache(&name, &version, &tarball_url).await?;
+            clone_package(&cache_path, &target_path, &name, &version)
+                .await
+                .inspect_err(|e| {
+                    tracing::warn!(
+                        "Clone failed: {}@{} to {}: {}",
+                        name,
+                        version,
+                        target_path.display(),
+                        e
+                    )
+                })
+                .ok()?;
+
+            CLONE_COUNT.fetch_add(1, Ordering::Relaxed);
+            tracing::debug!("Cloned: {}@{} to {}", name, version, target_path.display());
+            Some(())
+        })
+        .await
+        .is_some()
+}
 
 #[cfg(target_os = "macos")]
 use libc::clonefile;
@@ -15,37 +77,42 @@ use std::ffi::CString;
 #[cfg(target_os = "macos")]
 use std::os::unix::ffi::OsStrExt;
 
-#[cfg(target_os = "linux")]
-mod linux_clone {
+#[cfg(not(target_os = "macos"))]
+mod hardlink_clone {
     use anyhow::{Context, Result};
+    use std::collections::HashSet;
     use std::fs;
     use std::io;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
-    // Check if the package has install scripts (sync version)
+    struct CloneEntry {
+        src: PathBuf,
+        dst: PathBuf,
+    }
+
     fn has_install_script_sync(src: &Path) -> bool {
         src.parent().is_some_and(|parent| {
             fs::metadata(parent.join("_hasInstallScript")).is_ok_and(|m| m.is_file())
         })
     }
 
-    // Copy a single file, preserving permissions (sync version)
     fn copy_file_sync(src: &Path, dst: &Path) -> io::Result<()> {
         fs::copy(src, dst)?;
-        // Preserve permissions
-        let src_perms = fs::metadata(src)?.permissions();
-        fs::set_permissions(dst, src_perms)?;
+        #[cfg(unix)]
+        {
+            let src_perms = fs::metadata(src)?.permissions();
+            fs::set_permissions(dst, src_perms)?;
+        }
         Ok(())
     }
 
-    // Recursive directory copy with hardlink strategy (sync version)
-    fn clone_dir_sync(src: &Path, dst: &Path, use_copy: bool) -> io::Result<()> {
-        // Create destination directory
-        if let Err(e) = fs::create_dir(dst)
-            && e.kind() != io::ErrorKind::AlreadyExists
-        {
-            return Err(e);
-        }
+    fn collect_entries(
+        src: &Path,
+        dst: &Path,
+        files: &mut Vec<CloneEntry>,
+        dirs: &mut Vec<PathBuf>,
+    ) -> io::Result<()> {
+        dirs.push(dst.to_path_buf());
 
         for entry in fs::read_dir(src)? {
             let entry = entry?;
@@ -54,25 +121,21 @@ mod linux_clone {
             let target_path = dst.join(&file_name);
 
             if entry.file_type()?.is_dir() {
-                clone_dir_sync(&entry_path, &target_path, use_copy)?;
-            } else if use_copy {
-                // For packages with install scripts, always copy
-                copy_file_sync(&entry_path, &target_path)?;
+                collect_entries(&entry_path, &target_path, files, dirs)?;
             } else {
-                // Try hardlink first
-                if fs::hard_link(&entry_path, &target_path).is_err() {
-                    // Fallback to copy
-                    copy_file_sync(&entry_path, &target_path)?;
-                }
+                files.push(CloneEntry {
+                    src: entry_path,
+                    dst: target_path,
+                });
             }
         }
 
         Ok(())
     }
 
-    // Entry point: clone directory using spawn_blocking
+    /// Clone directory using spawn_blocking for sync I/O.
+    /// Uses hardlink when possible, falls back to copy.
     pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
-        // Pre-format for error message (avoid clone)
         let err_msg = format!("Failed to clone {} to {}", src.display(), dst.display());
         let src = src.to_path_buf();
         let dst = dst.to_path_buf();
@@ -85,143 +148,35 @@ mod linux_clone {
                 ));
             }
 
-            // Create destination directory (entry point)
-            fs::create_dir_all(&dst)?;
-
-            // Check if the package has install scripts
             let use_copy = has_install_script_sync(&src);
 
-            // Clone directory recursively
-            clone_dir_sync(&src, &dst, use_copy)
+            // Phase 1: Collect all files and directories
+            let mut files = Vec::new();
+            let mut dirs = Vec::new();
+            collect_entries(&src, &dst, &mut files, &mut dirs)?;
+
+            // Phase 2: Create all directories
+            let mut created_dirs = HashSet::new();
+            for dir in &dirs {
+                if created_dirs.insert(dir.clone())
+                    && let Err(e) = fs::create_dir_all(dir)
+                    && e.kind() != io::ErrorKind::AlreadyExists
+                {
+                    return Err(e);
+                }
+            }
+
+            // Phase 3: Clone files (hardlink first, fallback to copy)
+            for entry in &files {
+                if !use_copy && fs::hard_link(&entry.src, &entry.dst).is_ok() {
+                    continue;
+                }
+                copy_file_sync(&entry.src, &entry.dst)?;
+            }
+            Ok(())
         })
         .await?
         .with_context(|| err_msg)
-    }
-}
-
-#[cfg(target_os = "windows")]
-mod windows_clone {
-    use crate::fs;
-    use anyhow::{Context, Result};
-    use std::path::Path;
-
-    // Copy a single file using regular copy
-    async fn fast_copy_file(src: &Path, dst: &Path) -> Result<()> {
-        crate::fs::copy(src, dst).await.with_context(|| {
-            format!(
-                "Failed to copy file from {} to {}",
-                src.display(),
-                dst.display()
-            )
-        })?;
-        Ok(())
-    }
-
-    // Fast copy directory (internal recursive version)
-    async fn fast_copy_inner(src: &Path, dst: &Path) -> Result<()> {
-        // Use create_dir since parent already exists
-        if let Err(e) = tokio::fs::create_dir(dst).await
-            && e.kind() != std::io::ErrorKind::AlreadyExists
-        {
-            return Err(e.into());
-        }
-
-        // Copy all files in the directory
-        let mut read_dir = fs::read_dir(src).await?;
-        while let Some(entry) = read_dir.next_entry().await? {
-            let entry_path = entry.path();
-            let file_name = entry_path.file_name().unwrap();
-            let target_path = dst.join(file_name);
-
-            if entry.metadata().await?.is_dir() {
-                Box::pin(fast_copy_inner(&entry_path, &target_path)).await?;
-            } else {
-                fast_copy_file(&entry_path, &target_path).await?;
-            }
-        }
-        Ok(())
-    }
-
-    // Fast copy entry point
-    async fn fast_copy(src: &Path, dst: &Path) -> Result<()> {
-        fs::create_dir_all(dst).await?;
-        fast_copy_inner(src, dst).await
-    }
-
-    // Check if the package has install scripts
-    async fn has_install_script(src: &Path) -> bool {
-        if let Some(parent) = src.parent() {
-            let flag_path = parent.join("_hasInstallScript");
-            if let Ok(metadata) = fs::metadata(&flag_path).await {
-                return metadata.is_file();
-            }
-        }
-        false
-    }
-
-    // Internal recursive clone (parent directory already exists)
-    async fn clone_dir_inner(src: &Path, dst: &Path) -> Result<()> {
-        // Use create_dir since parent already exists
-        if let Err(e) = tokio::fs::create_dir(dst).await
-            && e.kind() != std::io::ErrorKind::AlreadyExists
-        {
-            return Err(e.into());
-        }
-
-        let mut read_dir = fs::read_dir(src).await?;
-        while let Some(entry) = read_dir.next_entry().await? {
-            let entry_path = entry.path();
-            let file_name = entry_path.file_name().unwrap();
-            let target_path = dst.join(file_name);
-
-            if entry.metadata().await?.is_dir() {
-                Box::pin(clone_dir_inner(&entry_path, &target_path)).await?;
-            } else {
-                // Try hardlink first for files in packages without install scripts
-                if let Err(e) = fs::hard_link(&entry_path, &target_path).await {
-                    tracing::debug!(
-                        "Failed to create hardlink for file from {} to {}: {}, using regular copy",
-                        entry_path.display(),
-                        target_path.display(),
-                        e
-                    );
-                    // If hardlink fails, fallback to regular copy
-                    crate::fs::copy(&entry_path, &target_path)
-                        .await
-                        .with_context(|| {
-                            format!(
-                                "Failed to copy file from {} to {}",
-                                entry_path.display(),
-                                target_path.display()
-                            )
-                        })?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
-        if !fs::metadata(src).await?.is_dir() {
-            return Err(anyhow::anyhow!("Source is not a directory"));
-        }
-
-        // Create destination directory (entry point, use create_dir_all)
-        fs::create_dir_all(dst).await?;
-
-        // Check if the package has install scripts
-        if has_install_script(src).await {
-            tracing::debug!(
-                "Package has install scripts, using fast copy for directory {} to {}",
-                src.display(),
-                dst.display()
-            );
-            return fast_copy_inner(src, dst).await;
-        }
-
-        // For directories without install scripts, use hardlink strategy
-        clone_dir_inner(src, dst).await
     }
 }
 
@@ -412,34 +367,14 @@ async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
         .await?;
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     {
         Retry::spawn(create_retry_strategy(), || async {
-            linux_clone::clone_dir(&real_src, dst).await?;
+            hardlink_clone::clone_dir(&real_src, dst).await?;
             tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
             Ok::<(), anyhow::Error>(())
         })
         .await?;
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        use super::retry::create_retry_strategy;
-        use tokio_retry::Retry;
-
-        Retry::spawn(create_retry_strategy(), || async {
-            windows_clone::clone_dir(&real_src, dst).await?;
-            tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
-            Ok::<(), anyhow::Error>(())
-        })
-        .await?;
-    }
-
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-    {
-        // For other platforms, use standard recursive copy
-        copy_dir_all(&real_src, dst).await?;
-        tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
     }
 
     Ok(())
@@ -478,27 +413,6 @@ pub async fn clone_package(src: &Path, dst: &Path, name: &str, version: &str) ->
         }
         false => clone(src, dst, true).await,
     }
-}
-
-// Standard directory copy for non-macOS/Linux/Windows platforms
-#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-async fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
-    fs::create_dir_all(dst).await?;
-    let mut entries = fs::read_dir(src).await?;
-
-    while let Some(entry) = entries.next_entry().await? {
-        let ty = entry.file_type().await?;
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-
-        if ty.is_dir() {
-            Box::pin(copy_dir_all(&src_path, &dst_path)).await?;
-        } else {
-            fs::copy(&src_path, &dst_path).await?;
-        }
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -845,8 +759,8 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(target_os = "linux")]
-    mod linux_tests {
+    #[cfg(not(target_os = "macos"))]
+    mod hardlink_clone_tests {
         use super::*;
         use crate::fs::File;
         use tokio::io::AsyncReadExt;
@@ -870,7 +784,7 @@ mod tests {
             .await?;
 
             // Perform clone operation
-            linux_clone::clone_dir(&src_dir, &dst_dir).await?;
+            hardlink_clone::clone_dir(&src_dir, &dst_dir).await?;
 
             // Verify clone result
             assert!(validate_directory(&src_dir, &dst_dir).await?);
@@ -912,7 +826,7 @@ mod tests {
             .await?;
 
             // Perform clone operation
-            linux_clone::clone_dir(&src_dir, &dst_dir).await?;
+            hardlink_clone::clone_dir(&src_dir, &dst_dir).await?;
 
             // Verify clone result
             assert!(validate_directory(&src_dir, &dst_dir).await?);
@@ -935,7 +849,7 @@ mod tests {
             let dst_dir = temp.path().join("dst");
 
             // Test case when source directory doesn't exist
-            let result = linux_clone::clone_dir(&src_dir, &dst_dir).await;
+            let result = hardlink_clone::clone_dir(&src_dir, &dst_dir).await;
             assert!(result.is_err());
             assert_eq!(
                 result
@@ -949,12 +863,13 @@ mod tests {
             // Test case when source path is a file instead of a directory
             create_test_file(temp.path(), "not_a_dir", b"content").await?;
             let result =
-                linux_clone::clone_dir(temp.path().join("not_a_dir").as_ref(), &dst_dir).await;
+                hardlink_clone::clone_dir(temp.path().join("not_a_dir").as_ref(), &dst_dir).await;
             assert!(result.is_err());
 
             Ok(())
         }
 
+        #[cfg(unix)]
         #[tokio::test]
         async fn test_fast_copy_preserves_permissions() -> Result<()> {
             use std::os::unix::fs::PermissionsExt;
@@ -978,7 +893,7 @@ mod tests {
             assert_eq!(src_metadata.permissions().mode() & 0o777, 0o755);
 
             // Use clone_dir to trigger fast_copy_file path (no _hasInstallScript flag)
-            linux_clone::clone_dir(&src_dir, &dst_dir).await?;
+            hardlink_clone::clone_dir(&src_dir, &dst_dir).await?;
 
             // Verify destination file has same permissions
             let dst_file = dst_dir.join("executable.sh");
@@ -992,6 +907,7 @@ mod tests {
             Ok(())
         }
 
+        #[cfg(unix)]
         #[tokio::test]
         async fn test_fast_copy_preserves_read_only_permissions() -> Result<()> {
             use std::os::unix::fs::PermissionsExt;
@@ -1015,7 +931,7 @@ mod tests {
             assert_eq!(src_metadata.permissions().mode() & 0o777, 0o444);
 
             // Use clone_dir to trigger fast_copy_file path
-            linux_clone::clone_dir(&src_dir, &dst_dir).await?;
+            hardlink_clone::clone_dir(&src_dir, &dst_dir).await?;
 
             // Verify destination file has same permissions
             let dst_file = dst_dir.join("readonly.txt");
@@ -1029,6 +945,7 @@ mod tests {
             Ok(())
         }
 
+        #[cfg(unix)]
         #[tokio::test]
         async fn test_clone_dir_preserves_executable_in_subdirs() -> Result<()> {
             use std::os::unix::fs::PermissionsExt;
@@ -1062,7 +979,7 @@ mod tests {
             fs::set_permissions(&data_path, perms).await?;
 
             // Clone directory
-            linux_clone::clone_dir(&src_dir, &dst_dir).await?;
+            hardlink_clone::clone_dir(&src_dir, &dst_dir).await?;
 
             // Verify script.sh has executable permissions
             let dst_script = dst_dir.join("bin/script.sh");

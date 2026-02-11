@@ -19,7 +19,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2026-01-04
+          toolchain: nightly-2026-02-05
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:

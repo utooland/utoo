@@ -260,19 +260,20 @@ enum Commands {
 }
 
 fn main() {
-    let parallelism = std::thread::available_parallelism()
+    // Windows default thread stack is 1MB, insufficient for libdeflater + tar + rayon work-stealing.
+    #[cfg(target_os = "windows")]
+    rayon::ThreadPoolBuilder::new()
+        .stack_size(8 * 1024 * 1024)
+        .build_global()
+        .ok();
+
+    let worker_threads = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4);
-    // Minimum 12 blocking threads for CI environments with fewer cores
-    let blocking_threads = (parallelism * 2).max(12);
 
     let result = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .worker_threads(parallelism)
-        .max_blocking_threads(blocking_threads)
-        .thread_name("utoo-worker")
-        .on_thread_stop(|| {})
-        .on_thread_park(|| {})
+        .worker_threads(worker_threads)
         .build()
         .expect("failed to build tokio runtime")
         .block_on(async_main());

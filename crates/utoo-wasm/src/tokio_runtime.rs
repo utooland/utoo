@@ -1,5 +1,5 @@
 use std::{
-    cell::OnceCell,
+    cell::{OnceCell, RefCell},
     sync::{
         atomic::{AtomicUsize, Ordering},
         OnceLock,
@@ -7,7 +7,15 @@ use std::{
     time::Duration,
 };
 
-use tokio::runtime::{self, Runtime};
+use tokio::{
+    runtime::{self, Runtime},
+    time::Instant,
+};
+
+#[cfg(feature = "utoopack")]
+thread_local! {
+    static LAST_SWC_ATOM_GC_TIME: RefCell<Option<Instant>> = const { RefCell::new(None) };
+}
 
 pub static TOKIO_RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
@@ -20,14 +28,40 @@ pub fn runtime() -> &'static Runtime {
 
 pub fn init_tokio_runtime(worker_url: String) {
     TOKIO_RUNTIME.get_or_init(|| {
-        runtime::Builder::new_multi_thread()
+        let concurrency = (|| {
+            let global = js_sys::global();
+            let navigator =
+                js_sys::Reflect::get(&global, &wasm_bindgen::JsValue::from_str("navigator"))
+                    .ok()?;
+            let concurrency = js_sys::Reflect::get(
+                &navigator,
+                &wasm_bindgen::JsValue::from_str("hardwareConcurrency"),
+            )
+            .ok()?;
+            concurrency.as_f64().map(|v| (v as usize).max(1))
+        })()
+        .unwrap_or(1);
+
+        let mut builder = runtime::Builder::new_multi_thread();
+        builder
             .disable_lifo_slot()
-            .thread_name_fn(|| {
-                static ATOMIC_ID: AtomicUsize = AtomicUsize::new(1);
-                let id = ATOMIC_ID.fetch_add(1, Ordering::SeqCst);
-                format!("tokio-runtime-worker-{id}")
+            .max_blocking_threads(concurrency);
+
+        #[cfg(feature = "utoopack")]
+        builder
+            .on_thread_stop(|| {
+                turbo_tasks_malloc::TurboMalloc::thread_stop();
             })
-            .max_blocking_threads(1)
+            .on_thread_park(|| {
+                LAST_SWC_ATOM_GC_TIME.with_borrow_mut(|cell| {
+                    if cell.is_none_or(|t| t.elapsed() > Duration::from_secs(2)) {
+                        swc_core::ecma::atoms::hstr::global_atom_store_gc();
+                        *cell = Some(Instant::now());
+                    }
+                });
+            });
+
+        builder
             .wasm_bindgen_shim_url(worker_url.clone())
             .build()
             .expect("Failed to build tokio runtime")

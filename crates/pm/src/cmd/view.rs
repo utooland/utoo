@@ -6,7 +6,7 @@ use utoo_ruborist::registry::resolve_package;
 use utoo_ruborist::service::fetch_full_manifest;
 use utoo_ruborist::util::parse_package_spec;
 
-use crate::helper::fs::Context;
+use crate::helper::ruborist_context::Context;
 use crate::util::config::get_registry;
 use crate::util::format_print::print_grid;
 

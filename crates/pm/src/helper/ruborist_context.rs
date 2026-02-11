@@ -1,8 +1,9 @@
-//! Tokio-based glob implementation for ruborist's Glob trait.
+//! Adapter layer bridging pm's configuration to ruborist's API.
 
 use std::path::{Path, PathBuf};
 use utoo_ruborist::service::{BuildDepsOptions, Glob, UnifiedRegistry};
 
+use crate::service::pipeline::{PipelineChannels, PipelineReceiver};
 use crate::util::cache::get_cache_dir;
 use crate::util::config::{get_legacy_peer_deps, get_manifests_concurrency_limit, get_registry};
 use crate::util::logger::ProgressReceiver;
@@ -27,15 +28,16 @@ impl Glob for TokioGlob {
 // Type aliases to hide concrete Glob type
 pub(crate) type GlobImpl = TokioGlob;
 pub(crate) type Registry = UnifiedRegistry;
-pub(crate) type DepsOptions = BuildDepsOptions<GlobImpl, ProgressReceiver>;
-
 /// Context for ruborist operations.
 /// Centralizes Glob and configuration to avoid spreading concrete types.
 pub(crate) struct Context;
 
 impl Context {
-    /// Create BuildDepsOptions with standard configuration.
-    pub async fn build_deps_options(cwd: PathBuf) -> DepsOptions {
+    /// Create BuildDepsOptions with a custom event receiver.
+    pub async fn deps_options<R: utoo_ruborist::progress::EventReceiver>(
+        cwd: PathBuf,
+        receiver: R,
+    ) -> BuildDepsOptions<GlobImpl, R> {
         BuildDepsOptions {
             cwd,
             registry_url: get_registry(),
@@ -43,8 +45,27 @@ impl Context {
             concurrency: get_manifests_concurrency_limit().await,
             legacy_peer_deps: get_legacy_peer_deps().await,
             glob: TokioGlob,
-            receiver: ProgressReceiver,
+            receiver,
         }
+    }
+
+    /// Create BuildDepsOptions with PipelineReceiver for concurrent download/clone.
+    /// Returns (options, channels) where channels are used to start pipeline workers.
+    pub async fn pipeline_deps_options(
+        cwd: PathBuf,
+    ) -> (
+        BuildDepsOptions<GlobImpl, PipelineReceiver<ProgressReceiver>>,
+        PipelineChannels,
+    ) {
+        let (receiver, channels) = PipelineReceiver::new(ProgressReceiver);
+        let options = Self::deps_options(cwd, receiver).await;
+        (options, channels)
+    }
+
+    /// Resolve dependency tree with plain ProgressReceiver. Returns PackageLock.
+    pub async fn build_deps(cwd: PathBuf) -> anyhow::Result<utoo_ruborist::lock::PackageLock> {
+        let options = Self::deps_options(cwd, ProgressReceiver).await;
+        utoo_ruborist::service::build_deps(options).await
     }
 
     /// Create a UnifiedRegistry with standard configuration.

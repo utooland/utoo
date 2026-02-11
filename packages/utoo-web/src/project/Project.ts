@@ -16,6 +16,7 @@ import {
   ServiceWorkerOptions,
   Stats,
 } from "../types";
+import { checkCompatibility } from "./checkCompatibility";
 import { ForkedProject } from "./ForkedProject";
 
 let ProjectWorker: Worker;
@@ -250,5 +251,9 @@ export class Project implements ProjectEndpoint {
     );
 
     return new ForkedProject(channel.port1);
+  }
+
+  public static checkCompatibility() {
+    return checkCompatibility();
   }
 }

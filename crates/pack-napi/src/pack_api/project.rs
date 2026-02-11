@@ -348,7 +348,7 @@ pub async fn project_new(
             subscriber.init();
         });
     } else if let Some(chrome_file) = tracing_chrome {
-        let mut builder = tracing_chrome::ChromeLayerBuilder::new();
+        let mut builder = tracing_chrome::ChromeLayerBuilder::new().include_args(false);
         if chrome_file != "1" && chrome_file != "true" {
             builder = builder.file(chrome_file);
         }
@@ -361,7 +361,7 @@ pub async fn project_new(
 
         TRACING_INIT.call_once(|| {
             tracing_subscriber::registry()
-                .with(EnvFilter::new("trace"))
+                .with(EnvFilter::new("info"))
                 .with(chrome_layer)
                 .init();
         });

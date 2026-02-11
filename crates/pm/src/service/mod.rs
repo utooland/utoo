@@ -1,4 +1,5 @@
 pub mod binary;
+pub mod clean;
 pub mod config;
 pub mod dependency_graph;
 pub mod execute;
@@ -6,6 +7,7 @@ pub mod init;
 pub mod install;
 pub mod package;
 pub mod package_management;
+pub mod pipeline;
 pub mod rebuild;
 pub mod script;
 pub mod update;

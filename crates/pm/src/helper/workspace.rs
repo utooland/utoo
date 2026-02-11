@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use std::env;
 use std::path::{Path, PathBuf};
 
-use super::fs::Context as FsContext;
+use super::ruborist_context::Context as FsContext;
 use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::resolver::workspace::WorkspaceDiscovery;
 

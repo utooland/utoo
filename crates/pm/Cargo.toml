@@ -11,8 +11,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
-async-compression = { version = "0.3", features = ["gzip", "tokio"] }
 atty = "0.2"
+bytes = "1.11.0"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { workspace = true }
 colored = "2.1"
@@ -25,9 +25,11 @@ futures = { workspace = true }
 glob = "0.3.1"
 indicatif = "0.17.8"
 libc = "0.2"
+libdeflater = "1.25"
 once_cell = "1.19"
 owo-colors = { workspace = true }
 petgraph = "0.6"
+rayon = { workspace = true }
 regex = "1.10"
 reqwest = { version = "0.12", default-features = false, features = [
   "gzip",
@@ -44,8 +46,7 @@ tempfile = "3.15.0"
 term_size = "0.3"
 tokio-fs-ext = { workspace = true }
 tokio-retry = "0.3"
-tokio-tar = "0.3.1"
-tokio-util = { version = "0.7", features = ["io"] }
+tokio-util = { version = "0.7" }
 toml = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = "0.2"
