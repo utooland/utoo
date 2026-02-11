@@ -1,6 +1,161 @@
 // Bootstrap: wire up global APIs from native ops.
 const __bootstrapOps = Deno.core.ops;
 
+// ---- Web Platform API polyfills (must be before ESM module init) ----
+
+// DOMException
+if (!globalThis.DOMException) {
+  globalThis.DOMException = class DOMException extends Error {
+    constructor(message, name) {
+      super(message);
+      this.name = name || "Error";
+      this.code = 0;
+    }
+  };
+}
+
+// Blob
+if (!globalThis.Blob) {
+  globalThis.Blob = class Blob {
+    constructor(parts, opts) {
+      this._parts = parts || [];
+      this.type = (opts && opts.type) || "";
+      this.size = this._parts.reduce((acc, p) => acc + (p.length || p.byteLength || 0), 0);
+    }
+    async text() {
+      return this._parts.map(p => typeof p === "string" ? p : new TextDecoder().decode(p)).join("");
+    }
+    async arrayBuffer() {
+      const t = await this.text();
+      return new TextEncoder().encode(t).buffer;
+    }
+    slice(start, end, type) { return new Blob([]); }
+    stream() { return null; }
+  };
+}
+
+// File
+if (!globalThis.File) {
+  globalThis.File = class File extends globalThis.Blob {
+    constructor(parts, name, opts) {
+      super(parts, opts);
+      this.name = name;
+      this.lastModified = (opts && opts.lastModified) || Date.now();
+    }
+  };
+}
+
+// AbortController/AbortSignal
+if (!globalThis.AbortController) {
+  class AbortSignal {
+    constructor() { this.aborted = false; this.reason = undefined; this._listeners = []; }
+    addEventListener(type, fn) { this._listeners.push(fn); }
+    removeEventListener(type, fn) { this._listeners = this._listeners.filter(l => l !== fn); }
+    throwIfAborted() { if (this.aborted) throw this.reason; }
+    static abort(reason) {
+      const s = new AbortSignal();
+      s.aborted = true; s.reason = reason || new DOMException("signal is aborted without reason");
+      return s;
+    }
+    static timeout(ms) {
+      const s = new AbortSignal();
+      globalThis.setTimeout(() => {
+        s.aborted = true; s.reason = new DOMException("signal timed out");
+        for (const fn of s._listeners) fn();
+      }, ms);
+      return s;
+    }
+  }
+  globalThis.AbortSignal = AbortSignal;
+  globalThis.AbortController = class AbortController {
+    constructor() { this.signal = new AbortSignal(); }
+    abort(reason) {
+      this.signal.aborted = true;
+      this.signal.reason = reason || new DOMException("The operation was aborted");
+      for (const fn of this.signal._listeners) fn();
+    }
+  };
+}
+
+// performance (minimal Web Performance API)
+if (!globalThis.performance) {
+  const __timeOrigin = Date.now();
+  globalThis.performance = {
+    now() { return Date.now() - __timeOrigin; },
+    timeOrigin: __timeOrigin,
+    mark() {},
+    measure() {},
+    clearMarks() {},
+    clearMeasures() {},
+    getEntries() { return []; },
+    getEntriesByName() { return []; },
+    getEntriesByType() { return []; },
+    toJSON() { return { timeOrigin: __timeOrigin }; },
+  };
+}
+
+// structuredClone
+if (!globalThis.structuredClone) {
+  globalThis.structuredClone = function structuredClone(value) {
+    return JSON.parse(JSON.stringify(value));
+  };
+}
+
+// EventTarget / Event polyfill
+if (!globalThis.EventTarget) {
+  globalThis.EventTarget = class EventTarget {
+    constructor() { this._listeners = {}; }
+    addEventListener(type, cb, opts) {
+      if (!this._listeners[type]) this._listeners[type] = [];
+      this._listeners[type].push({ cb, once: opts && opts.once });
+    }
+    removeEventListener(type, cb) {
+      if (!this._listeners[type]) return;
+      this._listeners[type] = this._listeners[type].filter(l => l.cb !== cb);
+    }
+    dispatchEvent(event) {
+      const listeners = this._listeners[event.type];
+      if (!listeners) return true;
+      for (const l of [...listeners]) {
+        l.cb.call(this, event);
+        if (l.once) this.removeEventListener(event.type, l.cb);
+      }
+      return !event.defaultPrevented;
+    }
+  };
+}
+
+if (!globalThis.Event) {
+  globalThis.Event = class Event {
+    constructor(type, opts) {
+      this.type = type;
+      this.bubbles = (opts && opts.bubbles) || false;
+      this.cancelable = (opts && opts.cancelable) || false;
+      this.composed = (opts && opts.composed) || false;
+      this.defaultPrevented = false;
+      this.target = null;
+      this.currentTarget = null;
+      this.timeStamp = Date.now();
+      this.isTrusted = false;
+    }
+    preventDefault() { if (this.cancelable) this.defaultPrevented = true; }
+    stopPropagation() {}
+    stopImmediatePropagation() {}
+    composedPath() { return []; }
+  };
+}
+
+if (!globalThis.CustomEvent) {
+  globalThis.CustomEvent = class CustomEvent extends globalThis.Event {
+    constructor(type, opts) {
+      super(type, opts);
+      this.detail = (opts && opts.detail) || null;
+    }
+  };
+}
+
+// ---- End Web Platform API polyfills ----
+
 function __formatArgs(args) {
   return args
     .map((a) => (typeof a === "string" ? a : JSON.stringify(a)))
@@ -135,6 +290,60 @@ __core.setNextTickCallback(() => {
   __core.setHasTickScheduled(false);
 });
 
+// Node.js compat: global === globalThis
+globalThis.global = globalThis;
+
+// Minimal stdio streams for Node.js compat
+const __stdout = {
+  fd: 1,
+  isTTY: false,
+  columns: 80,
+  rows: 24,
+  write(data) {
+    if (typeof data === "string") __bootstrapOps.op_console_log(data.replace(/\n$/, ""));
+    return true;
+  },
+  on() { return this; },
+  once() { return this; },
+  emit() { return false; },
+  end() {},
+  destroy() {},
+  writable: true,
+  _isStdio: true,
+};
+
+const __stderr = {
+  fd: 2,
+  isTTY: false,
+  columns: 80,
+  rows: 24,
+  write(data) {
+    if (typeof data === "string") __bootstrapOps.op_console_error(data.replace(/\n$/, ""));
+    return true;
+  },
+  on() { return this; },
+  once() { return this; },
+  emit() { return false; },
+  end() {},
+  destroy() {},
+  writable: true,
+  _isStdio: true,
+};
+
+const __stdin = {
+  fd: 0,
+  isTTY: false,
+  readable: true,
+  on() { return this; },
+  once() { return this; },
+  emit() { return false; },
+  pause() { return this; },
+  resume() { return this; },
+  read() { return null; },
+  destroy() {},
+  _isStdio: true,
+};
+
 globalThis.process = {
   exit(code = 0) {
     __bootstrapOps.op_exit(code);
@@ -144,9 +353,55 @@ globalThis.process = {
   },
   env: __bootstrapOps.op_env_to_object(),
   argv: ["utoo-runtime"],
+  execArgv: [],
+  execPath: "utoo-runtime",
+  pid: 1,
+  ppid: 0,
+  title: "utoo-runtime",
   version: "v22.0.0",
   versions: { node: "22.0.0" },
   platform: __bootstrapOps.op_os_platform(),
+  arch: __bootstrapOps.op_os_arch(),
+  release: { name: "node" },
+  config: {},
+  features: {},
+  stdout: __stdout,
+  stderr: __stderr,
+  stdin: __stdin,
+  hrtime(time) {
+    const now = Date.now();
+    const sec = Math.floor(now / 1000);
+    const nano = (now % 1000) * 1e6;
+    if (time) {
+      return [sec - time[0], nano - time[1]];
+    }
+    return [sec, nano];
+  },
+  memoryUsage() {
+    return { rss: 0, heapTotal: 0, heapUsed: 0, external: 0, arrayBuffers: 0 };
+  },
+  cpuUsage() {
+    return { user: 0, system: 0 };
+  },
+  uptime() { return 0; },
+  on() { return this; },
+  once() { return this; },
+  off() { return this; },
+  emit() { return false; },
+  removeListener() { return this; },
+  removeAllListeners() { return this; },
+  listeners() { return []; },
+  addListener() { return this; },
+  prependListener() { return this; },
+  prependOnceListener() { return this; },
+  listenerCount() { return 0; },
+  binding(name) {
+    throw new Error(`process.binding('${name}') is not supported in utoo-runtime`);
+  },
+  _linkedBinding(name) {
+    throw new Error(`process._linkedBinding('${name}') is not supported in utoo-runtime`);
+  },
+  umask() { return 0o22; },
   nextTick(cb, ...args) {
     __nextTickQueue.push([cb, ...args]);
     __core.setHasTickScheduled(true);

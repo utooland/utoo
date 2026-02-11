@@ -388,10 +388,17 @@ function finished(stream, opts, cb) {
   return cleanup;
 }
 
-const streamModule = {
-  Stream, Readable, Writable, Duplex, Transform, PassThrough,
-  pipeline, finished,
-};
+// Node.js compat: require('stream') returns the Stream class itself,
+// with sub-classes attached as properties.
+Stream.Stream = Stream;
+Stream.Readable = Readable;
+Stream.Writable = Writable;
+Stream.Duplex = Duplex;
+Stream.Transform = Transform;
+Stream.PassThrough = PassThrough;
+Stream.pipeline = pipeline;
+Stream.finished = finished;
+Stream.default = Stream;
 
-export default streamModule;
+export default Stream;
 export { Stream, Readable, Writable, Duplex, Transform, PassThrough, pipeline, finished };

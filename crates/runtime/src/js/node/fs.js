@@ -50,7 +50,8 @@ export function readFileSync(path, options) {
   if (encoding === "utf8" || encoding === "utf-8") {
     return ops.op_fs_read_text_file_sync(String(path));
   }
-  return ops.op_fs_read_file_sync(String(path));
+  const data = ops.op_fs_read_file_sync(String(path));
+  return Buffer.from(data.buffer || data, data.byteOffset, data.byteLength);
 }
 
 export function writeFileSync(path, data, _options) {
@@ -61,8 +62,25 @@ export function appendFileSync(path, data, _options) {
   ops.op_fs_append_file_sync(String(path), toBuffer(data));
 }
 
-export function readdirSync(path, _options) {
-  return ops.op_fs_readdir_sync(String(path)).map((e) => e.name);
+export function readdirSync(path, options) {
+  try {
+    const entries = ops.op_fs_readdir_sync(String(path));
+    if (options && options.withFileTypes) {
+      return entries.map((e) => ({
+        name: e.name,
+        isFile: () => e.is_file,
+        isDirectory: () => e.is_directory,
+        isSymbolicLink: () => e.is_symlink || false,
+        isBlockDevice: () => false,
+        isCharacterDevice: () => false,
+        isFIFO: () => false,
+        isSocket: () => false,
+      }));
+    }
+    return entries.map((e) => e.name);
+  } catch (err) {
+    throw wrapFsError(err, "scandir", String(path));
+  }
 }
 
 export function mkdirSync(path, options) {
@@ -71,12 +89,45 @@ export function mkdirSync(path, options) {
   ops.op_fs_mkdir_sync(String(path), recursive);
 }
 
-export function statSync(path) {
-  return wrapStats(ops.op_fs_stat_sync(String(path)));
+function wrapFsError(err, syscall, path) {
+  const msg = err.message || String(err);
+  if (msg.includes("No such file or directory") || msg.includes("os error 2")) {
+    const e = new Error(`${syscall} '${path}': ENOENT: no such file or directory`);
+    e.code = "ENOENT";
+    e.errno = -2;
+    e.syscall = syscall;
+    e.path = path;
+    return e;
+  }
+  if (msg.includes("Permission denied") || msg.includes("os error 13")) {
+    const e = new Error(`${syscall} '${path}': EACCES: permission denied`);
+    e.code = "EACCES";
+    e.errno = -13;
+    e.syscall = syscall;
+    e.path = path;
+    return e;
+  }
+  err.syscall = syscall;
+  err.path = path;
+  return err;
 }
 
-export function lstatSync(path) {
-  return wrapStats(ops.op_fs_lstat_sync(String(path)));
+export function statSync(path, options) {
+  try {
+    return wrapStats(ops.op_fs_stat_sync(String(path)));
+  } catch (err) {
+    if (options && options.throwIfNoEntry === false) return undefined;
+    throw wrapFsError(err, "stat", String(path));
+  }
+}
+
+export function lstatSync(path, options) {
+  try {
+    return wrapStats(ops.op_fs_lstat_sync(String(path)));
+  } catch (err) {
+    if (options && options.throwIfNoEntry === false) return undefined;
+    throw wrapFsError(err, "lstat", String(path));
+  }
 }
 
 export function unlinkSync(path) {
@@ -248,6 +299,72 @@ export const constants = {
 };
 
 // ---------------------------------------------------------------------------
+// Stream APIs (minimal implementations for Node.js compat)
+// ---------------------------------------------------------------------------
+
+import { Writable, Readable } from "ext:utoo_rt_ext/node/stream";
+
+export function createWriteStream(path, options) {
+  const encoding = options?.encoding || "utf8";
+  const flags = options?.flags || "w";
+  const isAppend = flags.includes("a");
+  let opened = false;
+
+  const stream = new Writable({
+    write(chunk, enc, cb) {
+      try {
+        const data = typeof chunk === "string" ? chunk : Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        if (!opened) {
+          if (!isAppend) ops.op_fs_write_file_sync(String(path), toBuffer(data));
+          else ops.op_fs_append_file_sync(String(path), toBuffer(data));
+          opened = true;
+        } else {
+          ops.op_fs_append_file_sync(String(path), toBuffer(data));
+        }
+        cb();
+      } catch (err) {
+        cb(err);
+      }
+    },
+  });
+
+  stream.path = path;
+  // emit 'open' and 'close' asynchronously
+  queueMicrotask(() => stream.emit("open"));
+  return stream;
+}
+
+export function createReadStream(path, options) {
+  const encoding = options?.encoding || null;
+  const stream = new Readable({
+    read() {
+      try {
+        const data = readFileSync(path, encoding ? { encoding } : undefined);
+        this.push(data);
+        this.push(null);
+      } catch (err) {
+        this.destroy(err);
+      }
+    },
+  });
+
+  stream.path = path;
+  queueMicrotask(() => stream.emit("open"));
+  return stream;
+}
+
+export function watch(filename, options, listener) {
+  // Stub - just return an event emitter
+  if (typeof options === "function") { listener = options; options = {}; }
+  const watcher = new (require("events"))();
+  watcher.close = function() {};
+  return watcher;
+}
+
+export function watchFile() {}
+export function unwatchFile() {}
+
+// ---------------------------------------------------------------------------
 // Default export
 // ---------------------------------------------------------------------------
 
@@ -286,6 +403,13 @@ const fs = {
   chmod,
   realpath,
   exists,
+  // Streams
+  createWriteStream,
+  createReadStream,
+  // Watch (stubs)
+  watch,
+  watchFile,
+  unwatchFile,
 };
 
 export default fs;

@@ -1,3 +1,5 @@
+import _types from "ext:utoo_rt_ext/node/util_types";
+
 function format(...args) {
   if (args.length === 0) return "";
   const first = args[0];
@@ -47,8 +49,17 @@ function inspect(obj, opts) {
 inspect.custom = Symbol.for("nodejs.util.inspect.custom");
 
 function inherits(ctor, superCtor) {
+  if (superCtor === undefined || superCtor === null) {
+    throw new TypeError("The super constructor to \"inherits\" must be not null, got " + superCtor + " (ctor: " + (ctor && ctor.name) + ")");
+  }
+  if (ctor === undefined || ctor === null) {
+    throw new TypeError("The constructor to \"inherits\" must be not null");
+  }
+  if (superCtor.prototype === undefined) {
+    throw new TypeError("The super constructor to \"inherits\" has no prototype (superCtor: " + superCtor.name + ")");
+  }
+  Object.defineProperty(ctor, "super_", { value: superCtor, writable: true, configurable: true });
   Object.setPrototypeOf(ctor.prototype, superCtor.prototype);
-  ctor.super_ = superCtor;
 }
 
 function deprecate(fn, msg) {
@@ -91,18 +102,7 @@ function debuglog() {
   return function () {};
 }
 
-const types = {
-  isDate: (v) => v instanceof Date,
-  isRegExp: (v) => v instanceof RegExp,
-  isPromise: (v) => v instanceof Promise,
-  isArray: Array.isArray,
-  isTypedArray: (v) => ArrayBuffer.isView(v) && !(v instanceof DataView),
-  isUint8Array: (v) => v instanceof Uint8Array,
-  isArrayBuffer: (v) => v instanceof ArrayBuffer,
-  isNativeError: (v) => v instanceof Error,
-  isSet: (v) => v instanceof Set,
-  isMap: (v) => v instanceof Map,
-};
+const types = _types;
 
 const util = {
   format, inspect, inherits, deprecate, promisify, callbackify,

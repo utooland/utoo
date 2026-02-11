@@ -208,5 +208,15 @@ class Buffer extends Uint8Array {
   }
 }
 
-export { Buffer };
-export default { Buffer };
+// Re-export Blob and File from globals (Node.js buffer module exports these)
+const Blob = globalThis.Blob;
+const File = globalThis.File;
+
+const kMaxLength = 2 ** 31 - 1;
+const kStringMaxLength = 2 ** 28 - 16;
+const SlowBuffer = Buffer;
+
+const constants = { MAX_LENGTH: kMaxLength, MAX_STRING_LENGTH: kStringMaxLength };
+
+export { Buffer, Blob, File, SlowBuffer, kMaxLength, kStringMaxLength, constants };
+export default { Buffer, Blob, File, SlowBuffer, kMaxLength, kStringMaxLength, constants };

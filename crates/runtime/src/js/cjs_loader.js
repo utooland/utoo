@@ -49,15 +49,50 @@ function __cjs_require(specifier) {
   __cjs_cache.set(resolved, mod);
 
   const dirname = resolved.substring(0, resolved.lastIndexOf("/"));
+
+  // Create a per-module require that captures this module's path
+  function moduleRequire(spec) {
+    const prev = globalThis.__cjs_current_file;
+    globalThis.__cjs_current_file = resolved;
+    try {
+      return __cjs_require(spec);
+    } finally {
+      globalThis.__cjs_current_file = prev;
+    }
+  }
+  moduleRequire.resolve = function (spec) {
+    return __cjsOps.op_cjs_resolve(spec, resolved);
+  };
+  moduleRequire.cache = __cjs_cache;
+  moduleRequire.main = undefined;
+  moduleRequire.extensions = {
+    ".js": function(mod, filename) {},
+    ".json": function(mod, filename) {},
+    ".node": function(mod, filename) {},
+    ".ts": function(mod, filename) {},
+    ".cjs": function(mod, filename) {},
+  };
+
   const wrapped =
     "(function(require,module,exports,__filename,__dirname){\n" +
     source +
     "\n})";
-  const fn_ = (0, eval)(wrapped);
+  let fn_;
+  try {
+    fn_ = (0, eval)(wrapped);
+  } catch (e) {
+    Deno.core.ops.op_console_error("[cjs_loader] parse error in " + resolved + ": " + e.message);
+    throw e;
+  }
 
   const prev = globalThis.__cjs_current_file;
   globalThis.__cjs_current_file = resolved;
-  fn_(__cjs_require, mod, mod.exports, resolved, dirname);
+  try {
+    fn_(moduleRequire, mod, mod.exports, resolved, dirname);
+  } catch (e) {
+    Deno.core.ops.op_console_error("[cjs_loader] runtime error in " + resolved + ": " + e.message);
+    throw e;
+  }
   globalThis.__cjs_current_file = prev;
   mod.loaded = true;
 

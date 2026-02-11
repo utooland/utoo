@@ -18,7 +18,12 @@ fn resolve_builtin(specifier: &str) -> Option<String> {
     match name {
         "fs" | "fs/promises" | "path" | "os" | "url" | "buffer" | "events" | "util" | "assert"
         | "querystring" | "string_decoder" | "stream" | "net" | "http" | "https"
-        | "async_hooks" | "crypto" | "zlib" => {
+        | "async_hooks" | "crypto" | "zlib" | "v8" | "cluster" | "child_process" | "tty"
+        | "dns" | "dgram" | "tls" | "worker_threads" | "perf_hooks" | "module"
+        | "readline" | "diagnostics_channel" | "console" | "timers"
+        | "timers/promises" | "constants" | "domain"
+        | "util/types" | "stream/promises" | "stream/web" | "stream/consumers"
+        | "inspector" => {
             let normalized = name.replace('/', "_");
             Some(format!("ext:utoo_rt_ext/node/{normalized}"))
         }

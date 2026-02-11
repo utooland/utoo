@@ -1,0 +1,9 @@
+{
+  "name": "egg-hello",
+  "version": "1.0.0",
+  "main": "app.js",
+  "type": "commonjs",
+  "dependencies": {
+    "egg": "^3.29.0"
+  }
+}

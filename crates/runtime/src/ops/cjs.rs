@@ -39,6 +39,7 @@ pub fn op_cjs_resolve(
     {
         let resolved = referrer_dir.join(specifier);
         return resolve_as_file_or_directory(&resolved)
+            .and_then(|p| normalize_path(&p))
             .map(|p| p.to_string_lossy().into_owned())
             .ok_or_else(|| {
                 JsErrorBox::generic(format!(
@@ -99,6 +100,25 @@ pub fn is_node_builtin(name: &str) -> bool {
             | "process"
             | "async_hooks"
             | "zlib"
+            | "v8"
+            | "cluster"
+            | "tty"
+            | "dns"
+            | "dgram"
+            | "worker_threads"
+            | "perf_hooks"
+            | "readline"
+            | "diagnostics_channel"
+            | "console"
+            | "timers"
+            | "timers/promises"
+            | "constants"
+            | "domain"
+            | "util/types"
+            | "stream/promises"
+            | "stream/web"
+            | "stream/consumers"
+            | "inspector"
     )
 }
 
@@ -168,6 +188,26 @@ pub fn resolve_from_node_modules_dir(
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/// Normalize a path by resolving `.` and `..` components without touching the filesystem.
+/// Falls back to canonicalize for symlinks, or returns the logical normalization.
+fn normalize_path(path: &Path) -> Option<PathBuf> {
+    // Try fs::canonicalize first (resolves symlinks + normalizes)
+    if let Ok(canonical) = std::fs::canonicalize(path) {
+        return Some(canonical);
+    }
+    // Fallback: manual normalization
+    let mut components = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => { components.pop(); }
+            std::path::Component::CurDir => {}
+            other => components.push(other),
+        }
+    }
+    let result: PathBuf = components.iter().collect();
+    if result.as_os_str().is_empty() { None } else { Some(result) }
+}
 
 /// Parse a specifier into (package_name, subpath).
 /// E.g. "koa/lib" -> ("koa", "lib"), "@koa/router/lib" -> ("@koa/router", "lib")
