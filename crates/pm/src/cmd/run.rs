@@ -51,6 +51,7 @@ pub async fn run(
                 .as_ref()
                 .map(|args| args.iter().map(|s| s.as_str()).collect::<Vec<&str>>());
             run_script(
+                &updated_cwd,
                 &script_name,
                 selected_workspace.as_deref(),
                 script_args_refs,
@@ -61,19 +62,16 @@ pub async fn run(
 }
 
 pub async fn run_script(
+    cwd: &Path,
     script_name: &str,
     workspace: Option<&str>,
     script_args: Option<Vec<&str>>,
 ) -> Result<()> {
-    let cwd = std::env::current_dir().context("Failed to get current directory")?;
-    let updated_cwd = update_cwd_to_project(&cwd).await?;
+    let updated_cwd = update_cwd_to_project(cwd).await?;
     let pkg = if let Some(workspace_name) = &workspace {
-        let workspace_dir = find_workspace_path(
-            &std::env::current_dir().context("Failed to get current directory")?,
-            workspace_name,
-        )
-        .await
-        .context("Failed to find workspace path")?;
+        let workspace_dir = find_workspace_path(&updated_cwd, workspace_name)
+            .await
+            .context("Failed to find workspace path")?;
         tracing::debug!(
             "Using workspace: {} at path: {}",
             workspace_name,
@@ -89,14 +87,11 @@ pub async fn run_script(
 
     let package = PackageInfo {
         path: if let Some(workspace_name) = workspace {
-            find_workspace_path(
-                &std::env::current_dir().context("Failed to get current directory")?,
-                workspace_name,
-            )
-            .await
-            .context("Failed to find workspace path")?
+            find_workspace_path(&updated_cwd, workspace_name)
+                .await
+                .context("Failed to find workspace path")?
         } else {
-            std::env::current_dir().context("Failed to get current directory")?
+            updated_cwd.to_path_buf()
         },
         bin_files: Default::default(),
         scripts: Scripts::default(),
@@ -248,6 +243,7 @@ pub async fn run_script_in_all_workspaces(
         for workspace_name in workspaces_to_run {
             let script_name = script_name.to_string();
             let script_args = script_args.clone();
+            let cwd = updated_cwd.clone();
 
             // Spawn concurrent task for each workspace in the layer
             join_set.spawn(async move {
@@ -258,7 +254,7 @@ pub async fn run_script_in_all_workspaces(
                 let script_args_refs = script_args
                     .as_ref()
                     .map(|args| args.iter().map(|s| s.as_str()).collect::<Vec<&str>>());
-                match run_script(&script_name, Some(&workspace_name), script_args_refs).await {
+                match run_script(&cwd, &script_name, Some(&workspace_name), script_args_refs).await {
                     Ok(()) => {
                         tracing::debug!(
                             "Successfully completed script '{script_name}' in workspace '{workspace_name}'"
@@ -329,7 +325,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_script_not_found() {
-        let _dir = tempdir().unwrap();
+        let dir = tempdir().unwrap();
         let package_json = r#"
         {
             "name": "@test/package",
@@ -339,10 +335,9 @@ mod tests {
             }
         }"#;
 
-        fs::write(_dir.path().join("package.json"), package_json).unwrap();
-        std::env::set_current_dir(_dir.path()).unwrap();
+        fs::write(dir.path().join("package.json"), package_json).unwrap();
 
-        let result = run_script("nonexistent", None, None).await;
+        let result = run_script(dir.path(), "nonexistent", None, None).await;
 
         assert!(result.is_err());
         assert!(
@@ -355,20 +350,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_script_invalid_json() {
-        let _dir = tempdir().unwrap();
+        let dir = tempdir().unwrap();
         let invalid_json = r#"{ "name": "test", "scripts": { "test": 123 } }"#;
 
-        fs::write(_dir.path().join("package.json"), invalid_json).unwrap();
-        std::env::set_current_dir(_dir.path()).unwrap();
+        fs::write(dir.path().join("package.json"), invalid_json).unwrap();
 
-        let result = run_script("test", None, None).await;
+        let result = run_script(dir.path(), "test", None, None).await;
 
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn test_get_topo_without_workspaces() {
-        let _dir = tempdir().unwrap();
+        let dir = tempdir().unwrap();
         let package_json = r#"
         {
             "name": "test-project",
@@ -378,10 +372,9 @@ mod tests {
             }
         }"#;
 
-        fs::write(_dir.path().join("package.json"), package_json).unwrap();
-        std::env::set_current_dir(_dir.path()).unwrap();
+        fs::write(dir.path().join("package.json"), package_json).unwrap();
 
-        let result = WorkspaceService::get_workspace_topology(_dir.path()).await;
+        let result = WorkspaceService::get_workspace_topology(dir.path()).await;
         assert!(result.is_ok());
         let topology = result.unwrap();
         // Should return empty topology for non-workspace projects
