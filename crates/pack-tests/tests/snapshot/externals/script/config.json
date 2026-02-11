@@ -1,0 +1,17 @@
+{
+    "config": {
+        "entry": [
+            {
+                "import": "input/index.ts",
+                "name": "main"
+            }
+        ],
+        "externals": {
+            "lodash": {
+                "root": "_",
+                "type": "script",
+                "script": "https://gw.alipayobjects.com/os/lib/lodash/4.17.21/lodash.min.js"
+            }
+        }
+    }
+}
