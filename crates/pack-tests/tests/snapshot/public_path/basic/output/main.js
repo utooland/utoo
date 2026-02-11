@@ -651,6 +651,27 @@ function loadChunkByUrl(chunkUrl) {
     return loadChunkByUrlInternal(1, this.m.id, chunkUrl);
 }
 browserContextPrototype.L = loadChunkByUrl;
+const loadedScripts = new Map();
+/**
+ * Load an external script by creating a <script> tag.
+ * This is used for script externals that need to be loaded from CDN or other external sources.
+ */ function loadScript(scriptUrl) {
+    // Return cached promise if script is already loading or loaded
+    let promise = loadedScripts.get(scriptUrl);
+    if (promise) {
+        return promise;
+    }
+    promise = new Promise((resolve, reject)=>{
+        const script = document.createElement('script');
+        script.src = scriptUrl;
+        script.onload = ()=>resolve();
+        script.onerror = ()=>reject(new Error(`Failed to load script: ${scriptUrl}`));
+        document.head.appendChild(script);
+    });
+    loadedScripts.set(scriptUrl, promise);
+    return promise;
+}
+browserContextPrototype.S = loadScript;
 // Do not make this async. React relies on referential equality of the returned Promise.
 function loadChunkByUrlInternal(sourceType, sourceData, chunkUrl) {
     const thenable = BACKEND.loadChunkCached(sourceType, chunkUrl);
