@@ -43,16 +43,20 @@ __turbopack_async_result__();
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
 
-let mod;
-try {
-  await __turbopack_context__.L("https://example.com/lib/script.js");
-  if (typeof global["bar_script1"] === 'undefined') {
-    throw new Error('Variable "bar_script1" is not available on global object after loading "https://example.com/lib/script.js"');
+const mod = await (async () => {
+  if (typeof globalThis["bar_script1"] !== 'undefined') {
+    return globalThis["bar_script1"];
   }
-  mod = global["bar_script1"];
-} catch (error) {
-  throw new Error('Failed to load external URL module "bar_script1@https://example.com/lib/script.js": ' + (error.message || error));
-}
+  await __turbopack_context__.S("https://example.com/lib/script.js");
+  if (typeof globalThis["bar_script1"] !== 'undefined') {
+    return globalThis["bar_script1"];
+  }
+  const error = new Error('Loading script failed.\n(missing: "https://example.com/lib/script.js")');
+  error.name = 'ScriptExternalLoadError';
+  error.type = 'missing';
+  error.request = "https://example.com/lib/script.js";
+  throw error;
+})();
 
 __turbopack_context__.v(mod);
 __turbopack_async_result__();
@@ -62,16 +66,20 @@ __turbopack_async_result__();
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
 
-let mod;
-try {
-  await __turbopack_context__.L("https://example.com/lib/script2.js");
-  if (typeof global["bar_script2"] === 'undefined') {
-    throw new Error('Variable "bar_script2" is not available on global object after loading "https://example.com/lib/script2.js"');
+const mod = await (async () => {
+  if (typeof globalThis["bar_script2"] !== 'undefined') {
+    return globalThis["bar_script2"];
   }
-  mod = global["bar_script2"];
-} catch (error) {
-  throw new Error('Failed to load external URL module "bar_script2@https://example.com/lib/script2.js": ' + (error.message || error));
-}
+  await __turbopack_context__.S("https://example.com/lib/script2.js");
+  if (typeof globalThis["bar_script2"] !== 'undefined') {
+    return globalThis["bar_script2"];
+  }
+  const error = new Error('Loading script failed.\n(missing: "https://example.com/lib/script2.js")');
+  error.name = 'ScriptExternalLoadError';
+  error.type = 'missing';
+  error.request = "https://example.com/lib/script2.js";
+  throw error;
+})();
 
 __turbopack_context__.v(mod);
 __turbopack_async_result__();
