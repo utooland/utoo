@@ -2,6 +2,7 @@ pub mod clean;
 pub mod config;
 pub mod deps;
 pub mod execute;
+pub mod init;
 pub mod install;
 pub mod link;
 pub mod list;
