@@ -2,6 +2,7 @@ pub mod binary;
 pub mod config;
 pub mod dependency_graph;
 pub mod execute;
+pub mod init;
 pub mod install;
 pub mod package;
 pub mod package_management;
