@@ -1,10 +1,10 @@
 pub mod auto_update;
 pub mod deps;
-pub mod fs;
 pub mod fuzzy_select;
 pub mod global_bin;
 pub mod install_runtime;
 pub mod lock;
 pub mod package;
+pub mod ruborist_context;
 pub mod tree_builder;
 pub mod workspace;

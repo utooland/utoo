@@ -1,79 +1,129 @@
 use anyhow::{Context, Result};
-use async_compression::tokio::bufread::GzipDecoder;
-use futures::StreamExt;
+use bytes::Bytes;
 use once_cell::sync::Lazy;
+use reqwest::Client;
 use reqwest::StatusCode;
-use reqwest::{Client, Response};
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
-use tokio::{fs::File, io::AsyncReadExt};
+use std::path::PathBuf;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use tokio::sync::Semaphore;
 use tokio_retry::RetryIf;
-use tokio_tar::Archive;
-use tokio_util::io::StreamReader;
 
-use super::retry::build_dns_cached_client;
-use super::retry::{RetryableError, create_retry_strategy};
+use super::cache::get_cache_dir;
+use super::config::get_manifests_concurrency_limit_sync;
+use super::extractor::extract_and_write;
+use super::oncemap::OnceMap;
+use super::retry::{RetryableError, build_dns_cached_client, create_retry_strategy};
 
-use dashmap::DashMap;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::sync::Arc;
-use tokio::sync::Mutex;
-
-// Global downloader client - no pool limit, concurrency controlled by semaphore
+// Global downloader client - no pool limit, concurrency controlled by OnceMap
 static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
 
-static DOWNLOAD_LOCKS: Lazy<DashMap<u64, Arc<Mutex<()>>>> = Lazy::new(DashMap::new);
+/// Global download cache shared between pipeline and install phases.
+/// Key: "name@version", Value: cache path.
+static DOWNLOAD_CACHE: Lazy<OnceMap<String, PathBuf>> = Lazy::new(OnceMap::new);
 
-fn lock_key(url: &str, dest: &Path) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    url.hash(&mut hasher);
-    dest.to_string_lossy().hash(&mut hasher);
-    hasher.finish()
+/// Semaphore controlling concurrent download count.
+static DOWNLOAD_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
+
+/// Number of fresh downloads (not cache hits).
+static DOWNLOAD_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// Returns the number of fresh downloads performed.
+pub fn download_count() -> usize {
+    DOWNLOAD_COUNT.load(Ordering::Relaxed)
 }
 
-pub async fn download(url: &str, dest: &Path) -> Result<()> {
-    let start = std::time::Instant::now();
-    let key = lock_key(url, dest);
-    let lock = DOWNLOAD_LOCKS
-        .entry(key)
-        .or_insert_with(|| Arc::new(Mutex::new(())))
-        .clone();
-    let _guard = lock.lock().await;
+/// Download a package tarball to the global cache directory, returning the cache path.
+///
+/// Uses `OnceMap` to deduplicate: the same `name@version` is only downloaded once,
+/// even when called concurrently from multiple tasks (pipeline workers, install phase, etc.).
+pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
+    let key = format!("{}@{}", name, version);
+    let cache_dir = get_cache_dir();
+    let name = name.to_string();
+    let version = version.to_string();
+    let tarball_url = tarball_url.to_string();
 
-    let resolved_path = dest.join("_resolved");
-    if crate::fs::try_exists(&resolved_path).await? {
-        tracing::debug!("Download skipped, already resolved: {}", dest.display());
-        return Ok(());
-    }
+    DOWNLOAD_CACHE
+        .get_or_init(key, || async move {
+            let cache_path = cache_dir.join(&name).join(&version);
 
+            // Fast path: already extracted in cache
+            if crate::fs::try_exists(&cache_path.join("_resolved"))
+                .await
+                .unwrap_or(false)
+            {
+                tracing::debug!("Cache hit: {}@{}", name, version);
+                return Some(cache_path);
+            }
+
+            // Download (semaphore controlled)
+            let semaphore = DOWNLOAD_SEMAPHORE
+                .get_or_init(|| Semaphore::new(get_manifests_concurrency_limit_sync()));
+            let _permit = semaphore.acquire().await.ok()?;
+            let bytes = download_bytes(&tarball_url)
+                .await
+                .inspect_err(|e| tracing::warn!("Download failed: {}@{}: {}", name, version, e))
+                .ok()?;
+
+            // Extract
+            extract_and_write(bytes, &cache_path)
+                .await
+                .inspect_err(|e| tracing::warn!("Extract failed: {}@{}: {}", name, version, e))
+                .ok()?;
+
+            DOWNLOAD_COUNT.fetch_add(1, Ordering::Relaxed);
+            tracing::debug!("Downloaded: {}@{}", name, version);
+            Some(cache_path)
+        })
+        .await
+        .as_deref()
+        .cloned()
+}
+
+/// Download tarball bytes with retries (network phase only).
+pub async fn download_bytes(url: &str) -> Result<Bytes> {
+    let retry_count = AtomicU32::new(0);
     RetryIf::spawn(
         create_retry_strategy(),
         || async {
-            let response = DOWNLOADER_CLIENT
-                .get(url)
-                .send()
-                .await
-                .with_context(|| format!("Failed to send HTTP request to {url}"))
-                .map_err(|e| RetryableError::Temporary(format!("Network error: {e}")))?;
+            let attempt = retry_count.fetch_add(1, Ordering::Relaxed);
+
+            let response = match DOWNLOADER_CLIENT.get(url).send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!(
+                        "Retry {}/10 - Network error: {}, url: {}",
+                        attempt + 1,
+                        e,
+                        url
+                    );
+                    return Err(RetryableError::Temporary(format!("Network error: {e}")));
+                }
+            };
 
             match response.status() {
                 StatusCode::OK => {
-                    if let Err(e) = try_unpack_stream_direct(response, dest).await {
-                        tracing::debug!("Stream unpacking failed {}: {:#}", dest.display(), e);
-                        return Err(RetryableError::Temporary(format!(
-                            "Network error during streaming: {e:#}"
-                        )));
+                    let bytes = response.bytes().await.map_err(|e| {
+                        tracing::warn!(
+                            "Retry {}/10 - Stream error: {}, url: {}",
+                            attempt + 1,
+                            e,
+                            url
+                        );
+                        RetryableError::Temporary(format!("Stream error: {e}"))
+                    })?;
+                    if attempt > 0 {
+                        tracing::info!("Retry succeeded on attempt {}, url: {}", attempt + 1, url);
                     }
-                    Ok(())
+                    Ok(bytes)
                 }
                 StatusCode::NOT_FOUND => {
                     tracing::debug!("URL not found {url}");
                     Err(RetryableError::Permanent(format!("URL not found {url}")))
                 }
                 status => {
-                    tracing::debug!("Error: {status}, url: {url}, retrying");
+                    tracing::warn!("Retry {}/10 - HTTP {}, url: {}", attempt + 1, status, url);
                     Err(RetryableError::Temporary(format!(
                         "HTTP error: {status}, url: {url}"
                     )))
@@ -83,222 +133,7 @@ pub async fn download(url: &str, dest: &Path) -> Result<()> {
         |e: &RetryableError| matches!(e, RetryableError::Temporary(_)),
     )
     .await
-    .context("Download failed after retries")?;
-
-    let duration = start.elapsed();
-    tracing::debug!("Download task took: {duration:?}, url: {url:?}");
-    Ok(())
-}
-
-// Stream-based unpacking directly from HTTP Response
-async fn try_unpack_stream_direct(response: Response, dest: &Path) -> Result<()> {
-    use std::sync::Arc;
-    use tokio::sync::{Semaphore, mpsc};
-
-    crate::fs::create_dir_all(dest)
-        .await
-        .with_context(|| format!("Failed to create destination directory: {}", dest.display()))?;
-
-    // Convert HTTP response stream to AsyncRead for streaming processing
-    let stream = response
-        .bytes_stream()
-        .map(|result| result.map_err(std::io::Error::other));
-    let stream_reader = StreamReader::new(stream);
-
-    // Create pipeline processing channels
-    let (entry_tx, mut entry_rx) = mpsc::channel::<ExtractedEntry>(500);
-
-    let dest = dest.to_path_buf();
-
-    // Stage 1: Streaming tar extraction
-    let extraction_task = {
-        let entry_tx = entry_tx.clone();
-        let dest = dest.clone();
-
-        tokio::spawn(async move {
-            // Create streaming gzip decoder
-            let gzip_decoder = GzipDecoder::new(stream_reader);
-            let mut tar_archive = Archive::new(gzip_decoder);
-            let mut entries = tar_archive.entries()?;
-
-            while let Some(entry_result) = entries.next().await {
-                let mut entry = entry_result.with_context(|| "Failed to read tar entry")?;
-                let path = entry
-                    .path()
-                    .with_context(|| "Failed to get entry path")?
-                    .into_owned();
-                let full_path = dest.join(&path);
-                let is_dir = entry.header().entry_type().is_dir();
-
-                // Only process files, skip directories (they'll be created when writing files)
-                if !is_dir {
-                    // Stream file content
-                    let mut content = Vec::new();
-                    entry
-                        .read_to_end(&mut content)
-                        .await
-                        .with_context(|| format!("Failed to read tar entry: {}", path.display()))?;
-
-                    // Extract file permission mode
-                    let mode = entry.header().mode().unwrap_or(0o644);
-
-                    let size = content.len();
-                    let extracted_entry = ExtractedEntry {
-                        path: full_path,
-                        content,
-                        size,
-                        mode,
-                    };
-
-                    if entry_tx.send(extracted_entry).await.is_err() {
-                        break;
-                    }
-                }
-            }
-
-            Ok::<(), anyhow::Error>(())
-        })
-    };
-
-    // Stage 2: Concurrent file writing with cached directory creation
-    let file_writing_task = {
-        tokio::spawn(async move {
-            use dashmap::DashSet;
-
-            let semaphore = Arc::new(Semaphore::new(16));
-            let created_dirs = Arc::new(DashSet::<std::path::PathBuf>::new());
-            let mut write_tasks = Vec::new();
-            let mut batch_size = 0;
-            let mut total_bytes = 0;
-            const MAX_BATCH_SIZE: usize = 100;
-            const MAX_BATCH_BYTES: usize = 50 * 1024 * 1024; // 50MB
-
-            while let Some(entry) = entry_rx.recv().await {
-                let semaphore = Arc::clone(&semaphore);
-                let created_dirs = Arc::clone(&created_dirs);
-                batch_size += 1;
-                total_bytes += entry.size;
-
-                let task = tokio::spawn(async move {
-                    let _permit = semaphore.acquire().await.unwrap();
-
-                    // Ensure parent directory exists using cache
-                    if let Some(parent) = entry.path.parent() {
-                        let parent_path = parent.to_path_buf();
-
-                        // Check cache first to avoid duplicate directory creation
-                        if !created_dirs.contains(&parent_path) {
-                            if let Err(e) = crate::fs::create_dir_all(&parent_path).await {
-                                tracing::debug!(
-                                    "Failed to create parent dir {}: {}",
-                                    parent_path.display(),
-                                    e
-                                );
-                                return Err(anyhow::anyhow!(
-                                    "Failed to create parent directory: {e}"
-                                )
-                                .context(format!("Parent directory: {}", parent_path.display())));
-                            }
-
-                            created_dirs.insert(parent_path);
-                        }
-                    }
-
-                    // Write file content
-                    if let Err(e) = crate::fs::write(&entry.path, &entry.content).await {
-                        tracing::debug!("Failed to write file {}: {}", entry.path.display(), e);
-                        return Err(anyhow::anyhow!("Write failed: {e}")
-                            .context(format!("File path: {}", entry.path.display())));
-                    }
-
-                    // Set original file permissions from tar entry (Unix only)
-                    set_file_permissions(&entry.path, entry.mode).await?;
-
-                    Ok::<(), anyhow::Error>(())
-                });
-
-                write_tasks.push(task);
-
-                // Process in batches to manage memory and concurrency
-                if batch_size >= MAX_BATCH_SIZE
-                    || total_bytes >= MAX_BATCH_BYTES
-                    || entry_rx.is_empty()
-                {
-                    for task in write_tasks.drain(..) {
-                        task.await??;
-                    }
-                    batch_size = 0;
-                    total_bytes = 0;
-                }
-            }
-
-            // Wait for remaining tasks
-            for task in write_tasks {
-                task.await??;
-            }
-
-            Ok::<(), anyhow::Error>(())
-        })
-    };
-
-    // Close sender channel
-    drop(entry_tx);
-
-    // Wait for both stages to complete
-    let (extract_result, write_result) = tokio::try_join!(extraction_task, file_writing_task)?;
-
-    extract_result?;
-    write_result?;
-
-    // Set directory permissions and create resolution marker
-    set_dir_permissions(&dest).await?;
-    File::create(&dest.join("_resolved"))
-        .await
-        .with_context(|| format!("Failed to create resolution marker in: {}", dest.display()))?;
-
-    Ok(())
-}
-
-/// Set file permissions (cross-platform)
-#[cfg(unix)]
-async fn set_file_permissions(path: &Path, mode: u32) -> Result<()> {
-    use std::fs::Permissions;
-    let permissions = Permissions::from_mode(mode);
-    crate::fs::set_permissions(path, permissions)
-        .await
-        .with_context(|| format!("Failed to set permissions for: {}", path.display()))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-async fn set_file_permissions(_path: &Path, _mode: u32) -> Result<()> {
-    // Windows doesn't need Unix-style permissions
-    Ok(())
-}
-
-/// Set directory permissions (cross-platform)
-#[cfg(unix)]
-async fn set_dir_permissions(path: &Path) -> Result<()> {
-    use std::fs::Permissions;
-    let permissions = Permissions::from_mode(0o755);
-    crate::fs::set_permissions(path, permissions)
-        .await
-        .with_context(|| format!("Failed to set directory permissions: {}", path.display()))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-async fn set_dir_permissions(_path: &Path) -> Result<()> {
-    // Windows doesn't need Unix-style permissions
-    Ok(())
-}
-
-#[derive(Debug)]
-struct ExtractedEntry {
-    path: std::path::PathBuf,
-    content: Vec<u8>,
-    size: usize,
-    mode: u32, // File permission mode
+    .context("Download failed after retries")
 }
 
 #[cfg(test)]
@@ -306,11 +141,9 @@ mod tests {
     use super::*;
     use flate2::Compression;
     use flate2::write::GzEncoder;
-    use mockito::Server;
     use std::io::Write;
     use tar::Builder;
     use tempfile::TempDir;
-    use tokio::task;
 
     // Helper to create a simple tar.gz archive in memory
     fn create_tar_gz() -> Vec<u8> {
@@ -331,42 +164,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_download_idempotent() {
+    async fn test_extract_and_write() {
         let tar_gz = create_tar_gz();
-        let mut server = Server::new_async().await;
-        let _m = server
-            .mock("GET", "/pkg.tgz")
-            .with_status(200)
-            .with_header("content-type", "application/gzip")
-            .with_body(tar_gz.clone())
-            .expect(1)
-            .create_async()
-            .await;
-
-        let url = format!("{}/pkg.tgz", server.url());
         let temp_dir = TempDir::new().unwrap();
         let dest = temp_dir.path().join("pkg");
-        let n = 8;
-        let mut handles = Vec::new();
-        for _ in 0..n {
-            let url = url.clone();
-            let dest = dest.clone();
-            handles.push(task::spawn(async move {
-                download(&url, &dest).await.unwrap();
-            }));
-        }
-        for h in handles {
-            h.await.unwrap();
-        }
+
+        extract_and_write(Bytes::from(tar_gz), &dest).await.unwrap();
+
         // _resolved file should exist
         assert!(dest.join("_resolved").exists());
         // Extracted file should exist
         assert!(dest.join("file.txt").exists());
-        // All concurrent calls should succeed and not corrupt the output
         let content = crate::fs::read_to_string(dest.join("file.txt"))
             .await
             .unwrap();
         assert_eq!(content, "hello world");
-        _m.assert();
+    }
+
+    #[tokio::test]
+    async fn test_extract_and_write_idempotent() {
+        let tar_gz = create_tar_gz();
+        let temp_dir = TempDir::new().unwrap();
+        let dest = temp_dir.path().join("pkg");
+
+        // First extraction
+        extract_and_write(Bytes::from(tar_gz.clone()), &dest)
+            .await
+            .unwrap();
+
+        // Second extraction should skip (already resolved)
+        extract_and_write(Bytes::from(tar_gz), &dest).await.unwrap();
+
+        assert!(dest.join("_resolved").exists());
+        assert!(dest.join("file.txt").exists());
     }
 }
