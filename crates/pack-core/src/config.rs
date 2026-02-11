@@ -123,6 +123,7 @@ pub struct Config {
     provider: Option<FxIndexMap<RcStr, ProviderConfigValue>>,
     images: Option<ImageConfig>,
     pub styles: Option<StyleConfig>,
+    react: Option<ReactConfig>,
     optimization: Option<OptimizationConfig>,
     stats: Option<bool>,
     persistent_caching: Option<bool>,
@@ -238,6 +239,14 @@ pub struct ExternalAdvanced {
     pub r#type: Option<ExternalType>,
     pub script: Option<RcStr>,
     pub sub_path: Option<ExternalSubPath>,
+}
+
+#[turbo_tasks::value(eq = "manual")]
+#[derive(Clone, Debug, PartialEq, Default, Deserialize, OperationValue)]
+#[serde(rename_all = "camelCase")]
+pub struct ReactConfig {
+    /// JSX runtime mode: "automatic" (default) or "classic"
+    pub runtime: Option<RcStr>,
 }
 
 #[turbo_tasks::value(eq = "manual")]
@@ -942,6 +951,11 @@ impl Config {
     #[turbo_tasks::function]
     pub fn styles(&self) -> Vc<StyleConfig> {
         self.styles.clone().unwrap_or_default().cell()
+    }
+
+    #[turbo_tasks::function]
+    pub fn react(&self) -> Vc<ReactConfig> {
+        self.react.clone().unwrap_or_default().cell()
     }
 
     #[turbo_tasks::function]

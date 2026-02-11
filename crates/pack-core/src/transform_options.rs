@@ -121,13 +121,9 @@ pub async fn get_jsx_transform_options(
     enable_react_refresh: bool,
 ) -> Result<Vc<JsxTransformOptions>> {
     let tsconfig = get_typescript_options(project_path.clone()).await?;
-
     let is_emotion_enabled = config.styles().await?.emotion.is_some();
+    let react_config = config.react().await?;
 
-    // [NOTE]: ref: WEB-901
-    // next.js does not allow to overriding react runtime config via tsconfig /
-    // jsconfig, it forces overrides into automatic runtime instead.
-    // [TODO]: we need to emit / validate config message like next.js devserver does
     let react_transform_options = JsxTransformOptions {
         development: mode.await?.is_react_development(),
         // https://github.com/vercel/next.js/blob/3dc2c1c7f8441cdee31da9f7e0986d654c7fd2e7/packages/next/src/build/swc/options.ts#L112
@@ -137,7 +133,7 @@ pub async fn get_jsx_transform_options(
         } else {
             None
         },
-        runtime: Some("automatic".into()),
+        runtime: react_config.runtime.clone().or(Some("automatic".into())),
         react_refresh: enable_react_refresh,
     };
 
