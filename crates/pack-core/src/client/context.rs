@@ -278,7 +278,7 @@ pub async fn get_client_module_options_context(
     } else {
         false
     };
-    let jsx_runtime_options = get_jsx_transform_options(
+    let jsx_transform_options = get_jsx_transform_options(
         project_path.clone(),
         mode,
         false,
@@ -381,7 +381,6 @@ pub async fn get_client_module_options_context(
             enable_typescript_transform: Some(
                 TypescriptTransformOptions::default().resolved_cell(),
             ),
-            enable_jsx: Some(JsxTransformOptions::default().resolved_cell()),
             ignore_dynamic_requests: true,
             ..Default::default()
         },
@@ -406,6 +405,7 @@ pub async fn get_client_module_options_context(
     let foreign_codes_options_context = ModuleOptionsContext {
         ecmascript: EcmascriptOptionsContext {
             enable_typeof_window_inlining: None,
+            enable_jsx: Some(jsx_transform_options),
             ..module_options_context.ecmascript
         },
         enable_webpack_loaders: foreign_enable_webpack_loaders,
@@ -417,6 +417,7 @@ pub async fn get_client_module_options_context(
 
     let internal_context = ModuleOptionsContext {
         ecmascript: EcmascriptOptionsContext {
+            enable_jsx: Some(JsxTransformOptions::default().resolved_cell()),
             ..module_options_context.ecmascript.clone()
         },
         enable_postcss_transform: None,
@@ -428,7 +429,7 @@ pub async fn get_client_module_options_context(
         // we try resolve it once at the root and pass down a context to all
         // the modules.
         ecmascript: EcmascriptOptionsContext {
-            enable_jsx: Some(jsx_runtime_options),
+            enable_jsx: Some(jsx_transform_options),
             enable_typescript_transform: Some(tsconfig),
             enable_decorators: Some(decorators_options.to_resolved().await?),
             ..module_options_context.ecmascript.clone()

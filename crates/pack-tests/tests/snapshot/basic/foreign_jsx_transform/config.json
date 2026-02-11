@@ -5,6 +5,9 @@
                 "import": "input/index.js",
                 "name": "main"
             }
-        ]
+        ],
+        "react": {
+            "runtime": "classic"
+        }
     }
 }
