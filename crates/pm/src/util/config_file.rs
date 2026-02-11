@@ -42,6 +42,11 @@ impl Config {
         Ok(self.values.get(key).cloned())
     }
 
+    pub fn delete(&mut self, key: &str, global: bool) -> ConfigResult<()> {
+        self.values.remove(key);
+        self.save(global)
+    }
+
     pub fn get_array(&self, key: &str) -> Option<&Vec<String>> {
         self.arrays.get(key)
     }
