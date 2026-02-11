@@ -118,12 +118,20 @@ fn build_interactive_package(cwd: &Path) -> Result<serde_json::Value> {
         main: prompt("entry point", defaults.main, false)?,
         test_script: {
             let cmd = prompt("test command", String::new(), true)?;
-            if cmd.is_empty() { DEFAULT_TEST.to_string() } else { cmd }
+            if cmd.is_empty() {
+                DEFAULT_TEST.to_string()
+            } else {
+                cmd
+            }
         },
         repository: prompt("git repository", defaults.repository, true)?,
         keywords: {
             let input = prompt("keywords", String::new(), true)?;
-            input.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+            input
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
         },
         author: prompt("author", defaults.author, true)?,
         license: prompt("license", defaults.license, false)?,
@@ -181,7 +189,10 @@ mod tests {
         let content = std::fs::read_to_string(dir.path().join("package.json")).unwrap();
         let pkg: serde_json::Value = serde_json::from_str(&content).unwrap();
 
-        assert_eq!(pkg["name"], dir.path().file_name().unwrap().to_str().unwrap());
+        assert_eq!(
+            pkg["name"],
+            dir.path().file_name().unwrap().to_str().unwrap()
+        );
         assert_eq!(pkg["version"], "1.0.0");
         assert_eq!(pkg["description"], "");
         assert_eq!(pkg["main"], "index.js");

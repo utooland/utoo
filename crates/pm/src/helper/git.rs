@@ -53,10 +53,10 @@ pub fn normalize_url(url: &str) -> String {
     }
 
     // SSH shorthand: git@host:user/repo.git
-    if let Some(rest) = url.strip_prefix("git@") {
-        if let Some((host, path)) = rest.split_once(':') {
-            return format!("git+ssh://git@{host}/{path}");
-        }
+    if let Some(rest) = url.strip_prefix("git@")
+        && let Some((host, path)) = rest.split_once(':')
+    {
+        return format!("git+ssh://git@{host}/{path}");
     }
 
     // https:// or http://
