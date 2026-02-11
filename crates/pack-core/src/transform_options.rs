@@ -124,10 +124,6 @@ pub async fn get_jsx_transform_options(
 
     let is_emotion_enabled = config.styles().await?.emotion.is_some();
 
-    // [NOTE]: ref: WEB-901
-    // next.js does not allow to overriding react runtime config via tsconfig /
-    // jsconfig, it forces overrides into automatic runtime instead.
-    // [TODO]: we need to emit / validate config message like next.js devserver does
     let react_transform_options = JsxTransformOptions {
         development: mode.await?.is_react_development(),
         // https://github.com/vercel/next.js/blob/3dc2c1c7f8441cdee31da9f7e0986d654c7fd2e7/packages/next/src/build/swc/options.ts#L112
@@ -147,12 +143,23 @@ pub async fn get_jsx_transform_options(
                 .as_str()
                 .map(|s| s.into());
 
+            // Map TypeScript jsx compiler option to JSX runtime
+            // TypeScript jsx values: "react" -> classic, "react-jsx" | "react-jsxdev" -> automatic
+            let jsx_runtime = json["compilerOptions"]["jsx"]
+                .as_str()
+                .and_then(|jsx| match jsx {
+                    "react" => Some("classic".into()),
+                    "react-jsx" | "react-jsxdev" => Some("automatic".into()),
+                    _ => None,
+                });
+
             Some(JsxTransformOptions {
                 import_source: if jsx_import_source.is_some() {
                     jsx_import_source
                 } else {
                     react_transform_options.import_source.clone()
                 },
+                runtime: jsx_runtime.or_else(|| react_transform_options.runtime.clone()),
                 ..react_transform_options.clone()
             })
         })
