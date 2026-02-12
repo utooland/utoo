@@ -213,6 +213,9 @@ export interface HtmlConfig {
   inject?: boolean | "body" | "head";
   scriptLoading?: "blocking" | "defer" | "module";
   meta?: Record<string, string | { [key: string]: string }>;
+  output?: {
+    path?: string;
+  };
 }
 
 export interface StyledComponentsConfig {

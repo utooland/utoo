@@ -34,8 +34,10 @@ export function processHtmlEntry(config: ConfigComplete, projectPath: string) {
             }
 
             newEntries.push({
+              ...entry,
               import: scriptPath,
               html: {
+                ...entry.html,
                 template: entry.import,
                 templateContent: doc.outerHTML,
                 filename: path.basename(entry.import),
