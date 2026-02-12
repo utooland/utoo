@@ -136,7 +136,7 @@ pub async fn get_jsx_transform_options(
         } else {
             None
         },
-        runtime: react_config.runtime.clone().map(|runtime| match runtime {
+        runtime: react_config.runtime.as_ref().map(|runtime| match runtime {
             ReactRuntime::Automatic => "automatic".into(),
             ReactRuntime::Classic => "classic".into(),
         }),
