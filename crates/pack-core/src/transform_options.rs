@@ -11,7 +11,10 @@ use turbopack_core::{
 };
 use turbopack_ecmascript::typescript::resolve::{read_from_tsconfigs, read_tsconfigs, tsconfig};
 
-use crate::{config::Config, mode::Mode};
+use crate::{
+    config::{Config, ReactRuntime},
+    mode::Mode,
+};
 
 async fn get_typescript_options(
     project_path: FileSystemPath,
@@ -133,7 +136,10 @@ pub async fn get_jsx_transform_options(
         } else {
             None
         },
-        runtime: react_config.runtime.clone().or(Some("automatic".into())),
+        runtime: react_config.runtime.clone().map(|runtime| match runtime {
+            ReactRuntime::Automatic => "automatic".into(),
+            ReactRuntime::Classic => "classic".into(),
+        }),
         react_refresh: enable_react_refresh,
     };
 
