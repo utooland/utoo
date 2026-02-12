@@ -135,7 +135,7 @@ export async function createHotReloader(
       packPath: getPackPath(),
     },
     {
-      persistentCaching: true,
+      persistentCaching: bundleOptions.config.persistentCaching ?? false,
     },
   );
 

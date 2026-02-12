@@ -326,13 +326,11 @@ impl Endpoint for LibraryEndpoint {
 
             let dist_root = self.project().dist_root().await?;
 
-            let (server_paths, client_paths) = (vec![], vec![]);
-
             let written_endpoint = EndpointOutputPaths::NodeJs {
                 // FIXME: No server path when bundling library
                 server_entry_path: dist_root.to_string(),
-                server_paths,
-                client_paths,
+                server_paths: vec![],
+                client_paths: vec![],
             };
 
             Ok(EndpointOutput {

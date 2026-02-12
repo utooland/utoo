@@ -366,15 +366,18 @@ impl Endpoint for AppEndpoint {
 
             let dist_root = this.project.dist_root().await?;
 
-            let (server_paths, client_paths) = (vec![], vec![]);
-
             let written_endpoint = EndpointOutputPaths::NodeJs {
                 server_entry_path: dist_root.path.to_string(),
-                server_paths,
-                client_paths,
+                // FIXME: No server path when bundling library
+                server_paths: vec![],
+                client_paths: vec![],
             };
 
-            let output_assets = if *this.project.should_create_webpack_stats().await? {
+            let should_create_webpack_stats = *this.project.should_create_webpack_stats().await?;
+
+            let output_assets = if !should_create_webpack_stats {
+                output_assets
+            } else {
                 let webpack_stats = generate_webpack_stats(output_assets, this.project.dist_root());
                 let webpack_stats_read = webpack_stats.await?;
                 let dist_root_owned = this.project.dist_root().owned().await?;
@@ -386,8 +389,6 @@ impl Endpoint for AppEndpoint {
                 .to_resolved()
                 .await?;
                 output_assets.concatenate(*ResolvedVc::cell(vec![ResolvedVc::upcast(stats_output)]))
-            } else {
-                output_assets
             };
 
             Ok(EndpointOutput {

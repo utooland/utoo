@@ -69,7 +69,7 @@ async function buildInternal(
       packPath: getPackPath(),
     },
     {
-      persistentCaching: false,
+      persistentCaching: bundleOptions.config.persistentCaching ?? false,
     },
   );
 

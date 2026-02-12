@@ -117,6 +117,9 @@ export class HtmlPlugin {
 
     const finalHtml = doc.outerHTML;
     const filename = this.config.filename || "index.html";
-    fs.writeFileSync(path.join(outputDir, filename), finalHtml);
+    fs.writeFileSync(
+      path.join(this.config.output?.path ?? outputDir, filename),
+      finalHtml,
+    );
   }
 }
