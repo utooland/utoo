@@ -15,7 +15,7 @@ use cmd::update::update;
 use cmd::view::view;
 use cmd::{clean::clean, deps::build_workspace};
 use helper::auto_update::init_auto_update;
-use util::config::{
+use util::settings::{
     set_cache_dir, set_legacy_peer_deps, set_manifests_concurrency_limit, set_omit, set_registry,
 };
 use util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
@@ -246,7 +246,10 @@ enum Commands {
     },
 
     #[command(name = PING_NAME, alias = PING_ALIAS, about = PING_ABOUT)]
-    Ping,
+    Ping {
+        /// Registry URL to ping (defaults to configured registry)
+        registry: Option<String>,
+    },
 
     #[command(name = CONFIG_NAME, alias = CONFIG_ALIAS, about = CONFIG_ABOUT)]
     Config {
@@ -495,8 +498,8 @@ async fn async_main() -> Result<()> {
             init(yes, None).await?;
             log_time_end("package.json created");
         }
-        Some(Commands::Ping) => {
-            cmd::ping::ping().await?;
+        Some(Commands::Ping { registry }) => {
+            cmd::ping::ping(registry.as_deref()).await?;
         }
         Some(Commands::Config { command }) => match command {
             ConfigCommands::Set { key, value, global } => {

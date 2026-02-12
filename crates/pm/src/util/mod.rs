@@ -4,6 +4,7 @@ pub mod cloner;
 pub mod config;
 pub mod downloader;
 pub mod extractor;
+pub mod settings;
 pub mod format_print;
 pub mod json;
 pub mod linker;

@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::path::Path;
 
 use crate::service::install::InstallService;
-use crate::util::config::get_omit;
+use crate::util::settings::get_omit;
 use crate::util::save_type::{PackageAction, SaveType};
 
 pub async fn update_packages(

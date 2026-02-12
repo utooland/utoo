@@ -10,7 +10,7 @@ use tokio::sync::Semaphore;
 use tokio_retry::RetryIf;
 
 use super::cache::get_cache_dir;
-use super::config::get_manifests_concurrency_limit_sync;
+use super::settings::get_manifests_concurrency_limit_sync;
 use super::extractor::extract_and_write;
 use super::oncemap::OnceMap;
 use super::retry::{RetryableError, build_dns_cached_client, create_retry_strategy};
