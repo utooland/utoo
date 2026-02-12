@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { workspace = true }
 atty = "0.2"
+base64 = "0.22"
 bytes = "1.11.0"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { workspace = true }
@@ -24,6 +25,7 @@ dirs = "4.0"
 flate2 = "1.0"
 futures = { workspace = true }
 glob = "0.3.1"
+ignore = "0.4"
 indicatif = "0.17.8"
 libc = "0.2"
 libdeflater = "1.25"
@@ -43,6 +45,8 @@ reqwest = { version = "0.12", default-features = false, features = [
 ] }
 serde = { workspace = true }
 serde_json = { version = "1.0", features = ["preserve_order"] }
+sha1 = "0.10"
+sha2 = "0.10"
 tar = "0.4"
 tempfile = "3.15.0"
 term_size = "0.3"

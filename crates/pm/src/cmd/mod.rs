@@ -8,6 +8,7 @@ pub mod link;
 pub mod list;
 pub mod login;
 pub mod logout;
+pub mod pack;
 pub mod ping;
 pub mod rebuild;
 pub mod run;

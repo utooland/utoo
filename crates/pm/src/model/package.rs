@@ -15,6 +15,11 @@ pub struct Scripts {
     pub preprepare: Option<String>,
     pub postprepare: Option<String>,
     pub prepublish: Option<String>,
+    pub prepublish_only: Option<String>,
+    pub prepack: Option<String>,
+    pub postpack: Option<String>,
+    pub publish: Option<String>,
+    pub postpublish: Option<String>,
 }
 
 impl Scripts {
@@ -27,6 +32,11 @@ impl Scripts {
             "preprepare" => self.preprepare.as_ref(),
             "postprepare" => self.postprepare.as_ref(),
             "prepublish" => self.prepublish.as_ref(),
+            "prepublishOnly" => self.prepublish_only.as_ref(),
+            "prepack" => self.prepack.as_ref(),
+            "postpack" => self.postpack.as_ref(),
+            "publish" => self.publish.as_ref(),
+            "postpublish" => self.postpublish.as_ref(),
             _ => None,
         }
     }
@@ -83,6 +93,11 @@ impl PackageInfo {
             preprepare: data["scripts"]["preprepare"].as_str().map(String::from),
             postprepare: data["scripts"]["postprepare"].as_str().map(String::from),
             prepublish: data["scripts"]["prepublish"].as_str().map(String::from),
+            prepublish_only: data["scripts"]["prepublishOnly"].as_str().map(String::from),
+            prepack: data["scripts"]["prepack"].as_str().map(String::from),
+            postpack: data["scripts"]["postpack"].as_str().map(String::from),
+            publish: data["scripts"]["publish"].as_str().map(String::from),
+            postpublish: data["scripts"]["postpublish"].as_str().map(String::from),
         };
 
         Ok(PackageInfo {

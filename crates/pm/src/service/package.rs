@@ -84,6 +84,7 @@ impl PackageService {
                     .get("prepublish")
                     .and_then(|s| s.as_str())
                     .map(String::from),
+                ..Default::default()
             },
             name,
             fullname,
@@ -137,6 +138,26 @@ impl PackageService {
                 .map(String::from),
             prepublish: scripts
                 .get("prepublish")
+                .and_then(|s| s.as_str())
+                .map(String::from),
+            prepublish_only: scripts
+                .get("prepublishOnly")
+                .and_then(|s| s.as_str())
+                .map(String::from),
+            prepack: scripts
+                .get("prepack")
+                .and_then(|s| s.as_str())
+                .map(String::from),
+            postpack: scripts
+                .get("postpack")
+                .and_then(|s| s.as_str())
+                .map(String::from),
+            publish: scripts
+                .get("publish")
+                .and_then(|s| s.as_str())
+                .map(String::from),
+            postpublish: scripts
+                .get("postpublish")
                 .and_then(|s| s.as_str())
                 .map(String::from),
         })
@@ -201,15 +222,7 @@ impl PackageService {
                     .context(format!("Failed to read scripts for package: {path}"))?
             } else {
                 // Create empty scripts for ignore_scripts mode
-                Scripts {
-                    preinstall: None,
-                    install: None,
-                    postinstall: None,
-                    prepare: None,
-                    preprepare: None,
-                    postprepare: None,
-                    prepublish: None,
-                }
+                Scripts::default()
             };
 
             // Check if this package is an optional dependency (based on edge type)
@@ -792,15 +805,7 @@ mod tests {
         let package_info = PackageInfo {
             path: package_path.to_path_buf(),
             bin_files: vec![("testbin".to_string(), "not-exist.js".to_string())],
-            scripts: Scripts {
-                preinstall: None,
-                install: None,
-                postinstall: None,
-                prepare: None,
-                preprepare: None,
-                postprepare: None,
-                prepublish: None,
-            },
+            scripts: Scripts::default(),
             name: "test-bin-missing".to_string(),
             fullname: "test-bin-missing".to_string(),
         };
@@ -1127,13 +1132,8 @@ mod tests {
             path: package_path.to_path_buf(),
             bin_files: vec![],
             scripts: Scripts {
-                preinstall: None,
-                install: None,
                 postinstall: Some("exit 1".to_string()),
-                prepare: None,
-                preprepare: None,
-                postprepare: None,
-                prepublish: None,
+                ..Default::default()
             },
             name: "test-optional-fail".to_string(),
             fullname: "test-optional-fail".to_string(),
