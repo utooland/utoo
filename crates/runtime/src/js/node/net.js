@@ -54,7 +54,7 @@ class Socket extends Duplex {
           this.push(null);
           break;
         }
-        this.push(new Uint8Array(data));
+        this.push(Buffer.from(data));
       } catch {
         if (!this.destroyed) this.push(null);
         break;
