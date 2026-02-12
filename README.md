@@ -1,5 +1,3 @@
-> 🌖 **Notice**: We are building a next-generation toolchain on top of [Turbopack](https://turbo.build/pack). Check out our [progress](https://github.com/utooland/utoo/issues/1872).
-
 <div align="center">
 <img src="https://mdn.alipayobjects.com/huamei_botco4/afts/img/357RTIva8S8AAAAAAAAAAAAADnNMAQFr/original" alt="Utoo Logo" height="80"/>
 <h1>Utoo</h1>
