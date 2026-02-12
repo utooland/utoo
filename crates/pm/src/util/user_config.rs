@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{LazyLock, OnceLock};
 
-use super::config::{Config, ConfigValue};
+use super::config_file::{Config, ConfigValue};
 use super::registry::{REGISTRY_NPMMIRROR, select_fastest_registry};
 use super::save_type::OmitType;
 
@@ -199,13 +199,11 @@ pub async fn detect_supports_semver(registry_url: &str) -> bool {
         .cloned()
         .unwrap_or_default();
     entries.push(new_entry);
-    let _ = config.set_array("supports-semver", entries, true);
+    if let Err(e) = config.set_array("supports-semver", entries, true) {
+        tracing::warn!("Failed to save semver support to config: {}", e);
+    }
 
-    tracing::debug!(
-        "Detected supports-semver={} for {}",
-        supports,
-        registry_url
-    );
+    tracing::debug!("Detected supports-semver={} for {}", supports, registry_url);
     supports
 }
 
@@ -219,7 +217,7 @@ mod tests {
     use anyhow::Result;
     use tempfile::TempDir;
 
-    use super::super::config::ConfigValueParser;
+    use super::super::config_file::ConfigValueParser;
 
     #[test]
     fn test_cache_dir_default() {

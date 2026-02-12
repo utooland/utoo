@@ -12,14 +12,14 @@ pub const REGISTRY_NPMJS: &str = "https://registry.npmjs.org";
 const PING_TIMEOUT_MS: u64 = 3000;
 
 /// Ping result structure
-struct PingResult {
-    registry: String,
-    latency_ms: u64,
-    success: bool,
+pub struct PingResult {
+    pub registry: String,
+    pub latency_ms: u64,
+    pub success: bool,
 }
 
 /// Ping a registry and measure latency
-async fn ping_registry(client: &reqwest::Client, registry_url: &str) -> PingResult {
+pub async fn ping_registry(client: &reqwest::Client, registry_url: &str) -> PingResult {
     let ping_url = format!("{}/-/ping", registry_url);
     let start = std::time::Instant::now();
 

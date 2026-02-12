@@ -1,5 +1,5 @@
 use crate::constants::cmd;
-use crate::util::config::{Config, ConfigResult};
+use crate::util::config_file::{Config, ConfigResult};
 use anyhow::anyhow;
 use colored::*;
 use std::cmp::max;

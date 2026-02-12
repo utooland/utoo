@@ -1,5 +1,5 @@
 use crate::constants::APP_VERSION;
-use crate::util::settings::get_registry;
+use crate::util::user_config::get_registry;
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};

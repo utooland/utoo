@@ -13,9 +13,9 @@ use utoo_ruborist::manifest::PackageJson;
 
 use crate::helper::install_runtime::install_runtime;
 use crate::helper::workspace::find_workspaces;
-use crate::util::settings::get_legacy_peer_deps;
 use crate::util::json::load_package_json_from_path;
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
+use crate::util::user_config::get_legacy_peer_deps;
 
 /// TreeBuilder - builds workspace dependency graph.
 ///

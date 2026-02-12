@@ -15,11 +15,11 @@ use cmd::update::update;
 use cmd::view::view;
 use cmd::{clean::clean, deps::build_workspace};
 use helper::auto_update::init_auto_update;
-use util::settings::{
-    set_cache_dir, set_legacy_peer_deps, set_manifests_concurrency_limit, set_omit, set_registry,
-};
 use util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
 use util::save_type::{OmitType, PackageAction, SaveType, parse_save_type};
+use util::user_config::{
+    set_cache_dir, set_legacy_peer_deps, set_manifests_concurrency_limit, set_omit, set_registry,
+};
 
 mod cmd;
 mod constants;
@@ -299,7 +299,7 @@ async fn async_main() -> Result<()> {
 
     // Check for help flag
     if args.len() > 1 && (args[1] == "-h" || args[1] == "--help") {
-        let config = crate::util::config::Config::load(false).await?;
+        let config = crate::util::config_file::Config::load(false).await?;
         let config_service = crate::service::config::ConfigService::new(config);
         config_service.print_help()?;
         return Ok(());
@@ -520,7 +520,7 @@ async fn async_main() -> Result<()> {
             // Check if there's a script name provided
             if let Some(script_name) = &cli.script_name {
                 // First check if there's a custom command configured for this script name
-                let config = crate::util::config::Config::load(false).await?;
+                let config = crate::util::config_file::Config::load(false).await?;
                 let config_service = crate::service::config::ConfigService::new(config);
                 // Check if there's a custom command available
                 if let Ok(Some(_)) = config_service.get_available_cmd(script_name) {

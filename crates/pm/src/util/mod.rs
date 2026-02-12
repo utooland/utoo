@@ -1,10 +1,9 @@
 pub mod binary_resolver;
 pub mod cache;
 pub mod cloner;
-pub mod config;
+pub mod config_file;
 pub mod downloader;
 pub mod extractor;
-pub mod settings;
 pub mod format_print;
 pub mod json;
 pub mod linker;
@@ -13,3 +12,4 @@ pub mod oncemap;
 pub mod registry;
 pub mod retry;
 pub mod save_type;
+pub mod user_config;

@@ -16,7 +16,7 @@ pub struct Config {
 }
 
 // global config path is ~/.utoo/config.toml
-// local config path is .utoo/config.toml
+// local config path is .utoo.toml
 impl Config {
     pub async fn load(global: bool) -> ConfigResult<Self> {
         if global {

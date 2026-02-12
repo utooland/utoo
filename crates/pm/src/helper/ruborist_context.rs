@@ -5,10 +5,10 @@ use utoo_ruborist::service::{BuildDepsOptions, Glob, UnifiedRegistry};
 
 use crate::service::pipeline::{PipelineChannels, PipelineReceiver};
 use crate::util::cache::get_cache_dir;
-use crate::util::settings::{
+use crate::util::logger::ProgressReceiver;
+use crate::util::user_config::{
     get_legacy_peer_deps, get_manifests_concurrency_limit, get_registry, get_supports_semver,
 };
-use crate::util::logger::ProgressReceiver;
 
 /// Tokio-based glob implementation.
 #[derive(Debug, Clone, Copy, Default)]
