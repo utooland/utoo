@@ -41,7 +41,7 @@
     "@swc/helpers": "0.5.15",
     "@utoo/pack-shared": "*",
     "@utoo/style-loader": "^1.0.0",
-    "domparser-rs": "^0.0.5",
+    "domparser-rs": "^0.0.7",
     "find-up": "4.1.0",
     "nanoid": "^3.3.11",
     "picocolors": "^1.1.1",
@@ -67,7 +67,6 @@
     "styled-jsx": "^5.1.6",
     "typescript": "^5.8.3"
   },
-
   "engines": {
     "node": ">= 20"
   },

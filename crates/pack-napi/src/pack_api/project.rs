@@ -33,7 +33,9 @@ use pack_core::tracing_presets::{
     TRACING_TURBOPACK_TARGETS,
 };
 use tracing::Instrument;
-use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{
+    EnvFilter, Registry, fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt,
+};
 use turbo_rcstr::RcStr;
 use turbo_tasks::{
     NonLocalValue, OperationValue, PrettyPrintError, ReadRef, ResolvedVc, TaskInput,
@@ -367,12 +369,18 @@ pub async fn project_new(
         });
     } else {
         TRACING_INIT.call_once(|| {
+            let env_filter = EnvFilter::try_from_default_env();
+            let env_filter_enabled = env_filter.is_ok();
             tracing_subscriber::fmt()
-                .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                .with_env_filter(env_filter.unwrap_or_else(|_| {
                     EnvFilter::new("pack_napi=info,pack_api=info,pack_core=info")
                 }))
-                .with_target(false)
-                .with_span_events(tracing_subscriber::fmt::format::FmtSpan::NONE)
+                .with_target(env_filter_enabled)
+                .with_span_events(if env_filter_enabled {
+                    FmtSpan::CLOSE
+                } else {
+                    FmtSpan::NONE
+                })
                 .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
                     "%Y-%m-%d %H:%M:%S.%3f".to_string(),
                 ))
