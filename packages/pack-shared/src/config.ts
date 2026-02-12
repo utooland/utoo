@@ -189,6 +189,9 @@ export interface ConfigComplete {
   images?: {
     inlineLimit?: number;
   };
+  react?: {
+    runtime?: "automatic" | "classic";
+  };
   stats?: boolean;
   persistentCaching?: boolean;
   nodePolyfill?: boolean;

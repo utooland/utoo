@@ -241,12 +241,19 @@ pub struct ExternalAdvanced {
     pub sub_path: Option<ExternalSubPath>,
 }
 
+#[turbo_tasks::value]
+#[derive(Clone, Debug, Deserialize, OperationValue)]
+#[serde(rename_all = "camelCase")]
+pub enum ReactRuntime {
+    Automatic,
+    Classic,
+}
+
 #[turbo_tasks::value(eq = "manual")]
 #[derive(Clone, Debug, PartialEq, Default, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
 pub struct ReactConfig {
-    /// JSX runtime mode: "automatic" (default) or "classic"
-    pub runtime: Option<RcStr>,
+    pub runtime: Option<ReactRuntime>,
 }
 
 #[turbo_tasks::value(eq = "manual")]
