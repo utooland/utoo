@@ -40,10 +40,18 @@ import _stream_promises from "ext:utoo_rt_ext/node/stream_promises";
 import _stream_web from "ext:utoo_rt_ext/node/stream_web";
 import _stream_consumers from "ext:utoo_rt_ext/node/stream_consumers";
 import _inspector from "ext:utoo_rt_ext/node/inspector";
+import _dns_promises from "ext:utoo_rt_ext/node/dns_promises";
+import _path_posix from "ext:utoo_rt_ext/node/path_posix";
+import _vm from "ext:utoo_rt_ext/node/vm";
 
 // Make Buffer globally available (Node.js compat)
 if (_buffer && _buffer.Buffer) {
   globalThis.Buffer = _buffer.Buffer;
+}
+
+// Make AsyncLocalStorage globally available (Next.js checks globalThis.AsyncLocalStorage)
+if (_async_hooks && _async_hooks.AsyncLocalStorage) {
+  globalThis.AsyncLocalStorage = _async_hooks.AsyncLocalStorage;
 }
 
 // Make URL/URLSearchParams globally available (Web platform + Node.js compat)
@@ -107,10 +115,15 @@ if (b) {
     ["stream/web", _stream_web],
     ["stream/consumers", _stream_consumers],
     ["inspector", _inspector],
+    ["dns/promises", _dns_promises],
+    ["path/posix", _path_posix],
+    ["vm", _vm],
   ]) {
     b.set(name, mod);
     b.set("node:" + name, mod);
   }
   b.set("fs/promises", _fsp);
   b.set("node:fs/promises", _fsp);
+  b.set("process", globalThis.process);
+  b.set("node:process", globalThis.process);
 }

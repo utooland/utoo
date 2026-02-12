@@ -15,6 +15,8 @@ deno_core   = { workspace = true }
 deno_error  = { workspace = true }
 flate2      = { workspace = true }
 libc        = "0.2"
+libloading  = "0.8"
+log         = "0.4"
 ring        = { workspace = true }
 tokio       = { workspace = true, features = ["full"] }
 tracing     = { workspace = true }

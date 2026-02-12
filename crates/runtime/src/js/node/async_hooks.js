@@ -1,23 +1,63 @@
+// AsyncLocalStorage backed by deno_core's AsyncVariable (V8 async context tracking)
+const { AsyncVariable, getAsyncContext, setAsyncContext } = Deno.core;
+
 class AsyncLocalStorage {
   constructor() {
-    this._store = undefined;
+    this._variable = new AsyncVariable();
   }
-  getStore() { return this._store; }
+  getStore() { return this._variable.get(); }
   run(store, callback, ...args) {
-    const prev = this._store;
-    this._store = store;
-    try { return callback(...args); }
-    finally { this._store = prev; }
+    // enter() returns the previous full async context snapshot,
+    // so we must restore with setAsyncContext(), not enter(prev)
+    const prev = this._variable.enter(store);
+    try {
+      return callback(...args);
+    } finally {
+      setAsyncContext(prev);
+    }
   }
-  enterWith(store) { this._store = store; }
-  disable() { this._store = undefined; }
+  exit(callback, ...args) {
+    return this.run(undefined, callback, ...args);
+  }
+  enterWith(store) { this._variable.enter(store); }
+  disable() { this._variable.enter(undefined); }
+  static bind(fn) {
+    const ctx = getAsyncContext();
+    return function(...args) {
+      const prev = setAsyncContext(ctx);
+      try {
+        return fn(...args);
+      } finally {
+        setAsyncContext(prev);
+      }
+    };
+  }
+  static snapshot() {
+    const ctx = getAsyncContext();
+    return function(fn, ...args) {
+      const prev = setAsyncContext(ctx);
+      try {
+        return fn(...args);
+      } finally {
+        setAsyncContext(prev);
+      }
+    };
+  }
 }
 
 class AsyncResource {
   constructor(type, opts) {
     this.type = type;
+    this._ctx = getAsyncContext();
   }
-  runInAsyncScope(fn, thisArg, ...args) { return fn.call(thisArg, ...args); }
+  runInAsyncScope(fn, thisArg, ...args) {
+    const prev = setAsyncContext(this._ctx);
+    try {
+      return fn.call(thisArg, ...args);
+    } finally {
+      setAsyncContext(prev);
+    }
+  }
   emitDestroy() { return this; }
   asyncId() { return -1; }
   triggerAsyncId() { return -1; }

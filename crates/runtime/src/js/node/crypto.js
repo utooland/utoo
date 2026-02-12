@@ -106,10 +106,40 @@ function randomInt(min, max, cb) {
   return val;
 }
 
+function randomFillSync(buf, offset, size) {
+  offset = offset || 0;
+  size = size !== undefined ? size : buf.length - offset;
+  const bytes = new Uint8Array(ops.op_crypto_random_bytes(size));
+  for (let i = 0; i < size; i++) buf[offset + i] = bytes[i];
+  return buf;
+}
+
+function randomFill(buf, offset, size, cb) {
+  if (typeof offset === "function") { cb = offset; offset = 0; size = buf.length; }
+  else if (typeof size === "function") { cb = size; size = buf.length - offset; }
+  try {
+    randomFillSync(buf, offset, size);
+    if (cb) process.nextTick(() => cb(null, buf));
+  } catch (e) {
+    if (cb) process.nextTick(() => cb(e));
+    else throw e;
+  }
+  return buf;
+}
+
+// Web Crypto API shim for Node.js crypto.webcrypto
+const webcrypto = {
+  getRandomValues(arr) { return globalThis.crypto.getRandomValues(arr); },
+  randomUUID() { return randomUUID(); },
+  subtle: globalThis.crypto.subtle,
+  CryptoKey: globalThis.CryptoKey,
+};
+
 const crypto = {
-  createHash, createHmac, randomBytes, timingSafeEqual,
-  randomUUID, randomInt,
+  createHash, createHmac, randomBytes, randomFillSync, randomFill,
+  timingSafeEqual, randomUUID, randomInt,
   getHashes() { return ["sha1", "sha256", "sha384", "sha512"]; },
+  webcrypto,
 };
 export default crypto;
-export { createHash, createHmac, randomBytes, timingSafeEqual, randomUUID, randomInt };
+export { createHash, createHmac, randomBytes, randomFillSync, randomFill, timingSafeEqual, randomUUID, randomInt, webcrypto };

@@ -76,8 +76,33 @@ fn metadata_to_stat(meta: &std::fs::Metadata) -> StatResult {
     }
 }
 
+fn io_error_code(e: &std::io::Error) -> &'static str {
+    match e.kind() {
+        std::io::ErrorKind::NotFound => "ENOENT",
+        std::io::ErrorKind::PermissionDenied => "EACCES",
+        std::io::ErrorKind::AlreadyExists => "EEXIST",
+        std::io::ErrorKind::ConnectionRefused => "ECONNREFUSED",
+        std::io::ErrorKind::AddrInUse => "EADDRINUSE",
+        std::io::ErrorKind::BrokenPipe => "EPIPE",
+        std::io::ErrorKind::TimedOut => "ETIMEDOUT",
+        _ => {
+            let msg = e.to_string();
+            if msg.contains("Is a directory") {
+                "EISDIR"
+            } else if msg.contains("Not a directory") {
+                "ENOTDIR"
+            } else if msg.contains("Directory not empty") {
+                "ENOTEMPTY"
+            } else {
+                "EIO"
+            }
+        }
+    }
+}
+
 fn map_io_err(e: std::io::Error) -> JsErrorBox {
-    JsErrorBox::generic(e.to_string())
+    let code = io_error_code(&e);
+    JsErrorBox::generic(format!("{code}: {e}"))
 }
 
 // ---------------------------------------------------------------------------

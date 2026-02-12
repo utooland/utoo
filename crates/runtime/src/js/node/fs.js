@@ -8,6 +8,18 @@ const ops = Deno.core.ops;
 // Helpers
 // ---------------------------------------------------------------------------
 
+// Add Node.js-compatible .code property to fs errors (e.g., "ENOENT")
+function __fsErr(e) {
+  if (e && !e.code && typeof e.message === "string") {
+    const colon = e.message.indexOf(":");
+    if (colon > 0 && colon < 12) {
+      const code = e.message.slice(0, colon);
+      if (/^[A-Z]+$/.test(code)) e.code = code;
+    }
+  }
+  throw e;
+}
+
 function normalizeArgs(optionsOrCb, cb) {
   if (typeof optionsOrCb === "function") {
     return [undefined, optionsOrCb];
@@ -161,8 +173,10 @@ export function chmodSync(path, mode) {
 }
 
 export function realpathSync(path) {
-  return ops.op_fs_realpath_sync(String(path));
+  try { return ops.op_fs_realpath_sync(String(path)); } catch (e) { __fsErr(e); }
 }
+// Node.js provides realpathSync.native as the native implementation
+realpathSync.native = realpathSync;
 
 // ---------------------------------------------------------------------------
 // Callback APIs

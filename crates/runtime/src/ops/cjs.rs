@@ -1,9 +1,15 @@
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use deno_core::op2;
 use deno_error::JsErrorBox;
 
 use crate::transpile::transpile_to_js;
+
+// Track the current CJS file being executed (for dynamic import() resolution)
+thread_local! {
+    pub static CURRENT_CJS_FILE: RefCell<String> = const { RefCell::new(String::new()) };
+}
 
 // ---------------------------------------------------------------------------
 // Ops
@@ -17,6 +23,11 @@ pub fn op_cjs_resolve(
     #[string] specifier: &str,
     #[string] referrer: &str,
 ) -> Result<String, JsErrorBox> {
+    // Track current CJS file for dynamic import() resolution
+    if !referrer.is_empty() {
+        CURRENT_CJS_FILE.with(|f| *f.borrow_mut() = referrer.to_string());
+    }
+
     // 1. Built-in?
     let bare = specifier.strip_prefix("node:").unwrap_or(specifier);
     if is_node_builtin(bare) {
@@ -119,6 +130,9 @@ pub fn is_node_builtin(name: &str) -> bool {
             | "stream/web"
             | "stream/consumers"
             | "inspector"
+            | "dns/promises"
+            | "path/posix"
+            | "vm"
     )
 }
 

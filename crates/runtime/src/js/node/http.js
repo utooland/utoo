@@ -86,7 +86,19 @@ class ServerResponse extends Writable {
     if (headers) {
       for (const [k, v] of Object.entries(headers)) this.setHeader(k, v);
     }
+    this._sendHeaders();
     return this;
+  }
+
+  get _header() {
+    // Used by some middleware to check if headers have been composed
+    return this._headersSent ? "sent" : null;
+  }
+
+  _implicitHeader() {
+    if (!this._headersSent) {
+      this.writeHead(this.statusCode);
+    }
   }
 
   flushHeaders() {

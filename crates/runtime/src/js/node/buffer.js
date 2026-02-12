@@ -122,8 +122,16 @@ class Buffer extends Uint8Array {
     return new Buffer(size);
   }
 
+  static allocUnsafeSlow(size) {
+    return new Buffer(size);
+  }
+
   static isBuffer(obj) {
-    return obj instanceof Buffer;
+    return obj instanceof Buffer || (obj != null && obj._isBuffer === true);
+  }
+
+  get _isBuffer() {
+    return true;
   }
 
   static concat(list, totalLength) {

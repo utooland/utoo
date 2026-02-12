@@ -107,6 +107,8 @@ const types = _types;
 const util = {
   format, inspect, inherits, deprecate, promisify, callbackify,
   debuglog, types,
+  TextEncoder: globalThis.TextEncoder,
+  TextDecoder: globalThis.TextDecoder,
   isArray: Array.isArray,
   isBuffer: (obj) => obj instanceof Uint8Array && obj.constructor.name === "Buffer",
   isFunction: (v) => typeof v === "function",

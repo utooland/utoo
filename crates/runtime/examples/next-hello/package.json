@@ -1,0 +1,11 @@
+{
+  "name": "next-hello",
+  "version": "1.0.0",
+  "main": "server.js",
+  "dependencies": {
+    "next": "^16.1.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@next/swc-wasm-nodejs": "^16.1.6"
+  }
+}

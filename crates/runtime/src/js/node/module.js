@@ -38,8 +38,36 @@ Module.builtinModules = [
   "url", "util", "v8", "worker_threads", "zlib",
 ];
 Module.createRequire = function(filename) {
-  return globalThis.require;
+  const filepath = typeof filename === "string" ? filename :
+    (filename && filename.pathname) ? filename.pathname : String(filename);
+  function createdRequire(specifier) {
+    const ops = Deno.core.ops;
+    const resolved = ops.op_cjs_resolve(specifier, filepath);
+    if (resolved.startsWith("node:")) {
+      const builtins = globalThis.__cjs_builtins;
+      if (builtins) {
+        if (builtins.has(resolved)) return builtins.get(resolved);
+        const name = resolved.slice(5);
+        if (builtins.has(name)) return builtins.get(name);
+      }
+      throw new Error("Cannot find built-in module '" + resolved + "'");
+    }
+    if (globalThis.__cjs_cache && globalThis.__cjs_cache.has(resolved)) {
+      return globalThis.__cjs_cache.get(resolved).exports;
+    }
+    // Fallback to global require
+    return globalThis.require(specifier);
+  }
+  createdRequire.resolve = function(specifier) {
+    const ops = Deno.core.ops;
+    return ops.op_cjs_resolve(specifier, filepath);
+  };
+  createdRequire.cache = {};
+  createdRequire.main = undefined;
+  createdRequire.extensions = Module._extensions;
+  return createdRequire;
 };
+Module.createRequireFromPath = Module.createRequire;
 Module.isBuiltin = function(moduleName) {
   const name = moduleName.startsWith("node:") ? moduleName.slice(5) : moduleName;
   return Module.builtinModules.includes(name);

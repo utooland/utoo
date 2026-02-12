@@ -1,5 +1,6 @@
 use deno_core::{op2, OpState, Resource, ResourceId};
 use deno_error::JsErrorBox;
+use ring::aead;
 use ring::digest;
 use ring::hmac;
 use ring::rand::{SecureRandom, SystemRandom};
@@ -166,4 +167,54 @@ pub fn op_crypto_random_bytes(#[smi] size: u32) -> Result<Vec<u8>, JsErrorBox> {
     rng.fill(&mut buf)
         .map_err(|_| JsErrorBox::generic("Failed to generate random bytes"))?;
     Ok(buf)
+}
+
+// --- AES-GCM ---
+
+#[op2]
+#[serde]
+pub fn op_crypto_aes_gcm_encrypt(
+    #[buffer] key: &[u8],
+    #[buffer] iv: &[u8],
+    #[buffer] data: &[u8],
+    #[buffer] additional_data: &[u8],
+) -> Result<Vec<u8>, JsErrorBox> {
+    let algorithm = match key.len() {
+        16 => &aead::AES_128_GCM,
+        32 => &aead::AES_256_GCM,
+        _ => return Err(JsErrorBox::type_error("AES-GCM key must be 128 or 256 bits")),
+    };
+    let unbound_key = aead::UnboundKey::new(algorithm, key)
+        .map_err(|_| JsErrorBox::generic("Failed to create AES-GCM key"))?;
+    let key = aead::LessSafeKey::new(unbound_key);
+    let nonce = aead::Nonce::try_assume_unique_for_key(iv)
+        .map_err(|_| JsErrorBox::type_error("AES-GCM IV must be 12 bytes"))?;
+    let mut in_out = data.to_vec();
+    key.seal_in_place_append_tag(nonce, aead::Aad::from(additional_data), &mut in_out)
+        .map_err(|_| JsErrorBox::generic("AES-GCM encryption failed"))?;
+    Ok(in_out)
+}
+
+#[op2]
+#[serde]
+pub fn op_crypto_aes_gcm_decrypt(
+    #[buffer] key: &[u8],
+    #[buffer] iv: &[u8],
+    #[buffer] data: &[u8],
+    #[buffer] additional_data: &[u8],
+) -> Result<Vec<u8>, JsErrorBox> {
+    let algorithm = match key.len() {
+        16 => &aead::AES_128_GCM,
+        32 => &aead::AES_256_GCM,
+        _ => return Err(JsErrorBox::type_error("AES-GCM key must be 128 or 256 bits")),
+    };
+    let unbound_key = aead::UnboundKey::new(algorithm, key)
+        .map_err(|_| JsErrorBox::generic("Failed to create AES-GCM key"))?;
+    let key = aead::LessSafeKey::new(unbound_key);
+    let nonce = aead::Nonce::try_assume_unique_for_key(iv)
+        .map_err(|_| JsErrorBox::type_error("AES-GCM IV must be 12 bytes"))?;
+    let mut in_out = data.to_vec();
+    let plaintext = key.open_in_place(nonce, aead::Aad::from(additional_data), &mut in_out)
+        .map_err(|_| JsErrorBox::generic("AES-GCM decryption failed"))?;
+    Ok(plaintext.to_vec())
 }

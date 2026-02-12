@@ -2,7 +2,51 @@
 // Loaded as a non-ESM bootstrap script so it runs before any modules.
 const __cjsOps = Deno.core.ops;
 
-const __cjs_cache = new Map();
+const __cjs_cache_map = new Map();
+// Wrap the Map in a Proxy so that bracket access (require.cache[key])
+// works like Node.js (which uses a plain object for require.cache).
+// Next.js and other frameworks use require.cache[key] and
+// delete require.cache[key] to manage the module cache.
+const __cjs_cache = new Proxy(__cjs_cache_map, {
+  get(map, key) {
+    if (key === Symbol.iterator) return map[Symbol.iterator].bind(map);
+    if (typeof key === 'symbol') return map[key];
+    // Proxy Map methods
+    if (key === 'has') return map.has.bind(map);
+    if (key === 'get') return map.get.bind(map);
+    if (key === 'set') return map.set.bind(map);
+    if (key === 'delete') return map.delete.bind(map);
+    if (key === 'clear') return map.clear.bind(map);
+    if (key === 'size') return map.size;
+    if (key === 'keys') return map.keys.bind(map);
+    if (key === 'values') return map.values.bind(map);
+    if (key === 'entries') return map.entries.bind(map);
+    if (key === 'forEach') return map.forEach.bind(map);
+    // Bracket access: require.cache[filepath] -> map.get(filepath)
+    return map.get(key);
+  },
+  set(map, key, value) {
+    if (typeof key === 'symbol') { map[key] = value; return true; }
+    map.set(key, value);
+    return true;
+  },
+  has(map, key) {
+    if (typeof key === 'symbol') return key in map;
+    return map.has(key);
+  },
+  deleteProperty(map, key) {
+    return map.delete(key);
+  },
+  ownKeys(map) {
+    return [...map.keys()];
+  },
+  getOwnPropertyDescriptor(map, key) {
+    if (map.has(key)) {
+      return { configurable: true, enumerable: true, value: map.get(key), writable: true };
+    }
+    return undefined;
+  },
+});
 const __cjs_builtins = new Map();
 globalThis.__cjs_cache = __cjs_cache;
 globalThis.__cjs_builtins = __cjs_builtins;
@@ -10,10 +54,18 @@ globalThis.__cjs_current_file = "";
 
 function __cjs_require(specifier) {
   // 1. Resolve
-  const resolved = __cjsOps.op_cjs_resolve(
-    specifier,
-    globalThis.__cjs_current_file,
-  );
+  let resolved;
+  try {
+    resolved = __cjsOps.op_cjs_resolve(
+      specifier,
+      globalThis.__cjs_current_file,
+    );
+  } catch (e) {
+    if (e && !e.code && e.message && e.message.includes("Cannot find module")) {
+      e.code = "MODULE_NOT_FOUND";
+    }
+    throw e;
+  }
 
   // 2. Built-in check ("node:fs" -> look up __cjs_builtins)
   if (resolved.startsWith("node:")) {
@@ -26,10 +78,22 @@ function __cjs_require(specifier) {
   // 3. Cache hit (also handles circular deps - returns partial exports)
   if (__cjs_cache.has(resolved)) return __cjs_cache.get(resolved).exports;
 
-  // 4. JSON shortcut
+  // 4. Native addon (.node) - load via NAPI
+  if (resolved.endsWith(".node")) {
+    const exports = __cjsOps.op_napi_open(
+      resolved,
+      globalThis,
+      function createBuffer(ab) { return new Uint8Array(ab); },
+      function reportError(err) { throw err; },
+    );
+    __cjs_cache.set(resolved, { id: resolved, filename: resolved, exports, loaded: true, children: [], parent: null });
+    return exports;
+  }
+
+  // 5. JSON shortcut
   if (resolved.endsWith(".json")) {
     const obj = JSON.parse(__cjsOps.op_fs_read_text_file_sync(resolved));
-    __cjs_cache.set(resolved, { exports: obj });
+    __cjs_cache.set(resolved, { id: resolved, filename: resolved, exports: obj, loaded: true, children: [], parent: null });
     return obj;
   }
 
@@ -45,6 +109,8 @@ function __cjs_require(specifier) {
     id: resolved,
     filename: resolved,
     loaded: false,
+    children: [],
+    parent: null,
   };
   __cjs_cache.set(resolved, mod);
 

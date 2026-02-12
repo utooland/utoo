@@ -2,6 +2,18 @@ import { Buffer } from "ext:utoo_rt_ext/node/buffer";
 
 const ops = Deno.core.ops;
 
+// Add Node.js-compatible .code property to fs errors (e.g., "ENOENT")
+function __fsErr(e) {
+  if (e && !e.code && typeof e.message === "string") {
+    const colon = e.message.indexOf(":");
+    if (colon > 0 && colon < 12) {
+      const code = e.message.slice(0, colon);
+      if (/^[A-Z]+$/.test(code)) e.code = code;
+    }
+  }
+  throw e;
+}
+
 function toBytes(data) {
   if (typeof data === "string") return Buffer.from(data, "utf-8");
   return data;
@@ -29,13 +41,15 @@ function wrapStats(s) {
 }
 
 export async function readFile(path, options) {
-  const encoding =
-    typeof options === "string" ? options : options?.encoding;
-  if (encoding === "utf8" || encoding === "utf-8") {
-    return await ops.op_fs_read_text_file(String(path));
-  }
-  const buf = await ops.op_fs_read_file(String(path));
-  return Buffer.from(buf);
+  try {
+    const encoding =
+      typeof options === "string" ? options : options?.encoding;
+    if (encoding === "utf8" || encoding === "utf-8") {
+      return await ops.op_fs_read_text_file(String(path));
+    }
+    const buf = await ops.op_fs_read_file(String(path));
+    return Buffer.from(buf);
+  } catch (e) { __fsErr(e); }
 }
 
 export async function writeFile(path, data, _options) {
@@ -46,8 +60,20 @@ export async function appendFile(path, data, _options) {
   await ops.op_fs_append_file(String(path), toBytes(data));
 }
 
-export async function readdir(path, _options) {
+export async function readdir(path, options) {
   const entries = await ops.op_fs_readdir(String(path));
+  if (options && options.withFileTypes) {
+    return entries.map((e) => ({
+      name: e.name,
+      isFile: () => e.is_file,
+      isDirectory: () => e.is_directory,
+      isSymbolicLink: () => e.is_symlink || false,
+      isBlockDevice: () => false,
+      isCharacterDevice: () => false,
+      isFIFO: () => false,
+      isSocket: () => false,
+    }));
+  }
   return entries.map((e) => e.name);
 }
 
@@ -58,11 +84,11 @@ export async function mkdir(path, options) {
 }
 
 export async function stat(path) {
-  return wrapStats(await ops.op_fs_stat(String(path)));
+  try { return wrapStats(await ops.op_fs_stat(String(path))); } catch (e) { __fsErr(e); }
 }
 
 export async function lstat(path) {
-  return wrapStats(await ops.op_fs_lstat(String(path)));
+  try { return wrapStats(await ops.op_fs_lstat(String(path))); } catch (e) { __fsErr(e); }
 }
 
 export async function unlink(path) {
@@ -84,7 +110,7 @@ export async function rm(path, options) {
 }
 
 export async function access(path, mode) {
-  await ops.op_fs_access(String(path), mode ?? 0);
+  try { await ops.op_fs_access(String(path), mode ?? 0); } catch (e) { __fsErr(e); }
 }
 
 export async function chmod(path, mode) {

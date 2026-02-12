@@ -70,6 +70,8 @@ deno_core::extension!(
         ops::crypto::op_crypto_hmac_update,
         ops::crypto::op_crypto_hmac_digest,
         ops::crypto::op_crypto_random_bytes,
+        ops::crypto::op_crypto_aes_gcm_encrypt,
+        ops::crypto::op_crypto_aes_gcm_decrypt,
         // Net
         ops::net::op_net_listen,
         ops::net::op_net_accept,
@@ -80,6 +82,8 @@ deno_core::extension!(
         ops::net::op_net_close,
         ops::net::op_net_local_addr,
         ops::net::op_net_remote_addr,
+        // NAPI
+        ops::napi::op_napi_open,
     ],
     esm_entry_point = "ext:utoo_rt_ext/node/_init",
     esm = [
@@ -122,9 +126,17 @@ deno_core::extension!(
         "ext:utoo_rt_ext/node/stream_web" = "src/js/node/stream_web.js",
         "ext:utoo_rt_ext/node/stream_consumers" = "src/js/node/stream_consumers.js",
         "ext:utoo_rt_ext/node/inspector" = "src/js/node/inspector.js",
+        "ext:utoo_rt_ext/node/dns_promises" = "src/js/node/dns_promises.js",
+        "ext:utoo_rt_ext/node/path_posix" = "src/js/node/path_posix.js",
+        "ext:utoo_rt_ext/node/vm" = "src/js/node/vm.js",
         "ext:utoo_rt_ext/node/_init" = "src/js/node/_init.js",
     ],
     js = ["src/js/bootstrap.js", "src/js/cjs_loader.js"],
+    state = |state| {
+        state.put(crate::napi::NapiState {
+            env_cleanup_hooks: std::rc::Rc::new(std::cell::RefCell::new(vec![])),
+        });
+    },
 );
 
 pub async fn run_script(script_path: &str) -> Result<()> {

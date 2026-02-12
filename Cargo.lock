@@ -10235,6 +10235,8 @@ dependencies = [
  "deno_error 0.7.3",
  "flate2",
  "libc",
+ "libloading",
+ "log",
  "ring",
  "serde",
  "serde_json",
