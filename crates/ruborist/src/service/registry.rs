@@ -75,6 +75,7 @@ pub struct UnifiedRegistryBuilder {
     registry_url: Option<String>,
     cache: Option<Arc<PackageCache>>,
     cache_dir: Option<PathBuf>,
+    supports_semver: Option<bool>,
 }
 
 impl UnifiedRegistryBuilder {
@@ -84,6 +85,7 @@ impl UnifiedRegistryBuilder {
             registry_url: None,
             cache: None,
             cache_dir: None,
+            supports_semver: None,
         }
     }
 
@@ -105,12 +107,22 @@ impl UnifiedRegistryBuilder {
         self
     }
 
+    /// Explicitly set whether the registry supports semver resolution.
+    ///
+    /// If not set, defaults to `!is_npm_registry(url)`.
+    pub fn supports_semver(mut self, value: bool) -> Self {
+        self.supports_semver = Some(value);
+        self
+    }
+
     /// Build the registry client.
     pub fn build(self) -> UnifiedRegistry {
         let registry_url = self
             .registry_url
             .unwrap_or_else(|| "https://registry.npmmirror.com".to_string());
-        let supports_semver = !is_npm_registry(&registry_url);
+        let supports_semver = self
+            .supports_semver
+            .unwrap_or_else(|| !is_npm_registry(&registry_url));
 
         // Priority: shared cache > cache_dir > new cache
         let cache = self.cache.unwrap_or_else(|| {
@@ -628,6 +640,34 @@ mod tests {
             .build();
         assert!(!registry.supports_semver());
         assert_eq!(registry.registry_url(), "https://registry.npmjs.org");
+    }
+
+    #[test]
+    fn test_unified_registry_builder_explicit_supports_semver() {
+        // Explicitly override supports_semver for npm registry
+        let registry = UnifiedRegistry::builder()
+            .registry("https://registry.npmjs.org")
+            .supports_semver(true)
+            .build();
+        assert!(registry.supports_semver());
+
+        // Explicitly override supports_semver for non-npm registry
+        let registry = UnifiedRegistry::builder()
+            .registry("https://registry.npmmirror.com")
+            .supports_semver(false)
+            .build();
+        assert!(!registry.supports_semver());
+
+        // Without explicit override, auto-detect based on URL
+        let registry = UnifiedRegistry::builder()
+            .registry("https://registry.npmjs.org")
+            .build();
+        assert!(!registry.supports_semver());
+
+        let registry = UnifiedRegistry::builder()
+            .registry("https://registry.npmmirror.com")
+            .build();
+        assert!(registry.supports_semver());
     }
 
     #[test]

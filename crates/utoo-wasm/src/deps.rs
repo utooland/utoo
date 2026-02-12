@@ -41,6 +41,7 @@ pub async fn build_deps_from_file(
         legacy_peer_deps: true,
         glob: OpfsGlob,
         receiver: NoopReceiver,
+        supports_semver: None,
     };
 
     build_deps(options).await

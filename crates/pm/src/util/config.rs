@@ -14,6 +14,8 @@ pub type ConfigResult<T> = Result<T>;
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Config {
     values: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    arrays: HashMap<String, Vec<String>>,
 }
 
 // global config path is ~/.utoo/config.toml
@@ -29,6 +31,7 @@ impl Config {
         if crate::fs::try_exists(&local_path).await? {
             let local_config = Self::load_from_path(&local_path).await?;
             config.values.extend(local_config.values);
+            config.arrays.extend(local_config.arrays);
         }
         Ok(config)
     }
@@ -40,6 +43,15 @@ impl Config {
 
     pub fn get(&self, key: &str) -> ConfigResult<Option<String>> {
         Ok(self.values.get(key).cloned())
+    }
+
+    pub fn get_array(&self, key: &str) -> Option<&Vec<String>> {
+        self.arrays.get(key)
+    }
+
+    pub fn set_array(&mut self, key: &str, value: Vec<String>, global: bool) -> ConfigResult<()> {
+        self.arrays.insert(key.to_string(), value);
+        self.save(global)
     }
 
     async fn load_from_path(path: &Path) -> ConfigResult<Self> {
@@ -91,6 +103,10 @@ impl Config {
 
     pub fn list(&self) -> ConfigResult<impl Iterator<Item = (&String, &String)>> {
         Ok(self.values.iter())
+    }
+
+    pub fn list_arrays(&self) -> impl Iterator<Item = (&String, &Vec<String>)> {
+        self.arrays.iter()
     }
 }
 
@@ -215,6 +231,11 @@ pub async fn set_registry(registry: Option<String>) {
     };
 
     REGISTRY.set(final_registry);
+
+    // Auto-detect semver support for the selected registry
+    let registry_url = get_registry();
+    let supports = detect_supports_semver(&registry_url).await;
+    let _ = SUPPORTS_SEMVER.set(supports);
 }
 
 pub fn get_registry() -> String {
@@ -279,6 +300,101 @@ pub async fn set_cache_dir(cache_dir: Option<String>) {
 
 pub fn get_cache_dir() -> PathBuf {
     PathBuf::from(CACHE_DIR.get_sync())
+}
+
+// Semver support detection and caching
+//
+// Config key `supports-semver` is a TOML array of probe results. Each entry
+// is the registry URL (positive → supports semver) or prefixed with "!"
+// (negative → does NOT support):
+//
+//   [arrays]
+//   supports-semver = [
+//     "https://registry.npmmirror.com",
+//     "!https://some-private.registry",
+//   ]
+//
+// Multiple registries are cached simultaneously, so switching between them
+// (e.g. `ut install --registry=xxx`) won't trigger a re-probe.
+static SUPPORTS_SEMVER: OnceLock<bool> = OnceLock::new();
+
+/// Probe a registry to detect whether it supports semver resolution.
+///
+/// 1. `is_npm_registry(url)` → return `false` immediately (known not to support)
+/// 2. Search `arrays.supports-semver` for `"{url}"` (true) or `"!{url}"` (false)
+/// 3. On cache miss, probe `GET $REGISTRY/utoo/%5E1` (5 s timeout)
+/// 4. Append the result to the array for future runs
+pub async fn detect_supports_semver(registry_url: &str) -> bool {
+    use utoo_ruborist::registry::is_npm_registry;
+
+    // Known: npm registry does not support semver queries
+    if is_npm_registry(registry_url) {
+        tracing::debug!("npm registry detected, skipping semver probe");
+        return false;
+    }
+
+    // Check config cache (TOML array of "url" / "!url" entries)
+    let mut config = Config::load(true).await.unwrap_or_default();
+    let cached = config.get_array("supports-semver");
+
+    if let Some(entries) = cached {
+        for entry in entries {
+            if entry == registry_url {
+                tracing::debug!("Cache hit: supports-semver=true for {}", registry_url);
+                return true;
+            }
+            if entry.strip_prefix('!') == Some(registry_url) {
+                tracing::debug!("Cache hit: supports-semver=false for {}", registry_url);
+                return false;
+            }
+        }
+    }
+
+    // Probe the registry
+    let probe_url = format!("{}/utoo/%5E1", registry_url.trim_end_matches('/'));
+    tracing::debug!("Probing semver support: {}", probe_url);
+
+    let supports = async {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()?;
+        let resp = client
+            .get(&probe_url)
+            .header("Accept", "application/vnd.npm.install-v1+json")
+            .send()
+            .await?;
+        tracing::debug!("Semver probe response: {} for {}", resp.status(), probe_url);
+        Ok::<bool, reqwest::Error>(resp.status().is_success())
+    }
+    .await
+    .unwrap_or_else(|e: reqwest::Error| {
+        tracing::debug!("Semver probe failed: {}", e);
+        false
+    });
+
+    // Append result to the cached array
+    let new_entry = if supports {
+        registry_url.to_string()
+    } else {
+        format!("!{}", registry_url)
+    };
+    let mut entries = config
+        .get_array("supports-semver")
+        .cloned()
+        .unwrap_or_default();
+    entries.push(new_entry);
+    let _ = config.set_array("supports-semver", entries, true);
+
+    tracing::debug!(
+        "Detected supports-semver={} for {}",
+        supports,
+        registry_url
+    );
+    supports
+}
+
+pub fn get_supports_semver() -> Option<bool> {
+    SUPPORTS_SEMVER.get().copied()
 }
 
 #[cfg(test)]

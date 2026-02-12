@@ -1,7 +1,7 @@
 use anyhow::Result;
 use colored::Colorize;
 
-use crate::util::config::get_registry;
+use crate::util::config::{get_registry, get_supports_semver};
 
 pub async fn ping() -> Result<()> {
     let registry = get_registry();
@@ -19,7 +19,17 @@ pub async fn ping() -> Result<()> {
         Ok(resp) => {
             let latency = start.elapsed().as_millis();
             if resp.status().is_success() {
-                println!("{} {}ms", "PONG".green(), latency.to_string().cyan());
+                let semver_info = match get_supports_semver() {
+                    Some(true) => "supports-semver: yes".green(),
+                    Some(false) => "supports-semver: no".yellow(),
+                    None => "supports-semver: unknown".dimmed(),
+                };
+                println!(
+                    "{} {}ms ({})",
+                    "PONG".green(),
+                    latency.to_string().cyan(),
+                    semver_info
+                );
             } else {
                 println!(
                     "{} HTTP {} ({}ms)",
