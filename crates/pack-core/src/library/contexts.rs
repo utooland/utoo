@@ -113,10 +113,14 @@ pub async fn get_library_chunking_context(
     .unused_references(unused_references.to_resolved().await?)
     .nested_async_availability(*nested_async_chunking.await?);
 
-    if !mode.is_development()
-        && let Some(filename) = &output.filename
-    {
-        builder = builder.filename(filename.clone());
+    if !mode.is_development() {
+        if let Some(filename) = &output.filename {
+            builder = builder.filename(filename.clone());
+        }
+
+        if let Some(chunk_filename) = &output.chunk_filename {
+            builder = builder.chunk_filename(chunk_filename.clone());
+        }
     }
 
     if mode.is_development() {

@@ -8,13 +8,13 @@ use turbo_tasks::{
     NonLocalValue, ResolvedVc, TaskInput, TryJoinIterExt, ValueToString, Vc, trace::TraceRawVcs,
 };
 use turbo_tasks_fs::FileSystemPath;
-use turbo_tasks_hash::{DeterministicHash, Xxh3Hash64Hasher, encode_hex};
+use turbo_tasks_hash::{DeterministicHash, Xxh3Hash64Hasher, encode_hex, hash_xxh3_hash64};
 use turbopack_browser::chunking_context::{
     match_content_hash_placeholder, match_name_placeholder, replace_content_hash_placeholder,
     replace_name_placeholder,
 };
 use turbopack_core::{
-    asset::Asset,
+    asset::{Asset, AssetContent},
     chunk::{
         Chunk, ChunkGroupResult, ChunkItem, ChunkableModule, ChunkingConfig, ChunkingConfigs,
         ChunkingContext, EntryChunkGroupResult, EvaluatableAsset, EvaluatableAssets, MinifyType,
@@ -137,6 +137,11 @@ impl LibraryChunkingContextBuilder {
         self
     }
 
+    pub fn chunk_filename(mut self, chunk_filename: RcStr) -> Self {
+        self.chunking_context.chunk_filename = Some(chunk_filename);
+        self
+    }
+
     pub fn asset_base_path(mut self, asset_base_path: Option<RcStr>) -> Self {
         self.chunking_context.asset_base_path = asset_base_path;
         self
@@ -205,6 +210,8 @@ pub struct LibraryChunkingContext {
     debug_ids: bool,
     /// Evaluate chunk filename template
     filename: Option<RcStr>,
+    /// Non evaluate chunk filename template
+    chunk_filename: Option<RcStr>,
 }
 
 impl LibraryChunkingContext {
@@ -233,6 +240,7 @@ impl LibraryChunkingContext {
                 export_usage: None,
                 unused_references: None,
                 filename: Default::default(),
+                chunk_filename: Default::default(),
                 runtime_root,
                 runtime_export,
                 enable_module_merging: false,
@@ -400,7 +408,7 @@ impl ChunkingContext for LibraryChunkingContext {
     #[turbo_tasks::function]
     async fn chunk_path(
         &self,
-        _asset: Option<Vc<Box<dyn Asset>>>,
+        asset: Option<Vc<Box<dyn Asset>>>,
         ident: Vc<AssetIdent>,
         _prefix: Option<RcStr>,
         extension: RcStr,
@@ -411,24 +419,64 @@ impl ChunkingContext for LibraryChunkingContext {
             .iter()
             .any(|m| m.contains("evaluate"));
 
-        if !evaluate {
-            bail!(
-                "library should only generate a single evaluate chunk, please enable inline features of styles.inlineCss and images.inlineLimit in config"
-            )
-        }
+        let output_root = &self.output_root;
 
-        let root_path = &self.output_root;
-        let mut name = ident_to_output_filename(ident, self.root_path.clone(), extension.clone())
-            .owned()
-            .await?;
+        let output_name =
+            ident_to_output_filename(ident, self.root_path.clone(), extension.clone())
+                .owned()
+                .await?
+                .to_string();
+
+        let mut filename = if evaluate {
+            output_name
+        } else {
+            match asset {
+                Some(asset) => {
+                    let filename_template = self.chunk_filename.clone();
+                    match filename_template {
+                        Some(filename) => {
+                            let query = QString::from(ident.await?.query.as_str());
+
+                            let name = query.get("name").unwrap_or(output_name.as_str());
+
+                            let mut filename = filename.to_string();
+
+                            if match_name_placeholder(&filename) {
+                                filename = replace_name_placeholder(&filename, name);
+                            }
+
+                            if match_content_hash_placeholder(&filename) {
+                                let content = asset.content().await?;
+                                if let AssetContent::File(file) = &*content {
+                                    let content_hash = hash_xxh3_hash64(&file.await?);
+                                    filename = replace_content_hash_placeholder(
+                                        &filename,
+                                        &format!("{content_hash:016x}"),
+                                    );
+                                } else {
+                                    bail!(
+                                        "chunk_path requires an asset with file content when content \
+                                     hashing is enabled"
+                                    );
+                                }
+                            };
+
+                            filename
+                        }
+                        None => output_name,
+                    }
+                }
+                None => output_name,
+            }
+        };
 
         // Check if the name already ends with the extension
-        if !name.ends_with(&*extension) {
+        if !filename.ends_with(&*extension) {
             // If doesn't end with extension, add the provided extension
-            name = format!("{name}{extension}").into();
+            filename = format!("{filename}{extension}");
         }
 
-        root_path.join(&name).map(|p| p.cell())
+        output_root.join(&filename).map(|p| p.cell())
     }
 
     #[turbo_tasks::function]
