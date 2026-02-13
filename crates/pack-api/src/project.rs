@@ -934,7 +934,7 @@ impl Project {
         Ok(get_client_chunking_context(ClientChunkingContextOptions {
             mode: self.mode(),
             root_path: self.project_path().owned().await?,
-            output_root: self.client_root().owned().await?,
+            output_root: self.dist_root().owned().await?,
             output_root_to_root_path: (*output_root_to_root_path).clone(),
             public_path: self.config().computed_public_path(),
             environment: self.client_compile_time_info().environment(),
