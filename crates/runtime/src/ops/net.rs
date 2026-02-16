@@ -25,6 +25,7 @@ struct TcpStreamResource {
     wr: RefCell<OwnedWriteHalf>,
     local_addr: std::net::SocketAddr,
     peer_addr: std::net::SocketAddr,
+    close_notify: tokio::sync::Notify,
 }
 
 impl Resource for TcpStreamResource {
@@ -49,6 +50,7 @@ fn add_stream(
         wr: RefCell::new(wr),
         local_addr,
         peer_addr,
+        close_notify: tokio::sync::Notify::new(),
     }))
 }
 
@@ -133,14 +135,18 @@ pub async fn op_net_read(
         .map_err(|e| JsErrorBox::generic(e.to_string()))?;
 
     let mut buf = vec![0u8; len as usize];
-    let n = resource
-        .rd
-        .borrow_mut()
-        .read(&mut buf)
-        .await
-        .map_err(|e| JsErrorBox::generic(e.to_string()))?;
-    buf.truncate(n);
-    Ok(buf)
+    let mut rd_ref = resource.rd.borrow_mut();
+    tokio::select! {
+        result = rd_ref.read(&mut buf) => {
+            let n = result.map_err(|e| JsErrorBox::generic(e.to_string()))?;
+            buf.truncate(n);
+            Ok(buf)
+        }
+        _ = resource.close_notify.notified() => {
+            // Connection was closed, return empty to signal EOF
+            Ok(vec![])
+        }
+    }
 }
 
 #[op2]
@@ -156,13 +162,13 @@ pub async fn op_net_write(
         .get::<TcpStreamResource>(rid)
         .map_err(|e| JsErrorBox::generic(e.to_string()))?;
 
-    let n = resource
+    resource
         .wr
         .borrow_mut()
-        .write(data.as_ref())
+        .write_all(data.as_ref())
         .await
         .map_err(|e| JsErrorBox::generic(e.to_string()))?;
-    Ok(n as u32)
+    Ok(data.len() as u32)
 }
 
 #[op2]
@@ -193,6 +199,10 @@ pub fn op_net_close(state: &mut OpState, #[smi] rid: ResourceId) -> Result<(), J
         .is_ok()
     {
         return Ok(());
+    }
+    // Signal any pending reads to abort before removing the resource
+    if let Ok(resource) = state.resource_table.get::<TcpStreamResource>(rid) {
+        resource.close_notify.notify_waiters();
     }
     state
         .resource_table

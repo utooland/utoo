@@ -318,16 +318,38 @@ export const constants = {
 
 import { Writable, Readable } from "ext:utoo_rt_ext/node/stream";
 
-export function createWriteStream(path, options) {
-  const encoding = options?.encoding || "utf8";
-  const flags = options?.flags || "w";
-  const isAppend = flags.includes("a");
-  let opened = false;
+// ReadStream/WriteStream constructors for instanceof checks (used by 'destroy' module)
+function ReadStream(path, options) {
+  if (!(this instanceof ReadStream)) return new ReadStream(path, options);
+  var encoding = options?.encoding || null;
+  Readable.call(this, {
+    read() {
+      try {
+        var data = readFileSync(path, encoding ? { encoding } : undefined);
+        this.push(data);
+        this.push(null);
+      } catch (err) {
+        this.destroy(err);
+      }
+    },
+  });
+  this.path = path;
+  var self = this;
+  queueMicrotask(function () { self.emit("open"); });
+}
+Object.setPrototypeOf(ReadStream.prototype, Readable.prototype);
+ReadStream.prototype.constructor = ReadStream;
+ReadStream.prototype.close = function (cb) { if (cb) cb(); this.destroy(); };
 
-  const stream = new Writable({
+function WriteStream(path, options) {
+  if (!(this instanceof WriteStream)) return new WriteStream(path, options);
+  var flags = options?.flags || "w";
+  var isAppend = flags.includes("a");
+  var opened = false;
+  Writable.call(this, {
     write(chunk, enc, cb) {
       try {
-        const data = typeof chunk === "string" ? chunk : Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        var data = typeof chunk === "string" ? chunk : Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
         if (!opened) {
           if (!isAppend) ops.op_fs_write_file_sync(String(path), toBuffer(data));
           else ops.op_fs_append_file_sync(String(path), toBuffer(data));
@@ -341,30 +363,20 @@ export function createWriteStream(path, options) {
       }
     },
   });
+  this.path = path;
+  var self = this;
+  queueMicrotask(function () { self.emit("open"); });
+}
+Object.setPrototypeOf(WriteStream.prototype, Writable.prototype);
+WriteStream.prototype.constructor = WriteStream;
+WriteStream.prototype.close = function (cb) { if (cb) cb(); this.destroy(); };
 
-  stream.path = path;
-  // emit 'open' and 'close' asynchronously
-  queueMicrotask(() => stream.emit("open"));
-  return stream;
+export function createWriteStream(path, options) {
+  return new WriteStream(path, options);
 }
 
 export function createReadStream(path, options) {
-  const encoding = options?.encoding || null;
-  const stream = new Readable({
-    read() {
-      try {
-        const data = readFileSync(path, encoding ? { encoding } : undefined);
-        this.push(data);
-        this.push(null);
-      } catch (err) {
-        this.destroy(err);
-      }
-    },
-  });
-
-  stream.path = path;
-  queueMicrotask(() => stream.emit("open"));
-  return stream;
+  return new ReadStream(path, options);
 }
 
 export function watch(filename, options, listener) {
@@ -420,6 +432,8 @@ const fs = {
   // Streams
   createWriteStream,
   createReadStream,
+  ReadStream,
+  WriteStream,
   // Watch (stubs)
   watch,
   watchFile,

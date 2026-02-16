@@ -1,4 +1,5 @@
-node_modules
+crates/runtime/**/node_modules
+crates/runtime/**/package-lock.json
 .next
 target
 .idea
@@ -14,4 +15,4 @@ trace-*.json.gz
 *.heapprofile
 .trace/
 *.tsbuildinfo
-
+node_modules

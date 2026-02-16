@@ -26,8 +26,26 @@ Module._extensions = {
   ".ts": function() {},
   ".cjs": function() {},
 };
-Module._resolveFilename = function(request) {
-  return request;
+Module._nodeModulePaths = function(from) {
+  const sep = '/';
+  const parts = from.split(sep);
+  const dirs = [];
+  for (let i = parts.length; i > 0; i--) {
+    if (parts[i - 1] === 'node_modules') continue;
+    dirs.push(parts.slice(0, i).join(sep) + sep + 'node_modules');
+  }
+  return dirs;
+};
+Module._resolveFilename = function(request, parent) {
+  // Use our CJS resolver for real resolution
+  const ops = Deno.core.ops;
+  let fromPath = '';
+  if (parent && parent.filename) {
+    fromPath = parent.filename;
+  } else if (parent && parent.id) {
+    fromPath = parent.id;
+  }
+  return ops.op_cjs_resolve(request, fromPath);
 };
 Module.builtinModules = [
   "assert", "async_hooks", "buffer", "child_process", "cluster",
@@ -38,8 +56,13 @@ Module.builtinModules = [
   "url", "util", "v8", "worker_threads", "zlib",
 ];
 Module.createRequire = function(filename) {
-  const filepath = typeof filename === "string" ? filename :
+  let filepath = typeof filename === "string" ? filename :
     (filename && filename.pathname) ? filename.pathname : String(filename);
+  // Convert file:// URLs to paths
+  if (filepath.startsWith("file://")) {
+    filepath = filepath.slice(7);
+    // Handle Windows drive letters if needed (file:///C:/...)
+  }
   function createdRequire(specifier) {
     const ops = Deno.core.ops;
     const resolved = ops.op_cjs_resolve(specifier, filepath);
@@ -55,8 +78,14 @@ Module.createRequire = function(filename) {
     if (globalThis.__cjs_cache && globalThis.__cjs_cache.has(resolved)) {
       return globalThis.__cjs_cache.get(resolved).exports;
     }
-    // Fallback to global require
-    return globalThis.require(specifier);
+    // Set the current file context so global require resolves correctly
+    const prevFile = globalThis.__cjs_current_file;
+    globalThis.__cjs_current_file = filepath;
+    try {
+      return globalThis.require(specifier);
+    } finally {
+      globalThis.__cjs_current_file = prevFile;
+    }
   }
   createdRequire.resolve = function(specifier) {
     const ops = Deno.core.ops;

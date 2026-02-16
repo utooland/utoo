@@ -109,6 +109,13 @@ class ServerResponse extends Writable {
     if (this._headersSent) return;
     this._headersSent = true;
 
+    // If no content-length and no transfer-encoding, signal connection close
+    if (!this.hasHeader("content-length") && !this.hasHeader("transfer-encoding")) {
+      if (!this.hasHeader("connection")) {
+        this.setHeader("connection", "close");
+      }
+    }
+
     let head = `HTTP/1.1 ${this.statusCode} ${this.statusMessage}\r\n`;
     for (const [k, v] of Object.entries(this._headers)) {
       if (Array.isArray(v)) {
@@ -140,7 +147,6 @@ class ServerResponse extends Writable {
   end(data, encoding, cb) {
     if (typeof data === "function") { cb = data; data = null; encoding = null; }
     if (typeof encoding === "function") { cb = encoding; encoding = null; }
-
     if (!this.hasHeader("content-length") && !this.hasHeader("transfer-encoding")) {
       let body = null;
       if (data != null) {
@@ -161,7 +167,13 @@ class ServerResponse extends Writable {
     this.writableEnded = true;
     this.writableFinished = true;
     this.emit("finish");
-    this.socket.end();
+    // end() shuts down the write side; once the socket finishes
+    // flushing, destroy it to close the read side too.
+    var sock = this.socket;
+    sock.end();
+    sock.once("finish", function () {
+      if (!sock.destroyed) sock.destroy();
+    });
     if (cb) cb();
     return this;
   }

@@ -1,11 +1,16 @@
 {
   "name": "next-hello",
   "version": "1.0.0",
-  "main": "server.js",
+  "main": "server.ts",
   "dependencies": {
     "next": "^16.1.6",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "@next/swc-wasm-nodejs": "^16.1.6"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/react": "^19.0.0",
+    "@types/node": "^22.0.0"
   }
 }

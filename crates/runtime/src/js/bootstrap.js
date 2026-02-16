@@ -591,14 +591,60 @@ if (!globalThis.ReadableStream) {
     }
     tee() {
       const reader = this.getReader();
-      const s1 = new ReadableStream({
-        async pull(controller) {
-          const { value, done } = await reader.read();
-          if (done) { controller.close(); return; }
-          controller.enqueue(value);
+      var canceled1 = false;
+      var canceled2 = false;
+      var reason1, reason2;
+      var branch1Controller, branch2Controller;
+      var cancelResolve;
+      var cancelPromise = new Promise(function (r) { cancelResolve = r; });
+      var reading = false;
+      var readAgain = false;
+
+      function pullAlgorithm() {
+        if (reading) { readAgain = true; return Promise.resolve(); }
+        reading = true;
+        return reader.read().then(function (result) {
+          reading = false;
+          var done = result.done;
+          var value = result.value;
+          if (done) {
+            if (!canceled1 && branch1Controller) branch1Controller.close();
+            if (!canceled2 && branch2Controller) branch2Controller.close();
+            return;
+          }
+          // Clone value for each branch (shallow copy for typed arrays)
+          var v1 = value;
+          var v2 = value;
+          if (!canceled1 && !canceled2 && value && typeof value.slice === "function") {
+            v2 = value.slice(0);
+          }
+          if (!canceled1 && branch1Controller) branch1Controller.enqueue(v1);
+          if (!canceled2 && branch2Controller) branch2Controller.enqueue(v2);
+          if (readAgain) { readAgain = false; return pullAlgorithm(); }
+        });
+      }
+
+      var branch1 = new ReadableStream({
+        start: function (c) { branch1Controller = c; },
+        pull: pullAlgorithm,
+        cancel: function (reason) {
+          canceled1 = true;
+          reason1 = reason;
+          if (canceled2) { cancelResolve(); }
+          return cancelPromise;
         }
       });
-      return [s1, s1]; // Simplified: both branches read same data
+      var branch2 = new ReadableStream({
+        start: function (c) { branch2Controller = c; },
+        pull: pullAlgorithm,
+        cancel: function (reason) {
+          canceled2 = true;
+          reason2 = reason;
+          if (canceled1) { cancelResolve(); }
+          return cancelPromise;
+        }
+      });
+      return [branch1, branch2];
     }
     pipeThrough(transform) {
       const reader = this.getReader();
@@ -678,9 +724,53 @@ if (!globalThis.WritableStream) {
 
 if (!globalThis.TransformStream) {
   globalThis.TransformStream = class TransformStream {
-    constructor(transformer) {
-      this.readable = new ReadableStream();
-      this.writable = new WritableStream();
+    constructor(transformer, writableStrategy, readableStrategy) {
+      const xform = transformer || {};
+      let readableController;
+      const self = this;
+
+      this.readable = new ReadableStream({
+        start(controller) {
+          readableController = controller;
+        },
+        cancel(reason) {
+          // If the readable side is cancelled, abort the writable side
+          if (self._writableController) {
+            self._writableController.error(reason);
+          }
+        }
+      }, readableStrategy);
+
+      this.writable = new WritableStream({
+        start(controller) {
+          self._writableController = controller;
+        },
+        async write(chunk) {
+          if (xform.transform) {
+            await xform.transform(chunk, {
+              enqueue(c) { readableController.enqueue(c); },
+              error(e) { readableController.error(e); },
+              terminate() { readableController.close(); }
+            });
+          } else {
+            // Identity transform -- pass through
+            readableController.enqueue(chunk);
+          }
+        },
+        async close() {
+          if (xform.flush) {
+            await xform.flush({
+              enqueue(c) { readableController.enqueue(c); },
+              error(e) { readableController.error(e); },
+              terminate() { readableController.close(); }
+            });
+          }
+          readableController.close();
+        },
+        abort(reason) {
+          readableController.error(reason);
+        }
+      }, writableStrategy);
     }
   };
 }
@@ -763,9 +853,41 @@ if (typeof globalThis.TextEncoder === "undefined") {
       return new Uint8Array(bytes);
     }
     encodeInto(str, dest) {
-      const encoded = this.encode(str);
-      dest.set(encoded.subarray(0, dest.length));
-      return { read: str.length, written: Math.min(encoded.length, dest.length) };
+      let read = 0;
+      let written = 0;
+      for (let i = 0; i < str.length; i++) {
+        let code = str.charCodeAt(i);
+        let byteLen;
+        if (code >= 0xd800 && code <= 0xdbff && i + 1 < str.length) {
+          const next = str.charCodeAt(i + 1);
+          if (next >= 0xdc00 && next <= 0xdfff) {
+            code = ((code - 0xd800) << 10) + (next - 0xdc00) + 0x10000;
+          }
+        }
+        if (code < 0x80) byteLen = 1;
+        else if (code < 0x800) byteLen = 2;
+        else if (code < 0x10000) byteLen = 3;
+        else byteLen = 4;
+        if (written + byteLen > dest.length) break;
+        if (code < 0x80) {
+          dest[written++] = code;
+        } else if (code < 0x800) {
+          dest[written++] = 0xc0 | (code >> 6);
+          dest[written++] = 0x80 | (code & 0x3f);
+        } else if (code < 0x10000) {
+          dest[written++] = 0xe0 | (code >> 12);
+          dest[written++] = 0x80 | ((code >> 6) & 0x3f);
+          dest[written++] = 0x80 | (code & 0x3f);
+        } else {
+          dest[written++] = 0xf0 | (code >> 18);
+          dest[written++] = 0x80 | ((code >> 12) & 0x3f);
+          dest[written++] = 0x80 | ((code >> 6) & 0x3f);
+          dest[written++] = 0x80 | (code & 0x3f);
+          i++; // skip the low surrogate
+        }
+        read = i + 1;
+      }
+      return { read: read, written: written };
     }
     get encoding() { return "utf-8"; }
   };
