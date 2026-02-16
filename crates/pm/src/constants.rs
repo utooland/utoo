@@ -57,4 +57,7 @@ pub mod cmd {
     pub const INIT_NAME: &str = "init";
     pub const INIT_ALIAS: &str = "create";
     pub const INIT_ABOUT: &str = "Create a package.json file";
+
+    pub const COMPLETIONS_NAME: &str = "completions";
+    pub const COMPLETIONS_ABOUT: &str = "Generate shell completion scripts";
 }
