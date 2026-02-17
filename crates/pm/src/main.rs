@@ -41,6 +41,20 @@ use crate::constants::cmd::{
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
 use crate::helper::workspace::update_cwd_to_root;
 
+fn detect_shell_from_env() -> Option<clap_complete::Shell> {
+    // Most common on Unix-like systems.
+    let shell_path = std::env::var("SHELL").ok()?;
+    let name = shell_path.rsplit('/').next().unwrap_or(shell_path.as_str());
+
+    match name {
+        "bash" => Some(clap_complete::Shell::Bash),
+        "zsh" => Some(clap_complete::Shell::Zsh),
+        "fish" => Some(clap_complete::Shell::Fish),
+        // Leave PowerShell + Elvish to explicit flags; auto-detect tends to be unreliable.
+        _ => None,
+    }
+}
+
 #[derive(Parser)]
 #[command(name = APP_NAME)]
 #[command(version = APP_VERSION)]
@@ -262,8 +276,9 @@ enum Commands {
     /// Generate shell completion scripts
     #[command(name = COMPLETIONS_NAME, about = COMPLETIONS_ABOUT)]
     Completions {
-        /// Shell to generate completions for
-        shell: clap_complete::Shell,
+        /// Shell to generate completions for (auto-detected if omitted)
+        #[arg(value_enum)]
+        shell: Option<clap_complete::Shell>,
     },
 }
 
@@ -317,7 +332,22 @@ async fn async_main() -> Result<()> {
 
     // Handle completions early to avoid unnecessary initialization (tracing, registry, auto-update)
     if let Some(Commands::Completions { shell }) = cli.command {
-        clap_complete::generate(shell, &mut Cli::command(), APP_NAME, &mut std::io::stdout());
+        let shell = shell.or_else(detect_shell_from_env);
+
+        let Some(shell) = shell else {
+            eprintln!(
+                "Could not detect shell. Usage: utoo completions <bash|zsh|fish|powershell|elvish>"
+            );
+            process::exit(2);
+        };
+
+        tokio::task::spawn_blocking(move || {
+            let mut cmd = Cli::command();
+            clap_complete::generate(shell, &mut cmd, APP_NAME, &mut std::io::stdout());
+        })
+        .await
+        .context("Failed to generate shell completions")?;
+
         return Ok(());
     }
 
