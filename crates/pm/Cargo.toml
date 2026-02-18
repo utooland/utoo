@@ -15,6 +15,7 @@ atty = "0.2"
 bytes = "1.11.0"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { workspace = true }
+clap_complete = "4"
 colored = "2.1"
 dashmap = "6.1.0"
 deno_semver = "0.7"

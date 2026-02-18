@@ -1,7 +1,7 @@
 use std::process;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use cmd::config::{handle_config_get, handle_config_list, handle_config_set};
 use cmd::deps::build_deps;
 use cmd::execute::execute;
@@ -30,15 +30,30 @@ mod service;
 mod util;
 
 use crate::constants::cmd::{
-    CLEAN_ABOUT, CLEAN_ALIAS, CLEAN_NAME, CONFIG_ABOUT, CONFIG_ALIAS, CONFIG_NAME, DEPS_ABOUT,
-    DEPS_ALIAS, DEPS_NAME, EXECUTE_ABOUT, EXECUTE_ALIAS, EXECUTE_NAME, INIT_ABOUT, INIT_ALIAS,
-    INIT_NAME, INSTALL_ABOUT, INSTALL_ALIAS, INSTALL_NAME, LINK_ABOUT, LINK_ALIAS, LINK_NAME,
-    LIST_ALIAS, LIST_NAME, REBUILD_ABOUT, REBUILD_ALIAS, REBUILD_NAME, RUN_ALIAS, RUN_NAME,
-    UNINSTALL_ABOUT, UNINSTALL_ALIAS, UNINSTALL_NAME, UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME,
-    VIEW_ABOUT, VIEW_ALIAS, VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME,
+    CLEAN_ABOUT, CLEAN_ALIAS, CLEAN_NAME, COMPLETIONS_ABOUT, COMPLETIONS_NAME, CONFIG_ABOUT,
+    CONFIG_ALIAS, CONFIG_NAME, DEPS_ABOUT, DEPS_ALIAS, DEPS_NAME, EXECUTE_ABOUT, EXECUTE_ALIAS,
+    EXECUTE_NAME, INIT_ABOUT, INIT_ALIAS, INIT_NAME, INSTALL_ABOUT, INSTALL_ALIAS, INSTALL_NAME,
+    LINK_ABOUT, LINK_ALIAS, LINK_NAME, LIST_ALIAS, LIST_NAME, REBUILD_ABOUT, REBUILD_ALIAS,
+    REBUILD_NAME, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT, UNINSTALL_ALIAS, UNINSTALL_NAME,
+    UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT, VIEW_ALIAS, VIEW_ALIAS_INFO,
+    VIEW_ALIAS_SHOW, VIEW_NAME,
 };
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
 use crate::helper::workspace::update_cwd_to_root;
+
+fn detect_shell_from_env() -> Option<clap_complete::Shell> {
+    // Most common on Unix-like systems.
+    let shell_path = std::env::var("SHELL").ok()?;
+    let name = shell_path.rsplit('/').next().unwrap_or(shell_path.as_str());
+
+    match name {
+        "bash" => Some(clap_complete::Shell::Bash),
+        "zsh" => Some(clap_complete::Shell::Zsh),
+        "fish" => Some(clap_complete::Shell::Fish),
+        // Leave PowerShell + Elvish to explicit flags; auto-detect tends to be unreliable.
+        _ => None,
+    }
+}
 
 #[derive(Parser)]
 #[command(name = APP_NAME)]
@@ -257,6 +272,14 @@ enum Commands {
         #[arg(long, short)]
         yes: bool,
     },
+
+    /// Generate shell completion scripts
+    #[command(name = COMPLETIONS_NAME, about = COMPLETIONS_ABOUT)]
+    Completions {
+        /// Shell to generate completions for (auto-detected if omitted)
+        #[arg(value_enum)]
+        shell: Option<clap_complete::Shell>,
+    },
 }
 
 fn main() {
@@ -304,6 +327,27 @@ async fn async_main() -> Result<()> {
     // Check for version flag
     if cli.version {
         println!("{APP_VERSION}");
+        return Ok(());
+    }
+
+    // Handle completions early to avoid unnecessary initialization (tracing, registry, auto-update)
+    if let Some(Commands::Completions { shell }) = cli.command {
+        let shell = shell.or_else(detect_shell_from_env);
+
+        let Some(shell) = shell else {
+            eprintln!(
+                "Could not detect shell. Usage: utoo completions <bash|zsh|fish|powershell|elvish>"
+            );
+            process::exit(2);
+        };
+
+        tokio::task::spawn_blocking(move || {
+            let mut cmd = Cli::command();
+            clap_complete::generate(shell, &mut cmd, APP_NAME, &mut std::io::stdout());
+        })
+        .await
+        .context("Failed to generate shell completions")?;
+
         return Ok(());
     }
 
@@ -541,7 +585,44 @@ async fn async_main() -> Result<()> {
                 log_time_end("All packages installed");
             }
         }
+        // Completions is handled early before initialization
+        Some(Commands::Completions { .. }) => unreachable!(),
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn test_cli_debug_assert() {
+        // Validates that the clap command definition has no conflicts or issues
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn test_completions_generates_output() {
+        for shell in [
+            clap_complete::Shell::Bash,
+            clap_complete::Shell::Zsh,
+            clap_complete::Shell::Fish,
+            clap_complete::Shell::PowerShell,
+            clap_complete::Shell::Elvish,
+        ] {
+            let mut buf = Vec::new();
+            clap_complete::generate(shell, &mut Cli::command(), APP_NAME, &mut buf);
+            let output = String::from_utf8(buf).expect("completion output should be valid UTF-8");
+            assert!(
+                !output.is_empty(),
+                "{shell} completion should produce output"
+            );
+            assert!(
+                output.contains("install"),
+                "{shell} completion should contain subcommands"
+            );
+        }
+    }
 }
