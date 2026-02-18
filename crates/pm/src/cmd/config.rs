@@ -57,7 +57,7 @@ pub async fn handle_config_list(global: bool) -> Result<()> {
         println!("{key} = {value}");
     }
     for (key, values) in config.list_arrays() {
-        println!("{key} = {:?}", values);
+        println!("{key} = [{}]", values.join(", "));
     }
     Ok(())
 }

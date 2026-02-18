@@ -188,7 +188,7 @@ pub async fn detect_supports_semver(registry_url: &str) -> bool {
         false
     });
 
-    // Append result to the cached array
+    // Update (or append) result in the cached array, deduplicating by registry URL
     let new_entry = if supports {
         registry_url.to_string()
     } else {
@@ -198,6 +198,11 @@ pub async fn detect_supports_semver(registry_url: &str) -> bool {
         .get_array("supports-semver")
         .cloned()
         .unwrap_or_default();
+    // Remove any existing entry for this registry (both "url" and "!url" forms)
+    entries.retain(|e| {
+        let url = e.strip_prefix('!').unwrap_or(e);
+        url != registry_url
+    });
     entries.push(new_entry);
     if let Err(e) = config.set_array("supports-semver", entries, true) {
         tracing::warn!("Failed to save semver support to config: {}", e);

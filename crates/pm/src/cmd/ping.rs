@@ -29,7 +29,7 @@ pub async fn ping(registry: Option<&str>) -> Result<()> {
             semver_info
         );
     } else {
-        println!(
+        anyhow::bail!(
             "{} registry did not respond ({}ms)",
             "FAIL".red(),
             result.latency_ms
