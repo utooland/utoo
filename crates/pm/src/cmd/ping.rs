@@ -16,7 +16,7 @@ pub async fn ping(registry: Option<&str>) -> Result<()> {
     let result = ping_registry(&client, &registry).await;
 
     if result.success {
-        let supports = detect_supports_semver(&registry).await;
+        let supports = detect_supports_semver(&registry, Some(&client)).await;
         let semver_info = if supports {
             "supports-semver: yes".green()
         } else {

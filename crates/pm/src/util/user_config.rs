@@ -21,7 +21,7 @@ static CACHE_DIR: LazyLock<ConfigValue<String>> = LazyLock::new(|| {
     ConfigValue::new("cache-dir", default_cache)
 });
 
-pub async fn set_registry(registry: Option<String>) {
+pub async fn init_registry(registry: Option<String>) {
     // Priority: CLI argument > UTOO_REGISTRY env > config > auto-select
     let final_registry = if let Some(reg) = registry {
         tracing::debug!("Using registry from CLI: {}", reg);
@@ -50,7 +50,7 @@ pub async fn set_registry(registry: Option<String>) {
 
     // Auto-detect semver support for the selected registry
     let registry_url = get_registry();
-    let supports = detect_supports_semver(&registry_url).await;
+    let supports = detect_supports_semver(&registry_url, None).await;
     let _ = SUPPORTS_SEMVER.set(supports);
 }
 
@@ -140,7 +140,15 @@ static SUPPORTS_SEMVER: OnceLock<bool> = OnceLock::new();
 /// 2. Search `arrays.supports-semver` for `"{url}"` (true) or `"!{url}"` (false)
 /// 3. On cache miss, probe `GET $REGISTRY/utoo/%5E1` (5 s timeout)
 /// 4. Append the result to the array for future runs
-pub async fn detect_supports_semver(registry_url: &str) -> bool {
+///
+/// An optional `reqwest::Client` can be provided to reuse an existing client
+/// (e.g. from the `ping` command). If `None`, a new client with 5s timeout is
+/// created internally.
+///
+/// NOTE: Config file writes are not protected by file locking. Concurrent
+/// `utoo` processes may race on the global config, potentially losing entries.
+/// This is a known limitation — entries will be re-probed on the next run.
+pub async fn detect_supports_semver(registry_url: &str, client: Option<&reqwest::Client>) -> bool {
     use utoo_ruborist::registry::is_npm_registry;
 
     // Known: npm registry does not support semver queries
@@ -171,9 +179,16 @@ pub async fn detect_supports_semver(registry_url: &str) -> bool {
     tracing::debug!("Probing semver support: {}", probe_url);
 
     let supports = async {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(5))
-            .build()?;
+        let owned_client;
+        let client = match client {
+            Some(c) => c,
+            None => {
+                owned_client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(5))
+                    .build()?;
+                &owned_client
+            }
+        };
         let resp = client
             .get(&probe_url)
             .header("Accept", "application/vnd.npm.install-v1+json")
