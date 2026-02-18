@@ -61,4 +61,7 @@ pub mod cmd {
     pub const PING_NAME: &str = "ping";
     pub const PING_ALIAS: &str = "pg";
     pub const PING_ABOUT: &str = "Ping npm registry";
+
+    pub const COMPLETIONS_NAME: &str = "completions";
+    pub const COMPLETIONS_ABOUT: &str = "Generate shell completion scripts\n\nAdd to your shell config:\n  bash:  echo 'eval \"$(utoo completions bash)\"' >> ~/.bashrc\n  zsh:   echo 'eval \"$(utoo completions zsh)\"' >> ~/.zshrc\n  fish:  utoo completions fish > ~/.config/fish/completions/utoo.fish";
 }
