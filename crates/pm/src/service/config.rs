@@ -72,6 +72,10 @@ impl ConfigService {
             (cmd::LINK_NAME, cmd::LINK_ALIAS, cmd::LINK_ABOUT),
             (cmd::CONFIG_NAME, cmd::CONFIG_ALIAS, cmd::CONFIG_ABOUT),
             (cmd::RUN_NAME, cmd::RUN_ALIAS, cmd::RUN_ABOUT),
+            (cmd::PING_NAME, cmd::PING_ALIAS, cmd::PING_ABOUT),
+            (cmd::LOGIN_NAME, cmd::LOGIN_ALIAS, cmd::LOGIN_ABOUT),
+            (cmd::LOGOUT_NAME, cmd::LOGOUT_ALIAS, cmd::LOGOUT_ABOUT),
+            (cmd::WHOAMI_NAME, cmd::WHOAMI_ALIAS, cmd::WHOAMI_ABOUT),
             ("*", "", "→ ut run *"),
         ];
 

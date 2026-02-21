@@ -6,8 +6,24 @@ fn registry_api(registry: &str, path: &str) -> String {
     format!("{}{}", registry.trim_end_matches('/'), path)
 }
 
-/// Resolve auth token from env vars or ~/.utoo/config.toml.
-pub async fn resolve_token() -> Option<String> {
+/// Extract host from registry URL for use as config key suffix.
+///
+/// "https://registry.npmjs.org/" -> "registry.npmjs.org"
+fn registry_host(registry: &str) -> &str {
+    let s = registry
+        .strip_prefix("https://")
+        .or_else(|| registry.strip_prefix("http://"))
+        .unwrap_or(registry);
+    s.trim_end_matches('/')
+}
+
+/// Config key for storing auth token per registry.
+fn token_key(registry: &str) -> String {
+    format!("auth-token:{}", registry_host(registry))
+}
+
+/// Resolve auth token for a specific registry.
+pub async fn resolve_token(registry: &str) -> Option<String> {
     for var in ["NPM_TOKEN", "NODE_AUTH_TOKEN"] {
         if let Ok(token) = std::env::var(var) {
             if !token.is_empty() {
@@ -17,29 +33,30 @@ pub async fn resolve_token() -> Option<String> {
     }
 
     let config = Config::load(true).await.ok()?;
-    let token = config.get("auth-token").ok().flatten()?;
+    let token = config.get(&token_key(registry)).ok().flatten()?;
     if token.is_empty() { None } else { Some(token) }
 }
 
 /// Resolve token or bail with a login hint.
-pub async fn require_token() -> Result<String> {
-    resolve_token()
-        .await
-        .ok_or_else(|| anyhow::anyhow!("Not logged in. Run `utoo login` to authenticate."))
+pub async fn require_token(registry: &str) -> Result<String> {
+    resolve_token(registry).await.ok_or_else(|| {
+        anyhow::anyhow!(
+            "Not logged in to {}. Run `utoo login` to authenticate.",
+            registry
+        )
+    })
 }
 
 /// Login to the registry via web flow. Returns the token on success.
 ///
 /// `on_login_url` is called with the URL the user must visit to authenticate.
-pub async fn web_login(
-    registry: &str,
-    on_login_url: impl FnOnce(&str),
-) -> Result<String> {
+pub async fn web_login(registry: &str, on_login_url: impl FnOnce(&str)) -> Result<String> {
     let client = reqwest::Client::new();
 
     let response = client
         .post(registry_api(registry, "/-/v1/login"))
-        .json(&serde_json::json!({}))
+        .header("npm-auth-type", "web")
+        .json(&serde_json::json!({ "hostname": "utoo" }))
         .send()
         .await
         .context("Failed to initiate web login")?;
@@ -135,17 +152,76 @@ pub async fn logout(registry: &str, token: &str) -> Result<()> {
     let status = response.status();
     if !status.is_success() && status.as_u16() != 404 {
         let body = response.text().await.unwrap_or_default();
-        tracing::warn!("Server-side token invalidation failed (HTTP {}): {}", status, body);
+        tracing::warn!(
+            "Server-side token invalidation failed (HTTP {}): {}",
+            status,
+            body
+        );
     }
 
     let mut config = Config::load(true).await?;
-    config.delete("auth-token", true)?;
+    config.delete(&token_key(registry), true)?;
     Ok(())
 }
 
-/// Save token to ~/.utoo/config.toml.
-pub async fn save_token(token: String) -> Result<()> {
+/// Save token to ~/.utoo/config.toml, keyed by registry.
+pub async fn save_token(registry: &str, token: String) -> Result<()> {
     let mut config = Config::load(true).await?;
-    config.set("auth-token", token, true)?;
+    config.set(&token_key(registry), token, true)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_registry_api_trailing_slash() {
+        assert_eq!(
+            registry_api("https://registry.npmjs.org/", "/-/whoami"),
+            "https://registry.npmjs.org/-/whoami"
+        );
+    }
+
+    #[test]
+    fn test_registry_api_no_trailing_slash() {
+        assert_eq!(
+            registry_api("https://registry.npmjs.org", "/-/v1/login"),
+            "https://registry.npmjs.org/-/v1/login"
+        );
+    }
+
+    #[test]
+    fn test_registry_host_https() {
+        assert_eq!(
+            registry_host("https://registry.npmjs.org/"),
+            "registry.npmjs.org"
+        );
+    }
+
+    #[test]
+    fn test_registry_host_http() {
+        assert_eq!(registry_host("http://localhost:4873/"), "localhost:4873");
+    }
+
+    #[test]
+    fn test_registry_host_bare() {
+        assert_eq!(registry_host("registry.npmjs.org"), "registry.npmjs.org");
+    }
+
+    #[test]
+    fn test_token_key_default_registry() {
+        assert_eq!(
+            token_key("https://registry.npmjs.org/"),
+            "auth-token:registry.npmjs.org"
+        );
+    }
+
+    #[test]
+    fn test_token_key_custom_registry() {
+        assert_eq!(
+            token_key("http://localhost:4873"),
+            "auth-token:localhost:4873"
+        );
+    }
 }

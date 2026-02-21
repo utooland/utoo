@@ -190,3 +190,52 @@ impl ConfigValueParser<usize> for ConfigValue<usize> {
         value.parse().unwrap_or(self.default)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seed_config(values: &[(&str, &str)]) -> Config {
+        let map = values
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        Config {
+            values: map,
+            arrays: HashMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_delete_removes_key_and_persists() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+
+        // seed two keys, save to temp file
+        let config = seed_config(&[("foo", "bar"), ("baz", "qux")]);
+        let content = toml::to_string_pretty(&config).unwrap();
+        fs::write(&path, &content).unwrap();
+
+        // load → delete → save back
+        let mut config = Config::load_from_path(&path).await.unwrap();
+        assert_eq!(config.get("foo").unwrap(), Some("bar".into()));
+
+        config.values.remove("foo");
+        let content = toml::to_string_pretty(&config).unwrap();
+        fs::write(&path, &content).unwrap();
+
+        // reload from disk — foo gone, baz kept
+        let reloaded = Config::load_from_path(&path).await.unwrap();
+        assert_eq!(reloaded.get("foo").unwrap(), None);
+        assert_eq!(reloaded.get("baz").unwrap(), Some("qux".into()));
+    }
+
+    #[tokio::test]
+    async fn test_delete_nonexistent_key_is_noop() {
+        let config = seed_config(&[("keep", "yes")]);
+
+        // deleting a key that doesn't exist just returns None
+        assert_eq!(config.values.get("nope"), None);
+        assert_eq!(config.get("keep").unwrap(), Some("yes".into()));
+    }
+}
