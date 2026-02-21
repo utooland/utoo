@@ -25,10 +25,10 @@ fn token_key(registry: &str) -> String {
 /// Resolve auth token for a specific registry.
 pub async fn resolve_token(registry: &str) -> Option<String> {
     for var in ["NPM_TOKEN", "NODE_AUTH_TOKEN"] {
-        if let Ok(token) = std::env::var(var) {
-            if !token.is_empty() {
-                return Some(token);
-            }
+        if let Ok(token) = std::env::var(var)
+            && !token.is_empty()
+        {
+            return Some(token);
         }
     }
 
@@ -92,10 +92,10 @@ pub async fn web_login(registry: &str, on_login_url: impl FnOnce(&str)) -> Resul
         tokio::time::sleep(interval).await;
         let poll_resp = client.get(done_url).send().await?;
 
-        if let Some(retry_after) = poll_resp.headers().get("retry-after") {
-            if let Ok(secs) = retry_after.to_str().unwrap_or("5").parse::<u64>() {
-                interval = std::time::Duration::from_secs(secs);
-            }
+        if let Some(retry_after) = poll_resp.headers().get("retry-after")
+            && let Ok(secs) = retry_after.to_str().unwrap_or("5").parse::<u64>()
+        {
+            interval = std::time::Duration::from_secs(secs);
         }
 
         match poll_resp.status().as_u16() {

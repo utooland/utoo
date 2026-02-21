@@ -11,7 +11,9 @@ pub async fn login() -> Result<()> {
 
     let token = auth::web_login(&registry, |url| {
         println!("Login at: {}", url);
-        let _ = open::that(url);
+        if let Err(e) = open::that(url) {
+            tracing::warn!("Failed to open browser: {e}");
+        }
     })
     .await?;
 

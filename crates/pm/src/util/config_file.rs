@@ -194,48 +194,64 @@ impl ConfigValueParser<usize> for ConfigValue<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
-    fn seed_config(values: &[(&str, &str)]) -> Config {
-        let map = values
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
-        Config {
-            values: map,
-            arrays: HashMap::new(),
+    /// Serialize tests that override HOME to avoid races.
+    static HOME_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Run an async closure with HOME pointed at a temp dir, so
+    /// Config::load/save(global=true) never touches the real config.
+    fn with_temp_home(f: impl FnOnce()) {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let prev = std::env::var("HOME").ok();
+        unsafe { std::env::set_var("HOME", dir.path()) };
+
+        f();
+
+        match prev {
+            Some(h) => unsafe { std::env::set_var("HOME", h) },
+            None => unsafe { std::env::remove_var("HOME") },
         }
     }
 
-    #[tokio::test]
-    async fn test_delete_removes_key_and_persists() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
+    #[test]
+    fn test_delete_removes_key_and_persists() {
+        with_temp_home(|| {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                let mut config = Config::load(true).await.unwrap();
+                config.set("foo", "bar".into(), true).unwrap();
+                config.set("baz", "qux".into(), true).unwrap();
 
-        // seed two keys, save to temp file
-        let config = seed_config(&[("foo", "bar"), ("baz", "qux")]);
-        let content = toml::to_string_pretty(&config).unwrap();
-        fs::write(&path, &content).unwrap();
+                // call the actual delete method
+                config.delete("foo", true).unwrap();
 
-        // load → delete → save back
-        let mut config = Config::load_from_path(&path).await.unwrap();
-        assert_eq!(config.get("foo").unwrap(), Some("bar".into()));
+                // in-memory: foo gone, baz kept
+                assert_eq!(config.get("foo").unwrap(), None);
+                assert_eq!(config.get("baz").unwrap(), Some("qux".into()));
 
-        config.values.remove("foo");
-        let content = toml::to_string_pretty(&config).unwrap();
-        fs::write(&path, &content).unwrap();
-
-        // reload from disk — foo gone, baz kept
-        let reloaded = Config::load_from_path(&path).await.unwrap();
-        assert_eq!(reloaded.get("foo").unwrap(), None);
-        assert_eq!(reloaded.get("baz").unwrap(), Some("qux".into()));
+                // reload from disk: still gone
+                let reloaded = Config::load(true).await.unwrap();
+                assert_eq!(reloaded.get("foo").unwrap(), None);
+                assert_eq!(reloaded.get("baz").unwrap(), Some("qux".into()));
+            });
+        });
     }
 
-    #[tokio::test]
-    async fn test_delete_nonexistent_key_is_noop() {
-        let config = seed_config(&[("keep", "yes")]);
+    #[test]
+    fn test_delete_nonexistent_key_is_noop() {
+        with_temp_home(|| {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                let mut config = Config::load(true).await.unwrap();
+                config.set("keep", "yes".into(), true).unwrap();
 
-        // deleting a key that doesn't exist just returns None
-        assert_eq!(config.values.get("nope"), None);
-        assert_eq!(config.get("keep").unwrap(), Some("yes".into()));
+                // deleting a key that doesn't exist should not error
+                config.delete("nope", true).unwrap();
+
+                assert_eq!(config.get("keep").unwrap(), Some("yes".into()));
+            });
+        });
     }
 }
