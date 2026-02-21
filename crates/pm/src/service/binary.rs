@@ -1,6 +1,6 @@
 use crate::fs;
-use crate::util::config::get_registry;
 use crate::util::json::load_package_json_from_path;
+use crate::util::user_config::get_registry;
 use anyhow::{Context, Result};
 use regex::Regex;
 use serde_json::{Map, Value};

@@ -6,6 +6,7 @@ pub mod init;
 pub mod install;
 pub mod link;
 pub mod list;
+pub mod ping;
 pub mod rebuild;
 pub mod run;
 pub mod update;

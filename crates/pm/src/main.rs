@@ -15,11 +15,11 @@ use cmd::update::update;
 use cmd::view::view;
 use cmd::{clean::clean, deps::build_workspace};
 use helper::auto_update::init_auto_update;
-use util::config::{
-    set_cache_dir, set_legacy_peer_deps, set_manifests_concurrency_limit, set_omit, set_registry,
-};
 use util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
 use util::save_type::{OmitType, PackageAction, SaveType, parse_save_type};
+use util::user_config::{
+    init_registry, set_cache_dir, set_legacy_peer_deps, set_manifests_concurrency_limit, set_omit,
+};
 
 mod cmd;
 mod constants;
@@ -33,10 +33,10 @@ use crate::constants::cmd::{
     CLEAN_ABOUT, CLEAN_ALIAS, CLEAN_NAME, COMPLETIONS_ABOUT, COMPLETIONS_NAME, CONFIG_ABOUT,
     CONFIG_ALIAS, CONFIG_NAME, DEPS_ABOUT, DEPS_ALIAS, DEPS_NAME, EXECUTE_ABOUT, EXECUTE_ALIAS,
     EXECUTE_NAME, INIT_ABOUT, INIT_ALIAS, INIT_NAME, INSTALL_ABOUT, INSTALL_ALIAS, INSTALL_NAME,
-    LINK_ABOUT, LINK_ALIAS, LINK_NAME, LIST_ALIAS, LIST_NAME, REBUILD_ABOUT, REBUILD_ALIAS,
-    REBUILD_NAME, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT, UNINSTALL_ALIAS, UNINSTALL_NAME,
-    UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT, VIEW_ALIAS, VIEW_ALIAS_INFO,
-    VIEW_ALIAS_SHOW, VIEW_NAME,
+    LINK_ABOUT, LINK_ALIAS, LINK_NAME, LIST_ALIAS, LIST_NAME, PING_ABOUT, PING_ALIAS, PING_NAME,
+    REBUILD_ABOUT, REBUILD_ALIAS, REBUILD_NAME, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT,
+    UNINSTALL_ALIAS, UNINSTALL_NAME, UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT,
+    VIEW_ALIAS, VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME,
 };
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
 use crate::helper::workspace::update_cwd_to_root;
@@ -259,6 +259,12 @@ enum Commands {
         prefix: Option<String>,
     },
 
+    #[command(name = PING_NAME, alias = PING_ALIAS, about = PING_ABOUT)]
+    Ping {
+        /// Registry URL to ping (defaults to configured registry)
+        registry: Option<String>,
+    },
+
     #[command(name = CONFIG_NAME, alias = CONFIG_ALIAS, about = CONFIG_ABOUT)]
     Config {
         #[command(subcommand)]
@@ -315,7 +321,7 @@ async fn async_main() -> Result<()> {
 
     // Check for help flag
     if args.len() > 1 && (args[1] == "-h" || args[1] == "--help") {
-        let config = crate::util::config::Config::load(false).await?;
+        let config = crate::util::config_file::Config::load(false).await?;
         let config_service = crate::service::config::ConfigService::new(config);
         config_service.print_help()?;
         return Ok(());
@@ -361,7 +367,7 @@ async fn async_main() -> Result<()> {
     );
 
     // global registry
-    set_registry(cli.registry).await;
+    init_registry(cli.registry).await;
 
     // set cache directory
     set_cache_dir(cli.cache_dir).await;
@@ -535,6 +541,9 @@ async fn async_main() -> Result<()> {
             init(yes, None).await?;
             log_time_end("package.json created");
         }
+        Some(Commands::Ping { registry }) => {
+            cmd::ping::ping(registry.as_deref()).await?;
+        }
         Some(Commands::Config { command }) => match command {
             ConfigCommands::Set { key, value, global } => {
                 handle_config_set(key, value, global).await?;
@@ -554,7 +563,7 @@ async fn async_main() -> Result<()> {
             // Check if there's a script name provided
             if let Some(script_name) = &cli.script_name {
                 // First check if there's a custom command configured for this script name
-                let config = crate::util::config::Config::load(false).await?;
+                let config = crate::util::config_file::Config::load(false).await?;
                 let config_service = crate::service::config::ConfigService::new(config);
                 // Check if there's a custom command available
                 if let Ok(Some(_)) = config_service.get_available_cmd(script_name) {

@@ -5,8 +5,10 @@ use utoo_ruborist::service::{BuildDepsOptions, Glob, UnifiedRegistry};
 
 use crate::service::pipeline::{PipelineChannels, PipelineReceiver};
 use crate::util::cache::get_cache_dir;
-use crate::util::config::{get_legacy_peer_deps, get_manifests_concurrency_limit, get_registry};
 use crate::util::logger::ProgressReceiver;
+use crate::util::user_config::{
+    get_legacy_peer_deps, get_manifests_concurrency_limit, get_registry, get_supports_semver,
+};
 
 /// Tokio-based glob implementation.
 #[derive(Debug, Clone, Copy, Default)]
@@ -46,6 +48,7 @@ impl Context {
             legacy_peer_deps: get_legacy_peer_deps().await,
             glob: TokioGlob,
             receiver,
+            supports_semver: get_supports_semver(),
         }
     }
 
@@ -70,10 +73,13 @@ impl Context {
 
     /// Create a UnifiedRegistry with standard configuration.
     pub fn registry() -> Registry {
-        UnifiedRegistry::builder()
+        let mut builder = UnifiedRegistry::builder()
             .registry(get_registry())
-            .cache_dir(get_cache_dir())
-            .build()
+            .cache_dir(get_cache_dir());
+        if let Some(semver) = get_supports_semver() {
+            builder = builder.supports_semver(semver);
+        }
+        builder.build()
     }
 
     /// Get the glob instance.
