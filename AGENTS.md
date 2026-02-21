@@ -40,10 +40,13 @@ The `next.js/` directory is a **git submodule** (`utooland/next.js`) providing T
 
 - **Pack**: User config → `@utoo/pack` (TS) → `pack-napi` (NAPI bridge) → `pack-api` → `pack-core` (Turbopack) → bundled output
 - **PM**: CLI args → `crates/pm/src/cmd/` (command parsing) → `crates/pm/src/service/` (business logic) → `crates/pm/src/util/` (registry, cache, linker)
+- **Web**: `@utoo/web` is an independent TS project that uses `utoo-wasm` for browser-compatible toolchain. Demo workflow:
+  1. `ut build:local --workspace @utoo/web`
+  2. `ut start --workspace utooweb-demo`
 
 ## Build, Test, and Development Commands
 
-- Install deps: `npm install`
+- Install deps: `npm install` (or bootstrap via global `utoo`/`ut` or locally built `target/release` binary)
 - Build all packages: `npm run build` (via Turbo)
 - Build specific package: `npx turbo run build --filter=@utoo/pack`
 - Watch mode: `npm run dev`
