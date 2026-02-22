@@ -47,19 +47,25 @@ pub struct PreloadStats {
     pub total_request_ms: u64,
 }
 
-/// Check if a spec is a local dependency (file:, link:, workspace:, portal:)
-pub fn is_local_spec(spec: &str) -> bool {
+/// Check if a spec is a non-registry dependency that should skip registry preloading.
+///
+/// Covers local specs (file:, link:, workspace:, portal:) and
+/// remote non-registry specs (git+, git://, github:).
+pub fn is_non_registry_spec(spec: &str) -> bool {
     spec.starts_with("file:")
         || spec.starts_with("link:")
         || spec.starts_with("workspace:")
         || spec.starts_with("portal:")
+        || spec.starts_with("git+")
+        || spec.starts_with("git://")
+        || spec.starts_with("github:")
 }
 
-/// Collect dependencies from any deps map, filtering out local specs.
+/// Collect dependencies from any deps map, filtering out non-registry specs.
 fn collect_deps(map: Option<&std::collections::HashMap<String, String>>) -> Vec<Dep> {
     map.into_iter()
         .flatten()
-        .filter(|(_, spec)| !is_local_spec(spec))
+        .filter(|(_, spec)| !is_non_registry_spec(spec))
         .map(|(name, spec)| (name.clone(), spec.clone()))
         .collect()
 }
@@ -342,12 +348,28 @@ mod tests {
     }
 
     #[test]
-    fn test_is_local_spec() {
-        assert!(is_local_spec("file:../foo"));
-        assert!(is_local_spec("link:../foo"));
-        assert!(is_local_spec("workspace:*"));
-        assert!(is_local_spec("portal:../foo"));
-        assert!(!is_local_spec("^1.0.0"));
-        assert!(!is_local_spec("latest"));
+    fn test_is_non_registry_spec() {
+        // Local specs
+        assert!(is_non_registry_spec("file:../foo"));
+        assert!(is_non_registry_spec("link:../foo"));
+        assert!(is_non_registry_spec("workspace:*"));
+        assert!(is_non_registry_spec("portal:../foo"));
+
+        // Git specs
+        assert!(is_non_registry_spec("git+https://github.com/user/repo.git"));
+        assert!(is_non_registry_spec(
+            "git+ssh://git@github.com/user/repo.git"
+        ));
+        assert!(is_non_registry_spec(
+            "git+https://github.com/user/repo.git#main"
+        ));
+        assert!(is_non_registry_spec("git://github.com/user/repo.git"));
+        assert!(is_non_registry_spec("github:user/repo"));
+        assert!(is_non_registry_spec("github:user/repo#v1.0"));
+
+        // Registry specs (should NOT match)
+        assert!(!is_non_registry_spec("^1.0.0"));
+        assert!(!is_non_registry_spec("latest"));
+        assert!(!is_non_registry_spec("~2.0.0"));
     }
 }

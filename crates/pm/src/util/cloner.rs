@@ -3,7 +3,7 @@ use once_cell::sync::Lazy;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use super::downloader::download_to_cache;
+use super::downloader::resolve_cache_path;
 use super::json::load_package_json_from_path;
 use super::oncemap::OnceMap;
 use super::retry::create_retry_strategy;
@@ -48,7 +48,7 @@ pub async fn clone_package_once(
 
     CLONE_CACHE
         .get_or_init(key, || async move {
-            let cache_path = download_to_cache(&name, &version, &tarball_url).await?;
+            let cache_path = resolve_cache_path(&name, &version, &tarball_url).await?;
             clone_package(&cache_path, &target_path, &name, &version)
                 .await
                 .inspect_err(|e| {

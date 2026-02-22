@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::util::cloner::{clone_package_once, wait_clone_if_pending};
-use crate::util::downloader::download_to_cache;
+use crate::util::downloader::{download_to_cache, is_git_url};
 
 use super::receiver::PipelineChannels;
 
@@ -27,6 +27,17 @@ pub fn start_workers(channels: PipelineChannels, cwd: PathBuf) -> PipelineHandle
             let Some(tarball_url) = info.tarball_url else {
                 continue;
             };
+            // Git packages are cloned & cached during BFS resolution (inside ruborist).
+            // Skip the download pipeline — the clone worker will pick up the
+            // pre-resolved cache path via resolve_cache_path.
+            if is_git_url(&tarball_url) {
+                tracing::debug!(
+                    "Skipping download for git package: {}@{}",
+                    info.name,
+                    info.version
+                );
+                continue;
+            }
             let name = info.name;
             let version = info.version;
             tokio::spawn(async move {

@@ -19,6 +19,17 @@ tracing      = { workspace = true }
 # HTTP client - works on both native and WASM
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 
+# Git clone (optional, native-only)
+gix = { version = "0.72", default-features = false, features = [
+  "blocking-http-transport-reqwest-rust-tls",
+  "blocking-network-client",
+], optional = true }
+tempfile = { version = "3", optional = true }
+
+[features]
+default    = []
+native-git = ["gix", "tempfile"]
+
 # Async runtime (works on both native and WASM with forked tokio)
 [dependencies.tokio]
 workspace = true

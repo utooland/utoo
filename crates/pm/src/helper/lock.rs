@@ -5,15 +5,16 @@ use std::path::{Path, PathBuf};
 
 use super::ruborist_context::Context;
 use crate::helper::workspace::find_workspaces;
+use crate::util::git_resolver::{resolve_git_spec, resolve_github_spec};
 use crate::util::json::{load_package_json_from_path, load_package_lock_json_from_path};
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
 use crate::util::save_type::{PackageAction, SaveType};
 use crate::util::user_config::get_legacy_peer_deps;
-use crate::util::{cloner::clone_package, downloader::download_to_cache};
+use crate::util::{cloner::clone_package, downloader::resolve_cache_path};
 use utoo_ruborist::lock::{LockPackage, PackageLock};
 use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::registry::resolve_package;
-use utoo_ruborist::util::parse_package_spec;
+use utoo_ruborist::spec::{PackageSpec, parse_cli_spec};
 
 use super::workspace::find_workspace_path;
 
@@ -168,13 +169,10 @@ pub async fn update_package_json(
         for (name, version, version_spec) in package_specs {
             match action {
                 PackageAction::Add => {
-                    let version_to_write = match version_spec {
-                        spec if spec.is_empty() || spec == "*" || spec == "latest" => {
-                            format!("^{version}")
-                        }
-                        spec => spec.to_string(),
-                    };
-                    deps_obj.insert(name, Value::String(version_to_write));
+                    deps_obj.insert(
+                        name,
+                        Value::String(format_save_spec(&version_spec, &version)),
+                    );
                 }
                 PackageAction::Remove => {
                     deps_obj.remove(&name);
@@ -193,12 +191,44 @@ pub async fn update_package_json(
     Ok(())
 }
 
+/// Format a version spec for writing into package.json.
+///
+/// Git/non-registry specs are written as-is (e.g. the resolved URL with pinned commit).
+/// Wildcard specs (`*`, `latest`, empty) are pinned to `^<resolved_version>`.
+/// Everything else (semver ranges, exact versions) passes through unchanged.
+fn format_save_spec(version_spec: &str, resolved_version: &str) -> String {
+    if version_spec.starts_with("git+") || version_spec.starts_with("git://") {
+        return version_spec.to_string();
+    }
+    match version_spec {
+        "" | "*" | "latest" => format!("^{resolved_version}"),
+        _ => version_spec.to_string(),
+    }
+}
+
 pub async fn resolve_package_spec(spec: &str) -> Result<(String, String, String)> {
-    let (name, version_spec) = parse_package_spec(spec);
-    let resolved = resolve_package(&Context::registry(), name, version_spec)
-        .await
-        .map_err(|e| anyhow!("{}", e))?;
-    Ok((name.to_string(), resolved.version, version_spec.to_string()))
+    let parsed = parse_cli_spec(spec);
+    match parsed {
+        PackageSpec::Registry { name, version_spec } => {
+            let resolved = resolve_package(&Context::registry(), &name, &version_spec)
+                .await
+                .map_err(|e| anyhow!("{}", e))?;
+            Ok((name, resolved.version, version_spec))
+        }
+        PackageSpec::Git { url, commit_ish } => {
+            let resolved = resolve_git_spec(&url, commit_ish.as_deref()).await?;
+            Ok((resolved.name, resolved.version, resolved.resolved_url))
+        }
+        PackageSpec::GitHub {
+            owner,
+            repo,
+            commit_ish,
+        } => {
+            let resolved = resolve_github_spec(&owner, &repo, commit_ish.as_deref()).await?;
+            Ok((resolved.name, resolved.version, resolved.resolved_url))
+        }
+        _ => Err(anyhow!("Unsupported package spec type: {}", spec)),
+    }
 }
 
 pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -> Result<PathBuf> {
@@ -238,7 +268,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
         .ok_or_else(|| anyhow!("Failed to get tarball URL from manifest"))?;
 
     // Download and extract package to cache
-    let cache_path = download_to_cache(&name, &resolved.version, tarball_url)
+    let cache_path = resolve_cache_path(&name, &resolved.version, tarball_url)
         .await
         .ok_or_else(|| anyhow!("Failed to download package {name}"))?;
 

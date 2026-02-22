@@ -30,6 +30,7 @@ impl Glob for TokioGlob {
 // Type aliases to hide concrete Glob type
 pub(crate) type GlobImpl = TokioGlob;
 pub(crate) type Registry = UnifiedRegistry;
+
 /// Context for ruborist operations.
 /// Centralizes Glob and configuration to avoid spreading concrete types.
 pub(crate) struct Context;

@@ -63,26 +63,6 @@ pub struct BuildDepsOptions<G, R> {
     pub supports_semver: Option<bool>,
 }
 
-impl<G, R> BuildDepsOptions<G, R> {
-    /// Create options with default values.
-    pub fn new(cwd: PathBuf, glob: G, receiver: R) -> Self
-    where
-        G: Default,
-        R: Default,
-    {
-        Self {
-            cwd,
-            registry_url: "https://registry.npmmirror.com".to_string(),
-            cache_dir: None,
-            concurrency: 20,
-            legacy_peer_deps: true,
-            glob,
-            receiver,
-            supports_semver: None,
-        }
-    }
-}
-
 /// Build dependency tree and return PackageLock.
 ///
 /// This is the main entry point for dependency resolution. It:
@@ -255,13 +235,14 @@ where
         cache_dir.is_some()
     );
 
-    // 10. Build dependency tree
+    // 11. Build dependency tree
     // Skip preload if project cache exists (cache is already warm)
     let skip_preload = cache_count > 0;
     let config = BuildDepsConfig::default()
         .with_legacy_peer_deps(legacy_peer_deps)
         .with_concurrency(concurrency)
-        .with_skip_preload(skip_preload);
+        .with_skip_preload(skip_preload)
+        .with_cache_dir(cache_dir.clone());
 
     if skip_preload {
         tracing::debug!(
@@ -274,12 +255,12 @@ where
         .await
         .map_err(|e| anyhow::anyhow!("Dependency resolution failed: {}", e))?;
 
-    // 11. Serialize to PackageLock
+    // 12. Serialize to PackageLock
     let (packages_value, _total) = graph.serialize_to_packages(&root_path);
     let packages: HashMap<String, LockPackage> = serde_json::from_value(packages_value)
         .context("Failed to convert packages to lock format")?;
 
-    // 12. Save project cache (export from memory cache)
+    // 13. Save project cache (export from memory cache)
     let mut new_cache_data = super::cache::ProjectCacheData::default();
     // Export version manifests from memory cache to project cache
     // Memory cache key format: "name@spec", manifest contains resolved version

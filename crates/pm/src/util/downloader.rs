@@ -33,10 +33,54 @@ pub fn download_count() -> usize {
     DOWNLOAD_COUNT.load(Ordering::Relaxed)
 }
 
-/// Download a package tarball to the global cache directory, returning the cache path.
+/// Check whether a tarball URL refers to a git-resolved package.
+pub fn is_git_url(tarball_url: &str) -> bool {
+    tarball_url.starts_with("git+") || tarball_url.starts_with("git://")
+}
+
+/// Look up the cache path for a git-resolved package.
+///
+/// Git packages are cloned during BFS resolution (inside ruborist) and
+/// stored at `<cache_dir>/<name>/<commit_sha>/` — the same `<name>/<key>/`
+/// layout as registry tarballs, so `utoo clean` works uniformly.
+///
+/// The commit SHA is extracted from the `#fragment` of `tarball_url`.
+pub async fn git_cache_lookup(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
+    let commit_sha = tarball_url.split_once('#').map(|(_, frag)| frag)?;
+    let cache_dir = get_cache_dir();
+    let cache_path = cache_dir.join(name).join(commit_sha);
+    if crate::fs::try_exists(&cache_path.join("_resolved"))
+        .await
+        .unwrap_or(false)
+    {
+        tracing::debug!("Git package cache hit: {}@{}", name, version);
+        return Some(cache_path);
+    }
+    tracing::warn!(
+        "Git package {}@{} not found in cache, expected pre-resolution",
+        name,
+        version
+    );
+    None
+}
+
+/// Resolve the local cache path for a package, downloading if necessary.
+///
+/// Routes git URLs to [`git_cache_lookup`] and registry tarballs to
+/// [`download_to_cache`].
+pub async fn resolve_cache_path(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
+    if is_git_url(tarball_url) {
+        return git_cache_lookup(name, version, tarball_url).await;
+    }
+    download_to_cache(name, version, tarball_url).await
+}
+
+/// Download a registry tarball to the global cache directory, returning the cache path.
 ///
 /// Uses `OnceMap` to deduplicate: the same `name@version` is only downloaded once,
 /// even when called concurrently from multiple tasks (pipeline workers, install phase, etc.).
+///
+/// For git-resolved packages, use [`resolve_cache_path`] instead.
 pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
     let key = format!("{}@{}", name, version);
     let cache_dir = get_cache_dir();

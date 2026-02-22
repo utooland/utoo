@@ -24,6 +24,8 @@ pub enum ResolveError<E> {
     NoVersions(String),
     /// Resolved version not found in manifest
     ManifestNotFound { name: String, version: String },
+    /// Git resolution failed
+    Git(String),
 }
 
 impl<E: std::fmt::Display> std::fmt::Display for ResolveError<E> {
@@ -35,6 +37,7 @@ impl<E: std::fmt::Display> std::fmt::Display for ResolveError<E> {
             ResolveError::ManifestNotFound { name, version } => {
                 write!(f, "Manifest not found for {}@{}", name, version)
             }
+            ResolveError::Git(msg) => write!(f, "Git resolution failed: {}", msg),
         }
     }
 }
@@ -43,7 +46,10 @@ impl<E: std::error::Error + 'static> std::error::Error for ResolveError<E> {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             ResolveError::Registry(e) => Some(e),
-            _ => None,
+            ResolveError::Version(_)
+            | ResolveError::NoVersions(_)
+            | ResolveError::ManifestNotFound { .. }
+            | ResolveError::Git(_) => None,
         }
     }
 }

@@ -26,8 +26,9 @@ use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
 use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
-use crate::resolver::preload::{PreloadConfig, preload_manifests};
+use crate::resolver::preload::{PreloadConfig, is_non_registry_spec, preload_manifests};
 use crate::resolver::registry::{ResolveError, resolve_dependency};
+use crate::traits::git::resolve_non_registry_dep;
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
 use crate::traits::registry::{RegistryClient, ResolvedPackage};
 
@@ -45,6 +46,8 @@ pub struct BuildDepsConfig {
     pub concurrency: usize,
     /// Whether to skip preload phase (useful when cache is already warm)
     pub skip_preload: bool,
+    /// Cache directory for git clones (None = git deps will fail)
+    pub cache_dir: Option<PathBuf>,
 }
 
 impl Default for BuildDepsConfig {
@@ -53,6 +56,7 @@ impl Default for BuildDepsConfig {
             legacy_peer_deps: true,
             concurrency: crate::resolver::preload::DEFAULT_CONCURRENCY,
             skip_preload: false,
+            cache_dir: None,
         }
     }
 }
@@ -75,6 +79,12 @@ impl BuildDepsConfig {
         self.skip_preload = skip;
         self
     }
+
+    /// Set the cache directory for git clones
+    pub fn with_cache_dir(mut self, cache_dir: Option<PathBuf>) -> Self {
+        self.cache_dir = cache_dir;
+        self
+    }
 }
 
 /// Snapshot of node dependency flags to avoid borrowing conflicts.
@@ -89,14 +99,14 @@ struct NodeFlags {
 
 /// Gather all unresolved deps from root and workspace nodes for preloading.
 fn gather_preload_deps(graph: &DependencyGraph, legacy_peer_deps: bool) -> Vec<(String, String)> {
-    use crate::resolver::preload::is_local_spec;
+    use crate::resolver::preload::is_non_registry_spec;
     use std::collections::HashSet;
 
     let mut deps = HashSet::new();
 
     // Collect from root node
     for (_, edge) in graph.get_dependency_edges(graph.root_index) {
-        if !edge.valid && !is_local_spec(&edge.spec) {
+        if !edge.valid && !is_non_registry_spec(&edge.spec) {
             // Skip peer deps in legacy mode
             if legacy_peer_deps && edge.edge_type == EdgeType::Peer {
                 continue;
@@ -111,7 +121,7 @@ fn gather_preload_deps(graph: &DependencyGraph, legacy_peer_deps: bool) -> Vec<(
             && node.is_workspace()
         {
             for (_, edge) in graph.get_dependency_edges(node_index) {
-                if !edge.valid && !is_local_spec(&edge.spec) {
+                if !edge.valid && !is_non_registry_spec(&edge.spec) {
                     // Skip peer deps in legacy mode
                     if legacy_peer_deps && edge.edge_type == EdgeType::Peer {
                         continue;
@@ -277,7 +287,7 @@ pub async fn process_dependency<R: RegistryClient>(
     registry: &R,
     node_index: NodeIndex,
     edge_info: &DependencyEdgeInfo,
-    legacy_peer_deps: bool,
+    config: &BuildDepsConfig,
 ) -> Result<ProcessResult, ResolveError<R::Error>> {
     tracing::debug!(
         "Processing dependency {}@{} from [{:?}]",
@@ -316,23 +326,41 @@ pub async fn process_dependency<R: RegistryClient>(
                 conflict_parent
             );
 
-            // Resolve from registry first to get the version
-            let resolved = match resolve_dependency(
-                registry,
-                &edge_info.name,
-                &edge_info.spec,
-                &edge_info.edge_type,
-            )
-            .await?
-            {
-                Some(resolved) => resolved,
-                None => {
-                    tracing::debug!(
-                        "Skipped optional dependency {}@{}",
-                        edge_info.name,
-                        edge_info.spec
-                    );
-                    return Ok(ProcessResult::Skipped);
+            // Route non-registry specs (git, github, …) through the
+            // built-in git resolver; everything else goes to the registry.
+            let resolved = if is_non_registry_spec(&edge_info.spec) {
+                match resolve_non_registry_dep(&config.cache_dir, &edge_info.name, &edge_info.spec)
+                    .await
+                {
+                    Ok(r) => r,
+                    Err(_) if edge_info.edge_type == EdgeType::Optional => {
+                        tracing::debug!(
+                            "Skipped optional non-registry dependency {}@{}",
+                            edge_info.name,
+                            edge_info.spec
+                        );
+                        return Ok(ProcessResult::Skipped);
+                    }
+                    Err(e) => return Err(ResolveError::Git(e.to_string())),
+                }
+            } else {
+                match resolve_dependency(
+                    registry,
+                    &edge_info.name,
+                    &edge_info.spec,
+                    &edge_info.edge_type,
+                )
+                .await?
+                {
+                    Some(resolved) => resolved,
+                    None => {
+                        tracing::debug!(
+                            "Skipped optional dependency {}@{}",
+                            edge_info.name,
+                            edge_info.spec
+                        );
+                        return Ok(ProcessResult::Skipped);
+                    }
                 }
             };
 
@@ -388,7 +416,7 @@ pub async fn process_dependency<R: RegistryClient>(
                 graph,
                 new_index,
                 &resolved.manifest,
-                legacy_peer_deps,
+                config.legacy_peer_deps,
                 false,
             );
 
@@ -482,7 +510,7 @@ pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
     run_preload_phase(graph, registry, &config, receiver).await;
 
     // Phase 2: BFS traversal to build the dependency tree
-    run_bfs_phase(graph, registry, config.legacy_peer_deps, receiver).await?;
+    run_bfs_phase(graph, registry, &config, receiver).await?;
 
     receiver.on_event(BuildEvent::Complete {
         total_nodes: graph.graph.node_count(),
@@ -547,7 +575,7 @@ async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
 async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
     graph: &mut DependencyGraph,
     registry: &R,
-    legacy_peer_deps: bool,
+    config: &BuildDepsConfig,
     receiver: &E,
 ) -> Result<(), ResolveError<R::Error>> {
     let start = tokio::time::Instant::now();
@@ -583,9 +611,7 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
                 receiver.on_event(BuildEvent::Resolving {
                     name: &edge_info.name,
                 });
-                match process_dependency(graph, registry, node_index, &edge_info, legacy_peer_deps)
-                    .await?
-                {
+                match process_dependency(graph, registry, node_index, &edge_info, config).await? {
                     ProcessResult::Created(idx) => {
                         // Extract node info for events
                         if let Some(node) = graph.get_node(idx) {
