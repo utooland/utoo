@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod binary;
 pub mod clean;
 pub mod config;

@@ -33,10 +33,11 @@ use crate::constants::cmd::{
     CLEAN_ABOUT, CLEAN_ALIAS, CLEAN_NAME, COMPLETIONS_ABOUT, COMPLETIONS_NAME, CONFIG_ABOUT,
     CONFIG_ALIAS, CONFIG_NAME, DEPS_ABOUT, DEPS_ALIAS, DEPS_NAME, EXECUTE_ABOUT, EXECUTE_ALIAS,
     EXECUTE_NAME, INIT_ABOUT, INIT_ALIAS, INIT_NAME, INSTALL_ABOUT, INSTALL_ALIAS, INSTALL_NAME,
-    LINK_ABOUT, LINK_ALIAS, LINK_NAME, LIST_ALIAS, LIST_NAME, PING_ABOUT, PING_ALIAS, PING_NAME,
-    REBUILD_ABOUT, REBUILD_ALIAS, REBUILD_NAME, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT,
-    UNINSTALL_ALIAS, UNINSTALL_NAME, UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT,
-    VIEW_ALIAS, VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME,
+    LINK_ABOUT, LINK_ALIAS, LINK_NAME, LIST_ALIAS, LIST_NAME, LOGIN_ABOUT, LOGIN_ALIAS, LOGIN_NAME,
+    LOGOUT_ABOUT, LOGOUT_ALIAS, LOGOUT_NAME, PING_ABOUT, PING_ALIAS, PING_NAME, REBUILD_ABOUT,
+    REBUILD_ALIAS, REBUILD_NAME, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT, UNINSTALL_ALIAS,
+    UNINSTALL_NAME, UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT, VIEW_ALIAS,
+    VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME, WHOAMI_ABOUT, WHOAMI_ALIAS, WHOAMI_NAME,
 };
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
 use crate::helper::workspace::update_cwd_to_root;
@@ -264,6 +265,15 @@ enum Commands {
         /// Registry URL to ping (defaults to configured registry)
         registry: Option<String>,
     },
+
+    #[command(name = LOGIN_NAME, alias = LOGIN_ALIAS, about = LOGIN_ABOUT)]
+    Login,
+
+    #[command(name = WHOAMI_NAME, alias = WHOAMI_ALIAS, about = WHOAMI_ABOUT)]
+    Whoami,
+
+    #[command(name = LOGOUT_NAME, alias = LOGOUT_ALIAS, about = LOGOUT_ABOUT)]
+    Logout,
 
     #[command(name = CONFIG_NAME, alias = CONFIG_ALIAS, about = CONFIG_ABOUT)]
     Config {
@@ -543,6 +553,15 @@ async fn async_main() -> Result<()> {
         }
         Some(Commands::Ping { registry }) => {
             cmd::ping::ping(registry.as_deref()).await?;
+        }
+        Some(Commands::Login) => {
+            cmd::login::login().await?;
+        }
+        Some(Commands::Whoami) => {
+            cmd::whoami::whoami().await?;
+        }
+        Some(Commands::Logout) => {
+            cmd::logout::logout().await?;
         }
         Some(Commands::Config { command }) => match command {
             ConfigCommands::Set { key, value, global } => {
