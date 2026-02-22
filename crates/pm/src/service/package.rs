@@ -28,12 +28,7 @@ pub struct PackageService;
 impl PackageService {
     pub async fn process_project_hooks(root_path: &Path) -> Result<()> {
         let data = load_package_json_from_path(root_path).await?;
-
-        let binding = serde_json::Map::new();
-        let scripts = data
-            .get("scripts")
-            .and_then(|s| s.as_object())
-            .unwrap_or(&binding);
+        let package_info = PackageInfo::from_json(root_path, &data)?;
 
         let hooks = [
             "preinstall",
@@ -45,53 +40,8 @@ impl PackageService {
             "postprepare",
         ];
 
-        let (_scope, name, fullname) = parse_package_name(&format!(
-            "node_modules/{}",
-            data.get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-        ));
-
-        let package_info = PackageInfo {
-            path: root_path.to_path_buf(),
-            bin_files: Vec::new(),
-            scripts: Scripts {
-                preinstall: scripts
-                    .get("preinstall")
-                    .and_then(|s| s.as_str())
-                    .map(String::from),
-                install: scripts
-                    .get("install")
-                    .and_then(|s| s.as_str())
-                    .map(String::from),
-                postinstall: scripts
-                    .get("postinstall")
-                    .and_then(|s| s.as_str())
-                    .map(String::from),
-                prepare: scripts
-                    .get("prepare")
-                    .and_then(|s| s.as_str())
-                    .map(String::from),
-                preprepare: scripts
-                    .get("preprepare")
-                    .and_then(|s| s.as_str())
-                    .map(String::from),
-                postprepare: scripts
-                    .get("postprepare")
-                    .and_then(|s| s.as_str())
-                    .map(String::from),
-                prepublish: scripts
-                    .get("prepublish")
-                    .and_then(|s| s.as_str())
-                    .map(String::from),
-                ..Default::default()
-            },
-            name,
-            fullname,
-        };
-
         for hook in hooks {
-            if scripts.get(hook).and_then(|s| s.as_str()).is_some() {
+            if package_info.scripts.get_script(hook).is_some() {
                 tracing::debug!("Executing project hook: {hook}");
                 ScriptService::execute_script(&package_info, hook, true)
                     .await
@@ -104,63 +54,7 @@ impl PackageService {
 
     async fn read_package_scripts(package_path: &Path) -> Result<Scripts> {
         let data = load_package_json_from_path(package_path).await?;
-
-        let default_scripts = serde_json::Map::new();
-        let scripts = data
-            .get("scripts")
-            .and_then(|s| s.as_object())
-            .unwrap_or(&default_scripts);
-
-        Ok(Scripts {
-            preinstall: scripts
-                .get("preinstall")
-                .and_then(|s| s.as_str())
-                .map(String::from),
-            install: scripts
-                .get("install")
-                .and_then(|s| s.as_str())
-                .map(String::from),
-            postinstall: scripts
-                .get("postinstall")
-                .and_then(|s| s.as_str())
-                .map(String::from),
-            prepare: scripts
-                .get("prepare")
-                .and_then(|s| s.as_str())
-                .map(String::from),
-            preprepare: scripts
-                .get("preprepare")
-                .and_then(|s| s.as_str())
-                .map(String::from),
-            postprepare: scripts
-                .get("postprepare")
-                .and_then(|s| s.as_str())
-                .map(String::from),
-            prepublish: scripts
-                .get("prepublish")
-                .and_then(|s| s.as_str())
-                .map(String::from),
-            prepublish_only: scripts
-                .get("prepublishOnly")
-                .and_then(|s| s.as_str())
-                .map(String::from),
-            prepack: scripts
-                .get("prepack")
-                .and_then(|s| s.as_str())
-                .map(String::from),
-            postpack: scripts
-                .get("postpack")
-                .and_then(|s| s.as_str())
-                .map(String::from),
-            publish: scripts
-                .get("publish")
-                .and_then(|s| s.as_str())
-                .map(String::from),
-            postpublish: scripts
-                .get("postpublish")
-                .and_then(|s| s.as_str())
-                .map(String::from),
-        })
+        Ok(Scripts::from_json(&data))
     }
 
     /// Collect packages from memory PackageLock object with early filtering

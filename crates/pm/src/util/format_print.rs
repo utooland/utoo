@@ -1,5 +1,15 @@
 use term_size;
 
+pub fn format_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} kB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
+}
+
 pub fn print_grid(items: Vec<String>) {
     let terminal_width = term_size::dimensions().map(|(w, _)| w).unwrap_or(80); // default width if unable to get terminal size
     tracing::debug!("Terminal size: {terminal_width}");

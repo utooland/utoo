@@ -268,9 +268,6 @@ enum Commands {
         /// Perform a dry run without creating a tarball
         #[arg(long)]
         dry_run: bool,
-        /// Output in JSON format
-        #[arg(long)]
-        json: bool,
     },
 
     #[command(name = PING_NAME, alias = PING_ALIAS, about = PING_ABOUT)]
@@ -564,12 +561,8 @@ async fn async_main() -> Result<()> {
             init(yes, None).await?;
             log_time_end("package.json created");
         }
-        Some(Commands::Pack {
-            path,
-            dry_run,
-            json,
-        }) => {
-            cmd::pack::pack(path, dry_run, json).await?;
+        Some(Commands::Pack { path, dry_run }) => {
+            cmd::pack::pack(path, dry_run).await?;
             log_time_end("Pack complete");
         }
         Some(Commands::Ping { registry }) => {
