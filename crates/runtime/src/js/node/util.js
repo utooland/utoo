@@ -84,7 +84,9 @@ function promisify(fn) {
       });
     });
   }
-  Object.setPrototypeOf(promisified, fn);
+  if (typeof fn === 'function') {
+    Object.setPrototypeOf(promisified, fn);
+  }
   return promisified;
 }
 

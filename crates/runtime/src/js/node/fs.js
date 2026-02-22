@@ -78,8 +78,11 @@ export function readdirSync(path, options) {
   try {
     const entries = ops.op_fs_readdir_sync(String(path));
     if (options && options.withFileTypes) {
+      var dir = String(path);
       return entries.map((e) => ({
         name: e.name,
+        parentPath: dir,
+        path: dir,
         isFile: () => e.is_file,
         isDirectory: () => e.is_directory,
         isSymbolicLink: () => e.is_symlink || false,
@@ -306,10 +309,51 @@ export function exists(path, cb) {
 // ---------------------------------------------------------------------------
 
 export const constants = {
+  // Access modes
   F_OK: 0,
   R_OK: 4,
   W_OK: 2,
   X_OK: 1,
+  // File open flags (macOS/POSIX)
+  O_RDONLY: 0,
+  O_WRONLY: 1,
+  O_RDWR: 2,
+  O_CREAT: 512,
+  O_EXCL: 2048,
+  O_NOCTTY: 131072,
+  O_TRUNC: 1024,
+  O_APPEND: 8,
+  O_DIRECTORY: 1048576,
+  O_NOFOLLOW: 256,
+  O_SYNC: 128,
+  O_DSYNC: 4194304,
+  O_NONBLOCK: 4,
+  // File type flags
+  S_IFMT: 61440,
+  S_IFREG: 32768,
+  S_IFDIR: 16384,
+  S_IFCHR: 8192,
+  S_IFBLK: 24576,
+  S_IFIFO: 4096,
+  S_IFLNK: 40960,
+  S_IFSOCK: 49152,
+  // Permission bits
+  S_IRWXU: 448,
+  S_IRUSR: 256,
+  S_IWUSR: 128,
+  S_IXUSR: 64,
+  S_IRWXG: 56,
+  S_IRGRP: 32,
+  S_IWGRP: 16,
+  S_IXGRP: 8,
+  S_IRWXO: 7,
+  S_IROTH: 4,
+  S_IWOTH: 2,
+  S_IXOTH: 1,
+  // Copy file flags
+  COPYFILE_EXCL: 1,
+  COPYFILE_FICLONE: 2,
+  COPYFILE_FICLONE_FORCE: 4,
 };
 
 // ---------------------------------------------------------------------------
@@ -390,6 +434,93 @@ export function watch(filename, options, listener) {
 export function watchFile() {}
 export function unwatchFile() {}
 
+// Stubs for less-common fs functions (noop or throw)
+export function utimes(path, atime, mtime, cb) {
+  // No-op, call callback immediately
+  if (typeof cb === "function") queueMicrotask(() => cb(null));
+}
+export function utimesSync() {}
+export function chown(path, uid, gid, cb) {
+  if (typeof cb === "function") queueMicrotask(() => cb(null));
+}
+export function chownSync() {}
+export function lchown(path, uid, gid, cb) {
+  if (typeof cb === "function") queueMicrotask(() => cb(null));
+}
+export function lchownSync() {}
+export function fstat(fd, optionsOrCb, cb) {
+  var callback = typeof optionsOrCb === "function" ? optionsOrCb : cb;
+  if (typeof callback === "function") queueMicrotask(() => callback(new Error("fstat not implemented")));
+}
+export function fstatSync() { throw new Error("fstat not implemented"); }
+export function closeSync() {}
+export function close(fd, cb) {
+  if (typeof cb === "function") queueMicrotask(() => cb(null));
+}
+export function openSync() { return 0; }
+export function open(path, flags, modeOrCb, cb) {
+  var callback = typeof modeOrCb === "function" ? modeOrCb : cb;
+  if (typeof callback === "function") queueMicrotask(() => callback(null, 0));
+}
+export function fdatasyncSync() {}
+export function fdatasync(fd, cb) {
+  if (typeof cb === "function") queueMicrotask(() => cb(null));
+}
+export function fsyncSync() {}
+export function fsync(fd, cb) {
+  if (typeof cb === "function") queueMicrotask(() => cb(null));
+}
+export function ftruncateSync() {}
+export function ftruncate(fd, lenOrCb, cb) {
+  var callback = typeof lenOrCb === "function" ? lenOrCb : cb;
+  if (typeof callback === "function") queueMicrotask(() => callback(null));
+}
+export function futimesSync() {}
+export function futimes(fd, atime, mtime, cb) {
+  if (typeof cb === "function") queueMicrotask(() => cb(null));
+}
+export function linkSync(existingPath, newPath) {}
+export function link(existingPath, newPath, cb) {
+  if (typeof cb === "function") queueMicrotask(() => cb(null));
+}
+export function symlinkSync(target, path) {}
+export function symlink(target, path, typeOrCb, cb) {
+  var callback = typeof typeOrCb === "function" ? typeOrCb : cb;
+  if (typeof callback === "function") queueMicrotask(() => callback(null));
+}
+export function readlinkSync(path) { return realpathSync(path); }
+export function readlink(path, optionsOrCb, cb) {
+  var callback = typeof optionsOrCb === "function" ? optionsOrCb : cb;
+  realpath(path, callback);
+}
+export function truncateSync(path, len) {}
+export function truncate(path, lenOrCb, cb) {
+  var callback = typeof lenOrCb === "function" ? lenOrCb : cb;
+  if (typeof callback === "function") queueMicrotask(() => callback(null));
+}
+export function mkdtempSync(prefix) {
+  var p = prefix + Math.random().toString(36).slice(2, 8);
+  mkdirSync(p, { recursive: true });
+  return p;
+}
+export function mkdtemp(prefix, optionsOrCb, cb) {
+  var callback = typeof optionsOrCb === "function" ? optionsOrCb : cb;
+  if (typeof callback === "function") {
+    try { var r = mkdtempSync(prefix); queueMicrotask(() => callback(null, r)); }
+    catch (e) { queueMicrotask(() => callback(e)); }
+  }
+}
+export function read() { throw new Error("fs.read not implemented"); }
+export function readSync() { throw new Error("fs.readSync not implemented"); }
+export function write() { throw new Error("fs.write not implemented"); }
+export function writeSync() { throw new Error("fs.writeSync not implemented"); }
+export function rmdirSync(path, options) { return rmSync(path, { ...options, recursive: true }); }
+export function rmdir(path, optionsOrCb, cb) {
+  var callback = typeof optionsOrCb === "function" ? optionsOrCb : cb;
+  var opts = typeof optionsOrCb === "object" ? optionsOrCb : {};
+  rm(path, { ...opts, recursive: true }, callback);
+}
+
 // ---------------------------------------------------------------------------
 // Default export
 // ---------------------------------------------------------------------------
@@ -438,6 +569,25 @@ const fs = {
   watch,
   watchFile,
   unwatchFile,
+  // Additional fs functions
+  utimes, utimesSync,
+  chown, chownSync,
+  lchown, lchownSync,
+  fstat, fstatSync,
+  close, closeSync,
+  open, openSync,
+  fdatasync, fdatasyncSync,
+  fsync, fsyncSync,
+  ftruncate, ftruncateSync,
+  futimes, futimesSync,
+  link, linkSync,
+  symlink, symlinkSync,
+  readlink, readlinkSync,
+  truncate, truncateSync,
+  mkdtemp, mkdtempSync,
+  read, readSync,
+  write, writeSync,
+  rmdirSync, rmdir,
 };
 
 export default fs;

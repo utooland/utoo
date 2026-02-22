@@ -46,6 +46,10 @@ export function resolve(...segments) {
     resolved = resolved ? seg + sep + resolved : seg;
     if (isAbsolute(resolved)) break;
   }
+  // If still not absolute, prepend cwd (like Node.js)
+  if (!isAbsolute(resolved)) {
+    resolved = (typeof process !== "undefined" && process.cwd ? process.cwd() : "/") + sep + resolved;
+  }
   return normalize(resolved);
 }
 

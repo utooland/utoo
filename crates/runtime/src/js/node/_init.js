@@ -16,6 +16,7 @@ import _stream from "ext:utoo_rt_ext/node/stream";
 import _net from "ext:utoo_rt_ext/node/net";
 import _http from "ext:utoo_rt_ext/node/http";
 import _https from "ext:utoo_rt_ext/node/https";
+import _http2 from "ext:utoo_rt_ext/node/http2";
 import _async_hooks from "ext:utoo_rt_ext/node/async_hooks";
 import _crypto from "ext:utoo_rt_ext/node/crypto";
 import _zlib from "ext:utoo_rt_ext/node/zlib";
@@ -43,6 +44,7 @@ import _inspector from "ext:utoo_rt_ext/node/inspector";
 import _dns_promises from "ext:utoo_rt_ext/node/dns_promises";
 import _path_posix from "ext:utoo_rt_ext/node/path_posix";
 import _vm from "ext:utoo_rt_ext/node/vm";
+import _repl from "ext:utoo_rt_ext/node/repl";
 
 // Make Buffer globally available (Node.js compat)
 if (_buffer && _buffer.Buffer) {
@@ -90,6 +92,7 @@ if (b) {
     ["net", _net],
     ["http", _http],
     ["https", _https],
+    ["http2", _http2],
     ["async_hooks", _async_hooks],
     ["crypto", _crypto],
     ["zlib", _zlib],
@@ -118,6 +121,7 @@ if (b) {
     ["dns/promises", _dns_promises],
     ["path/posix", _path_posix],
     ["vm", _vm],
+    ["repl", _repl],
   ]) {
     b.set(name, mod);
     b.set("node:" + name, mod);

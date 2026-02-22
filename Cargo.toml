@@ -11,6 +11,7 @@ members = [
   "crates/ruborist",
   "crates/utoo-wasm",
   "crates/runtime",
+  "crates/runtime-snapshot",
 ]
 resolver = "2"
 

@@ -104,6 +104,35 @@ Module.isBuiltin = function(moduleName) {
 Module.wrap = function(script) {
   return "(function(exports,require,module,__filename,__dirname){" + script + "\n});";
 };
+Module._preloadModules = function(requests) {
+  if (!Array.isArray(requests) || requests.length === 0) return;
+  for (const request of requests) {
+    try {
+      globalThis.require(request);
+    } catch (e) {
+      Deno.core.ops.op_console_error("[module] _preloadModules failed for " + request + ": " + e.message);
+    }
+  }
+};
+Module._load = function(request, parent, isMain) {
+  const ops = Deno.core.ops;
+  let fromPath = '';
+  if (parent && parent.filename) fromPath = parent.filename;
+  else if (parent && parent.id) fromPath = parent.id;
+  const resolved = ops.op_cjs_resolve(request, fromPath);
+  if (resolved.startsWith("node:")) {
+    const builtins = globalThis.__cjs_builtins;
+    if (builtins) {
+      if (builtins.has(resolved)) return builtins.get(resolved);
+      const name = resolved.slice(5);
+      if (builtins.has(name)) return builtins.get(name);
+    }
+    throw new Error("Cannot find built-in module '" + resolved + "'");
+  }
+  return globalThis.require(request);
+};
+Module._compile = function() {};
+Module.runMain = function() {};
 
 // Node.js compat: require('module') returns the Module class itself
 Module.Module = Module;

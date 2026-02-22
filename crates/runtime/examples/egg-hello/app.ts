@@ -1,4 +1,10 @@
-import { Application } from 'egg';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+import egg from 'egg';
+
+const __filename: string = fileURLToPath(import.meta.url);
+const __dirname: string = dirname(__filename);
+const { Application } = egg;
 
 const app = new Application({
   baseDir: __dirname,

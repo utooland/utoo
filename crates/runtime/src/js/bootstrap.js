@@ -79,10 +79,10 @@ if (!globalThis.AbortController) {
 
 // performance (minimal Web Performance API)
 if (!globalThis.performance) {
-  const __timeOrigin = Date.now();
+  var __timeOrigin = 0;
   globalThis.performance = {
-    now() { return Date.now() - __timeOrigin; },
-    timeOrigin: __timeOrigin,
+    now() { if (!__timeOrigin) __timeOrigin = Date.now(); return Date.now() - __timeOrigin; },
+    get timeOrigin() { if (!__timeOrigin) __timeOrigin = Date.now(); return __timeOrigin; },
     mark() {},
     measure() {},
     clearMarks() {},
@@ -90,7 +90,7 @@ if (!globalThis.performance) {
     getEntries() { return []; },
     getEntriesByName() { return []; },
     getEntriesByType() { return []; },
-    toJSON() { return { timeOrigin: __timeOrigin }; },
+    toJSON() { if (!__timeOrigin) __timeOrigin = Date.now(); return { timeOrigin: __timeOrigin }; },
   };
 }
 
@@ -799,8 +799,24 @@ if (!globalThis.fetch) {
 // ---- End Web Platform API polyfills ----
 
 function __formatArgs(args) {
+  if (args.length === 0) return "";
+  var first = args[0];
+  if (typeof first === "string" && args.length > 1 && /%[sdjoO%]/.test(first)) {
+    var i = 1;
+    var str = first.replace(/%[sdjoO%]/g, function(m) {
+      if (m === "%%") return "%";
+      if (i >= args.length) return m;
+      var a = args[i++];
+      if (m === "%s") return String(a);
+      if (m === "%d") return Number(a).toString();
+      if (m === "%j" || m === "%o" || m === "%O") try { return JSON.stringify(a); } catch(e) { return "[Circular]"; }
+      return m;
+    });
+    while (i < args.length) { str += " " + (typeof args[i] === "string" ? args[i] : JSON.stringify(args[i])); i++; }
+    return str;
+  }
   return args
-    .map((a) => (typeof a === "string" ? a : JSON.stringify(a)))
+    .map(function(a) { return typeof a === "string" ? a : JSON.stringify(a); })
     .join(" ");
 }
 
@@ -921,6 +937,18 @@ const __core = Deno.core;
 const __getAsyncContext = __core.getAsyncContext;
 const __setAsyncContext = __core.setAsyncContext;
 
+// Node.js setTimeout/setInterval return Timeout objects with ref/unref methods.
+function __makeTimeout(id) {
+  return {
+    _id: id,
+    ref: function() { return this; },
+    unref: function() { return this; },
+    hasRef: function() { return true; },
+    refresh: function() { return this; },
+    [Symbol.toPrimitive]: function() { return id; },
+  };
+}
+
 globalThis.setTimeout = function setTimeout(cb, delay, ...args) {
   delay = Math.max(0, (delay | 0) || 0);
   const ctx = __getAsyncContext();
@@ -932,12 +960,13 @@ globalThis.setTimeout = function setTimeout(cb, delay, ...args) {
       __setAsyncContext(prev);
     }
   };
-  return __core.queueUserTimer(
+  var id = __core.queueUserTimer(
     __core.getTimerDepth() + 1,
     false,
     delay,
     task,
   );
+  return __makeTimeout(id);
 };
 
 globalThis.setInterval = function setInterval(cb, delay, ...args) {
@@ -951,20 +980,21 @@ globalThis.setInterval = function setInterval(cb, delay, ...args) {
       __setAsyncContext(prev);
     }
   };
-  return __core.queueUserTimer(
+  var id = __core.queueUserTimer(
     __core.getTimerDepth() + 1,
     true,
     delay,
     task,
   );
+  return __makeTimeout(id);
 };
 
 globalThis.clearTimeout = function clearTimeout(id) {
-  if (id != null) __core.cancelTimer(id);
+  if (id != null) __core.cancelTimer(typeof id === "object" && id._id != null ? id._id : id);
 };
 
 globalThis.clearInterval = function clearInterval(id) {
-  if (id != null) __core.cancelTimer(id);
+  if (id != null) __core.cancelTimer(typeof id === "object" && id._id != null ? id._id : id);
 };
 
 // setImmediate / clearImmediate (Node.js compat)
@@ -986,7 +1016,9 @@ if (typeof globalThis.queueMicrotask === "undefined") {
 // process.nextTick - uses deno_core's nextTick callback system
 const __nextTickQueue = [];
 
-__core.setNextTickCallback(() => {
+// Exposed on globalThis so post-snapshot reinit can re-register it
+// (setNextTickCallback stores in Rust ContextState, not V8 heap)
+globalThis.__utoo_nextTickDrainer = () => {
   while (__nextTickQueue.length > 0) {
     const entry = __nextTickQueue.shift();
     const [ctx, fn, ...args] = entry;
@@ -998,7 +1030,8 @@ __core.setNextTickCallback(() => {
     }
   }
   __core.setHasTickScheduled(false);
-});
+};
+__core.setNextTickCallback(globalThis.__utoo_nextTickDrainer);
 
 // Node.js compat: global === globalThis
 globalThis.global = globalThis;
@@ -1018,6 +1051,21 @@ const __stdout = {
   emit() { return false; },
   end() {},
   destroy() {},
+  addListener() { return this; },
+  removeListener() { return this; },
+  removeAllListeners() { return this; },
+  setMaxListeners() { return this; },
+  getMaxListeners() { return 10; },
+  listeners() { return []; },
+  rawListeners() { return []; },
+  listenerCount() { return 0; },
+  eventNames() { return []; },
+  prependListener() { return this; },
+  prependOnceListener() { return this; },
+  off() { return this; },
+  pipe() { return this; },
+  cork() {},
+  uncork() {},
   writable: true,
   _isStdio: true,
 };
@@ -1036,6 +1084,21 @@ const __stderr = {
   emit() { return false; },
   end() {},
   destroy() {},
+  addListener() { return this; },
+  removeListener() { return this; },
+  removeAllListeners() { return this; },
+  setMaxListeners() { return this; },
+  getMaxListeners() { return 10; },
+  listeners() { return []; },
+  rawListeners() { return []; },
+  listenerCount() { return 0; },
+  eventNames() { return []; },
+  prependListener() { return this; },
+  prependOnceListener() { return this; },
+  off() { return this; },
+  pipe() { return this; },
+  cork() {},
+  uncork() {},
   writable: true,
   _isStdio: true,
 };
@@ -1051,8 +1114,43 @@ const __stdin = {
   resume() { return this; },
   read() { return null; },
   destroy() {},
+  addListener() { return this; },
+  removeListener() { return this; },
+  removeAllListeners() { return this; },
+  setMaxListeners() { return this; },
+  getMaxListeners() { return 10; },
+  listeners() { return []; },
+  rawListeners() { return []; },
+  listenerCount() { return 0; },
+  eventNames() { return []; },
+  prependListener() { return this; },
+  prependOnceListener() { return this; },
+  off() { return this; },
+  pipe() { return this; },
   _isStdio: true,
 };
+
+// Global event target stubs (used by service workers / tegg)
+var __globalEventListeners = {};
+globalThis.addEventListener = function(type, fn) {
+  if (!__globalEventListeners[type]) __globalEventListeners[type] = [];
+  __globalEventListeners[type].push(fn);
+};
+globalThis.removeEventListener = function(type, fn) {
+  var list = __globalEventListeners[type];
+  if (!list) return;
+  var idx = list.indexOf(fn);
+  if (idx >= 0) list.splice(idx, 1);
+};
+globalThis.dispatchEvent = function(event) {
+  var type = event && event.type ? event.type : event;
+  var list = __globalEventListeners[type];
+  if (!list) return true;
+  for (var i = 0; i < list.length; i++) list[i](event);
+  return true;
+};
+
+var __processListeners = {};
 
 globalThis.process = {
   exit(code = 0) {
@@ -1061,17 +1159,39 @@ globalThis.process = {
   cwd() {
     return __bootstrapOps.op_cwd();
   },
-  env: __bootstrapOps.op_env_to_object(),
+  get env() {
+    var v = __bootstrapOps.op_env_to_object();
+    Object.defineProperty(this, "env", { value: v, writable: true, configurable: true, enumerable: true });
+    return v;
+  },
+  set env(v) {
+    Object.defineProperty(this, "env", { value: v, writable: true, configurable: true, enumerable: true });
+  },
   argv: ["utoo-runtime"],
   execArgv: [],
-  execPath: "utoo-runtime",
+  get execPath() {
+    var v = __bootstrapOps.op_exec_path();
+    Object.defineProperty(this, "execPath", { value: v, writable: true, configurable: true, enumerable: true });
+    return v;
+  },
+  set execPath(v) {
+    Object.defineProperty(this, "execPath", { value: v, writable: true, configurable: true, enumerable: true });
+  },
   pid: 1,
   ppid: 0,
   title: "utoo-runtime",
-  version: "v22.0.0",
-  versions: { node: "22.0.0" },
-  platform: __bootstrapOps.op_os_platform(),
-  arch: __bootstrapOps.op_os_arch(),
+  version: "v20.0.0",
+  versions: { node: "20.0.0", modules: "115", v8: "11.3.244.8", uv: "1.44.2", openssl: "3.0.8", ares: "1.19.0", icu: "73.1", unicode: "15.0", napi: "9" },
+  get platform() {
+    var v = __bootstrapOps.op_os_platform();
+    Object.defineProperty(this, "platform", { value: v, writable: false, configurable: true, enumerable: true });
+    return v;
+  },
+  get arch() {
+    var v = __bootstrapOps.op_os_arch();
+    Object.defineProperty(this, "arch", { value: v, writable: false, configurable: true, enumerable: true });
+    return v;
+  },
   release: { name: "node" },
   config: {},
   features: {},
@@ -1098,21 +1218,115 @@ globalThis.process = {
     return { user: 0, system: 0 };
   },
   uptime() { return 0; },
-  on() { return this; },
-  once() { return this; },
-  off() { return this; },
-  emit() { return false; },
-  removeListener() { return this; },
-  removeAllListeners() { return this; },
-  listeners() { return []; },
-  addListener() { return this; },
-  prependListener() { return this; },
-  prependOnceListener() { return this; },
-  listenerCount() { return 0; },
+  on(event, fn) {
+    if (!__processListeners[event]) __processListeners[event] = [];
+    __processListeners[event].push({ fn: fn, once: false });
+    return this;
+  },
+  once(event, fn) {
+    if (!__processListeners[event]) __processListeners[event] = [];
+    __processListeners[event].push({ fn: fn, once: true });
+    return this;
+  },
+  off(event, fn) {
+    var list = __processListeners[event];
+    if (!list) return this;
+    __processListeners[event] = list.filter(function(l) { return l.fn !== fn; });
+    return this;
+  },
+  emit(event) {
+    var list = __processListeners[event];
+    if (!list || list.length === 0) return false;
+    var args = [];
+    for (var i = 1; i < arguments.length; i++) args.push(arguments[i]);
+    var snapshot = list.slice();
+    for (var j = 0; j < snapshot.length; j++) {
+      snapshot[j].fn.apply(this, args);
+      if (snapshot[j].once) {
+        var idx = list.indexOf(snapshot[j]);
+        if (idx !== -1) list.splice(idx, 1);
+      }
+    }
+    return true;
+  },
+  removeListener(event, fn) { return this.off(event, fn); },
+  removeAllListeners(event) {
+    if (event) { delete __processListeners[event]; } else { __processListeners = {}; }
+    return this;
+  },
+  listeners(event) {
+    var list = __processListeners[event];
+    return list ? list.map(function(l) { return l.fn; }) : [];
+  },
+  addListener(event, fn) { return this.on(event, fn); },
+  prependListener(event, fn) {
+    if (!__processListeners[event]) __processListeners[event] = [];
+    __processListeners[event].unshift({ fn: fn, once: false });
+    return this;
+  },
+  prependOnceListener(event, fn) {
+    if (!__processListeners[event]) __processListeners[event] = [];
+    __processListeners[event].unshift({ fn: fn, once: true });
+    return this;
+  },
+  listenerCount(event) {
+    var list = __processListeners[event];
+    return list ? list.length : 0;
+  },
+  eventNames() { return Object.keys(__processListeners); },
+  rawListeners(event) {
+    var list = __processListeners[event];
+    return list ? list.map(function(l) { return l.fn; }) : [];
+  },
+  setMaxListeners() { return this; },
+  getMaxListeners() { return 10; },
   binding(name) {
     // Return stubs for common bindings to avoid hard crashes
+    if (name === "constants") {
+      // Lazy-init and cache
+      if (!this._bindingConstants) {
+        // macOS (Darwin) POSIX constants
+        var c = {
+          O_RDONLY: 0, O_WRONLY: 1, O_RDWR: 2, O_CREAT: 512, O_EXCL: 2048,
+          O_NOCTTY: 131072, O_TRUNC: 1024, O_APPEND: 8, O_DIRECTORY: 1048576,
+          O_NOFOLLOW: 256, O_SYNC: 128, O_NONBLOCK: 4,
+          S_IFMT: 61440, S_IFREG: 32768, S_IFDIR: 16384, S_IFCHR: 8192,
+          S_IFBLK: 24576, S_IFIFO: 4096, S_IFLNK: 40960, S_IFSOCK: 49152,
+          S_IRWXU: 448, S_IRUSR: 256, S_IWUSR: 128, S_IXUSR: 64,
+          S_IRWXG: 56, S_IRGRP: 32, S_IWGRP: 16, S_IXGRP: 8,
+          S_IRWXO: 7, S_IROTH: 4, S_IWOTH: 2, S_IXOTH: 1,
+          F_OK: 0, R_OK: 4, W_OK: 2, X_OK: 1,
+          SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGILL: 4, SIGTRAP: 5,
+          SIGABRT: 6, SIGFPE: 8, SIGKILL: 9, SIGBUS: 10, SIGSEGV: 11,
+          SIGSYS: 12, SIGPIPE: 13, SIGALRM: 14, SIGTERM: 15, SIGURG: 16,
+          SIGSTOP: 17, SIGTSTP: 18, SIGCONT: 19, SIGCHLD: 20, SIGTTIN: 21,
+          SIGTTOU: 22, SIGIO: 23, SIGXCPU: 24, SIGXFSZ: 25, SIGVTALRM: 26,
+          SIGPROF: 27, SIGWINCH: 28, SIGUSR1: 30, SIGUSR2: 31,
+          E2BIG: 7, EACCES: 13, EADDRINUSE: 48, EADDRNOTAVAIL: 49,
+          EAFNOSUPPORT: 47, EAGAIN: 35, EALREADY: 37, EBADF: 9,
+          EBADMSG: 94, EBUSY: 16, ECANCELED: 89, ECHILD: 10,
+          ECONNABORTED: 53, ECONNREFUSED: 61, ECONNRESET: 54, EDEADLK: 11,
+          EDESTADDRREQ: 39, EDOM: 33, EDQUOT: 69, EEXIST: 17,
+          EFAULT: 14, EFBIG: 27, EHOSTUNREACH: 65, EINPROGRESS: 36,
+          EINTR: 4, EINVAL: 22, EIO: 5, EISCONN: 56, EISDIR: 21,
+          ELOOP: 62, EMFILE: 24, EMLINK: 31, EMSGSIZE: 40,
+          ENAMETOOLONG: 63, ENETDOWN: 50, ENETRESET: 52, ENETUNREACH: 51,
+          ENFILE: 23, ENOBUFS: 55, ENODEV: 19, ENOENT: 2,
+          ENOEXEC: 8, ENOLCK: 77, ENOMEM: 12, ENOPROTOOPT: 42,
+          ENOSPC: 28, ENOSYS: 78, ENOTCONN: 57, ENOTDIR: 20,
+          ENOTEMPTY: 66, ENOTSOCK: 38, ENOTSUP: 45, ENOTTY: 25,
+          ENXIO: 6, EOPNOTSUPP: 102, EOVERFLOW: 84, EPERM: 1,
+          EPIPE: 32, EPROTONOSUPPORT: 43, EPROTOTYPE: 41, ERANGE: 34,
+          EROFS: 30, ESPIPE: 29, ESRCH: 3, ESTALE: 70,
+          ETIMEDOUT: 60, ETXTBSY: 26, EWOULDBLOCK: 35, EXDEV: 18,
+        };
+        c.fs = c;
+        c.os = { errno: c, signals: c };
+        this._bindingConstants = c;
+      }
+      return this._bindingConstants;
+    }
     if (name === "fs") return {};
-    if (name === "constants") return {};
     if (name === "natives") return {};
     if (name === "buffer") return {};
     return {};
@@ -1126,3 +1340,63 @@ globalThis.process = {
     __core.setHasTickScheduled(true);
   },
 };
+
+// ---- IPC channel setup (Node.js child_process.fork() compatibility) ----
+// When real Node forks utoo-runtime as a child, it creates a socketpair,
+// passes one end as fd 3, and sets NODE_CHANNEL_FD=3. We detect this and
+// wire up process.send() / process.on('message') using the same
+// newline-delimited JSON protocol as Node.js.
+if (__bootstrapOps.op_ipc_has_channel()) {
+  globalThis.process.channel = { ref: function() {}, unref: function() {} };
+  globalThis.process.connected = true;
+
+  globalThis.process.send = function(message, handle, options, callback) {
+    if (typeof handle === "function") {
+      callback = handle; handle = undefined; options = undefined;
+    } else if (typeof options === "function") {
+      callback = options; options = undefined;
+    }
+    try {
+      __bootstrapOps.op_ipc_send(JSON.stringify(message));
+      if (typeof callback === "function") callback(null);
+      return true;
+    } catch (e) {
+      if (typeof callback === "function") callback(e);
+      return false;
+    }
+  };
+
+  globalThis.process.disconnect = function() {
+    globalThis.process.connected = false;
+    globalThis.process.channel = null;
+    globalThis.process.emit("disconnect");
+  };
+
+  // Background read loop for incoming IPC messages from parent.
+  // In this deno_core version, async ops are called via Deno.core.ops directly.
+  (async function __ipcReadLoop() {
+    while (globalThis.process.connected) {
+      try {
+        var line = await __bootstrapOps.op_ipc_read_line();
+        if (!line) {
+          // Empty string = EOF, parent closed channel
+          globalThis.process.connected = false;
+          globalThis.process.channel = null;
+          globalThis.process.emit("disconnect");
+          break;
+        }
+        try {
+          var message = JSON.parse(line);
+          globalThis.process.emit("message", message);
+        } catch (e) {
+          // Invalid JSON line, skip
+        }
+      } catch (e) {
+        globalThis.process.connected = false;
+        globalThis.process.channel = null;
+        globalThis.process.emit("disconnect");
+        break;
+      }
+    }
+  })();
+}

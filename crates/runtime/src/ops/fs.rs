@@ -157,7 +157,11 @@ pub fn op_fs_read_file_sync(#[string] path: &str) -> Result<Vec<u8>, JsErrorBox>
 #[op2]
 #[string]
 pub fn op_fs_read_text_file_sync(#[string] path: &str) -> Result<String, JsErrorBox> {
-    std::fs::read_to_string(path).map_err(map_io_err)
+    let bytes = std::fs::read(path).map_err(map_io_err)?;
+    match String::from_utf8(bytes) {
+        Ok(s) => Ok(s),
+        Err(e) => Ok(String::from_utf8_lossy(e.as_bytes()).into_owned()),
+    }
 }
 
 #[op2(fast)]

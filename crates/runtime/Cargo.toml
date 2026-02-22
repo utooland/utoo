@@ -8,6 +8,10 @@ license.workspace = true
 name = "utoo-runtime"
 path = "src/main.rs"
 
+[[bin]]
+name = "node"
+path = "src/main.rs"
+
 [dependencies]
 anyhow      = { workspace = true }
 clap        = { workspace = true }
@@ -30,9 +34,15 @@ swc_core    = { workspace = true, features = [
   "ecma_codegen",
   "ecma_parser",
   "ecma_parser_typescript",
+  "ecma_transforms_module",
   "ecma_transforms_typescript",
+  "ecma_transforms_proposal",
   "ecma_visit",
 ] }
+
+[features]
+default = ["snapshot"]
+snapshot = []
 
 [dev-dependencies]
 tempfile = "3"

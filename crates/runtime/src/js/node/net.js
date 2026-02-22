@@ -63,8 +63,16 @@ class Socket extends Duplex {
   }
 
   connect(port, host, cb) {
+    // Handle options object: connect({port, host}, cb) or connect(options, cb)
+    if (typeof port === "object" && port !== null) {
+      var opts = port;
+      cb = typeof host === "function" ? host : cb;
+      host = opts.host || opts.hostname || "127.0.0.1";
+      port = opts.port;
+    }
     if (typeof host === "function") { cb = host; host = "127.0.0.1"; }
     host = host || "127.0.0.1";
+    port = Number(port) | 0;
     this.connecting = true;
     if (cb) this.once("connect", cb);
 
@@ -139,6 +147,16 @@ class Server extends EventEmitter {
     if (typeof backlog === "function") { cb = backlog; backlog = undefined; }
     host = host || "0.0.0.0";
 
+    // Snapshot mode: capture listen args, don't actually bind.
+    // The event loop drains naturally, then V8 heap is serialized.
+    if (globalThis.__utoo_snapshot_mode) {
+      if (cb) this.once("listening", cb);
+      if (!globalThis.__utoo_snapshot_servers) globalThis.__utoo_snapshot_servers = [];
+      globalThis.__utoo_snapshot_servers.push({ server: this, port: port, host: host });
+      this.emit("listening");
+      return this;
+    }
+
     if (cb) this.once("listening", cb);
     (async () => {
       try {
@@ -196,7 +214,12 @@ function createServer(opts, connectionListener) {
 }
 
 function createConnection(port, host, cb) {
-  const socket = new Socket();
+  var opts = {};
+  if (typeof port === "object" && port !== null) {
+    opts = port;
+    cb = typeof host === "function" ? host : cb;
+  }
+  const socket = new Socket(opts);
   return socket.connect(port, host, cb);
 }
 

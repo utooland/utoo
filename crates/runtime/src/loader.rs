@@ -17,13 +17,13 @@ fn resolve_builtin(specifier: &str) -> Option<String> {
     let name = specifier.strip_prefix("node:").unwrap_or(specifier);
     match name {
         "fs" | "fs/promises" | "path" | "os" | "url" | "buffer" | "events" | "util" | "assert"
-        | "querystring" | "string_decoder" | "stream" | "net" | "http" | "https"
+        | "querystring" | "string_decoder" | "stream" | "net" | "http" | "https" | "http2"
         | "async_hooks" | "crypto" | "zlib" | "v8" | "cluster" | "child_process" | "tty"
         | "dns" | "dgram" | "tls" | "worker_threads" | "perf_hooks" | "module"
         | "readline" | "diagnostics_channel" | "console" | "timers"
         | "timers/promises" | "constants" | "domain"
         | "util/types" | "stream/promises" | "stream/web" | "stream/consumers"
-        | "inspector" | "dns/promises" | "path/posix" | "vm" => {
+        | "inspector" | "dns/promises" | "path/posix" | "vm" | "repl" => {
             let normalized = name.replace('/', "_");
             Some(format!("ext:utoo_rt_ext/node/{normalized}"))
         }
@@ -454,6 +454,16 @@ export default exports;
 
     let source = std::fs::read_to_string(&path)
         .map_err(|e| JsErrorBox::from_err(e))?;
+
+    // Strip shebang line (e.g. #!/usr/bin/env node)
+    let source = if source.starts_with("#!") {
+        match source.find('\n') {
+            Some(pos) => source[pos + 1..].to_string(),
+            None => String::new(),
+        }
+    } else {
+        source
+    };
 
     let code = if needs_transpile(&path) {
         transpile_to_js(&source, &path)

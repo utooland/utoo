@@ -53,8 +53,16 @@ function tracingChannel(nameOrChannels) {
   return new TracingChannel(nameOrChannels);
 }
 
-const dc = { channel, hasSubscribers, tracingChannel, Channel, TracingChannel };
+function subscribe(name, onMessage) {
+  channel(name).subscribe(onMessage);
+}
+
+function unsubscribe(name, onMessage) {
+  return channel(name).unsubscribe(onMessage);
+}
+
+const dc = { channel, hasSubscribers, tracingChannel, subscribe, unsubscribe, Channel, TracingChannel };
 dc.default = dc;
 
 export default dc;
-export { channel, hasSubscribers, tracingChannel, Channel, TracingChannel };
+export { channel, hasSubscribers, tracingChannel, subscribe, unsubscribe, Channel, TracingChannel };

@@ -116,6 +116,15 @@ pub fn op_napi_open<'scope>(
     }
 
     // dlopen the .node file
+    // Native addon loading requires NAPI symbols to be exported from the binary.
+    // Until we properly export napi_* symbols, skip dlopen to avoid dyld crashes.
+    // Set UTOO_ENABLE_NATIVE_ADDONS=1 to attempt loading anyway.
+    if std::env::var("UTOO_ENABLE_NATIVE_ADDONS").is_err() {
+        return Err(JsErrorBox::type_error(format!(
+            "Native addon loading is not yet supported: {}",
+            path.display()
+        )));
+    }
     let library = unsafe { libloading::Library::new(&path) }
         .map_err(|e| JsErrorBox::type_error(format!("{e}")))?;
 

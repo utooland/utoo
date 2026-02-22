@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use deno_core::JsRuntime;
+use deno_core::{JsRuntime, JsRuntimeForSnapshot};
 
 use crate::loader::UtooModuleLoader;
 use crate::ops;
@@ -15,6 +15,7 @@ deno_core::extension!(
         ops::process::op_exit,
         ops::process::op_cwd,
         ops::process::op_env_to_object,
+        ops::process::op_exec_path,
         // CJS
         ops::cjs::op_cjs_resolve,
         ops::cjs::op_cjs_detect,
@@ -84,6 +85,23 @@ deno_core::extension!(
         ops::net::op_net_remote_addr,
         // NAPI
         ops::napi::op_napi_open,
+        // Child process
+        ops::child_process::op_spawn,
+        ops::child_process::op_spawn_wait,
+        ops::child_process::op_spawn_stdin_write,
+        ops::child_process::op_spawn_stdin_close,
+        ops::child_process::op_spawn_stdout_read,
+        ops::child_process::op_spawn_stderr_read,
+        ops::child_process::op_spawn_kill,
+        ops::child_process::op_spawn_close,
+        ops::child_process::op_exec_sync,
+        ops::child_process::op_fork_spawn,
+        ops::child_process::op_ipc_stream_write,
+        ops::child_process::op_ipc_stream_read_line,
+        // IPC (Node.js fork channel)
+        ops::ipc::op_ipc_has_channel,
+        ops::ipc::op_ipc_send,
+        ops::ipc::op_ipc_read_line,
     ],
     esm_entry_point = "ext:utoo_rt_ext/node/_init",
     esm = [
@@ -96,6 +114,7 @@ deno_core::extension!(
         "ext:utoo_rt_ext/node/net" = "src/js/node/net.js",
         "ext:utoo_rt_ext/node/http" = "src/js/node/http.js",
         "ext:utoo_rt_ext/node/https" = "src/js/node/https.js",
+        "ext:utoo_rt_ext/node/http2" = "src/js/node/http2.js",
         "ext:utoo_rt_ext/node/async_hooks" = "src/js/node/async_hooks.js",
         "ext:utoo_rt_ext/node/crypto" = "src/js/node/crypto.js",
         "ext:utoo_rt_ext/node/zlib" = "src/js/node/zlib.js",
@@ -129,6 +148,7 @@ deno_core::extension!(
         "ext:utoo_rt_ext/node/dns_promises" = "src/js/node/dns_promises.js",
         "ext:utoo_rt_ext/node/path_posix" = "src/js/node/path_posix.js",
         "ext:utoo_rt_ext/node/vm" = "src/js/node/vm.js",
+        "ext:utoo_rt_ext/node/repl" = "src/js/node/repl.js",
         "ext:utoo_rt_ext/node/_init" = "src/js/node/_init.js",
     ],
     js = ["src/js/bootstrap.js", "src/js/cjs_loader.js"],
@@ -139,7 +159,16 @@ deno_core::extension!(
     },
 );
 
+/// Create the utoo_rt_ext extension. Used by the snapshot generator and benchmarks.
+pub fn create_ext() -> deno_core::Extension {
+    utoo_rt_ext::init()
+}
+
 pub async fn run_script(script_path: &str) -> Result<()> {
+    run_script_with_args(script_path, &[]).await
+}
+
+pub async fn run_script_with_args(script_path: &str, script_args: &[String]) -> Result<()> {
     let abs_path = std::path::absolute(script_path)
         .with_context(|| format!("Invalid path: {script_path}"))?;
 
@@ -148,11 +177,48 @@ pub async fn run_script(script_path: &str) -> Result<()> {
             anyhow::anyhow!("Cannot convert path to module specifier: {}", abs_path.display())
         })?;
 
+    // Build the process.argv JSON array
+    let argv_json = {
+        let mut argv = vec![
+            serde_json::Value::String("utoo-runtime".to_string()),
+            serde_json::Value::String(abs_path.to_string_lossy().into_owned()),
+        ];
+        for arg in script_args {
+            argv.push(serde_json::Value::String(arg.clone()));
+        }
+        serde_json::to_string(&argv)?
+    };
+
     let mut runtime = JsRuntime::new(deno_core::RuntimeOptions {
         module_loader: Some(std::rc::Rc::new(UtooModuleLoader)),
         extensions: vec![utoo_rt_ext::init()],
+        #[cfg(feature = "snapshot")]
+        startup_snapshot: Some(crate::UTOO_SNAPSHOT),
         ..Default::default()
     });
+
+    // Post-snapshot: restore Rust-side state that doesn't survive V8 snapshot
+    // - setNextTickCallback: stored in deno_core ContextState, not V8 heap
+    // - process.argv: baked in as snapshot-time value, needs runtime path
+    #[cfg(feature = "snapshot")]
+    runtime.execute_script(
+        "<utoo:reinit>",
+        format!(
+            "Deno.core.setNextTickCallback(globalThis.__utoo_nextTickDrainer);\
+             globalThis.process.argv = {argv_json};\
+             globalThis.process.execPath = Deno.core.ops.op_exec_path();",
+        ),
+    )?;
+
+    // Non-snapshot mode: set process.argv and execPath (bootstrap defaults are stale)
+    #[cfg(not(feature = "snapshot"))]
+    runtime.execute_script(
+        "<utoo:init-argv>",
+        format!(
+            "globalThis.process.argv = {argv_json};\
+             globalThis.process.execPath = Deno.core.ops.op_exec_path();",
+        ),
+    )?;
 
     let mod_id = runtime
         .load_main_es_module(&main_module)
@@ -169,6 +235,177 @@ pub async fn run_script(script_path: &str) -> Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))
         .context("Module evaluation error")?;
+
+    Ok(())
+}
+
+/// Build an application-level snapshot.
+///
+/// Runs the user's entry script in a `JsRuntimeForSnapshot` with
+/// `__utoo_snapshot_mode = true`. In this mode, `net.Server.listen()` captures
+/// args without actually binding a port, so the event loop drains naturally
+/// once framework initialization completes. The entire V8 heap (runtime +
+/// framework + app state) is then serialized to `output_path`.
+pub async fn build_app_snapshot(script_path: &str, output_path: &str) -> Result<()> {
+    let abs_path = std::path::absolute(script_path)
+        .with_context(|| format!("Invalid path: {script_path}"))?;
+
+    let main_module =
+        deno_core::ModuleSpecifier::from_file_path(&abs_path).map_err(|_| {
+            anyhow::anyhow!("Cannot convert path to module specifier: {}", abs_path.display())
+        })?;
+
+    // Build app snapshot from scratch (don't layer on runtime snapshot).
+    let mut runtime = JsRuntimeForSnapshot::new(deno_core::RuntimeOptions {
+        module_loader: Some(std::rc::Rc::new(UtooModuleLoader)),
+        extensions: vec![utoo_rt_ext::init()],
+        ..Default::default()
+    });
+
+    // Enable snapshot mode.
+    //
+    // V8 snapshot crash root cause: Error.stackTraceLimit is a V8-managed
+    // "special" property. Any JS write to it (even the same value) converts
+    // it from V8's internal representation to a regular JS data property.
+    // On restore, V8 tries to re-add it via AddProperty which asserts the
+    // property must not already exist → LinearSearch crash.
+    //
+    // Fix strategy:
+    // 1. Save original Error.captureStackTrace (V8 native) before replacing
+    // 2. Replace captureStackTrace with a no-op that sets obj.stack = []
+    //    (so depd's getStack() cleanup path runs and restores prepareStackTrace)
+    // 3. Let modules freely modify Error.stackTraceLimit during loading
+    // 4. Before snapshot: delete Error.stackTraceLimit and restore
+    //    Error.captureStackTrace to the original V8 native
+    runtime.execute_script(
+        "<utoo:snapshot-init>",
+        format!(
+            "globalThis.__utoo_snapshot_mode = true;\
+             globalThis.process.argv = ['utoo-runtime', {}];\
+             globalThis.__utoo_origCaptureStackTrace = Error.captureStackTrace;\
+             Error.captureStackTrace = function(obj) {{\
+               var fake = {{\
+                 getFileName: function() {{ return '<snapshot>'; }},\
+                 getLineNumber: function() {{ return 0; }},\
+                 getColumnNumber: function() {{ return 0; }},\
+                 getFunctionName: function() {{ return null; }},\
+                 getTypeName: function() {{ return null; }},\
+                 getMethodName: function() {{ return null; }},\
+                 isEval: function() {{ return false; }},\
+                 getEvalOrigin: function() {{ return ''; }},\
+                 getThis: function() {{ return null; }},\
+                 toString: function() {{ return '<snapshot>:0:0'; }}\
+               }};\
+               obj.stack = [fake, fake, fake, fake, fake, fake, fake, fake, fake, fake];\
+             }};",
+            serde_json::to_string(abs_path.to_string_lossy().as_ref())?
+        ),
+    )?;
+
+    eprintln!("Loading {}", abs_path.display());
+
+    let mod_id = runtime
+        .load_main_es_module(&main_module)
+        .await
+        .with_context(|| format!("Failed to load {}", abs_path.display()))?;
+
+    let result = runtime.mod_evaluate(mod_id);
+    runtime
+        .run_event_loop(deno_core::PollEventLoopOptions::default())
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))
+        .context("Event loop error")?;
+    result
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))
+        .context("Module evaluation error")?;
+
+    // Verify that listen() was intercepted
+    let captured: bool = runtime
+        .execute_script(
+            "<utoo:check>",
+            "!!(globalThis.__utoo_snapshot_servers && globalThis.__utoo_snapshot_servers.length > 0)",
+        )?
+        .open(runtime.v8_isolate())
+        .is_true();
+
+    if !captured {
+        anyhow::bail!(
+            "No server.listen() calls captured. The entry script must call \
+             server.listen() (e.g., via http.createServer().listen() or app.listen()) \
+             for the application snapshot to work."
+        );
+    }
+
+    // Clean up V8-managed properties before snapshot.
+    // Delete Error.stackTraceLimit (may have been converted from V8-internal
+    // to regular JS property by module code like depd). V8 will re-add it
+    // fresh with its default value during Context::FromSnapshot.
+    // Also restore Error.captureStackTrace to the original V8 native.
+    runtime.execute_script(
+        "<utoo:snapshot-cleanup>",
+        "delete Error.stackTraceLimit;\
+         if (globalThis.__utoo_origCaptureStackTrace) {\
+           Error.captureStackTrace = globalThis.__utoo_origCaptureStackTrace;\
+           delete globalThis.__utoo_origCaptureStackTrace;\
+         }",
+    )?;
+
+    eprintln!("Taking snapshot...");
+    let snapshot = runtime.snapshot();
+
+    std::fs::write(output_path, &snapshot)
+        .with_context(|| format!("Failed to write snapshot to {output_path}"))?;
+
+    eprintln!(
+        "Application snapshot written to {} ({:.1} KB)",
+        output_path,
+        snapshot.len() as f64 / 1024.0
+    );
+
+    Ok(())
+}
+
+/// Run from an application-level snapshot.
+///
+/// Restores the V8 heap (including fully initialized framework state), then
+/// re-binds the server to the port that was captured during snapshot build.
+pub async fn run_from_app_snapshot(snapshot_path: &str, _script_path: &str) -> Result<()> {
+    let snapshot_data = std::fs::read(snapshot_path)
+        .with_context(|| format!("Failed to read snapshot: {snapshot_path}"))?;
+
+    // Leak to get &'static [u8] (lives for the process lifetime)
+    let snapshot_static: &'static [u8] = Box::leak(snapshot_data.into_boxed_slice());
+
+    let mut runtime = JsRuntime::new(deno_core::RuntimeOptions {
+        module_loader: Some(std::rc::Rc::new(UtooModuleLoader)),
+        extensions: vec![utoo_rt_ext::init()],
+        startup_snapshot: Some(snapshot_static),
+        ..Default::default()
+    });
+
+    // Restore Rust-side state and resume the server
+    runtime.execute_script(
+        "<utoo:resume>",
+        r#"
+        Deno.core.setNextTickCallback(globalThis.__utoo_nextTickDrainer);
+        globalThis.__utoo_snapshot_mode = false;
+
+        // Re-bind all captured servers
+        if (globalThis.__utoo_snapshot_servers) {
+            for (const entry of globalThis.__utoo_snapshot_servers) {
+                entry.server.listen(entry.port, entry.host);
+            }
+            globalThis.__utoo_snapshot_servers = null;
+        }
+        "#,
+    )?;
+
+    runtime
+        .run_event_loop(deno_core::PollEventLoopOptions::default())
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))
+        .context("Event loop error")?;
 
     Ok(())
 }

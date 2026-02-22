@@ -21,3 +21,11 @@ pub fn op_cwd() -> Result<String, JsErrorBox> {
 pub fn op_env_to_object() -> HashMap<String, String> {
     std::env::vars().collect()
 }
+
+#[op2]
+#[string]
+pub fn op_exec_path() -> Result<String, JsErrorBox> {
+    std::env::current_exe()
+        .map(|p| p.to_string_lossy().into_owned())
+        .map_err(|e| JsErrorBox::generic(e.to_string()))
+}

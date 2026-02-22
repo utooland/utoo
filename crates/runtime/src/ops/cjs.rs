@@ -37,7 +37,11 @@ pub fn op_cjs_resolve(
     let referrer_dir = if referrer.is_empty() {
         std::env::current_dir().map_err(|e| JsErrorBox::generic(e.to_string()))?
     } else {
-        Path::new(referrer)
+        // Resolve symlinks so that require('..') from a symlinked bin script
+        // resolves relative to the real file location, not the symlink location.
+        let real_referrer = std::fs::canonicalize(referrer)
+            .unwrap_or_else(|_| PathBuf::from(referrer));
+        real_referrer
             .parent()
             .unwrap_or(Path::new("."))
             .to_path_buf()
@@ -46,6 +50,7 @@ pub fn op_cjs_resolve(
     // 2. Relative / absolute
     if specifier.starts_with("./")
         || specifier.starts_with("../")
+        || specifier == "." || specifier == ".."
         || specifier.starts_with('/')
     {
         let resolved = referrer_dir.join(specifier);
@@ -101,6 +106,7 @@ pub fn is_node_builtin(name: &str) -> bool {
             | "stream"
             | "http"
             | "https"
+            | "http2"
             | "crypto"
             | "child_process"
             | "net"
@@ -133,6 +139,7 @@ pub fn is_node_builtin(name: &str) -> bool {
             | "dns/promises"
             | "path/posix"
             | "vm"
+            | "repl"
     )
 }
 
@@ -140,8 +147,8 @@ pub fn is_node_builtin(name: &str) -> bool {
 pub fn is_cjs(path: &Path) -> bool {
     match path.extension().and_then(|e| e.to_str()) {
         Some("cjs") => true,
-        Some("mjs") => false,
-        Some("js") => {
+        Some("mjs" | "mts") => false,
+        Some("js" | "ts" | "tsx" | "jsx") => {
             // Walk up to find nearest package.json with "type" field
             let mut dir = path.parent();
             while let Some(d) = dir {
@@ -181,12 +188,23 @@ pub fn resolve_from_node_modules_dir(
         let nm = d.join("node_modules").join(pkg_name);
         if nm.is_dir() {
             let target = if subpath.is_empty() {
-                resolve_package_entry(&nm)?
+                // Try exports["."] first, then main/index
+                if let Some(resolved) = resolve_package_exports(&nm, ".") {
+                    resolved
+                } else {
+                    resolve_package_entry(&nm)?
+                }
             } else {
-                let sub = nm.join(subpath);
-                resolve_as_file_or_directory(&sub).ok_or_else(|| {
-                    format!("Cannot find '{specifier}' in {}", nm.display())
-                })?
+                // Try exports field first
+                let export_key = format!("./{subpath}");
+                if let Some(resolved) = resolve_package_exports(&nm, &export_key) {
+                    resolved
+                } else {
+                    let sub = nm.join(subpath);
+                    resolve_as_file_or_directory(&sub).ok_or_else(|| {
+                        format!("Cannot find '{specifier}' in {}", nm.display())
+                    })?
+                }
             };
             return Ok(target);
         }
@@ -244,6 +262,99 @@ fn parse_package_name(specifier: &str) -> (&str, &str) {
             None => (specifier, ""),
         }
     }
+}
+
+/// Resolve a subpath via the package.json "exports" field.
+/// Returns None if exports field is absent or doesn't match.
+fn resolve_package_exports(pkg_dir: &Path, export_key: &str) -> Option<PathBuf> {
+    let pkg_json = pkg_dir.join("package.json");
+    let content = std::fs::read_to_string(&pkg_json).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let exports = json.get("exports")?;
+
+    // exports can be a string (shorthand for ".") or an object
+    if let Some(s) = exports.as_str() {
+        if export_key == "." {
+            let resolved = pkg_dir.join(s);
+            return resolve_as_file_or_directory(&resolved);
+        }
+        return None;
+    }
+
+    let exports_obj = exports.as_object()?;
+
+    // Try exact match first
+    if let Some(target) = resolve_export_target(pkg_dir, exports_obj.get(export_key)) {
+        return Some(target);
+    }
+
+    // Try wildcard patterns (e.g., "./*")
+    for (pattern, value) in exports_obj {
+        if let Some(prefix) = pattern.strip_suffix('*') {
+            if export_key.starts_with(prefix) {
+                let rest = &export_key[prefix.len()..];
+                if let Some(target_pattern) = extract_export_string(value) {
+                    if let Some(resolved_str) = target_pattern.strip_suffix('*') {
+                        let resolved_path = format!("{resolved_str}{rest}");
+                        let full = pkg_dir.join(&resolved_path);
+                        if let Some(r) = resolve_as_file_or_directory(&full) {
+                            return Some(r);
+                        }
+                    } else if target_pattern.contains('*') {
+                        let resolved_path = target_pattern.replace('*', rest);
+                        let full = pkg_dir.join(&resolved_path);
+                        if let Some(r) = resolve_as_file_or_directory(&full) {
+                            return Some(r);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Given an exports target value, resolve it to a file path.
+/// Handles: string, or conditional object with "require"/"default"/"node" keys.
+fn resolve_export_target(
+    pkg_dir: &Path,
+    value: Option<&serde_json::Value>,
+) -> Option<PathBuf> {
+    let value = value?;
+    if let Some(s) = value.as_str() {
+        return resolve_as_file_or_directory(&pkg_dir.join(s));
+    }
+    if let Some(obj) = value.as_object() {
+        // Priority: "require" > "node" > "default" > "import"
+        // Try "require" first since we're in CJS context
+        for key in &["require", "node", "default"] {
+            if let Some(v) = obj.get(*key) {
+                // Recurse into nested condition objects
+                if let Some(r) = resolve_export_target(pkg_dir, Some(v)) {
+                    return Some(r);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Extract a string from an exports value, handling conditional objects recursively.
+fn extract_export_string(value: &serde_json::Value) -> Option<String> {
+    if let Some(s) = value.as_str() {
+        return Some(s.to_string());
+    }
+    if let Some(obj) = value.as_object() {
+        for key in &["require", "node", "default"] {
+            if let Some(v) = obj.get(*key) {
+                if let Some(s) = extract_export_string(v) {
+                    return Some(s);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Resolve the main entry point of a package directory.
