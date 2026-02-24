@@ -15,7 +15,7 @@
     "react-dom": "18.2.0",
     "three": "^0.153.0"
   },
-  "devdependencies": {
+  "devDependencies": {
     "@utoo/pack-cli": "*",
     "serve": "^14.2.4"
   }
