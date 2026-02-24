@@ -524,8 +524,8 @@ pub async fn get_client_resolve_options_context(
 pub struct ClientChunkingContextOptions {
     pub mode: Vc<Mode>,
     pub root_path: FileSystemPath,
-    pub output_root: FileSystemPath,
-    pub output_root_to_root_path: RcStr,
+    pub client_root: FileSystemPath,
+    pub client_root_to_root_path: RcStr,
     pub public_path: Vc<RcStr>,
     pub environment: Vc<Environment>,
     pub module_id_strategy: Vc<ModuleIdStrategy>,
@@ -542,8 +542,8 @@ pub async fn get_client_chunking_context(
     let ClientChunkingContextOptions {
         mode,
         root_path,
-        output_root,
-        output_root_to_root_path,
+        client_root,
+        client_root_to_root_path,
         public_path,
         environment,
         module_id_strategy,
@@ -577,11 +577,11 @@ pub async fn get_client_chunking_context(
 
     let mut builder = BrowserChunkingContext::builder(
         root_path.clone(),
-        output_root.clone(),
-        output_root_to_root_path,
-        output_root.clone(),
-        output_root.clone(),
-        output_root,
+        client_root.clone(),
+        client_root_to_root_path,
+        client_root.clone(),
+        client_root.clone(),
+        client_root.clone(),
         environment.to_resolved().await?,
         runtime_type,
     )

@@ -97,10 +97,10 @@ jobs:
           toolchain: nightly-2026-02-05
           targets: ${{ matrix.target }}
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: pm-release-${{ matrix.target }}
+      # - name: Cache cargo
+      #   uses: Swatinem/rust-cache@v2
+      #   with:
+      #     shared-key: pm-release-${{ matrix.target }}
 
       - name: Add cross-compilation target for x86_64 on macOS
         if: ${{ matrix.target == 'x86_64-apple-darwin' }}

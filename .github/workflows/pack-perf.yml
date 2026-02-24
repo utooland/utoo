@@ -37,7 +37,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -45,12 +44,12 @@ jobs:
           toolchain: nightly-2026-02-05
           components: rustfmt, clippy
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: utoopack-perf
-          cache-directories: |
-            target/release-local
+      # - name: Cache cargo
+      #   uses: Swatinem/rust-cache@v2
+      #   with:
+      #     shared-key: utoopack-perf
+      #     cache-directories: |
+      #       target/release-local
 
       - name: Install dependencies
         run: npm install

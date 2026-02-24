@@ -21,9 +21,9 @@ jobs:
         with:
           toolchain: nightly-2026-02-05
           components: clippy
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: clippy
+      # - name: Cache cargo
+      #   uses: Swatinem/rust-cache@v2
+      #   with:
+      #     shared-key: clippy
       - name: Cargo clippy
         run: cargo clippy --all-targets -- -D warnings --no-deps

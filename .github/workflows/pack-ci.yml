@@ -110,17 +110,16 @@ jobs:
         if: ${{ !matrix.settings.docker }}
         with:
           node-version: 20
-          cache: 'npm'
       - name: Install
         uses: dtolnay/rust-toolchain@stable
         if: ${{ !matrix.settings.docker }}
         with:
           toolchain: nightly-2026-02-05
           targets: ${{ matrix.settings.target }}
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: pack-ci-${{ matrix.settings.target }}
+      # - name: Cache cargo
+      #   uses: Swatinem/rust-cache@v2
+      #   with:
+      #     shared-key: pack-ci-${{ matrix.settings.target }}
       - name: Setup toolchain
         run: ${{ matrix.settings.setup }}
         if: ${{ matrix.settings.setup }}
