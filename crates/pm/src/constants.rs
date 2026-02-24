@@ -58,7 +58,7 @@ pub mod cmd {
     pub const INIT_ALIAS: &str = "create";
     pub const INIT_ABOUT: &str = "Create a package.json file";
 
-    pub const PACK_NAME: &str = "pack";
+    pub const PACK_NAME: &str = "pm-pack";
     pub const PACK_ALIAS: &str = "pk";
     pub const PACK_ABOUT: &str = "Create a tarball from a package";
 

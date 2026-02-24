@@ -1,12 +1,15 @@
 use term_size;
 
 pub fn format_size(bytes: u64) -> String {
-    if bytes < 1024 {
+    const KB: u64 = 1000;
+    const MB: u64 = KB * 1000;
+
+    if bytes < KB {
         format!("{} B", bytes)
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1} kB", bytes as f64 / 1024.0)
+    } else if bytes < MB {
+        format!("{:.1} kB", bytes as f64 / KB as f64)
     } else {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+        format!("{:.1} MB", bytes as f64 / MB as f64)
     }
 }
 

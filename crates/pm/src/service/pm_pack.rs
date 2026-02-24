@@ -12,7 +12,7 @@ use crate::util::json::load_package_json_from_path;
 
 pub struct PackResult {
     pub tarball_path: Option<PathBuf>,
-    pub files: Vec<String>,
+    pub files: Vec<(String, u64)>,
     pub name: String,
     pub version: String,
     pub integrity: String,
@@ -41,9 +41,9 @@ pub async fn pack(package_root: &Path, dry_run: bool) -> Result<PackResult> {
     .await??;
 
     let unpacked_size: u64 = collected.iter().map(|(_, size)| size).sum();
-    let file_paths: Vec<String> = collected
+    let file_paths: Vec<(String, u64)> = collected
         .iter()
-        .map(|(p, _)| p.to_string_lossy().to_string())
+        .map(|(p, size)| (p.to_string_lossy().to_string(), *size))
         .collect();
 
     if dry_run {
@@ -125,7 +125,7 @@ fn create_tarball(package_root: &Path, files: &[(PathBuf, u64)]) -> Result<Vec<u
 ///      `package-lock.json`, editor swap/backup files, etc.
 ///
 /// 3. **Inclusion check** (determines whether a surviving file is collected):
-///    - `is_always_included`: `package.json`, `readme*`, `license*`, `changelog*` — always
+///    - `is_always_included`: `package.json`, `readme*`, `license*` — always
 ///      included even if not listed in the `files` whitelist
 ///    - `referenced_files`: paths declared in `main`, `bin`, `types`, `typings` — always included
 ///    - Whitelist: if `files` field exists, the file must match a pattern; otherwise all files
@@ -151,7 +151,7 @@ fn collect_pack_files(
         let relative = entry.path().strip_prefix(package_root)?.to_path_buf();
         let rel_str = normalize_path(&relative.to_string_lossy());
 
-        let included = is_always_included(&name.to_lowercase())
+        let included = is_always_included(&rel_str.to_lowercase())
             || referenced_files.contains(&rel_str)
             || match &whitelist {
                 Some(wl) => matches_any(&rel_str, wl),
@@ -185,16 +185,18 @@ fn compile_whitelist(
         })
 }
 
-fn collect_referenced_files(pkg: &serde_json::Value) -> Vec<String> {
-    let mut refs = Vec::new();
+fn collect_referenced_files(pkg: &serde_json::Value) -> std::collections::HashSet<String> {
+    let mut refs = std::collections::HashSet::new();
     for key in ["main", "types", "typings"] {
         if let Some(s) = pkg.get(key).and_then(|v| v.as_str()) {
-            refs.push(normalize_path(s));
+            refs.insert(normalize_path(s));
         }
     }
     if let Some(bin) = pkg.get("bin") {
         match bin {
-            serde_json::Value::String(s) => refs.push(normalize_path(s)),
+            serde_json::Value::String(s) => {
+                refs.insert(normalize_path(s));
+            }
             serde_json::Value::Object(map) => {
                 refs.extend(map.values().filter_map(|v| v.as_str()).map(normalize_path));
             }
@@ -257,12 +259,15 @@ const ALWAYS_EXCLUDE_SUFFIXES: &[&str] = &[".swp", ".orig"];
 ///
 /// Our `starts_with` is more permissive (e.g. "readme-old-notes.txt" or "readme.md~"
 /// would incorrectly match). This is a known simplification — tighten if needed.
-fn is_always_included(lower_name: &str) -> bool {
-    lower_name == "package.json"
-        || lower_name.starts_with("readme")
-        || lower_name.starts_with("license")
-        || lower_name.starts_with("licence")
-        || lower_name.starts_with("changelog")
+fn is_always_included(lower_rel_path: &str) -> bool {
+    // Only root-level files are always included
+    if lower_rel_path.contains('/') {
+        return false;
+    }
+    lower_rel_path == "package.json"
+        || lower_rel_path.starts_with("readme")
+        || lower_rel_path.starts_with("license")
+        || lower_rel_path.starts_with("licence")
 }
 
 fn is_excluded_file(name: &str) -> bool {

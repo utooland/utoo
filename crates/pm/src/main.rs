@@ -562,7 +562,7 @@ async fn async_main() -> Result<()> {
             log_time_end("package.json created");
         }
         Some(Commands::Pack { path, dry_run }) => {
-            cmd::pack::pack(path, dry_run).await?;
+            cmd::pm_pack::pack(path, dry_run).await?;
             log_time_end("Pack complete");
         }
         Some(Commands::Ping { registry }) => {

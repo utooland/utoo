@@ -2,18 +2,20 @@ use anyhow::Result;
 use colored::Colorize;
 use std::path::PathBuf;
 
-use crate::service::pack as pack_service;
+use crate::service::pm_pack as pack_service;
 use crate::util::format_print::format_size;
 
 pub async fn pack(path: Option<String>, dry_run: bool) -> Result<()> {
-    let package_root = path
-        .map(PathBuf::from)
-        .map_or_else(std::env::current_dir, Ok)?;
+    let package_root = if let Some(p) = path {
+        PathBuf::from(p)
+    } else {
+        std::env::current_dir()?
+    };
 
     let result = pack_service::pack(&package_root, dry_run).await?;
 
-    for f in &result.files {
-        println!("{f}");
+    for (f, size) in &result.files {
+        println!("{} {f}", format_size(*size).dimmed());
     }
     println!();
 
