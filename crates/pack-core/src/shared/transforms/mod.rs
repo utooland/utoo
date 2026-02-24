@@ -8,6 +8,7 @@ use turbopack_ecmascript::{CustomTransformer, EcmascriptInputTransform};
 use image::{StructuredImageModuleType, module::BlurPlaceholderMode};
 use wasm::StaticWasmModuleType;
 
+pub mod classic_jsx_react_import;
 pub mod css_modules;
 pub mod default_export_namer;
 pub mod emotion;

@@ -38,7 +38,7 @@ use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 use crate::{
     client::runtime_entry::RuntimeEntries,
     config::{
-        Config, ProviderConfig, ProviderConfigValue, default_max_chunk_count_per_group,
+        Config, ProviderConfig, ProviderConfigValue, ReactRuntime, default_max_chunk_count_per_group,
         default_max_merge_chunk_size, default_min_chunk_size,
     },
     embed_js::embed_file_path,
@@ -50,6 +50,7 @@ use crate::{
     shared::{
         resolve::externals_plugin::ExternalsPlugin,
         transforms::{
+            classic_jsx_react_import::get_classic_jsx_react_import_rule,
             css_modules::get_auto_css_modules_rule,
             default_export_namer::get_default_export_namer_rule,
             emotion::get_emotion_transform_rule, remove_console::get_remove_console_transform_rule,
@@ -324,6 +325,18 @@ pub async fn get_client_module_options_context(
         // This transformer just to solve the react-refresh not work for no named jsx function component.
         // Refer to: https://github.com/utooland/utoo/issues/2439
         client_rules.push(get_default_export_namer_rule());
+    }
+
+    let is_classic_jsx = config
+        .react()
+        .await?
+        .runtime
+        .as_ref()
+        .map(|r| matches!(r, ReactRuntime::Classic))
+        .unwrap_or(false);
+
+    if is_classic_jsx {
+        client_rules.push(get_classic_jsx_react_import_rule());
     }
 
     let additional_rules: Vec<ModuleRule> = vec![
