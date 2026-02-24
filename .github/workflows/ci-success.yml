@@ -6,6 +6,9 @@ on:
       - "utoopack-ci"
       - "utoopm-ci"
       - "utooweb-ci"
+      - "utoopm-e2e"
+      - "utoopack-integration"
+      - "utoopack-perf"
     types:
       - completed
 
