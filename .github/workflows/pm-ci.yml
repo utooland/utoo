@@ -112,3 +112,19 @@ jobs:
         run: ${{ matrix.settings.test }}
         if: ${{ !matrix.settings.docker }}
         shell: bash
+
+  success:
+    name: utoopm-ci-success
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - test
+    steps:
+      - name: Check success
+        run: |
+          if [ "${{ needs.test.result }}" == "failure" ] || [ "${{ needs.test.result }}" == "cancelled" ]; then
+            echo "Tests failed or were cancelled"
+            exit 1
+          else
+            echo "Tests passed or were skipped"
+          fi

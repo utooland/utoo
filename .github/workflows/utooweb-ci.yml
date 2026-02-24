@@ -44,3 +44,19 @@ jobs:
           npm run build --workspace=@utoo/pack-shared
           npm run build:local --workspace=@utoo/web
           ls packages/utoo-web/esm/utoo
+
+  success:
+    name: utooweb-ci-success
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - build
+    steps:
+      - name: Check success
+        run: |
+          if [ "${{ needs.build.result }}" == "failure" ] || [ "${{ needs.build.result }}" == "cancelled" ]; then
+            echo "Tests failed or were cancelled"
+            exit 1
+          else
+            echo "Tests passed or were skipped"
+          fi
