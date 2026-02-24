@@ -76,6 +76,11 @@ pub mod compat {
     pub use crate::model::compatibility::{is_cpu_compatible, is_os_compatible};
 }
 
+/// Package specification types.
+pub mod spec {
+    pub use crate::model::spec::{PackageSpec, is_http_tarball_spec};
+}
+
 /// Utility functions.
 pub mod util {
     pub use crate::model::util::{parse_package_spec, read_package_json};
