@@ -1,6 +1,6 @@
-(globalThis["utooChunk_export_entry_exports"] || (globalThis["utooChunk_export_entry_exports"] = [])).push([
+(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["input_index_ts_6bcb050d.js"],"runtimeModuleIds":[76]}
+    {"otherChunks":["runtime_export_entry_exports_input_index_ts_6bcb050d.js"],"runtimeModuleIds":[76]}
 ]);
 (function(root, factory) {
     if (typeof exports === 'object' && typeof module === 'object')
@@ -12,14 +12,14 @@
 }(typeof self !== 'undefined' ? self : this, function() {
 
 const __chunk__ = (() => {
-if (!Array.isArray(globalThis["utooChunk_export_entry_exports"])) {
+if (!Array.isArray(globalThis["TURBOPACK"])) {
     return;
 }
 
 let __entryExports__ = undefined;
 
 const CHUNK_BASE_PATH = "/";
-const RELATIVE_ROOT_PATH = "..";
+const RELATIVE_ROOT_PATH = "/ROOT";
 const RUNTIME_PUBLIC_PATH = "/";
 const ASSET_SUFFIX = "";
 const WORKER_FORWARDED_GLOBALS = [];
@@ -1087,8 +1087,8 @@ let BACKEND;
         return fetch(getChunkRelativeUrl(wasmChunkPath));
     }
 })();
-const chunksToRegister = globalThis["utooChunk_export_entry_exports"];
-globalThis["utooChunk_export_entry_exports"] = { push: registerChunk };
+const chunksToRegister = globalThis["TURBOPACK"];
+globalThis["TURBOPACK"] = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
 
 try {
