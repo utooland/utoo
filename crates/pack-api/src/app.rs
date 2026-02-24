@@ -368,7 +368,7 @@ impl Endpoint for AppEndpoint {
 
             let written_endpoint = EndpointOutputPaths::NodeJs {
                 server_entry_path: dist_root.path.to_string(),
-                // FIXME: No server path when bundling library
+                // TODO: set right server path when server rendering supported
                 server_paths: vec![],
                 client_paths: vec![],
             };
