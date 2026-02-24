@@ -34,10 +34,11 @@ use crate::constants::cmd::{
     CONFIG_ALIAS, CONFIG_NAME, DEPS_ABOUT, DEPS_ALIAS, DEPS_NAME, EXECUTE_ABOUT, EXECUTE_ALIAS,
     EXECUTE_NAME, INIT_ABOUT, INIT_ALIAS, INIT_NAME, INSTALL_ABOUT, INSTALL_ALIAS, INSTALL_NAME,
     LINK_ABOUT, LINK_ALIAS, LINK_NAME, LIST_ALIAS, LIST_NAME, LOGIN_ABOUT, LOGIN_ALIAS, LOGIN_NAME,
-    LOGOUT_ABOUT, LOGOUT_ALIAS, LOGOUT_NAME, PING_ABOUT, PING_ALIAS, PING_NAME, REBUILD_ABOUT,
-    REBUILD_ALIAS, REBUILD_NAME, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT, UNINSTALL_ALIAS,
-    UNINSTALL_NAME, UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT, VIEW_ALIAS,
-    VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME, WHOAMI_ABOUT, WHOAMI_ALIAS, WHOAMI_NAME,
+    LOGOUT_ABOUT, LOGOUT_ALIAS, LOGOUT_NAME, PACK_ABOUT, PACK_ALIAS, PACK_NAME, PING_ABOUT,
+    PING_ALIAS, PING_NAME, REBUILD_ABOUT, REBUILD_ALIAS, REBUILD_NAME, RUN_ALIAS, RUN_NAME,
+    UNINSTALL_ABOUT, UNINSTALL_ALIAS, UNINSTALL_NAME, UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME,
+    VIEW_ABOUT, VIEW_ALIAS, VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME, WHOAMI_ABOUT,
+    WHOAMI_ALIAS, WHOAMI_NAME,
 };
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
 use crate::helper::workspace::update_cwd_to_root;
@@ -258,6 +259,15 @@ enum Commands {
         /// prefix for global package path
         #[arg(short, long)]
         prefix: Option<String>,
+    },
+
+    #[command(name = PACK_NAME, alias = PACK_ALIAS, about = PACK_ABOUT)]
+    Pack {
+        /// Path to the package directory
+        path: Option<String>,
+        /// Perform a dry run without creating a tarball
+        #[arg(long)]
+        dry_run: bool,
     },
 
     #[command(name = PING_NAME, alias = PING_ALIAS, about = PING_ABOUT)]
@@ -550,6 +560,10 @@ async fn async_main() -> Result<()> {
         Some(Commands::Init { yes }) => {
             init(yes, None).await?;
             log_time_end("package.json created");
+        }
+        Some(Commands::Pack { path, dry_run }) => {
+            cmd::pm_pack::pack(path, dry_run).await?;
+            log_time_end("Pack complete");
         }
         Some(Commands::Ping { registry }) => {
             cmd::ping::ping(registry.as_deref()).await?;

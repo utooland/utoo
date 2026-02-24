@@ -58,6 +58,10 @@ pub mod cmd {
     pub const INIT_ALIAS: &str = "create";
     pub const INIT_ABOUT: &str = "Create a package.json file";
 
+    pub const PACK_NAME: &str = "pm-pack";
+    pub const PACK_ALIAS: &str = "pk";
+    pub const PACK_ABOUT: &str = "Create a tarball from a package";
+
     pub const PING_NAME: &str = "ping";
     pub const PING_ALIAS: &str = "pg";
     pub const PING_ABOUT: &str = "Ping npm registry";

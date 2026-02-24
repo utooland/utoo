@@ -28,12 +28,7 @@ pub struct PackageService;
 impl PackageService {
     pub async fn process_project_hooks(root_path: &Path) -> Result<()> {
         let data = load_package_json_from_path(root_path).await?;
-
-        let binding = serde_json::Map::new();
-        let scripts = data
-            .get("scripts")
-            .and_then(|s| s.as_object())
-            .unwrap_or(&binding);
+        let package_info = PackageInfo::from_json(root_path, &data)?;
 
         let hooks = [
             "preinstall",
@@ -45,52 +40,8 @@ impl PackageService {
             "postprepare",
         ];
 
-        let (_scope, name, fullname) = parse_package_name(&format!(
-            "node_modules/{}",
-            data.get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-        ));
-
-        let package_info = PackageInfo {
-            path: root_path.to_path_buf(),
-            bin_files: Vec::new(),
-            scripts: Scripts {
-                preinstall: scripts
-                    .get("preinstall")
-                    .and_then(|s| s.as_str())
-                    .map(String::from),
-                install: scripts
-                    .get("install")
-                    .and_then(|s| s.as_str())
-                    .map(String::from),
-                postinstall: scripts
-                    .get("postinstall")
-                    .and_then(|s| s.as_str())
-                    .map(String::from),
-                prepare: scripts
-                    .get("prepare")
-                    .and_then(|s| s.as_str())
-                    .map(String::from),
-                preprepare: scripts
-                    .get("preprepare")
-                    .and_then(|s| s.as_str())
-                    .map(String::from),
-                postprepare: scripts
-                    .get("postprepare")
-                    .and_then(|s| s.as_str())
-                    .map(String::from),
-                prepublish: scripts
-                    .get("prepublish")
-                    .and_then(|s| s.as_str())
-                    .map(String::from),
-            },
-            name,
-            fullname,
-        };
-
         for hook in hooks {
-            if scripts.get(hook).and_then(|s| s.as_str()).is_some() {
+            if package_info.scripts.get_script(hook).is_some() {
                 tracing::debug!("Executing project hook: {hook}");
                 ScriptService::execute_script(&package_info, hook, true)
                     .await
@@ -103,43 +54,7 @@ impl PackageService {
 
     async fn read_package_scripts(package_path: &Path) -> Result<Scripts> {
         let data = load_package_json_from_path(package_path).await?;
-
-        let default_scripts = serde_json::Map::new();
-        let scripts = data
-            .get("scripts")
-            .and_then(|s| s.as_object())
-            .unwrap_or(&default_scripts);
-
-        Ok(Scripts {
-            preinstall: scripts
-                .get("preinstall")
-                .and_then(|s| s.as_str())
-                .map(String::from),
-            install: scripts
-                .get("install")
-                .and_then(|s| s.as_str())
-                .map(String::from),
-            postinstall: scripts
-                .get("postinstall")
-                .and_then(|s| s.as_str())
-                .map(String::from),
-            prepare: scripts
-                .get("prepare")
-                .and_then(|s| s.as_str())
-                .map(String::from),
-            preprepare: scripts
-                .get("preprepare")
-                .and_then(|s| s.as_str())
-                .map(String::from),
-            postprepare: scripts
-                .get("postprepare")
-                .and_then(|s| s.as_str())
-                .map(String::from),
-            prepublish: scripts
-                .get("prepublish")
-                .and_then(|s| s.as_str())
-                .map(String::from),
-        })
+        Ok(Scripts::from_json(&data))
     }
 
     /// Collect packages from memory PackageLock object with early filtering
@@ -201,15 +116,7 @@ impl PackageService {
                     .context(format!("Failed to read scripts for package: {path}"))?
             } else {
                 // Create empty scripts for ignore_scripts mode
-                Scripts {
-                    preinstall: None,
-                    install: None,
-                    postinstall: None,
-                    prepare: None,
-                    preprepare: None,
-                    postprepare: None,
-                    prepublish: None,
-                }
+                Scripts::default()
             };
 
             // Check if this package is an optional dependency (based on edge type)
@@ -792,15 +699,7 @@ mod tests {
         let package_info = PackageInfo {
             path: package_path.to_path_buf(),
             bin_files: vec![("testbin".to_string(), "not-exist.js".to_string())],
-            scripts: Scripts {
-                preinstall: None,
-                install: None,
-                postinstall: None,
-                prepare: None,
-                preprepare: None,
-                postprepare: None,
-                prepublish: None,
-            },
+            scripts: Scripts::default(),
             name: "test-bin-missing".to_string(),
             fullname: "test-bin-missing".to_string(),
         };
@@ -1127,13 +1026,8 @@ mod tests {
             path: package_path.to_path_buf(),
             bin_files: vec![],
             scripts: Scripts {
-                preinstall: None,
-                install: None,
                 postinstall: Some("exit 1".to_string()),
-                prepare: None,
-                preprepare: None,
-                postprepare: None,
-                prepublish: None,
+                ..Default::default()
             },
             name: "test-optional-fail".to_string(),
             fullname: "test-optional-fail".to_string(),

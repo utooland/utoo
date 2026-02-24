@@ -5,6 +5,7 @@ pub mod config_file;
 pub mod downloader;
 pub mod extractor;
 pub mod format_print;
+pub mod integrity;
 pub mod json;
 pub mod linker;
 pub mod logger;
