@@ -1,4 +1,5 @@
 use crate::fs;
+use crate::util::http::client;
 use crate::util::json::load_package_json_from_path;
 use crate::util::user_config::get_registry;
 use anyhow::{Context, Result};
@@ -19,7 +20,9 @@ async fn load_config() -> Result<&'static Value> {
         .get_or_try_init(|| async {
             let registry = get_registry();
             let url = format!("{registry}/binary-mirror-config/latest");
-            let response = reqwest::get(&url)
+            let response = client()
+                .get(&url)
+                .send()
                 .await
                 .context("Failed to fetch binary mirror config")?;
 

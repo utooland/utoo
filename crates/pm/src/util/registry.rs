@@ -4,6 +4,8 @@
 
 use colored::Colorize;
 
+use super::http::client_builder;
+
 /// Default registries for auto-selection
 pub const REGISTRY_NPMMIRROR: &str = "https://registry.npmmirror.com";
 pub const REGISTRY_NPMJS: &str = "https://registry.npmjs.org";
@@ -39,7 +41,7 @@ pub async fn ping_registry(client: &reqwest::Client, registry_url: &str) -> Ping
 
 /// Select fastest registry by concurrent ping
 pub async fn select_fastest_registry() -> String {
-    let client = reqwest::Client::builder()
+    let client = client_builder()
         .timeout(std::time::Duration::from_millis(PING_TIMEOUT_MS))
         .build();
 

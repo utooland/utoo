@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 
 use crate::util::config_file::Config;
+use crate::util::http::client;
 
 fn registry_api(registry: &str, path: &str) -> String {
     format!("{}{}", registry.trim_end_matches('/'), path)
@@ -51,7 +52,7 @@ pub async fn require_token(registry: &str) -> Result<String> {
 ///
 /// `on_login_url` is called with the URL the user must visit to authenticate.
 pub async fn web_login(registry: &str, on_login_url: impl FnOnce(&str)) -> Result<String> {
-    let client = reqwest::Client::new();
+    let client = client();
 
     let response = client
         .post(registry_api(registry, "/-/v1/login"))
@@ -117,7 +118,7 @@ pub async fn web_login(registry: &str, on_login_url: impl FnOnce(&str)) -> Resul
 
 /// Query current identity from the registry.
 pub async fn whoami(registry: &str, token: &str) -> Result<String> {
-    let response = reqwest::Client::new()
+    let response = client()
         .get(registry_api(registry, "/-/whoami"))
         .bearer_auth(token)
         .send()
@@ -142,7 +143,7 @@ pub async fn whoami(registry: &str, token: &str) -> Result<String> {
 
 /// Logout: invalidate the token on the server and remove from local config.
 pub async fn logout(registry: &str, token: &str) -> Result<()> {
-    let response = reqwest::Client::new()
+    let response = client()
         .delete(registry_api(registry, &format!("/-/user/token/{}", token)))
         .bearer_auth(token)
         .send()

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use colored::Colorize;
 
+use crate::util::http::client_builder;
 use crate::util::registry::ping_registry;
 use crate::util::user_config::{detect_supports_semver, get_registry};
 
@@ -9,7 +10,7 @@ pub async fn ping(registry: Option<&str>) -> Result<()> {
 
     println!("{} {}", "PING".green(), registry.cyan());
 
-    let client = reqwest::Client::builder()
+    let client = client_builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
 
