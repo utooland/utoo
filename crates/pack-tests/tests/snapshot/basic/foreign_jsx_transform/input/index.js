@@ -1,1 +1,0 @@
-import 'foreign-jsx-transform';

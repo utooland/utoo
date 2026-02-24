@@ -191,6 +191,7 @@ export interface ConfigComplete {
   };
   react?: {
     runtime?: "automatic" | "classic";
+    importSource?: string;
   };
   stats?: boolean;
   persistentCaching?: boolean;

@@ -249,11 +249,21 @@ pub enum ReactRuntime {
     Classic,
 }
 
+impl ReactRuntime {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ReactRuntime::Automatic => "automatic",
+            ReactRuntime::Classic => "classic",
+        }
+    }
+}
+
 #[turbo_tasks::value(eq = "manual")]
 #[derive(Clone, Debug, PartialEq, Default, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
 pub struct ReactConfig {
     pub runtime: Option<ReactRuntime>,
+    pub import_source: Option<RcStr>,
 }
 
 #[turbo_tasks::value(eq = "manual")]

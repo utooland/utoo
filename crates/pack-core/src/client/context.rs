@@ -278,15 +278,9 @@ pub async fn get_client_module_options_context(
     } else {
         false
     };
-    let jsx_transform_options = get_jsx_transform_options(
-        project_path.clone(),
-        mode,
-        false,
-        config,
-        enable_react_refresh,
-    )
-    .to_resolved()
-    .await?;
+    let jsx_transform_options = get_jsx_transform_options(mode, config, enable_react_refresh)
+        .to_resolved()
+        .await?;
 
     let mut loader_conditions = BTreeSet::new();
     loader_conditions.insert(WebpackLoaderBuiltinCondition::Browser);

@@ -11,10 +11,7 @@ use turbopack_core::{
 };
 use turbopack_ecmascript::typescript::resolve::{read_from_tsconfigs, read_tsconfigs, tsconfig};
 
-use crate::{
-    config::{Config, ReactRuntime},
-    mode::Mode,
-};
+use crate::{config::Config, mode::Mode};
 
 async fn get_typescript_options(
     project_path: FileSystemPath,
@@ -117,51 +114,21 @@ pub async fn get_decorators_transform_options(
 
 #[turbo_tasks::function]
 pub async fn get_jsx_transform_options(
-    project_path: FileSystemPath,
     mode: Vc<Mode>,
-    is_rsc_context: bool,
     config: Vc<Config>,
     enable_react_refresh: bool,
 ) -> Result<Vc<JsxTransformOptions>> {
-    let tsconfig = get_typescript_options(project_path.clone()).await?;
-    let is_emotion_enabled = config.styles().await?.emotion.is_some();
     let react_config = config.react().await?;
 
     let react_transform_options = JsxTransformOptions {
         development: mode.await?.is_react_development(),
-        // https://github.com/vercel/next.js/blob/3dc2c1c7f8441cdee31da9f7e0986d654c7fd2e7/packages/next/src/build/swc/options.ts#L112
-        // This'll be ignored if ts|jsconfig explicitly specifies importSource
-        import_source: if is_emotion_enabled && !is_rsc_context {
-            Some("@emotion/react".into())
-        } else {
-            None
-        },
-        runtime: react_config.runtime.as_ref().map(|runtime| match runtime {
-            ReactRuntime::Automatic => "automatic".into(),
-            ReactRuntime::Classic => "classic".into(),
-        }),
+        import_source: react_config.import_source.clone().or(Some("react".into())),
+        runtime: react_config
+            .runtime
+            .as_ref()
+            .map(|r| r.as_str().into())
+            .or(Some("automatic".into())),
         react_refresh: enable_react_refresh,
-    };
-
-    let react_transform_options = if let Some(tsconfig) = tsconfig {
-        read_from_tsconfigs(&tsconfig, |json, _| {
-            let jsx_import_source = json["compilerOptions"]["jsxImportSource"]
-                .as_str()
-                .map(|s| s.into());
-
-            Some(JsxTransformOptions {
-                import_source: if jsx_import_source.is_some() {
-                    jsx_import_source
-                } else {
-                    react_transform_options.import_source.clone()
-                },
-                ..react_transform_options.clone()
-            })
-        })
-        .await?
-        .unwrap_or_default()
-    } else {
-        react_transform_options
     };
 
     Ok(react_transform_options.cell())

@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/foreign_jsx_transform/node_modules/foreign-jsx-transform/index.js"],"sourcesContent":["/** @jsx jsx */\nvar a = 1;\nexport default a;"],"names":["a"],"mappings":"AAAA,aAAa,GACb,IAAIA,IAAI;qCACOA","ignoreList":[0]}},
-    {"offset": {"line": 11, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/foreign_jsx_transform/input/index.js"],"sourcesContent":["import 'foreign-jsx-transform';"],"names":[],"mappings":"AAAA"}}]
-}
