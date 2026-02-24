@@ -48,12 +48,12 @@ async function runBuild() {
   await build({
     config: {
       entry: [
-          {
-            import: "./src/index.ts",
-            html: {
-              template: "./index.html"
-            }
+        {
+          import: "./src/index.ts",
+          html: {
+            template: "./index.html"
           }
+        }
       ],
       output: {
         path: "./dist",
