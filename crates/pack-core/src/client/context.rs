@@ -38,8 +38,8 @@ use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 use crate::{
     client::runtime_entry::RuntimeEntries,
     config::{
-        Config, ProviderConfig, ProviderConfigValue, ReactRuntime, default_max_chunk_count_per_group,
-        default_max_merge_chunk_size, default_min_chunk_size,
+        Config, ProviderConfig, ProviderConfigValue, ReactRuntime,
+        default_max_chunk_count_per_group, default_max_merge_chunk_size, default_min_chunk_size,
     },
     embed_js::embed_file_path,
     import_map::{

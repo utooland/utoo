@@ -9,9 +9,9 @@ use turbopack_core::reference_type::{ReferenceType, UrlReferenceSubType};
 use turbopack_ecmascript::{CustomTransformer, EcmascriptInputTransform, TransformContext};
 
 pub fn get_classic_jsx_react_import_rule() -> ModuleRule {
-    let transform = EcmascriptInputTransform::Plugin(ResolvedVc::cell(
-        Box::new(ClassicJsxReactImportTransformer) as _,
-    ));
+    let transform = EcmascriptInputTransform::Plugin(ResolvedVc::cell(Box::new(
+        ClassicJsxReactImportTransformer,
+    ) as _));
 
     let condition = RuleCondition::all(vec![
         RuleCondition::not(RuleCondition::ReferenceType(ReferenceType::Url(
