@@ -4,7 +4,7 @@ on:
   push:
     branches: ['next']
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
