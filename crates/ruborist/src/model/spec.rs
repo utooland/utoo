@@ -76,6 +76,12 @@ impl PackageSpec {
                     commit_ish: commit_ish.map(String::from),
                 };
             }
+            // `github:foo` without `/` — treat as Git URL so it doesn't
+            // silently fall through to the registry resolver.
+            return PackageSpec::Git {
+                url: raw.to_string(),
+                commit_ish: commit_ish.map(String::from),
+            };
         }
 
         // Default: registry spec — use parse_package_spec for name@version splitting
@@ -92,14 +98,24 @@ impl PackageSpec {
 /// Useful for routing specs that look like HTTP tarballs away from
 /// the standard registry/git resolution paths.
 pub fn is_http_tarball_spec(spec: &str) -> bool {
-    (spec.starts_with("https://") || spec.starts_with("http://"))
-        && (spec.ends_with(".tgz") || spec.ends_with(".tar.gz"))
+    if !(spec.starts_with("https://") || spec.starts_with("http://")) {
+        return false;
+    }
+    // Only consider the path portion before any query (`?`) or fragment (`#`)
+    let base = spec
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(spec);
+    base.ends_with(".tgz") || base.ends_with(".tar.gz")
 }
 
 /// Split a string at the first `#` into (base, optional fragment).
+///
+/// An empty fragment (e.g. trailing `#`) is treated as `None`.
 fn split_fragment(s: &str) -> (&str, Option<&str>) {
-    match s.find('#') {
-        Some(pos) => (&s[..pos], Some(&s[pos + 1..])),
+    match s.split_once('#') {
+        Some((base, frag)) if !frag.is_empty() => (base, Some(frag)),
+        Some((base, _)) => (base, None),
         None => (s, None),
     }
 }
@@ -210,9 +226,32 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_git_trailing_hash() {
+        // Trailing `#` with no fragment should yield `commit_ish: None`
+        assert_eq!(
+            PackageSpec::parse("git+https://github.com/user/repo.git#"),
+            PackageSpec::Git {
+                url: "git+https://github.com/user/repo.git".to_string(),
+                commit_ish: None,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_github_no_slash() {
+        // `github:foo` without `/` is treated as a Git URL, not Registry
+        let spec = PackageSpec::parse("github:foo");
+        assert!(matches!(spec, PackageSpec::Git { .. }));
+    }
+
+    #[test]
     fn test_is_http_tarball_spec() {
         assert!(is_http_tarball_spec("https://example.com/pkg.tgz"));
         assert!(is_http_tarball_spec("http://example.com/pkg.tar.gz"));
+        assert!(is_http_tarball_spec("https://example.com/pkg.tgz?v=1.0"));
+        assert!(is_http_tarball_spec(
+            "https://example.com/pkg.tar.gz#download"
+        ));
         assert!(!is_http_tarball_spec("https://example.com/pkg"));
         assert!(!is_http_tarball_spec("lodash@^4.0.0"));
     }

@@ -89,14 +89,14 @@ struct NodeFlags {
 
 /// Gather all unresolved deps from root and workspace nodes for preloading.
 fn gather_preload_deps(graph: &DependencyGraph, legacy_peer_deps: bool) -> Vec<(String, String)> {
-    use crate::resolver::preload::is_local_spec;
+    use crate::resolver::preload::is_non_registry_spec;
     use std::collections::HashSet;
 
     let mut deps = HashSet::new();
 
     // Collect from root node
     for (_, edge) in graph.get_dependency_edges(graph.root_index) {
-        if !edge.valid && !is_local_spec(&edge.spec) {
+        if !edge.valid && !is_non_registry_spec(&edge.spec) {
             // Skip peer deps in legacy mode
             if legacy_peer_deps && edge.edge_type == EdgeType::Peer {
                 continue;
@@ -111,7 +111,7 @@ fn gather_preload_deps(graph: &DependencyGraph, legacy_peer_deps: bool) -> Vec<(
             && node.is_workspace()
         {
             for (_, edge) in graph.get_dependency_edges(node_index) {
-                if !edge.valid && !is_local_spec(&edge.spec) {
+                if !edge.valid && !is_non_registry_spec(&edge.spec) {
                     // Skip peer deps in legacy mode
                     if legacy_peer_deps && edge.edge_type == EdgeType::Peer {
                         continue;

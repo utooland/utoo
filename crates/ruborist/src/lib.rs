@@ -81,6 +81,11 @@ pub mod spec {
     pub use crate::model::spec::{PackageSpec, is_http_tarball_spec};
 }
 
+/// Git clone and resolution types.
+pub mod git {
+    pub use crate::traits::git::GitCloneResult;
+}
+
 /// Utility functions.
 pub mod util {
     pub use crate::model::util::{parse_package_spec, read_package_json};
