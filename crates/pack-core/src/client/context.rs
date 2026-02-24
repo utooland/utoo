@@ -327,13 +327,7 @@ pub async fn get_client_module_options_context(
         client_rules.push(get_default_export_namer_rule());
     }
 
-    let is_classic_jsx = config
-        .react()
-        .await?
-        .runtime
-        .as_ref()
-        .map(|r| matches!(r, ReactRuntime::Classic))
-        .unwrap_or(false);
+    let is_classic_jsx = matches!(config.react().await?.runtime, Some(ReactRuntime::Classic));
 
     if is_classic_jsx {
         client_rules.push(get_classic_jsx_react_import_rule());
