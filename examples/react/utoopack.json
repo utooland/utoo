@@ -24,22 +24,13 @@
   },
   "module": {
     "rules": {
-      "#svg": {
+      "*.svg": {
         "loaders": [
-          "@svgr/webpack"
+          {
+            "loader": "@svgr/webpack"
+          }
         ],
         "as": "*.js"
-      }
-    },
-    "conditions": {
-      "#svg": {
-        "path": {
-          "type": "regex",
-          "value": {
-            "source": ".*\\.svg$",
-            "flags": "i"
-          }
-        }
       }
     }
   }
