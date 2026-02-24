@@ -46,44 +46,46 @@ const { build, dev } = require('@utoo/pack');
 // Production build
 async function runBuild() {
   await build({
-    mode: "production",
-    entry: [
-      {
-        import: "./src/index.ts",
-        html: {
-          template: "./index.html"
+    config: {
+      entry: [
+        {
+          import: "./src/index.ts",
+          html: {
+            template: "./index.html"
+          }
         }
-      }
-    ],
-    output: {
-      path: "./dist",
-      filename: "[name].[contenthash:8].js",
-      chunkFilename: "[name].[contenthash:8].js",
-      clean: true
-    },
-    sourceMaps: true
+      ],
+      output: {
+        path: "./dist",
+        filename: "[name].[contenthash:8].js",
+        chunkFilename: "[name].[contenthash:8].js",
+        clean: true
+      },
+      sourceMaps: true
+    }
   });
 }
 
 // Development mode with HMR
 async function startDev() {
   const server = await dev({
-    mode: "development",
-    entry: [
-      {
-        import: "./src/index.ts",
-        html: {
-          template: "./index.html"
+    config: {
+      entry: [
+        {
+          import: "./src/index.ts",
+          html: {
+            template: "./index.html"
+          }
         }
-      }
-    ],
-    output: {
-      path: "./dist",
-      filename: "[name].[contenthash:8].js",
-      chunkFilename: "[name].[contenthash:8].js",
-      clean: true
-    },
-    sourceMaps: true
+      ],
+      output: {
+        path: "./dist",
+        filename: "[name].[contenthash:8].js",
+        chunkFilename: "[name].[contenthash:8].js",
+        clean: true
+      },
+      sourceMaps: true
+    }
   });
 }
 ```
