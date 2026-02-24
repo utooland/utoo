@@ -1,4 +1,5 @@
 use crate::constants::APP_VERSION;
+use crate::util::http::client_builder;
 use crate::util::user_config::get_registry;
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
@@ -138,7 +139,7 @@ async fn execute_update(version: &str) -> Result<()> {
 /// Fast remote version check - short timeout, quick failure
 async fn check_remote_version_fast() -> Result<VersionCache> {
     let registry_url = format!("{}/utoo/latest", get_registry());
-    let client = reqwest::Client::builder()
+    let client = client_builder()
         .timeout(std::time::Duration::from_millis(1000)) // 1 second timeout
         .build()
         .context("Failed to create HTTP client")?;

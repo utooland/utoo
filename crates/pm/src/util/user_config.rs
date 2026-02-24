@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::{LazyLock, OnceLock};
 
 use super::config_file::{Config, ConfigValue};
+use super::http::client_builder;
 use super::registry::{REGISTRY_NPMMIRROR, select_fastest_registry};
 use super::save_type::OmitType;
 
@@ -183,7 +184,7 @@ pub async fn detect_supports_semver(registry_url: &str, client: Option<&reqwest:
         let client = match client {
             Some(c) => c,
             None => {
-                owned_client = reqwest::Client::builder()
+                owned_client = client_builder()
                     .timeout(std::time::Duration::from_secs(5))
                     .build()?;
                 &owned_client
