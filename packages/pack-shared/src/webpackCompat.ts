@@ -137,6 +137,7 @@ export function compatOptionsFromWebpack(
       externals: compatExternals(externals),
       output: compatOutput(output),
       target: compatTarget(target),
+      platform: compatPlatform(target),
       sourceMaps: compatSourceMaps(devtool),
       optimization: compatOptimization(optimization),
       define: compatFromWebpackPlugin(plugins, compatDefine),
@@ -563,6 +564,14 @@ function compatTarget(
       ? webpackTarget.join(" ")
       : webpackTarget
     : undefined;
+}
+
+function compatPlatform(
+  webpackTarget: WebpackTarget | undefined,
+): ConfigComplete["platform"] {
+  if (!webpackTarget) return undefined;
+  const targets = Array.isArray(webpackTarget) ? webpackTarget : [webpackTarget];
+  return targets.some((t) => t === "node") ? "node" : undefined;
 }
 
 function compatSourceMaps(

@@ -21,7 +21,7 @@ use turbopack_core::{
 
 use crate::config::{
     ExternalConfig, ExternalSubPathTarget, ExternalTargetConverter,
-    ExternalType as ConfigExternalType, ExternalUmd, ExternalsConfig,
+    ExternalType as ConfigExternalType, ExternalUmd, ExternalsConfig, Platform,
 };
 
 #[turbo_tasks::value]
@@ -226,10 +226,13 @@ fn to_snake_case(input: &str) -> String {
         .join("_")
 }
 
-/// Handle external config and return the appropriate resolve result
+/// Handle external config and return the appropriate resolve result.
+/// `default_type` is used when no explicit type prefix is specified in Basic config
+/// or when Advanced config has no type field (e.g. `CommonJs` for Node.js platform).
 fn handle_external_config(
     external_config: &ExternalConfig,
     module_name: &str,
+    default_type: ExternalType,
 ) -> Vc<ResolveResultOption> {
     let (external_name, external_type) = match external_config {
         ExternalConfig::Basic(name) => {
@@ -254,8 +257,7 @@ fn handle_external_config(
                 };
                 (external_name.into(), ExternalType::Script)
             } else {
-                // Default to Global
-                (name.clone(), ExternalType::Global)
+                (name.clone(), default_type)
             }
         }
         ExternalConfig::Advanced(advanced) => {
@@ -282,7 +284,7 @@ fn handle_external_config(
                     ));
                 }
                 Some(crate::config::ExternalType::Global) => ExternalType::Global,
-                None => ExternalType::Global,
+                None => default_type,
             };
             (advanced.root.clone(), external_type)
         }
@@ -312,6 +314,7 @@ pub struct ExternalsPlugin {
     root: FileSystemPath,
     externals_config: ResolvedVc<ExternalsConfig>,
     processed_config: ResolvedVc<ProcessedExternalsConfig>,
+    platform: Platform,
 }
 
 #[turbo_tasks::value_impl]
@@ -321,6 +324,7 @@ impl ExternalsPlugin {
         project_path: FileSystemPath,
         root: FileSystemPath,
         externals_config: ResolvedVc<ExternalsConfig>,
+        platform: Platform,
     ) -> Result<Vc<Self>> {
         let processed_config = pre_process_externals_config(*externals_config)
             .to_resolved()
@@ -330,6 +334,7 @@ impl ExternalsPlugin {
             root,
             externals_config,
             processed_config,
+            platform,
         }
         .cell())
     }
@@ -345,17 +350,22 @@ impl BeforeResolvePlugin for ExternalsPlugin {
             return Ok(BeforeResolvePluginCondition::Never.cell());
         }
 
-        // Extract all possible module names from external keys
+        // Extract all possible module names from external keys.
         // For "react" -> ["react"]
+        // For "lodash/get" -> ["lodash/get", "lodash"]
         // For "@ant/bigfish/antd" -> ["@ant/bigfish/antd", "@ant/bigfish"]
         let mut modules = Vec::new();
         for key in externals_config.keys() {
             modules.push(key.clone());
-            // Extract scoped package name if key contains additional path
-            if key.starts_with('@')
-                && let (Some(pos), Some(first_pos)) = (key.rfind('/'), key.find('/'))
-                && pos > first_pos
-            {
+            if key.starts_with('@') {
+                // Scoped package: "@scope/pkg/sub" -> also add "@scope/pkg"
+                if let (Some(pos), Some(first_pos)) = (key.rfind('/'), key.find('/'))
+                    && pos > first_pos
+                {
+                    modules.push(key[..pos].into());
+                }
+            } else if let Some(pos) = key.find('/') {
+                // Non-scoped package with subpath: "lodash/get" -> also add "lodash"
                 modules.push(key[..pos].into());
             }
         }
@@ -375,6 +385,12 @@ impl BeforeResolvePlugin for ExternalsPlugin {
         let externals_config = self.externals_config.await?;
         let request_value = request.await?;
 
+        // Node platform defaults to CommonJs externals (require()), browser defaults to Global
+        let default_type = match self.platform {
+            Platform::Node => ExternalType::CommonJs,
+            Platform::Browser => ExternalType::Global,
+        };
+
         let (module_name, subpath_str) = match &*request_value {
             Request::Module {
                 module: Pattern::Constant(name),
@@ -392,7 +408,7 @@ impl BeforeResolvePlugin for ExternalsPlugin {
         if !subpath_str.is_empty() {
             let full_path = format!("{}{}", module_name, subpath_str);
             if let Some(external_config) = externals_config.get(full_path.as_str()) {
-                return Ok(handle_external_config(external_config, &full_path));
+                return Ok(handle_external_config(external_config, &full_path, default_type));
             }
             // If full path not in externals, skip to let after_resolve or normal resolution handle it
             return Ok(ResolveResultOption::none());
@@ -400,7 +416,7 @@ impl BeforeResolvePlugin for ExternalsPlugin {
 
         // Try module name only (e.g., "react")
         if let Some(external_config) = externals_config.get(module_name) {
-            return Ok(handle_external_config(external_config, module_name));
+            return Ok(handle_external_config(external_config, module_name, default_type));
         }
 
         Ok(ResolveResultOption::none())

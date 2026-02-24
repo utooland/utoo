@@ -178,9 +178,12 @@ impl LibraryEndpoint {
     pub async fn library_entry_modules(self: Vc<Self>) -> Result<Vc<Modules>> {
         let this = self.await?;
 
-        // Handle import path: convert absolute path to relative, keep relative path as-is
+        // Handle import path: convert absolute path to relative, keep relative path as-is.
+        // Use the absolute filesystem project_path from Project (not FileSystemPath.path
+        // which is relative to the DiskFileSystem root).
+        let project_data = self.project().await?;
         let relative_import =
-            convert_to_project_relative(&this.import, &self.project().project_path().await?.path)?;
+            convert_to_project_relative(&this.import, &project_data.project_path)?;
 
         let entry_request = Request::relative(
             relative_import.into(),

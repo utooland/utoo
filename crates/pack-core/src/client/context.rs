@@ -15,7 +15,7 @@ use turbopack::module_options::{
 use turbopack_browser::{BrowserChunkingContext, CurrentChunkMethod};
 use turbopack_core::{
     chunk::{
-        ChunkingConfig, ChunkingContext, MangleType, MinifyType, SourceMapSourceType,
+        ChunkingContext, MangleType, MinifyType, SourceMapSourceType,
         SourceMapsType, UnusedReferences, chunk_id_strategy::ModuleIdStrategy,
     },
     compile_time_info::{
@@ -38,8 +38,9 @@ use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 use crate::{
     client::runtime_entry::RuntimeEntries,
     config::{
-        Config, ProviderConfig, ProviderConfigValue, ReactRuntime,
+        Config, Platform, ProviderConfig, ProviderConfigValue, ReactRuntime,
         default_max_chunk_count_per_group, default_max_merge_chunk_size, default_min_chunk_size,
+        resolve_split_chunks_config,
     },
     embed_js::embed_file_path,
     import_map::{
@@ -74,7 +75,7 @@ use super::{
     transforms::get_client_transforms_rules,
 };
 
-fn defines(define_env: &FxIndexMap<RcStr, RcStr>) -> CompileTimeDefines {
+pub(crate) fn defines(define_env: &FxIndexMap<RcStr, RcStr>) -> CompileTimeDefines {
     let mut defines = FxIndexMap::default();
 
     for (k, v) in define_env {
@@ -97,12 +98,12 @@ fn defines(define_env: &FxIndexMap<RcStr, RcStr>) -> CompileTimeDefines {
 }
 
 #[turbo_tasks::function]
-async fn client_defines(define_env: Vc<EnvMap>) -> Result<Vc<CompileTimeDefines>> {
+pub(crate) async fn compile_time_defines(define_env: Vc<EnvMap>) -> Result<Vc<CompileTimeDefines>> {
     Ok(defines(&*define_env.await?).cell())
 }
 
 #[turbo_tasks::function]
-async fn client_free_vars(
+pub(crate) async fn free_var_references(
     define_env: Vc<EnvMap>,
     provider_config: Vc<ProviderConfig>,
 ) -> Result<Vc<FreeVarReferences>> {
@@ -177,9 +178,9 @@ pub async fn get_client_compile_time_info(
             .to_resolved()
             .await?,
     )
-    .defines(client_defines(define_env).to_resolved().await?)
+    .defines(compile_time_defines(define_env).to_resolved().await?)
     .free_var_references(
-        client_free_vars(define_env, provider_config)
+        free_var_references(define_env, provider_config)
             .to_resolved()
             .await?,
     )
@@ -478,22 +479,27 @@ pub async fn get_client_resolve_options_context(
 
     let external_config = *config.externals_config().to_resolved().await?;
 
+    let platform = config.await?.platform();
     let externals_plugin = ExternalsPlugin::new(
         project_path.clone(),
         project_path.root().owned().await?,
         external_config,
+        platform,
     )
     .to_resolved()
     .await?;
-
-    let custom_conditions = vec![mode.await?.condition().into()];
+    let mut custom_conditions = vec![mode.await?.condition().into()];
+    if platform == Platform::Node {
+        custom_conditions.push(rcstr!("node"));
+    }
     let resolve_options_context = ResolveOptionsContext {
         enable_node_modules: Some(project_path.root().owned().await?),
+        enable_node_externals: platform == Platform::Node,
         custom_conditions,
         import_map: Some(client_import_map),
         fallback_import_map: Some(client_fallback_import_map),
         resolved_map: Some(client_resolved_map),
-        browser: true,
+        browser: platform == Platform::Browser,
         module: true,
         before_resolve_plugins: vec![ResolvedVc::upcast(externals_plugin)],
         after_resolve_plugins: vec![ResolvedVc::upcast(externals_plugin)],
@@ -629,25 +635,8 @@ pub async fn get_client_chunking_context(
     } else {
         let output = config.output().await?;
         let split_chunks = &config.optimization().await?.split_chunks;
-
-        let (ecmascript_chunking_config, css_chunking_config) = (
-            split_chunks.as_ref().and_then(|sc| sc.get("js")).map_or(
-                ChunkingConfig {
-                    min_chunk_size: default_min_chunk_size(),
-                    max_chunk_count_per_group: default_max_chunk_count_per_group(),
-                    max_merge_chunk_size: default_max_merge_chunk_size(),
-                    ..Default::default()
-                },
-                Into::into,
-            ),
-            split_chunks.as_ref().and_then(|sc| sc.get("css")).map_or(
-                ChunkingConfig {
-                    max_merge_chunk_size: 100_000,
-                    ..Default::default()
-                },
-                Into::into,
-            ),
-        );
+        let (ecmascript_chunking_config, css_chunking_config) =
+            resolve_split_chunks_config(split_chunks);
 
         if let Some(filename) = &output.filename {
             builder = builder.filename(filename.clone());

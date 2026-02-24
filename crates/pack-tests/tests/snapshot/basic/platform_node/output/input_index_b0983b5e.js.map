@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 3, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/platform_node/input/index.js"],"sourcesContent":["const value = 42;\n\nfunction getMessage() {\n  return 'Hello from Node.js platform';\n}\n\nconsole.log(getMessage(), value);\n\nmodule.exports = { value, getMessage };\n"],"names":["value","getMessage","console","log","module","exports"],"mappings":"AAAA,MAAMA,QAAQ;AAEd,SAASC;IACP,OAAO;AACT;AAEAC,QAAQC,GAAG,CAACF,cAAcD;AAE1BI,OAAOC,OAAO,GAAG;IAAEL;IAAOC;AAAW"}}]
+}

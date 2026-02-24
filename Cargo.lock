@@ -4426,6 +4426,7 @@ dependencies = [
  "turbopack-ecmascript-runtime",
  "turbopack-image",
  "turbopack-node",
+ "turbopack-nodejs",
  "turbopack-resolve",
  "turbopack-static",
  "urlencoding",

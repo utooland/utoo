@@ -125,6 +125,7 @@ export interface ConfigComplete {
     entryRootExport?: string;
   };
   target?: string;
+  platform?: 'browser' | 'node';
   sourceMaps?: boolean;
   define?: Record<string, string>;
   provider?: ProviderConfig;

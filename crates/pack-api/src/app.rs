@@ -3,6 +3,7 @@ use pack_core::client::context::{
     get_client_module_options_context, get_client_resolve_options_context,
     get_client_runtime_entries,
 };
+use pack_core::config::Platform;
 use pack_core::util::convert_to_project_relative;
 use qstring::QString;
 use tracing::Instrument;
@@ -116,9 +117,12 @@ impl AppEntrypoint {
     ) -> Result<Vc<Modules>> {
         let this = self.await?;
 
-        // Handle import path: convert absolute path to relative, keep relative path as-is
+        // Handle import path: convert absolute path to relative, keep relative path as-is.
+        // Use the absolute filesystem project_path from Project (not FileSystemPath.path
+        // which is relative to the DiskFileSystem root).
+        let project_data = self.project().await?;
         let relative_import =
-            convert_to_project_relative(&this.import, &self.project().project_path().await?.path)?;
+            convert_to_project_relative(&this.import, &project_data.project_path)?;
 
         let entry_request = Request::relative(
             relative_import.into(),
@@ -224,16 +228,87 @@ impl AppEntrypoint {
     }
 
     #[turbo_tasks::function]
+    async fn node_chunk_group_for_entry(
+        self: Vc<Self>,
+        asset_context: Vc<Box<dyn AssetContext>>,
+        runtime_entries: Vc<EvaluatableAssets>,
+    ) -> Result<Vc<OutputAssets>> {
+        use turbopack_nodejs::NodeJsChunkingContext;
+
+        async move {
+            let this = self.await?;
+            let project = self.project();
+            let app_chunking_context = project.client_chunking_context();
+
+            let evaluatable_assets =
+                self.entry_evaluatable_assets(asset_context, runtime_entries);
+
+            if evaluatable_assets.await?.is_empty() {
+                bail!(
+                    "No evaluatable assets found for entry '{}'. The entry module may have \
+                     failed to resolve. Check that the entry import path is correct and \
+                     accessible from the project root.",
+                    this.name,
+                );
+            }
+
+            let module_graph = self.module_graph_for_entry(asset_context, runtime_entries);
+
+            let entry_path = project
+                .dist_root()
+                .owned()
+                .await?
+                .join(this.name.as_str())?
+                .with_extension("js");
+
+            let Some(nodejs_chunking_context) =
+                ResolvedVc::try_downcast_type::<NodeJsChunkingContext>(
+                    app_chunking_context.to_resolved().await?,
+                )
+            else {
+                bail!(
+                    "platform: 'node' requires NodeJsChunkingContext, but got a different \
+                     chunking context. Check that the project's platform config is set to 'node'."
+                );
+            };
+
+            let entry_chunk_group_result = nodejs_chunking_context
+                .entry_chunk_group(
+                    entry_path,
+                    evaluatable_assets,
+                    module_graph,
+                    Vc::cell(vec![]),
+                    Vc::cell(vec![]),
+                    AvailabilityInfo::root(),
+                )
+                .await?;
+
+            Ok(Vc::cell(vec![entry_chunk_group_result.asset]))
+        }
+        .instrument(tracing::trace_span!("app node chunk rendering"))
+        .await
+    }
+
+    #[turbo_tasks::function]
     pub async fn output_assets_for_entry(
         self: Vc<Self>,
         asset_context: Vc<Box<dyn AssetContext>>,
         runtime_entries: Vc<EvaluatableAssets>,
     ) -> Result<Vc<OutputAssets>> {
-        let chunk_group_assets = *self
-            .chunk_group_for_entry(asset_context, runtime_entries)
-            .await?
-            .assets;
-        Ok(chunk_group_assets)
+        let project = self.project();
+        let platform = project.config().await?.platform();
+        match platform {
+            Platform::Browser => {
+                let chunk_group_assets = *self
+                    .chunk_group_for_entry(asset_context, runtime_entries)
+                    .await?
+                    .assets;
+                Ok(chunk_group_assets)
+            }
+            Platform::Node => {
+                Ok(self.node_chunk_group_for_entry(asset_context, runtime_entries))
+            }
+        }
     }
 }
 

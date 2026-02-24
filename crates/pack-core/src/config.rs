@@ -9,7 +9,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value as JsonValue;
 use turbo_esregex::EsRegex;
 use turbo_rcstr::{RcStr, rcstr};
-use turbo_tasks::{FxIndexMap, OperationValue, ResolvedVc, Vc};
+use turbo_tasks::{FxIndexMap, OperationValue, ResolvedVc, TaskInput, Vc};
 use turbo_tasks_env::EnvMap;
 use turbo_tasks_fs::{FileJsonContent, FileSystemPath};
 use turbopack::module_options::{
@@ -104,6 +104,15 @@ pub struct ProviderConfig(
     #[bincode(with = "turbo_bincode::indexmap")] FxIndexMap<RcStr, ProviderConfigValue>,
 );
 
+#[turbo_tasks::value(shared)]
+#[derive(Default, Debug, Copy, Clone, Hash, TaskInput, Deserialize, OperationValue)]
+#[serde(rename_all = "lowercase")]
+pub enum Platform {
+    #[default]
+    Browser,
+    Node,
+}
+
 #[turbo_tasks::value(serialization = "custom", eq = "manual")]
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, OperationValue, Encode, Decode)]
 #[serde(rename_all = "camelCase")]
@@ -129,12 +138,19 @@ pub struct Config {
     persistent_caching: Option<bool>,
     cache_handler: Option<RcStr>,
     node_polyfill: Option<bool>,
+    platform: Option<Platform>,
     dev_server: Option<DevServer>,
     #[serde(default)]
     experimental: ExperimentalConfig,
     #[cfg(feature = "test")]
     #[serde(rename = "runtimeType")]
     runtime_type: Option<RcStr>,
+}
+
+impl Config {
+    pub fn platform(&self) -> Platform {
+        self.platform.unwrap_or_default()
+    }
 }
 
 #[turbo_tasks::value]
@@ -798,6 +814,37 @@ pub fn default_max_merge_chunk_size() -> usize {
     200_000
 }
 
+/// Resolve the split chunks configuration into JS and CSS `ChunkingConfig` pairs.
+/// Used by both browser and Node.js chunking context builders.
+pub fn resolve_split_chunks_config(
+    split_chunks: &Option<FxIndexMap<RcStr, SplitChunkConfig>>,
+) -> (ChunkingConfig, ChunkingConfig) {
+    (
+        split_chunks
+            .as_ref()
+            .and_then(|sc| sc.get("js"))
+            .map_or(
+                ChunkingConfig {
+                    min_chunk_size: default_min_chunk_size(),
+                    max_chunk_count_per_group: default_max_chunk_count_per_group(),
+                    max_merge_chunk_size: default_max_merge_chunk_size(),
+                    ..Default::default()
+                },
+                Into::into,
+            ),
+        split_chunks
+            .as_ref()
+            .and_then(|sc| sc.get("css"))
+            .map_or(
+                ChunkingConfig {
+                    max_merge_chunk_size: 100_000,
+                    ..Default::default()
+                },
+                Into::into,
+            ),
+    )
+}
+
 #[turbo_tasks::value(transparent)]
 pub struct SplitChunksConfig(
     #[bincode(with = "turbo_bincode::indexmap")] FxIndexMap<RcStr, SplitChunkConfig>,
@@ -1217,7 +1264,8 @@ impl Config {
 
     #[turbo_tasks::function]
     pub fn node_polyfill(&self) -> Vc<bool> {
-        Vc::cell(self.node_polyfill.unwrap_or(false))
+        // Node polyfills are unnecessary when targeting Node.js directly
+        Vc::cell(self.platform() != Platform::Node && self.node_polyfill.unwrap_or(false))
     }
 
     #[turbo_tasks::function]
@@ -1654,5 +1702,39 @@ mod tests {
         } else {
             panic!("Expected ExternalConfig::Advanced for antd");
         }
+    }
+
+    #[test]
+    fn test_platform_deserialization() {
+        // Default: no platform field → Browser
+        let json = serde_json::json!({
+            "entry": [{"import": "./index.js"}]
+        });
+        let config: Config = serde_json::from_value(json).unwrap();
+        assert_eq!(config.platform(), Platform::Browser);
+
+        // Explicit browser
+        let json = serde_json::json!({
+            "entry": [{"import": "./index.js"}],
+            "platform": "browser"
+        });
+        let config: Config = serde_json::from_value(json).unwrap();
+        assert_eq!(config.platform(), Platform::Browser);
+
+        // Explicit node
+        let json = serde_json::json!({
+            "entry": [{"import": "./index.js"}],
+            "platform": "node"
+        });
+        let config: Config = serde_json::from_value(json).unwrap();
+        assert_eq!(config.platform(), Platform::Node);
+
+        // Null platform → Browser (default)
+        let json = serde_json::json!({
+            "entry": [{"import": "./index.js"}],
+            "platform": null
+        });
+        let config: Config = serde_json::from_value(json).unwrap();
+        assert_eq!(config.platform(), Platform::Browser);
     }
 }
