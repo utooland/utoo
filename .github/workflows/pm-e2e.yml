@@ -4,14 +4,14 @@ on:
   push:
     branches: ["next", "e2e-pm"]
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
 
 jobs:
   e2e:
-    if: (github.event_name == 'push' && !contains(github.event.head_commit.message, '(pack)')) || (github.event_name == 'pull_request' && !contains(github.event.pull_request.title, '(pack)'))
+    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) || (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
     strategy:
       fail-fast: false
       matrix:
@@ -177,3 +177,19 @@ jobs:
           name: e2e-artifacts-${{ matrix.settings.target }}
           path: ${{ runner.temp }}/utoo-*
           if-no-files-found: ignore
+
+  success:
+    name: utoopm-e2e-success
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - e2e
+    steps:
+      - name: Check success
+        run: |
+          if [ "${{ needs.e2e.result }}" == "failure" ] || [ "${{ needs.e2e.result }}" == "cancelled" ]; then
+            echo "Tests failed or were cancelled"
+            exit 1
+          else
+            echo "Tests passed or were skipped"
+          fi

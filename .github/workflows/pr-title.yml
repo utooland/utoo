@@ -1,0 +1,29 @@
+name: PR Title Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  check-title:
+    name: Check PR Title for Scope
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify PR Title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          echo "Checking PR Title: \"$TITLE\""
+          # Regex matches: type(scope): subject or type(scope)!: subject
+          if [[ ! "$TITLE" =~ ^[a-zA-Z]+\([^)]+\)!?:\ .*$ ]]; then
+            echo "::error::❌ ERROR: Pull Request title must contain a scope."
+            echo "👉 Format: <type>(<scope>): <subject>"
+            echo ""
+            echo "✅ Valid examples:"
+            echo "   feat(pm): add new feature"
+            echo "   fix(pack): resolve crash"
+            echo "   chore(wasm): update deps"
+            exit 1
+          fi
+          
+          echo "✅ PR title is valid!"
