@@ -42,6 +42,11 @@ impl Config {
         Ok(self.values.get(key).cloned())
     }
 
+    pub fn delete(&mut self, key: &str, global: bool) -> ConfigResult<()> {
+        self.values.remove(key);
+        self.save(global)
+    }
+
     pub fn get_array(&self, key: &str) -> Option<&Vec<String>> {
         self.arrays.get(key)
     }
@@ -183,5 +188,70 @@ impl ConfigValueParser<bool> for ConfigValue<bool> {
 impl ConfigValueParser<usize> for ConfigValue<usize> {
     fn parse_config_value(&self, value: &str) -> usize {
         value.parse().unwrap_or(self.default)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// Serialize tests that override HOME to avoid races.
+    static HOME_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Run an async closure with HOME pointed at a temp dir, so
+    /// Config::load/save(global=true) never touches the real config.
+    fn with_temp_home(f: impl FnOnce()) {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let prev = std::env::var("HOME").ok();
+        unsafe { std::env::set_var("HOME", dir.path()) };
+
+        f();
+
+        match prev {
+            Some(h) => unsafe { std::env::set_var("HOME", h) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+    }
+
+    #[test]
+    fn test_delete_removes_key_and_persists() {
+        with_temp_home(|| {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                let mut config = Config::load(true).await.unwrap();
+                config.set("foo", "bar".into(), true).unwrap();
+                config.set("baz", "qux".into(), true).unwrap();
+
+                // call the actual delete method
+                config.delete("foo", true).unwrap();
+
+                // in-memory: foo gone, baz kept
+                assert_eq!(config.get("foo").unwrap(), None);
+                assert_eq!(config.get("baz").unwrap(), Some("qux".into()));
+
+                // reload from disk: still gone
+                let reloaded = Config::load(true).await.unwrap();
+                assert_eq!(reloaded.get("foo").unwrap(), None);
+                assert_eq!(reloaded.get("baz").unwrap(), Some("qux".into()));
+            });
+        });
+    }
+
+    #[test]
+    fn test_delete_nonexistent_key_is_noop() {
+        with_temp_home(|| {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                let mut config = Config::load(true).await.unwrap();
+                config.set("keep", "yes".into(), true).unwrap();
+
+                // deleting a key that doesn't exist should not error
+                config.delete("nope", true).unwrap();
+
+                assert_eq!(config.get("keep").unwrap(), Some("yes".into()));
+            });
+        });
     }
 }
