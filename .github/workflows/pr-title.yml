@@ -15,7 +15,8 @@ jobs:
         run: |
           echo "Checking PR Title: \"$TITLE\""
           # Regex matches: type(scope): subject or type(scope)!: subject
-          if [[ ! "$TITLE" =~ ^[a-zA-Z]+\([^)]+\)!?:\ .*$ ]]; then
+          regex="^[a-zA-Z]+\([^)]+\)!?:\ .*$"
+          if [[ ! "$TITLE" =~ $regex ]]; then
             echo "::error::❌ ERROR: Pull Request title must contain a scope."
             echo "👉 Format: <type>(<scope>): <subject>"
             echo ""
