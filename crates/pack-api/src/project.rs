@@ -934,7 +934,7 @@ impl Project {
     pub async fn client_chunking_context(self: Vc<Self>) -> Result<Vc<Box<dyn ChunkingContext>>> {
         Ok(get_client_chunking_context(ClientChunkingContextOptions {
             mode: self.mode(),
-            root_path: self.project_root().owned().await?,
+            root_path: self.project_path().owned().await?,
             client_root: self.client_root().owned().await?,
             client_root_to_root_path: rcstr!("/ROOT"),
             public_path: self.config().computed_public_path(),

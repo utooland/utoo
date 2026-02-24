@@ -21,17 +21,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: nightly-2026-02-05
           targets: wasm32-unknown-unknown
           components: rust-src
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: utooweb-ci
+      # - name: Cache cargo
+      #   uses: Swatinem/rust-cache@v2
+      #   with:
+      #     shared-key: utooweb-ci
       - name: Install dependencies
         run: |
           npm install

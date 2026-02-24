@@ -42,10 +42,10 @@ jobs:
         with:
           toolchain: nightly-2026-02-05
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: pm-bench-${{ matrix.os }}
+      # - name: Cache cargo
+      #   uses: Swatinem/rust-cache@v2
+      #   with:
+      #     shared-key: pm-bench-${{ matrix.os }}
 
       - name: Build utoo-pm
         run: cargo build --release --bin utoo -p utoo-pm

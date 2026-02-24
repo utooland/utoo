@@ -1,6 +1,6 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["runtime_app_dev_runtime_input_index_fe72225c.js"],"runtimeModuleIds":[41]}
+    {"otherChunks":["input_index_fe72225c.js"],"runtimeModuleIds":[41]}
 ]);
 (() => {
 if (!Array.isArray(globalThis["TURBOPACK"])) {

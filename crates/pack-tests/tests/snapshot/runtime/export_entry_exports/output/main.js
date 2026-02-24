@@ -1,6 +1,6 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
+(globalThis["utooChunk_export_entry_exports"] || (globalThis["utooChunk_export_entry_exports"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["runtime_export_entry_exports_input_index_ts_6bcb050d.js"],"runtimeModuleIds":[76]}
+    {"otherChunks":["input_index_ts_6bcb050d.js"],"runtimeModuleIds":[76]}
 ]);
 (function(root, factory) {
     if (typeof exports === 'object' && typeof module === 'object')
@@ -12,7 +12,7 @@
 }(typeof self !== 'undefined' ? self : this, function() {
 
 const __chunk__ = (() => {
-if (!Array.isArray(globalThis["TURBOPACK"])) {
+if (!Array.isArray(globalThis["utooChunk_export_entry_exports"])) {
     return;
 }
 
@@ -1087,8 +1087,8 @@ let BACKEND;
         return fetch(getChunkRelativeUrl(wasmChunkPath));
     }
 })();
-const chunksToRegister = globalThis["TURBOPACK"];
-globalThis["TURBOPACK"] = { push: registerChunk };
+const chunksToRegister = globalThis["utooChunk_export_entry_exports"];
+globalThis["utooChunk_export_entry_exports"] = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
 
 try {
