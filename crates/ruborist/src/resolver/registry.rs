@@ -25,7 +25,12 @@ pub enum ResolveError<E> {
     /// Resolved version not found in manifest
     ManifestNotFound { name: String, version: String },
     /// Git resolution failed
-    Git { url: String, message: String },
+    Git {
+        url: String,
+        source: Box<dyn std::error::Error + Send + Sync + 'static>,
+    },
+    /// Dependency type not yet supported (e.g. local file path, HTTP tarball)
+    Unsupported { spec: String, reason: &'static str },
 }
 
 impl<E: std::fmt::Display> std::fmt::Display for ResolveError<E> {
@@ -37,8 +42,11 @@ impl<E: std::fmt::Display> std::fmt::Display for ResolveError<E> {
             ResolveError::ManifestNotFound { name, version } => {
                 write!(f, "Manifest not found for {}@{}", name, version)
             }
-            ResolveError::Git { url, message } => {
-                write!(f, "Git resolution failed for '{}': {}", url, message)
+            ResolveError::Git { url, source } => {
+                write!(f, "Git resolution failed for {}: {}", url, source)
+            }
+            ResolveError::Unsupported { spec, reason } => {
+                write!(f, "Unsupported dependency '{spec}': {reason}")
             }
         }
     }
@@ -51,7 +59,8 @@ impl<E: std::error::Error + 'static> std::error::Error for ResolveError<E> {
             ResolveError::Version(_)
             | ResolveError::NoVersions(_)
             | ResolveError::ManifestNotFound { .. }
-            | ResolveError::Git { .. } => None,
+            | ResolveError::Unsupported { .. } => None,
+            ResolveError::Git { source, .. } => Some(source.as_ref()),
         }
     }
 }
@@ -126,11 +135,11 @@ pub fn resolve_from_manifest<E: std::error::Error + 'static>(
     })
 }
 
-/// Resolve a dependency with edge type awareness.
+/// Resolve a registry dependency with edge type awareness.
 ///
 /// For optional dependencies, returns `Ok(None)` on resolution failure
 /// instead of propagating the error.
-pub async fn resolve_dependency<R: RegistryClient>(
+pub async fn resolve_registry_dep<R: RegistryClient>(
     registry: &R,
     name: &str,
     spec: &str,
@@ -220,7 +229,7 @@ mod tests {
         let registry = MockRegistryClient::new();
 
         let result =
-            resolve_dependency(&registry, "nonexistent", "^1.0.0", &EdgeType::Optional).await;
+            resolve_registry_dep(&registry, "nonexistent", "^1.0.0", &EdgeType::Optional).await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }
@@ -229,7 +238,8 @@ mod tests {
     async fn test_resolve_prod_dependency_failure() {
         let registry = MockRegistryClient::new();
 
-        let result = resolve_dependency(&registry, "nonexistent", "^1.0.0", &EdgeType::Prod).await;
+        let result =
+            resolve_registry_dep(&registry, "nonexistent", "^1.0.0", &EdgeType::Prod).await;
         assert!(result.is_err());
     }
 }

@@ -8,6 +8,7 @@ license     = "MIT"
 [dependencies]
 anyhow       = { workspace = true }
 deno_semver  = "0.7"
+dirs         = { workspace = true }
 futures      = "0.3"
 parking_lot  = { workspace = true }
 petgraph     = "0.6"
@@ -20,9 +21,24 @@ tracing      = { workspace = true }
 # HTTP client - works on both native and WASM
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 
+# Git clone (optional, native-only)
+gix = { workspace = true, features = [
+  "blocking-http-transport-reqwest-rust-tls",
+  "blocking-network-client",
+], optional = true }
+tempfile = { workspace = true, optional = true }
+
+[features]
+default    = []
+native-git = ["gix", "tempfile"]
+
 # Async runtime (works on both native and WASM with forked tokio)
 [dependencies.tokio]
 workspace = true
+
+# Native-only dependencies (not compiled for WASM)
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+libc = "0.2"
 
 # WASM-only dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]

@@ -13,4 +13,4 @@ trace-*.json.gz
 *.heapprofile
 .trace/
 *.tsbuildinfo
-
+.claude/settings.local.json

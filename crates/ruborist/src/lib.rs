@@ -81,9 +81,16 @@ pub mod spec {
     pub use crate::model::spec::{PackageSpec, Protocol, SpecStr};
 }
 
-/// Git clone and resolution types.
+/// Git clone and resolution helpers.
 pub mod git {
-    pub use crate::traits::git::GitCloneResult;
+    pub use crate::model::git::GitCloneResult;
+
+    /// Ensure a git repository is cloned and cached, returning its metadata.
+    ///
+    /// Intended for use by `utoo-pm`'s downloader when installing git
+    /// dependencies. Only available when the `native-git` feature is enabled.
+    #[cfg(feature = "native-git")]
+    pub use crate::resolver::git::ensure_repo_cached;
 }
 
 /// Utility functions.
