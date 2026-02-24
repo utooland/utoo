@@ -7,15 +7,20 @@ on:
 jobs:
   check-title:
     name: Check PR Title for Scope
+    # Requires: gh (GitHub CLI, pre-installed on ubuntu-latest runners)
     runs-on: ubuntu-latest
     steps:
       - name: Verify PR Title
         env:
-          TITLE: ${{ github.event.pull_request.title }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          echo "Checking PR Title: \"$TITLE\""
+          # Fetch PR title dynamically so the check uses the latest title
+          PR_TITLE=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json title --jq .title)
+          echo "Checking PR Title: \"$PR_TITLE\""
           # Regex matches: type(scope): subject or type(scope)!: subject
-          if [[ ! "$TITLE" =~ ^[a-zA-Z]+\([^)]+\)!?:\ .*$ ]]; then
+          pattern='^[a-zA-Z]+\([^)]+\)!?: .*$'
+          if [[ ! "$PR_TITLE" =~ $pattern ]]; then
             echo "::error::❌ ERROR: Pull Request title must contain a scope."
             echo "👉 Format: <type>(<scope>): <subject>"
             echo ""
