@@ -192,26 +192,10 @@ pub async fn run_script_with_args(script_path: &str, script_args: &[String]) -> 
     let mut runtime = JsRuntime::new(deno_core::RuntimeOptions {
         module_loader: Some(std::rc::Rc::new(UtooModuleLoader)),
         extensions: vec![utoo_rt_ext::init()],
-        #[cfg(feature = "snapshot")]
-        startup_snapshot: Some(crate::UTOO_SNAPSHOT),
         ..Default::default()
     });
 
-    // Post-snapshot: restore Rust-side state that doesn't survive V8 snapshot
-    // - setNextTickCallback: stored in deno_core ContextState, not V8 heap
-    // - process.argv: baked in as snapshot-time value, needs runtime path
-    #[cfg(feature = "snapshot")]
-    runtime.execute_script(
-        "<utoo:reinit>",
-        format!(
-            "Deno.core.setNextTickCallback(globalThis.__utoo_nextTickDrainer);\
-             globalThis.process.argv = {argv_json};\
-             globalThis.process.execPath = Deno.core.ops.op_exec_path();",
-        ),
-    )?;
-
-    // Non-snapshot mode: set process.argv and execPath (bootstrap defaults are stale)
-    #[cfg(not(feature = "snapshot"))]
+    // Set process.argv and execPath (bootstrap defaults are stale)
     runtime.execute_script(
         "<utoo:init-argv>",
         format!(

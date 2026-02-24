@@ -317,7 +317,6 @@ pub fn op_spawn_kill(
     // On Unix, send signal via libc. Default to SIGTERM.
     #[cfg(unix)]
     {
-        use std::os::unix::process::CommandExt;
         let _ = signal; // We use the signal parameter
         if let Some(pid) = child.id() {
             let sig = if signal == 0 { 15 } else { signal }; // SIGTERM = 15
@@ -423,6 +422,7 @@ pub fn op_fork_spawn(
     #[serde] env: Vec<(String, String)>,
 ) -> Result<ForkSpawnResult, JsErrorBox> {
     use std::os::unix::io::FromRawFd;
+    #[allow(unused_imports)] // used by pre_exec() inside unsafe block
     use std::os::unix::process::CommandExt;
 
     // Create a Unix socketpair for IPC

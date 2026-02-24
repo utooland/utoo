@@ -10249,14 +10249,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "utoo-runtime-snapshot"
-version = "0.1.0"
-dependencies = [
- "deno_core",
- "utoo-runtime",
-]
-
-[[package]]
 name = "utoo-wasm"
 version = "0.1.0"
 dependencies = [

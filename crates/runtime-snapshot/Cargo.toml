@@ -1,8 +1,0 @@
-[package]
-name = "utoo-runtime-snapshot"
-version = "0.1.0"
-edition.workspace = true
-
-[dependencies]
-utoo-runtime = { path = "../runtime", default-features = false }
-deno_core = { workspace = true }

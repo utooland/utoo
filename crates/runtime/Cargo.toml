@@ -40,9 +40,5 @@ swc_core    = { workspace = true, features = [
   "ecma_visit",
 ] }
 
-[features]
-default = ["snapshot"]
-snapshot = []
-
 [dev-dependencies]
 tempfile = "3"
