@@ -3,8 +3,10 @@ name: CI Success Aggregator
 on:
   workflow_run:
     workflows: 
-      - "utoopack-ci"
       - "utoopm-ci"
+      - "utoopm-e2e"
+      - "utoopack-ci"
+      - "utoopack-integration"
       - "utooweb-ci"
     types:
       - completed
