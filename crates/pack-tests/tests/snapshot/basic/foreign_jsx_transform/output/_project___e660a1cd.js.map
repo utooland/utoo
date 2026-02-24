@@ -1,0 +1,8 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/node_modules/react/index.js"],"sourcesContent":["export function jsx() {\n  return 'purposefully empty stub for react/index.js'\n}\n"],"names":["jsx"],"mappings":"AAAO,SAASA;IACd,OAAO;AACT","ignoreList":[0]}},
+    {"offset": {"line": 12, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/foreign_jsx_transform/node_modules/foreign-jsx-transform/index.js"],"sourcesContent":["/** @jsx jsx */\nvar a = 1;\nexport default a;"],"names":["a"],"mappings":"AAAA,aAAa,GACb,IAAIA,IAAI;qCACOA","ignoreList":[0]}},
+    {"offset": {"line": 19, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/foreign_jsx_transform/input/index.jsx"],"sourcesContent":["import React from 'react';\nimport 'foreign-jsx-transform';\n\nconst App = () => {\n    return <div></div>\n}\n\nexport default App;"],"names":["App"],"mappings":"AAAA;AACA;;;AAEA,MAAMA,MAAM;IACR,qBAAO,6DAAC;AACZ;qCAEeA"}}]
+}
