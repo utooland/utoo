@@ -184,7 +184,6 @@ export interface ConfigComplete {
         };
 
     styledComponents?: boolean | StyledComponentsConfig;
-    emotion?: boolean | EmotionConfig;
   };
   images?: {
     inlineLimit?: number;
