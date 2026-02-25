@@ -98,9 +98,9 @@ pub async fn get_decorators_transform_options(
             json["compilerOptions"]["useDefineForClassFields"].as_bool()
         })
         .await?
-        .unwrap_or(false)
+        .unwrap_or(true)
     } else {
-        false
+        true
     };
 
     let decorators_transform_options = DecoratorsOptions {
