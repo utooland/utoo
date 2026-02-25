@@ -1,20 +1,19 @@
 //! Package specification types for different dependency sources.
 //!
-//! Supports registry (semver), git, GitHub shorthand, local, and HTTP tarball specs.
+//! Supports registry (semver), git, GitHub shorthand, local, and HTTP URL specs.
 //!
 //! # Parsing
-//! Specs implement [`FromStr`] so they can be parsed with `.parse()`:
+//! Specs implement [`From<&str>`] (infallible):
 //! ```
-//! use utoo_ruborist::spec::PackageSpec;
+//! use utoo_ruborist::spec::{PackageSpec, SpecStr};
 //!
-//! let spec: PackageSpec = "lodash@^4.17.0".parse().unwrap();
+//! let spec = "lodash@^4.17.0".parse_spec();
 //! assert!(matches!(spec, PackageSpec::Registry { .. }));
 //!
-//! let spec: PackageSpec = "git+https://github.com/user/repo.git#main".parse().unwrap();
+//! let spec = PackageSpec::from("git+https://github.com/user/repo.git#main");
 //! assert!(matches!(spec, PackageSpec::Git { .. }));
 //! ```
 
-use std::fmt;
 use std::str::FromStr;
 
 // ---------------------------------------------------------------------------
@@ -62,11 +61,11 @@ const PROTOCOL_PREFIXES: &[(Protocol, &[&str])] = &[
 ];
 
 impl Protocol {
-    /// Try to detect a protocol prefix from a raw spec string.
+    /// Strip a known protocol prefix from a raw spec string.
     ///
-    /// Returns the protocol and the remaining string after the matched prefix,
+    /// Returns the protocol and the remainder after the prefix,
     /// or `None` if no known protocol prefix is found.
-    pub fn parse_prefix(spec: &str) -> Option<(Self, &str)> {
+    pub fn strip_prefix(spec: &str) -> Option<(Self, &str)> {
         for &(proto, prefixes) in PROTOCOL_PREFIXES {
             for prefix in prefixes {
                 if let Some(rest) = spec.strip_prefix(prefix) {
@@ -87,29 +86,22 @@ impl Protocol {
 }
 
 /// Error returned when a string has no recognizable protocol prefix.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, thiserror::Error)]
+#[error("unsupported protocol prefix")]
 pub struct ParseProtocolError;
-
-impl fmt::Display for ParseProtocolError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "no known protocol prefix")
-    }
-}
-
-impl std::error::Error for ParseProtocolError {}
 
 impl FromStr for Protocol {
     type Err = ParseProtocolError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse_prefix(s)
+        Self::strip_prefix(s)
             .map(|(p, _)| p)
             .ok_or(ParseProtocolError)
     }
 }
 
-impl fmt::Display for Protocol {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for Protocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::File => write!(f, "file"),
             Self::Link => write!(f, "link"),
@@ -130,16 +122,16 @@ impl fmt::Display for Protocol {
 ///
 /// # Examples
 /// ```
-/// use utoo_ruborist::spec::PackageSpec;
+/// use utoo_ruborist::spec::{PackageSpec, SpecStr};
 ///
-/// let spec: PackageSpec = "lodash@^4.17.0".parse().unwrap();
+/// let spec = "lodash@^4.17.0".parse_spec();
 /// assert!(matches!(spec, PackageSpec::Registry { .. }));
 ///
-/// let spec: PackageSpec = "file:../local-pkg".parse().unwrap();
+/// let spec = PackageSpec::from("file:../local-pkg");
 /// assert!(matches!(spec, PackageSpec::Local { .. }));
 ///
-/// let spec: PackageSpec = "https://example.com/pkg.tgz".parse().unwrap();
-/// assert!(matches!(spec, PackageSpec::HttpTarball { .. }));
+/// let spec = PackageSpec::from("https://example.com/pkg.tgz");
+/// assert!(matches!(spec, PackageSpec::Http { .. }));
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum PackageSpec {
@@ -158,8 +150,8 @@ pub enum PackageSpec {
     },
     /// Local dependency: `file:`, `link:`, `workspace:`, `portal:`
     Local { protocol: Protocol, path: String },
-    /// HTTP tarball URL: `https://example.com/pkg.tgz`
-    HttpTarball { url: String },
+    /// HTTP URL dependency: `https://example.com/pkg.tgz`
+    Http { url: String },
 }
 
 impl PackageSpec {
@@ -169,45 +161,44 @@ impl PackageSpec {
     }
 }
 
-impl FromStr for PackageSpec {
-    type Err = std::convert::Infallible;
-
-    fn from_str(raw: &str) -> Result<Self, Self::Err> {
-        match Protocol::parse_prefix(raw) {
+impl From<&str> for PackageSpec {
+    fn from(raw: &str) -> Self {
+        match Protocol::strip_prefix(raw) {
             Some((Protocol::Git, _)) => {
                 let (url, commit_ish) = split_fragment(raw);
-                Ok(PackageSpec::Git {
-                    url: url.to_string(),
-                    commit_ish: commit_ish.map(String::from),
-                })
+                Self::Git {
+                    url: url.to_owned(),
+                    commit_ish: commit_ish.map(Into::into),
+                }
             }
             Some((Protocol::GitHub, rest)) => {
                 let (path, commit_ish) = split_fragment(rest);
                 if let Some((owner, repo)) = path.split_once('/') {
-                    Ok(PackageSpec::GitHub {
-                        owner: owner.to_string(),
-                        repo: repo.to_string(),
-                        commit_ish: commit_ish.map(String::from),
-                    })
+                    Self::GitHub {
+                        owner: owner.to_owned(),
+                        repo: repo.to_owned(),
+                        commit_ish: commit_ish.map(Into::into),
+                    }
                 } else {
                     // `github:foo` without `/` — treat as Git URL so it doesn't
                     // silently fall through to the registry resolver.
-                    Ok(PackageSpec::Git {
-                        url: raw.to_string(),
-                        commit_ish: commit_ish.map(String::from),
-                    })
+                    Self::Git {
+                        url: raw.to_owned(),
+                        commit_ish: commit_ish.map(Into::into),
+                    }
                 }
             }
-            Some((proto, rest)) if proto.is_local() => Ok(PackageSpec::Local {
+            Some((
+                proto @ (Protocol::File | Protocol::Link | Protocol::Workspace | Protocol::Portal),
+                rest,
+            )) => Self::Local {
                 protocol: proto,
-                path: rest.to_string(),
-            }),
-            Some((Protocol::Http, _)) if has_tarball_extension(raw) => {
-                Ok(PackageSpec::HttpTarball {
-                    url: raw.to_string(),
-                })
-            }
-            _ => {
+                path: rest.to_owned(),
+            },
+            Some((Protocol::Http, _)) => Self::Http {
+                url: raw.to_owned(),
+            },
+            None => {
                 // Bare GitHub shorthand: user/repo or user/repo#ref
                 // npm treats "user/repo" (no protocol, not scoped) as github:user/repo
                 if !raw.starts_with('@') {
@@ -216,35 +207,62 @@ impl FromStr for PackageSpec {
                         && !owner.is_empty()
                         && !repo.is_empty()
                     {
-                        return Ok(PackageSpec::GitHub {
-                            owner: owner.to_string(),
-                            repo: repo.to_string(),
-                            commit_ish: commit_ish.map(String::from),
-                        });
+                        return Self::GitHub {
+                            owner: owner.to_owned(),
+                            repo: repo.to_owned(),
+                            commit_ish: commit_ish.map(Into::into),
+                        };
                     }
                 }
 
                 // Default: registry spec
                 let (name, version_spec) = super::util::parse_package_spec(raw);
-                Ok(PackageSpec::Registry {
-                    name: name.to_string(),
-                    version_spec: version_spec.to_string(),
-                })
+                Self::Registry {
+                    name: name.to_owned(),
+                    version_spec: version_spec.to_owned(),
+                }
             }
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Extension trait
 // ---------------------------------------------------------------------------
 
-/// Check if a URL path ends with a tarball extension (`.tgz` or `.tar.gz`),
-/// ignoring query parameters and fragments.
-fn has_tarball_extension(url: &str) -> bool {
-    let base = url.split(['?', '#']).next().unwrap_or(url);
-    base.ends_with(".tgz") || base.ends_with(".tar.gz")
+/// Extension methods for `str` to work with package specs.
+///
+/// Because [`PackageSpec`] implements [`From<&str>`] (infallible conversion),
+/// parsing always succeeds, so we can expose a direct `parse_spec()` that
+/// returns `PackageSpec` without `Result`.
+///
+/// # Examples
+/// ```
+/// use utoo_ruborist::spec::SpecStr;
+///
+/// assert!("^1.0.0".is_registry_spec());
+/// assert!(!"file:../foo".is_registry_spec());
+/// ```
+pub trait SpecStr {
+    /// Parse into a [`PackageSpec`].  Always succeeds.
+    fn parse_spec(&self) -> PackageSpec;
+    /// Returns `true` if this is a registry (semver) spec.
+    fn is_registry_spec(&self) -> bool;
 }
+
+impl SpecStr for str {
+    fn parse_spec(&self) -> PackageSpec {
+        PackageSpec::from(self)
+    }
+
+    fn is_registry_spec(&self) -> bool {
+        self.parse_spec().is_registry()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 /// Split a string at the first `#` into (base, optional fragment).
 ///
@@ -266,7 +284,7 @@ mod tests {
     use super::*;
 
     fn spec(s: &str) -> PackageSpec {
-        s.parse().unwrap()
+        s.parse_spec()
     }
 
     // -- Protocol --
@@ -527,13 +545,13 @@ mod tests {
         );
     }
 
-    // -- PackageSpec: HttpTarball --
+    // -- PackageSpec: Http --
 
     #[test]
     fn test_parse_http_tarball() {
         assert_eq!(
             spec("https://example.com/pkg.tgz"),
-            PackageSpec::HttpTarball {
+            PackageSpec::Http {
                 url: "https://example.com/pkg.tgz".to_string(),
             }
         );
@@ -543,33 +561,30 @@ mod tests {
     fn test_parse_http_tarball_with_query() {
         assert_eq!(
             spec("https://example.com/pkg.tgz?v=1.0"),
-            PackageSpec::HttpTarball {
+            PackageSpec::Http {
                 url: "https://example.com/pkg.tgz?v=1.0".to_string(),
             }
         );
     }
 
     #[test]
-    fn test_parse_http_tarball_tar_gz() {
+    fn test_parse_http_tar_gz() {
         assert_eq!(
             spec("http://example.com/pkg.tar.gz"),
-            PackageSpec::HttpTarball {
+            PackageSpec::Http {
                 url: "http://example.com/pkg.tar.gz".to_string(),
             }
         );
     }
 
-    // -- has_tarball_extension --
-
     #[test]
-    fn test_has_tarball_extension() {
-        assert!(has_tarball_extension("https://example.com/pkg.tgz"));
-        assert!(has_tarball_extension("http://example.com/pkg.tar.gz"));
-        assert!(has_tarball_extension("https://example.com/pkg.tgz?v=1.0"));
-        assert!(has_tarball_extension(
-            "https://example.com/pkg.tar.gz#download"
-        ));
-        assert!(!has_tarball_extension("https://example.com/pkg"));
-        assert!(!has_tarball_extension("lodash@^4.0.0"));
+    fn test_parse_http_url_without_tarball_extension() {
+        // HTTP URLs without .tgz/.tar.gz must NOT fall through to bare GitHub shorthand
+        assert_eq!(
+            spec("https://example.com/pkg"),
+            PackageSpec::Http {
+                url: "https://example.com/pkg".to_string(),
+            }
+        );
     }
 }

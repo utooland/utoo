@@ -78,7 +78,7 @@ pub mod compat {
 
 /// Package specification types.
 pub mod spec {
-    pub use crate::model::spec::{PackageSpec, Protocol};
+    pub use crate::model::spec::{PackageSpec, Protocol, SpecStr};
 }
 
 /// Git clone and resolution types.
