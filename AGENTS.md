@@ -88,9 +88,12 @@ The pre-push hook runs: `cargo fmt --check`, `taplo format --check`, `npx biome 
 
 ## Subagents
 
+Agent definitions live in `agents/` and are symlinked to `.claude/agents/` for Claude Code discovery.
+
 | Agent | Path | Purpose |
 |-------|------|---------|
-| **code-guard** | `.claude/agents/code-guard.md` | Rust idiom & style review agent. Enforces idiomatic patterns and project conventions based on real PR review cases. |
+| **code-guard** | `agents/code-guard.md` | Rust idiom & style review agent. Enforces idiomatic patterns and project conventions based on real PR review cases. |
+| **utoopack-performance** | `agents/utoopack-performance-agent.md` | Turbopack performance diagnostics via Chrome Trace analysis across a 5-tier priority matrix. |
 
 ## Agent-Specific Notes
 
