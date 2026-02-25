@@ -90,7 +90,7 @@ The pre-push hook runs: `cargo fmt --check`, `taplo format --check`, `npx biome 
 
 | Agent | Path | Purpose |
 |-------|------|---------|
-| **code-guard** | `.claude/agents/code-guard.md` | Rust code quality sentinel. Reviews enum completeness, naming semantics, match exhaustiveness, deprecation policy, trait necessity, error message quality, and project conventions. Built on real PR review cases to prevent idiomatic Rust style regression. |
+| **code-guard** | `.claude/agents/code-guard.md` | Rust idiom & style review agent. Enforces idiomatic patterns and project conventions based on real PR review cases. |
 
 ## Agent-Specific Notes
 
