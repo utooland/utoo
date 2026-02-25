@@ -22,7 +22,7 @@
 - **Resolve**: Full support for `alias` and `extensions`.
 - **Styles**: Built-in support for Less, Sass, PostCSS, CSS Modules, and LightningCSS.
 - **Optimization**: Minification, Tree Shaking, Module Concatenation, and more.
-- **Frameworks**: Optimized for React (including `styled-jsx`, `emotion`, `styled-components`).
+- **Frameworks**: Optimized for React (including `styled-jsx`, `styled-components`).
 - **Tools**: Integrated Bundle Analyzer and Tracing Logs.
 
 > [!TIP]

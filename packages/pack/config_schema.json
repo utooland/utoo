@@ -1021,6 +1021,13 @@
             "null"
           ]
         },
+        "chunkLoadingGlobal": {
+          "description": "The global variable name used by the runtime for loading chunks. Default: 'TURBOPACK'",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "clean": {
           "description": "Whether to clean output directory before build",
           "type": [
@@ -1037,6 +1044,13 @@
           "items": {
             "$ref": "#/definitions/SchemaCopyItem"
           }
+        },
+        "entryRootExport": {
+          "description": "Expose entry module exports to global scope with the specified name. When set, all named exports from the entry module will be available on window/globalThis under the specified name. If set to empty string, will use package.json name. Default: None (no exposure)",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "filename": {
           "description": "Filename pattern for main files",
@@ -1207,9 +1221,6 @@
       "description": "Style configuration",
       "type": "object",
       "properties": {
-        "emotion": {
-          "description": "Emotion transform configuration"
-        },
         "inlineCss": {
           "description": "Inline CSS configuration"
         },
@@ -1260,6 +1271,16 @@
         "enable": {
           "description": "Whether to watch the filesystem for file changes.",
           "type": "boolean"
+        },
+        "ignored": {
+          "description": "Paths to ignore when watching for file changes. By default, ignores: node_modules",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
         },
         "pollInterval": {
           "description": "Enable polling at a certain interval if the native file watching doesn't work (e.g. docker).",
