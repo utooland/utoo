@@ -1,0 +1,10 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":[],"names":[],"mappings":""}},
+    {"offset": {"line": 11, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/reexport_cycle_class_extends/input/util/arrow.js"],"sourcesContent":["import { Path } from '../shape/index.js';\n\nexport function makeArrow(shape) {\n  return new Path();\n}\n"],"names":["makeArrow","shape"],"mappings":";;;;AAAA;AAAA;;AAEO,SAASA,UAAUC,KAAK;IAC7B,OAAO,IAAI,6LAAI;AACjB"}},
+    {"offset": {"line": 25, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/reexport_cycle_class_extends/input/shape/base.js"],"sourcesContent":["import { makeArrow } from '../util/arrow.js';\n\nexport default class Base {\n  constructor() {\n    this.type = 'base';\n  }\n  getArrow() {\n    return makeArrow(this);\n  }\n}\n"],"names":["Base","type","getArrow"],"mappings":";;;;AAAA;;AAEe,MAAMA;IACnBA,aAAc;QACZ,IAAI,CAACC,IAAI,GAAG;IACd;IACAC,WAAW;QACT,OAAO,IAAA,+JAAS,EAAC,IAAI;IACvB;AACF"}},
+    {"offset": {"line": 43, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/reexport_cycle_class_extends/input/shape/path.js"],"sourcesContent":["import Base from './base.js';\n\nexport default class Path extends Base {\n  constructor() {\n    super();\n    this.type = 'path';\n  }\n}\n"],"names":["Path","type"],"mappings":";;;;AAAA;;AAEe,MAAMA,aAAa,6JAAI;IACpCA,aAAc;QACZ,KAAK;QACL,IAAI,CAACC,IAAI,GAAG;IACd;AACF"}},
+    {"offset": {"line": 68, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/reexport_cycle_class_extends/input/index.js"],"sourcesContent":["import { Path } from './shape/index.js';\n\nexport default Path;\n"],"names":[],"mappings":"AAAA;AAAA;;qCAEe,6LAAI"}}]
+}
