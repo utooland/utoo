@@ -1,5 +1,5 @@
 {
-  "name": "react-example",
+  "name": "with-react",
   "version": "0.0.1",
   "scripts": {
     "build": "up build",
