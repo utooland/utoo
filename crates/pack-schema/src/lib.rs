@@ -729,7 +729,6 @@ pub struct SchemaImageConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SchemaStyleConfig {
-
     /// Styled components configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Styled components configuration")]

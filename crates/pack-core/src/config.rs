@@ -22,9 +22,7 @@ use turbopack_core::{
     resolve::ResolveAliasMap,
 };
 use turbopack_ecmascript::{OptionTreeShaking, TreeShakingMode};
-use turbopack_ecmascript_plugins::transform::{
-    styled_components::StyledComponentsTransformConfig,
-};
+use turbopack_ecmascript_plugins::transform::styled_components::StyledComponentsTransformConfig;
 use turbopack_node::transforms::webpack::{WebpackLoaderItem, WebpackLoaderItems};
 
 use crate::{
