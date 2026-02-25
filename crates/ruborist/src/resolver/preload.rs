@@ -49,25 +49,13 @@ pub struct PreloadStats {
 
 /// Check if a spec is a non-registry dependency that should skip registry preloading.
 ///
-/// Covers local specs (file:, link:, workspace:, portal:) and
-/// remote non-registry specs (git+, git://, github:).
+/// Delegates to [`PackageSpec`]'s `FromStr` so routing logic stays in one place.
+/// Covers local specs (file:, link:, workspace:, portal:), git/GitHub specs,
+/// HTTP tarball URLs, and bare `user/repo` GitHub shorthand.
 pub fn is_non_registry_spec(spec: &str) -> bool {
-    spec.starts_with("file:")
-        || spec.starts_with("link:")
-        || spec.starts_with("workspace:")
-        || spec.starts_with("portal:")
-        || spec.starts_with("git+")
-        || spec.starts_with("git://")
-        || spec.starts_with("github:")
-}
-
-/// Check if a spec is a local dependency (file:, link:, workspace:, portal:).
-#[deprecated(note = "use is_non_registry_spec instead")]
-pub fn is_local_spec(spec: &str) -> bool {
-    spec.starts_with("file:")
-        || spec.starts_with("link:")
-        || spec.starts_with("workspace:")
-        || spec.starts_with("portal:")
+    !spec
+        .parse::<crate::model::spec::PackageSpec>()
+        .is_ok_and(|s| s.is_registry())
 }
 
 /// Collect dependencies from any deps map, filtering out non-registry specs.
@@ -357,17 +345,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
-    fn test_is_local_spec() {
-        assert!(is_local_spec("file:../foo"));
-        assert!(is_local_spec("link:../foo"));
-        assert!(is_local_spec("workspace:*"));
-        assert!(is_local_spec("portal:../foo"));
-        assert!(!is_local_spec("^1.0.0"));
-        assert!(!is_local_spec("latest"));
-    }
-
-    #[test]
     fn test_is_non_registry_spec() {
         // Local specs
         assert!(is_non_registry_spec("file:../foo"));
@@ -387,9 +364,19 @@ mod tests {
         assert!(is_non_registry_spec("github:user/repo"));
         assert!(is_non_registry_spec("github:user/repo#v1.0"));
 
+        // HTTP tarball specs
+        assert!(is_non_registry_spec("https://example.com/pkg.tgz"));
+        assert!(is_non_registry_spec("http://example.com/pkg.tar.gz"));
+        assert!(is_non_registry_spec("https://example.com/pkg.tgz?v=1.0"));
+
+        // Bare GitHub shorthand
+        assert!(is_non_registry_spec("user/repo"));
+        assert!(is_non_registry_spec("user/repo#v1.0"));
+
         // Registry specs (should NOT match)
         assert!(!is_non_registry_spec("^1.0.0"));
         assert!(!is_non_registry_spec("latest"));
         assert!(!is_non_registry_spec("~2.0.0"));
+        assert!(!is_non_registry_spec("@scope/pkg@1.0.0"));
     }
 }

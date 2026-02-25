@@ -78,7 +78,7 @@ pub mod compat {
 
 /// Package specification types.
 pub mod spec {
-    pub use crate::model::spec::{PackageSpec, is_http_tarball_spec};
+    pub use crate::model::spec::{LocalProtocol, PackageSpec};
 }
 
 /// Git clone and resolution types.
