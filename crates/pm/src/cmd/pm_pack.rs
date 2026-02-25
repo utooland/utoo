@@ -19,12 +19,7 @@ pub async fn pack(path: Option<String>, dry_run: bool) -> Result<()> {
     if dry_run {
         println!("{}", "(dry run) Tarball not created".yellow());
     } else if let Some(tar_data) = &result.tarball_data {
-        let tarball_name = format!(
-            "{}-{}.tgz",
-            result.name.replace('/', "-").replace('@', ""),
-            result.version
-        );
-        let tarball_path = package_root.join(&tarball_name);
+        let tarball_path = package_root.join(result.tarball_filename());
         crate::fs::write(&tarball_path, tar_data)
             .await
             .with_context(|| format!("Failed to write tarball to {}", tarball_path.display()))?;

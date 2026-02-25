@@ -76,8 +76,7 @@ pub async fn publish(
 
     // Load package.json for version metadata in the publish payload
     let package_json = load_package_json_from_path(&package_info.path).await?;
-    let tarball_filename =
-        PublishPayload::tarball_filename(&pack_result.name, &pack_result.version);
+    let tarball_filename = pack_result.tarball_filename();
     let payload = PublishPayload::new(&PublishPayloadInput {
         package_json: &package_json,
         name: &pack_result.name,

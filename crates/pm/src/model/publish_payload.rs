@@ -61,7 +61,7 @@ impl PublishPayload {
                         input.registry, input.name, input.tarball_filename
                     ),
                 })
-                .unwrap(),
+                .expect("Dist serialization cannot fail"),
             );
             obj.insert(
                 "_id".to_string(),
@@ -84,46 +84,11 @@ impl PublishPayload {
             )]),
         }
     }
-
-    /// Build the tarball filename from package name and version.
-    ///
-    /// Scoped packages have `@` and `/` stripped, e.g. `@scope/pkg` → `scope-pkg-1.0.0.tgz`.
-    pub fn tarball_filename(name: &str, version: &str) -> String {
-        format!(
-            "{}-{}.tgz",
-            name.replace('/', "-").replace('@', ""),
-            version
-        )
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_tarball_filename_simple() {
-        assert_eq!(
-            PublishPayload::tarball_filename("my-pkg", "1.0.0"),
-            "my-pkg-1.0.0.tgz"
-        );
-    }
-
-    #[test]
-    fn test_tarball_filename_scoped() {
-        assert_eq!(
-            PublishPayload::tarball_filename("@scope/my-pkg", "2.3.4"),
-            "scope-my-pkg-2.3.4.tgz"
-        );
-    }
-
-    #[test]
-    fn test_tarball_filename_prerelease() {
-        assert_eq!(
-            PublishPayload::tarball_filename("pkg", "1.0.0-beta.1"),
-            "pkg-1.0.0-beta.1.tgz"
-        );
-    }
 
     #[test]
     fn test_payload_structure() {

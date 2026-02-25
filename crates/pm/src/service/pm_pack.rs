@@ -10,6 +10,7 @@ use crate::service::script::ScriptService;
 use crate::util::integrity::compute_integrity;
 use crate::util::json::load_package_json_from_path;
 
+#[derive(Default)]
 pub struct PackResult {
     pub tarball_data: Option<Vec<u8>>,
     pub files: Vec<(String, u64)>,
@@ -18,6 +19,19 @@ pub struct PackResult {
     pub integrity: String,
     pub unpacked_size: u64,
     pub packed_size: u64,
+}
+
+impl PackResult {
+    /// Build the tarball filename from package name and version.
+    ///
+    /// Scoped packages have `@` and `/` stripped, e.g. `@scope/pkg` → `scope-pkg-1.0.0.tgz`.
+    pub fn tarball_filename(&self) -> String {
+        format!(
+            "{}-{}.tgz",
+            self.name.replace('/', "-").replace('@', ""),
+            self.version
+        )
+    }
 }
 
 pub async fn pack(package_root: &Path, dry_run: bool) -> Result<PackResult> {
@@ -447,5 +461,35 @@ mod tests {
         for excluded in [".DS_Store", ".npmrc", "package-lock.json", "._metadata"] {
             assert!(!has(&files, excluded), "{excluded} should be excluded");
         }
+    }
+
+    #[test]
+    fn test_tarball_filename_simple() {
+        let r = PackResult {
+            name: "my-pkg".into(),
+            version: "1.0.0".into(),
+            ..Default::default()
+        };
+        assert_eq!(r.tarball_filename(), "my-pkg-1.0.0.tgz");
+    }
+
+    #[test]
+    fn test_tarball_filename_scoped() {
+        let r = PackResult {
+            name: "@scope/my-pkg".into(),
+            version: "2.3.4".into(),
+            ..Default::default()
+        };
+        assert_eq!(r.tarball_filename(), "scope-my-pkg-2.3.4.tgz");
+    }
+
+    #[test]
+    fn test_tarball_filename_prerelease() {
+        let r = PackResult {
+            name: "pkg".into(),
+            version: "1.0.0-beta.1".into(),
+            ..Default::default()
+        };
+        assert_eq!(r.tarball_filename(), "pkg-1.0.0-beta.1.tgz");
     }
 }
