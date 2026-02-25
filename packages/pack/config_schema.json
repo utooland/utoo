@@ -225,18 +225,6 @@
         "null"
       ]
     },
-    "platform": {
-      "description": "Target runtime platform. 'browser' uses DOM-based chunk loading, 'node' uses require()-based chunk loading. Defaults to 'browser'.",
-      "type": [
-        "string",
-        "null"
-      ],
-      "enum": [
-        "browser",
-        "node",
-        null
-      ]
-    },
     "watch": {
       "description": "Filesystem watcher options.",
       "anyOf": [

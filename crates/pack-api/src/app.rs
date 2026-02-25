@@ -120,9 +120,9 @@ impl AppEntrypoint {
         // Handle import path: convert absolute path to relative, keep relative path as-is.
         // Use the absolute filesystem project_path from Project (not FileSystemPath.path
         // which is relative to the DiskFileSystem root).
-        let project_data = self.project().await?;
+        let project = self.project().await?;
         let relative_import =
-            convert_to_project_relative(&this.import, &project_data.project_path)?;
+            convert_to_project_relative(&this.import, &project.project_path)?;
 
         let entry_request = Request::relative(
             relative_import.into(),
@@ -233,12 +233,10 @@ impl AppEntrypoint {
         asset_context: Vc<Box<dyn AssetContext>>,
         runtime_entries: Vc<EvaluatableAssets>,
     ) -> Result<Vc<OutputAssets>> {
-        use turbopack_nodejs::NodeJsChunkingContext;
-
         async move {
             let this = self.await?;
             let project = self.project();
-            let app_chunking_context = project.client_chunking_context();
+            let nodejs_chunking_context = project.server_chunking_context();
 
             let evaluatable_assets =
                 self.entry_evaluatable_assets(asset_context, runtime_entries);
@@ -260,17 +258,6 @@ impl AppEntrypoint {
                 .await?
                 .join(this.name.as_str())?
                 .with_extension("js");
-
-            let Some(nodejs_chunking_context) =
-                ResolvedVc::try_downcast_type::<NodeJsChunkingContext>(
-                    app_chunking_context.to_resolved().await?,
-                )
-            else {
-                bail!(
-                    "platform: 'node' requires NodeJsChunkingContext, but got a different \
-                     chunking context. Check that the project's platform config is set to 'node'."
-                );
-            };
 
             let entry_chunk_group_result = nodejs_chunking_context
                 .entry_chunk_group(

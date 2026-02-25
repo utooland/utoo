@@ -181,9 +181,9 @@ impl LibraryEndpoint {
         // Handle import path: convert absolute path to relative, keep relative path as-is.
         // Use the absolute filesystem project_path from Project (not FileSystemPath.path
         // which is relative to the DiskFileSystem root).
-        let project_data = self.project().await?;
+        let project = self.project().await?;
         let relative_import =
-            convert_to_project_relative(&this.import, &project_data.project_path)?;
+            convert_to_project_relative(&this.import, &project.project_path)?;
 
         let entry_request = Request::relative(
             relative_import.into(),

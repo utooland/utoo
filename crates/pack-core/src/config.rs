@@ -138,7 +138,6 @@ pub struct Config {
     persistent_caching: Option<bool>,
     cache_handler: Option<RcStr>,
     node_polyfill: Option<bool>,
-    platform: Option<Platform>,
     dev_server: Option<DevServer>,
     #[serde(default)]
     experimental: ExperimentalConfig,
@@ -149,7 +148,12 @@ pub struct Config {
 
 impl Config {
     pub fn platform(&self) -> Platform {
-        self.platform.unwrap_or_default()
+        if let Some(ref target) = self.target {
+            if target.contains("node") {
+                return Platform::Node;
+            }
+        }
+        Platform::Browser
     }
 }
 
@@ -1705,34 +1709,34 @@ mod tests {
     }
 
     #[test]
-    fn test_platform_deserialization() {
-        // Default: no platform field → Browser
+    fn test_platform_from_target() {
+        // No target → Browser (default)
         let json = serde_json::json!({
             "entry": [{"import": "./index.js"}]
         });
         let config: Config = serde_json::from_value(json).unwrap();
         assert_eq!(config.platform(), Platform::Browser);
 
-        // Explicit browser
+        // target: "node" → Node
         let json = serde_json::json!({
             "entry": [{"import": "./index.js"}],
-            "platform": "browser"
-        });
-        let config: Config = serde_json::from_value(json).unwrap();
-        assert_eq!(config.platform(), Platform::Browser);
-
-        // Explicit node
-        let json = serde_json::json!({
-            "entry": [{"import": "./index.js"}],
-            "platform": "node"
+            "target": "node"
         });
         let config: Config = serde_json::from_value(json).unwrap();
         assert_eq!(config.platform(), Platform::Node);
 
-        // Null platform → Browser (default)
+        // target: browser string → Browser
         let json = serde_json::json!({
             "entry": [{"import": "./index.js"}],
-            "platform": null
+            "target": "last 1 Chrome versions"
+        });
+        let config: Config = serde_json::from_value(json).unwrap();
+        assert_eq!(config.platform(), Platform::Browser);
+
+        // target: null → Browser (default)
+        let json = serde_json::json!({
+            "entry": [{"import": "./index.js"}],
+            "target": null
         });
         let config: Config = serde_json::from_value(json).unwrap();
         assert_eq!(config.platform(), Platform::Browser);

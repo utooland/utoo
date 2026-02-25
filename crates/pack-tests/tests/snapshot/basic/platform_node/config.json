@@ -6,7 +6,7 @@
         "name": "main"
       }
     ],
-    "platform": "node",
+    "target": "node",
     "optimization": {
       "minify": false
     }

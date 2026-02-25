@@ -6,17 +6,13 @@ use turbo_tasks_env::EnvMap;
 use turbo_tasks_fs::FileSystemPath;
 use turbopack_core::{
     chunk::{
-        ChunkingContext, MangleType, MinifyType, SourceMapsType,
+        MangleType, MinifyType, SourceMapsType,
         UnusedReferences, chunk_id_strategy::ModuleIdStrategy,
     },
     compile_time_info::CompileTimeInfo,
-    environment::{Environment, ExecutionEnvironment},
+    environment::{Environment, ExecutionEnvironment, NodeJsEnvironment},
     module_graph::binding_usage_info::OptionBindingUsageInfo,
 };
-#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-use turbopack_core::environment::NodeJsEnvironment;
-#[cfg(all(target_family = "wasm", target_os = "unknown"))]
-use turbopack_core::environment::BrowserEnvironment;
 use turbopack_css::chunk::CssChunkType;
 use turbopack_ecmascript::chunk::EcmascriptChunkType;
 use turbopack_nodejs::NodeJsChunkingContext;
@@ -44,7 +40,7 @@ pub struct ServerChunkingContextOptions {
 #[turbo_tasks::function]
 pub async fn get_server_chunking_context(
     options: ServerChunkingContextOptions,
-) -> Result<Vc<Box<dyn ChunkingContext>>> {
+) -> Result<Vc<NodeJsChunkingContext>> {
     let ServerChunkingContextOptions {
         mode,
         root_path,
@@ -111,7 +107,7 @@ pub async fn get_server_chunking_context(
             .module_merging(*concatenate_modules.await?);
     }
 
-    Ok(Vc::upcast(builder.build()))
+    Ok(builder.build())
 }
 
 #[turbo_tasks::function]
@@ -129,20 +125,8 @@ pub async fn get_server_compile_time_info(
     )]);
     let define_env = Vc::cell(define_env_map);
 
-    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-    let environment = Environment::new(
-        ExecutionEnvironment::NodeJsBuildTime(NodeJsEnvironment::default().resolved_cell()),
-    )
-    .to_resolved()
-    .await?;
-
-    // WASM targets don't have NodeJsEnvironment available, fall back to
-    // BrowserEnvironment. This path is only hit when running pack inside a
-    // browser-based WASM runtime (e.g. playground), where Node.js bundling
-    // is not meaningfully supported anyway.
-    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
-    let environment = Environment::new(ExecutionEnvironment::Browser(
-        BrowserEnvironment::default().resolved_cell(),
+    let environment = Environment::new(ExecutionEnvironment::NodeJsBuildTime(
+        NodeJsEnvironment::default().resolved_cell(),
     ))
     .to_resolved()
     .await?;

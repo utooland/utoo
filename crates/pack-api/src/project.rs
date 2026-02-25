@@ -3,7 +3,7 @@ use pack_core::{
     client::context::{
         ClientChunkingContextOptions, get_client_chunking_context, get_client_compile_time_info,
     },
-    config::{Config, ModuleIds as ModuleIdStrategyConfig, Platform},
+    config::{Config, ModuleIds as ModuleIdStrategyConfig},
     emit_assets,
     mode::Mode,
     server::{ServerChunkingContextOptions, get_server_chunking_context, get_server_compile_time_info},
@@ -812,27 +812,29 @@ impl Project {
     /// Returns compile-time info for the bundle target.
     ///
     /// The "client" name is retained for compatibility with existing callers
-    /// (AppEndpoint, LibraryEndpoint, etc.). Internally it dispatches to
-    /// browser or Node.js compile-time info based on the `platform` config.
     #[turbo_tasks::function]
     pub(super) async fn client_compile_time_info(&self) -> Result<Vc<CompileTimeInfo>> {
         let mut define_env = (*self.config.define_env().await?).clone();
         define_env.extend((*self.define_env.client().await?).clone());
         let define_env = Vc::cell(define_env);
-        let platform = self.config.await?.platform();
-        match platform {
-            Platform::Browser => Ok(get_client_compile_time_info(
-                (*self.config.target().await?).clone(),
-                define_env,
-                self.config.mode(),
-                self.config.provider_config(),
-            )),
-            Platform::Node => Ok(get_server_compile_time_info(
-                define_env,
-                self.config.mode(),
-                self.config.provider_config(),
-            )),
-        }
+        Ok(get_client_compile_time_info(
+            (*self.config.target().await?).clone(),
+            define_env,
+            self.config.mode(),
+            self.config.provider_config(),
+        ))
+    }
+
+    #[turbo_tasks::function]
+    pub(super) async fn server_compile_time_info(&self) -> Result<Vc<CompileTimeInfo>> {
+        let mut define_env = (*self.config.define_env().await?).clone();
+        define_env.extend((*self.define_env.client().await?).clone());
+        let define_env = Vc::cell(define_env);
+        Ok(get_server_compile_time_info(
+            define_env,
+            self.config.mode(),
+            self.config.provider_config(),
+        ))
     }
 
     #[turbo_tasks::function]
@@ -931,11 +933,6 @@ impl Project {
     }
 
     #[turbo_tasks::function]
-    pub(super) async fn server_compile_time_info(self: Vc<Self>) -> Result<Vc<CompileTimeInfo>> {
-        todo!()
-    }
-
-    #[turbo_tasks::function]
     pub(super) async fn edge_compile_time_info(self: Vc<Self>) -> Result<Vc<CompileTimeInfo>> {
         todo!()
     }
@@ -945,56 +942,43 @@ impl Project {
         todo!()
     }
 
-    /// Returns the chunking context for the bundle target.
-    ///
-    /// The "client" name is retained for compatibility with existing callers.
-    /// Dispatches to BrowserChunkingContext or NodeJsChunkingContext based on
-    /// the `platform` config.
     #[turbo_tasks::function]
     pub async fn client_chunking_context(self: Vc<Self>) -> Result<Vc<Box<dyn ChunkingContext>>> {
-        let this = self.await?;
-        let platform = this.config.await?.platform();
-        match platform {
-            Platform::Browser => {
-                Ok(get_client_chunking_context(ClientChunkingContextOptions {
-                    mode: self.mode(),
-                    root_path: self.project_path().owned().await?,
-                    client_root: self.client_root().owned().await?,
-                    client_root_to_root_path: rcstr!("/ROOT"),
-                    public_path: self.config().computed_public_path(),
-                    environment: self.client_compile_time_info().environment(),
-                    module_id_strategy: self.module_ids(),
-                    no_mangling: self.no_mangling(),
-                    config: self.config(),
-                    export_usage: self.export_usage(),
-                    unused_references: self.unused_references(),
-                }))
-            }
-            Platform::Node => {
-                let output_root_to_root_path = self.node_root_to_root_path().await?;
-                let environment = self.client_compile_time_info().environment().to_resolved().await?;
-                Ok(get_server_chunking_context(ServerChunkingContextOptions {
-                    mode: self.mode(),
-                    root_path: self.project_path().owned().await?,
-                    output_root: self.client_root().owned().await?,
-                    output_root_to_root_path: (*output_root_to_root_path).clone(),
-                    environment,
-                    module_id_strategy: self.module_ids(),
-                    no_mangling: self.no_mangling(),
-                    config: self.config(),
-                    export_usage: self.export_usage(),
-                    unused_references: self.unused_references(),
-                }))
-            }
-        }
+        Ok(get_client_chunking_context(ClientChunkingContextOptions {
+            mode: self.mode(),
+            root_path: self.project_path().owned().await?,
+            client_root: self.client_root().owned().await?,
+            client_root_to_root_path: rcstr!("/ROOT"),
+            public_path: self.config().computed_public_path(),
+            environment: self.client_compile_time_info().environment(),
+            module_id_strategy: self.module_ids(),
+            no_mangling: self.no_mangling(),
+            config: self.config(),
+            export_usage: self.export_usage(),
+            unused_references: self.unused_references(),
+        }))
     }
 
     #[turbo_tasks::function]
-    pub(super) fn server_chunking_context(
-        self: Vc<Self>,
-        _client_assets: bool,
-    ) -> Vc<NodeJsChunkingContext> {
-        todo!()
+    pub async fn server_chunking_context(self: Vc<Self>) -> Result<Vc<NodeJsChunkingContext>> {
+        let output_root_to_root_path = self.node_root_to_root_path().await?;
+        let environment = self
+            .server_compile_time_info()
+            .environment()
+            .to_resolved()
+            .await?;
+        Ok(get_server_chunking_context(ServerChunkingContextOptions {
+            mode: self.mode(),
+            root_path: self.project_path().owned().await?,
+            output_root: self.client_root().owned().await?,
+            output_root_to_root_path: (*output_root_to_root_path).clone(),
+            environment,
+            module_id_strategy: self.module_ids(),
+            no_mangling: self.no_mangling(),
+            config: self.config(),
+            export_usage: self.export_usage(),
+            unused_references: self.unused_references(),
+        }))
     }
 
     #[turbo_tasks::function]
@@ -1013,7 +997,7 @@ impl Project {
     ) -> Vc<Box<dyn ChunkingContext>> {
         match runtime {
             Runtime::Edge => self.edge_chunking_context(client_assets),
-            Runtime::NodeJs => Vc::upcast(self.server_chunking_context(client_assets)),
+            Runtime::NodeJs => Vc::upcast(self.server_chunking_context()),
         }
     }
 
