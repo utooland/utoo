@@ -32,9 +32,9 @@ Before you begin, ensure you have the following installed:
 - **typos**: Spell checker for source and docs. The pre-push hook runs `typos`. Install: `cargo install typos-cli --locked` or `brew install typos-cli`. Config: [.typos.toml](.typos.toml).
 - **LLVM (macOS only)**: Required to build `utoo-wasm` on macOS (the compiled output is used by `@utoo/web`). The dependency `libmimalloc-sys` compiles C code to `wasm32-unknown-unknown`; Apple Clang does not support that target. Install: `brew install llvm`. Then add the following to your shell config (e.g. `~/.zshrc` or `~/.bash_profile`) so the build uses Homebrew’s clang:
   ```bash
-  export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
-  export CC="/opt/homebrew/opt/llvm/bin/clang"
-  export AR="/opt/homebrew/opt/llvm/bin/llvm-ar"
+export PATH="$(brew --prefix llvm)/bin:$PATH"
+export CC="$(brew --prefix llvm)/bin/clang"
+export AR="$(brew --prefix llvm)/bin/llvm-ar"
   ```
   Restart the terminal or run `source ~/.zshrc` (or your config file) for the changes to take effect. 
 
