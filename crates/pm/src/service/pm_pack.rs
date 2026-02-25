@@ -11,7 +11,7 @@ use crate::util::integrity::compute_integrity;
 use crate::util::json::load_package_json_from_path;
 
 pub struct PackResult {
-    pub tarball_path: Option<PathBuf>,
+    pub tarball_data: Option<Vec<u8>>,
     pub files: Vec<(String, u64)>,
     pub name: String,
     pub version: String,
@@ -48,7 +48,7 @@ pub async fn pack(package_root: &Path, dry_run: bool) -> Result<PackResult> {
 
     if dry_run {
         return Ok(PackResult {
-            tarball_path: None,
+            tarball_data: None,
             files: file_paths,
             name: package_info.name,
             version,
@@ -65,21 +65,10 @@ pub async fn pack(package_root: &Path, dry_run: bool) -> Result<PackResult> {
     let integrity = compute_integrity(&tar_data);
     let packed_size = tar_data.len() as u64;
 
-    let tarball_name = format!(
-        "{}-{}.tgz",
-        package_info.name.replace('/', "-").replace('@', ""),
-        version
-    );
-    let tarball_path = package_root.join(&tarball_name);
-
-    crate::fs::write(&tarball_path, &tar_data)
-        .await
-        .with_context(|| format!("Failed to write tarball to {}", tarball_path.display()))?;
-
     ScriptService::execute_script(&package_info, "postpack", true).await?;
 
     Ok(PackResult {
-        tarball_path: Some(tarball_path),
+        tarball_data: Some(tar_data),
         files: file_paths,
         name: package_info.name,
         version,

@@ -580,7 +580,6 @@ async fn async_main() -> Result<()> {
         }
         Some(Commands::Publish { tag, dry_run, otp }) => {
             cmd::publish::publish(tag.as_deref(), dry_run, otp.as_deref()).await?;
-            log_time_end("Publish complete");
         }
         Some(Commands::Ping { registry }) => {
             cmd::ping::ping(registry.as_deref()).await?;

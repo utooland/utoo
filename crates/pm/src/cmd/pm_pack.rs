@@ -1,9 +1,9 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use colored::Colorize;
 use std::path::PathBuf;
 
 use crate::service::pm_pack as pack_service;
-use crate::util::format_print::format_size;
+use crate::util::format_print::print_pack_details;
 
 pub async fn pack(path: Option<String>, dry_run: bool) -> Result<()> {
     let package_root = if let Some(p) = path {
@@ -14,25 +14,21 @@ pub async fn pack(path: Option<String>, dry_run: bool) -> Result<()> {
 
     let result = pack_service::pack(&package_root, dry_run).await?;
 
-    for (f, size) in &result.files {
-        println!("{} {f}", format_size(*size).dimmed());
-    }
-    println!();
+    print_pack_details(&result, None);
 
     if dry_run {
         println!("{}", "(dry run) Tarball not created".yellow());
-    } else if let Some(tp) = &result.tarball_path {
-        println!("{} {}", "Tarball:".dimmed(), tp.display());
-    }
-
-    let row = |label: &str, val: &dyn std::fmt::Display| println!("{} {val}", label.dimmed());
-    row("Name:", &result.name.cyan());
-    row("Version:", &result.version);
-    row("Files:", &result.files.len());
-    row("Unpacked Size:", &format_size(result.unpacked_size));
-    if !dry_run {
-        row("Packed Size:", &format_size(result.packed_size));
-        row("Integrity:", &result.integrity);
+    } else if let Some(tar_data) = &result.tarball_data {
+        let tarball_name = format!(
+            "{}-{}.tgz",
+            result.name.replace('/', "-").replace('@', ""),
+            result.version
+        );
+        let tarball_path = package_root.join(&tarball_name);
+        crate::fs::write(&tarball_path, tar_data)
+            .await
+            .with_context(|| format!("Failed to write tarball to {}", tarball_path.display()))?;
+        println!("{} {}", "Tarball:".dimmed(), tarball_path.display());
     }
 
     Ok(())

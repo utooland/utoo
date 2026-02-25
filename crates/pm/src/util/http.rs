@@ -26,6 +26,7 @@ pub fn client() -> &'static reqwest::Client {
 /// `ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY` (and their lowercase variants).
 pub fn client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
+        .user_agent(concat!("utoo/", env!("CARGO_PKG_VERSION")))
         .no_proxy()
         .proxy(reqwest::Proxy::custom(|url| {
             env_var("ALL_PROXY").or_else(|| match url.scheme() {

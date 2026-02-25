@@ -42,14 +42,14 @@ pub async fn publish(tag: Option<&str>, dry_run: bool, otp: Option<&str>) -> Res
             "{}",
             format!(
                 "(dry run) Would publish {}@{} to {} with tag '{}'",
-                result.name, result.version, result.registry, result.tag
+                result.pack.name, result.pack.version, result.registry, result.tag
             )
             .yellow()
         );
     } else {
         println!(
             "{}",
-            format!("+ {}@{}", result.name, result.version).green()
+            format!("+ {}@{}", result.pack.name, result.pack.version).green()
         );
     }
 
