@@ -86,6 +86,12 @@ The pre-push hook runs: `cargo fmt --check`, `taplo format --check`, `npx biome 
 - Group related changes; avoid bundling unrelated refactors.
 - Keep commit messages concise and action-oriented.
 
+## Subagents
+
+| Agent | Path | Purpose |
+|-------|------|---------|
+| **code-guard** | `.claude/agents/code-guard.md` | Rust code quality sentinel. Reviews enum completeness, naming semantics, match exhaustiveness, deprecation policy, trait necessity, error message quality, and project conventions. Built on real PR review cases to prevent idiomatic Rust style regression. |
+
 ## Agent-Specific Notes
 
 - When adding a new `AGENTS.md` anywhere in the repo, also add a `CLAUDE.md` symlink pointing to it (example: `ln -s AGENTS.md CLAUDE.md`).
