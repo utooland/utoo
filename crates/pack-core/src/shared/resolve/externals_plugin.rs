@@ -408,7 +408,11 @@ impl BeforeResolvePlugin for ExternalsPlugin {
         if !subpath_str.is_empty() {
             let full_path = format!("{}{}", module_name, subpath_str);
             if let Some(external_config) = externals_config.get(full_path.as_str()) {
-                return Ok(handle_external_config(external_config, &full_path, default_type));
+                return Ok(handle_external_config(
+                    external_config,
+                    &full_path,
+                    default_type,
+                ));
             }
             // If full path not in externals, skip to let after_resolve or normal resolution handle it
             return Ok(ResolveResultOption::none());
@@ -416,7 +420,11 @@ impl BeforeResolvePlugin for ExternalsPlugin {
 
         // Try module name only (e.g., "react")
         if let Some(external_config) = externals_config.get(module_name) {
-            return Ok(handle_external_config(external_config, module_name, default_type));
+            return Ok(handle_external_config(
+                external_config,
+                module_name,
+                default_type,
+            ));
         }
 
         Ok(ResolveResultOption::none())

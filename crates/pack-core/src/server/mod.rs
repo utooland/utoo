@@ -6,8 +6,8 @@ use turbo_tasks_env::EnvMap;
 use turbo_tasks_fs::FileSystemPath;
 use turbopack_core::{
     chunk::{
-        MangleType, MinifyType, SourceMapsType,
-        UnusedReferences, chunk_id_strategy::ModuleIdStrategy,
+        MangleType, MinifyType, SourceMapsType, UnusedReferences,
+        chunk_id_strategy::ModuleIdStrategy,
     },
     compile_time_info::CompileTimeInfo,
     environment::{Environment, ExecutionEnvironment, NodeJsEnvironment},
@@ -87,9 +87,8 @@ pub async fn get_server_chunking_context(
     .unused_references(unused_references.to_resolved().await?);
 
     if mode.is_development() {
-        builder = builder.source_map_source_type(
-            turbopack_core::chunk::SourceMapSourceType::AbsoluteFileUri,
-        );
+        builder = builder
+            .source_map_source_type(turbopack_core::chunk::SourceMapSourceType::AbsoluteFileUri);
     } else {
         let split_chunks = &config.optimization().await?.split_chunks;
         let (ecmascript_chunking_config, css_chunking_config) =

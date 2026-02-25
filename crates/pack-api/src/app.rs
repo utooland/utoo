@@ -121,8 +121,7 @@ impl AppEntrypoint {
         // Use the absolute filesystem project_path from Project (not FileSystemPath.path
         // which is relative to the DiskFileSystem root).
         let project = self.project().await?;
-        let relative_import =
-            convert_to_project_relative(&this.import, &project.project_path)?;
+        let relative_import = convert_to_project_relative(&this.import, &project.project_path)?;
 
         let entry_request = Request::relative(
             relative_import.into(),
@@ -238,8 +237,7 @@ impl AppEntrypoint {
             let project = self.project();
             let nodejs_chunking_context = project.server_chunking_context();
 
-            let evaluatable_assets =
-                self.entry_evaluatable_assets(asset_context, runtime_entries);
+            let evaluatable_assets = self.entry_evaluatable_assets(asset_context, runtime_entries);
 
             if evaluatable_assets.await?.is_empty() {
                 bail!(
@@ -292,9 +290,7 @@ impl AppEntrypoint {
                     .assets;
                 Ok(chunk_group_assets)
             }
-            Platform::Node => {
-                Ok(self.node_chunk_group_for_entry(asset_context, runtime_entries))
-            }
+            Platform::Node => Ok(self.node_chunk_group_for_entry(asset_context, runtime_entries)),
         }
     }
 }
@@ -338,30 +334,47 @@ impl AppEndpoint {
 
     #[turbo_tasks::function]
     pub async fn app_module_context(self: Vc<Self>) -> Result<Vc<ModuleAssetContext>> {
+        let project = self.project();
+        let platform = project.config().await?.platform();
+        let (compile_time_info, layer) = match platform {
+            Platform::Browser => (
+                project.client_compile_time_info(),
+                Layer::new_with_user_friendly_name(rcstr!("client"), rcstr!("Browser")),
+            ),
+            Platform::Node => (
+                project.server_compile_time_info(),
+                Layer::new_with_user_friendly_name(rcstr!("server"), rcstr!("Node")),
+            ),
+        };
         Ok(ModuleAssetContext::new(
             // FIXME:
             TransitionOptions {
                 ..Default::default()
             }
             .cell(),
-            self.project().client_compile_time_info(),
+            compile_time_info,
             self.app_module_options_context(),
             self.app_resolve_options_context(),
-            // TODO: add server Layer for SSR
-            Layer::new_with_user_friendly_name(rcstr!("client"), rcstr!("Browser")),
+            layer,
         ))
     }
 
     #[turbo_tasks::function]
     async fn app_module_options_context(self: Vc<Self>) -> Result<Vc<ModuleOptionsContext>> {
+        let project = self.project();
+        let platform = project.config().await?.platform();
+        let compile_time_info = match platform {
+            Platform::Browser => project.client_compile_time_info(),
+            Platform::Node => project.server_compile_time_info(),
+        };
         Ok(get_client_module_options_context(
-            self.project().project_path().owned().await?,
-            self.project().execution_context(),
-            self.project().client_compile_time_info().environment(),
-            self.project().mode(),
-            self.project().config(),
-            Vc::cell(self.project().await?.watch.enable),
-            self.project().pack_path().owned().await?,
+            project.project_path().owned().await?,
+            project.execution_context(),
+            compile_time_info.environment(),
+            project.mode(),
+            project.config(),
+            Vc::cell(project.await?.watch.enable),
+            project.pack_path().owned().await?,
         ))
     }
 

@@ -148,10 +148,10 @@ pub struct Config {
 
 impl Config {
     pub fn platform(&self) -> Platform {
-        if let Some(ref target) = self.target {
-            if target.contains("node") {
-                return Platform::Node;
-            }
+        if let Some(ref target) = self.target
+            && target.contains("node")
+        {
+            return Platform::Node;
         }
         Platform::Browser
     }
@@ -824,28 +824,22 @@ pub fn resolve_split_chunks_config(
     split_chunks: &Option<FxIndexMap<RcStr, SplitChunkConfig>>,
 ) -> (ChunkingConfig, ChunkingConfig) {
     (
-        split_chunks
-            .as_ref()
-            .and_then(|sc| sc.get("js"))
-            .map_or(
-                ChunkingConfig {
-                    min_chunk_size: default_min_chunk_size(),
-                    max_chunk_count_per_group: default_max_chunk_count_per_group(),
-                    max_merge_chunk_size: default_max_merge_chunk_size(),
-                    ..Default::default()
-                },
-                Into::into,
-            ),
-        split_chunks
-            .as_ref()
-            .and_then(|sc| sc.get("css"))
-            .map_or(
-                ChunkingConfig {
-                    max_merge_chunk_size: 100_000,
-                    ..Default::default()
-                },
-                Into::into,
-            ),
+        split_chunks.as_ref().and_then(|sc| sc.get("js")).map_or(
+            ChunkingConfig {
+                min_chunk_size: default_min_chunk_size(),
+                max_chunk_count_per_group: default_max_chunk_count_per_group(),
+                max_merge_chunk_size: default_max_merge_chunk_size(),
+                ..Default::default()
+            },
+            Into::into,
+        ),
+        split_chunks.as_ref().and_then(|sc| sc.get("css")).map_or(
+            ChunkingConfig {
+                max_merge_chunk_size: 100_000,
+                ..Default::default()
+            },
+            Into::into,
+        ),
     )
 }
 

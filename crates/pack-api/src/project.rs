@@ -6,7 +6,9 @@ use pack_core::{
     config::{Config, ModuleIds as ModuleIdStrategyConfig},
     emit_assets,
     mode::Mode,
-    server::{ServerChunkingContextOptions, get_server_chunking_context, get_server_compile_time_info},
+    server::{
+        ServerChunkingContextOptions, get_server_chunking_context, get_server_compile_time_info,
+    },
     util::{Runtime, convert_to_project_relative},
 };
 use serde::Deserialize;
@@ -970,7 +972,7 @@ impl Project {
         Ok(get_server_chunking_context(ServerChunkingContextOptions {
             mode: self.mode(),
             root_path: self.project_path().owned().await?,
-            output_root: self.client_root().owned().await?,
+            output_root: self.dist_root().owned().await?,
             output_root_to_root_path: (*output_root_to_root_path).clone(),
             environment,
             module_id_strategy: self.module_ids(),

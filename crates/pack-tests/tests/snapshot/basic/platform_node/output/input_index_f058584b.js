@@ -1,5 +1,5 @@
 module.exports = [
-9, ((__turbopack_context__, module, exports) => {
+18, ((__turbopack_context__, module, exports) => {
 
 const value = 42;
 function getMessage() {
@@ -13,4 +13,4 @@ module.exports = {
 }),
 ];
 
-//# sourceMappingURL=input_index_b0983b5e.js.map
+//# sourceMappingURL=input_index_f058584b.js.map
