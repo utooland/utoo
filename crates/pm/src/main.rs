@@ -145,6 +145,10 @@ enum Commands {
         #[arg(long)]
         ignore_scripts: bool,
 
+        /// Save as production dependency (default behavior)
+        #[arg(long, short = 'S', default_value_t = true)]
+        save: bool,
+
         /// Save as dev dependency
         #[arg(long, short = 'D')]
         save_dev: bool,
@@ -416,6 +420,7 @@ async fn async_main() -> Result<()> {
             specs,
             workspace,
             ignore_scripts,
+            save: _,
             save_dev,
             save_peer,
             save_optional,
