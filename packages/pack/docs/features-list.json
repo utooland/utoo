@@ -286,12 +286,6 @@
           "remarks": ""
         },
         {
-          "featureLevel2": "`emotion`",
-          "featureStatus": "✅",
-          "featureDetails": "[Emotion.js](https://github.com/emotion-js/emotion)",
-          "remarks": ""
-        },
-        {
           "featureLevel2": "`css parse, transform, minify`",
           "featureStatus": "✅",
           "featureDetails": "[With lightningcss](https://lightningcss.dev/)",
