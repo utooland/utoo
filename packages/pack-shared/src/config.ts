@@ -302,3 +302,19 @@ export interface BundleOptions {
    */
   packPath?: string;
 }
+
+/**
+ * User config file shape (e.g. utoopack.config.mjs).
+ * Bundler options (entry, output, define, ...) at top level,
+ * plus optional CLI/runtime options (processEnv, watch, dev, ...).
+ */
+export type UserConfig = ConfigComplete &
+  Partial<
+    Pick<
+      BundleOptions,
+      "processEnv" | "defineEnv" | "watch" | "dev" | "buildId" | "packPath"
+    >
+  > & {
+    rootPath?: string;
+    projectPath?: string;
+  };

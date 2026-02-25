@@ -24,7 +24,8 @@ export default defineCommand({
     },
   },
   async run({ args }) {
-    const { projectOptions, projectPath, rootPath } = resolveBuildOptions(args);
+    const { projectOptions, projectPath, rootPath } =
+      await resolveBuildOptions(args);
     await utooPack.build(projectOptions, projectPath, rootPath);
   },
 });
