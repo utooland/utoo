@@ -1,0 +1,63 @@
+.lazy-container {
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+  background-color: #fce7f3;
+  border: 1px solid #fbcfe8;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px -1px rgba(244, 114, 182, 0.1);
+  text-align: center;
+  transition: transform 0.3s ease;
+
+  &:hover {
+    transform: scale(1.02);
+  }
+}
+
+.lazy-title {
+  color: #db2777;
+  font-size: 1.1rem;
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+}
+
+.lazy-content {
+  color: #831843;
+  font-size: 0.95rem;
+  margin-bottom: 1rem;
+}
+
+.lazy-decoration {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+
+  .lazy-dot {
+    width: 8px;
+    height: 8px;
+    background-color: #f472b6;
+    border-radius: 50%;
+    animation: lazy-pulse 1.5s infinite ease-in-out;
+
+    &:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+
+    &:nth-child(3) {
+      animation-delay: 0.4s;
+    }
+  }
+}
+
+@keyframes lazy-pulse {
+
+  0%,
+  100% {
+    transform: scale(0.8);
+    opacity: 0.5;
+  }
+
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+}
