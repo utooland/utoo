@@ -6,7 +6,8 @@ use utoo_ruborist::model::package_json::parse_bin_field;
 use crate::util::json::load_package_json_from_path;
 use crate::{service::script::ScriptService, util::linker::link};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Deserialize)]
+#[serde(default)]
 pub struct Scripts {
     pub preinstall: Option<String>,
     pub install: Option<String>,
@@ -15,9 +16,21 @@ pub struct Scripts {
     pub preprepare: Option<String>,
     pub postprepare: Option<String>,
     pub prepublish: Option<String>,
+    #[serde(rename = "prepublishOnly")]
+    pub prepublish_only: Option<String>,
+    pub prepack: Option<String>,
+    pub postpack: Option<String>,
+    pub publish: Option<String>,
+    pub postpublish: Option<String>,
 }
 
 impl Scripts {
+    pub fn from_json(data: &serde_json::Value) -> Self {
+        data.get("scripts")
+            .and_then(|s| serde_json::from_value(s.clone()).ok())
+            .unwrap_or_default()
+    }
+
     pub fn get_script(&self, script_type: &str) -> Option<&String> {
         match script_type {
             "preinstall" => self.preinstall.as_ref(),
@@ -27,6 +40,11 @@ impl Scripts {
             "preprepare" => self.preprepare.as_ref(),
             "postprepare" => self.postprepare.as_ref(),
             "prepublish" => self.prepublish.as_ref(),
+            "prepublishOnly" => self.prepublish_only.as_ref(),
+            "prepack" => self.prepack.as_ref(),
+            "postpack" => self.postpack.as_ref(),
+            "publish" => self.publish.as_ref(),
+            "postpublish" => self.postpublish.as_ref(),
             _ => None,
         }
     }
@@ -59,36 +77,25 @@ impl PackageInfo {
     }
 
     pub async fn from_path(path: &Path) -> Result<Self> {
-        // Read package.json
         let data = load_package_json_from_path(path).await?;
+        Self::from_json(path, &data)
+    }
 
-        // Parse package name
+    pub fn from_json(path: &Path, data: &serde_json::Value) -> Result<Self> {
         let name = data["name"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Failed to get package name from package.json"))?
             .to_string();
 
-        // Parse binary files (empty bin paths are filtered out)
         let bin_files = data
             .get("bin")
             .map(|bin| parse_bin_field(bin, &name))
             .unwrap_or_default();
 
-        // Parse scripts
-        let scripts = Scripts {
-            preinstall: data["scripts"]["preinstall"].as_str().map(String::from),
-            install: data["scripts"]["install"].as_str().map(String::from),
-            postinstall: data["scripts"]["postinstall"].as_str().map(String::from),
-            prepare: data["scripts"]["prepare"].as_str().map(String::from),
-            preprepare: data["scripts"]["preprepare"].as_str().map(String::from),
-            postprepare: data["scripts"]["postprepare"].as_str().map(String::from),
-            prepublish: data["scripts"]["prepublish"].as_str().map(String::from),
-        };
-
         Ok(PackageInfo {
             path: path.to_path_buf(),
             bin_files,
-            scripts,
+            scripts: Scripts::from_json(data),
             name: name.clone(),
             fullname: name,
         })

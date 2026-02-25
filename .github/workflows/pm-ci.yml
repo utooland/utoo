@@ -4,14 +4,14 @@ on:
   push:
     branches: ["next"]
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
 
 jobs:
   test:
-    if: (github.event_name == 'push' && !contains(github.event.head_commit.message, '(pack)')) || (github.event_name == 'pull_request' && !contains(github.event.pull_request.title, '(pack)'))
+    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) || (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
     strategy:
       fail-fast: false
       matrix:
@@ -76,7 +76,6 @@ jobs:
         if: ${{ !matrix.settings.docker }}
         with:
           node-version: 20
-          cache: 'npm'
       
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -85,10 +84,10 @@ jobs:
           toolchain: nightly-2026-02-05
           targets: ${{ matrix.settings.target }}
       
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: pm-ci-${{ matrix.settings.target }}
+      # - name: Cache cargo
+      #   uses: Swatinem/rust-cache@v2
+      #   with:
+      #     shared-key: pm-ci-${{ matrix.settings.target }}
       
       - name: Setup toolchain
         run: ${{ matrix.settings.setup }}
@@ -113,3 +112,19 @@ jobs:
         run: ${{ matrix.settings.test }}
         if: ${{ !matrix.settings.docker }}
         shell: bash
+
+  success:
+    name: utoopm-ci-success
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - test
+    steps:
+      - name: Check success
+        run: |
+          if [ "${{ needs.test.result }}" == "failure" ] || [ "${{ needs.test.result }}" == "cancelled" ]; then
+            echo "Tests failed or were cancelled"
+            exit 1
+          else
+            echo "Tests passed or were skipped"
+          fi

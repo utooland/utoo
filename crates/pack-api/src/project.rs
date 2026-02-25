@@ -503,20 +503,22 @@ impl Project {
             .await?
             .iter()
             .filter_map(|e| {
-                e.library.as_ref().map(|l| LibraryEntrypoint {
-                    name: e.name.clone().unwrap_or(
-                        PathBuf::from(e.import.as_str())
-                            .file_stem()
-                            .unwrap()
-                            .to_string_lossy()
-                            .into(),
-                    ),
-                    import: e.import.clone(),
-                    runtime_root: l.name.clone(),
-                    runtime_export: l.export.clone(),
+                e.library.as_ref().map(|l| {
+                    anyhow::Ok(LibraryEntrypoint {
+                        name: e.name.clone().unwrap_or(
+                            PathBuf::from(e.import.as_str())
+                                .file_stem()
+                                .unwrap()
+                                .to_string_lossy()
+                                .into(),
+                        ),
+                        import: convert_to_project_relative(&e.import, &this.project_path)?,
+                        runtime_root: l.name.clone(),
+                        runtime_export: l.export.clone(),
+                    })
                 })
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
         if lib_vec.is_empty() {
             Ok(Vc::cell(None))
         } else {
@@ -549,7 +551,7 @@ impl Project {
                                         .to_string_lossy()
                                         .into(),
                                 ),
-                                import: e.import.clone(),
+                                import: convert_to_project_relative(&e.import, &this.project_path)?,
                             })
                         })
                     },
@@ -696,12 +698,12 @@ impl Project {
 
     #[turbo_tasks::function]
     pub async fn node_root_to_root_path(self: Vc<Self>) -> Result<Vc<RcStr>> {
-        let node_root = self.node_root().owned().await?;
-        let output_root = self.output_fs().root().owned().await?;
-        let output_root_to_root_path = node_root
-            .get_relative_path_to(&output_root)
-            .context("Pack path need to be in root path")?;
-        Ok(Vc::cell(output_root_to_root_path))
+        Ok(Vc::cell(
+            self.node_root()
+                .await?
+                .get_relative_path_to(&*self.output_fs().root().await?)
+                .context("Expected node root to be inside of output fs")?,
+        ))
     }
 
     #[turbo_tasks::function]
@@ -930,12 +932,11 @@ impl Project {
 
     #[turbo_tasks::function]
     pub async fn client_chunking_context(self: Vc<Self>) -> Result<Vc<Box<dyn ChunkingContext>>> {
-        let output_root_to_root_path = self.node_root_to_root_path().await?;
         Ok(get_client_chunking_context(ClientChunkingContextOptions {
             mode: self.mode(),
             root_path: self.project_path().owned().await?,
-            output_root: self.dist_root().owned().await?,
-            output_root_to_root_path: (*output_root_to_root_path).clone(),
+            client_root: self.client_root().owned().await?,
+            client_root_to_root_path: rcstr!("/ROOT"),
             public_path: self.config().computed_public_path(),
             environment: self.client_compile_time_info().environment(),
             module_id_strategy: self.module_ids(),

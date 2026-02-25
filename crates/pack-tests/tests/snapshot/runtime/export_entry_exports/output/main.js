@@ -19,7 +19,7 @@ if (!Array.isArray(globalThis["utooChunk_export_entry_exports"])) {
 let __entryExports__ = undefined;
 
 const CHUNK_BASE_PATH = "/";
-const RELATIVE_ROOT_PATH = "..";
+const RELATIVE_ROOT_PATH = "/ROOT";
 const RUNTIME_PUBLIC_PATH = "/";
 const ASSET_SUFFIX = "";
 const WORKER_FORWARDED_GLOBALS = [];

@@ -8,7 +8,7 @@ if (!Array.isArray(globalThis["TURBOPACK"])) {
 }
 
 const CHUNK_BASE_PATH = "/";
-const RELATIVE_ROOT_PATH = "..";
+const RELATIVE_ROOT_PATH = "/ROOT";
 const RUNTIME_PUBLIC_PATH = "/";
 const ASSET_SUFFIX = "";
 const WORKER_FORWARDED_GLOBALS = [];

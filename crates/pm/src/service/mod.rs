@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod binary;
 pub mod clean;
 pub mod config;
@@ -8,6 +9,7 @@ pub mod install;
 pub mod package;
 pub mod package_management;
 pub mod pipeline;
+pub mod pm_pack;
 pub mod rebuild;
 pub mod script;
 pub mod update;

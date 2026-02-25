@@ -1,6 +1,6 @@
 use crate::fs;
 
-pub use super::config::get_cache_dir;
+pub use super::user_config::get_cache_dir;
 
 pub fn matches_pattern(text: &str, pattern: &str) -> bool {
     if pattern == "*" {

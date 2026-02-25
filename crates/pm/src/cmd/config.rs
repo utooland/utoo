@@ -1,4 +1,4 @@
-use crate::util::config::Config;
+use crate::util::config_file::Config;
 use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 
@@ -55,6 +55,9 @@ pub async fn handle_config_list(global: bool) -> Result<()> {
 
     for (key, value) in config.list()? {
         println!("{key} = {value}");
+    }
+    for (key, values) in config.list_arrays() {
+        println!("{key} = [{}]", values.join(", "));
     }
     Ok(())
 }

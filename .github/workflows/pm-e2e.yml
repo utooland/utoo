@@ -4,14 +4,14 @@ on:
   push:
     branches: ["next", "e2e-pm"]
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
 
 jobs:
   e2e:
-    if: (github.event_name == 'push' && !contains(github.event.head_commit.message, '(pack)')) || (github.event_name == 'pull_request' && !contains(github.event.pull_request.title, '(pack)'))
+    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) || (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
     strategy:
       fail-fast: false
       matrix:
@@ -55,7 +55,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -63,10 +62,10 @@ jobs:
           toolchain: nightly-2026-02-05
           targets: ${{ matrix.settings.target }}
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: pm-e2e-${{ matrix.settings.target }}
+      # - name: Cache cargo
+      #   uses: Swatinem/rust-cache@v2
+      #   with:
+      #     shared-key: pm-e2e-${{ matrix.settings.target }}
 
       - name: Build utoo-pm
         run: cargo build --release --target ${{ matrix.settings.target }} --bin utoo -p utoo-pm
@@ -178,3 +177,19 @@ jobs:
           name: e2e-artifacts-${{ matrix.settings.target }}
           path: ${{ runner.temp }}/utoo-*
           if-no-files-found: ignore
+
+  success:
+    name: utoopm-e2e-success
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - e2e
+    steps:
+      - name: Check success
+        run: |
+          if [ "${{ needs.e2e.result }}" == "failure" ] || [ "${{ needs.e2e.result }}" == "cancelled" ]; then
+            echo "Tests failed or were cancelled"
+            exit 1
+          else
+            echo "Tests passed or were skipped"
+          fi

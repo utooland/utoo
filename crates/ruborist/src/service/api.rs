@@ -59,6 +59,8 @@ pub struct BuildDepsOptions<G, R> {
     pub glob: G,
     /// Progress event receiver
     pub receiver: R,
+    /// Explicit semver support override (None = auto-detect from registry URL)
+    pub supports_semver: Option<bool>,
 }
 
 impl<G, R> BuildDepsOptions<G, R> {
@@ -76,6 +78,7 @@ impl<G, R> BuildDepsOptions<G, R> {
             legacy_peer_deps: true,
             glob,
             receiver,
+            supports_semver: None,
         }
     }
 }
@@ -121,6 +124,7 @@ where
         legacy_peer_deps,
         glob,
         receiver,
+        supports_semver,
     } = options;
 
     // 1. Find root path (workspace root if applicable)
@@ -236,10 +240,13 @@ where
     }
 
     // 9. Create registry client with shared cache
-    let registry = UnifiedRegistry::builder()
+    let mut builder = UnifiedRegistry::builder()
         .registry(&registry_url)
-        .cache(package_cache)
-        .build();
+        .cache(package_cache);
+    if let Some(semver) = supports_semver {
+        builder = builder.supports_semver(semver);
+    }
+    let registry = builder.build();
 
     tracing::debug!(
         "Using registry: {} (semver: {}, disk cache: {})",
@@ -317,10 +324,12 @@ mod tests {
             legacy_peer_deps: true,
             glob: NoopGlob,
             receiver: NoopReceiver,
+            supports_semver: None,
         };
 
         assert_eq!(options.concurrency, 20);
         assert!(options.legacy_peer_deps);
+        assert!(options.supports_semver.is_none());
     }
 
     #[test]

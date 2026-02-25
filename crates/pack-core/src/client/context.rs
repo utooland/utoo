@@ -38,8 +38,8 @@ use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 use crate::{
     client::runtime_entry::RuntimeEntries,
     config::{
-        Config, ProviderConfig, ProviderConfigValue, default_max_chunk_count_per_group,
-        default_max_merge_chunk_size, default_min_chunk_size,
+        Config, ProviderConfig, ProviderConfigValue, ReactRuntime,
+        default_max_chunk_count_per_group, default_max_merge_chunk_size, default_min_chunk_size,
     },
     embed_js::embed_file_path,
     import_map::{
@@ -50,6 +50,7 @@ use crate::{
     shared::{
         resolve::externals_plugin::ExternalsPlugin,
         transforms::{
+            classic_jsx_react_import::get_classic_jsx_react_import_rule,
             css_modules::get_auto_css_modules_rule,
             default_export_namer::get_default_export_namer_rule,
             emotion::get_emotion_transform_rule, remove_console::get_remove_console_transform_rule,
@@ -278,15 +279,9 @@ pub async fn get_client_module_options_context(
     } else {
         false
     };
-    let jsx_transform_options = get_jsx_transform_options(
-        project_path.clone(),
-        mode,
-        false,
-        config,
-        enable_react_refresh,
-    )
-    .to_resolved()
-    .await?;
+    let jsx_transform_options = get_jsx_transform_options(mode, config, enable_react_refresh)
+        .to_resolved()
+        .await?;
 
     let mut loader_conditions = BTreeSet::new();
     loader_conditions.insert(WebpackLoaderBuiltinCondition::Browser);
@@ -330,6 +325,12 @@ pub async fn get_client_module_options_context(
         // This transformer just to solve the react-refresh not work for no named jsx function component.
         // Refer to: https://github.com/utooland/utoo/issues/2439
         client_rules.push(get_default_export_namer_rule());
+    }
+
+    let is_classic_jsx = matches!(config.react().await?.runtime, Some(ReactRuntime::Classic));
+
+    if is_classic_jsx {
+        client_rules.push(get_classic_jsx_react_import_rule());
     }
 
     let additional_rules: Vec<ModuleRule> = vec![
@@ -530,8 +531,8 @@ pub async fn get_client_resolve_options_context(
 pub struct ClientChunkingContextOptions {
     pub mode: Vc<Mode>,
     pub root_path: FileSystemPath,
-    pub output_root: FileSystemPath,
-    pub output_root_to_root_path: RcStr,
+    pub client_root: FileSystemPath,
+    pub client_root_to_root_path: RcStr,
     pub public_path: Vc<RcStr>,
     pub environment: Vc<Environment>,
     pub module_id_strategy: Vc<ModuleIdStrategy>,
@@ -548,8 +549,8 @@ pub async fn get_client_chunking_context(
     let ClientChunkingContextOptions {
         mode,
         root_path,
-        output_root,
-        output_root_to_root_path,
+        client_root,
+        client_root_to_root_path,
         public_path,
         environment,
         module_id_strategy,
@@ -583,11 +584,11 @@ pub async fn get_client_chunking_context(
 
     let mut builder = BrowserChunkingContext::builder(
         root_path.clone(),
-        output_root.clone(),
-        output_root_to_root_path,
-        output_root.clone(),
-        output_root.clone(),
-        output_root,
+        client_root.clone(),
+        client_root_to_root_path,
+        client_root.clone(),
+        client_root.clone(),
+        client_root.clone(),
         environment.to_resolved().await?,
         runtime_type,
     )

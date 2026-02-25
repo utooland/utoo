@@ -58,6 +58,26 @@ pub mod cmd {
     pub const INIT_ALIAS: &str = "create";
     pub const INIT_ABOUT: &str = "Create a package.json file";
 
+    pub const PACK_NAME: &str = "pm-pack";
+    pub const PACK_ALIAS: &str = "pk";
+    pub const PACK_ABOUT: &str = "Create a tarball from a package";
+
+    pub const PING_NAME: &str = "ping";
+    pub const PING_ALIAS: &str = "pg";
+    pub const PING_ABOUT: &str = "Ping npm registry";
+
+    pub const LOGIN_NAME: &str = "login";
+    pub const LOGIN_ALIAS: &str = "lg";
+    pub const LOGIN_ABOUT: &str = "Login to npm registry";
+
+    pub const WHOAMI_NAME: &str = "whoami";
+    pub const WHOAMI_ALIAS: &str = "who";
+    pub const WHOAMI_ABOUT: &str = "Display npm username";
+
+    pub const LOGOUT_NAME: &str = "logout";
+    pub const LOGOUT_ALIAS: &str = "lo";
+    pub const LOGOUT_ABOUT: &str = "Logout from npm registry";
+
     pub const COMPLETIONS_NAME: &str = "completions";
     pub const COMPLETIONS_ABOUT: &str = "Generate shell completion scripts\n\nAdd to your shell config:\n  bash:  echo 'eval \"$(utoo completions bash)\"' >> ~/.bashrc\n  zsh:   echo 'eval \"$(utoo completions zsh)\"' >> ~/.zshrc\n  fish:  utoo completions fish > ~/.config/fish/completions/utoo.fish";
 }
