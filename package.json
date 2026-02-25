@@ -39,7 +39,7 @@
     "examples/with-style-loader",
     "examples/with-tailwind",
     "examples/resolve",
-    "examples/react",
+    "examples/with-react",
     "examples/utooweb-demo",
     "examples/expose-entry-exports"
   ],
