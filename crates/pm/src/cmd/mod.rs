@@ -10,6 +10,7 @@ pub mod login;
 pub mod logout;
 pub mod ping;
 pub mod pm_pack;
+pub mod publish;
 pub mod rebuild;
 pub mod run;
 pub mod update;

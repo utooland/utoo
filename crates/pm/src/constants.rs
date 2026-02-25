@@ -62,6 +62,10 @@ pub mod cmd {
     pub const PACK_ALIAS: &str = "pk";
     pub const PACK_ABOUT: &str = "Create a tarball from a package";
 
+    pub const PUBLISH_NAME: &str = "publish";
+    pub const PUBLISH_ALIAS: &str = "pub";
+    pub const PUBLISH_ABOUT: &str = "Publish a package to the registry";
+
     pub const PING_NAME: &str = "ping";
     pub const PING_ALIAS: &str = "pg";
     pub const PING_ABOUT: &str = "Ping npm registry";
