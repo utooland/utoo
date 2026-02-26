@@ -8,14 +8,20 @@ use utoo_ruborist::service::dns::CachingResolver;
 static DNS_RESOLVER: LazyLock<Arc<CachingResolver>> =
     LazyLock::new(|| Arc::new(CachingResolver::new(Duration::from_secs(300))));
 
-/// Global shared client for general-purpose HTTP requests.
+/// Global shared client for all HTTP requests (registry manifests + tarball downloads).
 ///
-/// Uses the same no-system-proxy policy as [`client_builder`].
-/// For download-heavy workloads with custom timeouts, use [`client_builder`] instead.
+/// Also injected into ruborist so that manifest fetches and tarball downloads
+/// share the same HTTP/2 connection pool, enabling multiplexing on a single
+/// TCP connection per host.
 static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
-    client_builder()
+    let c = client_builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .read_timeout(std::time::Duration::from_secs(30))
         .build()
-        .expect("Failed to build HTTP client")
+        .expect("Failed to build HTTP client");
+    // Share connection pool with ruborist for HTTP/2 multiplexing
+    utoo_ruborist::service::set_http_client(c.clone());
+    c
 });
 
 /// Return a reference to the global shared [`reqwest::Client`].
@@ -36,6 +42,7 @@ pub fn client() -> &'static reqwest::Client {
 pub fn client_builder() -> reqwest::ClientBuilder {
     let mut builder = reqwest::Client::builder()
         .user_agent(concat!("utoo/", env!("CARGO_PKG_VERSION")))
+        .use_rustls_tls()
         .no_proxy()
         .dns_resolver(DNS_RESOLVER.clone());
 

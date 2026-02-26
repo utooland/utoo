@@ -2,8 +2,6 @@ use std::fmt;
 use tokio::time::Duration;
 use tokio_retry::strategy::ExponentialBackoff;
 
-use super::http::client_builder;
-
 /// A generic error type for retryable operations
 #[derive(Debug)]
 pub enum RetryableError {
@@ -21,19 +19,6 @@ impl fmt::Display for RetryableError {
 }
 
 impl std::error::Error for RetryableError {}
-
-/// Build a reqwest::Client with timeout config.
-/// Connection pool is unlimited - concurrency is controlled by semaphore instead.
-pub fn build_dns_cached_client() -> reqwest::Client {
-    client_builder()
-        .connect_timeout(std::time::Duration::from_secs(5)) // TLS + TCP handshake
-        .read_timeout(std::time::Duration::from_secs(30)) // Timeout for individual read operations
-        // No total timeout - large files (e.g. node binary ~100MB) need longer download time
-        // No pool_max_idle_per_host - let reqwest manage connections freely
-        // Concurrency is controlled by semaphore in preload service
-        .build()
-        .expect("Failed to build reqwest client")
-}
 
 pub fn create_retry_strategy() -> impl Iterator<Item = Duration> {
     let delays = vec![

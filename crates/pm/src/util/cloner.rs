@@ -290,14 +290,25 @@ async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
 
 // find the first non built subdirectory
 pub async fn find_real_src<P: AsRef<Path>>(src: P) -> Option<PathBuf> {
-    let mut read_dir = fs::read_dir(src.as_ref()).await.ok()?;
-    while let Some(entry) = read_dir.next_entry().await.ok()? {
-        if let Ok(metadata) = entry.metadata().await
-            && metadata.is_dir()
-            && let Some(name) = entry.path().file_name()
-            && name.to_string_lossy() != ".utoo_built"
-        {
-            return Some(entry.path());
+    let src = src.as_ref();
+    // Retry on transient errors (e.g. EMFILE under low ulimit)
+    for _ in 0..3 {
+        match fs::read_dir(src).await {
+            Ok(mut read_dir) => {
+                while let Ok(Some(entry)) = read_dir.next_entry().await {
+                    if let Ok(metadata) = entry.metadata().await
+                        && metadata.is_dir()
+                        && let Some(name) = entry.path().file_name()
+                        && name.to_string_lossy() != ".utoo_built"
+                    {
+                        return Some(entry.path());
+                    }
+                }
+                return None; // Directory exists but has no valid subdirectory
+            }
+            Err(_) => {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
         }
     }
     None

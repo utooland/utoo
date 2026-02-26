@@ -10,12 +10,23 @@ use std::time::Duration;
 use crate::model::manifest::{FullManifest, VersionManifest};
 use crate::service::dns::CachingResolver;
 
-/// Global HTTP client with connection pooling and DNS caching
+/// Global HTTP client with connection pooling and DNS caching.
+///
+/// Can be set externally via [`set_http_client`] to share a connection pool
+/// with the caller (e.g. pm's downloader), enabling HTTP/2 multiplexing
+/// across both manifest fetches and tarball downloads.
 static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+/// Inject an external HTTP client to share its connection pool.
+/// Must be called before any manifest fetch. Ignored if already initialized.
+pub fn set_http_client(client: reqwest::Client) {
+    let _ = HTTP_CLIENT.set(client);
+}
 
 fn get_client() -> &'static reqwest::Client {
     HTTP_CLIENT.get_or_init(|| {
         let mut builder = reqwest::Client::builder()
+            .use_rustls_tls()
             .no_proxy()
             .dns_resolver(Arc::new(CachingResolver::new(Duration::from_secs(300))));
 
