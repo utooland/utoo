@@ -69,8 +69,21 @@ export type TurbopackRuleConfigItem = {
   condition?: TurbopackRuleCondition;
 };
 
+/**
+ * This can be an object representing a single configuration, or a list of
+ * loaders and/or rule configuration objects.
+ *
+ * - A list of loader path strings or objects is the "shorthand" syntax.
+ * - A list of rule configuration objects can be useful when each configuration
+ *   object has different `condition` fields, but still match the same top-level
+ *   path glob.
+ */
+export type TurbopackRuleConfigCollection =
+  | TurbopackRuleConfigItem
+  | (TurbopackLoaderItem | TurbopackRuleConfigItem)[];
+
 export interface ModuleOptions {
-  rules?: Record<string, TurbopackRuleConfigItem>;
+  rules?: Record<string, TurbopackRuleConfigCollection>;
 }
 
 export interface ResolveOptions {
