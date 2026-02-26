@@ -72,7 +72,6 @@ pub async fn publish(
 
     // Load package.json for version metadata in the publish payload
     let package_json = load_package_json_from_path(&package_info.path).await?;
-    let tarball_filename = pack_result.tarball_filename();
     let payload = PublishPayload::new(&PublishPayloadInput {
         package_json: &package_json,
         name: &pack_result.name,
@@ -81,14 +80,17 @@ pub async fn publish(
         shasum: &shasum,
         integrity: &pack_result.integrity,
         tarball_data,
-        tarball_filename: &tarball_filename,
         registry,
+        access: Some("public"),
     });
 
     println!("Publishing to {registry} with tag {tag}");
 
     // Send PUT request to registry, handling web-based OTP if needed.
-    let url = format!("{}/{}", registry.trim_end_matches('/'), pack_result.name);
+    // Scoped packages: encode `/` as `%2f` so the registry sees a single path
+    // segment (npm does the same via `npa.resolve().escapedName`).
+    let escaped_name = pack_result.name.replace('/', "%2f");
+    let url = format!("{}/{}", registry.trim_end_matches('/'), escaped_name);
 
     let mut response = build_publish_request(&url, &token, &payload, otp)
         .send()

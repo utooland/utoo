@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use std::env;
 use std::path::{Path, PathBuf};
 use utoo_ruborist::model::package_json::parse_bin_field;
@@ -47,6 +47,52 @@ impl Scripts {
             "postpublish" => self.postpublish.as_ref(),
             _ => None,
         }
+    }
+}
+
+#[derive(Debug, Default, Clone, serde::Deserialize)]
+#[serde(default)]
+pub struct PublishConfig {
+    pub tag: Option<String>,
+    pub registry: Option<String>,
+    pub access: Option<String>,
+}
+
+/// Publish-related metadata extracted from package.json.
+///
+/// Combines the top-level `private` field with nested `publishConfig`.
+#[derive(Debug, Default, Clone, serde::Deserialize)]
+#[serde(default)]
+pub struct PublishMeta {
+    pub private: bool,
+    #[serde(rename = "publishConfig")]
+    pub publish_config: PublishConfig,
+}
+
+impl PublishMeta {
+    pub fn from_json(data: &serde_json::Value) -> Self {
+        serde_json::from_value(data.clone()).unwrap_or_default()
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.private {
+            bail!(
+                "This package has been marked as private.\n\
+                 Remove the 'private' field from package.json to publish it."
+            );
+        }
+        if self
+            .publish_config
+            .access
+            .as_deref()
+            .is_some_and(|a| a != "public")
+        {
+            bail!(
+                "utoo publish currently only supports public access.\n\
+                 Remove or change 'publishConfig.access' to \"public\" in package.json."
+            );
+        }
+        Ok(())
     }
 }
 

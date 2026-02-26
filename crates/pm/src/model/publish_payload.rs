@@ -12,8 +12,8 @@ pub(crate) struct PublishPayloadInput<'a> {
     pub shasum: &'a str,
     pub integrity: &'a str,
     pub tarball_data: &'a [u8],
-    pub tarball_filename: &'a str,
     pub registry: &'a str,
+    pub access: Option<&'a str>,
 }
 
 /// npm registry PUT payload for publishing a package.
@@ -21,6 +21,8 @@ pub(crate) struct PublishPayloadInput<'a> {
 pub(crate) struct PublishPayload {
     _id: String,
     name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    access: Option<String>,
     #[serde(rename = "dist-tags")]
     dist_tags: HashMap<String, String>,
     versions: HashMap<String, serde_json::Value>,
@@ -45,8 +47,18 @@ struct Dist {
 
 impl PublishPayload {
     /// Build the publish PUT payload from the given input.
+    ///
+    /// The tarball name and URL are derived from `name` and `version` following
+    /// the npm registry protocol (`libnpmpublish/lib/publish.js`):
+    /// ```js
+    /// const tarballName = `${manifest.name}-${manifest.version}.tgz`
+    /// const tarballURI  = `${manifest.name}/-/${tarballName}`
+    /// ```
     pub fn new(input: &PublishPayloadInput<'_>) -> Self {
         let tarball_base64 = BASE64.encode(input.tarball_data);
+
+        // npm: `${name}-${version}.tgz` — preserves scope for scoped packages.
+        let tarball_name = format!("{}-{}.tgz", input.name, input.version);
 
         // Inject dist and _id into version metadata
         let mut version_metadata = input.package_json.clone();
@@ -56,9 +68,12 @@ impl PublishPayload {
                 serde_json::to_value(Dist {
                     shasum: input.shasum.to_string(),
                     integrity: input.integrity.to_string(),
+                    // npm: `${name}/-/${tarballName}` resolved against registry
                     tarball: format!(
-                        "{}/{}-/{}",
-                        input.registry, input.name, input.tarball_filename
+                        "{}/{}/-/{}",
+                        input.registry.trim_end_matches('/'),
+                        input.name,
+                        tarball_name,
                     ),
                 })
                 .expect("Dist serialization cannot fail"),
@@ -72,10 +87,11 @@ impl PublishPayload {
         Self {
             _id: input.name.to_string(),
             name: input.name.to_string(),
+            access: input.access.map(String::from),
             dist_tags: HashMap::from([(input.tag.to_string(), input.version.to_string())]),
             versions: HashMap::from([(input.version.to_string(), version_metadata)]),
             _attachments: HashMap::from([(
-                input.tarball_filename.to_string(),
+                tarball_name,
                 Attachment {
                     content_type: "application/octet-stream",
                     data: tarball_base64,
@@ -105,8 +121,8 @@ mod tests {
             shasum: "abc123shasum",
             integrity: "sha512-integrity",
             tarball_data: b"fake-tarball",
-            tarball_filename: "test-pkg-1.0.0.tgz",
             registry: "https://registry.npmjs.org",
+            access: None,
         });
 
         assert_eq!(payload._id, "test-pkg");
@@ -118,11 +134,9 @@ mod tests {
         assert_eq!(ver["_id"], "test-pkg@1.0.0");
         assert_eq!(ver["dist"]["shasum"], "abc123shasum");
         assert_eq!(ver["dist"]["integrity"], "sha512-integrity");
-        assert!(
-            ver["dist"]["tarball"]
-                .as_str()
-                .unwrap()
-                .contains("test-pkg-1.0.0.tgz")
+        assert_eq!(
+            ver["dist"]["tarball"].as_str().unwrap(),
+            "https://registry.npmjs.org/test-pkg/-/test-pkg-1.0.0.tgz",
         );
 
         let att = &payload._attachments["test-pkg-1.0.0.tgz"];
@@ -131,6 +145,55 @@ mod tests {
 
         let decoded = BASE64.decode(&att.data).unwrap();
         assert_eq!(decoded, b"fake-tarball");
+    }
+
+    /// Verify scoped package payload matches npm registry protocol.
+    ///
+    /// npm source (`libnpmpublish/lib/publish.js`):
+    /// ```js
+    /// const tarballName = `${manifest.name}-${manifest.version}.tgz`
+    /// const tarballURI  = `${manifest.name}/-/${tarballName}`
+    /// manifest.dist.tarball = new URL(tarballURI, registry).href
+    /// root._attachments[tarballName] = { ... }
+    /// ```
+    ///
+    /// For `@eggjs/tegg-plugin@3.72.0`:
+    ///   - PUT tarballName  = `@eggjs/tegg-plugin-3.72.0.tgz`
+    ///   - PUT tarball URL  = `https://registry.npmjs.org/@eggjs/tegg-plugin/-/@eggjs/tegg-plugin-3.72.0.tgz`
+    ///   - GET tarball URL  = `https://registry.npmjs.org/@eggjs/tegg-plugin/-/tegg-plugin-3.72.0.tgz`
+    ///     (registry rewrites the stored URL, stripping the scope from filename)
+    #[test]
+    fn test_payload_scoped_package() {
+        let pkg_json = serde_json::json!({
+            "name": "@eggjs/tegg-plugin",
+            "version": "3.72.0"
+        });
+
+        let payload = PublishPayload::new(&PublishPayloadInput {
+            package_json: &pkg_json,
+            name: "@eggjs/tegg-plugin",
+            version: "3.72.0",
+            tag: "latest",
+            shasum: "abc",
+            integrity: "sha512-xyz",
+            tarball_data: b"data",
+            registry: "https://registry.npmjs.org",
+            access: Some("public"),
+        });
+
+        // dist.tarball: {registry}/{name}/-/{name}-{version}.tgz
+        let tarball_url = payload.versions["3.72.0"]["dist"]["tarball"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            tarball_url,
+            "https://registry.npmjs.org/@eggjs/tegg-plugin/-/@eggjs/tegg-plugin-3.72.0.tgz",
+        );
+
+        // _attachments key: {name}-{version}.tgz (full scoped name)
+        assert!(
+            payload._attachments.contains_key("@eggjs/tegg-plugin-3.72.0.tgz"),
+        );
     }
 
     #[test]
@@ -144,8 +207,8 @@ mod tests {
             shasum: "s",
             integrity: "i",
             tarball_data: b"d",
-            tarball_filename: "pkg-2.0.0-rc.1.tgz",
             registry: "https://r.test",
+            access: None,
         });
 
         assert_eq!(payload.dist_tags["beta"], "2.0.0-rc.1");
