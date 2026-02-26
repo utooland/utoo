@@ -9,7 +9,6 @@
 | Feature Level1 | Feature Level2 | Feature Status | Feature Details | Remarks |
 | :-------------- | :-------------- | :-------------- | :-------------- | :-------------- |
 | Entry | `name` & `import` | ✅ | [Webpack `entry` context](https://webpack.js.org/configuration/entry-context/#entry) |  |
-|  | `filename` template | ✅ | [Webpack `output.filename`](https://webpack.js.org/configuration/output/#outputfilename) | e.g., `[name].[contenthash:8].js` |
 |  | `library` | ✅ | [Webpack `output.library`](https://webpack.js.org/configuration/output/#outputlibrary) | Supports UMD (root, export) and `dynamicImportToRequire` |
 | Mode | `mode` | ✅ | [Webpack `mode` configuration](https://webpack.js.org/configuration/mode/#root) |  |
 | Module | `rules` | ✅ | [Webpack `module.rules`](https://webpack.js.org/configuration/module/#rulerules) | `loader-runner` supports most mainstream webpack loaders |
@@ -20,7 +19,10 @@
 |  | `publicPath` | ✅ | [Webpack `output.publicPath`](https://webpack.js.org/configuration/output/#outputpublicpath) |  |
 |  | `clean` | ✅ | [Webpack `output.clean`](https://webpack.js.org/configuration/output/#outputclean) |  |
 |  | `filename` | ✅ | [Webpack `output.filename`](https://webpack.js.org/configuration/output/#outputfilename) |  |
-|  | `chunkFilename` | ✅ | [Webpack `output.filename`](https://webpack.js.org/configuration/output/#outputchunkfilename) |  |
+|  | `chunkFilename` | ✅ | [Webpack `output.chunkFilename`](https://webpack.js.org/configuration/output/#outputchunkfilename) |  |
+|  | `cssFilename` | ✅ | [Webpack `output.cssFilename`](https://webpack.js.org/configuration/output/#outputcssfilename) |  |
+|  | `cssChunkFilename` | ✅ | [Webpack `output.cssChunkFilename`](https://webpack.js.org/configuration/output/#outputcsschunkfilename) |  |
+|  | `assetModuleFilename` | ✅ | [Webpack `output.assetModuleFilename`](https://webpack.js.org/configuration/output/#outputassetmodulefilename) |  |
 |  | `copy` | ✅ | [Mako `config.copy`](https://makojs.dev/docs/config#copy) |  |
 |  | `standalone` | ❓ |  |  |
 | Target | `browserslist` | ✅ | [Webpack `target` string](https://webpack.js.org/configuration/target/#string) |  |
@@ -43,7 +45,6 @@
 |  | `inlineCss` | ✅ | [Webpack `style-loader`](https://github.com/webpack-contrib/style-loader) |  |
 |  | `styledJsx` | ✅ | [Vercel `styled-jsx`](https://github.com/vercel/styled-jsx) |  |
 |  | `styledComponents` | ✅ | [Styled Components](https://github.com/styled-components/styled-components) |  |
-|  | `emotion` | ✅ | [Emotion.js](https://github.com/emotion-js/emotion) |  |
 |  | `css parse, transform, minify` | ✅ | [With lightningcss](https://lightningcss.dev/) |  |
 |  | `css module` | ✅ |  |  |
 | Images | `inline` | ✅ | [Webpack `url-loader`](https://github.com/webpack-contrib/url-loader) |  |

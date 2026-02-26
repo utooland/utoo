@@ -369,6 +369,9 @@ pub struct OutputConfig {
     pub path: Option<RcStr>,
     pub filename: Option<RcStr>,
     pub chunk_filename: Option<RcStr>,
+    pub css_filename: Option<RcStr>,
+    pub css_chunk_filename: Option<RcStr>,
+    pub asset_module_filename: Option<RcStr>,
     // TODO: make sure this is needed
     pub r#type: Option<OutputType>,
     pub clean: Option<bool>,
