@@ -1,8 +1,11 @@
-import { bold, green, magenta, red } from "picocolors";
+import picocolors from "picocolors";
 import {
   decodeMagicIdentifier,
   MAGIC_IDENTIFIER_REGEX,
 } from "./magicIdentifier";
+
+// picocolors is a CommonJS module, so we need to import it as a default import
+const { bold, green, magenta, red } = picocolors;
 
 export type StyledString =
   | {

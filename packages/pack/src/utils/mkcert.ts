@@ -2,11 +2,8 @@ import { execSync } from "node:child_process";
 import { createPrivateKey, X509Certificate } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { WritableStream } from "node:stream/web";
 import os from "os";
-
-const { WritableStream } = require("node:stream/web") as {
-  WritableStream: typeof global.WritableStream;
-};
 
 const MKCERT_VERSION = "v1.4.4";
 
