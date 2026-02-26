@@ -1,33 +1,40 @@
 use colored::Colorize;
+use std::io;
 use term_size;
 
 use crate::service::pm_pack::PackResult;
 
-/// Print pack file listing and summary metadata.
+/// Write pack file listing and summary metadata to the given writer.
 ///
 /// Fields with empty/zero values (e.g. dry-run pack with no tarball) are omitted.
 /// Pass `shasum` separately because it is computed outside the pack step.
-pub fn print_pack_details(result: &PackResult, shasum: Option<&str>) {
+pub fn print_pack_details(
+    w: &mut impl io::Write,
+    result: &PackResult,
+    shasum: Option<&str>,
+) -> io::Result<()> {
     for (f, size) in &result.files {
-        println!("{} {f}", format_size(*size).dimmed());
+        writeln!(w, "{} {f}", format_size(*size).dimmed())?;
     }
-    println!();
+    writeln!(w)?;
 
-    let row = |label: &str, val: &dyn std::fmt::Display| println!("{} {val}", label.dimmed());
-    row("Name:", &result.name.cyan());
-    row("Version:", &result.version);
-    row("Files:", &result.files.len());
-    row("Unpacked Size:", &format_size(result.unpacked_size));
+    let mut row =
+        |label: &str, val: &dyn std::fmt::Display| writeln!(w, "{} {val}", label.dimmed());
+    row("Name:", &result.name.cyan())?;
+    row("Version:", &result.version)?;
+    row("Files:", &result.files.len())?;
+    row("Unpacked Size:", &format_size(result.unpacked_size))?;
     if result.packed_size > 0 {
-        row("Packed Size:", &format_size(result.packed_size));
+        row("Packed Size:", &format_size(result.packed_size))?;
     }
     if !result.integrity.is_empty() {
-        row("Integrity:", &result.integrity);
+        row("Integrity:", &result.integrity)?;
     }
     if let Some(shasum) = shasum {
-        row("Shasum:", &shasum);
+        row("Shasum:", &shasum)?;
     }
-    println!();
+    writeln!(w)?;
+    Ok(())
 }
 
 pub fn format_size(bytes: u64) -> String {
