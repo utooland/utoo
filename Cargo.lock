@@ -9652,7 +9652,6 @@ dependencies = [
  "libc",
  "libdeflater",
  "mockito",
- "once_cell",
  "open",
  "openssl",
  "owo-colors",
@@ -9694,6 +9693,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-fs-ext",
+ "tokio-retry",
  "tracing",
 ]
 

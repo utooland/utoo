@@ -1,16 +1,18 @@
-use crate::constants::APP_VERSION;
-use crate::util::http::client_builder;
-use crate::util::user_config::get_registry;
-use anyhow::{Context, Result};
-use once_cell::sync::Lazy;
-use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
+
+use crate::constants::APP_VERSION;
+use crate::util::http::client_builder;
+use crate::util::user_config::get_registry;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct VersionCache {
@@ -20,8 +22,8 @@ struct VersionCache {
 
 // Global state management for async update checking
 static UPDATE_AVAILABLE: AtomicBool = AtomicBool::new(false);
-static UPDATE_VERSION: Lazy<Arc<RwLock<Option<String>>>> =
-    Lazy::new(|| Arc::new(RwLock::new(None)));
+static UPDATE_VERSION: LazyLock<Arc<RwLock<Option<String>>>> =
+    LazyLock::new(|| Arc::new(RwLock::new(None)));
 
 /// Initialize auto update with immediate check and background monitoring
 pub async fn init_auto_update() -> Result<()> {

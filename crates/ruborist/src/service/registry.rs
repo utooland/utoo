@@ -10,7 +10,7 @@
 //!
 //! # Architecture
 //!
-//! - `http` module: Pure HTTP requests (`fetch_full_manifest`, `fetch_version_manifest`)
+//! - `manifest` module: Manifest fetching with retry (`fetch_full_manifest`, `fetch_version_manifest`)
 //! - `UnifiedRegistry`: Handles caching logic with three-tier strategy
 //!   - Memory cache (fastest)
 //!   - Disk cache (persistent, with ETag validation)
@@ -39,7 +39,7 @@ fn current_timestamp_secs() -> u64 {
 }
 
 use super::cache::{PackageCache, Versions, VersionsInfo};
-use super::http;
+use super::manifest;
 use crate::model::manifest::{FullManifest, VersionManifest};
 use crate::resolver::semver::normalize_spec;
 use crate::resolver::version::resolve_target_version;
@@ -199,8 +199,13 @@ impl UnifiedRegistry {
 
         // 3. Fetch from network with ETag for validation
         let use_abbreviated = self.supports_semver;
-        match http::fetch_full_manifest(&self.registry_url, name, use_abbreviated, etag.as_deref())
-            .await
+        match manifest::fetch_full_manifest(
+            &self.registry_url,
+            name,
+            use_abbreviated,
+            etag.as_deref(),
+        )
+        .await
         {
             Ok((manifest, new_etag)) => {
                 // 4. Cache full manifest in memory
@@ -242,10 +247,14 @@ impl UnifiedRegistry {
                     )))
                 } else {
                     // Disk cache corrupted, fetch fresh
-                    let (manifest, new_etag) =
-                        http::fetch_full_manifest(&self.registry_url, name, use_abbreviated, None)
-                            .await
-                            .map_err(RegistryError)?;
+                    let (manifest, new_etag) = manifest::fetch_full_manifest(
+                        &self.registry_url,
+                        name,
+                        use_abbreviated,
+                        None,
+                    )
+                    .await
+                    .map_err(RegistryError)?;
 
                     self.cache
                         .set_full_manifest(name.to_string(), manifest.clone());
@@ -304,7 +313,7 @@ impl UnifiedRegistry {
         // Use abbreviated format only for semver-supporting registries
         tracing::debug!("Cache miss for {}@{}, fetching from network", name, spec);
         let manifest =
-            http::fetch_version_manifest(&self.registry_url, name, spec, self.supports_semver)
+            manifest::fetch_version_manifest(&self.registry_url, name, spec, self.supports_semver)
                 .await
                 .map_err(RegistryError)?;
 
@@ -378,7 +387,7 @@ impl RegistryClient for UnifiedRegistry {
         // Both semver and non-semver registries support {registry}/{name}/{version}
         // Use abbreviated format only for semver-supporting registries
         let manifest =
-            http::fetch_version_manifest(&self.registry_url, name, spec, self.supports_semver)
+            manifest::fetch_version_manifest(&self.registry_url, name, spec, self.supports_semver)
                 .await
                 .map_err(RegistryError)?;
 

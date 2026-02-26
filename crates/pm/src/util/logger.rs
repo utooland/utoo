@@ -1,18 +1,17 @@
-use anyhow::Result;
 use std::env;
 use std::path::PathBuf;
+use std::sync::{LazyLock, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use anyhow::Result;
 use indicatif::{ProgressBar, ProgressStyle};
-use once_cell::sync::{Lazy, OnceCell};
 use owo_colors::OwoColorize;
-
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{
     EnvFilter, Layer, Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
 
-pub static PROGRESS_BAR: Lazy<ProgressBar> = Lazy::new(|| {
+pub static PROGRESS_BAR: LazyLock<ProgressBar> = LazyLock::new(|| {
     let pb = ProgressBar::new(0).with_style(
         ProgressStyle::with_template("{spinner:.blue} +{pos:.green} ~{len:.magenta} {wide_msg}")
             .unwrap()
@@ -23,7 +22,7 @@ pub static PROGRESS_BAR: Lazy<ProgressBar> = Lazy::new(|| {
 });
 
 // Global state for tracing
-static LOG_FILE_PATH: OnceCell<PathBuf> = OnceCell::new();
+static LOG_FILE_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 /// Initialize tracing subscriber with console and file output
 /// Returns (log_path, guard) - the guard must be kept alive for the duration of the program
@@ -116,7 +115,7 @@ pub fn log_progress(text: &str) {
 }
 
 // Global timer for log_time/log_time_end
-static START_TIME: OnceCell<Instant> = OnceCell::new();
+static START_TIME: OnceLock<Instant> = OnceLock::new();
 
 /// Start the global timer for elapsed time logging.
 pub fn log_time() {

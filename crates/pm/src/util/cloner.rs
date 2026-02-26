@@ -1,17 +1,19 @@
+use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use anyhow::{Context, Result};
+use tokio_retry::Retry;
+
 use super::downloader::download_to_cache;
 use super::json::load_package_json_from_path;
 use super::oncemap::OnceMap;
 use super::retry::create_retry_strategy;
 use crate::fs;
-use anyhow::{Context, Result};
-use once_cell::sync::Lazy;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use tokio_retry::Retry;
 
 /// Global clone cache shared between pipeline and install phases.
 /// Key: target path, Value: ()
-static CLONE_CACHE: Lazy<OnceMap<String, ()>> = Lazy::new(OnceMap::new);
+static CLONE_CACHE: LazyLock<OnceMap<String, ()>> = LazyLock::new(OnceMap::new);
 
 /// Number of clones completed.
 static CLONE_COUNT: AtomicUsize = AtomicUsize::new(0);
