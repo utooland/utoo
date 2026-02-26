@@ -11,13 +11,11 @@
   ],
   "output": {
     "path": "./dist",
-    "clean": true,
-    "copy": [
-      {
-        "from": "./static/index.css",
-        "to": "./index.css"
-      }
-    ]
+    "filename": "with-react.[contenthash:8].js",
+    "chunkFilename": "with-react.[contenthash:8].js",
+    "cssFilename": "with-react.[contenthash:8].css",
+    "assetModuleFilename": "with-react.[contenthash:8].css",
+    "clean": true
   },
   "optimization": {
     "minify": false

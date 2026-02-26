@@ -24,12 +24,6 @@
           "remarks": ""
         },
         {
-          "featureLevel2": "`filename` template",
-          "featureStatus": "✅",
-          "featureDetails": "[Webpack `output.filename`](https://webpack.js.org/configuration/output/#outputfilename)",
-          "remarks": "e.g., `[name].[contenthash:8].js`"
-        },
-        {
           "featureLevel2": "`library`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `output.library`](https://webpack.js.org/configuration/output/#outputlibrary)",
@@ -118,6 +112,25 @@
           "featureLevel2": "`chunkFilename`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `output.filename`](https://webpack.js.org/configuration/output/#outputchunkfilename)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`cssFilename`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `output.cssFilename`](https://webpack.js.org/configuration/output/#outputcssfilename)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`cssChunkFilename`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `output.cssChunkFilename`](https://webpack.js.org/configuration/output/#outputcsschunkfilename)",
+          "remarks": ""
+        },
+        {
+          "featureLevel2": "`assetModuleFilename`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `output.assetModuleFilename`](https://webpack.js.org/configuration/output/#outputassetmodulefilename)",
+
           "remarks": ""
         },
         {

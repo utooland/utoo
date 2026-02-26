@@ -33,6 +33,7 @@ use turbopack_core::{
     },
     output::{OutputAsset, OutputAssets},
 };
+use turbopack_css::chunk::{CssChunk, source_map::CssChunkSourceMapAsset};
 use turbopack_ecmascript::{
     async_chunk::module::AsyncLoaderModule,
     chunk::{EcmascriptChunk, EcmascriptChunkType},
@@ -137,8 +138,13 @@ impl LibraryChunkingContextBuilder {
         self
     }
 
-    pub fn chunk_filename(mut self, chunk_filename: RcStr) -> Self {
-        self.chunking_context.chunk_filename = Some(chunk_filename);
+    pub fn css_filename(mut self, css_filename: RcStr) -> Self {
+        self.chunking_context.css_filename = Some(css_filename);
+        self
+    }
+
+    pub fn asset_module_filename(mut self, asset_module_filename: RcStr) -> Self {
+        self.chunking_context.asset_module_filename = Some(asset_module_filename);
         self
     }
 
@@ -210,8 +216,10 @@ pub struct LibraryChunkingContext {
     debug_ids: bool,
     /// Evaluate chunk filename template
     filename: Option<RcStr>,
-    /// Non evaluate chunk filename template
-    chunk_filename: Option<RcStr>,
+    /// Initial css chunk filename template
+    css_filename: Option<RcStr>,
+    /// Asset module filename template
+    asset_module_filename: Option<RcStr>,
 }
 
 impl LibraryChunkingContext {
@@ -240,7 +248,8 @@ impl LibraryChunkingContext {
                 export_usage: None,
                 unused_references: None,
                 filename: Default::default(),
-                chunk_filename: Default::default(),
+                css_filename: Default::default(),
+                asset_module_filename: Default::default(),
                 runtime_root,
                 runtime_export,
                 enable_module_merging: false,
@@ -432,38 +441,47 @@ impl ChunkingContext for LibraryChunkingContext {
         } else {
             match asset {
                 Some(asset) => {
-                    let filename_template = self.chunk_filename.clone();
-                    match filename_template {
-                        Some(filename) => {
-                            let query = QString::from(ident.await?.query.as_str());
+                    let resolved_asset = asset.to_resolved().await?;
+                    if ResolvedVc::try_downcast_type::<CssChunk>(resolved_asset).is_some()
+                        || ResolvedVc::try_downcast_type::<CssChunkSourceMapAsset>(resolved_asset)
+                            .is_some()
+                    {
+                        match &self.css_filename {
+                            Some(filename_template) => {
+                                let query = QString::from(ident.await?.query.as_str());
 
-                            let name = query.get("name").unwrap_or(output_name.as_str());
+                                let name = query.get("name").unwrap_or(output_name.as_str());
 
-                            let mut filename = filename.to_string();
+                                let mut filename = filename_template.to_string();
 
-                            if match_name_placeholder(&filename) {
-                                filename = replace_name_placeholder(&filename, name);
-                            }
-
-                            if match_content_hash_placeholder(&filename) {
-                                let content = asset.content().await?;
-                                if let AssetContent::File(file) = &*content {
-                                    let content_hash = hash_xxh3_hash64(&file.await?);
-                                    filename = replace_content_hash_placeholder(
-                                        &filename,
-                                        &format!("{content_hash:016x}"),
-                                    );
-                                } else {
-                                    bail!(
-                                        "chunk_path requires an asset with file content when content \
-                                     hashing is enabled"
-                                    );
+                                if match_name_placeholder(&filename) {
+                                    filename = replace_name_placeholder(&filename, name);
                                 }
-                            };
 
-                            filename
+                                if match_content_hash_placeholder(&filename) {
+                                    let content = asset.content().await?;
+                                    if let AssetContent::File(file) = &*content {
+                                        let content_hash = hash_xxh3_hash64(&file.await?);
+                                        filename = replace_content_hash_placeholder(
+                                            &filename,
+                                            &format!("{content_hash:016x}"),
+                                        );
+                                    } else {
+                                        bail!(
+                                            "chunk_path requires an asset with file content when content \
+                                     hashing is enabled"
+                                        );
+                                    }
+                                };
+
+                                filename
+                            }
+                            None => output_name,
                         }
-                        None => output_name,
+                    } else {
+                        bail!(
+                            "library building can not generate more then one js chunk and css chunk"
+                        );
                     }
                 }
                 None => output_name,
@@ -525,17 +543,41 @@ impl ChunkingContext for LibraryChunkingContext {
     ) -> Result<Vc<FileSystemPath>> {
         let source_path = original_asset_ident.path().await?;
         let basename = source_path.file_name();
-        let asset_path = match source_path.extension_ref() {
-            Some(ext) => format!(
-                "{basename}.{content_hash}.{ext}",
-                basename = &basename[..basename.len() - ext.len() - 1],
-                content_hash = &content_hash[..8]
-            ),
-            None => format!(
-                "{basename}.{content_hash}",
-                content_hash = &content_hash[..8]
-            ),
+
+        let asset_path = match &self.asset_module_filename {
+            Some(filename_template) => {
+                let mut filename = filename_template.to_string();
+
+                if match_name_placeholder(&filename) {
+                    filename = replace_name_placeholder(&filename, basename);
+                }
+
+                if match_content_hash_placeholder(&filename) {
+                    filename = replace_content_hash_placeholder(&filename, &content_hash);
+                };
+
+                if let Some(ext) = source_path.extension_ref() {
+                    if let Some((stem, _)) = filename.rsplit_once(".") {
+                        filename = stem.to_string();
+                    }
+                    filename = format!("{filename}.{ext}");
+                }
+
+                filename
+            }
+            None => match source_path.extension_ref() {
+                Some(ext) => format!(
+                    "{basename}.{content_hash}.{ext}",
+                    basename = &basename[..basename.len() - ext.len() - 1],
+                    content_hash = &content_hash[..8]
+                ),
+                None => format!(
+                    "{basename}.{content_hash}",
+                    content_hash = &content_hash[..8]
+                ),
+            },
         };
+
         self.output_root.join(&asset_path).map(|p| p.cell())
     }
 

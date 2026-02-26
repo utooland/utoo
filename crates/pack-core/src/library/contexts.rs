@@ -118,8 +118,12 @@ pub async fn get_library_chunking_context(
             builder = builder.filename(filename.clone());
         }
 
-        if let Some(chunk_filename) = &output.chunk_filename {
-            builder = builder.chunk_filename(chunk_filename.clone());
+        if let Some(css_filename) = &output.css_filename {
+            builder = builder.css_filename(css_filename.clone());
+        }
+
+        if let Some(asset_module_filename) = &output.asset_module_filename {
+            builder = builder.asset_module_filename(asset_module_filename.clone());
         }
     }
 

@@ -113,6 +113,10 @@ export interface ConfigComplete {
     type?: "standalone" | "export";
     filename?: string;
     chunkFilename?: string;
+    cssFilename?: string;
+    // TODO: make cssChunkFilename works as expected
+    // cssChunkFilename?: string;
+    assetModuleFilename?: string;
     clean?: boolean;
     copy?: Array<
       | {
