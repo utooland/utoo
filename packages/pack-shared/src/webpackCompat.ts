@@ -3,6 +3,7 @@ import {
   ConfigComplete,
   ExternalConfig,
   HtmlConfig,
+  TurbopackRuleConfigCollection,
   TurbopackRuleConfigItem,
 } from "./config";
 
@@ -48,10 +49,13 @@ export interface WebpackOutput {
   publicPath?: string | ((...args: any[]) => string);
   filename?: string | ((...args: any[]) => string);
   chunkFilename?: string | ((...args: any[]) => string);
-  assetModuleFilename?: string;
+  cssFilename?: string | ((...args: any[]) => string);
+  cssChunkFilename?: string | ((...args: any[]) => string);
+  assetModuleFilename?: string | ((...args: any[]) => string);
   library?: any;
   libraryTarget?: string;
   globalObject?: string;
+  chunkLoadingGlobal?: string;
   clean?: boolean | { keep?: any };
 }
 
@@ -63,6 +67,8 @@ export interface WebpackOptimization {
   moduleIds?: string;
   chunkIds?: string;
   concatenateModules?: boolean;
+  usedExports?: boolean | "global";
+  mangleExports?: boolean | "deterministic" | "size";
 }
 
 export type WebpackEntry =
@@ -128,14 +134,27 @@ export function compatOptionsFromWebpack(
     stats,
   } = webpackConfig;
 
+  const html = compatFromWebpackPlugin(plugins, compatHtml);
+  const copy = compatFromWebpackPlugin(plugins, compatCopy);
+  const outputCompat = compatOutput(output);
+  if (outputCompat && !outputCompat.cssFilename) {
+    outputCompat.cssFilename = compatFromWebpackPlugin(
+      plugins,
+      compatMiniCssExtract,
+    );
+  }
+  if (outputCompat && copy) {
+    (outputCompat as any).copy = copy;
+  }
+
   return {
     config: {
-      entry: compatEntry(entry),
+      entry: compatEntry(entry, html),
       mode: compatMode(mode),
       module: compatModule(module),
       resolve: compatResolve(resolve),
       externals: compatExternals(externals),
-      output: compatOutput(output),
+      output: outputCompat,
       target: compatTarget(target),
       sourceMaps: compatSourceMaps(devtool),
       optimization: compatOptimization(optimization),
@@ -158,7 +177,10 @@ function compatMode(
     : "production";
 }
 
-function compatEntry(webpackEntry: WebpackEntry | undefined) {
+function compatEntry(
+  webpackEntry: WebpackEntry | undefined,
+  html?: HtmlConfig,
+) {
   if (!webpackEntry) {
     return undefined;
   }
@@ -166,20 +188,21 @@ function compatEntry(webpackEntry: WebpackEntry | undefined) {
 
   switch (typeof webpackEntry) {
     case "string":
-      entry.push({ import: webpackEntry });
+      entry.push({ import: webpackEntry, html });
       break;
     case "object":
       if (Array.isArray(webpackEntry)) {
         webpackEntry.forEach((e) =>
           entry.push({
             import: e,
+            html,
           }),
         );
       } else {
         Object.entries(webpackEntry).forEach(([k, v]) => {
           switch (typeof v) {
             case "string":
-              entry.push({ name: k, import: v });
+              entry.push({ name: k, import: v, html });
               break;
             case "object":
               if (!Array.isArray(v)) {
@@ -188,6 +211,7 @@ function compatEntry(webpackEntry: WebpackEntry | undefined) {
                     entry.push({
                       name: k,
                       import: v.import,
+                      html,
                       library:
                         v.library?.type === "umd"
                           ? {
@@ -211,7 +235,7 @@ function compatEntry(webpackEntry: WebpackEntry | undefined) {
                 if (v.length === 0) {
                   throw "entry value items is empty";
                 } else if (v.length === 1) {
-                  entry.push({ name: k, import: v[0] });
+                  entry.push({ name: k, import: v[0], html });
                 } else {
                   throw "multi entry items for one entry not supported yet";
                 }
@@ -224,9 +248,9 @@ function compatEntry(webpackEntry: WebpackEntry | undefined) {
       }
       break;
     case "function":
-      throw "functional entry not supported yet";
+      throw new Error("functional entry not supported yet");
     default:
-      throw "entry config not compatible now";
+      throw new Error("entry config not compatible now");
   }
 
   return entry;
@@ -262,6 +286,29 @@ function compatHtml(
     (maybeWebpackPluginInstance as any).userOptions ||
     (maybeWebpackPluginInstance as any).options
   );
+}
+
+compatMiniCssExtract.pluginName = "MiniCssExtractPlugin";
+function compatMiniCssExtract(
+  maybeWebpackPluginInstance: MaybeWebpackPluginInstance,
+): string | undefined {
+  return (maybeWebpackPluginInstance as any)?.options?.filename;
+}
+
+compatCopy.pluginName = "CopyPlugin";
+function compatCopy(
+  maybeWebpackPluginInstance: MaybeWebpackPluginInstance,
+): NonNullable<ConfigComplete["output"]>["copy"] | undefined {
+  const patterns = (maybeWebpackPluginInstance as any)?.patterns;
+  if (!Array.isArray(patterns)) return undefined;
+
+  return patterns.map((pattern: any) => {
+    if (typeof pattern === "string") return pattern;
+    return {
+      from: pattern.from,
+      to: pattern.to,
+    };
+  });
 }
 
 compatDefine.pluginName = "DefinePlugin";
@@ -339,10 +386,10 @@ function compatExternals(
           {} as ConfigComplete["externals"],
         );
       } else if (webpackExternals instanceof RegExp) {
-        throw "regex external not supported yet";
+        throw new Error("regex external not supported yet");
       } else {
         if ("byLayer" in webpackExternals) {
-          throw "by layer external item not supported yet";
+          throw new Error("by layer external item not supported yet");
         }
         Object.entries(webpackExternals).forEach(([key, value]) => {
           if (typeof value === "string") {
@@ -434,7 +481,7 @@ function compatExternals(
       break;
     }
     case "function": {
-      throw "functional external not supported yet";
+      throw new Error("functional external not supported yet");
     }
     default:
       break;
@@ -452,46 +499,81 @@ function compatModule(
   const moduleRules = {
     rules: webpackModule.rules.reduce(
       (acc, cur) => {
-        switch (typeof cur) {
-          case "object":
-            if (cur) {
-              let condition = cur.test?.toString().match(/(\.\w+)/)?.[1];
-              if (condition) {
-                Object.assign(acc, {
-                  ["*" + condition]: <TurbopackRuleConfigItem>{
-                    loaders:
-                      typeof cur.use === "string"
-                        ? [cur.use]
-                        : typeof cur?.use === "object"
-                          ? Array.isArray(cur.use)
-                            ? cur.use.map((use) =>
-                                typeof use === "string"
-                                  ? { loader: use, options: {} }
-                                  : {
-                                      loader: (<any>use).loader,
-                                      options: (<any>use).options || {},
-                                    },
-                              )
-                            : [
-                                {
-                                  loader: cur.loader!,
-                                  options: cur.options || {},
-                                },
-                              ]
-                          : [],
-                    as: "*.js",
-                  },
-                });
+        if (typeof cur === "object" && cur) {
+          // Normalize condition from test, include, exclude
+          let ruleCondition: any = undefined;
+          if (cur.test || cur.include || cur.exclude) {
+            const conditions: any[] = [];
+            if (cur.test) conditions.push({ path: cur.test });
+            if (cur.include) conditions.push({ path: cur.include });
+            if (cur.exclude) conditions.push({ not: { path: cur.exclude } });
+
+            ruleCondition =
+              conditions.length === 1 ? conditions[0] : { all: conditions };
+          }
+
+          // Determine the glob keys for the rules record
+          // utoo usually uses extensions as keys like "*.svg"
+          const extensions = cur.test?.toString().match(/\.(\w+)/g);
+          const globKeys = extensions
+            ? extensions.map((ext) => `*${ext}`)
+            : ["*"];
+
+          // Handle loaders
+          const loaders =
+            typeof cur.use === "string"
+              ? [{ loader: cur.use, options: {} }]
+              : Array.isArray(cur.use)
+                ? cur.use.map((use) =>
+                    typeof use === "string"
+                      ? { loader: use, options: {} }
+                      : {
+                          loader: (use as any).loader,
+                          options: (use as any).options || {},
+                        },
+                  )
+                : cur.loader
+                  ? [
+                      {
+                        loader: cur.loader,
+                        options: cur.options || {},
+                      },
+                    ]
+                  : [];
+
+          const ruleItem: TurbopackRuleConfigItem = {
+            loaders,
+            condition: ruleCondition,
+            as:
+              cur.type === "asset" ||
+              cur.type === "asset/resource" ||
+              cur.type === "asset/inline" ||
+              cur.type === "asset/source" ||
+              (loaders.length > 0 &&
+                !globKeys.some(
+                  (k) => k === "*.js" || k === "*.ts" || k === "*.tsx",
+                ))
+                ? "*.js"
+                : undefined,
+          };
+
+          for (const key of globKeys) {
+            const existing = acc[key];
+            if (!existing) {
+              acc[key] = ruleItem;
+            } else {
+              // If already exists, turn into a collection array
+              if (Array.isArray(existing)) {
+                existing.push(ruleItem);
+              } else {
+                acc[key] = [existing as any, ruleItem];
               }
             }
-            break;
-          default:
-            break;
+          }
         }
-
         return acc;
       },
-      {} as Record<string, TurbopackRuleConfigItem>,
+      {} as Record<string, TurbopackRuleConfigCollection>,
     ),
   };
 
@@ -512,46 +594,71 @@ function compatResolve(
             (acc, cur) => Object.assign(acc, { [cur.name]: cur.alias }),
             {},
           )
-        : Object.entries(alias).reduce((acc, [k, v]) => {
-            if (typeof v === "string") {
-              // Handle alias keys ending with $ by removing the $
-              const aliasKey = k.endsWith("$") ? k.slice(0, -1) : k;
-              Object.assign(acc, { [aliasKey]: v });
-            } else {
-              throw "non string alias value not supported yet";
-            }
-            return acc;
-          }, {})
+        : Object.entries(alias).reduce(
+            (acc, [k, v]) => {
+              if (typeof v === "string") {
+                // Handle alias keys ending with $ by removing the $
+                const aliasKey = k.endsWith("$") ? k.slice(0, -1) : k;
+                acc[aliasKey] = v;
+              } else {
+                throw new Error("non string alias value not supported yet");
+              }
+              return acc;
+            },
+            {} as Record<string, any>,
+          )
       : undefined,
     extensions,
   };
 }
 
+function normalizeWebpackHash(
+  filename: string | undefined,
+): string | undefined {
+  if (!filename) return filename;
+  // Replace [hash] and [chunkhash] with [contenthash] as utoo only supports contenthash
+  // Also remove [ext] as it is automatically appended in utoopack
+  return filename
+    .replace(/\[(?:hash|chunkhash)(?::(\d+))?\]/g, "[contenthash:$1]")
+    .replace(/\[ext\]/g, "");
+}
+
 function compatOutput(
   webpackOutput: WebpackOutput | undefined,
 ): ConfigComplete["output"] {
-  if (webpackOutput?.filename && typeof webpackOutput.filename !== "string") {
-    throw "non string output filename not supported yet";
-  }
-  if (
-    webpackOutput?.chunkFilename &&
-    typeof webpackOutput.chunkFilename !== "string"
-  ) {
-    throw "non string output chunkFilename not supported yet";
+  for (const field of [
+    "filename",
+    "chunkFilename",
+    "publicPath",
+    "cssFilename",
+    "cssChunkFilename",
+    "assetModuleFilename",
+  ] as const) {
+    if (webpackOutput?.[field] && typeof webpackOutput[field] !== "string") {
+      throw new Error(`non string output ${field} not supported yet`);
+    }
   }
 
-  if (
-    webpackOutput?.publicPath &&
-    typeof webpackOutput.publicPath !== "string"
-  ) {
-    throw "non string output publicPath not supported yet";
-  }
   return {
     path: webpackOutput?.path,
-    filename: webpackOutput?.filename as string | undefined,
-    chunkFilename: webpackOutput?.chunkFilename as string | undefined,
+    filename: normalizeWebpackHash(
+      webpackOutput?.filename as string | undefined,
+    ),
+    chunkFilename: normalizeWebpackHash(
+      webpackOutput?.chunkFilename as string | undefined,
+    ),
+    cssFilename: normalizeWebpackHash(
+      webpackOutput?.cssFilename as string | undefined,
+    ),
+    cssChunkFilename: normalizeWebpackHash(
+      webpackOutput?.cssChunkFilename as string | undefined,
+    ),
+    assetModuleFilename: normalizeWebpackHash(
+      webpackOutput?.assetModuleFilename as string | undefined,
+    ),
     clean: !!webpackOutput?.clean,
     publicPath: webpackOutput?.publicPath as string | undefined,
+    chunkLoadingGlobal: webpackOutput?.chunkLoadingGlobal,
   };
 }
 
@@ -577,7 +684,8 @@ function compatOptimization(
   if (!webpackOptimization) {
     return;
   }
-  const { moduleIds, minimize, concatenateModules } = webpackOptimization;
+  const { moduleIds, minimize, concatenateModules, usedExports } =
+    webpackOptimization;
   return {
     moduleIds:
       moduleIds === "named"
@@ -585,14 +693,18 @@ function compatOptimization(
         : moduleIds === "deterministic"
           ? "deterministic"
           : undefined,
+    noMangling: webpackOptimization.mangleExports === false,
     minify: minimize,
     concatenateModules,
+    treeShaking: !!usedExports,
+    removeUnusedExports: !!usedExports,
+    removeUnusedImports: !!usedExports,
   };
 }
 
 function compatStats(
   webpackStats: WebpackStats | undefined,
-): ConfigComplete["sourceMaps"] {
+): ConfigComplete["stats"] {
   return !!webpackStats;
 }
 

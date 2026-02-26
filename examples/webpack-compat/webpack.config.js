@@ -3,9 +3,19 @@ const HtmlWebpackPlugin = require("html-webpack-plugin");
 
 module.exports = {
   mode: process.env.NODE_ENV === "production" ? "production" : "development",
-  entry: "./src/index.js",
+  entry: "./src/index.tsx",
   output: {
     path: "dist",
+    filename: "[name].[contenthash:8].js",
+    chunkFilename: "[name].[contenthash:8].js",
+    cssFilename: "[name].[contenthash:8].css",
+    assetModuleFilename: "[name].[contenthash:8].[ext]",
+  },
+  resolve: {
+    alias: {
+      "@": "./src",
+    },
+    extensions: [".js", ".jsx", ".ts", ".tsx"],
   },
   externals: {
     react: "React",
@@ -17,23 +27,26 @@ module.exports = {
       BROWSER_SUPPORTS_HTML5: true,
       TWO: "1",
       "typeof window": JSON.stringify("object"),
-      "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV),
+      "process.env.NODE_ENV": JSON.stringify(
+        process.env.NODE_ENV || "development",
+      ),
     }),
-    new HtmlWebpackPlugin(),
+    new HtmlWebpackPlugin({
+      title: "Utoo Webpack Compat Demo",
+      template: "./public/index.html",
+    }),
   ],
   module: {
     rules: [
       {
         test: /\.html$/i,
         use: ["html-loader"],
-        options: {
-          esModule: true,
-        },
       },
     ],
   },
   optimization: {
-    moduleIds: "named",
-    minimize: false,
+    moduleIds: "deterministic",
+    minimize: process.env.NODE_ENV === "production",
+    usedExports: true,
   },
 };
