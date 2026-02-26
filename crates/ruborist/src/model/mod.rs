@@ -7,6 +7,7 @@ pub mod node;
 pub mod override_rule;
 pub mod package_json;
 pub mod package_lock;
+pub mod spec;
 pub mod tarball_info;
 pub(crate) mod util;
 
