@@ -3,19 +3,66 @@
 //! Provides retry with exponential backoff for both native and WASM targets.
 
 use anyhow::{Result, anyhow};
-use std::sync::OnceLock;
+use std::env;
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use crate::model::manifest::{FullManifest, VersionManifest};
+use crate::service::dns::CachingResolver;
 
-/// Global HTTP client with connection pooling
+/// Global HTTP client with connection pooling and DNS caching
 static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
 fn get_client() -> &'static reqwest::Client {
     HTTP_CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .build()
-            .expect("Failed to build reqwest client")
+        let mut builder = reqwest::Client::builder()
+            .no_proxy()
+            .dns_resolver(Arc::new(CachingResolver::new(Duration::from_secs(300))));
+
+        builder = match env_proxy() {
+            Some(EnvProxy::All(url)) => {
+                builder.proxy(reqwest::Proxy::all(&url).expect("invalid ALL_PROXY url"))
+            }
+            Some(EnvProxy::PerScheme { https, http }) => {
+                if let Some(url) = https {
+                    builder = builder
+                        .proxy(reqwest::Proxy::https(&url).expect("invalid HTTPS_PROXY url"));
+                }
+                if let Some(url) = http {
+                    builder = builder
+                        .proxy(reqwest::Proxy::http(&url).expect("invalid HTTP_PROXY url"));
+                }
+                builder
+            }
+            None => builder,
+        };
+
+        builder.build().expect("Failed to build reqwest client")
     })
+}
+
+enum EnvProxy {
+    All(String),
+    PerScheme {
+        https: Option<String>,
+        http: Option<String>,
+    },
+}
+
+fn env_proxy() -> Option<EnvProxy> {
+    if let Some(url) = env_var("ALL_PROXY") {
+        return Some(EnvProxy::All(url));
+    }
+    let https = env_var("HTTPS_PROXY");
+    let http = env_var("HTTP_PROXY");
+    if https.is_some() || http.is_some() {
+        return Some(EnvProxy::PerScheme { https, http });
+    }
+    None
+}
+
+fn env_var(key: &str) -> Option<String> {
+    env::var(key).or_else(|_| env::var(key.to_lowercase())).ok()
 }
 
 /// Check if an error is retryable.

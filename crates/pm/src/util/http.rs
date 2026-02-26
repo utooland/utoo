@@ -1,5 +1,12 @@
 use std::env;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
+use std::time::Duration;
+
+use utoo_ruborist::service::dns::CachingResolver;
+
+/// Global DNS caching resolver shared across all HTTP clients.
+static DNS_RESOLVER: LazyLock<Arc<CachingResolver>> =
+    LazyLock::new(|| Arc::new(CachingResolver::new(Duration::from_secs(300))));
 
 /// Global shared client for general-purpose HTTP requests.
 ///
@@ -16,24 +23,58 @@ pub fn client() -> &'static reqwest::Client {
     &CLIENT
 }
 
-/// Create a [`reqwest::ClientBuilder`] with system proxy auto-detection disabled.
+/// Create a [`reqwest::ClientBuilder`] with system proxy auto-detection disabled
+/// and DNS caching enabled.
 ///
-/// reqwest's `system-proxy` feature (enabled via Cargo feature unification)
-/// reads macOS / Windows system proxy settings (e.g. set by Surge / Clash),
-/// which can cause unexpected routing or significant slowdowns.
+/// Proxy is determined once at build time from environment variables
+/// (`ALL_PROXY` > `HTTPS_PROXY` / `HTTP_PROXY`), then configured as a static
+/// proxy so that connections are properly pooled and file descriptors reused.
 ///
-/// This builder only respects explicitly set environment variables:
-/// `ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY` (and their lowercase variants).
+/// DNS resolution uses the system resolver (`getaddrinfo`) with a 5-minute
+/// in-memory cache, replacing `hickory-dns` which may fail in sandboxed
+/// environments.
 pub fn client_builder() -> reqwest::ClientBuilder {
-    reqwest::Client::builder()
+    let mut builder = reqwest::Client::builder()
         .user_agent(concat!("utoo/", env!("CARGO_PKG_VERSION")))
         .no_proxy()
-        .proxy(reqwest::Proxy::custom(|url| {
-            env_var("ALL_PROXY").or_else(|| match url.scheme() {
-                "https" => env_var("HTTPS_PROXY"),
-                _ => env_var("HTTP_PROXY"),
-            })
-        }))
+        .dns_resolver(DNS_RESOLVER.clone());
+
+    builder = match env_proxy() {
+        Some(EnvProxy::All(url)) => builder.proxy(reqwest::Proxy::all(&url).expect("invalid ALL_PROXY url")),
+        Some(EnvProxy::PerScheme { https, http }) => {
+            if let Some(url) = https {
+                builder = builder.proxy(reqwest::Proxy::https(&url).expect("invalid HTTPS_PROXY url"));
+            }
+            if let Some(url) = http {
+                builder = builder.proxy(reqwest::Proxy::http(&url).expect("invalid HTTP_PROXY url"));
+            }
+            builder
+        }
+        None => builder,
+    };
+
+    builder
+}
+
+enum EnvProxy {
+    All(String),
+    PerScheme {
+        https: Option<String>,
+        http: Option<String>,
+    },
+}
+
+/// Read proxy configuration from environment variables once.
+fn env_proxy() -> Option<EnvProxy> {
+    if let Some(url) = env_var("ALL_PROXY") {
+        return Some(EnvProxy::All(url));
+    }
+    let https = env_var("HTTPS_PROXY");
+    let http = env_var("HTTP_PROXY");
+    if https.is_some() || http.is_some() {
+        return Some(EnvProxy::PerScheme { https, http });
+    }
+    None
 }
 
 fn env_var(key: &str) -> Option<String> {

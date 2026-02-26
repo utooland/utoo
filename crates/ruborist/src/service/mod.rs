@@ -44,6 +44,7 @@
 
 mod api;
 mod cache;
+pub mod dns;
 mod fs;
 mod http;
 mod registry;
