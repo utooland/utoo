@@ -15,13 +15,15 @@ pub async fn publish(tag: Option<&str>, dry_run: bool, otp: Option<&str>) -> Res
     let meta = PublishMeta::from_json(&package_json);
     meta.validate()?;
 
-    let tag = tag
+    let tag = meta.resolve_tag(tag)?;
+    let registry = meta
+        .publish_config
+        .registry
+        .as_deref()
         .map(String::from)
-        .or(meta.publish_config.tag)
-        .unwrap_or_else(|| "latest".to_string());
-    let registry = meta.publish_config.registry.unwrap_or_else(get_registry);
-    let package_info = PackageInfo::from_json(&package_root, &package_json)?;
+        .unwrap_or_else(get_registry);
 
+    let package_info = PackageInfo::from_json(&package_root, &package_json)?;
     let result = publish_service::publish(&package_info, &registry, &tag, dry_run, otp).await?;
 
     if dry_run {

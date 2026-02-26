@@ -65,6 +65,8 @@ pub struct PublishConfig {
 #[serde(default)]
 pub struct PublishMeta {
     pub private: bool,
+    #[serde(default)]
+    pub version: String,
     #[serde(rename = "publishConfig")]
     pub publish_config: PublishConfig,
 }
@@ -93,6 +95,27 @@ impl PublishMeta {
             );
         }
         Ok(())
+    }
+
+    /// Resolve the publish tag: CLI flag > publishConfig.tag > "latest".
+    ///
+    /// Rejects pre-release versions using the default `latest` tag to prevent
+    /// accidentally marking a pre-release as the stable install target.
+    pub fn resolve_tag(&self, cli_tag: Option<&str>) -> Result<String> {
+        let is_default = cli_tag.is_none() && self.publish_config.tag.is_none();
+        let tag = cli_tag
+            .map(String::from)
+            .or_else(|| self.publish_config.tag.clone())
+            .unwrap_or_else(|| "latest".to_string());
+
+        if is_default && self.version.contains('-') {
+            bail!(
+                "Publishing a pre-release version ({}) with the 'latest' tag is not allowed.\n\
+                 Use --tag to specify an explicit tag, e.g.: utoo publish --tag beta",
+                self.version,
+            );
+        }
+        Ok(tag)
     }
 }
 

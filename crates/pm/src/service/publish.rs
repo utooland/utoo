@@ -86,47 +86,12 @@ pub async fn publish(
 
     println!("Publishing to {registry} with tag {tag}");
 
-    // Send PUT request to registry, handling web-based OTP if needed.
     // Scoped packages: encode `/` as `%2f` so the registry sees a single path
     // segment (npm does the same via `npa.resolve().escapedName`).
     let escaped_name = pack_result.name.replace('/', "%2f");
     let url = format!("{}/{}", registry.trim_end_matches('/'), escaped_name);
 
-    let mut response = build_publish_request(&url, &token, &payload, otp)
-        .send()
-        .await
-        .context("Failed to send publish request")?;
-
-    // If 401 with web auth URLs, open browser for OTP approval and retry
-    if response.status().as_u16() == 401 && otp.is_none() {
-        let body = response.text().await.unwrap_or_default();
-        let body_json: serde_json::Value =
-            serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
-
-        if let (Some(auth_url), Some(done_url)) =
-            (body_json["authUrl"].as_str(), body_json["doneUrl"].as_str())
-        {
-            println!("Authenticate your account at:\n{auth_url}");
-            if let Err(e) = open::that(auth_url) {
-                tracing::warn!("Failed to open browser: {e}");
-            }
-
-            // Poll doneUrl until the user approves; the returned token is
-            // an OTP value — use it in the npm-otp header with the original
-            // bearer token.
-            println!("Waiting for authentication...");
-            let web_otp = auth::poll_done_url(done_url).await?;
-            println!("Authentication successful, retrying publish...");
-            response = build_publish_request(&url, &token, &payload, Some(&web_otp))
-                .send()
-                .await
-                .context("Failed to send publish request (retry after web auth)")?;
-        } else {
-            return Err(anyhow::anyhow!(
-                "Authentication failed. Check your credentials or run `utoo login`.\n{body}"
-            ));
-        }
-    }
+    let response = send_with_web_auth_retry(&url, &token, &payload, otp).await?;
 
     match response.status().as_u16() {
         200 | 201 => {}
@@ -162,6 +127,53 @@ pub async fn publish(
         tag: tag.to_string(),
         registry: registry.to_string(),
     })
+}
+
+/// Send a publish PUT request, handling web-based OTP approval if needed.
+///
+/// If the first request returns 401 with `authUrl` + `doneUrl` in the body
+/// (indicating web-based 2FA), opens the browser, polls for approval, and
+/// retries with the OTP. Otherwise returns the initial response as-is.
+async fn send_with_web_auth_retry(
+    url: &str,
+    token: &str,
+    payload: &PublishPayload,
+    otp: Option<&str>,
+) -> Result<reqwest::Response> {
+    let response = build_publish_request(url, token, payload, otp)
+        .send()
+        .await
+        .context("Failed to send publish request")?;
+
+    if response.status().as_u16() != 401 || otp.is_some() {
+        return Ok(response);
+    }
+
+    let body = response.text().await.unwrap_or_default();
+    let body_json: serde_json::Value =
+        serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
+
+    let (Some(auth_url), Some(done_url)) =
+        (body_json["authUrl"].as_str(), body_json["doneUrl"].as_str())
+    else {
+        return Err(anyhow::anyhow!(
+            "Authentication failed. Check your credentials or run `utoo login`.\n{body}"
+        ));
+    };
+
+    println!("Authenticate your account at:\n{auth_url}");
+    if let Err(e) = open::that(auth_url) {
+        tracing::warn!("Failed to open browser: {e}");
+    }
+
+    println!("Waiting for authentication...");
+    let web_otp = auth::poll_done_url(done_url).await?;
+    println!("Authentication successful, retrying publish...");
+
+    build_publish_request(url, token, payload, Some(&web_otp))
+        .send()
+        .await
+        .context("Failed to send publish request (retry after web auth)")
 }
 
 /// Build a PUT request to the registry, optionally including an OTP header.

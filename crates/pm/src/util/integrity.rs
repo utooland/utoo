@@ -1,10 +1,10 @@
 use base64::Engine;
-use sha2::Digest;
 
 /// Compute an SRI integrity string (`sha512-<base64>`) for the given data.
 ///
 /// This is the same format used by npm registries and package-lock.json.
 pub fn compute_integrity(data: &[u8]) -> String {
+    use sha2::Digest;
     let hash = sha2::Sha512::digest(data);
     let b64 = base64::engine::general_purpose::STANDARD.encode(hash);
     format!("sha512-{b64}")
