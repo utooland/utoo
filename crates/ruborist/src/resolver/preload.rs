@@ -47,19 +47,12 @@ pub struct PreloadStats {
     pub total_request_ms: u64,
 }
 
-/// Check if a spec is a local dependency (file:, link:, workspace:, portal:)
-pub fn is_local_spec(spec: &str) -> bool {
-    spec.starts_with("file:")
-        || spec.starts_with("link:")
-        || spec.starts_with("workspace:")
-        || spec.starts_with("portal:")
-}
-
-/// Collect dependencies from any deps map, filtering out local specs.
+/// Collect dependencies from any deps map, filtering out non-registry specs.
 fn collect_deps(map: Option<&std::collections::HashMap<String, String>>) -> Vec<Dep> {
+    use crate::model::spec::SpecStr;
     map.into_iter()
         .flatten()
-        .filter(|(_, spec)| !is_local_spec(spec))
+        .filter(|(_, spec)| spec.is_registry_spec())
         .map(|(name, spec)| (name.clone(), spec.clone()))
         .collect()
 }
@@ -342,12 +335,36 @@ mod tests {
     }
 
     #[test]
-    fn test_is_local_spec() {
-        assert!(is_local_spec("file:../foo"));
-        assert!(is_local_spec("link:../foo"));
-        assert!(is_local_spec("workspace:*"));
-        assert!(is_local_spec("portal:../foo"));
-        assert!(!is_local_spec("^1.0.0"));
-        assert!(!is_local_spec("latest"));
+    fn test_is_registry_spec() {
+        use crate::model::spec::SpecStr;
+
+        // Local specs — not registry
+        assert!(!"file:../foo".is_registry_spec());
+        assert!(!"link:../foo".is_registry_spec());
+        assert!(!"workspace:*".is_registry_spec());
+        assert!(!"portal:../foo".is_registry_spec());
+
+        // Git specs — not registry
+        assert!(!"git+https://github.com/user/repo.git".is_registry_spec());
+        assert!(!"git+ssh://git@github.com/user/repo.git".is_registry_spec());
+        assert!(!"git+https://github.com/user/repo.git#main".is_registry_spec());
+        assert!(!"git://github.com/user/repo.git".is_registry_spec());
+        assert!(!"github:user/repo".is_registry_spec());
+        assert!(!"github:user/repo#v1.0".is_registry_spec());
+
+        // HTTP tarball specs — not registry
+        assert!(!"https://example.com/pkg.tgz".is_registry_spec());
+        assert!(!"http://example.com/pkg.tar.gz".is_registry_spec());
+        assert!(!"https://example.com/pkg.tgz?v=1.0".is_registry_spec());
+
+        // Bare GitHub shorthand — not registry
+        assert!(!"user/repo".is_registry_spec());
+        assert!(!"user/repo#v1.0".is_registry_spec());
+
+        // Registry specs
+        assert!("^1.0.0".is_registry_spec());
+        assert!("latest".is_registry_spec());
+        assert!("~2.0.0".is_registry_spec());
+        assert!("@scope/pkg@1.0.0".is_registry_spec());
     }
 }
