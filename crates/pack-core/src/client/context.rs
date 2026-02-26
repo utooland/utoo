@@ -661,7 +661,7 @@ pub async fn get_client_chunking_context(
         }
 
         if let Some(css_chunk_filename) = &output.css_chunk_filename {
-            builder = builder.chunk_filename(css_chunk_filename.clone());
+            builder = builder.css_chunk_filename(css_chunk_filename.clone());
         }
 
         if let Some(asset_module_filename) = &output.asset_module_filename {

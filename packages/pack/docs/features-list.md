@@ -19,7 +19,7 @@
 |  | `publicPath` | ✅ | [Webpack `output.publicPath`](https://webpack.js.org/configuration/output/#outputpublicpath) |  |
 |  | `clean` | ✅ | [Webpack `output.clean`](https://webpack.js.org/configuration/output/#outputclean) |  |
 |  | `filename` | ✅ | [Webpack `output.filename`](https://webpack.js.org/configuration/output/#outputfilename) |  |
-|  | `chunkFilename` | ✅ | [Webpack `output.filename`](https://webpack.js.org/configuration/output/#outputchunkfilename) |  |
+|  | `chunkFilename` | ✅ | [Webpack `output.chunkFilename`](https://webpack.js.org/configuration/output/#outputchunkfilename) |  |
 |  | `cssFilename` | ✅ | [Webpack `output.cssFilename`](https://webpack.js.org/configuration/output/#outputcssfilename) |  |
 |  | `cssChunkFilename` | ✅ | [Webpack `output.cssChunkFilename`](https://webpack.js.org/configuration/output/#outputcsschunkfilename) |  |
 |  | `assetModuleFilename` | ✅ | [Webpack `output.assetModuleFilename`](https://webpack.js.org/configuration/output/#outputassetmodulefilename) |  |

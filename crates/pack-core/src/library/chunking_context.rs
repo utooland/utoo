@@ -494,7 +494,7 @@ impl ChunkingContext for LibraryChunkingContext {
             filename = format!("{filename}{extension}");
         }
 
-        output_root.join(&filename).map(|p| p.cell())
+        Ok(output_root.join(&filename)?.cell())
     }
 
     #[turbo_tasks::function]

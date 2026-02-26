@@ -111,7 +111,7 @@
         {
           "featureLevel2": "`chunkFilename`",
           "featureStatus": "✅",
-          "featureDetails": "[Webpack `output.filename`](https://webpack.js.org/configuration/output/#outputchunkfilename)",
+          "featureDetails": "[Webpack `output.chunkFilename`](https://webpack.js.org/configuration/output/#outputchunkfilename)",
           "remarks": ""
         },
         {
