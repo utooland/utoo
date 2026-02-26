@@ -12,7 +12,7 @@ use crate::util::json::load_package_json_from_path;
 
 #[derive(Default)]
 pub struct PackResult {
-    pub tarball_data: Option<Vec<u8>>,
+    pub tarball_data: Vec<u8>,
     pub files: Vec<(String, u64)>,
     pub name: String,
     pub version: String,
@@ -34,7 +34,7 @@ impl PackResult {
     }
 }
 
-pub async fn pack(package_root: &Path, dry_run: bool) -> Result<PackResult> {
+pub async fn pack(package_root: &Path) -> Result<PackResult> {
     let data = load_package_json_from_path(package_root).await?;
     let package_info = PackageInfo::from_json(package_root, &data)?;
     let version = data["version"]
@@ -60,18 +60,6 @@ pub async fn pack(package_root: &Path, dry_run: bool) -> Result<PackResult> {
         .map(|(p, size)| (p.to_string_lossy().to_string(), *size))
         .collect();
 
-    if dry_run {
-        return Ok(PackResult {
-            tarball_data: None,
-            files: file_paths,
-            name: package_info.name,
-            version,
-            integrity: String::new(),
-            unpacked_size,
-            packed_size: 0,
-        });
-    }
-
     // create_tarball reads each file via std::fs — also blocking I/O.
     let tar_data =
         tokio::task::spawn_blocking(move || create_tarball(&package_root_owned, &collected))
@@ -82,7 +70,7 @@ pub async fn pack(package_root: &Path, dry_run: bool) -> Result<PackResult> {
     ScriptService::execute_script(&package_info, "postpack", true).await?;
 
     Ok(PackResult {
-        tarball_data: Some(tar_data),
+        tarball_data: tar_data,
         files: file_paths,
         name: package_info.name,
         version,

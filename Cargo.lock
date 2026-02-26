@@ -9797,6 +9797,7 @@ dependencies = [
  "reqwest 0.12.24",
  "serde",
  "serde_json",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-fs-ext",
  "tracing",

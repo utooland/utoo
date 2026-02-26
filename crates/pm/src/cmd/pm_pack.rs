@@ -12,15 +12,15 @@ pub async fn pack(path: Option<String>, dry_run: bool) -> Result<()> {
         std::env::current_dir()?
     };
 
-    let result = pack_service::pack(&package_root, dry_run).await?;
+    let result = pack_service::pack(&package_root).await?;
 
     print_pack_details(&result, None);
 
     if dry_run {
-        println!("{}", "(dry run) Tarball not created".yellow());
-    } else if let Some(tar_data) = &result.tarball_data {
+        println!("{}", "(dry run) Tarball not written to disk".yellow());
+    } else {
         let tarball_path = package_root.join(result.tarball_filename());
-        crate::fs::write(&tarball_path, tar_data)
+        crate::fs::write(&tarball_path, &result.tarball_data)
             .await
             .with_context(|| format!("Failed to write tarball to {}", tarball_path.display()))?;
         println!("{} {}", "Tarball:".dimmed(), tarball_path.display());

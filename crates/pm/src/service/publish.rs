@@ -49,39 +49,26 @@ pub async fn publish(
     dry_run: bool,
     otp: Option<&str>,
 ) -> Result<PublishResult> {
-    let token = auth::require_token(registry).await?;
-
     // Run prepublishOnly lifecycle script
     ScriptService::execute_script(package_info, "prepublishOnly", true).await?;
 
-    // Pack the package in memory (prepack/postpack scripts run inside pack)
-    let pack_result = pm_pack::pack(&package_info.path, dry_run).await?;
+    // Always pack in memory — dry-run only skips the registry PUT.
+    let pack_result = pm_pack::pack(&package_info.path).await?;
 
-
-    if dry_run {
-        print_pack_details(&pack_result, None);
-        return Ok(PublishResult {
-            pack: pack_result,
-            tag: tag.to_string(),
-            registry: registry.to_string(),
-        });
-    }
-
-    let tarball_data = pack_result
-        .tarball_data
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("No tarball created"))?;
-
+    let tarball_data = &pack_result.tarball_data;
     let shasum = compute_shasum(tarball_data);
 
     print_pack_details(&pack_result, Some(&shasum));
 
+    if dry_run {
         return Ok(PublishResult {
             pack: pack_result,
             tag: tag.to_string(),
             registry: registry.to_string(),
         });
     }
+
+    let token = auth::require_token(registry).await?;
 
     // Load package.json for version metadata in the publish payload
     let package_json = load_package_json_from_path(&package_info.path).await?;
