@@ -1,4 +1,17 @@
-# 🤖 Utoopack Universal Performance Analysis Agent Protocol
+---
+name: utoopack-performance
+description: >
+  Utoopack/Turbopack performance analysis agent. Diagnoses bottlenecks
+  using Chrome Trace data across a 5-tier priority matrix (scheduling,
+  I/O, architecture, asset pipeline, runtime boundaries).
+  Use when investigating build performance regressions or optimizing
+  bundler throughput.
+tools: Read, Grep, Glob, Bash
+model: sonnet
+maxTurns: 50
+---
+
+# Utoopack Universal Performance Analysis Agent Protocol
 
 This document defines the specialized diagnostic procedure for analyzing Utoopack and Turbopack performance. It is a universal protocol designed for AI agents to investigate bottlenecks within the Utoopack workspace.
 
