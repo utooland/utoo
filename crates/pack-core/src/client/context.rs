@@ -656,6 +656,18 @@ pub async fn get_client_chunking_context(
             builder = builder.chunk_filename(chunk_filename.clone());
         }
 
+        if let Some(css_filename) = &output.css_filename {
+            builder = builder.css_filename(css_filename.clone());
+        }
+
+        if let Some(css_chunk_filename) = &output.css_chunk_filename {
+            builder = builder.css_chunk_filename(css_chunk_filename.clone());
+        }
+
+        if let Some(asset_module_filename) = &output.asset_module_filename {
+            builder = builder.asset_module_filename(asset_module_filename.clone());
+        }
+
         builder = builder
             .chunking_config(
                 Vc::<EcmascriptChunkType>::default().to_resolved().await?,
