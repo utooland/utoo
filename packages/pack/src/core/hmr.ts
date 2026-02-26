@@ -131,7 +131,7 @@ export async function createHotReloader(
           moduleIds: "named",
         },
       },
-      projectPath: normalizePath(projectPath || process.cwd()),
+      projectPath: normalizePath(resolvedProjectPath),
       rootPath: rootPath || projectPath || process.cwd(),
       packPath: getPackPath(),
     },

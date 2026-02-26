@@ -65,7 +65,7 @@ async function buildInternal(
           bundleOptions.config.stats ||
           bundleOptions.config.entry.some((e: EntryOptions) => !!e.html),
       },
-      projectPath: normalizePath(projectPath || process.cwd()),
+      projectPath: normalizePath(resolvedProjectPath),
       rootPath: rootPath || projectPath || process.cwd(),
       packPath: getPackPath(),
     },
