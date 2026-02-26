@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "util";
 import type {
   HmrIdentifiers,
   NapiPartialProjectOptions,
@@ -7,7 +8,14 @@ import type {
   StackFrame,
 } from "../binding";
 import * as binding from "../binding";
-import { ConfigComplete } from "../config/types";
+import {
+  ConfigComplete,
+  TurbopackLoaderBuiltinCondition,
+  TurbopackLoaderItem,
+  TurbopackRuleCondition,
+  TurbopackRuleConfigCollection,
+  TurbopackRuleConfigItem,
+} from "../config/types";
 import { rustifyEnv } from "../utils/common";
 import { runLoaderWorkerPool } from "./loaderWorkerPool";
 import {
@@ -68,7 +76,144 @@ async function serializeConfig(config: ConfigComplete): Promise<string> {
     }
   }
 
+  if (configSerializable.module && configSerializable.module.rules) {
+    configSerializable.module.rules = serializeModuleRules(
+      configSerializable.module.rules,
+    );
+  }
+
   return JSON.stringify(configSerializable, null, 2);
+}
+
+type SerializedRuleCondition =
+  | { all: SerializedRuleCondition[] }
+  | { any: SerializedRuleCondition[] }
+  | { not: SerializedRuleCondition }
+  | TurbopackLoaderBuiltinCondition
+  | {
+      path?:
+        | { type: "regex"; value: { source: string; flags: string } }
+        | { type: "glob"; value: string };
+      content?: { source: string; flags: string };
+      query?:
+        | { type: "regex"; value: { source: string; flags: string } }
+        | { type: "constant"; value: string };
+      contentType?:
+        | { type: "regex"; value: { source: string; flags: string } }
+        | { type: "glob"; value: string };
+    };
+
+// converts regexes to a `RegexComponents` object so that it can be JSON-serialized when passed to
+// Turbopack
+function serializeRuleCondition(
+  cond: TurbopackRuleCondition,
+): SerializedRuleCondition {
+  function regexComponents(regex: RegExp) {
+    return {
+      source: regex.source,
+      flags: regex.flags,
+    };
+  }
+
+  if (typeof cond === "string") {
+    return cond;
+  } else if ("all" in cond) {
+    return { ...cond, all: cond.all.map(serializeRuleCondition) };
+  } else if ("any" in cond) {
+    return { ...cond, any: cond.any.map(serializeRuleCondition) };
+  } else if ("not" in cond) {
+    return { ...cond, not: serializeRuleCondition(cond.not) };
+  } else {
+    return {
+      ...cond,
+      path:
+        cond.path == null
+          ? undefined
+          : cond.path instanceof RegExp
+            ? {
+                type: "regex",
+                value: regexComponents(cond.path),
+              }
+            : { type: "glob", value: cond.path },
+      content: cond.content && regexComponents(cond.content),
+      query:
+        cond.query == null
+          ? undefined
+          : cond.query instanceof RegExp
+            ? {
+                type: "regex",
+                value: regexComponents(cond.query),
+              }
+            : { type: "constant", value: cond.query },
+      contentType:
+        cond.contentType == null
+          ? undefined
+          : cond.contentType instanceof RegExp
+            ? {
+                type: "regex",
+                value: regexComponents(cond.contentType),
+              }
+            : { type: "glob", value: cond.contentType },
+    };
+  }
+}
+
+// Note: Returns an updated `turbopackRules` with serialized conditions. Does not mutate in-place.
+function serializeModuleRules(
+  turbopackRules: Record<string, TurbopackRuleConfigCollection>,
+): Record<string, any> {
+  const serializedRules: Record<string, any> = {};
+  for (const [glob, rule] of Object.entries(turbopackRules)) {
+    if (Array.isArray(rule)) {
+      serializedRules[glob] = rule.map((item) => {
+        if (
+          typeof item !== "string" &&
+          ("loaders" in item || "type" in item || "condition" in item)
+        ) {
+          return serializeConfigItem(item as TurbopackRuleConfigItem, glob);
+        } else {
+          checkLoaderItem(item as TurbopackLoaderItem, glob);
+          return item;
+        }
+      });
+    } else {
+      serializedRules[glob] = serializeConfigItem(rule, glob);
+    }
+  }
+
+  return serializedRules;
+
+  function serializeConfigItem(
+    rule: TurbopackRuleConfigItem,
+    glob: string,
+  ): any {
+    if (!rule) return rule;
+    if (rule.loaders) {
+      for (const item of rule.loaders) {
+        checkLoaderItem(item, glob);
+      }
+    }
+    let serializedRule: any = rule;
+    if (rule.condition != null) {
+      serializedRule = {
+        ...rule,
+        condition: serializeRuleCondition(rule.condition),
+      };
+    }
+    return serializedRule;
+  }
+
+  function checkLoaderItem(loaderItem: TurbopackLoaderItem, glob: string) {
+    if (
+      typeof loaderItem !== "string" &&
+      !isDeepStrictEqual(loaderItem, JSON.parse(JSON.stringify(loaderItem)))
+    ) {
+      throw new Error(
+        `loader ${loaderItem.loader} for match "${glob}" does not have serializable options. ` +
+          "Ensure that options passed are plain JavaScript objects and values.",
+      );
+    }
+  }
 }
 
 async function rustifyPartialProjectOptions(

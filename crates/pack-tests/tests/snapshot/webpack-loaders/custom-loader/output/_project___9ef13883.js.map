@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/node_modules/react/jsx-runtime.js"],"sourcesContent":["export function jsx() {\n  return 'purposefully empty stub for react/jsx-runtime.js'\n}\nexport function jsxs() {\n  return 'purposefully empty stub for react/jsx-runtime.js'\n}\n"],"names":["jsx","jsxs"],"mappings":"AAAO,SAASA;IACd,OAAO;AACT;AACO,SAASC;IACd,OAAO;AACT","ignoreList":[0]}},
-    {"offset": {"line": 19, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/webpack-loaders/custom-loader/input/index.tsx"],"sourcesContent":["import dataText from './test.txt';\n\nexport default function App() {\n    return <div>{dataText}</div>;\n}"],"names":["App"],"mappings":";;;AAEe,SAASA;IACpB,qBAAO,gDAAC;kBAAK,KAAA;;AACjB"}}]
-}

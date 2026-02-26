@@ -9,9 +9,25 @@
     "module": {
       "rules": {
         "*.txt": {
-          "loaders": [],
+          "loaders": [
+            "test-file-loader"
+          ],
           "as": "*.js"
-        }
+        },
+        "*.mdx": [
+          {
+            "condition": {
+              "query": {
+                "type": "constant",
+                "value": "?reverse"
+              }
+            },
+            "loaders": [
+              "reverse-loader"
+            ],
+            "as": "*.js"
+          }
+        ]
       }
     }
   }

@@ -9,12 +9,12 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value as JsonValue;
 use turbo_esregex::EsRegex;
 use turbo_rcstr::{RcStr, rcstr};
-use turbo_tasks::{FxIndexMap, OperationValue, ResolvedVc, Vc};
+use turbo_tasks::{FxIndexMap, NonLocalValue, OperationValue, ResolvedVc, Vc, trace::TraceRawVcs};
 use turbo_tasks_env::EnvMap;
 use turbo_tasks_fs::{FileJsonContent, FileSystemPath};
 use turbopack::module_options::{
-    ConditionItem, ConditionPath, LoaderRuleItem, WebpackRules,
-    module_options_context::MdxTransformOptions,
+    ConditionContentType, ConditionItem, ConditionPath, ConditionQuery, LoaderRuleItem,
+    WebpackRules, module_options_context::MdxTransformOptions,
 };
 use turbopack_core::{
     chunk::ChunkingConfig,
@@ -401,8 +401,90 @@ pub enum OutputType {
     Export,
 }
 
-#[turbo_tasks::value]
-#[derive(Clone, Debug, Serialize, Deserialize, OperationValue)]
+#[derive(
+    Clone,
+    PartialEq,
+    Eq,
+    Debug,
+    Deserialize,
+    TraceRawVcs,
+    NonLocalValue,
+    OperationValue,
+    Encode,
+    Decode,
+)]
+#[serde(
+    tag = "type",
+    content = "value",
+    rename_all = "camelCase",
+    deny_unknown_fields
+)]
+pub enum ConfigConditionQuery {
+    Constant(RcStr),
+    Regex(RegexComponents),
+}
+
+impl TryFrom<ConfigConditionQuery> for ConditionQuery {
+    type Error = anyhow::Error;
+
+    fn try_from(config: ConfigConditionQuery) -> Result<ConditionQuery> {
+        Ok(match config {
+            ConfigConditionQuery::Constant(value) => ConditionQuery::Constant(value),
+            ConfigConditionQuery::Regex(regex) => {
+                ConditionQuery::Regex(EsRegex::try_from(regex)?.resolved_cell())
+            }
+        })
+    }
+}
+
+#[derive(
+    Clone,
+    PartialEq,
+    Eq,
+    Debug,
+    Deserialize,
+    TraceRawVcs,
+    NonLocalValue,
+    OperationValue,
+    Encode,
+    Decode,
+)]
+#[serde(
+    tag = "type",
+    content = "value",
+    rename_all = "camelCase",
+    deny_unknown_fields
+)]
+pub enum ConfigConditionContentType {
+    Glob(RcStr),
+    Regex(RegexComponents),
+}
+
+impl TryFrom<ConfigConditionContentType> for ConditionContentType {
+    type Error = anyhow::Error;
+
+    fn try_from(config: ConfigConditionContentType) -> Result<ConditionContentType> {
+        Ok(match config {
+            ConfigConditionContentType::Glob(value) => ConditionContentType::Glob(value),
+            ConfigConditionContentType::Regex(regex) => {
+                ConditionContentType::Regex(EsRegex::try_from(regex)?.resolved_cell())
+            }
+        })
+    }
+}
+
+#[derive(
+    Deserialize,
+    Clone,
+    PartialEq,
+    Eq,
+    Debug,
+    TraceRawVcs,
+    NonLocalValue,
+    OperationValue,
+    Encode,
+    Decode,
+)]
 // We can end up with confusing behaviors if we silently ignore extra properties, since `Base` will
 // match nearly every object, since it has no required field.
 #[serde(deny_unknown_fields)]
@@ -421,6 +503,10 @@ pub enum ConfigConditionItem {
         path: Option<ConfigConditionPath>,
         #[serde(default)]
         content: Option<RegexComponents>,
+        #[serde(default)]
+        query: Option<ConfigConditionQuery>,
+        #[serde(default, rename = "contentType")]
+        content_type: Option<ConfigConditionContentType>,
     },
 }
 
@@ -441,14 +527,21 @@ impl TryFrom<ConfigConditionItem> for ConditionItem {
             ConfigConditionItem::Builtin(cond) => {
                 ConditionItem::Builtin(RcStr::from(cond.as_str()))
             }
-            ConfigConditionItem::Base { path, content } => ConditionItem::Base {
+            ConfigConditionItem::Base {
+                path,
+                content,
+                query,
+                content_type,
+            } => ConditionItem::Base {
                 path: path.map(ConditionPath::try_from).transpose()?,
                 content: content
                     .map(EsRegex::try_from)
                     .transpose()?
                     .map(EsRegex::resolved_cell),
-                content_type: None,
-                query: None,
+                query: query.map(ConditionQuery::try_from).transpose()?,
+                content_type: content_type
+                    .map(ConditionContentType::try_from)
+                    .transpose()?,
             },
         })
     }
