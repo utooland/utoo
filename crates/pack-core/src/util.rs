@@ -1,4 +1,4 @@
-use std::{borrow::Cow, path::Path, sync::LazyLock};
+use std::{path::Path, sync::LazyLock};
 
 use anyhow::{Context, Result};
 use bincode::{Decode, Encode};

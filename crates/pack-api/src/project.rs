@@ -6,7 +6,7 @@ use pack_core::{
     config::{Config, ModuleIds as ModuleIdStrategyConfig},
     emit_assets,
     mode::Mode,
-    util::{Runtime, convert_to_project_relative, strip_leading_separator, to_unix_path},
+    util::{Runtime, convert_to_project_relative},
 };
 use serde::Deserialize;
 use std::{

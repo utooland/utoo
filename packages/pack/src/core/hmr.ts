@@ -25,6 +25,7 @@ import {
 } from "../utils/common";
 import { getInitialAssetsFromStats } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
+import { normalizePath } from "../utils/normalize-path";
 import { validateEntryPaths } from "../utils/validateEntry";
 import { projectFactory } from "./project";
 import { Project, Update as TurbopackUpdate } from "./types";
@@ -130,7 +131,7 @@ export async function createHotReloader(
           moduleIds: "named",
         },
       },
-      projectPath: projectPath || process.cwd(),
+      projectPath: normalizePath(projectPath || process.cwd()),
       rootPath: rootPath || projectPath || process.cwd(),
       packPath: getPackPath(),
     },
