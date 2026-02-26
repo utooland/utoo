@@ -325,7 +325,28 @@ enum Commands {
     },
 }
 
+/// Raise the soft file-descriptor limit to the hard limit (like bun/pnpm).
+///
+/// macOS default terminals have `ulimit -n 256` which is too low for concurrent
+/// package installs. The hard limit is typically much higher (e.g. 10240).
+#[cfg(unix)]
+fn raise_fd_limit() {
+    use libc::{RLIMIT_NOFILE, getrlimit, rlimit, setrlimit};
+    unsafe {
+        let mut limit = std::mem::zeroed::<rlimit>();
+        if getrlimit(RLIMIT_NOFILE, &mut limit) == 0 && limit.rlim_cur < limit.rlim_max {
+            limit.rlim_cur = limit.rlim_max;
+            let _ = setrlimit(RLIMIT_NOFILE, &limit);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn raise_fd_limit() {}
+
 fn main() {
+    raise_fd_limit();
+
     // Windows default thread stack is 1MB, insufficient for libdeflater + tar + rayon work-stealing.
     #[cfg(target_os = "windows")]
     rayon::ThreadPoolBuilder::new()

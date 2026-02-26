@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
-use std::error::Error as _;
 use bytes::Bytes;
 use reqwest::StatusCode;
 use std::path::PathBuf;
-use std::sync::{LazyLock, OnceLock};
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::{LazyLock, OnceLock};
+use std::time::Duration;
 use tokio::sync::Semaphore;
 use tokio_retry::RetryIf;
 
@@ -14,17 +14,23 @@ use super::http::client_builder;
 use super::oncemap::OnceMap;
 use super::retry::{RetryableError, create_retry_strategy};
 
+/// Maximum concurrent tarball downloads.
+///
+/// Lower than manifest concurrency because each HTTP/1.1 download opens a
+/// separate TCP connection (unlike HTTP/2 multiplexed manifests).
+const MAX_CONCURRENT_DOWNLOADS: usize = 48;
+
 /// HTTP/1.1 client for tarball downloads.
 ///
 /// Uses HTTP/1.1 (not HTTP/2) because bulk tarball downloads benefit from
-/// TCP-level parallelism — multiple HTTP/1.1 connections get higher aggregate
+/// TCP-level parallelism -- multiple HTTP/1.1 connections get higher aggregate
 /// bandwidth from rate-limited CDNs than a single multiplexed HTTP/2 connection.
 /// Concurrency is controlled by [`DOWNLOAD_SEMAPHORE`].
 static DOWNLOAD_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     client_builder()
         .http1_only()
-        .connect_timeout(std::time::Duration::from_secs(5))
-        .read_timeout(std::time::Duration::from_secs(30))
+        .connect_timeout(Duration::from_secs(5))
+        .read_timeout(Duration::from_secs(30))
         .build()
         .expect("Failed to build download client")
 });
@@ -68,11 +74,8 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
                 return Some(cache_path);
             }
 
-            // Download (semaphore controlled)
-            // Uses a lower limit than manifest concurrency because each HTTP/1.1
-            // download opens a separate TCP connection (unlike HTTP/2 manifests).
-            let semaphore = DOWNLOAD_SEMAPHORE
-                .get_or_init(|| Semaphore::new(48));
+            let semaphore =
+                DOWNLOAD_SEMAPHORE.get_or_init(|| Semaphore::new(MAX_CONCURRENT_DOWNLOADS));
             let _permit = semaphore.acquire().await.ok()?;
             let bytes = download_bytes(&tarball_url)
                 .await
@@ -119,11 +122,8 @@ pub async fn download_bytes(url: &str) -> Result<Bytes> {
                 StatusCode::OK => {
                     let bytes = response.bytes().await.map_err(|e| {
                         tracing::warn!(
-                            "Retry {}/10 - Stream error: {}, source: {:?}, url: {}",
+                            "Retry {}/10 - Stream error: {e:#}, url: {url}",
                             attempt + 1,
-                            e,
-                            e.source(),
-                            url
                         );
                         RetryableError::Temporary(format!("Stream error: {e}"))
                     })?;

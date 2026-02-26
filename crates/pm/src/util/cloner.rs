@@ -1,13 +1,12 @@
-use anyhow::{Context, Result};
-use once_cell::sync::Lazy;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-
 use super::downloader::download_to_cache;
 use super::json::load_package_json_from_path;
 use super::oncemap::OnceMap;
 use super::retry::create_retry_strategy;
 use crate::fs;
+use anyhow::{Context, Result};
+use once_cell::sync::Lazy;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio_retry::Retry;
 
 /// Global clone cache shared between pipeline and install phases.
@@ -288,27 +287,14 @@ async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
     Ok(true)
 }
 
-// find the first non built subdirectory
+// find the first subdirectory in a cache directory
 pub async fn find_real_src<P: AsRef<Path>>(src: P) -> Option<PathBuf> {
-    let src = src.as_ref();
-    // Retry on transient errors (e.g. EMFILE under low ulimit)
-    for _ in 0..3 {
-        match fs::read_dir(src).await {
-            Ok(mut read_dir) => {
-                while let Ok(Some(entry)) = read_dir.next_entry().await {
-                    if let Ok(metadata) = entry.metadata().await
-                        && metadata.is_dir()
-                        && let Some(name) = entry.path().file_name()
-                        && name.to_string_lossy() != ".utoo_built"
-                    {
-                        return Some(entry.path());
-                    }
-                }
-                return None; // Directory exists but has no valid subdirectory
-            }
-            Err(_) => {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            }
+    let mut read_dir = fs::read_dir(src.as_ref()).await.ok()?;
+    while let Some(entry) = read_dir.next_entry().await.ok()? {
+        if let Ok(metadata) = entry.metadata().await
+            && metadata.is_dir()
+        {
+            return Some(entry.path());
         }
     }
     None
@@ -558,45 +544,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_find_real_src_with_built_dir() -> Result<()> {
-        let temp = TempDir::new()?;
-        let dir = temp.path().join("test_dir");
-        fs::create_dir(&dir).await?;
-
-        // Create .utoo_built directory
-        let built_dir = dir.join(".utoo_built");
-        fs::create_dir(&built_dir).await?;
-
-        // Create a regular subdirectory
-        let subdir = dir.join("subdir");
-        fs::create_dir(&subdir).await?;
-
-        assert_eq!(find_real_src(&dir).await.unwrap(), subdir);
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn test_clone_without_find_real() -> Result<()> {
         let temp = TempDir::new()?;
         let src_dir = temp.path().join("src");
         let dst_dir = temp.path().join("dst");
 
         // Create source structure
-        create_test_structure(
-            &src_dir,
-            &[
-                (".utoo_built", None),
-                ("real_dir/file.txt", Some(b"content")),
-            ],
-        )
-        .await?;
+        create_test_structure(&src_dir, &[("real_dir/file.txt", Some(b"content"))]).await?;
 
         // Test cloning with find_real=false
         clone(&src_dir, &dst_dir, false).await?;
 
         // Verify everything was cloned
         assert!(dst_dir.join("real_dir").exists());
-        assert!(dst_dir.join(".utoo_built").exists());
         assert_eq!(
             fs::read_to_string(dst_dir.join("real_dir/file.txt")).await?,
             "content"

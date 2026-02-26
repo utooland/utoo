@@ -9,11 +9,21 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
+
+const DNS_CACHE_TTL: Duration = Duration::from_secs(300);
+
+static SHARED_RESOLVER: LazyLock<Arc<CachingResolver>> =
+    LazyLock::new(|| Arc::new(CachingResolver::new(DNS_CACHE_TTL)));
+
+/// Return the global shared DNS resolver instance.
+pub fn shared_resolver() -> Arc<CachingResolver> {
+    SHARED_RESOLVER.clone()
+}
 
 struct CacheEntry {
     addrs: Vec<SocketAddr>,
@@ -47,11 +57,11 @@ impl Resolve for CachingResolver {
         // Fast path: check cache under read lock
         {
             let cache_read = cache.read();
-            if let Some(entry) = cache_read.get(&hostname) {
-                if entry.expires_at > Instant::now() {
-                    let addrs: Addrs = Box::new(entry.addrs.clone().into_iter());
-                    return Box::pin(std::future::ready(Ok(addrs)));
-                }
+            if let Some(entry) = cache_read.get(&hostname)
+                && entry.expires_at > Instant::now()
+            {
+                let addrs: Addrs = Box::new(entry.addrs.clone().into_iter());
+                return Box::pin(std::future::ready(Ok(addrs)));
             }
         }
 

@@ -37,13 +37,6 @@ pub struct PipelineResult {
 pub async fn resolve_with_pipeline(root_path: &std::path::Path) -> anyhow::Result<PipelineResult> {
     use crate::helper::lock::save_package_lock;
     use crate::helper::ruborist_context::Context;
-    use crate::util::http::client;
-    use crate::util::user_config::get_registry;
-
-    // Warmup: establish HTTP/2 connection to registry before starting
-    // concurrent workers, so subsequent requests can multiplex immediately.
-    let registry_url = get_registry();
-    let _ = client().head(&registry_url).send().await;
 
     let (options, channels) = Context::pipeline_deps_options(root_path.to_path_buf()).await;
     let handles = worker::start_workers(channels, root_path.to_path_buf());

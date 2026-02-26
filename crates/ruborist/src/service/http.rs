@@ -4,52 +4,55 @@
 
 use anyhow::{Result, anyhow};
 use std::env;
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::sync::LazyLock;
 
 use crate::model::manifest::{FullManifest, VersionManifest};
-use crate::service::dns::CachingResolver;
+use crate::service::dns::shared_resolver;
 
 /// Global HTTP client with connection pooling and DNS caching.
-///
-/// Can be set externally via [`set_http_client`] to share a connection pool
-/// with the caller (e.g. pm's downloader), enabling HTTP/2 multiplexing
-/// across both manifest fetches and tarball downloads.
-static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-
-/// Inject an external HTTP client to share its connection pool.
-/// Must be called before any manifest fetch. Ignored if already initialized.
-pub fn set_http_client(client: reqwest::Client) {
-    let _ = HTTP_CLIENT.set(client);
-}
+static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    client_builder()
+        .build()
+        .expect("Failed to build reqwest client")
+});
 
 fn get_client() -> &'static reqwest::Client {
-    HTTP_CLIENT.get_or_init(|| {
-        let mut builder = reqwest::Client::builder()
-            .use_rustls_tls()
-            .no_proxy()
-            .dns_resolver(Arc::new(CachingResolver::new(Duration::from_secs(300))));
+    &HTTP_CLIENT
+}
 
-        builder = match env_proxy() {
-            Some(EnvProxy::All(url)) => {
-                builder.proxy(reqwest::Proxy::all(&url).expect("invalid ALL_PROXY url"))
-            }
-            Some(EnvProxy::PerScheme { https, http }) => {
-                if let Some(url) = https {
-                    builder = builder
-                        .proxy(reqwest::Proxy::https(&url).expect("invalid HTTPS_PROXY url"));
-                }
-                if let Some(url) = http {
-                    builder = builder
-                        .proxy(reqwest::Proxy::http(&url).expect("invalid HTTP_PROXY url"));
-                }
-                builder
-            }
-            None => builder,
-        };
+/// Create a [`reqwest::ClientBuilder`] with rustls TLS, DNS caching, and proxy
+/// from environment variables.
+///
+/// This is the shared base for all HTTP clients. Callers can further customize
+/// the builder (e.g. add `user_agent`, `http1_only`, timeouts) before building.
+///
+/// Proxy is read once from environment variables:
+/// `ALL_PROXY` > `HTTPS_PROXY` / `HTTP_PROXY` (and their lowercase variants).
+pub fn client_builder() -> reqwest::ClientBuilder {
+    let mut builder = reqwest::Client::builder()
+        .use_rustls_tls()
+        .no_proxy()
+        .dns_resolver(shared_resolver());
 
-        builder.build().expect("Failed to build reqwest client")
-    })
+    builder = match env_proxy() {
+        Some(EnvProxy::All(url)) => {
+            builder.proxy(reqwest::Proxy::all(&url).expect("invalid ALL_PROXY url"))
+        }
+        Some(EnvProxy::PerScheme { https, http }) => {
+            if let Some(url) = https {
+                builder =
+                    builder.proxy(reqwest::Proxy::https(&url).expect("invalid HTTPS_PROXY url"));
+            }
+            if let Some(url) = http {
+                builder =
+                    builder.proxy(reqwest::Proxy::http(&url).expect("invalid HTTP_PROXY url"));
+            }
+            builder
+        }
+        None => builder,
+    };
+
+    builder
 }
 
 enum EnvProxy {
