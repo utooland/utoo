@@ -57,6 +57,16 @@ pub async fn publish(
     // Pack the package in memory (prepack/postpack scripts run inside pack)
     let pack_result = pm_pack::pack(&package_info.path, dry_run).await?;
 
+
+    if dry_run {
+        print_pack_details(&pack_result, None);
+        return Ok(PublishResult {
+            pack: pack_result,
+            tag: tag.to_string(),
+            registry: registry.to_string(),
+        });
+    }
+
     let tarball_data = pack_result
         .tarball_data
         .as_ref()
@@ -66,7 +76,6 @@ pub async fn publish(
 
     print_pack_details(&pack_result, Some(&shasum));
 
-    if dry_run {
         return Ok(PublishResult {
             pack: pack_result,
             tag: tag.to_string(),
