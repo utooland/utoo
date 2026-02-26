@@ -535,8 +535,10 @@ impl TryFrom<ConfigConditionItem> for ConditionItem {
                     .map(EsRegex::try_from)
                     .transpose()?
                     .map(EsRegex::resolved_cell),
-                content_type: None,
-                query: None,
+                query: query.map(ConditionQuery::try_from).transpose()?,
+                content_type: content_type
+                    .map(ConditionContentType::try_from)
+                    .transpose()?,
             },
         })
     }
