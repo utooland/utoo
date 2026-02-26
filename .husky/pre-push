@@ -7,7 +7,7 @@
 cargo fmt --check
 
 # toml fmt check
-RUST_LOG=warn taplo format --check
+npx tombi format --check
 
 # biome check
 npx biome ci

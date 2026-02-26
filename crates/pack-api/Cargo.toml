@@ -5,22 +5,19 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-anyhow      = { workspace = true, features = ["backtrace"] }
-bincode     = { workspace = true }
-futures     = { workspace = true }
-parking_lot = { workspace = true }
-qstring     = { workspace = true }
-rustc-hash  = { workspace = true }
-serde       = { workspace = true }
-serde_json  = { workspace = true }
-tokio       = { workspace = true, features = ["sync"] }
-tracing     = { workspace = true }
-url         = { workspace = true }
-urlencoding = { workspace = true }
-
+anyhow              = { workspace = true, features = ["backtrace"] }
+bincode             = { workspace = true }
+futures             = { workspace = true }
 ## turbpack specific
 pack-core           = { workspace = true }
+parking_lot         = { workspace = true }
+qstring             = { workspace = true }
+rustc-hash          = { workspace = true }
+serde               = { workspace = true }
+serde_json          = { workspace = true }
 simd-json           = { workspace = true, features = ["arraybackend"] }
+tokio               = { workspace = true, features = ["sync"] }
+tracing             = { workspace = true }
 turbo-bincode       = { workspace = true }
 turbo-rcstr         = { workspace = true }
 turbo-tasks         = { workspace = true }
@@ -36,6 +33,8 @@ turbopack-node      = { workspace = true, default-features = false }
 turbopack-nodejs    = { workspace = true }
 turbopack-resolve   = { workspace = true }
 turbopack-static    = { workspace = true }
+url                 = { workspace = true }
+urlencoding         = { workspace = true }
 
 [build-dependencies]
 anyhow = { workspace = true }

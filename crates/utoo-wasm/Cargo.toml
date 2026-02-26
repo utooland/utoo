@@ -1,25 +1,11 @@
 [package]
-name    = "utoo-wasm"
-version = "0.1.0"
-edition = "2021"
-
+name        = "utoo-wasm"
+version     = "0.1.0"
+edition     = "2021"
 description = "WASM bindings for utoo-pm & utoopack"
 
 [lib]
 crate-type = ["cdylib"]
-
-[features]
-default = ["utoopack"]
-utoopack = [
-  "pack-api",
-  "pack-core",
-  "turbo-rcstr",
-  "turbo-tasks",
-  "turbo-tasks-backend",
-  "turbo-tasks-fs",
-  "turbopack-core",
-  "turbopack-node",
-]
 
 [dependencies]
 anyhow                   = { workspace = true, features = ["backtrace"] }
@@ -30,31 +16,43 @@ futures                  = { workspace = true }
 js-sys                   = "0.3.83"
 oneshot                  = "0.1.11"
 opfs-project             = "0.1.17"
+## turbpack specific - conditional on utoopack feature
+pack-api                 = { workspace = true, optional = true }
+pack-core                = { workspace = true, optional = true }
+parking_lot              = { workspace = true, features = ["nightly"] }
 petgraph                 = "0.6"
 reqwest                  = { version = "0.12.22", default-features = false, features = ["json"] }
 rustc-hash               = { workspace = true }
 serde                    = { version = "1.0", features = ["derive"] }
-serde-wasm-bindgen       = "0.6.5"
 serde_json               = { workspace = true }
+serde-wasm-bindgen       = "0.6.5"
+swc_core                 = { workspace = true, features = ["base", "ecma_ast"] }
 tar                      = "0.4.44"
 tokio                    = { workspace = true, features = ["rt", "rt-multi-thread", "time"] }
 tokio-fs-ext             = { workspace = true, features = ["opfs_offload", "opfs_tracing", "opfs_watch"] }
 tracing                  = { workspace = true }
 tracing-subscriber       = { workspace = true }
 tracing-web              = "0.1.3"
+turbo-rcstr              = { workspace = true, optional = true }
+turbo-tasks              = { workspace = true, optional = true }
+turbo-tasks-backend      = { workspace = true, optional = true }
+turbo-tasks-fs           = { workspace = true, optional = true }
+turbo-tasks-malloc       = { workspace = true, default-features = false, features = ["custom_allocator"] }
+turbopack-core           = { workspace = true, optional = true }
+turbopack-node           = { workspace = true, default-features = false, features = ["worker_pool"], optional = true }
 utoo-ruborist            = { path = "../ruborist" }
 wasm-bindgen             = "0.2.108"
 wasm-bindgen-futures     = "0.4.58"
 
-## turbpack specific - conditional on utoopack feature
-pack-api            = { workspace = true, optional = true }
-pack-core           = { workspace = true, optional = true }
-parking_lot         = { workspace = true, features = ["nightly"] }
-swc_core            = { workspace = true, features = ["base", "ecma_ast"] }
-turbo-rcstr         = { workspace = true, optional = true }
-turbo-tasks         = { workspace = true, optional = true }
-turbo-tasks-backend = { workspace = true, optional = true }
-turbo-tasks-fs      = { workspace = true, optional = true }
-turbo-tasks-malloc  = { workspace = true, default-features = false, features = ["custom_allocator"] }
-turbopack-core      = { workspace = true, optional = true }
-turbopack-node      = { workspace = true, optional = true, default-features = false, features = ["worker_pool"] }
+[features]
+default  = ["utoopack"]
+utoopack = [
+  "pack-api",
+  "pack-core",
+  "turbo-rcstr",
+  "turbo-tasks",
+  "turbo-tasks-backend",
+  "turbo-tasks-fs",
+  "turbopack-core",
+  "turbopack-node",
+]

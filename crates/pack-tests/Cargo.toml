@@ -1,16 +1,12 @@
 [package]
 name        = "pack-tests"
 version     = "0.1.0"
+edition     = "2024"
 description = "TBD"
 license     = "MIT"
-edition     = "2024"
-autobenches = false
-
 # don't publish this crate
-publish = false
-
-[lints]
-workspace = true
+publish     = false
+autobenches = false
 
 [dev-dependencies]
 anyhow                       = { workspace = true }
@@ -39,3 +35,6 @@ turbopack-node               = { workspace = true, default-features = false, fea
 turbopack-nodejs             = { workspace = true, features = ["test"] }
 turbopack-resolve            = { workspace = true }
 turbopack-test-utils         = { workspace = true }
+
+[lints]
+workspace = true

@@ -7,49 +7,30 @@ license.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[features]
-plugin = [
-  "pack-core/plugin",
-  "swc_core/plugin_transform_host_native",
-  "swc_core/plugin_transform_host_native_filesystem_cache",
-  "swc_core/plugin_transform_host_native_shared_runtime",
-  "turbopack-ecmascript-plugins/swc_ecma_transform_plugin",
-]
-
-# Enable support for the tokio console: https://github.com/tokio-rs/console
-tokio-console = ["dep:console-subscriber"]
-# Enable dhat profiling allocator for heap profiling.
-__internal_dhat-heap = ["dhat"]
-# Enable dhat profiling allocator for ad hoc profiling.
-# [Note]: we do not have any ad hoc event in the codebase yet, so enabling this
-# effectively does nothing.
-__internal_dhat-ad-hoc = ["dhat"]
-
 [dependencies]
-anyhow  = { workspace = true, features = ["backtrace"] }
-bincode = { workspace = true }
-
-console-subscriber = { workspace = true, optional = true }
-dhat = { version = "0.3.2", optional = true }
-napi = { version = "2", default-features = false, features = [
-  "error_anyhow",
-  "napi3",
-  "serde-json",
-  "tokio_rt",
+anyhow                       = { workspace = true, features = ["backtrace"] }
+bincode                      = { workspace = true }
+console-subscriber           = { workspace = true, optional = true }
+dhat                         = { version = "0.3.2", optional = true }
+napi                         = { version = "2", default-features = false, features = [
   # Lightningcss uses this features
   "compat-mode",
+  "error_anyhow",
+  "napi3",
   "napi4",
   "napi5",
+  "serde-json",
+  "tokio_rt",
 ] }
-napi-derive = "2"
-owo-colors = { workspace = true }
-pack-api = { workspace = true }
-pack-core = { workspace = true }
-rand = { workspace = true }
-rustc-hash = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-swc_core = { workspace = true, features = [
+napi-derive                  = "2"
+owo-colors                   = { workspace = true }
+pack-api                     = { workspace = true }
+pack-core                    = { workspace = true }
+rand                         = { workspace = true }
+rustc-hash                   = { workspace = true }
+serde                        = { workspace = true }
+serde_json                   = { workspace = true }
+swc_core                     = { workspace = true, features = [
   "base",
   "common_concurrent",
   "ecma_ast",
@@ -68,11 +49,18 @@ swc_core = { workspace = true, features = [
   "ecma_utils",
   "ecma_visit",
 ] }
-tracing = { workspace = true }
-tracing-chrome = "0.7.2"
-tracing-subscriber = { workspace = true, features = ["chrono"] }
+tracing                      = { workspace = true }
+tracing-chrome               = "0.7.2"
+tracing-subscriber           = { workspace = true, features = ["chrono"] }
 turbopack-ecmascript-plugins = { workspace = true, optional = true }
-urlencoding = { workspace = true }
+urlencoding                  = { workspace = true }
+
+[build-dependencies]
+anyhow       = { workspace = true }
+napi-build   = "2"
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+vergen-gitcl = { version = "1.0.8", features = ["cargo"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pack-api                          = { workspace = true }
@@ -92,12 +80,22 @@ turbopack-node                    = { workspace = true, default-features = false
 turbopack-trace-server            = { workspace = true }
 turbopack-trace-utils             = { workspace = true }
 
-[build-dependencies]
-anyhow       = { workspace = true }
-napi-build   = "2"
-serde        = { workspace = true }
-serde_json   = { workspace = true }
-vergen-gitcl = { version = "1.0.8", features = ["cargo"] }
+[features]
+# Enable dhat profiling allocator for ad hoc profiling.
+# [Note]: we do not have any ad hoc event in the codebase yet, so enabling this
+# effectively does nothing.
+__internal_dhat-ad-hoc = ["dhat"]
+# Enable dhat profiling allocator for heap profiling.
+__internal_dhat-heap   = ["dhat"]
+plugin                 = [
+  "pack-core/plugin",
+  "swc_core/plugin_transform_host_native",
+  "swc_core/plugin_transform_host_native_filesystem_cache",
+  "swc_core/plugin_transform_host_native_shared_runtime",
+  "turbopack-ecmascript-plugins/swc_ecma_transform_plugin",
+]
+# Enable support for the tokio console: https://github.com/tokio-rs/console
+tokio-console          = ["dep:console-subscriber"]
 
 [lints]
 workspace = true

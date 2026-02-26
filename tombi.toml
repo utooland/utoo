@@ -1,0 +1,6 @@
+[files]
+include = ["Cargo.toml", "crates/*/*.toml"]
+
+[format.rules]
+line-width = 120
+key-value-equals-sign-alignment = true

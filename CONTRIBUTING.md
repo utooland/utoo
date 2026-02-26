@@ -28,7 +28,6 @@ Before you begin, ensure you have the following installed:
   ```bash
   cargo install wasm-bindgen-cli@0.2.106
   ```
-- **taplo**: Formats TOML files (e.g. `Cargo.toml`). The pre-push hook runs `taplo format --check`. Install: `cargo install taplo-cli --locked` or `brew install taplo`. Format manually: `RUST_LOG=warn taplo format`.
 - **typos**: Spell checker for source and docs. The pre-push hook runs `typos`. Install: `cargo install typos-cli --locked` or `brew install typos-cli`. Config: [.typos.toml](.typos.toml).
 - **LLVM (macOS only)**: Required to build `utoo-wasm` on macOS (the compiled output is used by `@utoo/web`). The dependency `libmimalloc-sys` compiles C code to `wasm32-unknown-unknown`; Apple Clang does not support that target. Install: `brew install llvm`. Then add the following to your shell config (e.g. `~/.zshrc` or `~/.bash_profile`) so the build uses Homebrew’s clang:
   ```bash
