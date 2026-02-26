@@ -25,7 +25,7 @@ use turbo_tasks_fs::{
     DirectoryContent, DirectoryEntry, DiskFileSystem, FileContent, FileSystem, FileSystemEntryType,
     FileSystemPath, VirtualFileSystem, invalidation,
 };
-use turbo_unix_path::normalize_path;
+use turbo_unix_path::{join_path, normalize_path, unix_to_sys};
 use turbopack::global_module_ids::get_global_module_id_strategy;
 use turbopack_core::{
     chunk::{UnusedReferences, chunk_id_strategy::ModuleIdFallback},
@@ -626,6 +626,24 @@ impl Project {
     }
 
     #[turbo_tasks::function]
+    pub async fn dist_dir_absolute(self: Vc<Self>) -> Result<Vc<RcStr>> {
+        let this = self.await?;
+        let dist_dir = self.dist_dir().await?;
+        Ok(Vc::cell(
+            format!(
+                "{}{}{}",
+                this.root_path,
+                std::path::MAIN_SEPARATOR,
+                unix_to_sys(
+                    &join_path(&this.project_path, dist_dir.as_str())
+                        .context("expected project_path to be inside of root_path")?
+                )
+            )
+            .into(),
+        ))
+    }
+
+    #[turbo_tasks::function]
     pub async fn project_root(self: Vc<Self>) -> Result<Vc<FileSystemPath>> {
         Ok(self.project_fs(self.dist_dir()).root())
     }
@@ -642,9 +660,11 @@ impl Project {
             .unwrap_or("dist".into());
 
         let relative_dist_path = convert_to_project_relative(&dist_path, &this.project_path)?;
-        let relative_dist_path = relative_dist_path
-            .strip_prefix("./")
-            .unwrap_or(&relative_dist_path);
+        let relative_dist_path = unix_to_sys(
+            relative_dist_path
+                .strip_prefix("./")
+                .unwrap_or(&relative_dist_path),
+        );
 
         Ok(Vc::cell(relative_dist_path.into()))
     }
@@ -657,10 +677,11 @@ impl Project {
         } else {
             "./"
         };
-        let pack_relative = pack_relative
-            .strip_prefix(MAIN_SEPARATOR)
-            .unwrap_or(pack_relative)
-            .replace(MAIN_SEPARATOR, "/");
+        let pack_relative = unix_to_sys(
+            pack_relative
+                .strip_prefix(MAIN_SEPARATOR)
+                .unwrap_or(pack_relative),
+        );
 
         Ok(self
             .output_fs()
@@ -677,10 +698,11 @@ impl Project {
         let dist_dir = self.dist_dir().await?;
 
         let project_relative = this.project_path.strip_prefix(&*this.root_path).unwrap();
-        let project_relative = project_relative
-            .strip_prefix(MAIN_SEPARATOR)
-            .unwrap_or(project_relative)
-            .replace(MAIN_SEPARATOR, "/");
+        let project_relative = unix_to_sys(
+            project_relative
+                .strip_prefix(MAIN_SEPARATOR)
+                .unwrap_or(project_relative),
+        );
 
         Ok(self
             .output_fs()
@@ -711,10 +733,11 @@ impl Project {
         let this = self.await?;
         let root = self.project_root().await?;
         let project_relative = this.project_path.strip_prefix(&*this.root_path).unwrap();
-        let project_relative = project_relative
-            .strip_prefix(MAIN_SEPARATOR)
-            .unwrap_or(project_relative)
-            .replace(MAIN_SEPARATOR, "/");
+        let project_relative = unix_to_sys(
+            project_relative
+                .strip_prefix(MAIN_SEPARATOR)
+                .unwrap_or(project_relative),
+        );
         Ok(root.join(&project_relative)?.cell())
     }
 
