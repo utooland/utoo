@@ -184,7 +184,6 @@ export interface ConfigComplete {
         };
 
     styledComponents?: boolean | StyledComponentsConfig;
-    emotion?: boolean | EmotionConfig;
   };
   images?: {
     inlineLimit?: number;
@@ -234,20 +233,6 @@ export interface StyledComponentsConfig {
   namespace?: string;
   pure?: boolean;
   cssProp?: boolean;
-}
-
-export interface EmotionConfig {
-  sourceMap?: boolean;
-  autoLabel?: "dev-only" | "always" | "never";
-  labelFormat?: string;
-  importMap?: {
-    [importName: string]: {
-      [exportName: string]: {
-        canonicalImport?: [string, string];
-        styledBaseImport?: [string, string];
-      };
-    };
-  };
 }
 
 export interface BundleOptions {

@@ -16,7 +16,7 @@ echo -e "node path: $(node -e 'console.log(process.arch)')"
 
 ut config set registry https://registry.npmjs.org --global
 
-# Case 1: Clone and install ant-design-x (next) - test manifests-concurrency-limit
+# Case 1: Clone and install ant-design-x (next)
 echo -e "${YELLOW}Case 1: Clone and install ant-design-x (next)${NC}"
 cd e2e/pm/ant-design-x
 if [ ! -d "ant-design-x" ]; then
@@ -24,16 +24,9 @@ if [ ! -d "ant-design-x" ]; then
 fi
 cd ant-design-x
 
-# Test different manifests-concurrency-limit values
-echo -e "${YELLOW}Testing different manifests-concurrency-limit values...${NC}"
-for limit in 10 20 40 60 70 80 90 100 120 200; do
-  echo -e "${YELLOW}--- Testing manifests-concurrency-limit=$limit ---${NC}"
-  rm -rf node_modules package-lock.json
-  rm -rf ~/.cache/nm
-  time utoo install --ignore-scripts --manifests-concurrency-limit $limit || { echo -e "${RED}FAIL: utoo install failed with limit=$limit${NC}"; exit 1; }
-  echo -e "${GREEN}PASS: limit=$limit completed${NC}"
-  echo ""
-done
+rm -rf node_modules package-lock.json
+rm -rf ~/.cache/nm
+time utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for ant-design-x${NC}"; exit 1; }
 
 utoo rebuild || { echo -e "${RED}FAIL: utoo rebuild failed for ant-design-x (next)${NC}"; exit 1; }
 echo -e "${GREEN}PASS: ant-design-x (next) cloned and installed${NC}"

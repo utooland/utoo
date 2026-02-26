@@ -11,7 +11,6 @@ use wasm::StaticWasmModuleType;
 pub mod classic_jsx_react_import;
 pub mod css_modules;
 pub mod default_export_namer;
-pub mod emotion;
 pub mod image;
 pub mod modularize_imports;
 pub mod remove_console;

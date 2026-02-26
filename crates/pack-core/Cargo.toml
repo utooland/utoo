@@ -70,11 +70,11 @@ turbopack-static             = { workspace = true }
 
 [target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]
 turbo-tasks-fetch            = { workspace = true }
-turbopack-ecmascript-plugins = { workspace = true, default-features = true, features = ["transform_emotion"] }
+turbopack-ecmascript-plugins = { workspace = true, default-features = true }
 
 [target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
 getrandom                    = { version = "0.3", features = ["wasm_js"] }
-turbopack-ecmascript-plugins = { workspace = true, default-features = false, features = ["transform_emotion"] }
+turbopack-ecmascript-plugins = { workspace = true, default-features = false }
 
 [lints]
 workspace = true

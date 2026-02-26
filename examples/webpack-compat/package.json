@@ -9,6 +9,7 @@
   "devDependencies": {
     "@types/webpack": "^5.28.5",
     "@utoo/pack": "*",
+    "@utoo/pack-cli": "*",
     "html-loader": "^5.1.0",
     "html-webpack-plugin": "^5.6.5",
     "typescript": "^5.8.3",

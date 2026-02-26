@@ -22,9 +22,7 @@ use turbopack_core::{
     resolve::ResolveAliasMap,
 };
 use turbopack_ecmascript::{OptionTreeShaking, TreeShakingMode};
-use turbopack_ecmascript_plugins::transform::{
-    emotion::EmotionTransformConfig, styled_components::StyledComponentsTransformConfig,
-};
+use turbopack_ecmascript_plugins::transform::styled_components::StyledComponentsTransformConfig;
 use turbopack_node::transforms::webpack::{WebpackLoaderItem, WebpackLoaderItems};
 
 use crate::{
@@ -270,7 +268,6 @@ pub struct ReactConfig {
 #[derive(Clone, Debug, PartialEq, Default, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
 pub struct StyleConfig {
-    pub emotion: Option<EmotionTransformOptionsOrBoolean>,
     pub styled_components: Option<StyledComponentsTransformOptionsOrBoolean>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     sass: Option<serde_json::Value>,
@@ -686,23 +683,6 @@ impl PartialEq for SizeLimit {
 }
 
 impl Eq for SizeLimit {}
-
-#[turbo_tasks::value]
-#[derive(Clone, Debug, Deserialize, OperationValue)]
-#[serde(untagged)]
-pub enum EmotionTransformOptionsOrBoolean {
-    Boolean(bool),
-    Options(EmotionTransformConfig),
-}
-
-impl EmotionTransformOptionsOrBoolean {
-    pub fn is_enabled(&self) -> bool {
-        match self {
-            Self::Boolean(enabled) => *enabled,
-            _ => true,
-        }
-    }
-}
 
 #[turbo_tasks::value]
 #[derive(Clone, Debug, Deserialize, OperationValue)]
