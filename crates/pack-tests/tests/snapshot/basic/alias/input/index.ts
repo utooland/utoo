@@ -5,6 +5,9 @@ import { aliasB } from '@@/b';
 import { a as browserslistA } from 'browserslist';
 import style from '@/index.less';
 import { a } from '@/a?query';
+import { output } from '../../../output';
+
+output;
 
 console.log('a', a);
 

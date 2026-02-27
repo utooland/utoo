@@ -25,7 +25,7 @@ use turbo_tasks_fs::{
     DirectoryContent, DirectoryEntry, DiskFileSystem, FileContent, FileSystem, FileSystemEntryType,
     FileSystemPath, VirtualFileSystem, invalidation,
 };
-use turbo_unix_path::{join_path, normalize_path, unix_to_sys};
+use turbo_unix_path::{join_path, normalize_path, sys_to_unix, unix_to_sys};
 use turbopack::global_module_ids::get_global_module_id_strategy;
 use turbopack_core::{
     chunk::{UnusedReferences, chunk_id_strategy::ModuleIdFallback},
@@ -574,13 +574,24 @@ impl Project {
     #[turbo_tasks::function]
     pub async fn project_fs(&self, denied_path: Vc<RcStr>) -> Result<Vc<DiskFileSystem>> {
         let mut denied_paths = Vec::new();
+        let unix_relative_project: String = if self.project_path.starts_with(&*self.root_path) {
+            let relative = self
+                .project_path
+                .strip_prefix(&*self.root_path)
+                .unwrap()
+                .trim_start_matches(MAIN_SEPARATOR);
+            sys_to_unix(relative).into_owned()
+        } else {
+            String::new()
+        };
 
         let denied_path = denied_path.await?;
         if !denied_path.is_empty() {
-            let normalized =
-                normalize_path(&denied_path).map_or_else(|| (*denied_path).clone(), RcStr::from);
-            if !normalized.is_empty() {
-                denied_paths.push(normalized);
+            let unix_denied = sys_to_unix(&denied_path);
+            if let Some(normalized) = join_path(&unix_relative_project, &unix_denied) {
+                if !normalized.is_empty() {
+                    denied_paths.push(RcStr::from(normalized));
+                }
             }
         }
 
@@ -599,9 +610,11 @@ impl Project {
             }
         }
 
-        let root_turbopack_path = rcstr!(".turbopack");
-        if !denied_paths.contains(&root_turbopack_path) {
-            denied_paths.push(root_turbopack_path);
+        let project_turbopack = join_path(&unix_relative_project, ".turbopack")
+            .map(RcStr::from)
+            .unwrap_or_else(|| rcstr!(".turbopack"));
+        if !denied_paths.contains(&project_turbopack) {
+            denied_paths.push(project_turbopack);
         }
         // Get watched ignored paths from configuration
         let watched_ignored = self.watch.ignored.clone();
