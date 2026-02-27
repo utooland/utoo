@@ -588,10 +588,10 @@ impl Project {
         let denied_path = denied_path.await?;
         if !denied_path.is_empty() {
             let unix_denied = sys_to_unix(&denied_path);
-            if let Some(normalized) = join_path(&unix_relative_project, &unix_denied) {
-                if !normalized.is_empty() {
-                    denied_paths.push(RcStr::from(normalized));
-                }
+            if let Some(normalized) = join_path(&unix_relative_project, &unix_denied)
+                && !normalized.is_empty()
+            {
+                denied_paths.push(RcStr::from(normalized));
             }
         }
 
