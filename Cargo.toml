@@ -72,6 +72,8 @@ indoc       = "2.0.0"
 parking_lot = "0.12.4"
 qstring     = "0.7.2"
 rand        = "0.9.0"
+sha1        = "0.10"
+sha2        = "0.10"
 url         = "2.2.2"
 urlencoding = "2.1.2"
 

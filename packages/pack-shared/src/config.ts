@@ -24,7 +24,18 @@ export interface DefineEnv {
 
 export type RustifiedEnv = { name: string; value: string }[];
 
-export interface ExperimentalConfig {}
+export interface ExperimentalConfig {
+  swcPlugins?: [string, any][];
+  dynamicIO?: boolean;
+  useCache?: boolean;
+  cacheHandlers?: Record<string, string>;
+  esmExternals?: boolean | "loose";
+  ppr?: boolean | "incremental";
+  taint?: boolean;
+  reactCompiler?: boolean | any;
+  viewTransition?: boolean;
+  serverActions?: boolean | any;
+}
 
 export type JSONValue =
   | string
@@ -59,6 +70,8 @@ export type TurbopackRuleCondition =
   | {
       path?: string | RegExp;
       content?: RegExp;
+      query?: string | RegExp;
+      contentType?: string | RegExp;
     };
 
 export type TurbopackRuleConfigItem = {
@@ -67,8 +80,21 @@ export type TurbopackRuleConfigItem = {
   condition?: TurbopackRuleCondition;
 };
 
+/**
+ * This can be an object representing a single configuration, or a list of
+ * loaders and/or rule configuration objects.
+ *
+ * - A list of loader path strings or objects is the "shorthand" syntax.
+ * - A list of rule configuration objects can be useful when each configuration
+ *   object has different `condition` fields, but still match the same top-level
+ *   path glob.
+ */
+export type TurbopackRuleConfigCollection =
+  | TurbopackRuleConfigItem
+  | (TurbopackLoaderItem | TurbopackRuleConfigItem)[];
+
 export interface ModuleOptions {
-  rules?: Record<string, TurbopackRuleConfigItem>;
+  rules?: Record<string, TurbopackRuleConfigCollection>;
 }
 
 export interface ResolveOptions {
@@ -113,6 +139,9 @@ export interface ConfigComplete {
     type?: "standalone" | "export";
     filename?: string;
     chunkFilename?: string;
+    cssFilename?: string;
+    cssChunkFilename?: string;
+    assetModuleFilename?: string;
     clean?: boolean;
     copy?: Array<
       | {
@@ -122,6 +151,7 @@ export interface ConfigComplete {
       | string
     >;
     publicPath?: string;
+    chunkLoadingGlobal?: string;
     entryRootExport?: string;
   };
   target?: string;
@@ -130,6 +160,7 @@ export interface ConfigComplete {
   provider?: ProviderConfig;
   optimization?: {
     moduleIds?: "named" | "deterministic";
+    noMangling?: boolean;
     minify?: boolean;
     treeShaking?: boolean;
     splitChunks?: Record<

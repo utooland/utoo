@@ -35,10 +35,10 @@ use crate::constants::cmd::{
     EXECUTE_NAME, INIT_ABOUT, INIT_ALIAS, INIT_NAME, INSTALL_ABOUT, INSTALL_ALIAS, INSTALL_NAME,
     LINK_ABOUT, LINK_ALIAS, LINK_NAME, LIST_ALIAS, LIST_NAME, LOGIN_ABOUT, LOGIN_ALIAS, LOGIN_NAME,
     LOGOUT_ABOUT, LOGOUT_ALIAS, LOGOUT_NAME, PACK_ABOUT, PACK_ALIAS, PACK_NAME, PING_ABOUT,
-    PING_ALIAS, PING_NAME, REBUILD_ABOUT, REBUILD_ALIAS, REBUILD_NAME, RUN_ALIAS, RUN_NAME,
-    UNINSTALL_ABOUT, UNINSTALL_ALIAS, UNINSTALL_NAME, UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME,
-    VIEW_ABOUT, VIEW_ALIAS, VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME, WHOAMI_ABOUT,
-    WHOAMI_ALIAS, WHOAMI_NAME,
+    PING_ALIAS, PING_NAME, PUBLISH_ABOUT, PUBLISH_ALIAS, PUBLISH_NAME, REBUILD_ABOUT,
+    REBUILD_ALIAS, REBUILD_NAME, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT, UNINSTALL_ALIAS,
+    UNINSTALL_NAME, UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT, VIEW_ALIAS,
+    VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME, WHOAMI_ABOUT, WHOAMI_ALIAS, WHOAMI_NAME,
 };
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
 use crate::helper::workspace::update_cwd_to_root;
@@ -272,6 +272,19 @@ enum Commands {
         /// Perform a dry run without creating a tarball
         #[arg(long)]
         dry_run: bool,
+    },
+
+    #[command(name = PUBLISH_NAME, alias = PUBLISH_ALIAS, about = PUBLISH_ABOUT)]
+    Publish {
+        /// Distribution tag (default: latest, or publishConfig.tag from package.json)
+        #[arg(long)]
+        tag: Option<String>,
+        /// Perform a dry run without publishing
+        #[arg(long)]
+        dry_run: bool,
+        /// One-time password for 2FA
+        #[arg(long)]
+        otp: Option<String>,
     },
 
     #[command(name = PING_NAME, alias = PING_ALIAS, about = PING_ABOUT)]
@@ -567,8 +580,11 @@ async fn async_main() -> Result<()> {
             log_time_end("package.json created");
         }
         Some(Commands::Pack { path, dry_run }) => {
-            cmd::pm_pack::pack(path, dry_run).await?;
+            cmd::pm_pack::pack(path, dry_run.into()).await?;
             log_time_end("Pack complete");
+        }
+        Some(Commands::Publish { tag, dry_run, otp }) => {
+            cmd::publish::publish(tag.as_deref(), dry_run, otp.as_deref()).await?;
         }
         Some(Commands::Ping { registry }) => {
             cmd::ping::ping(registry.as_deref()).await?;

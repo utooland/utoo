@@ -10,8 +10,9 @@ use crate::service::script::ScriptService;
 use crate::util::integrity::compute_integrity;
 use crate::util::json::load_package_json_from_path;
 
+#[derive(Default)]
 pub struct PackResult {
-    pub tarball_path: Option<PathBuf>,
+    pub tarball_data: Vec<u8>,
     pub files: Vec<(String, u64)>,
     pub name: String,
     pub version: String,
@@ -20,7 +21,20 @@ pub struct PackResult {
     pub packed_size: u64,
 }
 
-pub async fn pack(package_root: &Path, dry_run: bool) -> Result<PackResult> {
+impl PackResult {
+    /// Build the tarball filename from package name and version.
+    ///
+    /// Scoped packages have `@` and `/` stripped, e.g. `@scope/pkg` → `scope-pkg-1.0.0.tgz`.
+    pub fn tarball_filename(&self) -> String {
+        format!(
+            "{}-{}.tgz",
+            self.name.replace('/', "-").replace('@', ""),
+            self.version
+        )
+    }
+}
+
+pub async fn pack(package_root: &Path) -> Result<PackResult> {
     let data = load_package_json_from_path(package_root).await?;
     let package_info = PackageInfo::from_json(package_root, &data)?;
     let version = data["version"]
@@ -46,18 +60,6 @@ pub async fn pack(package_root: &Path, dry_run: bool) -> Result<PackResult> {
         .map(|(p, size)| (p.to_string_lossy().to_string(), *size))
         .collect();
 
-    if dry_run {
-        return Ok(PackResult {
-            tarball_path: None,
-            files: file_paths,
-            name: package_info.name,
-            version,
-            integrity: String::new(),
-            unpacked_size,
-            packed_size: 0,
-        });
-    }
-
     // create_tarball reads each file via std::fs — also blocking I/O.
     let tar_data =
         tokio::task::spawn_blocking(move || create_tarball(&package_root_owned, &collected))
@@ -65,21 +67,10 @@ pub async fn pack(package_root: &Path, dry_run: bool) -> Result<PackResult> {
     let integrity = compute_integrity(&tar_data);
     let packed_size = tar_data.len() as u64;
 
-    let tarball_name = format!(
-        "{}-{}.tgz",
-        package_info.name.replace('/', "-").replace('@', ""),
-        version
-    );
-    let tarball_path = package_root.join(&tarball_name);
-
-    crate::fs::write(&tarball_path, &tar_data)
-        .await
-        .with_context(|| format!("Failed to write tarball to {}", tarball_path.display()))?;
-
     ScriptService::execute_script(&package_info, "postpack", true).await?;
 
     Ok(PackResult {
-        tarball_path: Some(tarball_path),
+        tarball_data: tar_data,
         files: file_paths,
         name: package_info.name,
         version,
@@ -458,5 +449,35 @@ mod tests {
         for excluded in [".DS_Store", ".npmrc", "package-lock.json", "._metadata"] {
             assert!(!has(&files, excluded), "{excluded} should be excluded");
         }
+    }
+
+    #[test]
+    fn test_tarball_filename_simple() {
+        let r = PackResult {
+            name: "my-pkg".into(),
+            version: "1.0.0".into(),
+            ..Default::default()
+        };
+        assert_eq!(r.tarball_filename(), "my-pkg-1.0.0.tgz");
+    }
+
+    #[test]
+    fn test_tarball_filename_scoped() {
+        let r = PackResult {
+            name: "@scope/my-pkg".into(),
+            version: "2.3.4".into(),
+            ..Default::default()
+        };
+        assert_eq!(r.tarball_filename(), "scope-my-pkg-2.3.4.tgz");
+    }
+
+    #[test]
+    fn test_tarball_filename_prerelease() {
+        let r = PackResult {
+            name: "pkg".into(),
+            version: "1.0.0-beta.1".into(),
+            ..Default::default()
+        };
+        assert_eq!(r.tarball_filename(), "pkg-1.0.0-beta.1.tgz");
     }
 }

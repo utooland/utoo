@@ -81,36 +81,46 @@ pub async fn web_login(registry: &str, on_login_url: impl FnOnce(&str)) -> Resul
 
     on_login_url(login_url);
 
+    poll_done_url(done_url).await
+}
+
+/// Poll a registry `doneUrl` until it returns a token.
+///
+/// Used by both the login flow and the publish OTP web-auth flow.
+/// Returns **202** while pending, **200** with a `token` field on success.
+/// Respects the `retry-after` header; times out after 5 minutes.
+pub async fn poll_done_url(done_url: &str) -> Result<String> {
+    let client = client();
     let timeout = std::time::Duration::from_secs(300);
     let start = std::time::Instant::now();
     let mut interval = std::time::Duration::from_secs(5);
 
     loop {
         if start.elapsed() > timeout {
-            bail!("Login timed out after 5 minutes");
+            bail!("Authentication timed out after 5 minutes");
         }
 
         tokio::time::sleep(interval).await;
-        let poll_resp = client.get(done_url).send().await?;
+        let resp = client.get(done_url).send().await?;
 
-        if let Some(retry_after) = poll_resp.headers().get("retry-after")
+        if let Some(retry_after) = resp.headers().get("retry-after")
             && let Ok(secs) = retry_after.to_str().unwrap_or("5").parse::<u64>()
         {
             interval = std::time::Duration::from_secs(secs);
         }
 
-        match poll_resp.status().as_u16() {
+        match resp.status().as_u16() {
             200 => {
-                let body: serde_json::Value = poll_resp.json().await?;
+                let body: serde_json::Value = resp.json().await?;
                 let token = body["token"]
                     .as_str()
-                    .ok_or_else(|| anyhow::anyhow!("Missing token in login response"))?;
+                    .ok_or_else(|| anyhow::anyhow!("Missing token in response"))?;
                 return Ok(token.to_string());
             }
             202 => continue,
             status => {
-                let body = poll_resp.text().await.unwrap_or_default();
-                bail!("Login polling failed (HTTP {}): {}", status, body);
+                let body = resp.text().await.unwrap_or_default();
+                bail!("Authentication polling failed (HTTP {status}): {body}");
             }
         }
     }

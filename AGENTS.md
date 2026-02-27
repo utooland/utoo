@@ -86,6 +86,15 @@ The pre-push hook runs: `cargo fmt --check`, `taplo format --check`, `npx biome 
 - Group related changes; avoid bundling unrelated refactors.
 - Keep commit messages concise and action-oriented.
 
+## Subagents
+
+Agent definitions live in `agents/` and are symlinked to `.claude/agents/` for Claude Code discovery.
+
+| Agent | Path | Purpose |
+|-------|------|---------|
+| **code-guard** | `agents/code-guard.md` | Rust idiom & style review agent. Enforces idiomatic patterns and project conventions based on real PR review cases. |
+| **utoopack-performance** | `agents/utoopack-performance-agent.md` | Turbopack performance diagnostics via Chrome Trace analysis across a 5-tier priority matrix. |
+
 ## Agent-Specific Notes
 
 - When adding a new `AGENTS.md` anywhere in the repo, also add a `CLAUDE.md` symlink pointing to it (example: `ln -s AGENTS.md CLAUDE.md`).
