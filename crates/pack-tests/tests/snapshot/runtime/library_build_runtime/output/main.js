@@ -1,6 +1,6 @@
-((__TURBOPACK__) => {
+((__UTOOPACK__) => {
             
-if (!Array.isArray(__TURBOPACK__)) {
+if (!Array.isArray(__UTOOPACK__)) {
     return;
 }
 
@@ -797,8 +797,8 @@ let BACKEND;
         return resolver.promise;
     }
 })();
-const chunksToRegister = __TURBOPACK__;
-__TURBOPACK__ = { push: registerChunk };
+const chunksToRegister = __UTOOPACK__;
+__UTOOPACK__ = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
 function factory () {
     const runtimeModuleIds = ["11"];
