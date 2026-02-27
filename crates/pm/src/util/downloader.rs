@@ -13,12 +13,10 @@ use super::extractor::extract_and_write;
 use super::http::client_builder;
 use super::oncemap::OnceMap;
 use super::retry::{RetryableError, create_retry_strategy};
+use super::user_config::get_manifests_concurrency_limit;
 
-/// Maximum concurrent tarball downloads.
-///
-/// Lower than manifest concurrency because each HTTP/1.1 download opens a
-/// separate TCP connection (unlike HTTP/2 multiplexed manifests).
-const MAX_CONCURRENT_DOWNLOADS: usize = 48;
+/// Minimum concurrent downloads after adaptive degradation.
+const MIN_CONCURRENT_DOWNLOADS: usize = 4;
 
 /// HTTP/1.1 client for tarball downloads.
 ///
@@ -40,7 +38,14 @@ static DOWNLOAD_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
 static DOWNLOAD_CACHE: LazyLock<OnceMap<String, PathBuf>> = LazyLock::new(OnceMap::new);
 
 /// Semaphore controlling concurrent download count.
+/// Initialized from `--manifests-concurrency-limit` config (default 64); on
+/// network errors, permits are permanently forgotten to shrink the effective
+/// pool (adaptive degradation).
 static DOWNLOAD_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
+
+/// Current effective concurrency limit (for logging).
+/// Initialized from config on first download; 0 means not yet initialized.
+static EFFECTIVE_CONCURRENCY: AtomicUsize = AtomicUsize::new(0);
 
 /// Number of fresh downloads (not cache hits).
 static DOWNLOAD_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -48,6 +53,44 @@ static DOWNLOAD_COUNT: AtomicUsize = AtomicUsize::new(0);
 /// Returns the number of fresh downloads performed.
 pub fn download_count() -> usize {
     DOWNLOAD_COUNT.load(Ordering::Relaxed)
+}
+
+/// Reduce effective download concurrency by half (floor: [`MIN_CONCURRENT_DOWNLOADS`]).
+///
+/// Works by permanently forgetting semaphore permits so they are never returned
+/// to the pool. This is the same strategy used by Bun's package manager.
+fn degrade_concurrency() {
+    let current = EFFECTIVE_CONCURRENCY.load(Ordering::Relaxed);
+    if current <= MIN_CONCURRENT_DOWNLOADS {
+        return;
+    }
+
+    // How many permits to remove: shrink to current/2, but keep at least MIN
+    let new_limit = (current / 2).max(MIN_CONCURRENT_DOWNLOADS);
+    let to_remove = current - new_limit;
+
+    if EFFECTIVE_CONCURRENCY
+        .compare_exchange(current, new_limit, Ordering::Relaxed, Ordering::Relaxed)
+        .is_ok()
+    {
+        // Spawn a task to acquire and forget permits, shrinking the pool
+        let semaphore = DOWNLOAD_SEMAPHORE
+            .get()
+            .expect("semaphore must be initialized before degradation");
+        tokio::spawn(async move {
+            for _ in 0..to_remove {
+                if let Ok(permit) = semaphore.acquire().await {
+                    permit.forget(); // permanently removes from pool
+                }
+            }
+        });
+
+        tracing::warn!(
+            "Download concurrency degraded: {} -> {} (network errors detected)",
+            current,
+            new_limit
+        );
+    }
 }
 
 /// Download a package tarball to the global cache directory, returning the cache path.
@@ -74,8 +117,11 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
                 return Some(cache_path);
             }
 
-            let semaphore =
-                DOWNLOAD_SEMAPHORE.get_or_init(|| Semaphore::new(MAX_CONCURRENT_DOWNLOADS));
+            let limit = get_manifests_concurrency_limit().await;
+            let semaphore = DOWNLOAD_SEMAPHORE.get_or_init(|| {
+                EFFECTIVE_CONCURRENCY.store(limit, Ordering::Relaxed);
+                Semaphore::new(limit)
+            });
             let _permit = semaphore.acquire().await.ok()?;
             let bytes = download_bytes(&tarball_url)
                 .await
@@ -108,6 +154,7 @@ pub async fn download_bytes(url: &str) -> Result<Bytes> {
             let response = match DOWNLOAD_CLIENT.get(url).send().await {
                 Ok(r) => r,
                 Err(e) => {
+                    degrade_concurrency();
                     tracing::warn!(
                         "Retry {}/10 - Network error: {}, url: {}",
                         attempt + 1,
@@ -121,6 +168,7 @@ pub async fn download_bytes(url: &str) -> Result<Bytes> {
             match response.status() {
                 StatusCode::OK => {
                     let bytes = response.bytes().await.map_err(|e| {
+                        degrade_concurrency();
                         tracing::warn!(
                             "Retry {}/10 - Stream error: {e:#}, url: {url}",
                             attempt + 1,
@@ -135,6 +183,20 @@ pub async fn download_bytes(url: &str) -> Result<Bytes> {
                 StatusCode::NOT_FOUND => {
                     tracing::debug!("URL not found {url}");
                     Err(RetryableError::Permanent(format!("URL not found {url}")))
+                }
+                StatusCode::TOO_MANY_REQUESTS => {
+                    degrade_concurrency();
+                    tracing::warn!("Retry {}/10 - HTTP 429, url: {}", attempt + 1, url);
+                    Err(RetryableError::Temporary(format!(
+                        "HTTP error: 429, url: {url}"
+                    )))
+                }
+                status if status.is_server_error() => {
+                    degrade_concurrency();
+                    tracing::warn!("Retry {}/10 - HTTP {}, url: {}", attempt + 1, status, url);
+                    Err(RetryableError::Temporary(format!(
+                        "HTTP error: {status}, url: {url}"
+                    )))
                 }
                 status => {
                     tracing::warn!("Retry {}/10 - HTTP {}, url: {}", attempt + 1, status, url);
@@ -211,5 +273,25 @@ mod tests {
 
         assert!(dest.join("_resolved").exists());
         assert!(dest.join("file.txt").exists());
+    }
+
+    #[test]
+    fn test_degrade_concurrency() {
+        // Reset state (simulate config default of 64)
+        EFFECTIVE_CONCURRENCY.store(64, Ordering::Relaxed);
+
+        // Degrade: 64 -> 32
+        let current = EFFECTIVE_CONCURRENCY.load(Ordering::Relaxed);
+        let new_limit = (current / 2).max(MIN_CONCURRENT_DOWNLOADS);
+        assert_eq!(new_limit, 32);
+
+        // Degrade chain: 32 -> 16 -> 8 -> 4 -> 4 (floor)
+        assert_eq!((32_usize / 2).max(MIN_CONCURRENT_DOWNLOADS), 16);
+        assert_eq!((16_usize / 2).max(MIN_CONCURRENT_DOWNLOADS), 8);
+        assert_eq!((8_usize / 2).max(MIN_CONCURRENT_DOWNLOADS), 4);
+        assert_eq!((4_usize / 2).max(MIN_CONCURRENT_DOWNLOADS), 4); // floor
+
+        // Restore
+        EFFECTIVE_CONCURRENCY.store(0, Ordering::Relaxed);
     }
 }
