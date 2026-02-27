@@ -128,18 +128,26 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
         }
     }
 
-    // Write files in parallel using rayon
+    // Write files in parallel using rayon.
+    // On Unix, set file mode via open() to avoid a separate chmod() syscall per file.
     entries.par_iter().try_for_each(|entry| -> Result<()> {
+        #[cfg(unix)]
+        let mut file = {
+            use std::os::unix::fs::OpenOptionsExt;
+            fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(entry.mode)
+                .open(&entry.path)
+                .with_context(|| format!("Failed to create: {}", entry.path.display()))?
+        };
+        #[cfg(not(unix))]
         let mut file = fs::File::create(&entry.path)
             .with_context(|| format!("Failed to create: {}", entry.path.display()))?;
+
         file.write_all(&entry.content)
             .with_context(|| format!("Failed to write: {}", entry.path.display()))?;
-
-        #[cfg(unix)]
-        {
-            let perms = fs::Permissions::from_mode(entry.mode);
-            fs::set_permissions(&entry.path, perms).ok();
-        }
         Ok(())
     })?;
 

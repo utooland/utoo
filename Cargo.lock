@@ -9690,6 +9690,7 @@ dependencies = [
  "reqwest 0.12.24",
  "serde",
  "serde_json",
+ "simd-json",
  "thiserror 1.0.69",
  "tokio",
  "tokio-fs-ext",

@@ -132,9 +132,12 @@ pub async fn fetch_full_manifest(
                         .and_then(|v| v.to_str().ok())
                         .map(|s| s.to_string());
 
-                    let manifest: FullManifest = response
-                        .json()
+                    let mut bytes = response
+                        .bytes()
                         .await
+                        .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
+                        .to_vec();
+                    let manifest: FullManifest = simd_json::serde::from_slice(&mut bytes)
                         .map_err(|e| FetchError::Permanent(anyhow!("JSON parse error: {e}")))?;
 
                     Ok((manifest, new_etag))
@@ -192,9 +195,12 @@ pub async fn fetch_version_manifest(
                     .map_err(classify_reqwest_error)?;
 
                 if response.status().is_success() {
-                    response
-                        .json()
+                    let mut bytes = response
+                        .bytes()
                         .await
+                        .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
+                        .to_vec();
+                    simd_json::serde::from_slice(&mut bytes)
                         .map_err(|e| FetchError::Permanent(anyhow!("JSON parse error: {e}")))
                 } else {
                     Err(classify_status(response.status(), &url))

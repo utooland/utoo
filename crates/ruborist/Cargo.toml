@@ -14,6 +14,7 @@ parking_lot  = { workspace = true }
 petgraph     = "0.6"
 serde        = { version = "1.0", features = ["derive"] }
 serde_json   = { workspace = true }
+simd-json    = "0.17"
 thiserror    = { workspace = true }
 tokio-fs-ext = { workspace = true }
 tokio-retry  = "0.3"

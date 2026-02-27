@@ -29,11 +29,11 @@ pub async fn exists(path: impl AsRef<Path>) -> bool {
 
 /// Read a JSON file and deserialize it.
 ///
-/// Uses `read` + `from_slice` instead of `read_to_string` + `from_str`
-/// to avoid unnecessary UTF-8 string conversion.
+/// Uses `read` + `simd_json::from_slice` for SIMD-accelerated parsing.
 pub async fn read_json<T: serde::de::DeserializeOwned>(path: impl AsRef<Path>) -> io::Result<T> {
-    let bytes = tokio_fs_ext::read(path).await?;
-    serde_json::from_slice(&bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    let mut bytes = tokio_fs_ext::read(path).await?;
+    simd_json::serde::from_slice(&mut bytes)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 /// Glob pattern matching trait.
