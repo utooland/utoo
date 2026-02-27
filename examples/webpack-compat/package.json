@@ -3,10 +3,16 @@
   "version": "1.0.0",
   "description": "Webpack compatible example",
   "scripts": {
-    "build": "up build --webpack",
-    "dev": "up dev --webpack"
+    "build": "NODE_ENV=production up build --webpack",
+    "dev": "NODE_ENV=development up dev --webpack"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
     "@types/webpack": "^5.28.5",
     "@utoo/pack": "*",
     "@utoo/pack-cli": "*",
