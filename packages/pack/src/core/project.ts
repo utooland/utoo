@@ -1,3 +1,4 @@
+import { resolve } from "path";
 import { isDeepStrictEqual } from "util";
 import type {
   HmrIdentifiers,
@@ -16,7 +17,7 @@ import {
   TurbopackRuleConfigCollection,
   TurbopackRuleConfigItem,
 } from "../config/types";
-import { rustifyEnv } from "../utils/common";
+import { getPackPath, rustifyEnv } from "../utils/common";
 import { runLoaderWorkerPool } from "./loaderWorkerPool";
 import {
   Endpoint,
@@ -326,10 +327,7 @@ export function projectFactory() {
     constructor(nativeProject: { __napiType: "Project" }) {
       this._nativeProject = nativeProject;
       if (typeof binding.registerWorkerScheduler === "function") {
-        runLoaderWorkerPool(
-          binding,
-          require.resolve("@utoo/pack/cjs/binding.js"),
-        );
+        runLoaderWorkerPool(binding, resolve(getPackPath(), "./binding.js"));
       }
     }
 

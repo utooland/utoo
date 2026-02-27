@@ -1,0 +1,14 @@
+{
+  "name": "example-pack-esm-api",
+  "version": "1.0.0",
+  "description": "Example: bundle using @utoo/pack ESM JS API (no CLI)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node dev.mjs"
+  },
+  "devDependencies": {
+    "@utoo/pack": "*"
+  }
+}

@@ -14,7 +14,7 @@ import { nanoid } from "nanoid";
 import type { Socket } from "net";
 import path from "path";
 import { Duplex } from "stream";
-import ws from "ws";
+import { WebSocket, WebSocketServer } from "ws";
 import { BundleOptions } from "../config/types";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import {
@@ -30,7 +30,7 @@ import { validateEntryPaths } from "../utils/validateEntry";
 import { projectFactory } from "./project";
 import { Project, Update as TurbopackUpdate } from "./types";
 
-const wsServer = new ws.Server({ noServer: true });
+const wsServer = new WebSocketServer({ noServer: true });
 
 const sessionId = Math.floor(Number.MAX_SAFE_INTEGER * Math.random());
 
@@ -150,10 +150,10 @@ export async function createHotReloader(
   let hmrEventHappened = false;
   let hmrHash = 0;
 
-  const clients = new Set<ws>();
-  const clientStates = new WeakMap<ws, ClientState>();
+  const clients = new Set<WebSocket>();
+  const clientStates = new WeakMap<WebSocket, ClientState>();
 
-  function sendToClient(client: ws, payload: HMR_ACTION_TYPES) {
+  function sendToClient(client: WebSocket, payload: HMR_ACTION_TYPES) {
     client.send(JSON.stringify(payload));
   }
 
@@ -192,7 +192,7 @@ export async function createHotReloader(
     sendEnqueuedMessagesDebounce();
   }
 
-  async function subscribeToHmrEvents(client: ws, id: string) {
+  async function subscribeToHmrEvents(client: WebSocket, id: string) {
     const state = clientStates.get(client);
     if (!state || state.subscriptions.has(id)) {
       return;
@@ -227,7 +227,7 @@ export async function createHotReloader(
     }
   }
 
-  function unsubscribeFromHmrEvents(client: ws, id: string) {
+  function unsubscribeFromHmrEvents(client: WebSocket, id: string) {
     const state = clientStates.get(client);
     if (!state) {
       return;

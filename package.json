@@ -41,7 +41,8 @@
     "examples/resolve",
     "examples/with-react",
     "examples/utooweb-demo",
-    "examples/expose-entry-exports"
+    "examples/expose-entry-exports",
+    "examples/pack-esm-api"
   ],
   "repository": "https://github.com/utooland/utoo"
 }
