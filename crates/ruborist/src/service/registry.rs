@@ -198,13 +198,12 @@ impl UnifiedRegistry {
         let etag = disk_versions.as_ref().and_then(|v| v.etag.clone());
 
         // 3. Fetch from network with ETag for validation
-        let use_abbreviated = self.supports_semver;
-        match manifest::fetch_full_manifest(
-            &self.registry_url,
+        match manifest::fetch_full_manifest(manifest::FetchManifestOptions {
+            registry_url: &self.registry_url,
             name,
-            use_abbreviated,
-            etag.as_deref(),
-        )
+            format: manifest::MetadataFormat::Abbreviated,
+            etag: etag.as_deref(),
+        })
         .await
         {
             Ok((manifest, new_etag)) => {
@@ -247,14 +246,15 @@ impl UnifiedRegistry {
                     )))
                 } else {
                     // Disk cache corrupted, fetch fresh
-                    let (manifest, new_etag) = manifest::fetch_full_manifest(
-                        &self.registry_url,
-                        name,
-                        use_abbreviated,
-                        None,
-                    )
-                    .await
-                    .map_err(RegistryError)?;
+                    let (manifest, new_etag) =
+                        manifest::fetch_full_manifest(manifest::FetchManifestOptions {
+                            registry_url: &self.registry_url,
+                            name,
+                            format: manifest::MetadataFormat::Abbreviated,
+                            etag: None,
+                        })
+                        .await
+                        .map_err(RegistryError)?;
 
                     self.cache
                         .set_full_manifest(name.to_string(), manifest.clone());

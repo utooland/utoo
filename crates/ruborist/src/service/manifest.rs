@@ -79,17 +79,38 @@ fn is_retryable(err: &FetchError) -> bool {
     matches!(err, FetchError::Retryable(_))
 }
 
+/// Manifest metadata format.
+#[derive(Debug, Clone, Copy)]
+pub enum MetadataFormat {
+    /// Only install-relevant fields (deps, dist, engines, bin).
+    /// Uses `application/vnd.npm.install-v1+json`, 10-50x smaller than full.
+    /// Supported by all major registries.
+    Abbreviated,
+    /// Complete metadata including readme, time, maintainers, etc.
+    /// Only needed for display commands like `utoo view`.
+    Complete,
+}
+
+/// Options for fetching a full manifest.
+pub struct FetchManifestOptions<'a> {
+    pub registry_url: &'a str,
+    pub name: &'a str,
+    pub format: MetadataFormat,
+    pub etag: Option<&'a str>,
+}
+
 /// Fetch full manifest with retry and ETag support.
 pub async fn fetch_full_manifest(
-    registry_url: &str,
-    name: &str,
-    use_abbreviated: bool,
-    etag: Option<&str>,
+    opts: FetchManifestOptions<'_>,
 ) -> Result<(FullManifest, Option<String>)> {
-    let url = format!("{}/{}", registry_url, name);
-    let etag_owned = etag.map(|s| s.to_string());
+    let url = format!("{}/{}", opts.registry_url, opts.name);
+    let etag_owned = opts.etag.map(|s| s.to_string());
+    let accept = match opts.format {
+        MetadataFormat::Abbreviated => "application/vnd.npm.install-v1+json",
+        MetadataFormat::Complete => "application/json",
+    };
 
-    tracing::debug!("Fetching full manifest for {} from {}", name, url);
+    tracing::debug!("Fetching full manifest for {} from {}", opts.name, url);
 
     RetryIf::spawn(
         retry_strategy(),
@@ -97,12 +118,6 @@ pub async fn fetch_full_manifest(
             let url = url.clone();
             let etag = etag_owned.clone();
             async move {
-                let accept = if use_abbreviated {
-                    "application/vnd.npm.install-v1+json"
-                } else {
-                    "application/json"
-                };
-
                 let mut request = get_client().get(&url).header("Accept", accept);
                 if let Some(etag_value) = &etag {
                     request = request.header("If-None-Match", etag_value);
@@ -133,7 +148,7 @@ pub async fn fetch_full_manifest(
     .await
     .map_err(|e| match e {
         FetchError::Retryable(e) | FetchError::Permanent(e) => {
-            anyhow!("Failed to fetch {}: {}", name, e)
+            anyhow!("Failed to fetch {}: {}", opts.name, e)
         }
     })
 }
