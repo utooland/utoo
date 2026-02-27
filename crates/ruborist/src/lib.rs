@@ -85,12 +85,8 @@ pub mod spec {
 pub mod git {
     pub use crate::model::git::GitCloneResult;
 
-    /// Ensure a git repository is cloned and cached, returning its metadata.
-    ///
-    /// Intended for use by `utoo-pm`'s downloader when installing git
-    /// dependencies. Only available when the `native-git` feature is enabled.
     #[cfg(feature = "native-git")]
-    pub use crate::resolver::git::ensure_repo_cached;
+    pub use crate::resolver::git::{GitCloneCache, ensure_repo_cached};
 }
 
 /// Utility functions.

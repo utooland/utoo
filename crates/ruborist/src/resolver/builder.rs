@@ -21,6 +21,7 @@
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
 use crate::model::manifest::NodeManifest;
@@ -40,19 +41,29 @@ use crate::traits::registry::{RegistryClient, ResolvedPackage};
 async fn resolve_non_registry_dep(
     cache_dir: Option<&std::path::Path>,
     spec: &PackageSpec,
+    name: &str,
+    clone_cache: &GitCloneCache,
 ) -> anyhow::Result<ResolvedPackage> {
     #[cfg(feature = "native-git")]
     {
-        crate::resolver::git::resolve_non_registry_dep(cache_dir, spec).await
+        crate::resolver::git::resolve_non_registry_dep(cache_dir, spec, name, clone_cache).await
     }
     #[cfg(not(feature = "native-git"))]
     {
-        let _ = cache_dir;
+        let _ = (cache_dir, name, clone_cache);
         anyhow::bail!(
             "Git resolution not available for spec '{spec:?}' (enable the 'native-git' feature)"
         )
     }
 }
+
+// Re-export the git clone cache type so callers can construct a `BuildDepsConfig`
+// without depending on the `native-git` feature directly.
+#[cfg(feature = "native-git")]
+use crate::resolver::git::GitCloneCache;
+
+#[cfg(not(feature = "native-git"))]
+type GitCloneCache = tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::OnceCell<Arc<()>>>>>;
 
 // Re-export edge types
 pub use super::edges::{
@@ -70,6 +81,8 @@ pub struct BuildDepsConfig {
     pub skip_preload: bool,
     /// Cache directory for git clones (defaults to `~/.cache/nm`)
     pub cache_dir: Option<PathBuf>,
+    /// Shared dedup cache for concurrent git clone operations
+    pub git_clone_cache: Arc<GitCloneCache>,
 }
 
 impl Default for BuildDepsConfig {
@@ -79,6 +92,7 @@ impl Default for BuildDepsConfig {
             concurrency: crate::resolver::preload::DEFAULT_CONCURRENCY,
             skip_preload: false,
             cache_dir: dirs::home_dir().map(|d| d.join(".cache/nm")),
+            git_clone_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
 }
@@ -359,7 +373,13 @@ pub async fn process_dependency<R: RegistryClient>(
                 PackageSpec::Git { .. } | PackageSpec::GitHub { .. } => {
                     // TODO: add spec => version expiry check so stale git caches
                     // are invalidated (e.g. branch refs that have moved forward).
-                    match resolve_non_registry_dep(config.cache_dir.as_deref(), &parsed_spec).await
+                    match resolve_non_registry_dep(
+                        config.cache_dir.as_deref(),
+                        &parsed_spec,
+                        &edge_info.name,
+                        &config.git_clone_cache,
+                    )
+                    .await
                     {
                         Ok(r) => r,
                         Err(_) if edge_info.edge_type == EdgeType::Optional => {

@@ -25,10 +25,7 @@ pub enum ResolveError<E> {
     /// Resolved version not found in manifest
     ManifestNotFound { name: String, version: String },
     /// Git resolution failed
-    Git {
-        url: String,
-        source: Box<dyn std::error::Error + Send + Sync + 'static>,
-    },
+    Git { url: String, source: anyhow::Error },
     /// Dependency type not yet supported (e.g. local file path, HTTP tarball)
     Unsupported { spec: String, reason: &'static str },
 }

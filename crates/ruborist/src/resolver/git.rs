@@ -6,13 +6,13 @@
 //! - High-level BFS resolver ([`resolve_non_registry_dep`]) that turns a git
 //!   spec into a [`ResolvedPackage`]
 //!
-//! ## Cache layout
+//! # Cache layout
 //!
 //! Git packages are stored under `<cache_dir>/<name>/<commit_sha>/`, the same
 //! `<name>/<key>/` layout used by registry tarballs. This means `utoo clean`
 //! works uniformly without any git-specific knowledge.
 //!
-//! ## Async / blocking model
+//! # Async / blocking model
 //!
 //! The `gix` crate uses blocking HTTP transport; all network and heavy I/O
 //! is run in a `tokio::task::spawn_blocking` thread so the async executor is
@@ -21,33 +21,31 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
-use parking_lot::Mutex;
 
 use crate::model::git::GitCloneResult;
 use crate::model::manifest::{Dist, VersionManifest};
 use crate::model::spec::PackageSpec;
 use crate::traits::registry::ResolvedPackage;
 
-// ---------------------------------------------------------------------------
+// ============================================================================
 // Clone dedup cache
-// ---------------------------------------------------------------------------
+// ============================================================================
 
 /// Deduplicates concurrent git clone operations.
 ///
 /// Keyed by canonical `url#commit_ish`. When multiple BFS tasks request the
 /// same repo simultaneously, only one clone is performed; the others await
-/// the result. Matches the `DOWNLOAD_CACHE` pattern in the PM crate's
-/// `downloader.rs`.
-type CloneCache = Mutex<HashMap<String, Arc<tokio::sync::OnceCell<Arc<GitCloneResult>>>>>;
+/// the result. Lives as a field on `BuildDepsConfig` rather than as a global
+/// static, so it is scoped to a single resolution session.
+pub type GitCloneCache =
+    tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::OnceCell<Arc<GitCloneResult>>>>>;
 
-static GIT_CLONE_CACHE: LazyLock<CloneCache> = LazyLock::new(|| Mutex::new(HashMap::new()));
-
-// ---------------------------------------------------------------------------
+// ============================================================================
 // Helpers
-// ---------------------------------------------------------------------------
+// ============================================================================
 
 /// Read `GITHUB_TOKEN` or `GH_TOKEN` from the environment.
 fn github_auth_token() -> Option<String> {
@@ -59,9 +57,20 @@ fn github_auth_token() -> Option<String> {
 
 /// Inject an auth token into an HTTPS URL (e.g. `https://token:TOKEN@github.com/...`).
 ///
-/// Returns the original URL unchanged if the scheme is not HTTPS.
+/// Returns the original URL unchanged if:
+/// - the scheme is not HTTPS
+/// - the URL already contains credentials (userinfo before the host)
 fn try_inject_token_into_https_url(url: &str, token: &str) -> String {
     if let Some(rest) = url.strip_prefix("https://") {
+        // If the URL already contains userinfo (e.g. user:pass@host), leave it alone
+        // to avoid producing a malformed URL like https://token@user:pass@host.
+        if rest
+            .split_once('/')
+            .map_or(rest, |(host, _)| host)
+            .contains('@')
+        {
+            return url.to_string();
+        }
         format!("https://x-access-token:{token}@{rest}")
     } else {
         url.to_string()
@@ -93,40 +102,24 @@ fn read_pkg_manifest(repo: &gix::Repository, tree_id: gix::ObjectId) -> Result<V
     ))
 }
 
-/// Scan the cache directory for a previously-extracted git package by commit SHA.
+/// Validate that a package name does not contain path-traversal components.
 ///
-/// Checks `<cache_dir>/<name>/<sha>/_resolved` for unscoped packages and
-/// `<cache_dir>/@<scope>/<name>/<sha>/_resolved` for scoped packages.
-/// Returns the package directory path if found.
-fn find_cached_git_package(cache_dir: &Path, sha: &str) -> Option<PathBuf> {
-    let entries = std::fs::read_dir(cache_dir).ok()?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let dir_name = entry.file_name();
-        let dir_name_str = dir_name.to_string_lossy();
-
-        if dir_name_str.starts_with('@') {
-            // Scoped package: @scope/name/sha/_resolved
-            if let Ok(scope_entries) = std::fs::read_dir(&path) {
-                for scope_entry in scope_entries.flatten() {
-                    let candidate = scope_entry.path().join(sha);
-                    if candidate.join("_resolved").exists() {
-                        return Some(candidate);
-                    }
-                }
-            }
-        } else if !dir_name_str.starts_with('.') {
-            // Unscoped package: name/sha/_resolved
-            let candidate = path.join(sha);
-            if candidate.join("_resolved").exists() {
-                return Some(candidate);
-            }
-        }
+/// Rejects names like `../evil` or `/etc/passwd` that would escape the
+/// cache directory when used in `cache_dir.join(name)`.
+fn validate_package_name(name: &str) -> Result<()> {
+    let name_path = PathBuf::from(name);
+    if name_path.components().any(|c| {
+        matches!(
+            c,
+            std::path::Component::ParentDir | std::path::Component::RootDir
+        )
+    }) {
+        return Err(anyhow!(
+            "Suspicious package name '{}' — refusing to use for cache path",
+            name
+        ));
     }
-    None
+    Ok(())
 }
 
 /// Build a [`GitCloneResult`] from a cached package directory on disk.
@@ -143,15 +136,12 @@ fn read_cached_git_result(
     let mut manifest: VersionManifest =
         serde_json::from_slice(&pkg_bytes).context("failed to parse cached package.json")?;
 
-    let name = if manifest.name.is_empty() {
+    if manifest.name.is_empty() {
         return Err(anyhow!("cached package.json missing 'name'"));
-    } else {
-        manifest.name.clone()
-    };
+    }
     if manifest.version.is_empty() {
         manifest.version = "0.0.0".to_string();
     }
-    let version = manifest.version.clone();
 
     let resolved_url = format!("{}#{}", original_url, sha);
     manifest.dist = Dist {
@@ -163,17 +153,23 @@ fn read_cached_git_result(
         s.contains_key("preinstall") || s.contains_key("install") || s.contains_key("postinstall")
     }));
 
-    Ok(GitCloneResult {
-        name,
-        version,
-        path: package_dir.to_path_buf(),
+    Ok(GitCloneResult::new(
+        package_dir.to_path_buf(),
         resolved_url,
         manifest,
-    })
+    ))
 }
 
 /// Recursively extract a git tree to a directory on disk.
-fn extract_tree_to_dir(repo: &gix::Repository, tree_id: gix::ObjectId, dest: &Path) -> Result<()> {
+///
+/// `root_dest` is the top-level extraction directory; symlinks that would
+/// escape it are skipped to prevent path-traversal attacks.
+fn extract_tree_to_dir(
+    repo: &gix::Repository,
+    tree_id: gix::ObjectId,
+    dest: &Path,
+    root_dest: &Path,
+) -> Result<()> {
     let tree = repo
         .find_object(tree_id)?
         .try_into_tree()
@@ -188,7 +184,7 @@ fn extract_tree_to_dir(repo: &gix::Repository, tree_id: gix::ObjectId, dest: &Pa
         match entry.mode().kind() {
             gix::object::tree::EntryKind::Tree => {
                 std::fs::create_dir_all(&entry_path)?;
-                extract_tree_to_dir(repo, entry.object_id(), &entry_path)?;
+                extract_tree_to_dir(repo, entry.object_id(), &entry_path, root_dest)?;
             }
             gix::object::tree::EntryKind::Blob | gix::object::tree::EntryKind::BlobExecutable => {
                 let obj = repo.find_object(entry.object_id())?;
@@ -200,7 +196,7 @@ fn extract_tree_to_dir(repo: &gix::Repository, tree_id: gix::ObjectId, dest: &Pa
                     use std::os::unix::fs::PermissionsExt;
                     let perms = std::fs::Permissions::from_mode(0o755);
                     if let Err(e) = std::fs::set_permissions(&entry_path, perms) {
-                        tracing::warn!(
+                        tracing::debug!(
                             "Failed to set executable permission on {}: {e}",
                             entry_path.display()
                         );
@@ -210,9 +206,22 @@ fn extract_tree_to_dir(repo: &gix::Repository, tree_id: gix::ObjectId, dest: &Pa
             gix::object::tree::EntryKind::Link => {
                 let obj = repo.find_object(entry.object_id())?;
                 let target = std::str::from_utf8(&obj.data).context("non-UTF-8 symlink target")?;
+
+                // Validate that the symlink target does not escape the
+                // extraction root to prevent path-traversal attacks.
+                let resolved = entry_path.parent().unwrap_or(dest).join(target);
+                if !resolved.starts_with(root_dest) {
+                    tracing::debug!(
+                        "Skipping symlink {} -> {} (escapes extraction dir)",
+                        entry_path.display(),
+                        target
+                    );
+                    continue;
+                }
+
                 #[cfg(unix)]
                 if let Err(e) = std::os::unix::fs::symlink(target, &entry_path) {
-                    tracing::warn!("Failed to create symlink {}: {e}", entry_path.display());
+                    tracing::debug!("Failed to create symlink {}: {e}", entry_path.display());
                 }
                 #[cfg(not(unix))]
                 {
@@ -231,9 +240,9 @@ fn extract_tree_to_dir(repo: &gix::Repository, tree_id: gix::ObjectId, dest: &Pa
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
+// ============================================================================
 // Blocking core
-// ---------------------------------------------------------------------------
+// ============================================================================
 
 /// Blocking core that does the actual clone + extraction via gix.
 ///
@@ -244,17 +253,24 @@ fn clone_repo_blocking(
     clone_url: &str,
     commit_ish: Option<&str>,
     original_url: &str,
+    name: &str,
 ) -> Result<GitCloneResult> {
+    // Validate the caller-supplied name before using it in any path operation.
+    // This MUST run before the early cache check which does cache_dir.join(name).
+    validate_package_name(name)?;
+
     // A full 40-hex SHA might not be reachable at depth 1 (it may not be
     // HEAD), so only use shallow fetch for branch/tag refs and bare HEAD.
     let is_full_sha =
         commit_ish.is_some_and(|c| c.len() == 40 && c.chars().all(|ch| ch.is_ascii_hexdigit()));
 
     // Early cache check for full SHA specs — skip network fetch entirely.
-    // Branch/tag refs must always be fetched (the ref may have moved).
+    // The package name is known at call site so we check the exact path
+    // rather than scanning directories.
     if is_full_sha {
-        let sha = commit_ish.unwrap(); // safe: is_full_sha implies Some
-        if let Some(package_dir) = find_cached_git_package(cache_dir, sha) {
+        let sha = commit_ish.unwrap();
+        let package_dir = cache_dir.join(name).join(sha);
+        if package_dir.join("_resolved").exists() {
             match read_cached_git_result(&package_dir, sha, original_url) {
                 Ok(result) => {
                     tracing::debug!(
@@ -266,7 +282,7 @@ fn clone_repo_blocking(
                     return Ok(result);
                 }
                 Err(e) => {
-                    tracing::warn!("Git cache read failed, will re-fetch: {e}");
+                    tracing::debug!("Git cache read failed, will re-fetch: {e}");
                     // Fall through to network fetch
                 }
             }
@@ -349,28 +365,15 @@ fn clone_repo_blocking(
     };
 
     if manifest.version.is_empty() {
-        tracing::warn!(
+        tracing::debug!(
             "package.json in git repo '{}' is missing 'version' field; defaulting to 0.0.0",
             name
         );
         manifest.version = "0.0.0".to_string();
     }
-    let version = manifest.version.clone();
 
-    // Reject suspicious package names via Path::components() to avoid
-    // path-traversal attacks (e.g. `@scope/../evil` passes string-based checks).
-    let name_path = PathBuf::from(&name);
-    if name_path.components().any(|c| {
-        matches!(
-            c,
-            std::path::Component::ParentDir | std::path::Component::RootDir
-        )
-    }) {
-        return Err(anyhow!(
-            "Suspicious package name '{}' in git repo — refusing to cache",
-            name
-        ));
-    }
+    // Also validate the manifest name (may differ from the edge name).
+    validate_package_name(&name)?;
 
     // Cache path: <cache_dir>/<name>/<commit_sha>/
     // Using the full commit SHA as the version directory avoids collisions
@@ -393,60 +396,52 @@ fn clone_repo_blocking(
     }));
 
     if resolved_marker.exists() {
-        return Ok(GitCloneResult {
-            name,
-            version,
-            path: package_dir,
-            resolved_url,
-            manifest,
-        });
+        return Ok(GitCloneResult::new(package_dir, resolved_url, manifest));
     }
 
-    // Extract into a staging directory, then atomically rename it into place.
-    // This avoids TOCTOU: concurrent processes each get their own tmp dir and
-    // the winner's rename is POSIX-atomic (same filesystem guaranteed).
-    let tmp_dir = package_dir.with_extension("tmp");
-    if tmp_dir.exists() {
-        std::fs::remove_dir_all(&tmp_dir).context("Failed to remove stale tmp git cache dir")?;
-    }
-    std::fs::create_dir_all(&tmp_dir)?;
+    // Extract into a per-process unique staging directory, then atomically
+    // rename it into place. Using tempdir_in() ensures no two OS processes
+    // collide on the same staging path (the old deterministic `.tmp` suffix
+    // could race between concurrent `utoo install` invocations).
+    let parent_dir = package_dir
+        .parent()
+        .ok_or_else(|| anyhow!("package_dir has no parent"))?;
+    std::fs::create_dir_all(parent_dir)?;
+    let tmp_dir = tempfile::tempdir_in(parent_dir)
+        .context("Failed to create staging directory for git cache")?;
 
-    extract_tree_to_dir(&checkout, tree_id.into(), &tmp_dir)?;
+    extract_tree_to_dir(&checkout, tree_id.into(), tmp_dir.path(), tmp_dir.path())?;
 
     // Write marker inside tmp dir so it becomes visible atomically after rename.
-    std::fs::write(tmp_dir.join("_resolved"), "")?;
+    std::fs::write(tmp_dir.path().join("_resolved"), "")?;
 
     // Atomic rename; match on the error to detect the race-winner case.
     // On Linux/macOS, rename(2) over an existing non-empty directory yields
     // ENOTEMPTY (not EEXIST), so we check raw_os_error in addition to
     // ErrorKind::AlreadyExists.
-    match std::fs::rename(&tmp_dir, &package_dir) {
+    // into_path() consumes the TempDir without deleting it on success.
+    let tmp_path = tmp_dir.keep();
+    match std::fs::rename(&tmp_path, &package_dir) {
         Ok(()) => {}
         Err(e)
             if e.kind() == std::io::ErrorKind::AlreadyExists
                 || e.raw_os_error() == Some(libc::ENOTEMPTY) =>
         {
-            // Another process completed first — discard our tmp dir.
-            let _ = std::fs::remove_dir_all(&tmp_dir);
+            // Another process completed first — discard our staging dir.
+            let _ = std::fs::remove_dir_all(&tmp_path);
         }
         Err(e) => {
-            let _ = std::fs::remove_dir_all(&tmp_dir);
+            let _ = std::fs::remove_dir_all(&tmp_path);
             return Err(anyhow!("Failed to commit git cache directory: {e}"));
         }
     }
 
-    Ok(GitCloneResult {
-        name,
-        version,
-        path: package_dir,
-        resolved_url,
-        manifest,
-    })
+    Ok(GitCloneResult::new(package_dir, resolved_url, manifest))
 }
 
-// ---------------------------------------------------------------------------
+// ============================================================================
 // Async public API
-// ---------------------------------------------------------------------------
+// ============================================================================
 
 /// Ensure a git repository is cloned and cached, returning its metadata.
 ///
@@ -463,28 +458,34 @@ fn clone_repo_blocking(
 /// * `cache_dir` - Root cache directory
 /// * `url` - Git URL, optionally with `git+` prefix
 /// * `commit_ish` - Optional branch, tag, or commit SHA to check out
+/// * `name` - Package name (from the dependency edge)
+/// * `clone_cache` - Shared dedup cache for concurrent clone operations
 pub async fn ensure_repo_cached(
     cache_dir: &Path,
     url: &str,
     commit_ish: Option<&str>,
+    name: &str,
+    clone_cache: &GitCloneCache,
 ) -> Result<Arc<GitCloneResult>> {
-    // Normalize the dedup key: strip `git+` so `git+https://…` and `https://…`
-    // resolve to the same cache entry.
+    // The caller should pass a clone-ready URL (no `git+` prefix) via
+    // PackageSpec::clone_url(). We still strip defensively in case raw URLs
+    // are threaded through.
     let canonical_url = url.strip_prefix("git+").unwrap_or(url);
     let key = format!("{}#{}", canonical_url, commit_ish.unwrap_or("HEAD"));
 
     let cell = {
-        let mut cache = GIT_CLONE_CACHE.lock();
+        let mut cache = clone_cache.lock().await;
         cache
             .entry(key)
             .or_insert_with(|| Arc::new(tokio::sync::OnceCell::new()))
             .clone()
     };
 
-    let clone_url = url.strip_prefix("git+").unwrap_or(url).to_string();
+    let clone_url = canonical_url.to_string();
     let original_url = url.to_string();
     let cache_dir = cache_dir.to_path_buf();
     let commit_ish_owned = commit_ish.map(|s| s.to_string());
+    let name_owned = name.to_string();
 
     cell.get_or_try_init(|| async {
         tokio::task::spawn_blocking(move || {
@@ -493,6 +494,7 @@ pub async fn ensure_repo_cached(
                 &clone_url,
                 commit_ish_owned.as_deref(),
                 &original_url,
+                &name_owned,
             )
             .map(Arc::new)
         })
@@ -503,9 +505,9 @@ pub async fn ensure_repo_cached(
     .cloned()
 }
 
-// ---------------------------------------------------------------------------
+// ============================================================================
 // High-level resolver — called by BFS `process_dependency`
-// ---------------------------------------------------------------------------
+// ============================================================================
 
 /// Resolve a non-registry dependency spec to a [`ResolvedPackage`].
 ///
@@ -521,15 +523,19 @@ pub async fn ensure_repo_cached(
 pub(crate) async fn resolve_non_registry_dep(
     cache_dir: Option<&Path>,
     spec: &PackageSpec,
+    name: &str,
+    clone_cache: &GitCloneCache,
 ) -> anyhow::Result<ResolvedPackage> {
     let (url, commit_ish) = match spec {
-        PackageSpec::Git { url, commit_ish } => (url.clone(), commit_ish.clone()),
+        PackageSpec::Git { commit_ish, .. } => {
+            (spec.clone_url().unwrap().to_string(), commit_ish.clone())
+        }
         PackageSpec::GitHub {
             owner,
             repo,
             commit_ish,
         } => (
-            format!("git+https://github.com/{owner}/{repo}.git"),
+            format!("https://github.com/{owner}/{repo}.git"),
             commit_ish.clone(),
         ),
         // Exhaustive enumeration — new PackageSpec variants will cause a
@@ -542,7 +548,8 @@ pub(crate) async fn resolve_non_registry_dep(
     let cache_dir = cache_dir
         .ok_or_else(|| anyhow::anyhow!("cache_dir required for git dependency resolution"))?;
 
-    let result = ensure_repo_cached(cache_dir, &url, commit_ish.as_deref()).await?;
+    let result =
+        ensure_repo_cached(cache_dir, &url, commit_ish.as_deref(), name, clone_cache).await?;
 
     Ok(ResolvedPackage {
         name: result.name.clone(),
@@ -565,6 +572,14 @@ mod tests {
         assert_eq!(
             try_inject_token_into_https_url("ssh://git@github.com/user/repo.git", "mytoken"),
             "ssh://git@github.com/user/repo.git"
+        );
+        // URL with existing credentials should pass through unchanged
+        assert_eq!(
+            try_inject_token_into_https_url(
+                "https://user:pass@github.com/user/repo.git",
+                "mytoken"
+            ),
+            "https://user:pass@github.com/user/repo.git"
         );
     }
 

@@ -31,3 +31,24 @@ pub struct GitCloneResult {
     /// [`ResolvedPackage`]: crate::traits::registry::ResolvedPackage
     pub manifest: VersionManifest,
 }
+
+impl GitCloneResult {
+    /// Construct a new `GitCloneResult`, asserting that the top-level fields
+    /// are consistent with the embedded manifest.
+    pub fn new(path: PathBuf, resolved_url: String, manifest: VersionManifest) -> Self {
+        let name = manifest.name.clone();
+        let version = manifest.version.clone();
+        debug_assert_eq!(
+            manifest.dist.tarball.as_deref(),
+            Some(resolved_url.as_str()),
+            "manifest.dist.tarball must equal resolved_url"
+        );
+        Self {
+            name,
+            version,
+            path,
+            resolved_url,
+            manifest,
+        }
+    }
+}

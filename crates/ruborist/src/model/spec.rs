@@ -155,6 +155,16 @@ impl PackageSpec {
     pub fn is_registry(&self) -> bool {
         matches!(self, PackageSpec::Registry { .. })
     }
+
+    /// Return the clone-ready URL for a git spec, stripping the `git+` prefix.
+    ///
+    /// Returns `None` for non-git variants.
+    pub fn clone_url(&self) -> Option<&str> {
+        match self {
+            PackageSpec::Git { url, .. } => Some(url.strip_prefix("git+").unwrap_or(url)),
+            _ => None,
+        }
+    }
 }
 
 impl From<&str> for PackageSpec {
@@ -370,6 +380,27 @@ mod tests {
                 version_spec: "1.0.0".to_string(),
             }
         );
+    }
+
+    // -- PackageSpec: clone_url --
+
+    #[test]
+    fn test_clone_url_strips_git_prefix() {
+        let s = spec("git+https://github.com/user/repo.git#main");
+        assert_eq!(s.clone_url(), Some("https://github.com/user/repo.git"));
+    }
+
+    #[test]
+    fn test_clone_url_bare_protocol() {
+        // git:// URLs don't have the git+ prefix, so clone_url() returns them as-is
+        let s = spec("git://github.com/user/repo.git");
+        assert_eq!(s.clone_url(), Some("git://github.com/user/repo.git"));
+    }
+
+    #[test]
+    fn test_clone_url_non_git_returns_none() {
+        let s = spec("lodash@^4.17.0");
+        assert_eq!(s.clone_url(), None);
     }
 
     // -- PackageSpec: Git --
