@@ -93,6 +93,85 @@ fn read_pkg_manifest(repo: &gix::Repository, tree_id: gix::ObjectId) -> Result<V
     ))
 }
 
+/// Scan the cache directory for a previously-extracted git package by commit SHA.
+///
+/// Checks `<cache_dir>/<name>/<sha>/_resolved` for unscoped packages and
+/// `<cache_dir>/@<scope>/<name>/<sha>/_resolved` for scoped packages.
+/// Returns the package directory path if found.
+fn find_cached_git_package(cache_dir: &Path, sha: &str) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(cache_dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let dir_name = entry.file_name();
+        let dir_name_str = dir_name.to_string_lossy();
+
+        if dir_name_str.starts_with('@') {
+            // Scoped package: @scope/name/sha/_resolved
+            if let Ok(scope_entries) = std::fs::read_dir(&path) {
+                for scope_entry in scope_entries.flatten() {
+                    let candidate = scope_entry.path().join(sha);
+                    if candidate.join("_resolved").exists() {
+                        return Some(candidate);
+                    }
+                }
+            }
+        } else if !dir_name_str.starts_with('.') {
+            // Unscoped package: name/sha/_resolved
+            let candidate = path.join(sha);
+            if candidate.join("_resolved").exists() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+/// Build a [`GitCloneResult`] from a cached package directory on disk.
+///
+/// Reads `package.json` from the cached dir and fills in git-specific
+/// manifest fields (`dist.tarball`, `has_install_script`).
+fn read_cached_git_result(
+    package_dir: &Path,
+    sha: &str,
+    original_url: &str,
+) -> Result<GitCloneResult> {
+    let pkg_bytes = std::fs::read(package_dir.join("package.json"))
+        .context("failed to read cached package.json")?;
+    let mut manifest: VersionManifest =
+        serde_json::from_slice(&pkg_bytes).context("failed to parse cached package.json")?;
+
+    let name = if manifest.name.is_empty() {
+        return Err(anyhow!("cached package.json missing 'name'"));
+    } else {
+        manifest.name.clone()
+    };
+    if manifest.version.is_empty() {
+        manifest.version = "0.0.0".to_string();
+    }
+    let version = manifest.version.clone();
+
+    let resolved_url = format!("{}#{}", original_url, sha);
+    manifest.dist = Dist {
+        tarball: Some(resolved_url.clone()),
+        integrity: None,
+        ..Default::default()
+    };
+    manifest.has_install_script = Some(manifest.scripts.as_ref().is_some_and(|s| {
+        s.contains_key("preinstall") || s.contains_key("install") || s.contains_key("postinstall")
+    }));
+
+    Ok(GitCloneResult {
+        name,
+        version,
+        path: package_dir.to_path_buf(),
+        resolved_url,
+        manifest,
+    })
+}
+
 /// Recursively extract a git tree to a directory on disk.
 fn extract_tree_to_dir(repo: &gix::Repository, tree_id: gix::ObjectId, dest: &Path) -> Result<()> {
     let tree = repo
@@ -166,6 +245,34 @@ fn clone_repo_blocking(
     commit_ish: Option<&str>,
     original_url: &str,
 ) -> Result<GitCloneResult> {
+    // A full 40-hex SHA might not be reachable at depth 1 (it may not be
+    // HEAD), so only use shallow fetch for branch/tag refs and bare HEAD.
+    let is_full_sha =
+        commit_ish.is_some_and(|c| c.len() == 40 && c.chars().all(|ch| ch.is_ascii_hexdigit()));
+
+    // Early cache check for full SHA specs — skip network fetch entirely.
+    // Branch/tag refs must always be fetched (the ref may have moved).
+    if is_full_sha {
+        let sha = commit_ish.unwrap(); // safe: is_full_sha implies Some
+        if let Some(package_dir) = find_cached_git_package(cache_dir, sha) {
+            match read_cached_git_result(&package_dir, sha, original_url) {
+                Ok(result) => {
+                    tracing::debug!(
+                        "Git cache hit: {}@{} (SHA: {})",
+                        result.name,
+                        result.version,
+                        sha
+                    );
+                    return Ok(result);
+                }
+                Err(e) => {
+                    tracing::warn!("Git cache read failed, will re-fetch: {e}");
+                    // Fall through to network fetch
+                }
+            }
+        }
+    }
+
     // Capture auth token once; reused for URL injection and the error hint below.
     let token = github_auth_token();
     let effective_url = match &token {
@@ -177,11 +284,6 @@ fn clone_repo_blocking(
     let temp_dir = tempfile::tempdir().context("Failed to create temp directory for git clone")?;
 
     let url = gix::url::parse(effective_url.as_str().into())?;
-
-    // A full 40-hex SHA might not be reachable at depth 1 (it may not be
-    // HEAD), so only use shallow fetch for branch/tag refs and bare HEAD.
-    let is_full_sha =
-        commit_ish.is_some_and(|c| c.len() == 40 && c.chars().all(|ch| ch.is_ascii_hexdigit()));
 
     let mut prepare = gix::prepare_clone_bare(url, temp_dir.path())?;
 
