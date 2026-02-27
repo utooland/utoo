@@ -1,4 +1,4 @@
-((__TURBOPACK__) => {
+((__UTOOPACK__) => {
 // Dummy runtime
 })([["main.js", {
 

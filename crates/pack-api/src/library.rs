@@ -11,10 +11,12 @@ use qstring::QString;
 use tracing::{Instrument, trace_span};
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{Completion, JoinIterExt, ResolvedVc, ValueToString, Vc};
+use turbo_tasks_fs::{File, FileContent};
 use turbopack::{
     ModuleAssetContext, module_options::ModuleOptionsContext, transition::TransitionOptions,
 };
 use turbopack_core::{
+    asset::AssetContent,
     chunk::{
         ChunkGroupResult, ChunkingContext, EvaluatableAsset, EvaluatableAssets,
         availability_info::AvailabilityInfo,
@@ -31,12 +33,14 @@ use turbopack_core::{
         origin::{PlainResolveOrigin, ResolveOrigin, ResolveOriginExt},
         parse::Request,
     },
+    virtual_output::VirtualOutputAsset,
 };
 use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 
 use crate::{
     endpoint::{Endpoint, EndpointOutput, EndpointOutputPaths},
     project::Project,
+    webpack_stats::generate_webpack_stats,
 };
 
 #[turbo_tasks::value]
@@ -331,6 +335,24 @@ impl Endpoint for LibraryEndpoint {
                 server_entry_path: dist_root.to_string(),
                 server_paths: vec![],
                 client_paths: vec![],
+            };
+
+            let should_create_webpack_stats = *this.project.should_create_webpack_stats().await?;
+
+            let output_assets = if !should_create_webpack_stats {
+                output_assets
+            } else {
+                let webpack_stats = generate_webpack_stats(output_assets, this.project.dist_root());
+                let webpack_stats_read = webpack_stats.await?;
+                let dist_root_owned = this.project.dist_root().owned().await?;
+                let stats_json = simd_json::serde::to_string(&*webpack_stats_read)?;
+                let stats_output = VirtualOutputAsset::new(
+                    dist_root_owned.join("stats.json")?,
+                    AssetContent::file(FileContent::from(File::from(stats_json)).cell()),
+                )
+                .to_resolved()
+                .await?;
+                output_assets.concatenate(*ResolvedVc::cell(vec![ResolvedVc::upcast(stats_output)]))
             };
 
             Ok(EndpointOutput {
