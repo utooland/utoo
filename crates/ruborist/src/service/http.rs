@@ -38,16 +38,20 @@ pub fn client_builder() -> reqwest::ClientBuilder {
             .no_proxy()
             .dns_resolver(shared_resolver());
 
-        if let Some(url) = env_var("ALL_PROXY") {
-            builder = builder.proxy(reqwest::Proxy::all(&url).expect("invalid ALL_PROXY url"));
-        } else {
-            if let Some(url) = env_var("HTTPS_PROXY") {
-                builder =
-                    builder.proxy(reqwest::Proxy::https(&url).expect("invalid HTTPS_PROXY url"));
+        match env_var("ALL_PROXY") {
+            Some(url) => {
+                builder = builder.proxy(reqwest::Proxy::all(&url).expect("invalid ALL_PROXY url"));
             }
-            if let Some(url) = env_var("HTTP_PROXY") {
-                builder =
-                    builder.proxy(reqwest::Proxy::http(&url).expect("invalid HTTP_PROXY url"));
+            None => {
+                // HTTPS_PROXY and HTTP_PROXY are checked independently (both can be set)
+                if let Some(url) = env_var("HTTPS_PROXY") {
+                    builder = builder
+                        .proxy(reqwest::Proxy::https(&url).expect("invalid HTTPS_PROXY url"));
+                }
+                if let Some(url) = env_var("HTTP_PROXY") {
+                    builder =
+                        builder.proxy(reqwest::Proxy::http(&url).expect("invalid HTTP_PROXY url"));
+                }
             }
         }
 

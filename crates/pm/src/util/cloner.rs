@@ -289,7 +289,11 @@ async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
     Ok(true)
 }
 
-// find the first non-internal subdirectory in a cache directory
+/// Find the package root directory inside a cache entry.
+///
+/// Each cache entry has exactly one real subdirectory (the extracted tarball root,
+/// e.g. `package/`). Internal directories like `.utoo_built` are skipped.
+/// Returns the first non-internal subdirectory found.
 pub async fn find_real_src<P: AsRef<Path>>(src: P) -> Option<PathBuf> {
     let mut read_dir = fs::read_dir(src.as_ref()).await.ok()?;
     while let Some(entry) = read_dir.next_entry().await.ok()? {

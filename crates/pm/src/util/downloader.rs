@@ -55,18 +55,24 @@ pub fn download_count() -> usize {
     DOWNLOAD_COUNT.load(Ordering::Relaxed)
 }
 
+/// Compute the degraded concurrency limit: halve, but never below [`MIN_CONCURRENT_DOWNLOADS`].
+/// Returns `None` if already at or below the floor.
+fn compute_degraded_limit(current: usize) -> Option<usize> {
+    if current <= MIN_CONCURRENT_DOWNLOADS {
+        return None;
+    }
+    Some((current / 2).max(MIN_CONCURRENT_DOWNLOADS))
+}
+
 /// Reduce effective download concurrency by half (floor: [`MIN_CONCURRENT_DOWNLOADS`]).
 ///
 /// Works by permanently forgetting semaphore permits so they are never returned
 /// to the pool. This is the same strategy used by Bun's package manager.
 fn degrade_concurrency() {
     let current = EFFECTIVE_CONCURRENCY.load(Ordering::Relaxed);
-    if current <= MIN_CONCURRENT_DOWNLOADS {
+    let Some(new_limit) = compute_degraded_limit(current) else {
         return;
-    }
-
-    // How many permits to remove: shrink to current/2, but keep at least MIN
-    let new_limit = (current / 2).max(MIN_CONCURRENT_DOWNLOADS);
+    };
     let to_remove = current - new_limit;
 
     if EFFECTIVE_CONCURRENCY
@@ -275,39 +281,17 @@ mod tests {
         assert!(dest.join("file.txt").exists());
     }
 
-    #[tokio::test]
-    async fn test_degrade_concurrency() {
-        // Initialize semaphore and effective concurrency
-        let _ = DOWNLOAD_SEMAPHORE.get_or_init(|| Semaphore::new(64));
-        EFFECTIVE_CONCURRENCY.store(64, Ordering::Relaxed);
-
-        // Degrade: 64 -> 32
-        degrade_concurrency();
-        // Allow spawned permit-forgetting task to run
-        tokio::task::yield_now().await;
-        assert_eq!(EFFECTIVE_CONCURRENCY.load(Ordering::Relaxed), 32);
-
-        // Degrade: 32 -> 16
-        degrade_concurrency();
-        tokio::task::yield_now().await;
-        assert_eq!(EFFECTIVE_CONCURRENCY.load(Ordering::Relaxed), 16);
-
-        // Degrade: 16 -> 8
-        degrade_concurrency();
-        tokio::task::yield_now().await;
-        assert_eq!(EFFECTIVE_CONCURRENCY.load(Ordering::Relaxed), 8);
-
-        // Degrade: 8 -> 4
-        degrade_concurrency();
-        tokio::task::yield_now().await;
-        assert_eq!(EFFECTIVE_CONCURRENCY.load(Ordering::Relaxed), 4);
-
-        // Floor: 4 -> 4 (no further degradation)
-        degrade_concurrency();
-        tokio::task::yield_now().await;
-        assert_eq!(EFFECTIVE_CONCURRENCY.load(Ordering::Relaxed), 4);
-
-        // Restore
-        EFFECTIVE_CONCURRENCY.store(0, Ordering::Relaxed);
+    #[test]
+    fn test_degrade_concurrency() {
+        // Test the full degradation chain without touching global statics.
+        // compute_degraded_limit is the pure logic extracted from degrade_concurrency().
+        assert_eq!(compute_degraded_limit(64), Some(32));
+        assert_eq!(compute_degraded_limit(32), Some(16));
+        assert_eq!(compute_degraded_limit(16), Some(8));
+        assert_eq!(compute_degraded_limit(8), Some(4));
+        // At or below floor: no further degradation
+        assert_eq!(compute_degraded_limit(4), None);
+        assert_eq!(compute_degraded_limit(3), None);
+        assert_eq!(compute_degraded_limit(1), None);
     }
 }
