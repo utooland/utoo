@@ -95,6 +95,16 @@ __turbopack_context__.s([
     a
 ]);
 }),
+"[project]/output/index.ts [client] (ecmascript)", ((__turbopack_context__) => {
+"use strict";
+
+const output = "output";
+__turbopack_context__.s([
+    "output",
+    0,
+    output
+]);
+}),
 "[project]/basic/alias/input/index.ts [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
@@ -107,6 +117,7 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$browserslist
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$browserslist$2f$browser$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/browserslist/browser.js [client] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$index$2e$less$3f$modules__$5b$client$5d$__$28$css__module$29$__ = __turbopack_context__.i("[project]/basic/alias/input/index.less?modules [client] (css module)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$a$2e$ts$3f$query__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/alias/input/a.ts?query [client] (ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$output$2f$index$2e$ts__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/output/index.ts [client] (ecmascript)");
 ;
 ;
 ;
@@ -114,6 +125,8 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$a
 ;
 ;
 ;
+;
+__TURBOPACK__imported__module__$5b$project$5d2f$output$2f$index$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["output"];
 console.log('a', __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$a$2e$ts$3f$query__$5b$client$5d$__$28$ecmascript$29$__["a"]);
 console.log('style', __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$index$2e$less$3f$modules__$5b$client$5d$__$28$css__module$29$__["default"]);
 console.log(__TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$browserslist$2f$browser$2e$js__$5b$client$5d$__$28$ecmascript$29$__["a"], __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$a$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["foo"], __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$alias$2d$pkg$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["aliasPkg"], __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$a$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["bar"]);
@@ -123,4 +136,4 @@ __turbopack_context__.s([]);
 }),
 ]);
 
-//# sourceMappingURL=_project___1a8318bb.js.map
+//# sourceMappingURL=_project___ce347b56.js.map
