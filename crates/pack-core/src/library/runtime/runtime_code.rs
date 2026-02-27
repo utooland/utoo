@@ -48,7 +48,7 @@ pub async fn get_library_runtime_code(
     writedoc!(
         code,
         r#"            
-            if (!Array.isArray(__TURBOPACK__)) {{
+            if (!Array.isArray(__UTOOPACK__)) {{
                 return;
             }}
 
@@ -93,8 +93,8 @@ pub async fn get_library_runtime_code(
     writedoc!(
         code,
         r#"
-            const chunksToRegister = __TURBOPACK__;
-            __TURBOPACK__ = {{ push: registerChunk }};
+            const chunksToRegister = __UTOOPACK__;
+            __UTOOPACK__ = {{ push: registerChunk }};
             chunksToRegister.forEach(registerChunk);
         "#
     )?;

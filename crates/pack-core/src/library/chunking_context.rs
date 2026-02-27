@@ -430,11 +430,17 @@ impl ChunkingContext for LibraryChunkingContext {
 
         let output_root = &self.output_root;
 
-        let output_name =
-            ident_to_output_filename(ident, self.root_path.clone(), extension.clone())
-                .owned()
-                .await?
-                .to_string();
+        let output_name = ident_to_output_filename(
+            ident,
+            self.root_path.clone(),
+            extension.clone(),
+            self.filename
+                .as_ref()
+                .and_then(|f| f.rsplit_once("/").map(|p| RcStr::from(p.0))),
+        )
+        .owned()
+        .await?
+        .to_string();
 
         let mut filename = if evaluate {
             output_name
@@ -757,10 +763,23 @@ async fn ident_to_output_filename(
     ident: Vc<AssetIdent>,
     context_path: FileSystemPath,
     expected_extension: RcStr,
+    filename_prefix: Option<RcStr>,
 ) -> Result<Vc<RcStr>> {
     let ident = &*ident.await?;
+
     let mut name = if let Some(inner) = context_path.get_path_to(&ident.path) {
-        escape_file_path(inner)
+        let (parent, file_name) = match inner.rsplit_once("/") {
+            Some((parent, file_name)) => (Some(parent), file_name),
+            None => (None, inner),
+        };
+        if let Some(filename_prefix) = filename_prefix
+            && let Some(parent) = parent
+            && filename_prefix == parent
+        {
+            format!("{}/{}", parent, escape_file_path(file_name))
+        } else {
+            escape_file_path(inner)
+        }
     } else {
         escape_file_path(&ident.path.to_string())
     };

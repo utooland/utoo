@@ -1,4 +1,5 @@
 use anyhow::Result;
+use pack_core::library::ecmascript::EcmascriptLibraryEvaluateChunk;
 use qstring::QString;
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
@@ -162,6 +163,34 @@ pub async fn get_asset_intermediate_info(
             id: chunk_ident.clone(),
             ..Default::default()
         });
+    }
+
+    if let Some(chunk) = ResolvedVc::try_downcast_type::<EcmascriptLibraryEvaluateChunk>(asset) {
+        let entry_path_full = chunk.path().await?;
+        let entry_path = dist_root
+            .await?
+            .get_relative_path_to(&entry_path_full)
+            .unwrap_or_else(|| entry_path_full.path.clone());
+        local_chunks.push(WebpackStatsChunk {
+            size: asset_len,
+            files: vec![entry_path.clone()],
+            id: entry_path.clone(),
+            ..Default::default()
+        });
+
+        let entry_name: RcStr = QString::from(chunk.ident().await?.query.as_str())
+            .get("name")
+            .unwrap_or(remove_extension_from_str(entry_path.as_str()))
+            .into();
+
+        local_entrypoints.push((
+            entry_name.clone(),
+            WebpackStatsEntrypoint {
+                name: entry_name,
+                chunks: vec![entry_path.clone()],
+                assets: vec![WebpackStatsEntrypointAssets { name: entry_path }],
+            },
+        ));
     }
 
     let local_asset = WebpackStatsAsset {

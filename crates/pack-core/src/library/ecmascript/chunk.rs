@@ -102,7 +102,7 @@ impl EcmascriptLibraryEvaluateChunk {
         writedoc!(
             code,
             r#"
-                ((__TURBOPACK__) => {{
+                ((__UTOOPACK__) => {{
             "#,
         )?;
 
@@ -180,7 +180,7 @@ impl EcmascriptLibraryEvaluateChunk {
     }
 
     #[turbo_tasks::function]
-    async fn ident_for_path(&self) -> Result<Vc<AssetIdent>> {
+    pub async fn ident(&self) -> Result<Vc<AssetIdent>> {
         let mut ident = self.ident.owned().await?;
 
         ident.add_modifier(rcstr!("ecmascript library evaluate chunk"));
@@ -193,7 +193,7 @@ impl EcmascriptLibraryEvaluateChunk {
         let this = self.await?;
         Ok(SourceMapAsset::new(
             Vc::upcast(*this.chunking_context),
-            self.ident_for_path(),
+            self.ident(),
             Vc::upcast(self),
         ))
     }
@@ -212,7 +212,7 @@ impl OutputAsset for EcmascriptLibraryEvaluateChunk {
     #[turbo_tasks::function]
     async fn path(self: Vc<Self>) -> Result<Vc<FileSystemPath>> {
         let this = self.await?;
-        let ident = self.ident_for_path();
+        let ident = self.ident();
         Ok(this
             .chunking_context
             .chunk_path(Some(Vc::upcast(self)), ident, None, ".js".into()))
