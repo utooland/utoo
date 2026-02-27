@@ -1,13 +1,24 @@
 use base64::Engine;
-use sha2::Digest;
 
 /// Compute an SRI integrity string (`sha512-<base64>`) for the given data.
 ///
 /// This is the same format used by npm registries and package-lock.json.
 pub fn compute_integrity(data: &[u8]) -> String {
+    use sha2::Digest;
     let hash = sha2::Sha512::digest(data);
     let b64 = base64::engine::general_purpose::STANDARD.encode(hash);
     format!("sha512-{b64}")
+}
+
+/// Compute a SHA-1 hex digest (the `shasum` field required by npm registries).
+pub fn compute_shasum(data: &[u8]) -> String {
+    use sha1::Digest;
+    let hash = sha1::Sha1::digest(data);
+    hash.iter().fold(String::with_capacity(40), |mut s, b| {
+        use std::fmt::Write;
+        let _ = write!(s, "{b:02x}");
+        s
+    })
 }
 
 #[cfg(test)]
@@ -35,5 +46,29 @@ mod tests {
         let a = compute_integrity(b"aaa");
         let b = compute_integrity(b"bbb");
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn test_compute_shasum_format() {
+        let shasum = compute_shasum(b"hello");
+        // SHA-1 produces 20 bytes → 40 hex chars
+        assert_eq!(shasum.len(), 40);
+        assert!(shasum.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_compute_shasum_known_value() {
+        // SHA-1("hello") = aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d
+        assert_eq!(
+            compute_shasum(b"hello"),
+            "aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d"
+        );
+    }
+
+    #[test]
+    fn test_compute_shasum_deterministic() {
+        let a = compute_shasum(b"test data");
+        let b = compute_shasum(b"test data");
+        assert_eq!(a, b);
     }
 }

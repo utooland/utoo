@@ -10,6 +10,7 @@ pub mod package;
 pub mod package_management;
 pub mod pipeline;
 pub mod pm_pack;
+pub mod publish;
 pub mod rebuild;
 pub mod script;
 pub mod update;

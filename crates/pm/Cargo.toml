@@ -46,7 +46,8 @@ reqwest = { version = "0.12", default-features = false, features = [
 ] }
 serde = { workspace = true }
 serde_json = { version = "1.0", features = ["preserve_order"] }
-sha2 = "0.10"
+sha1 = { workspace = true }
+sha2 = { workspace = true }
 tar = "0.4"
 tempfile = "3.15.0"
 term_size = "0.3"
