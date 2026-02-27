@@ -44,7 +44,7 @@
 
 mod api;
 mod cache;
-pub mod dns;
+pub(crate) mod dns;
 mod fs;
 mod http;
 mod manifest;

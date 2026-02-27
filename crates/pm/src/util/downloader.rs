@@ -275,21 +275,37 @@ mod tests {
         assert!(dest.join("file.txt").exists());
     }
 
-    #[test]
-    fn test_degrade_concurrency() {
-        // Reset state (simulate config default of 64)
+    #[tokio::test]
+    async fn test_degrade_concurrency() {
+        // Initialize semaphore and effective concurrency
+        let _ = DOWNLOAD_SEMAPHORE.get_or_init(|| Semaphore::new(64));
         EFFECTIVE_CONCURRENCY.store(64, Ordering::Relaxed);
 
         // Degrade: 64 -> 32
-        let current = EFFECTIVE_CONCURRENCY.load(Ordering::Relaxed);
-        let new_limit = (current / 2).max(MIN_CONCURRENT_DOWNLOADS);
-        assert_eq!(new_limit, 32);
+        degrade_concurrency();
+        // Allow spawned permit-forgetting task to run
+        tokio::task::yield_now().await;
+        assert_eq!(EFFECTIVE_CONCURRENCY.load(Ordering::Relaxed), 32);
 
-        // Degrade chain: 32 -> 16 -> 8 -> 4 -> 4 (floor)
-        assert_eq!((32_usize / 2).max(MIN_CONCURRENT_DOWNLOADS), 16);
-        assert_eq!((16_usize / 2).max(MIN_CONCURRENT_DOWNLOADS), 8);
-        assert_eq!((8_usize / 2).max(MIN_CONCURRENT_DOWNLOADS), 4);
-        assert_eq!((4_usize / 2).max(MIN_CONCURRENT_DOWNLOADS), 4); // floor
+        // Degrade: 32 -> 16
+        degrade_concurrency();
+        tokio::task::yield_now().await;
+        assert_eq!(EFFECTIVE_CONCURRENCY.load(Ordering::Relaxed), 16);
+
+        // Degrade: 16 -> 8
+        degrade_concurrency();
+        tokio::task::yield_now().await;
+        assert_eq!(EFFECTIVE_CONCURRENCY.load(Ordering::Relaxed), 8);
+
+        // Degrade: 8 -> 4
+        degrade_concurrency();
+        tokio::task::yield_now().await;
+        assert_eq!(EFFECTIVE_CONCURRENCY.load(Ordering::Relaxed), 4);
+
+        // Floor: 4 -> 4 (no further degradation)
+        degrade_concurrency();
+        tokio::task::yield_now().await;
+        assert_eq!(EFFECTIVE_CONCURRENCY.load(Ordering::Relaxed), 4);
 
         // Restore
         EFFECTIVE_CONCURRENCY.store(0, Ordering::Relaxed);

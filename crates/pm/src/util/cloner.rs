@@ -289,12 +289,14 @@ async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
     Ok(true)
 }
 
-// find the first subdirectory in a cache directory
+// find the first non-internal subdirectory in a cache directory
 pub async fn find_real_src<P: AsRef<Path>>(src: P) -> Option<PathBuf> {
     let mut read_dir = fs::read_dir(src.as_ref()).await.ok()?;
     while let Some(entry) = read_dir.next_entry().await.ok()? {
         if let Ok(metadata) = entry.metadata().await
             && metadata.is_dir()
+            && let Some(name) = entry.path().file_name()
+            && name.to_string_lossy() != ".utoo_built"
         {
             return Some(entry.path());
         }
@@ -542,6 +544,27 @@ mod tests {
         fs::create_dir(&subdir).await?;
         assert_eq!(find_real_src(&dir).await.unwrap(), subdir);
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_find_real_src_with_built_dir() -> Result<()> {
+        let temp = TempDir::new()?;
+        let dir = temp.path().join("test_dir");
+        fs::create_dir(&dir).await?;
+
+        // Create .utoo_built directory (should be skipped)
+        let built_dir = dir.join(".utoo_built");
+        fs::create_dir(&built_dir).await?;
+
+        // Only .utoo_built exists -> None
+        assert!(find_real_src(&dir).await.is_none());
+
+        // Create a regular subdirectory
+        let subdir = dir.join("subdir");
+        fs::create_dir(&subdir).await?;
+
+        assert_eq!(find_real_src(&dir).await.unwrap(), subdir);
         Ok(())
     }
 

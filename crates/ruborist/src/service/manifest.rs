@@ -43,8 +43,12 @@ impl std::fmt::Display for FetchError {
 }
 
 /// Classify a `reqwest::Error` as retryable or permanent.
+///
+/// - `is_timeout()` / `is_connect()`: transient network issues
+/// - `is_body()`: stream read errors (e.g. connection reset mid-transfer)
+/// - Everything else (including `is_request()` for invalid URLs): permanent
 fn classify_reqwest_error(e: reqwest::Error) -> FetchError {
-    if e.is_timeout() || e.is_connect() || e.is_request() {
+    if e.is_timeout() || e.is_connect() || e.is_body() {
         FetchError::Retryable(anyhow!(e))
     } else {
         FetchError::Permanent(anyhow!(e))
