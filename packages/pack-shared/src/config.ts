@@ -24,7 +24,18 @@ export interface DefineEnv {
 
 export type RustifiedEnv = { name: string; value: string }[];
 
-export interface ExperimentalConfig {}
+export interface ExperimentalConfig {
+  swcPlugins?: [string, any][];
+  dynamicIO?: boolean;
+  useCache?: boolean;
+  cacheHandlers?: Record<string, string>;
+  esmExternals?: boolean | "loose";
+  ppr?: boolean | "incremental";
+  taint?: boolean;
+  reactCompiler?: boolean | any;
+  viewTransition?: boolean;
+  serverActions?: boolean | any;
+}
 
 export type JSONValue =
   | string
@@ -129,8 +140,7 @@ export interface ConfigComplete {
     filename?: string;
     chunkFilename?: string;
     cssFilename?: string;
-    // TODO: make cssChunkFilename works as expected
-    // cssChunkFilename?: string;
+    cssChunkFilename?: string;
     assetModuleFilename?: string;
     clean?: boolean;
     copy?: Array<
@@ -141,6 +151,7 @@ export interface ConfigComplete {
       | string
     >;
     publicPath?: string;
+    chunkLoadingGlobal?: string;
     entryRootExport?: string;
   };
   target?: string;
@@ -149,6 +160,7 @@ export interface ConfigComplete {
   provider?: ProviderConfig;
   optimization?: {
     moduleIds?: "named" | "deterministic";
+    noMangling?: boolean;
     minify?: boolean;
     treeShaking?: boolean;
     splitChunks?: Record<
