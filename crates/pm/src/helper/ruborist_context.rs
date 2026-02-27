@@ -42,13 +42,13 @@ impl Context {
     ) -> BuildDepsOptions<GlobImpl, R> {
         BuildDepsOptions {
             cwd,
-            registry_url: get_registry(),
+            registry_url: get_registry().await,
             cache_dir: Some(get_cache_dir()),
             concurrency: get_manifests_concurrency_limit().await,
             legacy_peer_deps: get_legacy_peer_deps().await,
             glob: TokioGlob,
             receiver,
-            supports_semver: get_supports_semver(),
+            supports_semver: get_supports_semver().await,
         }
     }
 
@@ -72,11 +72,11 @@ impl Context {
     }
 
     /// Create a UnifiedRegistry with standard configuration.
-    pub fn registry() -> Registry {
+    pub async fn registry() -> Registry {
         let mut builder = UnifiedRegistry::builder()
-            .registry(get_registry())
+            .registry(get_registry().await)
             .cache_dir(get_cache_dir());
-        if let Some(semver) = get_supports_semver() {
+        if let Some(semver) = get_supports_semver().await {
             builder = builder.supports_semver(semver);
         }
         builder.build()

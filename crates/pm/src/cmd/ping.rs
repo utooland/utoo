@@ -6,7 +6,10 @@ use crate::util::registry::ping_registry;
 use crate::util::user_config::{detect_supports_semver, get_registry};
 
 pub async fn ping(registry: Option<&str>) -> Result<()> {
-    let registry = registry.map(String::from).unwrap_or_else(get_registry);
+    let registry = match registry {
+        Some(r) => r.to_string(),
+        None => get_registry().await,
+    };
 
     println!("{} {}", "PING".green(), registry.cyan());
 

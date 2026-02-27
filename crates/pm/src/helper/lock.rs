@@ -195,7 +195,7 @@ pub async fn update_package_json(
 
 pub async fn resolve_package_spec(spec: &str) -> Result<(String, String, String)> {
     let (name, version_spec) = parse_package_spec(spec);
-    let resolved = resolve_package(&Context::registry(), name, version_spec)
+    let resolved = resolve_package(&Context::registry().await, name, version_spec)
         .await
         .map_err(|e| anyhow!("{}", e))?;
     Ok((name.to_string(), resolved.version, version_spec.to_string()))
@@ -225,7 +225,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
     crate::fs::create_dir_all(&package_path).await?;
 
     // Get package info from registry
-    let resolved = resolve_package(&Context::registry(), &name, &version_spec)
+    let resolved = resolve_package(&Context::registry().await, &name, &version_spec)
         .await
         .map_err(|e| anyhow!("{}", e))?;
 
@@ -720,7 +720,7 @@ mod tests {
         update_package_json(
             temp_path,
             &PackageAction::Add,
-            &["lodash@4.17.21"],
+            &["is-odd@3.0.1"],
             &None,
             &SaveType::Prod,
         )
@@ -741,7 +741,7 @@ mod tests {
         update_package_json(
             temp_path,
             &PackageAction::Add,
-            &["react@18.0.0"],
+            &["is-number@7.0.0"],
             &None,
             &SaveType::Prod,
         )

@@ -20,7 +20,7 @@ pub async fn view(package_spec: &str) -> Result<()> {
     tracing::debug!("Resolved package: {name} (spec: {version_spec})");
 
     // Fetch full manifest directly from registry (no ETag/304 caching)
-    let registry_url = get_registry();
+    let registry_url = get_registry().await;
     let (full_manifest, _etag) = fetch_full_manifest(FetchManifestOptions {
         registry_url: &registry_url,
         name,
@@ -33,7 +33,7 @@ pub async fn view(package_spec: &str) -> Result<()> {
     tracing::debug!("Fetched package info: {full_manifest:?}");
 
     // Create registry client for version resolution
-    let registry = Context::registry();
+    let registry = Context::registry().await;
 
     // Get the specific version manifest
     let resolved_package = resolve_package(&registry, name, version_spec)

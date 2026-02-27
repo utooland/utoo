@@ -17,12 +17,10 @@ pub async fn publish(tag: Option<&str>, dry_run: bool, otp: Option<&str>) -> Res
     meta.validate()?;
 
     let tag = meta.resolve_tag(tag)?;
-    let registry = meta
-        .publish_config
-        .registry
-        .as_deref()
-        .map(String::from)
-        .unwrap_or_else(get_registry);
+    let registry = match meta.publish_config.registry.as_deref() {
+        Some(r) => r.to_string(),
+        None => get_registry().await,
+    };
     let package_info = PackageInfo::from_json(&package_root, &package_json)?;
     let result = publish_service::publish(&PublishOptions {
         package_info: &package_info,

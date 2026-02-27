@@ -140,7 +140,7 @@ async fn execute_update(version: &str) -> Result<()> {
 
 /// Fast remote version check - short timeout, quick failure
 async fn check_remote_version_fast() -> Result<VersionCache> {
-    let registry_url = format!("{}/utoo/latest", get_registry());
+    let registry_url = format!("{}/utoo/latest", get_registry().await);
     let client = client_builder()
         .timeout(std::time::Duration::from_millis(1000)) // 1 second timeout
         .build()

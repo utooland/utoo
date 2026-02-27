@@ -5,7 +5,7 @@ use crate::service::auth;
 use crate::util::user_config::get_registry;
 
 pub async fn login() -> Result<()> {
-    let registry = get_registry();
+    let registry = get_registry().await;
 
     println!("Login to {}", registry.cyan());
 

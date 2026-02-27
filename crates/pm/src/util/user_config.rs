@@ -2,13 +2,14 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{LazyLock, OnceLock};
 
+use tokio::sync::OnceCell;
+
 use super::config_file::{Config, ConfigValue};
 use super::http::client_builder;
-use super::registry::{REGISTRY_NPMMIRROR, select_fastest_registry};
+use super::registry::select_fastest_registry;
 use super::save_type::OmitType;
 
-static REGISTRY: LazyLock<ConfigValue<String>> =
-    LazyLock::new(|| ConfigValue::new("registry", REGISTRY_NPMMIRROR.to_string()));
+static REGISTRY: OnceCell<String> = OnceCell::const_new();
 
 static LEGACY_PEER_DEPS: LazyLock<ConfigValue<bool>> =
     LazyLock::new(|| ConfigValue::new("legacy-peer-deps", true));
@@ -22,41 +23,41 @@ static CACHE_DIR: LazyLock<ConfigValue<String>> = LazyLock::new(|| {
     ConfigValue::new("cache-dir", default_cache)
 });
 
-pub async fn init_registry(registry: Option<String>) {
-    // Priority: CLI argument > UTOO_REGISTRY env > config > auto-select
-    let final_registry = if let Some(reg) = registry {
-        tracing::debug!("Using registry from CLI: {}", reg);
-        Some(reg)
-    } else if let Ok(env_reg) = std::env::var("UTOO_REGISTRY")
+/// Auto-detect registry: CLI argument > UTOO_REGISTRY env > config > fastest.
+async fn resolve_registry() -> String {
+    if let Ok(env_reg) = std::env::var("UTOO_REGISTRY")
         && !env_reg.is_empty()
     {
         tracing::debug!("Using registry from env: {}", env_reg);
-        Some(env_reg)
-    } else {
-        let config_registry = Config::load(false)
-            .await
-            .ok()
-            .and_then(|c| c.get("registry").ok().flatten());
+        return env_reg;
+    }
 
-        if let Some(ref reg) = config_registry {
-            tracing::debug!("Using registry from config: {}", reg);
-            config_registry
-        } else {
-            // No config, auto-select fastest registry
-            Some(select_fastest_registry().await)
-        }
-    };
+    let config_registry = Config::load(false)
+        .await
+        .ok()
+        .and_then(|c| c.get("registry").ok().flatten());
 
-    REGISTRY.set(final_registry);
+    if let Some(reg) = config_registry {
+        tracing::debug!("Using registry from config: {}", reg);
+        return reg;
+    }
 
-    // Auto-detect semver support for the selected registry
-    let registry_url = get_registry();
-    let supports = detect_supports_semver(&registry_url, None).await;
-    let _ = SUPPORTS_SEMVER.set(supports);
+    // No config, auto-select fastest registry
+    select_fastest_registry().await
 }
 
-pub fn get_registry() -> String {
-    REGISTRY.get_sync()
+pub async fn init_registry(registry: Option<String>) {
+    if let Some(reg) = registry {
+        tracing::debug!("Using registry from CLI: {}", reg);
+        let _ = REGISTRY.set(reg);
+    }
+    // Eagerly resolve registry and semver support during startup
+    let _ = get_registry().await;
+    let _ = get_supports_semver().await;
+}
+
+pub async fn get_registry() -> String {
+    REGISTRY.get_or_init(resolve_registry).await.clone()
 }
 
 pub fn set_legacy_peer_deps(value: Option<bool>) {
@@ -129,7 +130,7 @@ pub fn get_cache_dir() -> PathBuf {
 //
 // Multiple registries are cached simultaneously, so switching between them
 // (e.g. `ut install --registry=xxx`) won't trigger a re-probe.
-static SUPPORTS_SEMVER: OnceLock<bool> = OnceLock::new();
+static SUPPORTS_SEMVER: OnceCell<bool> = OnceCell::const_new();
 
 /// Probe a registry to detect whether it supports semver resolution.
 ///
@@ -224,8 +225,15 @@ pub async fn detect_supports_semver(registry_url: &str, client: Option<&reqwest:
     supports
 }
 
-pub fn get_supports_semver() -> Option<bool> {
-    SUPPORTS_SEMVER.get().copied()
+pub async fn get_supports_semver() -> Option<bool> {
+    Some(
+        *SUPPORTS_SEMVER
+            .get_or_init(|| async {
+                let registry_url = get_registry().await;
+                detect_supports_semver(&registry_url, None).await
+            })
+            .await,
+    )
 }
 
 #[cfg(test)]
