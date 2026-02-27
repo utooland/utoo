@@ -548,18 +548,19 @@ impl ChunkingContext for LibraryChunkingContext {
             Some(filename_template) => {
                 let mut filename = filename_template.to_string();
 
+                let (_, name, ext) = source_path.split_file_stem_extension();
+
                 if match_name_placeholder(&filename) {
-                    filename = replace_name_placeholder(&filename, basename);
+                    filename = replace_name_placeholder(&filename, name);
                 }
 
                 if match_content_hash_placeholder(&filename) {
                     filename = replace_content_hash_placeholder(&filename, &content_hash);
                 };
 
-                if let Some(ext) = source_path.extension_ref() {
-                    if let Some((stem, _)) = filename.rsplit_once(".") {
-                        filename = stem.to_string();
-                    }
+                if let Some(ext) = ext
+                    && !filename.ends_with(ext)
+                {
                     filename = format!("{filename}.{ext}");
                 }
 
