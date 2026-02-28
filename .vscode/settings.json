@@ -11,5 +11,8 @@
   },
   "[typescript]": {
     "editor.defaultFormatter": "vscode.typescript-language-features"
+  },
+  "[toml]": {
+    "editor.defaultFormatter": "tombi-toml.tombi"
   }
 }

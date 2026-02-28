@@ -1,6 +1,6 @@
 [files]
-include = ["Cargo.toml", "crates/*/*.toml"]
+include = ["Cargo.toml", "crates/*/*.toml", "tombi.toml"]
 
 [format.rules]
-line-width = 120
 key-value-equals-sign-alignment = true
+line-width                      = 120

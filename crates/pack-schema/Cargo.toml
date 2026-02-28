@@ -2,8 +2,8 @@
 name        = "pack-schema"
 version     = "0.1.0"
 edition     = "2024"
-description = "Schema generator for Mako configuration files"
 license     = "MIT"
+description = "Schema generator for Mako configuration files"
 
 [[bin]]
 name = "pack-schema"

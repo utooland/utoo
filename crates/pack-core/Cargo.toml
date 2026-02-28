@@ -4,27 +4,34 @@ version           = "0.1.0"
 edition.workspace = true
 license.workspace = true
 
+[features]
+plugin = ["swc_core/plugin_transform_host_native", "turbopack-ecmascript-plugins/swc_ecma_transform_plugin"]
+test   = ["turbopack-browser/test", "turbopack-ecmascript-runtime/test"]
+
 [dependencies]
-anyhow                       = { workspace = true }
-async-trait                  = { workspace = true }
-base64                       = "0.22.1"
-bincode                      = { workspace = true }
-dunce                        = { workspace = true }
-either                       = { workspace = true, features = ["serde"] }
-futures                      = { workspace = true }
-indoc                        = { workspace = true }
-mime_guess                   = "2.0.4"
+anyhow              = { workspace = true }
+async-trait         = { workspace = true }
+base64              = "0.22.1"
+bincode             = { workspace = true }
+dunce               = { workspace = true }
+either              = { workspace = true, features = ["serde"] }
+futures             = { workspace = true }
+indoc               = { workspace = true }
+mime_guess          = "2.0.4"
+pathdiff            = { workspace = true }
+qstring             = "0.7.2"
+regex               = { workspace = true }
+rustc-hash          = { workspace = true }
+serde               = { workspace = true }
+serde_json          = { workspace = true }
+serde_path_to_error = { workspace = true }
+tracing             = { workspace = true }
+urlencoding         = { workspace = true }
+
 ## turbpack specific
-modularize_imports           = { workspace = true }
-pathdiff                     = { workspace = true }
-qstring                      = "0.7.2"
-regex                        = { workspace = true }
-remove_console               = { workspace = true }
-rustc-hash                   = { workspace = true }
-serde                        = { workspace = true }
-serde_json                   = { workspace = true }
-serde_path_to_error          = { workspace = true }
-swc_core                     = { workspace = true, features = [
+modularize_imports = { workspace = true }
+remove_console = { workspace = true }
+swc_core = { workspace = true, features = [
   "base",
   "common_concurrent",
   "ecma_ast",
@@ -41,7 +48,7 @@ swc_core                     = { workspace = true, features = [
   "ecma_utils",
   "ecma_visit",
 ] }
-tracing                      = { workspace = true }
+
 turbo-bincode                = { workspace = true }
 turbo-esregex                = { workspace = true }
 turbo-rcstr                  = { workspace = true }
@@ -60,19 +67,14 @@ turbopack-image              = { workspace = true }
 turbopack-node               = { workspace = true, default-features = false }
 turbopack-resolve            = { workspace = true }
 turbopack-static             = { workspace = true }
-urlencoding                  = { workspace = true }
-
-[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
-getrandom                    = { version = "0.3", features = ["wasm_js"] }
-turbopack-ecmascript-plugins = { workspace = true, default-features = false }
 
 [target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]
 turbo-tasks-fetch            = { workspace = true }
 turbopack-ecmascript-plugins = { workspace = true, default-features = true }
 
-[features]
-plugin = ["swc_core/plugin_transform_host_native", "turbopack-ecmascript-plugins/swc_ecma_transform_plugin"]
-test   = ["turbopack-browser/test", "turbopack-ecmascript-runtime/test"]
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
+getrandom                    = { version = "0.3", features = ["wasm_js"] }
+turbopack-ecmascript-plugins = { workspace = true, default-features = false }
 
 [lints]
 workspace = true
