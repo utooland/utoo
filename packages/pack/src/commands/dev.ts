@@ -398,7 +398,7 @@ export async function initialize(
         const reqUrl = req.url || "";
         let requestPath = url.parse(reqUrl).pathname || "";
 
-        if (publicPath && publicPath !== "runtime") {
+        if (publicPath) {
           const normalizedPrefix = normalizedPublicPath(publicPath);
 
           const isAbsoluteUrl =
