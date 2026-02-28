@@ -6,6 +6,10 @@
 [![License](https://img.shields.io/github/license/utooland/utoo?style=flat-square)](./LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](./CONTRIBUTING.md)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/utooland/utoo)
+[![npm](https://img.shields.io/npm/v/utoo?style=flat-square)](https://www.npmjs.com/package/utoo)
+[![npm downloads](https://img.shields.io/npm/dm/utoo?style=flat-square)](https://www.npmjs.com/package/utoo)
+[![PM CI](https://github.com/utooland/utoo/actions/workflows/pm-ci.yml/badge.svg)](https://github.com/utooland/utoo/actions/workflows/pm-ci.yml)
+[![Pack CI](https://github.com/utooland/utoo/actions/workflows/pack-ci.yml/badge.svg)](https://github.com/utooland/utoo/actions/workflows/pack-ci.yml)
 
 </div>
 
