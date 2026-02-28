@@ -178,6 +178,34 @@ pub async fn get_asset_intermediate_info(
             ..Default::default()
         });
 
+        let entry_referenced_assets = chunk.chunks_data().await?;
+        let futures: Vec<_> = entry_referenced_assets
+            .iter()
+            .map(|asset| {
+                let asset = *asset;
+                async move {
+                    let chunk_data = asset.await?;
+                    let name: RcStr = chunk_data.path.as_str().into();
+                    Ok::<_, anyhow::Error>((name.clone(), WebpackStatsEntrypointAssets { name }))
+                }
+            })
+            .collect();
+
+        let results = futures::future::try_join_all(futures).await?;
+        let mut entry_chunks = Vec::with_capacity(results.len() + 1);
+        let mut entry_assets_list = Vec::with_capacity(results.len() + 1);
+
+        for (chunk_name, asset_info) in results {
+            entry_chunks.push(chunk_name);
+            entry_assets_list.push(asset_info);
+        }
+
+        let mut entry_chunks = entry_chunks;
+        entry_chunks.push(entry_path.clone());
+        entry_assets_list.push(WebpackStatsEntrypointAssets {
+            name: entry_path.clone(),
+        });
+
         let entry_name: RcStr = QString::from(chunk.ident().await?.query.as_str())
             .get("name")
             .unwrap_or(remove_extension_from_str(entry_path.as_str()))
@@ -187,8 +215,8 @@ pub async fn get_asset_intermediate_info(
             entry_name.clone(),
             WebpackStatsEntrypoint {
                 name: entry_name,
-                chunks: vec![entry_path.clone()],
-                assets: vec![WebpackStatsEntrypointAssets { name: entry_path }],
+                chunks: entry_chunks,
+                assets: entry_assets_list,
             },
         ));
     }

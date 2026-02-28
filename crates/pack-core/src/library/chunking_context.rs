@@ -16,7 +16,7 @@ use turbopack_browser::chunking_context::{
 use turbopack_core::{
     asset::{Asset, AssetContent},
     chunk::{
-        Chunk, ChunkGroupResult, ChunkItem, ChunkableModule, ChunkingConfig, ChunkingConfigs,
+        ChunkGroupResult, ChunkItem, ChunkableModule, ChunkingConfig, ChunkingConfigs,
         ChunkingContext, EntryChunkGroupResult, EvaluatableAsset, EvaluatableAssets, MinifyType,
         SourceMapSourceType, SourceMapsType, UnusedReferences,
         availability_info::AvailabilityInfo,
@@ -283,35 +283,6 @@ impl LibraryChunkingContext {
 
 #[turbo_tasks::value_impl]
 impl LibraryChunkingContext {
-    #[turbo_tasks::function]
-    async fn generate_chunk(
-        self: Vc<Self>,
-        ident: Vc<AssetIdent>,
-        chunk: Vc<Box<dyn Chunk>>,
-        evaluatable_assets: Vc<EvaluatableAssets>,
-    ) -> Result<Vc<Box<dyn OutputAsset>>> {
-        let chunk = chunk.to_resolved().await?;
-        Ok(
-            if let Some(ecmascript_chunk) = ResolvedVc::try_downcast_type::<EcmascriptChunk>(chunk)
-            {
-                let ident =
-                    self.ecmascript_chunk_ident_with_filename_template(ident, *ecmascript_chunk);
-                Vc::upcast(EcmascriptLibraryEvaluateChunk::new(
-                    self,
-                    ident,
-                    *ecmascript_chunk,
-                    evaluatable_assets,
-                ))
-            } else if let Some(output_asset) =
-                ResolvedVc::try_sidecast::<Box<dyn OutputAsset>>(chunk)
-            {
-                *output_asset
-            } else {
-                bail!("Unable to generate output asset for chunk");
-            },
-        )
-    }
-
     #[turbo_tasks::function]
     pub(crate) async fn ecmascript_chunk_ident_with_filename_template(
         self: Vc<Self>,
@@ -661,9 +632,43 @@ impl ChunkingContext for LibraryChunkingContext {
 
             let assets: Vec<ResolvedVc<Box<dyn OutputAsset>>> = chunks
                 .iter()
-                .map(|chunk| {
-                    self.generate_chunk(ident, **chunk, evaluatable_assets)
-                        .to_resolved()
+                .map(async |chunk| {
+                    if let Some(ecmascript_chunk) =
+                        ResolvedVc::try_downcast_type::<EcmascriptChunk>(*chunk)
+                    {
+                        let ident = self.ecmascript_chunk_ident_with_filename_template(
+                            ident,
+                            *ecmascript_chunk,
+                        );
+                        let other_chunks = chunks
+                            .iter()
+                            .filter_map(|c| {
+                                if c == chunk {
+                                    None
+                                } else {
+                                    ResolvedVc::try_sidecast::<Box<dyn OutputAsset>>(*c)
+                                }
+                            })
+                            .collect::<Vec<_>>();
+
+                        Ok(ResolvedVc::upcast(
+                            EcmascriptLibraryEvaluateChunk::new(
+                                *self,
+                                ident,
+                                *ecmascript_chunk,
+                                Vc::cell(other_chunks),
+                                evaluatable_assets,
+                            )
+                            .to_resolved()
+                            .await?,
+                        ))
+                    } else if let Some(output_asset) =
+                        ResolvedVc::try_sidecast::<Box<dyn OutputAsset>>(*chunk)
+                    {
+                        Ok(output_asset)
+                    } else {
+                        bail!("Unable to generate output asset for chunk");
+                    }
                 })
                 .try_join()
                 .await?;

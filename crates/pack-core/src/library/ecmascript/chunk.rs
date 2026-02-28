@@ -7,11 +7,14 @@ use turbo_tasks::{ResolvedVc, TryJoinIterExt, ValueToString, Vc};
 use turbo_tasks_fs::{File, FileContent, FileSystemPath, rope::RopeBuilder};
 use turbopack_core::{
     asset::{Asset, AssetContent},
-    chunk::{ChunkingContext, EvaluatableAssets, MinifyType, ModuleChunkItemIdExt, ModuleId},
+    chunk::{
+        ChunkData, ChunkingContext, ChunksData, EvaluatableAssets, MinifyType,
+        ModuleChunkItemIdExt, ModuleId,
+    },
     code_builder::{Code, CodeBuilder},
     environment::{EdgeWorkerEnvironment, Environment, ExecutionEnvironment, NodeJsVersion},
     ident::AssetIdent,
-    output::{OutputAsset, OutputAssetsReference, OutputAssetsWithReferenced},
+    output::{OutputAsset, OutputAssets, OutputAssetsReference, OutputAssetsWithReferenced},
     source_map::{GenerateSourceMap, SourceMapAsset},
 };
 use turbopack_ecmascript::{
@@ -28,6 +31,7 @@ pub struct EcmascriptLibraryEvaluateChunk {
     chunking_context: ResolvedVc<LibraryChunkingContext>,
     ident: ResolvedVc<AssetIdent>,
     chunk: ResolvedVc<EcmascriptChunk>,
+    other_chunks: ResolvedVc<OutputAssets>,
     pub(crate) evaluatable_assets: ResolvedVc<EvaluatableAssets>,
 }
 
@@ -38,12 +42,14 @@ impl EcmascriptLibraryEvaluateChunk {
         chunking_context: ResolvedVc<LibraryChunkingContext>,
         ident: ResolvedVc<AssetIdent>,
         chunk: ResolvedVc<EcmascriptChunk>,
+        other_chunks: ResolvedVc<OutputAssets>,
         evaluatable_assets: ResolvedVc<EvaluatableAssets>,
     ) -> Vc<Self> {
         EcmascriptLibraryEvaluateChunk {
             chunking_context,
             ident,
             chunk,
+            other_chunks,
             evaluatable_assets,
         }
         .cell()
@@ -70,6 +76,13 @@ impl EcmascriptLibraryEvaluateChunk {
                 output_root
             );
         };
+
+        let other_chunks_data = self.chunks_data().await?;
+        let other_chunks_data = other_chunks_data.iter().try_join().await?;
+        let other_chunks_data: Vec<_> = other_chunks_data
+            .iter()
+            .map(|chunk_data| EcmascriptChunkData::new(chunk_data))
+            .collect();
 
         let runtime_module_ids: Vec<turbopack_core::chunk::ModuleId> = this
             .evaluatable_assets
@@ -162,7 +175,7 @@ impl EcmascriptLibraryEvaluateChunk {
         }
 
         let params = EcmascriptBrowserChunkRuntimeParams {
-            other_chunks: &Vec::<EcmascriptChunkData<'_>>::new(),
+            other_chunks: &other_chunks_data,
             runtime_module_ids,
         };
 
@@ -195,6 +208,14 @@ impl EcmascriptLibraryEvaluateChunk {
             Vc::upcast(*this.chunking_context),
             self.ident(),
             Vc::upcast(self),
+        ))
+    }
+
+    #[turbo_tasks::function]
+    pub async fn chunks_data(&self) -> Result<Vc<ChunksData>> {
+        Ok(ChunkData::from_assets(
+            self.chunking_context.output_root().owned().await?,
+            *self.other_chunks,
         ))
     }
 }

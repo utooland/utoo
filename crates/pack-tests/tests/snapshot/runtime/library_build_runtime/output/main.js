@@ -17,9 +17,9 @@ const RUNTIME_PUBLIC_PATH = "";
 const REEXPORTED_OBJECTS = Symbol("reexported objects");
 /**
  * Constructs the `__turbopack_context__` object for a module.
- */ function Context(module) {
+ */ function Context(module, exports) {
     this.m = module;
-    this.e = module.exports;
+    this.e = exports || module.exports;
 }
 const contextPrototype = Context.prototype;
 const hasOwnProperty = Object.prototype.hasOwnProperty;
@@ -599,6 +599,9 @@ function getOrInstantiateRuntimeModule(chunkPath, moduleId) {
 const getOrInstantiateModuleFromParent = (id, sourceModule)=>{
     const module = moduleCache[id];
     if (module) {
+        if (module.error) {
+            throw module.error;
+        }
         return module;
     }
     return instantiateModule(id, SourceType.Parent, sourceModule.id);
@@ -612,16 +615,16 @@ function instantiateModule(id, sourceType, sourceData) {
         factoryNotAvailable(id, sourceType, sourceData);
     }
     const module = createModuleObject(id);
+    const exports = module.exports;
     moduleCache[id] = module;
     // NOTE(alexkirsz) This can fail when the module encounters a runtime error.
+    const context = new Context(module, exports);
     try {
-        const context = new Context(module);
-        moduleFactory(context);
+        moduleFactory(context, module, exports);
     } catch (error) {
         module.error = error;
         throw error;
     }
-    module.loaded = true;
     if (module.namespaceObject && module.exports !== module.namespaceObject) {
         // in case of a circular dependency: cjs1 -> esm2 -> cjs1
         interopEsm(module.exports, module.namespaceObject);
