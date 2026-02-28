@@ -1,0 +1,25 @@
+name: tombi
+
+on:
+  push:
+    branches: ["next"]
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  tombi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: tombi-toml/setup-tombi@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          version: "0.7.32"
+      - name: TOML format check
+        run: tombi format --check

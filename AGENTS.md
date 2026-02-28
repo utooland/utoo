@@ -67,10 +67,10 @@ Bundler snapshot tests live in `crates/pack-tests/tests/snapshot/`. Each test ca
 
 - Format JS/JSON: `npm run biome` (Biome, double quotes, 2-space indent)
 - Format Rust: `cargo fmt`
-- Format TOML: `RUST_LOG=warn taplo format`
+- Format TOML: `tombi format` (or `npx tombi format`)
 - Spellcheck: `typos`
 
-The pre-push hook runs: `cargo fmt --check`, `taplo format --check`, `npx biome ci`, `typos`.
+The pre-push hook runs: `cargo fmt --check`, `tombi format --check`, `npx biome ci`, `typos`.
 
 ## Coding Style & Conventions
 

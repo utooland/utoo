@@ -1,6 +1,6 @@
 [workspace]
-exclude = ["next.js"]
-members = [
+resolver = "2"
+members  = [
   "crates/pack-api",
   "crates/pack-cli",
   "crates/pack-core",
@@ -11,86 +11,85 @@ members = [
   "crates/ruborist",
   "crates/utoo-wasm",
 ]
-resolver = "2"
+exclude  = ["next.js"]
 
 [workspace.package]
 edition = "2024"
 license = "MIT"
 
+# tombi: format.rules.table-keys-order.disabled = true
 [workspace.dependencies]
-pack-api  = { path = "./crates/pack-api" }
-pack-core = { path = "./crates/pack-core" }
-
-anyhow              = "1.0.96"
-async-trait         = "0.1.64"
-bincode             = { version = "2.0.1", features = ["serde"] }
-clap                = { version = "4.5.32", features = ["derive"] }
-console-subscriber  = "0.4.1"
-criterion           = "0.6.0"
-dirs                = "5.0"
-dunce               = "1.0.5"
-either              = "1.9.0"
-futures             = "0.3.31"
-once_cell           = "1.17.1"
-owo-colors          = "4.2.0"
-pathdiff            = "0.2.1"
-rayon               = "1.10.0"
-regex               = "1.11.1"
-rustc-hash          = "2.1.1"
-schemars            = "0.8"
-serde               = { version = "1.0.219", features = ["derive"] }
-serde_json          = "1.0.140"
-serde_path_to_error = "0.1.16"
-simd-json           = "0.17.0"
-thiserror           = "1.0"
-tokio               = { version = "1.47.1" }
-tokio-fs-ext        = "0.7.7"
-toml                = "0.8"
-tracing             = "0.1.41"
-tracing-subscriber  = { version = "0.3.19", features = ["env-filter", "fmt"] }
-
+pack-api                          = { path = "./crates/pack-api" }
+pack-core                         = { path = "./crates/pack-core" }
+anyhow                            = "1.0.96"
+async-trait                       = "0.1.64"
+bincode                           = { version = "2.0.1", features = ["serde"] }
+clap                              = { version = "4.5.32", features = ["derive"] }
+console-subscriber                = "0.4.1"
+criterion                         = "0.6.0"
+dirs                              = "5.0"
+dunce                             = "1.0.5"
+either                            = "1.9.0"
+futures                           = "0.3.31"
+once_cell                         = "1.17.1"
+owo-colors                        = "4.2.0"
+pathdiff                          = "0.2.1"
+rayon                             = "1.10.0"
+regex                             = "1.11.1"
+rustc-hash                        = "2.1.1"
+schemars                          = "0.8"
+serde                             = { version = "1.0.219", features = ["derive"] }
+serde_json                        = "1.0.140"
+serde_path_to_error               = "0.1.16"
+simd-json                         = "0.17.0"
+thiserror                         = "1.0"
+tokio                             = { version = "1.47.1" }
+tokio-fs-ext                      = "0.7.7"
+toml                              = "0.8"
+tracing                           = "0.1.41"
+tracing-subscriber                = { version = "0.3.19", features = ["env-filter", "fmt"] }
 # SWC crates
-swc_core                  = { version = "54.0.0", features = ["ecma_loader_lru", "ecma_loader_parking_lot", "parallel_rayon"] }
-swc_plugin_backend_wasmer = { version = "6.0.0" }
-testing                   = "19.0.0"
-
+swc_core                          = { version = "54.0.0", features = [
+  "ecma_loader_lru",
+  "ecma_loader_parking_lot",
+  "parallel_rayon"
+] }
+swc_plugin_backend_wasmer         = { version = "6.0.0" }
+testing                           = "19.0.0"
 # Keep consistent with preset_env_base through swc_core
-browserslist-rs         = "0.19.0"
-mdxjs                   = "1.0.3"
-modularize_imports      = "0.108.0"
-preset_env_base         = "6.0.0"
-react_remove_properties = "0.62.0"
-remove_console          = "0.63.0"
-styled_components       = "0.136.0"
-styled_jsx              = "0.111.0"
-swc_emotion             = "0.112.0"
-swc_relay               = "0.82.0"
-
-indoc       = "2.0.0"
-parking_lot = "0.12.4"
-qstring     = "0.7.2"
-rand        = "0.9.0"
-sha1        = "0.10"
-sha2        = "0.10"
-url         = "2.2.2"
-urlencoding = "2.1.2"
-
+browserslist-rs                   = "0.19.0"
+mdxjs                             = "1.0.3"
+modularize_imports                = "0.108.0"
+preset_env_base                   = "6.0.0"
+react_remove_properties           = "0.62.0"
+remove_console                    = "0.63.0"
+styled_components                 = "0.136.0"
+styled_jsx                        = "0.111.0"
+swc_emotion                       = "0.112.0"
+swc_relay                         = "0.82.0"
+indoc                             = "2.0.0"
+parking_lot                       = "0.12.4"
+qstring                           = "0.7.2"
+rand                              = "0.9.0"
+sha1                              = "0.10"
+sha2                              = "0.10"
+url                               = "2.2.2"
+urlencoding                       = "2.1.2"
 # Dependencies from nextjs, should keep the same rev!
 ## Dependencies for common cache and task. See https://github.com/utooland/next.js/blob/canary/turbopack/crates/turbopack/architecture.md
-turbo-bincode       = { path = "./next.js/turbopack/crates/turbo-bincode" }
-turbo-esregex       = { path = "./next.js/turbopack/crates/turbo-esregex" }
-turbo-rcstr         = { path = "./next.js/turbopack/crates/turbo-rcstr" }
-turbo-tasks         = { path = "./next.js/turbopack/crates/turbo-tasks" }
-turbo-tasks-backend = { path = "./next.js/turbopack/crates/turbo-tasks-backend" }
-turbo-tasks-bytes   = { path = "./next.js/turbopack/crates/turbo-tasks-bytes" }
-turbo-tasks-env     = { path = "./next.js/turbopack/crates/turbo-tasks-env" }
-turbo-tasks-fetch   = { path = "./next.js/turbopack/crates/turbo-tasks-fetch" }
-turbo-tasks-fs      = { path = "./next.js/turbopack/crates/turbo-tasks-fs" }
-turbo-tasks-hash    = { path = "./next.js/turbopack/crates/turbo-tasks-hash" }
-turbo-tasks-malloc  = { path = "./next.js/turbopack/crates/turbo-tasks-malloc", default-features = false }
-turbo-unix-path     = { path = "./next.js/turbopack/crates/turbo-unix-path" }
-
-### Dependencies for bundler specially.
+turbo-bincode                     = { path = "./next.js/turbopack/crates/turbo-bincode" }
+turbo-esregex                     = { path = "./next.js/turbopack/crates/turbo-esregex" }
+turbo-rcstr                       = { path = "./next.js/turbopack/crates/turbo-rcstr" }
+turbo-tasks                       = { path = "./next.js/turbopack/crates/turbo-tasks" }
+turbo-tasks-backend               = { path = "./next.js/turbopack/crates/turbo-tasks-backend" }
+turbo-tasks-bytes                 = { path = "./next.js/turbopack/crates/turbo-tasks-bytes" }
+turbo-tasks-env                   = { path = "./next.js/turbopack/crates/turbo-tasks-env" }
+turbo-tasks-fetch                 = { path = "./next.js/turbopack/crates/turbo-tasks-fetch" }
+turbo-tasks-fs                    = { path = "./next.js/turbopack/crates/turbo-tasks-fs" }
+turbo-tasks-hash                  = { path = "./next.js/turbopack/crates/turbo-tasks-hash" }
+turbo-tasks-malloc                = { path = "./next.js/turbopack/crates/turbo-tasks-malloc", default-features = false }
+turbo-unix-path                   = { path = "./next.js/turbopack/crates/turbo-unix-path" }
+## # Dependencies for bundler specially.
 turbopack                         = { path = "./next.js/turbopack/crates/turbopack" }
 turbopack-browser                 = { path = "./next.js/turbopack/crates/turbopack-browser" }
 turbopack-cli-utils               = { path = "./next.js/turbopack/crates/turbopack-cli-utils" }
@@ -113,42 +112,6 @@ turbopack-trace-utils             = { path = "./next.js/turbopack/crates/turbopa
 [workspace.lints.clippy]
 too_many_arguments = "allow"
 
-[profile.release]
-lto       = "fat"
-opt-level = "z"
-strip     = "symbols"
-
-[profile.release-local]
-codegen-units   = 256
-incremental     = true
-inherits        = "release"
-lto             = false
-opt-level       = 1
-split-debuginfo = "unpacked"
-strip           = "none"
-
-# cargo build --profile instruments --bin pack-cli
-# xcrun xctrace record --template "Time Profiler" --launch -- ./target/instruments/pack-cli --mode build --project-path ./examples/with-antd --root-path .
-# xcrun xctrace record --template "System Trace" --launch -- ./target/instruments/pack-cli --mode build --project-path ./examples/with-antd --root-path .
-# open Lauch_pack-cli_xxx.trace
-[profile.instruments]
-codegen-units = 256
-debug         = 1
-incremental   = true
-inherits      = "release"
-lto           = false
-opt-level     = 1
-strip         = "none"
-
-[profile.wasm-dev]
-codegen-units = 256
-debug         = 1
-incremental   = true
-inherits      = "release"
-lto           = false
-opt-level     = 1
-strip         = "none"
-
 [patch.crates-io]
 bincode          = { git = "https://github.com/bgw/bincode.git", branch = "bgw/patches" }
 include_dir      = { git = "https://github.com/vercel-labs/include_dir", branch = "turbopack" }
@@ -156,6 +119,42 @@ lightningcss     = { git = "https://github.com/utooland/lightningcss", branch = 
 mdxjs            = { git = "https://github.com/vercel-labs/mdxjs-rs-turbopack.git", branch = "turbopack" }
 mimalloc         = { git = "https://github.com/utooland/mimalloc_rust.git" }
 parcel_selectors = { git = "https://github.com/utooland/lightningcss", branch = "support-css-module-global" }
-tokio            = { git = "https://github.com/utooland/tokio.git", package = "tokio" }
-tokio-util       = { git = "https://github.com/utooland/tokio.git", package = "tokio-util" }
+tokio            = { package = "tokio", git = "https://github.com/utooland/tokio.git" }
+tokio-util       = { package = "tokio-util", git = "https://github.com/utooland/tokio.git" }
 virtue           = { git = "https://github.com/bgw/virtue.git", branch = "bgw/fix-generic-default-parsing" }
+
+[profile.release]
+opt-level = "z"
+strip     = "symbols"
+lto       = "fat"
+
+# cargo build --profile instruments --bin pack-cli
+# xcrun xctrace record --template "Time Profiler" --launch -- ./target/instruments/pack-cli --mode build --project-path ./examples/with-antd --root-path .
+# xcrun xctrace record --template "System Trace" --launch -- ./target/instruments/pack-cli --mode build --project-path ./examples/with-antd --root-path .
+# open Lauch_pack-cli_xxx.trace
+[profile.instruments]
+inherits      = "release"
+opt-level     = 1
+debug         = 1
+strip         = "none"
+lto           = false
+incremental   = true
+codegen-units = 256
+
+[profile.release-local]
+inherits        = "release"
+opt-level       = 1
+split-debuginfo = "unpacked"
+strip           = "none"
+lto             = false
+incremental     = true
+codegen-units   = 256
+
+[profile.wasm-dev]
+inherits      = "release"
+opt-level     = 1
+debug         = 1
+strip         = "none"
+lto           = false
+incremental   = true
+codegen-units = 256

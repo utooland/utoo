@@ -5,6 +5,7 @@ edition     = "2024"
 description = "Rust arborist - dependency resolution core for utoo package manager"
 license     = "MIT"
 
+# tombi: format.rules.table-keys-order.disabled = true
 [dependencies]
 anyhow       = { workspace = true }
 deno_semver  = "0.7"
@@ -16,17 +17,16 @@ serde_json   = { workspace = true }
 thiserror    = { workspace = true }
 tokio-fs-ext = { workspace = true }
 tracing      = { workspace = true }
-
 # HTTP client - works on both native and WASM
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
+reqwest      = { version = "0.12", default-features = false, features = ["json"] }
 
 # Async runtime (works on both native and WASM with forked tokio)
 [dependencies.tokio]
 workspace = true
 
-# WASM-only dependencies
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = "0.3" # For time in WASM
-
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
+
+# WASM-only dependencies
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"  # For time in WASM
