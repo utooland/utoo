@@ -393,7 +393,7 @@ pub async fn process_dependency<R: RegistryClient>(
                         Err(e) => {
                             return Err(ResolveError::Git {
                                 url: edge_info.spec.clone(),
-                                source: e.into(),
+                                source: e,
                             });
                         }
                     }
