@@ -14,6 +14,7 @@ use turbopack_core::{
     code_builder::{Code, CodeBuilder},
     environment::{EdgeWorkerEnvironment, Environment, ExecutionEnvironment, NodeJsVersion},
     ident::AssetIdent,
+    module_graph::ModuleGraph,
     output::{OutputAsset, OutputAssets, OutputAssetsReference, OutputAssetsWithReferenced},
     source_map::{GenerateSourceMap, SourceMapAsset},
 };
@@ -32,6 +33,7 @@ pub struct EcmascriptLibraryEvaluateChunk {
     ident: ResolvedVc<AssetIdent>,
     chunk: ResolvedVc<EcmascriptChunk>,
     other_chunks: ResolvedVc<OutputAssets>,
+    module_graph: ResolvedVc<ModuleGraph>,
     pub(crate) evaluatable_assets: ResolvedVc<EvaluatableAssets>,
 }
 
@@ -44,6 +46,7 @@ impl EcmascriptLibraryEvaluateChunk {
         chunk: ResolvedVc<EcmascriptChunk>,
         other_chunks: ResolvedVc<OutputAssets>,
         evaluatable_assets: ResolvedVc<EvaluatableAssets>,
+        module_graph: ResolvedVc<ModuleGraph>,
     ) -> Vc<Self> {
         EcmascriptLibraryEvaluateChunk {
             chunking_context,
@@ -51,6 +54,7 @@ impl EcmascriptLibraryEvaluateChunk {
             chunk,
             other_chunks,
             evaluatable_assets,
+            module_graph,
         }
         .cell()
     }
@@ -217,6 +221,21 @@ impl EcmascriptLibraryEvaluateChunk {
             self.chunking_context.output_root().owned().await?,
             *self.other_chunks,
         ))
+    }
+
+    #[turbo_tasks::function]
+    pub fn evaluatable_assets(&self) -> Vc<EvaluatableAssets> {
+        *self.evaluatable_assets
+    }
+
+    #[turbo_tasks::function]
+    pub fn module_graph(&self) -> Vc<ModuleGraph> {
+        *self.module_graph
+    }
+
+    #[turbo_tasks::function]
+    pub fn chunking_context(&self) -> Vc<Box<dyn ChunkingContext>> {
+        Vc::upcast(*self.chunking_context)
     }
 }
 

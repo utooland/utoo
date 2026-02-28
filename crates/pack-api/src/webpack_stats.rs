@@ -178,6 +178,21 @@ pub async fn get_asset_intermediate_info(
             ..Default::default()
         });
 
+        let evaluatable_assets = chunk.evaluatable_assets().await?;
+        let items: Vec<_> = evaluatable_assets
+            .iter()
+            .map(|&evaluatable_asset| {
+                let entry_path = entry_path.clone();
+                async move {
+                    let item = evaluatable_asset
+                        .as_chunk_item(chunk.module_graph(), chunk.chunking_context());
+                    Ok::<_, anyhow::Error>((item.to_resolved().await?, entry_path))
+                }
+            })
+            .try_join()
+            .await?;
+        local_chunk_items.extend(items);
+
         let entry_referenced_assets = chunk.chunks_data().await?;
         let futures: Vec<_> = entry_referenced_assets
             .iter()

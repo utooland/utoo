@@ -643,6 +643,8 @@ impl ChunkingContext for LibraryChunkingContext {
                         let other_chunks = chunks
                             .iter()
                             .filter_map(|c| {
+                                // We have no more than two output chunks for library,
+                                // one .js chunk and one .css chunk, so this is simple enough
                                 if c == chunk {
                                     None
                                 } else {
@@ -658,6 +660,7 @@ impl ChunkingContext for LibraryChunkingContext {
                                 *ecmascript_chunk,
                                 Vc::cell(other_chunks),
                                 evaluatable_assets,
+                                module_graph,
                             )
                             .to_resolved()
                             .await?,
