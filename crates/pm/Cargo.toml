@@ -35,7 +35,13 @@ owo-colors         = { workspace = true }
 petgraph           = "0.6"
 rayon              = { workspace = true }
 regex              = "1.10"
-reqwest            = { version = "0.12", default-features = false, features = ["gzip", "http2", "json", "rustls-tls", "stream"] }
+reqwest            = { version = "0.12", default-features = false, features = [
+  "gzip",
+  "http2",
+  "json",
+  "rustls-tls",
+  "stream"
+] }
 serde              = { workspace = true }
 serde_json         = { version = "1.0", features = ["preserve_order"] }
 sha1               = { workspace = true }

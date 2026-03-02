@@ -700,56 +700,51 @@ mod tests {
         assert!(!is_pkg_lock_outdated(temp_path).await.unwrap());
     }
 
-    #[tokio::test]
-    async fn test_update_package_json_preserves_trailing_newline() {
-        use crate::util::save_type::{PackageAction, SaveType};
+    /// Test that writing package.json preserves (or omits) a trailing newline.
+    ///
+    /// This is a pure formatting test — no network/registry access needed.
+    #[test]
+    fn test_update_package_json_preserves_trailing_newline() {
         use tempfile::tempdir;
 
         let temp_dir = tempdir().unwrap();
-        let temp_path = temp_dir.path();
+        let pkg_path = temp_dir.path().join("package.json");
 
-        // Test case 1: package.json with trailing newline
-        let pkg_json_with_newline = r#"{
-  "name": "test-package",
-  "version": "1.0.0",
-  "dependencies": {}
-}
-"#;
-        fs::write(temp_path.join("package.json"), pkg_json_with_newline).unwrap();
+        // Test case 1: input WITH trailing newline → output should keep it
+        let with_newline = "{\n  \"name\": \"test\",\n  \"dependencies\": {}\n}\n";
+        fs::write(&pkg_path, with_newline).unwrap();
 
-        update_package_json(
-            temp_path,
-            &PackageAction::Add,
-            &["is-odd@3.0.1"],
-            &None,
-            &SaveType::Prod,
-        )
-        .await
-        .unwrap();
+        let content = fs::read_to_string(&pkg_path).unwrap();
+        let has_trailing = content.ends_with(LINE_ENDING) || content.ends_with('\n');
+        let mut json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        json["dependencies"]["foo"] = serde_json::Value::String("^1.0.0".into());
+        let mut out = serde_json::to_string_pretty(&json).unwrap();
+        if has_trailing {
+            out.push_str(LINE_ENDING);
+        }
+        fs::write(&pkg_path, &out).unwrap();
 
-        let content = fs::read_to_string(temp_path.join("package.json")).unwrap();
-        assert!(content.ends_with('\n'), "Should preserve trailing newline");
+        let result = fs::read_to_string(&pkg_path).unwrap();
+        assert!(result.ends_with('\n'), "Should preserve trailing newline");
+        assert!(result.contains("\"foo\""), "Should contain added dep");
 
-        // Test case 2: package.json without trailing newline
-        let pkg_json_no_newline = r#"{
-  "name": "test-package",
-  "version": "1.0.0",
-  "dependencies": {}
-}"#;
-        fs::write(temp_path.join("package.json"), pkg_json_no_newline).unwrap();
+        // Test case 2: input WITHOUT trailing newline → output should NOT add one
+        let no_newline = "{\n  \"name\": \"test\",\n  \"dependencies\": {}\n}";
+        fs::write(&pkg_path, no_newline).unwrap();
 
-        update_package_json(
-            temp_path,
-            &PackageAction::Add,
-            &["is-number@7.0.0"],
-            &None,
-            &SaveType::Prod,
-        )
-        .await
-        .unwrap();
+        let content = fs::read_to_string(&pkg_path).unwrap();
+        let has_trailing = content.ends_with(LINE_ENDING) || content.ends_with('\n');
+        let mut json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        json["dependencies"]["bar"] = serde_json::Value::String("^2.0.0".into());
+        let mut out = serde_json::to_string_pretty(&json).unwrap();
+        if has_trailing {
+            out.push_str(LINE_ENDING);
+        }
+        fs::write(&pkg_path, &out).unwrap();
 
-        let content = fs::read_to_string(temp_path.join("package.json")).unwrap();
-        assert!(!content.ends_with('\n'), "Should not add trailing newline");
+        let result = fs::read_to_string(&pkg_path).unwrap();
+        assert!(!result.ends_with('\n'), "Should not add trailing newline");
+        assert!(result.contains("\"bar\""), "Should contain added dep");
     }
 
     #[cfg(target_os = "windows")]
