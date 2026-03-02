@@ -22,9 +22,13 @@ const REEXPORTED_OBJECTS = Symbol("reexported objects");
 /**
  * Constructs the `__turbopack_context__` object for a module.
  */
-function Context(this: TurbopackBaseContext<Module>, module: Module) {
+function Context(
+  this: TurbopackBaseContext<Module>,
+  module: Module,
+  exports: Exports,
+) {
   this.m = module;
-  this.e = module.exports;
+  this.e = exports || module.exports;
 }
 const contextPrototype = Context.prototype as TurbopackBaseContext<Module>;
 
@@ -612,5 +616,5 @@ function requireStub(_moduleId: ModuleId): never {
 contextPrototype.z = requireStub;
 
 type ContextConstructor<M> = {
-  new (module: Module): TurbopackBaseContext<M>;
+  new (module: Module, exports: Exports): TurbopackBaseContext<M>;
 };
