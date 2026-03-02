@@ -11,6 +11,7 @@
         ],
         "optimization": {
             "minify": false
-        }
+        },
+        "stats": true
     }
 }
