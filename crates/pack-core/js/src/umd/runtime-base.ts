@@ -196,13 +196,14 @@ function loadChunkByUrlInternal(
           );
       }
       throw new (Error as any)(
-        `Failed to load chunk ${chunkUrl} ${loadReason}${error ? `: ${error}` : ""
+        `Failed to load chunk ${chunkUrl} ${loadReason}${
+          error ? `: ${error}` : ""
         }`,
         error
           ? {
-            cause: error,
-          }
-          : undefined
+              cause: error,
+            }
+          : undefined,
       );
     });
     instrumentedBackendLoadChunks.set(thenable, entry);

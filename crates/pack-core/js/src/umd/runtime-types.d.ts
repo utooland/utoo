@@ -27,11 +27,11 @@ interface Exports {
 type ChunkData =
   | ChunkPath
   | {
-    path: ChunkPath;
-    included: ModuleId[];
-    excluded: ModuleId[];
-    moduleChunks: ChunkPath[];
-  };
+      path: ChunkPath;
+      included: ModuleId[];
+      excluded: ModuleId[];
+      moduleChunks: ChunkPath[];
+    };
 
 type CommonJsRequire = (moduleId: ModuleId) => Exports;
 type RuntimeRequire = (request: string) => Exports;
@@ -41,10 +41,7 @@ type EsmImport = (
   allowExportDefault: boolean,
 ) => EsmNamespaceObject | Promise<EsmNamespaceObject>;
 type InvokeAsyncLoader = (moduleId: ModuleId) => Promise<Exports>;
-type EsmExport = (
-  bindings: any,
-  id: ModuleId | undefined,
-) => void;
+type EsmExport = (bindings: any, id: ModuleId | undefined) => void;
 type ExportValue = (value: any, id: ModuleId | undefined) => void;
 type ExportNamespace = (namespace: any, id: ModuleId | undefined) => void;
 type DynamicExport = (
@@ -95,9 +92,9 @@ interface Module {
   error: Error | undefined;
   id: ModuleId;
   namespaceObject?:
-  | EsmNamespaceObject
-  | Promise<EsmNamespaceObject>
-  | AsyncModulePromise<EsmNamespaceObject>;
+    | EsmNamespaceObject
+    | Promise<EsmNamespaceObject>
+    | AsyncModulePromise<EsmNamespaceObject>;
 }
 
 interface ModuleWithDirection extends Module {
