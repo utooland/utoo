@@ -30,8 +30,8 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 
 use super::cache::{PackageCache, load_project_cache, save_project_cache};
-use crate::fs::Glob;
 use super::registry::UnifiedRegistry;
+use crate::fs::Glob;
 use crate::model::graph::{DependencyGraph, PackageNode};
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;

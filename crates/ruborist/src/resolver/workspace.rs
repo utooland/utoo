@@ -17,9 +17,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
+use crate::fs::Glob;
 use crate::model::package_json::PackageJson;
 use crate::model::util::read_package_json;
-use crate::fs::Glob;
 
 /// A discovered workspace package.
 #[derive(Debug, Clone)]
@@ -240,8 +240,8 @@ pub async fn collect_workspace_packages<G: Glob + Clone>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::package_json::WorkspacesConfig;
     use crate::fs::NoopGlob;
+    use crate::model::package_json::WorkspacesConfig;
 
     #[test]
     fn test_is_workspace_root() {

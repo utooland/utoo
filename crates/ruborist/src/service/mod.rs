@@ -49,13 +49,13 @@ mod http;
 mod manifest;
 mod registry;
 
+pub use crate::fs::{Glob, NoopGlob, exists, read_to_string};
 pub use api::{BuildDepsOptions, build_deps};
 pub use cache::{
     CacheStats, ManifestCache, MemoryCache, PackageCache, ProjectCache, ProjectCacheData,
     ProjectPackageCache, Versions, VersionsInfo, get_manifest_cache_path, get_versions_cache_path,
     load_project_cache, save_project_cache,
 };
-pub use crate::fs::{Glob, NoopGlob, exists, read_to_string};
 pub use http::client_builder;
 pub use manifest::{
     FetchManifestOptions, FetchManifestResult, FetchVersionManifestOptions, MetadataFormat,

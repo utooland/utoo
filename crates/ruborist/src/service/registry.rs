@@ -161,6 +161,8 @@ impl Clone for UnifiedRegistry {
 ///
 /// Separates the 200 (full data) and 304 (use cache) cases at the type level,
 /// so callers can pattern-match instead of string-matching error messages.
+/// Transient return value, immediately destructured — Box not needed.
+#[allow(clippy::large_enum_variant)]
 enum FullManifestResult {
     /// Fresh manifest fetched from the network (HTTP 200).
     Full(FullManifest),
@@ -648,11 +650,7 @@ impl RegistryClient for UnifiedRegistry {
             // Write to disk cache (only for non-semver registries)
             if !self.supports_semver {
                 self.cache
-                    .set_version_manifest_to_disk(
-                        &fetch_name,
-                        &resolved_version,
-                        &version_manifest,
-                    )
+                    .set_version_manifest_to_disk(&fetch_name, &resolved_version, &version_manifest)
                     .await;
             }
 

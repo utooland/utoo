@@ -32,13 +32,14 @@ pub async fn exists(path: impl AsRef<Path>) -> bool {
 /// Read a JSON file and deserialize it.
 ///
 /// Uses `read` + `simd_json::from_slice` for SIMD-accelerated parsing.
-pub async fn read_json<T: serde::de::DeserializeOwned>(path: impl AsRef<Path>) -> anyhow::Result<T> {
+pub async fn read_json<T: serde::de::DeserializeOwned>(
+    path: impl AsRef<Path>,
+) -> anyhow::Result<T> {
     let path = path.as_ref();
     let mut bytes = tokio_fs_ext::read(path)
         .await
         .context(format!("Failed to read {}", path.display()))?;
-    simd_json::serde::from_slice(&mut bytes)
-        .context(format!("Failed to parse {}", path.display()))
+    simd_json::serde::from_slice(&mut bytes).context(format!("Failed to parse {}", path.display()))
 }
 
 /// Glob pattern matching trait.

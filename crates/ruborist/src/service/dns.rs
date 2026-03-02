@@ -81,9 +81,7 @@ mod native {
         cache: &Mutex<HashMap<String, CacheEntry>>,
         ttl: Duration,
     ) -> Result<Arc<Vec<SocketAddr>>, Box<dyn std::error::Error + Send + Sync>> {
-        let result: Vec<SocketAddr> = tokio::net::lookup_host((hostname, 0))
-            .await?
-            .collect();
+        let result: Vec<SocketAddr> = tokio::net::lookup_host((hostname, 0)).await?.collect();
 
         if result.is_empty() {
             tracing::warn!("DNS lookup returned no addresses for {}", hostname);
@@ -117,13 +115,13 @@ mod native {
             // through the iterator.
             {
                 let cache = self.cache.lock();
-                if let Some(entry) = cache.get(&hostname) {
-                    if entry.expires_at > Instant::now() {
-                        let cached = entry.addrs.to_vec();
-                        return Box::pin(std::future::ready(Ok(
-                            Box::new(cached.into_iter()) as Addrs
-                        )));
-                    }
+                if let Some(entry) = cache.get(&hostname)
+                    && entry.expires_at > Instant::now()
+                {
+                    let cached = entry.addrs.to_vec();
+                    return Box::pin(std::future::ready(
+                        Ok(Box::new(cached.into_iter()) as Addrs),
+                    ));
                 }
             }
 
@@ -145,23 +143,23 @@ mod native {
             let inflight_map = Arc::clone(&self.inflight);
 
             Box::pin(async move {
-                let resolved = inflight
+                let result = inflight
                     .cell
                     .get_or_try_init(|| do_lookup(&hostname, &cache, ttl))
-                    .await?;
+                    .await;
 
-                // Clone out of the OnceCell before dropping inflight.
-                // SocketAddr is Copy and we typically have 1-4 addrs, so
-                // the small Vec allocation is negligible.
-                let owned = resolved.to_vec();
+                // Always clean up the inflight entry — even on error —
+                // to prevent a memory leak if lookups consistently fail.
+                inflight_map.lock().remove(&hostname);
 
-                // Clean up the inflight entry
-                {
-                    let mut map = inflight_map.lock();
-                    map.remove(&hostname);
-                }
+                let resolved = result?;
 
-                let addrs: Addrs = Box::new(owned.into_iter());
+                // resolved is a &Arc<Vec<SocketAddr>> borrowed from the OnceCell,
+                // but Addrs requires a 'static owned iterator.
+                // to_vec() + into_iter() creates an owned copy; iter().copied()
+                // would borrow from the local reference and fail lifetime checks.
+                #[allow(clippy::unnecessary_to_owned)]
+                let addrs: Addrs = Box::new(resolved.to_vec().into_iter());
                 Ok(addrs)
             })
         }

@@ -21,9 +21,10 @@ pub async fn view(package_spec: &str) -> Result<()> {
 
     // Fetch full manifest directly from registry (Complete format for display, no ETag)
     let registry_url = get_registry();
-    let (full_manifest, _etag) = fetch_full_manifest_fresh(&registry_url, name, MetadataFormat::Complete)
-        .await
-        .map_err(|e| anyhow!("Failed to fetch package info for {}: {}", package_spec, e))?;
+    let (full_manifest, _etag) =
+        fetch_full_manifest_fresh(&registry_url, name, MetadataFormat::Complete)
+            .await
+            .map_err(|e| anyhow!("Failed to fetch package info for {}: {}", package_spec, e))?;
 
     tracing::debug!("Fetched package info: {full_manifest:?}");
 

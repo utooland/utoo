@@ -26,6 +26,8 @@ fn retry_strategy() -> impl Iterator<Item = Duration> {
 }
 
 /// Result of a full manifest fetch with ETag support.
+/// Transient return value, immediately destructured — Box not needed.
+#[allow(clippy::large_enum_variant)]
 pub enum FetchManifestResult {
     /// 200 OK — fresh manifest with optional new ETag.
     Ok(FullManifest, Option<String>),
@@ -129,7 +131,7 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
             let etag = etag_owned.clone();
             async move {
                 let mut request = get_client()
-                    .map_err(|e| FetchError::Permanent(e))?
+                    .map_err(FetchError::Permanent)?
                     .get(&url)
                     .header("Accept", accept);
                 if let Some(etag_value) = &etag {
@@ -238,7 +240,7 @@ pub async fn fetch_version_manifest(
             let url = url.clone();
             async move {
                 let response = get_client()
-                    .map_err(|e| FetchError::Permanent(e))?
+                    .map_err(FetchError::Permanent)?
                     .get(&url)
                     .header("Accept", accept)
                     .send()
