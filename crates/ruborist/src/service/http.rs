@@ -146,10 +146,21 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
     Ok(builder)
 }
 
+/// Read a proxy env var, checking uppercase then lowercase.
+///
+/// Empty strings are treated as unset. This matters in Claude Code's sandbox,
+/// which sets `ALL_PROXY=""` (empty uppercase) alongside `all_proxy=socks5://...`
+/// (valid lowercase). Without filtering empties first, `std::env::var("ALL_PROXY")`
+/// returns `Ok("")` — an `Ok`, not `Err` — so a naive `Result::or_else` fallback
+/// to the lowercase variant would never fire.
 #[cfg(not(target_arch = "wasm32"))]
 fn env_var(key: &str) -> Option<String> {
     std::env::var(key)
-        .or_else(|_| std::env::var(key.to_lowercase()))
         .ok()
         .filter(|s| !s.is_empty())
+        .or_else(|| {
+            std::env::var(key.to_lowercase())
+                .ok()
+                .filter(|s| !s.is_empty())
+        })
 }
