@@ -30,7 +30,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 
 use super::cache::{PackageCache, load_project_cache, save_project_cache};
-use super::fs::Glob;
+use crate::fs::Glob;
 use super::registry::UnifiedRegistry;
 use crate::model::graph::{DependencyGraph, PackageNode};
 use crate::model::node::EdgeType;
@@ -133,9 +133,7 @@ where
 
     // 2. Read root package.json
     let pkg_path = root_path.join("package.json");
-    let mut pkg: PackageJson = super::fs::read_json(&pkg_path)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to read/parse package.json: {}", e))?;
+    let mut pkg: PackageJson = crate::fs::read_json(&pkg_path).await?;
 
     // 3. Inject runtime dependencies (node-bin packages)
     if let Some(engines) = &pkg.engines {
@@ -311,7 +309,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::service::fs::NoopGlob;
+    use crate::fs::NoopGlob;
     use crate::traits::progress::NoopReceiver;
 
     #[tokio::test]

@@ -45,7 +45,6 @@
 mod api;
 mod cache;
 pub(crate) mod dns;
-mod fs;
 mod http;
 mod manifest;
 mod registry;
@@ -56,7 +55,7 @@ pub use cache::{
     ProjectPackageCache, Versions, VersionsInfo, get_manifest_cache_path, get_versions_cache_path,
     load_project_cache, save_project_cache,
 };
-pub use fs::{Glob, NoopGlob, exists, read_to_string};
+pub use crate::fs::{Glob, NoopGlob, exists, read_to_string};
 pub use http::client_builder;
 pub use manifest::{
     FetchManifestOptions, FetchManifestResult, FetchVersionManifestOptions, MetadataFormat,

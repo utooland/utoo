@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde_json::{Map, Value};
 
 use super::package_json::PackageJson;
@@ -10,10 +10,7 @@ use super::package_json::PackageJson;
 /// Read and parse package.json from a directory.
 pub async fn read_package_json(dir: &Path) -> Result<PackageJson> {
     let path = dir.join("package.json");
-    let mut bytes = tokio_fs_ext::read(&path)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", path.display(), e))?;
-    simd_json::serde::from_slice(&mut bytes).context(format!("Failed to parse {}", path.display()))
+    crate::fs::read_json(&path).await
 }
 
 /// Parse a package spec string into (name, version_spec).

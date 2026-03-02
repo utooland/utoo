@@ -255,11 +255,11 @@ impl PackageCache {
         let cache_dir = self.cache_dir.as_ref()?;
         let path = get_versions_cache_path(cache_dir, name);
 
-        if !super::fs::exists(&path).await {
+        if !crate::fs::exists(&path).await {
             return None;
         }
 
-        match super::fs::read_json::<VersionsInfo>(&path).await {
+        match crate::fs::read_json::<VersionsInfo>(&path).await {
             Ok(info) => {
                 tracing::debug!("Disk cache hit for versions: {name}");
                 // Also cache in memory
@@ -309,11 +309,11 @@ impl PackageCache {
         let cache_dir = self.cache_dir.as_ref()?;
         let path = get_manifest_cache_path(cache_dir, name, version);
 
-        if !super::fs::exists(&path).await {
+        if !crate::fs::exists(&path).await {
             return None;
         }
 
-        match super::fs::read_json::<VersionManifest>(&path).await {
+        match crate::fs::read_json::<VersionManifest>(&path).await {
             Ok(manifest) => {
                 tracing::debug!("Disk cache hit for manifest: {name}@{version}");
                 // Also cache in memory
@@ -474,14 +474,12 @@ impl ProjectCache {
 
 /// Load project cache from file.
 pub async fn load_project_cache(path: &Path) -> Result<ProjectCacheData> {
-    if !super::fs::exists(path).await {
+    if !crate::fs::exists(path).await {
         tracing::debug!("Project cache file not found: {}", path.display());
         return Ok(ProjectCacheData::default());
     }
 
-    let data: ProjectCacheData = super::fs::read_json(path)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to read/parse project cache: {}", e))?;
+    let data: ProjectCacheData = crate::fs::read_json(path).await?;
 
     tracing::debug!("Loaded project cache from {}", path.display());
     Ok(data)
