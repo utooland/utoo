@@ -1,7 +1,79 @@
-//! HTTP client infrastructure for registry operations.
+//! HTTP request chain for registry operations.
 //!
-//! Provides the shared HTTP client with connection pooling, DNS caching (native),
-//! and proxy support. Manifest fetching logic lives in `manifest.rs`.
+//! # Architecture
+//!
+//! ```text
+//!   registry.rs                      resolve_package(name, spec)
+//!       |                                     |
+//!       |          +------------- supports_semver? -------------+
+//!       |          |                                            |
+//!       |        true (npmmirror)                     false (npmjs.org)
+//!       |          |                                            |
+//!       |   fetch_version_manifest          resolve_full_manifest
+//!       |   GET /{name}/{spec}              GET /{name}
+//!       |   Accept: abbreviated             Accept: abbreviated
+//!       |          |                        + If-None-Match: {etag}
+//!       |          |                                  |
+//!       |          |                        +---------+---------+
+//!       |          |                      200 OK          304 Not Modified
+//!       |          |                    parse manifest     use disk cache
+//!       |          |                    cache etag         + fetch version
+//!       |          |                        |                   |
+//!       v          v                        v                   v
+//!  +-----------------------------------------------------------------+
+//!  |  manifest.rs -- Retry Layer                                     |
+//!  |  RetryIf + FetchError { Retryable, Permanent }                  |
+//!  |  delays: 100ms -> 200ms -> 500ms -> 1s -> 2s  (5 attempts max) |
+//!  +-----------------------------------------------------------------+
+//!       |
+//!       v
+//!  +-----------------------------------------------------------------+
+//!  |  http.rs -- HTTP Client  (this file)                            |
+//!  |  global singleton reqwest::Client (LazyLock)                    |
+//!  |  rustls TLS + no_proxy + env proxy + CachingResolver            |
+//!  +-----------------------------------------------------------------+
+//!       |
+//!       v
+//!  +-----------------------------------------------------------------+
+//!  |  dns.rs -- CachingResolver                                      |
+//!  |  wraps OS getaddrinfo + in-memory cache (TTL 300s)              |
+//!  |  single-flight: concurrent lookups coalesced via OnceCell       |
+//!  +-----------------------------------------------------------------+
+//! ```
+//!
+//! # Abbreviated metadata
+//!
+//! `Accept: application/vnd.npm.install-v1+json` returns only install-relevant
+//! fields (deps, dist, engines, bin), 10-50x smaller than full JSON.
+//! Controlled by [`manifest::MetadataFormat`].
+//!
+//! # ETag / 304 Not Modified
+//!
+//! Only for `fetch_full_manifest` on non-semver registries. First request
+//! returns `ETag`; subsequent requests send `If-None-Match`. On 304, the
+//! disk-cached version list is reused and individual versions are fetched
+//! separately. See [`manifest::FetchManifestResult`].
+//!
+//! # Retry classification
+//!
+//! Errors are classified structurally (not by string matching):
+//! - **Retryable**: timeout, connect, body (stream reset), request (h2 reset),
+//!   HTTP 429, HTTP 5xx
+//! - **Permanent**: HTTP 404, JSON parse, other 4xx
+//!
+//! See [`manifest::FetchError`] and [`manifest::classify_status`].
+//!
+//! # Proxy
+//!
+//! System proxy is disabled (`no_proxy`). Only env vars are read:
+//! `ALL_PROXY` > `HTTPS_PROXY` + `HTTP_PROXY` (+ lowercase variants).
+//!
+//! # DNS caching
+//!
+//! Replaces `hickory-dns` with OS resolver (`getaddrinfo` via
+//! `tokio::net::lookup_host`) wrapped in [`dns::CachingResolver`].
+//! More compatible with sandboxed environments where direct DNS is blocked.
+//! WASM targets skip DNS entirely (browser handles it).
 
 use std::sync::LazyLock;
 

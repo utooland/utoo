@@ -178,6 +178,34 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
     })
 }
 
+/// Fetch full manifest without ETag / 304 support.
+///
+/// Convenience wrapper around [`fetch_full_manifest`] for callers that never
+/// send `If-None-Match` (e.g. `utoo view`, corrupted-cache fallback).
+/// Returns the manifest directly — no [`FetchManifestResult::NotModified`]
+/// to handle.
+pub async fn fetch_full_manifest_fresh(
+    registry_url: &str,
+    name: &str,
+    format: MetadataFormat,
+) -> Result<(FullManifest, Option<String>)> {
+    match fetch_full_manifest(FetchManifestOptions {
+        registry_url,
+        name,
+        format,
+        etag: None,
+    })
+    .await?
+    {
+        FetchManifestResult::Ok(manifest, etag) => Ok((manifest, etag)),
+        FetchManifestResult::NotModified => {
+            // fetch_full_manifest with etag: None treats server 304 as an error,
+            // so this variant is structurally unreachable.
+            Err(anyhow!("unexpected 304 without If-None-Match for {name}"))
+        }
+    }
+}
+
 /// Options for fetching a version manifest.
 pub struct FetchVersionManifestOptions<'a> {
     pub registry_url: &'a str,

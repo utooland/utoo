@@ -254,19 +254,13 @@ impl UnifiedRegistry {
                     Ok(FullManifestResult::NotModified)
                 } else {
                     // Disk cache corrupted, fetch fresh (without etag)
-                    let result = manifest::fetch_full_manifest(manifest::FetchManifestOptions {
-                        registry_url: &self.registry_url,
+                    let (manifest, new_etag) = manifest::fetch_full_manifest_fresh(
+                        &self.registry_url,
                         name,
-                        format: manifest::MetadataFormat::Abbreviated,
-                        etag: None,
-                    })
+                        manifest::MetadataFormat::Abbreviated,
+                    )
                     .await
                     .map_err(RegistryError)?;
-
-                    let manifest::FetchManifestResult::Ok(manifest, new_etag) = result else {
-                        // etag: None was passed, so fetch_full_manifest guarantees no 304.
-                        unreachable!()
-                    };
 
                     self.cache
                         .set_full_manifest(name.to_string(), manifest.clone());
@@ -650,6 +644,17 @@ impl RegistryClient for UnifiedRegistry {
                 fetch_spec.to_string(),
                 version_manifest.clone(),
             );
+
+            // Write to disk cache (only for non-semver registries)
+            if !self.supports_semver {
+                self.cache
+                    .set_version_manifest_to_disk(
+                        &fetch_name,
+                        &resolved_version,
+                        &version_manifest,
+                    )
+                    .await;
+            }
 
             Ok(ResolvedPackage {
                 name: name.to_string(),

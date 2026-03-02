@@ -72,6 +72,40 @@ mod native {
         }
     }
 
+    /// Perform a system DNS lookup and cache the result.
+    ///
+    /// Extracted as a named function so the explicit return type lets `?`
+    /// convert `io::Error` automatically — no turbofish annotation needed.
+    async fn do_lookup(
+        hostname: &str,
+        cache: &Mutex<HashMap<String, CacheEntry>>,
+        ttl: Duration,
+    ) -> Result<Arc<Vec<SocketAddr>>, Box<dyn std::error::Error + Send + Sync>> {
+        let result: Vec<SocketAddr> = tokio::net::lookup_host((hostname, 0))
+            .await?
+            .collect();
+
+        if result.is_empty() {
+            tracing::warn!("DNS lookup returned no addresses for {}", hostname);
+        }
+
+        let addrs = Arc::new(result);
+
+        // Populate the cache if we got addresses
+        if !addrs.is_empty() {
+            let mut c = cache.lock();
+            c.insert(
+                hostname.to_string(),
+                CacheEntry {
+                    addrs: Arc::clone(&addrs),
+                    expires_at: Instant::now() + ttl,
+                },
+            );
+        }
+
+        Ok(addrs)
+    }
+
     impl Resolve for CachingResolver {
         fn resolve(&self, name: Name) -> Resolving {
             let hostname = name.as_str().to_string();
@@ -113,35 +147,7 @@ mod native {
             Box::pin(async move {
                 let resolved = inflight
                     .cell
-                    .get_or_try_init(|| async {
-                        let result: Vec<SocketAddr> =
-                            tokio::net::lookup_host((hostname.as_str(), 0))
-                                .await
-                                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-                                    Box::new(e)
-                                })?
-                                .collect();
-
-                        if result.is_empty() {
-                            tracing::warn!("DNS lookup returned no addresses for {}", hostname);
-                        }
-
-                        let addrs = Arc::new(result);
-
-                        // Populate the cache if we got addresses
-                        if !addrs.is_empty() {
-                            let mut c = cache.lock();
-                            c.insert(
-                                hostname.clone(),
-                                CacheEntry {
-                                    addrs: Arc::clone(&addrs),
-                                    expires_at: Instant::now() + ttl,
-                                },
-                            );
-                        }
-
-                        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(addrs)
-                    })
+                    .get_or_try_init(|| do_lookup(&hostname, &cache, ttl))
                     .await?;
 
                 // Clone out of the OnceCell before dropping inflight.
