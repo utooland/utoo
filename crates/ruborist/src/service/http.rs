@@ -151,4 +151,5 @@ fn env_var(key: &str) -> Option<String> {
     std::env::var(key)
         .or_else(|_| std::env::var(key.to_lowercase()))
         .ok()
+        .filter(|s| !s.is_empty())
 }
