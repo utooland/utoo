@@ -10,10 +10,10 @@ use super::package_json::PackageJson;
 /// Read and parse package.json from a directory.
 pub async fn read_package_json(dir: &Path) -> Result<PackageJson> {
     let path = dir.join("package.json");
-    let bytes = tokio_fs_ext::read(&path)
+    let mut bytes = tokio_fs_ext::read(&path)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", path.display(), e))?;
-    serde_json::from_slice(&bytes).context(format!("Failed to parse {}", path.display()))
+    simd_json::serde::from_slice(&mut bytes).context(format!("Failed to parse {}", path.display()))
 }
 
 /// Parse a package spec string into (name, version_spec).

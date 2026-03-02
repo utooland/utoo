@@ -14,11 +14,13 @@ parking_lot  = { workspace = true }
 petgraph     = "0.6"
 serde        = { version = "1.0", features = ["derive"] }
 serde_json   = { workspace = true }
+simd-json    = "0.17"
 thiserror    = { workspace = true }
 tokio-fs-ext = { workspace = true }
+tokio-retry  = "0.3"
 tracing      = { workspace = true }
 # HTTP client - works on both native and WASM
-reqwest      = { version = "0.12", default-features = false, features = ["json"] }
+reqwest      = { version = "0.12", default-features = false, features = ["http2", "json", "rustls-tls"] }
 
 # Async runtime (works on both native and WASM with forked tokio)
 [dependencies.tokio]
