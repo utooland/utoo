@@ -47,7 +47,7 @@ impl std::fmt::Display for FetchError {
 /// - `is_timeout()` / `is_connect()`: transient network issues
 /// - `is_body()`: stream read errors (e.g. connection reset mid-transfer)
 /// - `is_request()`: request-level errors — often caused by h2 connection
-///    resets or pooled connection failures, so we retry these too
+///   resets or pooled connection failures, so we retry these too
 /// - Everything else (e.g. `is_builder()`, `is_decode()`): permanent
 fn classify_reqwest_error(e: reqwest::Error) -> FetchError {
     if e.is_timeout() || e.is_connect() || e.is_body() || e.is_request() {
