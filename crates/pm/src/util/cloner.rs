@@ -385,8 +385,7 @@ async fn validate_name_version(dst: &Path, name: &str, version: &str) -> bool {
     let Ok(pkg) = load_package_json_from_path(dst).await else {
         return false;
     };
-    pkg.get("name").and_then(|v| v.as_str()) == Some(name)
-        && pkg.get("version").and_then(|v| v.as_str()) == Some(version)
+    pkg.name == name && pkg.version == version
 }
 
 /// Clone a package from cache to destination with name/version validation

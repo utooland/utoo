@@ -9,13 +9,11 @@ use anyhow::Result;
 use serde_json::{Value, json};
 use utoo_ruborist::builder::add_edges_from;
 use utoo_ruborist::graph::{DependencyGraph, EdgeType, PackageNode};
-use utoo_ruborist::manifest::PackageJson;
 
 use crate::helper::install_runtime::install_runtime;
 use crate::helper::workspace::find_workspaces;
-use crate::util::json::load_package_json_from_path;
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
-use crate::util::user_config::get_legacy_peer_deps;
+use crate::util::user_config::{get_legacy_peer_deps, get_or_load_package_json};
 
 /// TreeBuilder - builds workspace dependency graph.
 ///
@@ -51,11 +49,7 @@ impl TreeBuilder {
     }
 
     async fn init_tree(&self) -> Result<DependencyGraph> {
-        // Load package.json as Value first
-        let pkg_value = load_package_json_from_path(&self.path).await?;
-
-        // Parse into typed PackageJson
-        let pkg: PackageJson = serde_json::from_value(pkg_value.clone())?;
+        let pkg = get_or_load_package_json(&self.path).await?;
 
         // Create dependency graph with root node
         let mut graph = DependencyGraph::from_package_json(self.path.clone(), pkg.clone());

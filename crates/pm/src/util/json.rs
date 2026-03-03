@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
-use serde_json::Value;
 use std::path::Path;
 
 /// Read and parse a JSON file into the specified type
@@ -13,19 +12,23 @@ pub async fn read_json_file<T: DeserializeOwned>(path: &Path) -> Result<T> {
         .with_context(|| format!("Failed to parse JSON from {}", path.display()))
 }
 
-/// Load package.json from specified path
-pub async fn load_package_json_from_path(path: &Path) -> Result<Value> {
+/// Load package.json from a directory path and deserialize into `PackageJson`.
+pub async fn load_package_json_from_path(
+    path: &Path,
+) -> Result<utoo_ruborist::manifest::PackageJson> {
     read_json_file(&path.join("package.json")).await
 }
 
-pub async fn load_package_lock_json_from_path(path: &Path) -> Result<Value> {
+pub async fn load_package_lock_json_from_path(
+    path: &Path,
+) -> Result<utoo_ruborist::lock::PackageLock> {
     read_json_file(&path.join("package-lock.json")).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::fs;
     use tempfile::tempdir;
 
@@ -74,9 +77,9 @@ mod tests {
 
         fs::write(&package_path, test_data.to_string()).unwrap();
 
-        let value = load_package_json_from_path(dir.path()).await.unwrap();
-        assert_eq!(value["name"], "test-package");
-        assert_eq!(value["version"], "1.0.0");
+        let pkg = load_package_json_from_path(dir.path()).await.unwrap();
+        assert_eq!(pkg.name, "test-package");
+        assert_eq!(pkg.version, "1.0.0");
     }
 
     #[tokio::test]

@@ -1,14 +1,19 @@
+use std::collections::HashMap;
+
 use anyhow::{Context, Result, bail};
 use std::env;
 use std::path::{Path, PathBuf};
-use utoo_ruborist::model::package_json::parse_bin_field;
+use utoo_ruborist::manifest::{PackageJson, PublishConfig};
 
 use crate::util::json::load_package_json_from_path;
+use crate::util::user_config::get_or_load_package_json;
 use crate::{service::script::ScriptService, util::linker::link};
 
+/// Typed struct for npm lifecycle hooks only.
+/// For arbitrary user scripts (build, test, dev, etc.), use `PackageInfo.scripts` HashMap.
 #[derive(Debug, Default, Clone, serde::Deserialize)]
 #[serde(default)]
-pub struct Scripts {
+pub struct LifecycleScripts {
     pub preinstall: Option<String>,
     pub install: Option<String>,
     pub postinstall: Option<String>,
@@ -24,10 +29,12 @@ pub struct Scripts {
     pub postpublish: Option<String>,
 }
 
-impl Scripts {
-    pub fn from_json(data: &serde_json::Value) -> Self {
-        data.get("scripts")
-            .and_then(|s| serde_json::from_value(s.clone()).ok())
+impl LifecycleScripts {
+    /// Roundtrip through serde to extract only the known lifecycle hook fields
+    /// from a full scripts map, ignoring arbitrary user scripts (build, test, etc.).
+    pub fn from_scripts(scripts: &HashMap<String, String>) -> Self {
+        serde_json::to_value(scripts)
+            .and_then(serde_json::from_value)
             .unwrap_or_default()
     }
 
@@ -50,14 +57,6 @@ impl Scripts {
     }
 }
 
-#[derive(Debug, Default, Clone, serde::Deserialize)]
-#[serde(default)]
-pub struct PublishConfig {
-    pub tag: Option<String>,
-    pub registry: Option<String>,
-    pub access: Option<String>,
-}
-
 /// Publish-related metadata extracted from package.json.
 ///
 /// Combines the top-level `private` field with nested `publishConfig`.
@@ -72,8 +71,12 @@ pub struct PublishMeta {
 }
 
 impl PublishMeta {
-    pub fn from_json(data: &serde_json::Value) -> Self {
-        serde_json::from_value(data.clone()).unwrap_or_default()
+    pub fn from_package_json(pkg: &PackageJson) -> Self {
+        Self {
+            private: pkg.private.unwrap_or(false),
+            version: pkg.version.clone(),
+            publish_config: pkg.publish_config.clone().unwrap_or_default(),
+        }
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -123,7 +126,8 @@ impl PublishMeta {
 pub struct PackageInfo {
     pub path: PathBuf,
     pub bin_files: Vec<(String, String)>, // (bin_name, relative_path)
-    pub scripts: Scripts,
+    pub scripts: HashMap<String, String>,
+    pub lifecycle_scripts: LifecycleScripts,
     pub fullname: String, // exp "@babel/parser"
     pub name: String,     // exp "parser" or "@babel/parser"
 }
@@ -145,28 +149,31 @@ impl PackageInfo {
         !self.bin_files.is_empty()
     }
 
+    /// Load PackageInfo from disk without caching.
+    /// For node_modules dependencies; project/workspace packages should use `load`.
     pub async fn from_path(path: &Path) -> Result<Self> {
-        let data = load_package_json_from_path(path).await?;
-        Self::from_json(path, &data)
+        let pkg = load_package_json_from_path(path).await?;
+        Self::from_package_json(path, &pkg)
     }
 
-    pub fn from_json(path: &Path, data: &serde_json::Value) -> Result<Self> {
-        let name = data["name"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("Failed to get package name from package.json"))?
-            .to_string();
+    /// Load PackageInfo using the cached package.json reader.
+    /// Preferred for project/workspace packages.
+    pub async fn load(path: &Path) -> Result<Self> {
+        let pkg = get_or_load_package_json(path).await?;
+        Self::from_package_json(path, &pkg)
+    }
 
-        let bin_files = data
-            .get("bin")
-            .map(|bin| parse_bin_field(bin, &name))
-            .unwrap_or_default();
-
+    pub fn from_package_json(path: &Path, pkg: &PackageJson) -> Result<Self> {
+        if pkg.name.is_empty() {
+            anyhow::bail!("Failed to get package name from package.json");
+        }
         Ok(PackageInfo {
             path: path.to_path_buf(),
-            bin_files,
-            scripts: Scripts::from_json(data),
-            name: name.clone(),
-            fullname: name,
+            bin_files: pkg.bin_entries(),
+            lifecycle_scripts: LifecycleScripts::from_scripts(&pkg.scripts),
+            scripts: pkg.scripts.clone(),
+            name: pkg.name.clone(),
+            fullname: pkg.name.clone(),
         })
     }
 
@@ -254,9 +261,9 @@ mod tests {
         assert_eq!(package_info.bin_files.len(), 1);
         assert_eq!(package_info.bin_files[0].0, "test-cli");
         assert_eq!(package_info.bin_files[0].1, "./bin/cli.js");
-        assert!(package_info.scripts.preinstall.is_some());
-        assert!(package_info.scripts.install.is_some());
-        assert!(package_info.scripts.postinstall.is_some());
+        assert!(package_info.lifecycle_scripts.preinstall.is_some());
+        assert!(package_info.lifecycle_scripts.install.is_some());
+        assert!(package_info.lifecycle_scripts.postinstall.is_some());
     }
 
     #[tokio::test]

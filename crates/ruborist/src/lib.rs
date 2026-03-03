@@ -40,7 +40,7 @@ pub mod graph {
 /// Package manifest types.
 pub mod manifest {
     pub use crate::model::manifest::{Dist, FullManifest, VersionManifest};
-    pub use crate::model::package_json::PackageJson;
+    pub use crate::model::package_json::{PackageJson, PublishConfig};
 }
 
 /// Package lock types (package-lock.json).

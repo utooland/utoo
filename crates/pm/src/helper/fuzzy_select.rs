@@ -4,7 +4,7 @@ use dialoguer::FuzzySelect;
 use std::path::Path;
 
 use crate::helper::workspace::find_workspaces;
-use crate::util::json::load_package_json_from_path;
+use crate::util::user_config::get_or_load_package_json;
 use utoo_ruborist::manifest::PackageJson;
 
 /// Represents a script selection with its workspace context
@@ -76,9 +76,7 @@ fn collect_scripts_from_package(
 ///   - `None`: Show all scripts (workspace-aware if applicable, or single package)
 ///   - `Some(name)`: Show only scripts from the specified workspace
 pub async fn select_script(cwd: &Path, workspace_filter: Option<&str>) -> Result<ScriptSelection> {
-    let pkg_value = load_package_json_from_path(cwd).await?;
-    let pkg: PackageJson =
-        serde_json::from_value(pkg_value).context("Failed to parse package.json")?;
+    let pkg = get_or_load_package_json(cwd).await?;
 
     // Check if this is a workspace root
     let is_workspace_root = pkg.workspaces.is_some();

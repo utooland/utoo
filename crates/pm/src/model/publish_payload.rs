@@ -2,10 +2,11 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::Serialize;
 use std::collections::HashMap;
+use utoo_ruborist::manifest::PackageJson;
 
 /// Input for building the publish payload.
 pub(crate) struct PublishPayloadInput<'a> {
-    pub package_json: &'a serde_json::Value,
+    pub package_json: &'a PackageJson,
     pub name: &'a str,
     pub version: &'a str,
     pub tag: &'a str,
@@ -63,7 +64,7 @@ impl PublishPayload {
         let tarball_name = format!("{}-{}.tgz", input.name, input.version);
 
         // Inject dist and _id into version metadata
-        let mut version_metadata = input.package_json.clone();
+        let mut version_metadata = input.package_json.to_value();
         if let Some(obj) = version_metadata.as_object_mut() {
             obj.insert(
                 "dist".to_string(),
@@ -86,11 +87,7 @@ impl PublishPayload {
             );
         }
 
-        let description = input
-            .package_json
-            .get("description")
-            .and_then(|v| v.as_str())
-            .map(String::from);
+        let description = input.package_json.description.clone();
 
         Self {
             _id: input.name.to_string(),
@@ -117,11 +114,12 @@ mod tests {
 
     #[test]
     fn test_payload_structure() {
-        let pkg_json = serde_json::json!({
-            "name": "test-pkg",
-            "version": "1.0.0",
-            "description": "A test package"
-        });
+        let pkg_json = PackageJson {
+            name: "test-pkg".to_string(),
+            version: "1.0.0".to_string(),
+            description: Some("A test package".to_string()),
+            ..Default::default()
+        };
 
         let payload = PublishPayload::new(&PublishPayloadInput {
             package_json: &pkg_json,
@@ -175,10 +173,11 @@ mod tests {
     ///     (registry rewrites the stored URL, stripping the scope from filename)
     #[test]
     fn test_payload_scoped_package() {
-        let pkg_json = serde_json::json!({
-            "name": "@eggjs/tegg-plugin",
-            "version": "3.72.0"
-        });
+        let pkg_json = PackageJson {
+            name: "@eggjs/tegg-plugin".to_string(),
+            version: "3.72.0".to_string(),
+            ..Default::default()
+        };
 
         let payload = PublishPayload::new(&PublishPayloadInput {
             package_json: &pkg_json,
@@ -214,7 +213,11 @@ mod tests {
 
     #[test]
     fn test_payload_custom_tag() {
-        let pkg_json = serde_json::json!({ "name": "pkg", "version": "2.0.0-rc.1" });
+        let pkg_json = PackageJson {
+            name: "pkg".to_string(),
+            version: "2.0.0-rc.1".to_string(),
+            ..Default::default()
+        };
         let payload = PublishPayload::new(&PublishPayloadInput {
             package_json: &pkg_json,
             name: "pkg",

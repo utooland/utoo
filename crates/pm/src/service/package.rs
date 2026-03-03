@@ -1,5 +1,5 @@
 use crate::helper::package::parse_package_name;
-use crate::model::package::{PackageInfo, Scripts};
+use crate::model::package::{LifecycleScripts, PackageInfo};
 use crate::util::json::load_package_json_from_path;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
 use anyhow::{Context, Result};
@@ -27,8 +27,7 @@ pub struct PackageService;
 
 impl PackageService {
     pub async fn process_project_hooks(root_path: &Path) -> Result<()> {
-        let data = load_package_json_from_path(root_path).await?;
-        let package_info = PackageInfo::from_json(root_path, &data)?;
+        let package_info = PackageInfo::load(root_path).await?;
 
         let hooks = [
             "preinstall",
@@ -41,7 +40,7 @@ impl PackageService {
         ];
 
         for hook in hooks {
-            if package_info.scripts.get_script(hook).is_some() {
+            if package_info.lifecycle_scripts.get_script(hook).is_some() {
                 tracing::debug!("Executing project hook: {hook}");
                 ScriptService::execute_script(&package_info, hook, true)
                     .await
@@ -52,9 +51,9 @@ impl PackageService {
         Ok(())
     }
 
-    async fn read_package_scripts(package_path: &Path) -> Result<Scripts> {
-        let data = load_package_json_from_path(package_path).await?;
-        Ok(Scripts::from_json(&data))
+    async fn read_lifecycle_scripts(package_path: &Path) -> Result<LifecycleScripts> {
+        let pkg = load_package_json_from_path(package_path).await?;
+        Ok(LifecycleScripts::from_scripts(&pkg.scripts))
     }
 
     /// Collect packages from memory PackageLock object with early filtering
@@ -109,14 +108,13 @@ impl PackageService {
                 continue;
             }
 
-            // Read scripts from package.json only if needed
-            let scripts = if has_scripts || !ignore_scripts {
-                Self::read_package_scripts(&package_path)
+            // Read lifecycle scripts from package.json only if needed
+            let lifecycle_scripts = if has_scripts || !ignore_scripts {
+                Self::read_lifecycle_scripts(&package_path)
                     .await
                     .context(format!("Failed to read scripts for package: {path}"))?
             } else {
-                // Create empty scripts for ignore_scripts mode
-                Scripts::default()
+                LifecycleScripts::default()
             };
 
             // Check if this package is an optional dependency (based on edge type)
@@ -126,7 +124,8 @@ impl PackageService {
             let package_info = PackageInfo {
                 path: package_path,
                 bin_files,
-                scripts,
+                scripts: Default::default(),
+                lifecycle_scripts,
                 name,
                 fullname,
             };
@@ -150,15 +149,15 @@ impl PackageService {
 
             // Script queues - skip in bins_only mode
             if !ignore_scripts {
-                if package.scripts.preinstall.is_some() {
+                if package.lifecycle_scripts.preinstall.is_some() {
                     tracing::debug!("Adding {} to preinstall queue", package.path.display());
                     queues.preinstall.push((Rc::clone(&package), is_optional));
                 }
-                if package.scripts.install.is_some() {
+                if package.lifecycle_scripts.install.is_some() {
                     tracing::debug!("Adding {} to install queue", package.path.display());
                     queues.install.push((Rc::clone(&package), is_optional));
                 }
-                if package.scripts.postinstall.is_some() {
+                if package.lifecycle_scripts.postinstall.is_some() {
                     tracing::debug!("Adding {} to postinstall queue", package.path.display());
                     queues.postinstall.push((Rc::clone(&package), is_optional));
                 }
@@ -237,9 +236,9 @@ impl PackageService {
             .iter()
             .filter_map(|(package, is_optional)| {
                 let script_option = match script_name {
-                    "preinstall" => &package.scripts.preinstall,
-                    "install" => &package.scripts.install,
-                    "postinstall" => &package.scripts.postinstall,
+                    "preinstall" => &package.lifecycle_scripts.preinstall,
+                    "install" => &package.lifecycle_scripts.install,
+                    "postinstall" => &package.lifecycle_scripts.postinstall,
                     _ => return None,
                 };
 
@@ -699,7 +698,8 @@ mod tests {
         let package_info = PackageInfo {
             path: package_path.to_path_buf(),
             bin_files: vec![("testbin".to_string(), "not-exist.js".to_string())],
-            scripts: Scripts::default(),
+            scripts: Default::default(),
+            lifecycle_scripts: LifecycleScripts::default(),
             name: "test-bin-missing".to_string(),
             fullname: "test-bin-missing".to_string(),
         };
@@ -1025,7 +1025,8 @@ mod tests {
         let package_info = PackageInfo {
             path: package_path.to_path_buf(),
             bin_files: vec![],
-            scripts: Scripts {
+            scripts: Default::default(),
+            lifecycle_scripts: LifecycleScripts {
                 postinstall: Some("exit 1".to_string()),
                 ..Default::default()
             },

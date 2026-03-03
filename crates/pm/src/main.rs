@@ -561,15 +561,16 @@ async fn async_main() -> Result<()> {
             view(&package).await?;
         }
         Some(Commands::Link { packages, prefix }) => {
+            let cwd = std::env::current_dir().context("Failed to get current directory")?;
             match packages {
                 None => {
                     // Link current package to global
-                    let package_name = link_current_to_global(prefix.as_deref()).await?;
+                    let package_name = link_current_to_global(&cwd, prefix.as_deref()).await?;
                     log_time_end(&format!("{package_name} linked"));
                 }
                 Some(packages) => {
                     for package in packages.iter() {
-                        link_global_to_local(package, prefix.as_deref()).await?;
+                        link_global_to_local(&cwd, package, prefix.as_deref()).await?;
                     }
                     log_time_end(&format!("'{}' linked to local", packages.join(", ")));
                 }

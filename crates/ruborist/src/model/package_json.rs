@@ -78,6 +78,34 @@ pub struct PackageJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dist: Option<DistInfo>,
 
+    /// Package description
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// Whether package is private
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub private: Option<bool>,
+
+    /// Files whitelist for publishing
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files: Option<Vec<String>>,
+
+    /// Main entry point
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub main: Option<String>,
+
+    /// TypeScript types entry
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub types: Option<String>,
+
+    /// TypeScript typings entry (legacy alias for types)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub typings: Option<String>,
+
+    /// Publish configuration
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publish_config: Option<PublishConfig>,
+
     /// Preserve other fields we don't explicitly model
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
@@ -140,6 +168,22 @@ impl LicenseConfig {
             LicenseConfig::Object { r#type, .. } => r#type,
         }
     }
+}
+
+/// Publish configuration from package.json.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PublishConfig {
+    /// Distribution tag (e.g., "latest", "beta")
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+
+    /// Registry URL override
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registry: Option<String>,
+
+    /// Package access level ("public" or "restricted")
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access: Option<String>,
 }
 
 /// Distribution information from registry.
@@ -367,6 +411,48 @@ mod tests {
             Some("https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz")
         );
         assert_eq!(pkg.integrity(), Some("sha512-xyz"));
+    }
+
+    #[test]
+    fn test_parse_publish_fields() {
+        let value = json!({
+            "name": "my-pkg",
+            "version": "1.0.0",
+            "description": "A great package",
+            "private": true,
+            "files": ["dist", "lib"],
+            "main": "./lib/index.js",
+            "types": "./lib/index.d.ts",
+            "typings": "./lib/index.d.ts",
+            "publishConfig": {
+                "tag": "beta",
+                "registry": "https://custom.registry.org",
+                "access": "public"
+            }
+        });
+
+        let pkg = PackageJson::from_value(&value).unwrap();
+        assert_eq!(pkg.description.as_deref(), Some("A great package"));
+        assert_eq!(pkg.private, Some(true));
+        assert_eq!(
+            pkg.files.as_deref(),
+            Some(&["dist".to_string(), "lib".to_string()][..])
+        );
+        assert_eq!(pkg.main.as_deref(), Some("./lib/index.js"));
+        assert_eq!(pkg.types.as_deref(), Some("./lib/index.d.ts"));
+        assert_eq!(pkg.typings.as_deref(), Some("./lib/index.d.ts"));
+
+        let pc = pkg.publish_config.as_ref().unwrap();
+        assert_eq!(pc.tag.as_deref(), Some("beta"));
+        assert_eq!(pc.registry.as_deref(), Some("https://custom.registry.org"));
+        assert_eq!(pc.access.as_deref(), Some("public"));
+
+        // Round-trip: ensure new fields survive to_value
+        let rt = pkg.to_value();
+        assert_eq!(rt["description"], "A great package");
+        assert_eq!(rt["private"], true);
+        assert_eq!(rt["main"], "./lib/index.js");
+        assert_eq!(rt["publishConfig"]["tag"], "beta");
     }
 
     #[test]

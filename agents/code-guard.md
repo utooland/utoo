@@ -197,6 +197,7 @@ pub struct ParseProtocolError;
 - [ ] Does `clippy` pass? Has `cargo fmt` been run?
 - [ ] Do doctests compile? (`cargo test --doc -p <crate>`)
 - [ ] Do tests cover edge cases and "the scenario a reviewer would ask about"?
+- [ ] Are all `use` imports declared at the top of the file? Inline paths like `super::foo::bar()` or `crate::baz::qux()` in function bodies are not allowed — always add a top-level `use` statement instead.
 
 ---
 
