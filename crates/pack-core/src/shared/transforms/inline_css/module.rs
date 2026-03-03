@@ -1,0 +1,119 @@
+use anyhow::Result;
+use bincode::{Decode, Encode};
+use turbo_rcstr::RcStr;
+use turbo_tasks::{NonLocalValue, ResolvedVc, TaskInput, Vc, trace::TraceRawVcs};
+use turbopack::{ModuleAssetContext, module_options::CustomModuleType};
+use turbopack_core::{
+    module::Module,
+    reference_type::ReferenceType,
+    resolve::ModulePart,
+    source::Source,
+};
+use turbopack_ecmascript::EcmascriptInputTransforms;
+
+use super::source_asset::InlineCssFileSource;
+
+#[derive(
+    Eq,
+    PartialEq,
+    Clone,
+    Copy,
+    Debug,
+    PartialOrd,
+    Ord,
+    Hash,
+    TaskInput,
+    TraceRawVcs,
+    NonLocalValue,
+    Encode,
+    Decode,
+)]
+pub enum InjectType {
+    StyleTag,
+    SingletonStyleTag,
+    LinkTag,
+    LazyStyleTag,
+    LazySingletonStyleTag,
+}
+
+impl InjectType {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "singletonStyleTag" => Self::SingletonStyleTag,
+            "linkTag" => Self::LinkTag,
+            "lazyStyleTag" => Self::LazyStyleTag,
+            "lazySingletonStyleTag" => Self::LazySingletonStyleTag,
+            _ => Self::StyleTag,
+        }
+    }
+}
+
+/// Custom module type that transforms CSS files into JavaScript modules
+/// that inject styles into the DOM at runtime.
+#[turbo_tasks::value]
+pub struct InlineCssModuleType {
+    pub insert: RcStr,
+    pub inject_type: InjectType,
+}
+
+#[turbo_tasks::value_impl]
+impl InlineCssModuleType {
+    #[turbo_tasks::function]
+    pub fn new(insert: RcStr, inject_type: InjectType) -> Vc<Self> {
+        InlineCssModuleType {
+            insert,
+            inject_type,
+        }
+        .cell()
+    }
+
+    #[turbo_tasks::function]
+    pub(crate) fn create_module(
+        source: ResolvedVc<Box<dyn Source>>,
+        module_asset_context: ResolvedVc<ModuleAssetContext>,
+        insert: RcStr,
+        inject_type: InjectType,
+    ) -> Vc<Box<dyn Module>> {
+        module_asset_context
+            .process(
+                Vc::upcast(
+                    InlineCssFileSource {
+                        css: source,
+                        insert,
+                        inject_type,
+                    }
+                    .cell(),
+                ),
+                ReferenceType::Undefined,
+            )
+            .module()
+    }
+}
+
+#[turbo_tasks::value_impl]
+impl CustomModuleType for InlineCssModuleType {
+    #[turbo_tasks::function]
+    fn create_module(
+        &self,
+        source: Vc<Box<dyn Source>>,
+        module_asset_context: Vc<ModuleAssetContext>,
+        _part: Option<ModulePart>,
+    ) -> Vc<Box<dyn Module>> {
+        InlineCssModuleType::create_module(
+            source,
+            module_asset_context,
+            self.insert.clone(),
+            self.inject_type,
+        )
+    }
+
+    #[turbo_tasks::function]
+    fn extend_ecmascript_transforms(
+        self: Vc<Self>,
+        _preprocess: Vc<EcmascriptInputTransforms>,
+        _main: Vc<EcmascriptInputTransforms>,
+        _postprocess: Vc<EcmascriptInputTransforms>,
+    ) -> Result<Vc<Box<dyn CustomModuleType>>> {
+        Ok(Vc::upcast(self))
+    }
+}

@@ -1,11 +1,13 @@
 use anyhow::Result;
 pub use modularize_imports::ModularizeImportPackageConfig;
+use turbo_rcstr::RcStr;
 use turbo_tasks::ResolvedVc;
 use turbopack::module_options::{ModuleRule, ModuleRuleEffect, ModuleType, RuleCondition};
 use turbopack_core::reference_type::{ReferenceType, UrlReferenceSubType};
 use turbopack_ecmascript::{CustomTransformer, EcmascriptInputTransform};
 
 use image::{StructuredImageModuleType, module::BlurPlaceholderMode};
+use inline_css::{InlineCssModuleType, module::InjectType};
 use wasm::StaticWasmModuleType;
 
 pub mod classic_jsx_react_import;
@@ -13,6 +15,7 @@ pub mod css_modules;
 pub mod default_export_namer;
 pub mod emotion;
 pub mod image;
+pub mod inline_css;
 pub mod modularize_imports;
 pub mod remove_console;
 pub mod styled_components;
@@ -60,6 +63,26 @@ pub async fn get_wasm_rule() -> Result<ModuleRule> {
         ]),
         vec![ModuleRuleEffect::ModuleType(ModuleType::Custom(
             ResolvedVc::upcast(StaticWasmModuleType::new().to_resolved().await?),
+        ))],
+    ))
+}
+
+/// Returns a module rule for CSS files that outputs them as JS modules
+/// injecting styles into the DOM at runtime.
+pub async fn get_inline_css_rule(insert: RcStr, inject_type: InjectType) -> Result<ModuleRule> {
+    Ok(ModuleRule::new(
+        RuleCondition::All(vec![
+            RuleCondition::not(RuleCondition::ReferenceType(ReferenceType::Url(
+                UrlReferenceSubType::Undefined,
+            ))),
+            RuleCondition::ResourcePathEndsWith(".css".to_string()),
+        ]),
+        vec![ModuleRuleEffect::ModuleType(ModuleType::Custom(
+            ResolvedVc::upcast(
+                InlineCssModuleType::new(insert, inject_type)
+                    .to_resolved()
+                    .await?,
+            ),
         ))],
     ))
 }
