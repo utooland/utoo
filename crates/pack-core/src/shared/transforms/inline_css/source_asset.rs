@@ -55,9 +55,7 @@ impl Asset for InlineCssFileSource {
                 writeln!(
                     result,
                     "import api from {};",
-                    StringifyJs(
-                        "@utoo/pack-runtime/style-loader/injectStylesIntoLinkTag.js"
-                    )
+                    StringifyJs("@utoo/pack-runtime/style-loader/injectStylesIntoLinkTag.js")
                 )?;
                 writeln!(result, "var content = {};", StringifyJs(css_text.as_ref()))?;
                 writeln!(result)?;
@@ -74,14 +72,11 @@ impl Asset for InlineCssFileSource {
             }
 
             InjectType::LazyStyleTag | InjectType::LazySingletonStyleTag => {
-                let is_singleton =
-                    matches!(self.inject_type, InjectType::LazySingletonStyleTag);
+                let is_singleton = matches!(self.inject_type, InjectType::LazySingletonStyleTag);
                 writeln!(
                     result,
                     "import api from {};",
-                    StringifyJs(
-                        "@utoo/pack-runtime/style-loader/injectStylesIntoStyleTag.js"
-                    )
+                    StringifyJs("@utoo/pack-runtime/style-loader/injectStylesIntoStyleTag.js")
                 )?;
                 writeln!(result, "var content = {};", StringifyJs(css_text.as_ref()))?;
                 writeln!(result)?;
@@ -120,9 +115,7 @@ impl Asset for InlineCssFileSource {
                 writeln!(
                     result,
                     "import api from {};",
-                    StringifyJs(
-                        "@utoo/pack-runtime/style-loader/injectStylesIntoStyleTag.js"
-                    )
+                    StringifyJs("@utoo/pack-runtime/style-loader/injectStylesIntoStyleTag.js")
                 )?;
                 writeln!(result, "var content = {};", StringifyJs(css_text.as_ref()))?;
                 writeln!(result)?;
@@ -141,9 +134,6 @@ impl Asset for InlineCssFileSource {
             }
         }
 
-        Ok(AssetContent::File(
-            FileContent::Content(result.build().into()).resolved_cell(),
-        )
-        .cell())
+        Ok(AssetContent::File(FileContent::Content(result.build().into()).resolved_cell()).cell())
     }
 }
