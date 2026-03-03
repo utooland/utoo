@@ -14,10 +14,20 @@ __turbopack_context__.s([
     jsx
 ]);
 }),
+88, ((__turbopack_context__) => {
+"use strict";
+
+function jsx() {
+    return 'purposefully empty stub for @emotion/react/index.js';
+}
+__turbopack_context__.s([]);
+}),
 96, ((__turbopack_context__) => {
 "use strict";
 
-/** @jsxImportSource @emotion/react */ var __TURBOPACK__imported__module__59__ = __turbopack_context__.i(59);
+var __TURBOPACK__imported__module__59__ = __turbopack_context__.i(59);
+/** @jsxImportSource @emotion/react */ var __TURBOPACK__imported__module__88__ = __turbopack_context__.i(88);
+;
 ;
 function App(props) {
     // @ts-ignore make lsp happy.
@@ -34,4 +44,4 @@ __turbopack_context__.s([
 }),
 ]);
 
-//# sourceMappingURL=_project___742a6632.js.map
+//# sourceMappingURL=_project___e95e9ae8.js.map
