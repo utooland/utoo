@@ -3,10 +3,23 @@ use bytes::Bytes;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+use tokio::sync::Semaphore;
 
 const MIN_ESTIMATED_SIZE: usize = 16;
 const MAX_ESTIMATED_SIZE: usize = 512 * 1024 * 1024; // 512MB
 const DECOMPRESSION_RETRY_FACTOR: usize = 4;
+
+/// Semaphore limiting concurrent extraction tasks on the blocking pool.
+/// Without this, 64 concurrent downloads could spawn 64 blocking threads,
+/// defeating the purpose of removing rayon.
+static EXTRACT_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
+
+fn extract_concurrency() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| (n.get() / 2).max(2))
+        .unwrap_or(4)
+}
 
 /// Extract gzip tarball and write to destination.
 ///
@@ -47,27 +60,31 @@ struct ExtractedEntry {
     mode: u32,
 }
 
-/// Extract tarball using libdeflate for decompression + rayon for parallel writes.
+/// Extract tarball using libdeflate for decompression on tokio's blocking pool.
 ///
-/// Uses rayon::spawn (not tokio blocking pool) to avoid thread storms.
-/// Rayon's global pool is configured with sufficient stack size at startup.
+/// A semaphore limits concurrent extractions to half the CPU core count,
+/// preventing thread explosion from the blocking pool. File writes are
+/// sequential within each extraction — parallelism comes from multiple
+/// extractions running concurrently.
 async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
+    let semaphore = EXTRACT_SEMAPHORE.get_or_init(|| Semaphore::new(extract_concurrency()));
+    let _permit = semaphore
+        .acquire()
+        .await
+        .map_err(|_| anyhow::anyhow!("Extract semaphore closed"))?;
+
     let estimated_size = estimate_uncompressed_size(&gzip_bytes);
     let dest_owned = dest.to_path_buf();
 
-    let (tx, rx) = tokio::sync::oneshot::channel();
-
-    rayon::spawn(move || {
-        let result = extract_tarball_sync(gzip_bytes, estimated_size, &dest_owned);
-        let _ = tx.send(result);
-    });
-
-    rx.await.with_context(|| "Extract task panicked")?
+    tokio::task::spawn_blocking(move || {
+        extract_tarball_sync(gzip_bytes, estimated_size, &dest_owned)
+    })
+    .await
+    .with_context(|| "Extract task panicked")?
 }
 
-/// Synchronous extraction: decompress + parse + parallel write, all on rayon.
+/// Synchronous extraction: decompress + parse + sequential write, on a blocking thread.
 fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -> Result<()> {
-    use rayon::prelude::*;
     use std::collections::HashSet;
     use std::fs;
     use std::io::{Cursor, Read, Write};
@@ -118,27 +135,45 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
         }
     }
 
-    // Create directories
-    let mut created_dirs = HashSet::new();
+    // Create directories — sorted shallowest-first so that a single mkdir()
+    // succeeds most of the time, avoiding the stat-per-component overhead of
+    // create_dir_all().
+    let mut seen = HashSet::new();
+    let mut dirs = Vec::new();
     for entry in entries.iter() {
         if let Some(parent) = entry.path.parent()
-            && created_dirs.insert(parent.to_path_buf())
+            && seen.insert(parent.to_path_buf())
         {
-            fs::create_dir_all(parent).ok();
+            dirs.push(parent.to_path_buf());
+        }
+    }
+    dirs.sort_unstable_by_key(|p| p.as_os_str().len());
+    for dir in &dirs {
+        if let Err(e) = fs::create_dir(dir)
+            && e.kind() == std::io::ErrorKind::NotFound
+        {
+            // Parent missing — fall back to recursive creation.
+            // AlreadyExists and other errors are non-fatal.
+            fs::create_dir_all(dir).ok();
         }
     }
 
-    // Write files in parallel using rayon
-    entries.par_iter().try_for_each(|entry| -> Result<()> {
+    // Write files sequentially — I/O-bound, not CPU-bound.
+    // Parallelism across packages (multiple concurrent extractions) is sufficient.
+    entries.iter().try_for_each(|entry| -> Result<()> {
         let mut file = fs::File::create(&entry.path)
             .with_context(|| format!("Failed to create: {}", entry.path.display()))?;
         file.write_all(&entry.content)
             .with_context(|| format!("Failed to write: {}", entry.path.display()))?;
 
+        // Only chmod files that need non-default permissions.
+        // File::create() uses mode 0o666 masked by umask (typically 0o022 → 0o644).
+        // Skip chmod for 0o644 (most files) to avoid unnecessary syscalls.
         #[cfg(unix)]
-        {
-            let perms = fs::Permissions::from_mode(entry.mode);
-            fs::set_permissions(&entry.path, perms).ok();
+        if entry.mode != 0o644 {
+            use std::os::unix::io::AsRawFd;
+            // Use fchmod on the open fd to avoid an extra path lookup.
+            unsafe { libc::fchmod(file.as_raw_fd(), entry.mode as libc::mode_t) };
         }
         Ok(())
     })?;
