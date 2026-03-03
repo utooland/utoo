@@ -1,5 +1,5 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-82, ((__turbopack_context__) => {
+"[project]/basic/foreign_jsx_transform/node_modules/react/index.js [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 const React = {
@@ -17,22 +17,22 @@ __turbopack_context__.s([
     __TURBOPACK__default__export__
 ]);
 }),
-86, ((__turbopack_context__) => {
+"[project]/basic/foreign_jsx_transform/node_modules/foreign-jsx-transform/index.js [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 /** @jsx jsx */ var a = 1;
 var __TURBOPACK__default__export__ = a;
 __turbopack_context__.s([]);
 }),
-97, ((__turbopack_context__) => {
+"[project]/basic/foreign_jsx_transform/input/index.jsx [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
-var __TURBOPACK__imported__module__82__ = __turbopack_context__.i(82);
-var __TURBOPACK__imported__module__86__ = __turbopack_context__.i(86);
+var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$foreign_jsx_transform$2f$node_modules$2f$react$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/foreign_jsx_transform/node_modules/react/index.js [client] (ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$foreign_jsx_transform$2f$node_modules$2f$foreign$2d$jsx$2d$transform$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/foreign_jsx_transform/node_modules/foreign-jsx-transform/index.js [client] (ecmascript)");
 ;
 ;
 const App = ()=>{
-    return /*#__PURE__*/ __TURBOPACK__imported__module__82__["default"].createElement("div", null);
+    return /*#__PURE__*/ __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$foreign_jsx_transform$2f$node_modules$2f$react$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__["default"].createElement("div", null);
 };
 var __TURBOPACK__default__export__ = App;
 __turbopack_context__.s([

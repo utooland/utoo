@@ -1,5 +1,5 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-59, ((__turbopack_context__) => {
+"[project]/node_modules/@emotion/react/jsx-runtime.js [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 function jsx() {
@@ -14,7 +14,7 @@ __turbopack_context__.s([
     jsx
 ]);
 }),
-88, ((__turbopack_context__) => {
+"[project]/node_modules/@emotion/react/index.js [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 function jsx() {
@@ -22,16 +22,16 @@ function jsx() {
 }
 __turbopack_context__.s([]);
 }),
-96, ((__turbopack_context__) => {
+"[project]/basic/jsx/input/index.tsx [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
-var __TURBOPACK__imported__module__59__ = __turbopack_context__.i(59);
-/** @jsxImportSource @emotion/react */ var __TURBOPACK__imported__module__88__ = __turbopack_context__.i(88);
+var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$emotion$2f$react$2f$jsx$2d$runtime$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/@emotion/react/jsx-runtime.js [client] (ecmascript)");
+/** @jsxImportSource @emotion/react */ var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$emotion$2f$react$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/@emotion/react/index.js [client] (ecmascript)");
 ;
 ;
 function App(props) {
     // @ts-ignore make lsp happy.
-    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__59__["jsx"])("div", {
+    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$emotion$2f$react$2f$jsx$2d$runtime$2e$js__$5b$client$5d$__$28$ecmascript$29$__["jsx"])("div", {
         children: props.content
     });
 }
