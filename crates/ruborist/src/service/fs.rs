@@ -17,8 +17,6 @@ use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use anyhow::Context;
-
 /// Read a file and return its contents as a UTF-8 string.
 pub async fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
     tokio_fs_ext::read_to_string(path).await
@@ -31,15 +29,11 @@ pub async fn exists(path: impl AsRef<Path>) -> bool {
 
 /// Read a JSON file and deserialize it.
 ///
-/// Uses `read` + `simd_json::from_slice` for SIMD-accelerated parsing.
-pub async fn read_json<T: serde::de::DeserializeOwned>(
-    path: impl AsRef<Path>,
-) -> anyhow::Result<T> {
-    let path = path.as_ref();
-    let mut bytes = tokio_fs_ext::read(path)
-        .await
-        .context(format!("Failed to read {}", path.display()))?;
-    simd_json::serde::from_slice(&mut bytes).context(format!("Failed to parse {}", path.display()))
+/// Uses `read` + `from_slice` instead of `read_to_string` + `from_str`
+/// to avoid unnecessary UTF-8 string conversion.
+pub async fn read_json<T: serde::de::DeserializeOwned>(path: impl AsRef<Path>) -> io::Result<T> {
+    let bytes = tokio_fs_ext::read(path).await?;
+    serde_json::from_slice(&bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 /// Glob pattern matching trait.

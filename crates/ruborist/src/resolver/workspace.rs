@@ -17,9 +17,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::fs::Glob;
 use crate::model::package_json::PackageJson;
 use crate::model::util::read_package_json;
+use crate::service::Glob;
 
 /// A discovered workspace package.
 #[derive(Debug, Clone)]
@@ -151,7 +151,7 @@ impl<G: Glob> WorkspaceDiscovery<G> {
     pub async fn find_project_path(&self, cwd: &Path) -> Result<PathBuf> {
         // Check current directory first
         let current_pkg = cwd.join("package.json");
-        if crate::fs::exists(&current_pkg).await {
+        if crate::service::exists(&current_pkg).await {
             return Ok(cwd.to_path_buf());
         }
 
@@ -159,7 +159,7 @@ impl<G: Glob> WorkspaceDiscovery<G> {
         let mut current = cwd.to_path_buf();
         while let Some(parent) = current.parent() {
             let pkg_path = parent.join("package.json");
-            if crate::fs::exists(&pkg_path).await {
+            if crate::service::exists(&pkg_path).await {
                 return Ok(parent.to_path_buf());
             }
             current = parent.to_path_buf();
@@ -175,7 +175,7 @@ impl<G: Glob> WorkspaceDiscovery<G> {
 
         while let Some(parent) = current.parent() {
             let pkg_path = parent.join("package.json");
-            if crate::fs::exists(&pkg_path).await {
+            if crate::service::exists(&pkg_path).await {
                 let pkg = read_package_json(parent).await?;
 
                 if Self::is_workspace_root(&pkg) {
@@ -240,8 +240,8 @@ pub async fn collect_workspace_packages<G: Glob + Clone>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fs::NoopGlob;
     use crate::model::package_json::WorkspacesConfig;
+    use crate::service::NoopGlob;
 
     #[test]
     fn test_is_workspace_root() {

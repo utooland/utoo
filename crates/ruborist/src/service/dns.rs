@@ -17,10 +17,21 @@ mod native {
     use std::sync::{Arc, LazyLock};
     use std::time::{Duration, Instant};
 
+    use anyhow::Result;
     use parking_lot::Mutex;
     use reqwest::dns::{Addrs, Name, Resolve, Resolving};
     use tokio::sync::OnceCell;
 
+    /// Fixed fallback TTL for cached DNS entries.
+    ///
+    /// Ideally we'd respect the TTL from DNS records, but `getaddrinfo`
+    /// (used by `tokio::net::lookup_host`) does not expose it — the OS
+    /// resolver abstracts that away. Getting real TTL would require a raw
+    /// DNS library like `hickory-dns`, which is incompatible with sandboxed
+    /// environments (the primary reason this module exists).
+    ///
+    /// 300 s is a reasonable default for a CLI tool that typically runs for
+    /// seconds to minutes.
     const DNS_CACHE_TTL: Duration = Duration::from_secs(300);
 
     static SHARED_RESOLVER: LazyLock<Arc<CachingResolver>> =
@@ -73,14 +84,17 @@ mod native {
     }
 
     /// Perform a system DNS lookup and cache the result.
-    ///
-    /// Extracted as a named function so the explicit return type lets `?`
-    /// convert `io::Error` automatically — no turbofish annotation needed.
     async fn do_lookup(
         hostname: &str,
         cache: &Mutex<HashMap<String, CacheEntry>>,
         ttl: Duration,
-    ) -> Result<Arc<Vec<SocketAddr>>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<Arc<Vec<SocketAddr>>> {
+        // Returns both IPv4 and IPv6 addresses from the system resolver.
+        // reqwest handles dual-stack via Happy Eyeballs (RFC 8305): it tries
+        // IPv6 first, and starts a parallel IPv4 attempt after ~250 ms if
+        // IPv6 hasn't connected yet. The first to succeed wins. This means
+        // broken IPv6 adds at most ~250 ms latency on the first connection;
+        // subsequent requests reuse the connection pool.
         let result: Vec<SocketAddr> = tokio::net::lookup_host((hostname, 0)).await?.collect();
 
         if result.is_empty() {

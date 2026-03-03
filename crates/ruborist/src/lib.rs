@@ -22,7 +22,6 @@
 //! }).await?;
 //! ```
 
-pub mod fs;
 pub mod model;
 pub mod resolver;
 pub mod service;
