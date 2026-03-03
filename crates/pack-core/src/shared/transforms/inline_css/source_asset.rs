@@ -50,6 +50,8 @@ impl Asset for InlineCssFileSource {
 
         let mut result = RopeBuilder::from("");
 
+        // The runtime API expects arrays of [id, css_content, media_query, source_map].
+        // media_query and source_map are undefined as they are not used in the inline CSS case.
         match self.inject_type {
             InjectType::LinkTag => {
                 writeln!(
