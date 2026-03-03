@@ -31,7 +31,6 @@ var __TURBOPACK__imported__module__82__ = __turbopack_context__.i(82);
 var __TURBOPACK__imported__module__86__ = __turbopack_context__.i(86);
 ;
 ;
-void __TURBOPACK__imported__module__82__["default"];
 const App = ()=>{
     return /*#__PURE__*/ __TURBOPACK__imported__module__82__["default"].createElement("div", null);
 };
