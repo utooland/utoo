@@ -4,7 +4,8 @@ use turbo_rcstr::RcStr;
 use turbo_tasks::{NonLocalValue, ResolvedVc, TaskInput, Vc, trace::TraceRawVcs};
 use turbopack::{ModuleAssetContext, module_options::CustomModuleType};
 use turbopack_core::{
-    module::Module, reference_type::ReferenceType, resolve::ModulePart, source::Source,
+    context::AssetContext, module::Module, reference_type::ReferenceType, resolve::ModulePart,
+    source::Source,
 };
 use turbopack_ecmascript::EcmascriptInputTransforms;
 
