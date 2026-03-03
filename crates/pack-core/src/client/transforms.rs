@@ -34,17 +34,17 @@ pub async fn get_client_transforms_rules(config: Vc<Config>) -> Result<Vec<Modul
         rules.push(get_wasm_rule().await?);
     }
 
-    if let Some(inline_css_options) = &*config.inline_css().await? {
-        if let Some(obj) = inline_css_options.as_object() {
-            let insert = obj.get("insert").and_then(|v| v.as_str()).unwrap_or("head");
-            let inject_type = obj
-                .get("injectType")
-                .and_then(|v| v.as_str())
-                .map(InjectType::from_str)
-                .unwrap_or(InjectType::StyleTag);
+    if let Some(inline_css_options) = &*config.inline_css().await?
+        && let Some(obj) = inline_css_options.as_object()
+    {
+        let insert = obj.get("insert").and_then(|v| v.as_str()).unwrap_or("head");
+        let inject_type = obj
+            .get("injectType")
+            .and_then(|v| v.as_str())
+            .map(InjectType::from_str)
+            .unwrap_or(InjectType::Style);
 
-            rules.push(get_inline_css_rule(insert.into(), inject_type).await?);
-        }
+        rules.push(get_inline_css_rule(insert.into(), inject_type).await?);
     }
 
     Ok(rules)

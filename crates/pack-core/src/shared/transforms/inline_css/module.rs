@@ -27,21 +27,21 @@ use super::source_asset::InlineCssFileSource;
     Decode,
 )]
 pub enum InjectType {
-    StyleTag,
-    SingletonStyleTag,
-    LinkTag,
-    LazyStyleTag,
-    LazySingletonStyleTag,
+    Style,
+    SingletonStyle,
+    Link,
+    LazyStyle,
+    LazySingletonStyle,
 }
 
 impl InjectType {
     pub fn from_str(s: &str) -> Self {
         match s {
-            "singletonStyleTag" => Self::SingletonStyleTag,
-            "linkTag" => Self::LinkTag,
-            "lazyStyleTag" => Self::LazyStyleTag,
-            "lazySingletonStyleTag" => Self::LazySingletonStyleTag,
-            _ => Self::StyleTag,
+            "singletonStyleTag" => Self::SingletonStyle,
+            "linkTag" => Self::Link,
+            "lazyStyleTag" => Self::LazyStyle,
+            "lazySingletonStyleTag" => Self::LazySingletonStyle,
+            _ => Self::Style,
         }
     }
 }

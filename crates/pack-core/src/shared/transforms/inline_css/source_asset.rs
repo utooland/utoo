@@ -53,7 +53,7 @@ impl Asset for InlineCssFileSource {
         // The runtime API expects arrays of [id, css_content, media_query, source_map].
         // media_query and source_map are undefined as they are not used in the inline CSS case.
         match self.inject_type {
-            InjectType::LinkTag => {
+            InjectType::Link => {
                 writeln!(
                     result,
                     "import api from {};",
@@ -73,8 +73,8 @@ impl Asset for InlineCssFileSource {
                 writeln!(result, "export default {{}};")?;
             }
 
-            InjectType::LazyStyleTag | InjectType::LazySingletonStyleTag => {
-                let is_singleton = matches!(self.inject_type, InjectType::LazySingletonStyleTag);
+            InjectType::LazyStyle | InjectType::LazySingletonStyle => {
+                let is_singleton = matches!(self.inject_type, InjectType::LazySingletonStyle);
                 writeln!(
                     result,
                     "import api from {};",
@@ -112,8 +112,8 @@ impl Asset for InlineCssFileSource {
                 writeln!(result, "export default exported;")?;
             }
 
-            InjectType::StyleTag | InjectType::SingletonStyleTag => {
-                let is_singleton = matches!(self.inject_type, InjectType::SingletonStyleTag);
+            InjectType::Style | InjectType::SingletonStyle => {
+                let is_singleton = matches!(self.inject_type, InjectType::SingletonStyle);
                 writeln!(
                     result,
                     "import api from {};",
