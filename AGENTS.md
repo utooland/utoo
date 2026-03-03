@@ -95,6 +95,17 @@ Agent definitions live in `agents/` and are symlinked to `.claude/agents/` for C
 | **code-guard** | `agents/code-guard.md` | Rust idiom & style review agent. Enforces idiomatic patterns and project conventions based on real PR review cases. |
 | **utoopack-performance** | `agents/utoopack-performance-agent.md` | Turbopack performance diagnostics via Chrome Trace analysis across a 5-tier priority matrix. |
 
+## Post-Edit Verification
+
+After modifying Rust code, **always** run these checks before considering the task done:
+
+```bash
+cargo fmt
+cargo clippy --all-targets -- -D warnings --no-deps
+```
+
+Fix any issues found. Do not leave clippy warnings or formatting drift for the user to clean up.
+
 ## Agent-Specific Notes
 
 - When adding a new `AGENTS.md` anywhere in the repo, also add a `CLAUDE.md` symlink pointing to it (example: `ln -s AGENTS.md CLAUDE.md`).
