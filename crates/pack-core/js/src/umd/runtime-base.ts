@@ -85,7 +85,7 @@ interface RuntimeBackend {
   ) => Promise<void>;
 }
 
-const moduleFactories: ModuleFactories = Object.create(null);
+const moduleFactories: ModuleFactories = new Map();
 contextPrototype.M = moduleFactories;
 
 const availableModules: Map<ModuleId, Promise<any> | true> = new Map();
@@ -195,7 +195,7 @@ function loadChunkByUrlInternal(
             (sourceType) => `Unknown source type: ${sourceType}`,
           );
       }
-      throw new Error(
+      throw new (Error as any)(
         `Failed to load chunk ${chunkUrl} ${loadReason}${
           error ? `: ${error}` : ""
         }`,
@@ -293,15 +293,15 @@ function registerCompressedModuleFactory(
   moduleId: ModuleId,
   moduleFactory: Function | [Function, ModuleId[]],
 ) {
-  if (!moduleFactories[moduleId]) {
+  if (!moduleFactories.has(moduleId)) {
     if (Array.isArray(moduleFactory)) {
       let [moduleFactoryFn, otherIds] = moduleFactory;
-      moduleFactories[moduleId] = moduleFactoryFn;
+      moduleFactories.set(moduleId, moduleFactoryFn);
       for (const otherModuleId of otherIds) {
-        moduleFactories[otherModuleId] = moduleFactoryFn;
+        moduleFactories.set(otherModuleId, moduleFactoryFn);
       }
     } else {
-      moduleFactories[moduleId] = moduleFactory;
+      moduleFactories.set(moduleId, moduleFactory);
     }
   }
 }

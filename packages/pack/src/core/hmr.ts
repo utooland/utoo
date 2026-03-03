@@ -248,7 +248,7 @@ export async function createHotReloader(
 
       const assets = { js: [] as string[], css: [] as string[] };
       await Promise.all(
-        entrypoints.apps.map((l) =>
+        [...entrypoints.apps, ...entrypoints.libraries].map((l) =>
           l.writeToDisk().then((res) => {
             processIssues(res, true, true);
           }),

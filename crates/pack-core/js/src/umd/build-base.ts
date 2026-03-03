@@ -50,7 +50,7 @@ function instantiateModule(
   sourceType: SourceType,
   sourceData: SourceData,
 ): Module {
-  const moduleFactory = moduleFactories[id];
+  const moduleFactory = moduleFactories.get(id);
   if (typeof moduleFactory !== "function") {
     // This can happen if modules incorrectly handle HMR disposes/updates,
     // e.g. when they keep a `setTimeout` around which still executes old code
