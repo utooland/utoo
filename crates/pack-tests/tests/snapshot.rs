@@ -46,7 +46,8 @@ fn default_config() -> String {
             },
             "mode": "production",
             "optimization": {
-                "minify": false
+                "minify": false,
+                "moduleIds": "named"
             }
         },
         "runtimeType": "dummy"
@@ -216,6 +217,7 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
     if user_config.get("optimization").is_none() {
         let default_optimization = serde_json::json!({
             "minify": false,
+            "moduleIds": "named",
         });
         user_config["optimization"] = default_optimization;
     }

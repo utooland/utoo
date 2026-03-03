@@ -1,5 +1,5 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-67, ((__turbopack_context__) => {
+"[project]/dynamic_import/very-dynamic/input/index.ts [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 async function importUrl(url) {
