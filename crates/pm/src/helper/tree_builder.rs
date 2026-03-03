@@ -83,7 +83,7 @@ impl TreeBuilder {
 
         // Process each workspace member
         for (name, path, pkg) in workspaces {
-            let version = pkg.version.clone();
+            let version = &pkg.version;
 
             // Create workspace node
             let workspace_node =
@@ -101,8 +101,8 @@ impl TreeBuilder {
             // Create and mark dependency edge as resolved
             let dep_edge_id = graph.add_dependency_edge(
                 graph.root_index,
-                name.clone(),
-                version.clone(),
+                name.as_str(),
+                version.as_str(),
                 EdgeType::Prod,
             );
             graph.mark_dependency_resolved(dep_edge_id, workspace_index);

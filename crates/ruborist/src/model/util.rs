@@ -3,9 +3,24 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value};
 
 use super::package_json::PackageJson;
+
+/// Deserialize a field, falling back to `Default::default()` when the value
+/// is present but has an unexpected type (e.g., `engines` being an array
+/// instead of a map). This keeps the overall parse from failing due to one
+/// non-standard field.
+pub(crate) fn deserialize_or_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: DeserializeOwned + Default,
+{
+    let value = Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
 
 /// Read and parse package.json from a directory.
 pub async fn read_package_json(dir: &Path) -> Result<PackageJson> {

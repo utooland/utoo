@@ -5,15 +5,13 @@ use std::path::{Path, PathBuf};
 
 use super::ruborist_context::Context;
 use crate::helper::workspace::find_workspaces;
-use crate::util::json::{
-    load_package_json_from_path, load_package_lock_json_from_path, read_json_file,
-};
+use crate::util::json::{load_package_json, load_package_lock_json_from_path, read_json_file};
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
 use crate::util::save_type::{PackageAction, SaveType};
 use crate::util::user_config::{get_legacy_peer_deps, set_package_json};
 use crate::util::{cloner::clone_package, downloader::download_to_cache};
 use utoo_ruborist::lock::{LockPackage, PackageLock};
-use utoo_ruborist::manifest::PackageJson;
+use utoo_ruborist::manifest::{DepsView, PackageJson};
 use utoo_ruborist::registry::resolve_package;
 use utoo_ruborist::util::parse_package_spec;
 
@@ -322,7 +320,7 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
     // Always read from disk — this function checks whether the on-disk
     // package.json has diverged from the lock file, so it must not use the
     // in-process cache.
-    let pkg = load_package_json_from_path(root_path).await?;
+    let pkg: DepsView = load_package_json(root_path).await?;
     let lock_file: Value = read_json_file(&root_path.join("package-lock.json")).await?;
 
     // get packages in package-lock.json
@@ -331,18 +329,19 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
         .and_then(|p| p.as_object())
         .ok_or_else(|| anyhow!("Invalid package-lock.json format"))?;
 
-    // prepare packages to check
-    let mut pkgs_to_check: Vec<(String, PackageJson)> = vec![("".to_string(), pkg.clone())];
+    // prepare packages to check: (relative_path, deps, engines)
+    let mut pkgs_to_check: Vec<(String, DepsView)> = vec![("".to_string(), pkg)];
 
-    // populate all workspaces
+    // populate all workspaces (load only the deps view for each)
     let workspaces = find_workspaces(root_path).await?;
-    for (_, path, workspace_pkg) in workspaces {
+    for (_, path, _) in workspaces {
         let target_path = path
             .strip_prefix(root_path)
             .unwrap_or(&path)
             .to_string_lossy()
             .to_string();
-        pkgs_to_check.push((target_path, workspace_pkg));
+        let ws_deps: DepsView = load_package_json(&path).await?;
+        pkgs_to_check.push((target_path, ws_deps));
     }
 
     let legacy_peer_deps = get_legacy_peer_deps().await;

@@ -3,7 +3,10 @@
 //! Shared types for serializing/deserializing npm lock files.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
+
+use super::util::deserialize_or_default;
 
 /// Represents a license field that can be either a string or an array of strings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,16 +42,20 @@ pub struct LockPackage {
     pub optional_dependencies: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bin: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub engines: Option<serde_json::Value>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_or_default"
+    )]
+    pub engines: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub funding: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub os: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cpu: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub scripts: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scripts: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub peer: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -148,10 +155,14 @@ pub struct PackageLock {
 
 impl PackageLock {
     /// Create a new PackageLock with default values.
-    pub fn new(name: String, version: String, packages: HashMap<String, LockPackage>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        version: impl Into<String>,
+        packages: HashMap<String, LockPackage>,
+    ) -> Self {
         Self {
-            name,
-            version,
+            name: name.into(),
+            version: version.into(),
             lockfile_version: 3,
             requires: true,
             packages,
@@ -176,7 +187,7 @@ impl PackageLock {
 use std::path::Path;
 
 use petgraph::graph::NodeIndex;
-use serde_json::{Value, json};
+use serde_json::json;
 
 use super::graph::DependencyGraph;
 use super::node::EdgeType;
@@ -195,7 +206,7 @@ pub fn serialize_graph(graph: &DependencyGraph, root_path: &Path) -> PackageLock
     let packages: HashMap<String, LockPackage> =
         serde_json::from_value(packages_value).expect("Failed to convert packages to lock format");
 
-    PackageLock::new(root_node.name.clone(), root_node.version.clone(), packages)
+    PackageLock::new(&root_node.name, &root_node.version, packages)
 }
 
 /// Serialize graph to package-lock.json packages format.
@@ -541,11 +552,7 @@ mod tests {
     }
 
     fn create_test_node(is_dev: bool, is_optional: bool, is_peer: bool) -> PackageNode {
-        let pkg = PackageJson {
-            name: "test".to_string(),
-            version: "1.0.0".to_string(),
-            ..Default::default()
-        };
+        let pkg = PackageJson::new("test", "1.0.0");
         let mut node = PackageNode::from_package_json("test".to_string(), PathBuf::from("."), pkg);
         node.is_dev = is_dev;
         node.is_optional = is_optional;

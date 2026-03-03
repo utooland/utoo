@@ -58,7 +58,7 @@ fn collect_scripts_from_package(
     pkg: &PackageJson,
     workspace_name: Option<String>,
 ) -> Vec<ScriptItem> {
-    pkg.scripts
+    pkg.scripts_or_empty()
         .iter()
         .map(|(script_name, cmd)| ScriptItem {
             workspace_name: workspace_name.clone(),

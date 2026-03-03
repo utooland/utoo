@@ -8,7 +8,7 @@ use utoo_ruborist::manifest::PackageJson;
 
 use super::config_file::{Config, ConfigValue};
 use super::http::client_builder;
-use super::json::load_package_json_from_path;
+use super::json::load_package_json;
 use super::registry::{REGISTRY_NPMMIRROR, select_fastest_registry};
 use super::save_type::OmitType;
 
@@ -125,7 +125,7 @@ pub fn get_cache_dir() -> PathBuf {
 }
 
 // Package.json cache — keyed by directory path, covers root + workspace members.
-// node_modules packages should use json::load_package_json_from_path directly.
+// node_modules packages should use json::load_package_json directly.
 static PACKAGE_JSON_CACHE: LazyLock<DashMap<PathBuf, PackageJson>> = LazyLock::new(DashMap::new);
 
 /// Load and cache a package.json by directory path.
@@ -137,7 +137,7 @@ pub async fn get_or_load_package_json(path: &Path) -> Result<PackageJson> {
     if let Some(entry) = PACKAGE_JSON_CACHE.get(path) {
         return Ok(entry.value().clone());
     }
-    let pkg = load_package_json_from_path(path).await?;
+    let pkg: PackageJson = load_package_json(path).await?;
     PACKAGE_JSON_CACHE.insert(path.to_path_buf(), pkg.clone());
     Ok(pkg)
 }

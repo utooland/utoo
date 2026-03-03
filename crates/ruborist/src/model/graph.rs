@@ -71,10 +71,12 @@ impl PackageNode {
 
     /// Create a root project node from PackageJson.
     pub fn root_from_package_json(path: PathBuf, pkg: PackageJson) -> Self {
+        let name = pkg.name.clone();
+        let version = pkg.version.clone();
         Self {
             path,
-            name: pkg.name.clone(),
-            version: pkg.version.clone(),
+            name,
+            version,
             manifest: NodeManifest::Local(pkg),
             node_type: NodeType::Root,
             is_prod: false,
@@ -86,6 +88,7 @@ impl PackageNode {
 
     /// Create a workspace package node from PackageJson.
     pub fn workspace_from_package_json(path: PathBuf, pkg: PackageJson) -> Self {
+        let name = pkg.name.clone();
         let version = if pkg.version.is_empty() {
             "*".to_string()
         } else {
@@ -93,7 +96,7 @@ impl PackageNode {
         };
         Self {
             path,
-            name: pkg.name.clone(),
+            name,
             version,
             manifest: NodeManifest::Local(pkg),
             node_type: NodeType::Workspace,
@@ -106,10 +109,12 @@ impl PackageNode {
 
     /// Create a symlinked package node from PackageJson.
     pub fn link_from_package_json(path: PathBuf, pkg: PackageJson) -> Self {
+        let name = pkg.name.clone();
+        let version = pkg.version.clone();
         Self {
             path,
-            name: pkg.name.clone(),
-            version: pkg.version.clone(),
+            name,
+            version,
             manifest: NodeManifest::Local(pkg),
             node_type: NodeType::Link,
             is_prod: false,

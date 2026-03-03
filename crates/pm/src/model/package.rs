@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use anyhow::{Context, Result, bail};
 use std::env;
 use std::path::{Path, PathBuf};
-use utoo_ruborist::manifest::{PackageJson, PublishConfig};
+use utoo_ruborist::manifest::{PackageInstallView, PackageJson, PublishConfig};
 
-use crate::util::json::load_package_json_from_path;
+use crate::util::json::load_package_json;
 use crate::util::user_config::get_or_load_package_json;
 use crate::{service::script::ScriptService, util::linker::link};
 
@@ -152,8 +152,8 @@ impl PackageInfo {
     /// Load PackageInfo from disk without caching.
     /// For node_modules dependencies; project/workspace packages should use `load`.
     pub async fn from_path(path: &Path) -> Result<Self> {
-        let pkg = load_package_json_from_path(path).await?;
-        Self::from_package_json(path, &pkg)
+        let pkg: PackageInstallView = load_package_json(path).await?;
+        Self::from_install_view(path, &pkg)
     }
 
     /// Load PackageInfo using the cached package.json reader.
@@ -163,7 +163,23 @@ impl PackageInfo {
         Self::from_package_json(path, &pkg)
     }
 
+    /// Build from the full PackageJson (cached path, project/workspace packages).
     pub fn from_package_json(path: &Path, pkg: &PackageJson) -> Result<Self> {
+        if pkg.name.is_empty() {
+            anyhow::bail!("Failed to get package name from package.json");
+        }
+        Ok(PackageInfo {
+            path: path.to_path_buf(),
+            bin_files: pkg.bin_entries(),
+            lifecycle_scripts: LifecycleScripts::from_scripts(pkg.scripts_or_empty()),
+            scripts: pkg.scripts_or_empty().clone(),
+            name: pkg.name.clone(),
+            fullname: pkg.name.clone(),
+        })
+    }
+
+    /// Build from the lightweight install view (node_modules packages).
+    pub fn from_install_view(path: &Path, pkg: &PackageInstallView) -> Result<Self> {
         if pkg.name.is_empty() {
             anyhow::bail!("Failed to get package name from package.json");
         }

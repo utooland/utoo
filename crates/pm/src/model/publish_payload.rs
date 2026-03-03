@@ -173,11 +173,7 @@ mod tests {
     ///     (registry rewrites the stored URL, stripping the scope from filename)
     #[test]
     fn test_payload_scoped_package() {
-        let pkg_json = PackageJson {
-            name: "@eggjs/tegg-plugin".to_string(),
-            version: "3.72.0".to_string(),
-            ..Default::default()
-        };
+        let pkg_json = PackageJson::new("@eggjs/tegg-plugin", "3.72.0");
 
         let payload = PublishPayload::new(&PublishPayloadInput {
             package_json: &pkg_json,
@@ -213,11 +209,7 @@ mod tests {
 
     #[test]
     fn test_payload_custom_tag() {
-        let pkg_json = PackageJson {
-            name: "pkg".to_string(),
-            version: "2.0.0-rc.1".to_string(),
-            ..Default::default()
-        };
+        let pkg_json = PackageJson::new("pkg", "2.0.0-rc.1");
         let payload = PublishPayload::new(&PublishPayloadInput {
             package_json: &pkg_json,
             name: "pkg",

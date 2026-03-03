@@ -705,7 +705,7 @@ fn graph_to_package_lock(
     let packages: HashMap<String, LockPackage> =
         serde_json::from_value(packages_value).unwrap_or_default();
 
-    PackageLock::new(pkg.name.clone(), pkg.version.clone(), packages)
+    PackageLock::new(&pkg.name, &pkg.version, packages)
 }
 
 #[cfg(test)]
@@ -748,13 +748,13 @@ mod tests {
             create_version_manifest("lodash", "4.17.21"),
         );
 
+        let root_pkg = PackageJson::new("test-project", "1.0.0");
         let root_pkg = PackageJson {
-            name: "test-project".to_string(),
-            version: "1.0.0".to_string(),
-            dependencies: [("lodash".to_string(), "^4.17.0".to_string())]
-                .into_iter()
-                .collect(),
-            ..Default::default()
+            dependencies: Some(HashMap::from([(
+                "lodash".to_string(),
+                "^4.17.0".to_string(),
+            )])),
+            ..root_pkg
         };
 
         let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg.clone());
@@ -786,13 +786,13 @@ mod tests {
         );
         registry.add_package("debug", "4.3.0", create_version_manifest("debug", "4.3.0"));
 
+        let root_pkg = PackageJson::new("test-project", "1.0.0");
         let root_pkg = PackageJson {
-            name: "test-project".to_string(),
-            version: "1.0.0".to_string(),
-            dependencies: [("express".to_string(), "^4.0.0".to_string())]
-                .into_iter()
-                .collect(),
-            ..Default::default()
+            dependencies: Some(HashMap::from([(
+                "express".to_string(),
+                "^4.0.0".to_string(),
+            )])),
+            ..root_pkg
         };
 
         let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg.clone());
@@ -814,13 +814,13 @@ mod tests {
             create_version_manifest("lodash", "4.17.21"),
         );
 
+        let pkg = PackageJson::new("test-project", "1.0.0");
         let pkg = PackageJson {
-            name: "test-project".to_string(),
-            version: "1.0.0".to_string(),
-            dependencies: [("lodash".to_string(), "^4.17.0".to_string())]
-                .into_iter()
-                .collect(),
-            ..Default::default()
+            dependencies: Some(HashMap::from([(
+                "lodash".to_string(),
+                "^4.17.0".to_string(),
+            )])),
+            ..pkg
         };
 
         let lock = resolve(&pkg, &registry).await.unwrap();
@@ -837,11 +837,7 @@ mod tests {
     // Helper to create a graph with source -> target for testing update_node_type_from_edge
     // Returns (graph, source_index, target_index) where source is NOT root
     fn create_source_target_graph() -> (DependencyGraph, NodeIndex, NodeIndex) {
-        let root_pkg = PackageJson {
-            name: "root".to_string(),
-            version: "1.0.0".to_string(),
-            ..Default::default()
-        };
+        let root_pkg = PackageJson::new("root", "1.0.0");
         let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg);
 
         // Add source node (non-root)

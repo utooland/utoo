@@ -444,57 +444,37 @@ impl NodeManifest {
     /// Get production dependencies.
     pub fn dependencies(&self) -> Option<&HashMap<String, String>> {
         match self {
-            NodeManifest::Local(pkg) => {
-                if pkg.dependencies.is_empty() {
-                    None
-                } else {
-                    Some(&pkg.dependencies)
-                }
-            }
+            NodeManifest::Local(pkg) => pkg.dependencies.as_ref(),
             NodeManifest::Registry(manifest) => manifest.dependencies.as_ref(),
         }
+        .filter(|m| !m.is_empty())
     }
 
     /// Get peer dependencies.
     pub fn peer_dependencies(&self) -> Option<&HashMap<String, String>> {
         match self {
-            NodeManifest::Local(pkg) => {
-                if pkg.peer_dependencies.is_empty() {
-                    None
-                } else {
-                    Some(&pkg.peer_dependencies)
-                }
-            }
+            NodeManifest::Local(pkg) => pkg.peer_dependencies.as_ref(),
             NodeManifest::Registry(manifest) => manifest.peer_dependencies.as_ref(),
         }
+        .filter(|m| !m.is_empty())
     }
 
     /// Get optional dependencies.
     pub fn optional_dependencies(&self) -> Option<&HashMap<String, String>> {
         match self {
-            NodeManifest::Local(pkg) => {
-                if pkg.optional_dependencies.is_empty() {
-                    None
-                } else {
-                    Some(&pkg.optional_dependencies)
-                }
-            }
+            NodeManifest::Local(pkg) => pkg.optional_dependencies.as_ref(),
             NodeManifest::Registry(manifest) => manifest.optional_dependencies.as_ref(),
         }
+        .filter(|m| !m.is_empty())
     }
 
     /// Get dev dependencies (only for local packages).
     pub fn dev_dependencies(&self) -> Option<&HashMap<String, String>> {
         match self {
-            NodeManifest::Local(pkg) => {
-                if pkg.dev_dependencies.is_empty() {
-                    None
-                } else {
-                    Some(&pkg.dev_dependencies)
-                }
-            }
-            NodeManifest::Registry(_) => None, // Registry packages don't include devDeps
+            NodeManifest::Local(pkg) => pkg.dev_dependencies.as_ref(),
+            NodeManifest::Registry(_) => None,
         }
+        .filter(|m| !m.is_empty())
     }
 
     /// Get engines requirements.
@@ -553,15 +533,10 @@ impl NodeManifest {
     /// Get scripts.
     pub fn scripts(&self) -> Option<&HashMap<String, String>> {
         match self {
-            NodeManifest::Local(pkg) => {
-                if pkg.scripts.is_empty() {
-                    None
-                } else {
-                    Some(&pkg.scripts)
-                }
-            }
+            NodeManifest::Local(pkg) => pkg.scripts.as_ref(),
             NodeManifest::Registry(manifest) => manifest.scripts.as_ref(),
         }
+        .filter(|m| !m.is_empty())
     }
 
     /// Get distribution info (tarball, integrity).

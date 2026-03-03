@@ -143,7 +143,10 @@ where
         if !runtime_deps.is_empty() {
             tracing::debug!("Injecting {} runtime dependencies", runtime_deps.len());
             for (name, version) in runtime_deps {
-                pkg.optional_dependencies.entry(name).or_insert(version);
+                pkg.optional_dependencies
+                    .get_or_insert_with(HashMap::new)
+                    .entry(name)
+                    .or_insert(version);
             }
         }
     }
@@ -178,7 +181,7 @@ where
         let dep_edge_id = graph.add_dependency_edge(
             root_index,
             workspace.name.clone(),
-            ws_pkg.version.clone(),
+            &ws_pkg.version,
             EdgeType::Prod,
         );
         graph.mark_dependency_resolved(dep_edge_id, workspace_index);
@@ -301,11 +304,7 @@ where
         tracing::warn!("Failed to save project cache: {}", e);
     }
 
-    Ok(PackageLock::new(
-        pkg.name.clone(),
-        pkg.version.clone(),
-        packages,
-    ))
+    Ok(PackageLock::new(&pkg.name, &pkg.version, packages))
 }
 
 #[cfg(test)]

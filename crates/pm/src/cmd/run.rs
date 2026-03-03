@@ -92,7 +92,7 @@ pub async fn run_script(
             updated_cwd.to_path_buf()
         },
         bin_files: Default::default(),
-        scripts: pkg.scripts.clone(),
+        scripts: pkg.scripts_or_empty().clone(),
         lifecycle_scripts: Default::default(),
         fullname,
         name,
@@ -169,7 +169,7 @@ async fn need_run(cwd: &Path, workspace_name: &str, script_name: &str) -> Result
     };
 
     // Check if the script exists in package.json
-    let has_script = pkg.scripts.contains_key(script_name);
+    let has_script = pkg.scripts_or_empty().contains_key(script_name);
     if !has_script {
         tracing::debug!(
             "Script '{script_name}' not found in workspace '{workspace_name}', skipping"

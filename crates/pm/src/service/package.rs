@@ -1,6 +1,5 @@
 use crate::helper::package::parse_package_name;
 use crate::model::package::{LifecycleScripts, PackageInfo};
-use crate::util::json::load_package_json_from_path;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
 use anyhow::{Context, Result};
 use futures;
@@ -8,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 use utoo_ruborist::lock::PackageLock;
+use utoo_ruborist::manifest::ScriptsView;
 use utoo_ruborist::model::package_json::parse_bin_field;
 
 use super::script::ScriptService;
@@ -52,8 +52,8 @@ impl PackageService {
     }
 
     async fn read_lifecycle_scripts(package_path: &Path) -> Result<LifecycleScripts> {
-        let pkg = load_package_json_from_path(package_path).await?;
-        Ok(LifecycleScripts::from_scripts(&pkg.scripts))
+        let s: ScriptsView = crate::util::json::load_package_json(package_path).await?;
+        Ok(LifecycleScripts::from_scripts(&s.scripts))
     }
 
     /// Collect packages from memory PackageLock object with early filtering

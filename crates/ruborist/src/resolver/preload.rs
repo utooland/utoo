@@ -63,12 +63,12 @@ pub fn collect_initial_deps(
     legacy_peer_deps: bool,
 ) -> Vec<Dep> {
     let mut deps = Vec::new();
-    deps.extend(collect_deps(Some(&pkg.dependencies)));
-    deps.extend(collect_deps(Some(&pkg.dev_dependencies)));
+    deps.extend(collect_deps(pkg.dependencies.as_ref()));
+    deps.extend(collect_deps(pkg.dev_dependencies.as_ref()));
     if !legacy_peer_deps {
-        deps.extend(collect_deps(Some(&pkg.peer_dependencies)));
+        deps.extend(collect_deps(pkg.peer_dependencies.as_ref()));
     }
-    deps.extend(collect_deps(Some(&pkg.optional_dependencies)));
+    deps.extend(collect_deps(pkg.optional_dependencies.as_ref()));
     deps
 }
 

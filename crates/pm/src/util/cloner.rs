@@ -4,11 +4,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::downloader::download_to_cache;
-use super::json::load_package_json_from_path;
+use super::json::load_package_json;
 use super::oncemap::OnceMap;
 use super::retry::create_retry_strategy;
 use crate::fs;
 use tokio_retry::Retry;
+use utoo_ruborist::manifest::IdentityView;
 
 /// Global clone cache shared between pipeline and install phases.
 /// Key: target path, Value: ()
@@ -382,7 +383,7 @@ async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
 
 /// Validate that the package.json in dst has matching name and version
 async fn validate_name_version(dst: &Path, name: &str, version: &str) -> bool {
-    let Ok(pkg) = load_package_json_from_path(dst).await else {
+    let Ok(pkg) = load_package_json::<IdentityView>(dst).await else {
         return false;
     };
     pkg.name == name && pkg.version == version

@@ -60,15 +60,15 @@ impl DependencySource for PackageJson {
     where
         F: FnMut(EdgeType, &str, &str),
     {
-        iter_deps(Some(&self.dependencies), EdgeType::Prod, &mut f);
+        iter_deps(self.dependencies.as_ref(), EdgeType::Prod, &mut f);
         if include_dev {
-            iter_deps(Some(&self.dev_dependencies), EdgeType::Dev, &mut f);
+            iter_deps(self.dev_dependencies.as_ref(), EdgeType::Dev, &mut f);
         }
         if !legacy_peer_deps {
-            iter_deps(Some(&self.peer_dependencies), EdgeType::Peer, &mut f);
+            iter_deps(self.peer_dependencies.as_ref(), EdgeType::Peer, &mut f);
         }
         iter_deps(
-            Some(&self.optional_dependencies),
+            self.optional_dependencies.as_ref(),
             EdgeType::Optional,
             &mut f,
         );

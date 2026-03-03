@@ -12,10 +12,11 @@ pub async fn read_json_file<T: DeserializeOwned>(path: &Path) -> Result<T> {
         .with_context(|| format!("Failed to parse JSON from {}", path.display()))
 }
 
-/// Load package.json from a directory path and deserialize into `PackageJson`.
-pub async fn load_package_json_from_path(
-    path: &Path,
-) -> Result<utoo_ruborist::manifest::PackageJson> {
+/// Load package.json from a directory path and deserialize into the caller's
+/// chosen view type `T`. Use a full `PackageJson` for root projects, or a
+/// minimal view (e.g. `ScriptsView`) for node_modules to avoid parsing
+/// unnecessary / non-standard fields.
+pub async fn load_package_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
     read_json_file(&path.join("package.json")).await
 }
 
@@ -66,7 +67,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_load_package_json_from_path() {
+    async fn test_load_package_json() {
         let dir = tempdir().unwrap();
         let package_path = dir.path().join("package.json");
 
@@ -77,7 +78,8 @@ mod tests {
 
         fs::write(&package_path, test_data.to_string()).unwrap();
 
-        let pkg = load_package_json_from_path(dir.path()).await.unwrap();
+        use utoo_ruborist::manifest::PackageJson;
+        let pkg: PackageJson = load_package_json(dir.path()).await.unwrap();
         assert_eq!(pkg.name, "test-package");
         assert_eq!(pkg.version, "1.0.0");
     }

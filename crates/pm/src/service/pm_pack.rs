@@ -37,8 +37,7 @@ impl PackResult {
 pub async fn pack(package_root: &Path) -> Result<PackResult> {
     let pkg = get_or_load_package_json(package_root).await?;
     let package_info = PackageInfo::from_package_json(package_root, &pkg)?;
-    let version = pkg.version.clone();
-    if version.is_empty() {
+    if pkg.version.is_empty() {
         anyhow::bail!("Missing 'version' field in package.json");
     }
 
@@ -73,7 +72,7 @@ pub async fn pack(package_root: &Path) -> Result<PackResult> {
         tarball_data: tar_data,
         files: file_paths,
         name: package_info.name,
-        version,
+        version: pkg.version.clone(),
         integrity,
         unpacked_size,
         packed_size,
