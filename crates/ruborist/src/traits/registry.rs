@@ -1,10 +1,12 @@
 //! Registry client trait for dependency resolution.
 
+use std::collections::HashMap;
+use std::future::Future;
+use std::sync::Arc;
+
 use crate::model::manifest::{FullManifest, VersionManifest};
 use crate::resolver::semver::normalize_spec;
 use crate::resolver::version::resolve_target_version;
-use std::collections::HashMap;
-use std::future::Future;
 
 /// Check if a registry URL is the official npm registry.
 ///
@@ -58,8 +60,8 @@ pub struct ResolvedPackage {
     pub name: String,
     /// Resolved version
     pub version: String,
-    /// Full package manifest (package.json content for this version)
-    pub manifest: VersionManifest,
+    /// Full package manifest (package.json content for this version, Arc-shared)
+    pub manifest: Arc<VersionManifest>,
 }
 
 /// Versions info for a package (lightweight, without full manifests).
@@ -151,7 +153,7 @@ pub trait RegistryClient {
         &self,
         name: &str,
         spec: &str,
-    ) -> impl Future<Output = Result<VersionManifest, Self::Error>> {
+    ) -> impl Future<Output = Result<Arc<VersionManifest>, Self::Error>> {
         async move {
             let manifest = self.fetch_full_manifest(name).await?;
             let version_list: Vec<String> = manifest.versions.keys().cloned().collect();
@@ -163,7 +165,7 @@ pub trait RegistryClient {
             manifest
                 .versions
                 .get(&resolved_version)
-                .cloned()
+                .map(|vm| Arc::new(vm.clone()))
                 .ok_or_else(|| {
                     RegistryError(anyhow::anyhow!(
                         "Version {} not found in manifest for {}",
@@ -242,7 +244,7 @@ pub trait RegistryClient {
                 let version_manifest = full_manifest
                     .versions
                     .get(&resolved_version)
-                    .cloned()
+                    .map(|vm| Arc::new(vm.clone()))
                     .ok_or_else(|| {
                         RegistryError(anyhow::anyhow!(
                             "Version {} not found in manifest for {}",
@@ -304,7 +306,7 @@ pub trait RegistryClient {
     /// allowing build phase to directly hit memory cache without traversing full_manifest.
     ///
     /// Default implementation is no-op (no caching).
-    fn cache_version_manifest(&self, _name: &str, _spec: &str, _manifest: VersionManifest) {
+    fn cache_version_manifest(&self, _name: &str, _spec: &str, _manifest: Arc<VersionManifest>) {
         // Default: no-op
     }
 }

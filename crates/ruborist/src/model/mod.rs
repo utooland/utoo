@@ -1,4 +1,116 @@
 //! Core data structures for dependency resolution.
+//!
+//! # Type Hierarchy
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────┐
+//! │ Registry Data (from npm API)                                   │
+//! │                                                                │
+//! │   FullManifest                 1 package, all versions          │
+//! │   ├── name, dist_tags, time                                    │
+//! │   └── versions: HashMap<String, VersionManifest>               │
+//! │                                    │                           │
+//! │   VersionManifest                  │  1 specific version       │
+//! │   ├── name, version, dist          │  (extracted & Arc-shared) │
+//! │   ├── dependencies                 │                           │
+//! │   ├── peer_dependencies            │                           │
+//! │   └── optional_dependencies        │                           │
+//! │                                    ▼                           │
+//! │                        Arc<VersionManifest>                    │
+//! │                        (shared across cache + graph)           │
+//! └─────────────────────────────────────────────────────────────────┘
+//!
+//! ┌─────────────────────────────────────────────────────────────────┐
+//! │ Local Data (from disk)                                         │
+//! │                                                                │
+//! │   PackageJson                  project's package.json          │
+//! │   ├── name, version                                            │
+//! │   ├── dependencies, dev_dependencies                           │
+//! │   ├── peer_dependencies, optional_dependencies                 │
+//! │   └── workspaces, engines, bin, ...                            │
+//! └─────────────────────────────────────────────────────────────────┘
+//!
+//! ┌─────────────────────────────────────────────────────────────────┐
+//! │ Unified Abstraction                                            │
+//! │                                                                │
+//! │   NodeManifest                                                 │
+//! │   ├── Local(PackageJson)              ← root / workspace      │
+//! │   └── Registry(Arc<VersionManifest>)  ← resolved dependency   │
+//! │                                                                │
+//! │   Provides unified accessors:                                  │
+//! │     name(), version(), dependencies(), peer_dependencies(),    │
+//! │     optional_dependencies(), dev_dependencies(), engines(),    │
+//! │     bin(), has_install_scripts()                               │
+//! └─────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! # Dependency Graph
+//!
+//! ```text
+//!   DependencyGraph (petgraph DiGraph)
+//!   │
+//!   ├── Nodes: PackageNode
+//!   │   ├── name, version, path
+//!   │   ├── manifest: NodeManifest       ← owns package data
+//!   │   └── node_type: Root | Regular | Workspace | Link
+//!   │
+//!   └── Edges: DependencyEdge / PhysicalEdge
+//!       ├── DependencyEdge: name + spec + EdgeType(Prod|Dev|Peer|Optional)
+//!       └── PhysicalEdge: parent → child (node_modules nesting)
+//! ```
+//!
+//! # Ownership & Sharing
+//!
+//! `VersionManifest` is the hot type in the resolution pipeline — it flows
+//! from registry/cache into graph nodes. Wrapping it in `Arc` avoids deep
+//! cloning at every cache read and graph insertion:
+//!
+//! ```text
+//!   MemoryCache ──┐
+//!                 ├── Arc<VersionManifest> ── (ref-count clone)
+//!   PackageNode ──┘
+//!
+//!   Cold paths (disk I/O, serde) still use owned VersionManifest,
+//!   wrapping in Arc::new() at the boundary.
+//! ```
+//!
+//! # Deserialization: Full vs Lightweight Views
+//!
+//! `PackageJson` is the **full** model — every field ruborist cares about.
+//! It is used by the resolver (root project, workspace members) where all
+//! fields may be needed.
+//!
+//! For PM-side operations on already-installed packages (`node_modules/`),
+//! parsing the full struct is wasteful and fragile (third-party packages
+//! may contain non-standard fields that break strict parsing). Lightweight
+//! **View** structs solve this — each declares only the fields it needs;
+//! serde silently skips the rest.
+//!
+//! ```text
+//!   package.json on disk
+//!   │
+//!   ├─ load_package_json::<PackageJson>()    full parse (resolver)
+//!   │
+//!   └─ load_package_json::<View>()           partial parse (PM hot paths)
+//!       │
+//!       ├── ScriptsView          { scripts }
+//!       │   └─ rebuild: check lifecycle scripts (preinstall/postinstall)
+//!       │
+//!       ├── IdentityView         { name, version }
+//!       │   └─ cache validation: compare installed vs expected
+//!       │
+//!       ├── PackageInstallView   { name, bin, scripts }
+//!       │   └─ post-install: bin linking + lifecycle scripts
+//!       │
+//!       ├── DepsView             { deps, devDeps, peerDeps, optDeps }
+//!       │   └─ lockfile freshness: detect package.json drift
+//!       │
+//!       └── EnginesView          { engines }
+//!           └─ lockfile freshness: root-only engine requirements check
+//!
+//!   All Views are Deserialize-only (no Serialize).
+//!   load_package_json<T: DeserializeOwned>(path) dispatches by type param.
+//! ```
 
 pub mod compatibility;
 pub mod graph;

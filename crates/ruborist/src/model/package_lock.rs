@@ -3,7 +3,6 @@
 //! Shared types for serializing/deserializing npm lock files.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::HashMap;
 
 use super::util::deserialize_or_default;
@@ -187,7 +186,6 @@ impl PackageLock {
 use std::path::Path;
 
 use petgraph::graph::NodeIndex;
-use serde_json::json;
 
 use super::graph::DependencyGraph;
 use super::node::EdgeType;
@@ -197,23 +195,24 @@ use super::node::EdgeType;
 /// This is the main entry point for converting a resolved dependency graph
 /// into a package-lock.json compatible structure.
 pub fn serialize_graph(graph: &DependencyGraph, root_path: &Path) -> PackageLock {
-    let (packages_value, _total) = serialize_to_packages(graph, root_path);
+    let (packages, _total) = serialize_to_packages(graph, root_path);
 
     let root_node = graph
         .get_node(graph.root_index)
         .expect("Graph must have a root node");
-
-    let packages: HashMap<String, LockPackage> =
-        serde_json::from_value(packages_value).expect("Failed to convert packages to lock format");
 
     PackageLock::new(&root_node.name, &root_node.version, packages)
 }
 
 /// Serialize graph to package-lock.json packages format.
 ///
-/// Returns (packages_json, total_package_count).
-pub fn serialize_to_packages(graph: &DependencyGraph, root_path: &Path) -> (Value, i32) {
-    let mut packages = json!({});
+/// Builds `LockPackage` structs directly (no intermediate `serde_json::Value`).
+/// Returns (packages_map, total_package_count).
+pub fn serialize_to_packages(
+    graph: &DependencyGraph,
+    root_path: &Path,
+) -> (HashMap<String, LockPackage>, i32) {
+    let mut packages = HashMap::new();
     let mut stack = vec![(graph.root_index, String::new())];
     let mut total_packages = 0;
 
@@ -222,18 +221,15 @@ pub fn serialize_to_packages(graph: &DependencyGraph, root_path: &Path) -> (Valu
         check_duplicate_dependencies(graph, node_index);
 
         // Create package info
-        let pkg_info = create_package_info(graph, node_index, root_path, &mut total_packages);
+        let lock_pkg = create_lock_package(graph, node_index, root_path, &mut total_packages);
 
-        // Use empty string for root node
-        let key: &str = if prefix.is_empty() { "" } else { &prefix };
-        packages[key] = pkg_info;
+        packages.insert(prefix.clone(), lock_pkg);
 
         // Add physical children to processing stack
         for child_index in graph.get_physical_children(node_index) {
             let child = graph.get_node(child_index).expect("Child node must exist");
             let child_prefix = if prefix.is_empty() {
                 if child.is_workspace() {
-                    // Workspace nodes use relative path from root
                     child
                         .path
                         .strip_prefix(root_path)
@@ -276,187 +272,113 @@ fn check_duplicate_dependencies(graph: &DependencyGraph, node_index: NodeIndex) 
     }
 }
 
-/// Create package information for a node.
-fn create_package_info(
+/// Create a LockPackage from a graph node.
+fn create_lock_package(
     graph: &DependencyGraph,
     node_index: NodeIndex,
     root_path: &Path,
     total_packages: &mut i32,
-) -> Value {
+) -> LockPackage {
     let node = graph.get_node(node_index).expect("Node must exist");
 
     if node.is_root() {
-        create_root_package_info(graph, node_index)
+        create_root_lock_package(graph, node_index)
     } else {
-        let mut pkg_info =
-            create_non_root_package_info(graph, node_index, root_path, total_packages);
-        add_package_fields(graph, &mut pkg_info, node_index);
-        pkg_info
+        create_non_root_lock_package(graph, node_index, root_path, total_packages)
     }
 }
 
-/// Create package info for root node.
-fn create_root_package_info(graph: &DependencyGraph, node_index: NodeIndex) -> Value {
+/// Create LockPackage for root node.
+fn create_root_lock_package(graph: &DependencyGraph, node_index: NodeIndex) -> LockPackage {
     let node = graph.get_node(node_index).expect("Node must exist");
     let manifest = &node.manifest;
-    let mut info = json!({
-        "name": node.name,
-        "version": node.version,
-    });
 
-    // Add optional fields from manifest
-    if let Some(engines) = manifest.engines() {
-        info["engines"] = json!(engines);
+    LockPackage {
+        name: Some(node.name.clone()),
+        version: Some(node.version.clone()),
+        engines: manifest.engines().cloned(),
+        workspaces: manifest
+            .workspaces()
+            .and_then(|v| serde_json::from_value(v).ok()),
+        dependencies: manifest.dependencies().cloned(),
+        dev_dependencies: manifest.dev_dependencies().cloned(),
+        peer_dependencies: manifest.peer_dependencies().cloned(),
+        optional_dependencies: manifest.optional_dependencies().cloned(),
+        ..LockPackage::default()
     }
-    if let Some(workspaces) = manifest.workspaces() {
-        info["workspaces"] = workspaces;
-    }
-
-    // Add dependency fields
-    if let Some(deps) = manifest.dependencies()
-        && !deps.is_empty()
-    {
-        info["dependencies"] = json!(deps);
-    }
-    if let Some(deps) = manifest.dev_dependencies()
-        && !deps.is_empty()
-    {
-        info["devDependencies"] = json!(deps);
-    }
-    if let Some(deps) = manifest.peer_dependencies()
-        && !deps.is_empty()
-    {
-        info["peerDependencies"] = json!(deps);
-    }
-    if let Some(deps) = manifest.optional_dependencies()
-        && !deps.is_empty()
-    {
-        info["optionalDependencies"] = json!(deps);
-    }
-
-    info
 }
 
-/// Create package info for non-root nodes.
-fn create_non_root_package_info(
+/// Create LockPackage for non-root nodes.
+fn create_non_root_lock_package(
     graph: &DependencyGraph,
     node_index: NodeIndex,
     root_path: &Path,
     total_packages: &mut i32,
-) -> Value {
+) -> LockPackage {
     let node = graph.get_node(node_index).expect("Node must exist");
     let manifest = &node.manifest;
-    let mut info = json!({
-        "name": manifest.name(),
-    });
+
+    let mut pkg = LockPackage {
+        name: Some(manifest.name().to_string()),
+        ..LockPackage::default()
+    };
 
     if node.is_workspace() {
-        info["version"] = json!(manifest.version());
+        pkg.version = Some(manifest.version().to_string());
     } else if node.is_link() {
-        info["link"] = json!(true);
-        let relative_path = get_relative_path(&node.path, root_path);
-        info["resolved"] = json!(relative_path);
+        pkg.link = Some(true);
+        pkg.resolved = Some(get_relative_path(&node.path, root_path));
     } else {
         // Regular package
         *total_packages += 1;
-        info["version"] = json!(manifest.version());
+        pkg.version = Some(manifest.version().to_string());
 
-        // Get resolved and integrity from dist field
         if let Some(dist) = manifest.dist() {
-            info["resolved"] = json!(dist.tarball);
-            info["integrity"] = json!(dist.integrity);
+            pkg.resolved = dist.tarball.clone();
+            pkg.integrity = dist.integrity.clone();
         }
     }
 
-    // Add optional flags
-    add_optional_flags(&mut info, node);
-
-    info
-}
-
-/// Add optional flags (peer, dev, optional, hasInstallScript).
-fn add_optional_flags(info: &mut Value, node: &super::graph::PackageNode) {
-    let manifest = &node.manifest;
-
+    // Flags
     if node.is_peer {
-        info["peer"] = json!(true);
+        pkg.peer = Some(true);
     }
-
     if node.is_dev {
-        info["dev"] = json!(true);
+        pkg.dev = Some(true);
     }
     if node.is_optional {
-        info["optional"] = json!(true);
-    }
-
-    if manifest.has_install_script() {
-        info["hasInstallScript"] = json!(true);
-    }
-}
-
-/// Add package fields like dependencies, bin, license, etc.
-fn add_package_fields(graph: &DependencyGraph, pkg_info: &mut Value, node_index: NodeIndex) {
-    let node = graph.get_node(node_index).expect("Node must exist");
-    let manifest = &node.manifest;
-
-    if let Some(bin) = manifest.bin() {
-        pkg_info["bin"] = bin;
-    }
-    if let Some(license) = manifest.license() {
-        pkg_info["license"] = json!(license);
-    }
-    if let Some(engines) = manifest.engines() {
-        pkg_info["engines"] = json!(engines);
-    }
-    if let Some(os) = manifest.os() {
-        pkg_info["os"] = os.clone();
-    }
-    if let Some(cpu) = manifest.cpu() {
-        pkg_info["cpu"] = cpu.clone();
-    }
-    if let Some(scripts) = manifest.scripts() {
-        pkg_info["scripts"] = json!(scripts);
+        pkg.optional = Some(true);
     }
     if manifest.has_install_script() {
-        pkg_info["hasInstallScript"] = json!(true);
+        pkg.has_install_script = Some(true);
     }
 
-    // Add dependency fields
-    add_dependency_fields(graph, pkg_info, node_index);
+    // Package metadata
+    pkg.bin = manifest.bin();
+    pkg.license = manifest.license().map(License::String);
+    pkg.engines = manifest.engines().cloned();
+    pkg.os = manifest.os().cloned();
+    pkg.cpu = manifest.cpu().cloned();
+    pkg.scripts = manifest.scripts().cloned();
+
+    // Dependencies from graph edges
+    collect_edge_deps(graph, node_index, &mut pkg);
+
+    pkg
 }
 
-/// Add dependency fields to package info.
-fn add_dependency_fields(graph: &DependencyGraph, pkg_info: &mut Value, node_index: NodeIndex) {
-    let dep_types = [
-        ("dependencies", EdgeType::Prod),
-        ("devDependencies", EdgeType::Dev),
-        ("peerDependencies", EdgeType::Peer),
-        ("optionalDependencies", EdgeType::Optional),
-    ];
-
-    for (field_name, edge_type) in dep_types {
-        let deps = collect_dependencies(graph, node_index, &edge_type);
-        if !deps.is_empty() {
-            pkg_info[field_name] = json!(deps);
-        }
-    }
-}
-
-/// Collect dependencies of a specific type.
-fn collect_dependencies(
-    graph: &DependencyGraph,
-    node_index: NodeIndex,
-    edge_type: &EdgeType,
-) -> HashMap<String, String> {
-    let mut deps = HashMap::new();
-
+/// Populate dependency fields on LockPackage from graph edges.
+fn collect_edge_deps(graph: &DependencyGraph, node_index: NodeIndex, pkg: &mut LockPackage) {
     for (_, dep_edge) in graph.get_dependency_edges(node_index) {
-        if &dep_edge.edge_type == edge_type {
-            deps.insert(dep_edge.name.clone(), dep_edge.spec.clone());
-        }
+        let map = match dep_edge.edge_type {
+            EdgeType::Prod => &mut pkg.dependencies,
+            EdgeType::Dev => &mut pkg.dev_dependencies,
+            EdgeType::Peer => &mut pkg.peer_dependencies,
+            EdgeType::Optional => &mut pkg.optional_dependencies,
+        };
+        map.get_or_insert_with(HashMap::new)
+            .insert(dep_edge.name.clone(), dep_edge.spec.clone());
     }
-
-    deps
 }
 
 /// Get relative path from root.
@@ -472,7 +394,6 @@ mod tests {
     use super::super::graph::PackageNode;
     use super::super::package_json::PackageJson;
     use super::*;
-    use serde_json::json;
     use std::path::PathBuf;
 
     #[test]
@@ -551,58 +472,58 @@ mod tests {
         assert_eq!(package_lock.packages.len(), 2);
     }
 
-    fn create_test_node(is_dev: bool, is_optional: bool, is_peer: bool) -> PackageNode {
-        let pkg = PackageJson::new("test", "1.0.0");
-        let mut node = PackageNode::from_package_json("test".to_string(), PathBuf::from("."), pkg);
-        node.is_dev = is_dev;
-        node.is_optional = is_optional;
-        node.is_peer = is_peer;
-        node
+    /// Helper: create a graph with a single non-root node, return its LockPackage.
+    fn lock_pkg_for_node(is_dev: bool, is_optional: bool, is_peer: bool) -> LockPackage {
+        use super::super::graph::DependencyGraph;
+
+        let root_pkg = PackageJson::new("root", "1.0.0");
+        let mut graph = DependencyGraph::from_package_json(PathBuf::from("/root"), root_pkg);
+
+        let child_pkg = PackageJson::new("test", "1.0.0");
+        let mut child =
+            PackageNode::from_package_json("test".to_string(), PathBuf::from("/root"), child_pkg);
+        child.is_dev = is_dev;
+        child.is_optional = is_optional;
+        child.is_peer = is_peer;
+        let child_idx = graph.add_node(child);
+        graph.add_physical_edge(graph.root_index, child_idx);
+
+        let (packages, _) = serialize_to_packages(&graph, &PathBuf::from("/root"));
+        packages
+            .get("node_modules/test")
+            .cloned()
+            .expect("child package must exist")
     }
 
     #[test]
-    fn test_add_optional_flags_dev_only() {
-        let node = create_test_node(true, false, false);
-        let mut info = json!({});
-        add_optional_flags(&mut info, &node);
-
-        assert_eq!(info["dev"], json!(true));
-        assert!(info.get("optional").is_none());
-        assert!(info.get("devOptional").is_none());
+    fn test_flags_dev_only() {
+        let pkg = lock_pkg_for_node(true, false, false);
+        assert_eq!(pkg.dev, Some(true));
+        assert!(pkg.optional.is_none());
+        assert!(pkg.dev_optional.is_none());
     }
 
     #[test]
-    fn test_add_optional_flags_optional_only() {
-        let node = create_test_node(false, true, false);
-        let mut info = json!({});
-        add_optional_flags(&mut info, &node);
-
-        assert!(info.get("dev").is_none());
-        assert_eq!(info["optional"], json!(true));
-        assert!(info.get("devOptional").is_none());
+    fn test_flags_optional_only() {
+        let pkg = lock_pkg_for_node(false, true, false);
+        assert!(pkg.dev.is_none());
+        assert_eq!(pkg.optional, Some(true));
+        assert!(pkg.dev_optional.is_none());
     }
 
     #[test]
-    fn test_add_optional_flags_dev_and_optional() {
-        // When both dev and optional are true, we output both flags separately
-        // (not devOptional, per npm spec for "optional dependency of a dev dependency")
-        let node = create_test_node(true, true, false);
-        let mut info = json!({});
-        add_optional_flags(&mut info, &node);
-
-        assert_eq!(info["dev"], json!(true));
-        assert_eq!(info["optional"], json!(true));
-        assert!(info.get("devOptional").is_none());
+    fn test_flags_dev_and_optional() {
+        let pkg = lock_pkg_for_node(true, true, false);
+        assert_eq!(pkg.dev, Some(true));
+        assert_eq!(pkg.optional, Some(true));
+        assert!(pkg.dev_optional.is_none());
     }
 
     #[test]
-    fn test_add_optional_flags_peer() {
-        let node = create_test_node(false, false, true);
-        let mut info = json!({});
-        add_optional_flags(&mut info, &node);
-
-        assert_eq!(info["peer"], json!(true));
-        assert!(info.get("dev").is_none());
-        assert!(info.get("optional").is_none());
+    fn test_flags_peer() {
+        let pkg = lock_pkg_for_node(false, false, true);
+        assert_eq!(pkg.peer, Some(true));
+        assert!(pkg.dev.is_none());
+        assert!(pkg.optional.is_none());
     }
 }

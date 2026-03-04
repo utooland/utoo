@@ -3,9 +3,10 @@
 use petgraph::Direction::{Incoming, Outgoing};
 use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
 use petgraph::visit::EdgeRef;
-use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+
+use std::sync::Arc;
 
 use super::manifest::{NodeManifest, VersionManifest};
 use super::node::{EdgeType, NodeType};
@@ -38,7 +39,11 @@ pub struct PackageNode {
 
 impl PackageNode {
     /// Create a new regular package node from VersionManifest.
-    pub fn from_version_manifest(name: String, path: PathBuf, manifest: VersionManifest) -> Self {
+    pub fn from_version_manifest(
+        name: String,
+        path: PathBuf,
+        manifest: Arc<VersionManifest>,
+    ) -> Self {
         let version = manifest.version.clone();
         Self {
             path,
@@ -338,9 +343,13 @@ impl DependencyGraph {
 
     /// Serialize graph to package-lock.json format.
     ///
+    /// Builds `LockPackage` structs directly — no intermediate `serde_json::Value`.
     /// Delegates to `package_lock::serialize_to_packages` for the actual implementation.
     #[inline]
-    pub fn serialize_to_packages(&self, root_path: &Path) -> (Value, i32) {
+    pub fn serialize_to_packages(
+        &self,
+        root_path: &Path,
+    ) -> (HashMap<String, super::package_lock::LockPackage>, i32) {
         super::package_lock::serialize_to_packages(self, root_path)
     }
 
@@ -585,12 +594,12 @@ mod tests {
         PackageJson::new(name, version)
     }
 
-    fn create_version_manifest(name: &str, version: &str) -> VersionManifest {
-        VersionManifest {
+    fn create_version_manifest(name: &str, version: &str) -> Arc<VersionManifest> {
+        Arc::new(VersionManifest {
             name: name.to_string(),
             version: version.to_string(),
             ..Default::default()
-        }
+        })
     }
 
     #[test]

@@ -409,6 +409,8 @@ pub struct VersionInfo {
     pub npm_user: Option<NpmUser>,
 }
 
+use std::sync::Arc;
+
 use super::package_json::PackageJson;
 
 /// Manifest for a node in the dependency graph.
@@ -420,8 +422,8 @@ use super::package_json::PackageJson;
 pub enum NodeManifest {
     /// Local package.json (root or workspace)
     Local(PackageJson),
-    /// Registry package manifest (resolved dependency)
-    Registry(VersionManifest),
+    /// Registry package manifest (resolved dependency, Arc-shared for cheap cloning)
+    Registry(Arc<VersionManifest>),
 }
 
 impl NodeManifest {
@@ -573,8 +575,8 @@ impl From<PackageJson> for NodeManifest {
     }
 }
 
-impl From<VersionManifest> for NodeManifest {
-    fn from(manifest: VersionManifest) -> Self {
+impl From<Arc<VersionManifest>> for NodeManifest {
+    fn from(manifest: Arc<VersionManifest>) -> Self {
         NodeManifest::Registry(manifest)
     }
 }

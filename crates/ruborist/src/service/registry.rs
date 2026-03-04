@@ -298,7 +298,7 @@ impl UnifiedRegistry {
         &self,
         name: &str,
         spec: &str,
-    ) -> Result<VersionManifest, RegistryError> {
+    ) -> Result<Arc<VersionManifest>, RegistryError> {
         // 1. Check memory cache using name@spec as key
         if let Some(manifest) = self.cache.get_version_manifest(name, spec) {
             tracing::debug!("Memory cache hit for version manifest: {}@{}", name, spec);
@@ -331,6 +331,8 @@ impl UnifiedRegistry {
         })
         .await
         .map_err(RegistryError)?;
+
+        let manifest = Arc::new(manifest);
 
         // 4. Cache in memory
         self.cache
@@ -367,7 +369,7 @@ impl RegistryClient for UnifiedRegistry {
             })
     }
 
-    fn cache_version_manifest(&self, name: &str, spec: &str, manifest: VersionManifest) {
+    fn cache_version_manifest(&self, name: &str, spec: &str, manifest: Arc<VersionManifest>) {
         self.cache
             .set_version_manifest(name.to_string(), spec.to_string(), manifest);
     }
@@ -390,7 +392,7 @@ impl RegistryClient for UnifiedRegistry {
         &self,
         name: &str,
         spec: &str,
-    ) -> Result<VersionManifest, Self::Error> {
+    ) -> Result<Arc<VersionManifest>, Self::Error> {
         // 1. Check memory cache first
         if let Some(manifest) = self.cache.get_version_manifest(name, spec) {
             tracing::debug!("Memory cache hit for version manifest: {}@{}", name, spec);
@@ -423,6 +425,8 @@ impl RegistryClient for UnifiedRegistry {
         })
         .await
         .map_err(RegistryError)?;
+
+        let manifest = Arc::new(manifest);
 
         // 4. Cache the result
         self.cache
@@ -489,7 +493,7 @@ impl RegistryClient for UnifiedRegistry {
             let version_manifest = full_manifest
                 .versions
                 .get(&resolved_version)
-                .cloned()
+                .map(|vm| Arc::new(vm.clone()))
                 .ok_or_else(|| {
                     RegistryError(anyhow!(
                         "Version {} not found in manifest for {}",
@@ -603,14 +607,14 @@ impl RegistryClient for UnifiedRegistry {
                     let version_manifest = full_manifest
                         .versions
                         .get(&resolved_version)
-                        .cloned()
+                        .map(|vm| Arc::new(vm.clone()))
                         .ok_or_else(|| {
-                        RegistryError(anyhow!(
-                            "Version {} not found in manifest for {}",
-                            resolved_version,
-                            fetch_name
-                        ))
-                    })?;
+                            RegistryError(anyhow!(
+                                "Version {} not found in manifest for {}",
+                                resolved_version,
+                                fetch_name
+                            ))
+                        })?;
 
                     (resolved_version, version_manifest)
                 }

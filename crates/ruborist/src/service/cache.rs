@@ -8,19 +8,49 @@
 //! # Architecture
 //!
 //! ```text
-//! +------------------+
-//! |   Memory Cache   |  <- Fastest, lost on restart
-//! +------------------+
-//!          |
-//!          v
-//! +------------------+
-//! |   Disk Cache     |  <- Persistent, ~/.utoo/cache/
-//! +------------------+
-//!          |
-//!          v
-//! +------------------+
-//! |  Project Cache   |  <- Per-project, .utoo-manifest.json
-//! +------------------+
+//!  PackageCache                    (entry point, delegates to tiers)
+//!  ├── memory: MemoryCache         tier 1 — in-process, lost on restart
+//!  └── cache_dir: Option<PathBuf>  tier 2 — persistent, ~/.utoo/cache/
+//!
+//!  ProjectCacheData                tier 3 — per-project .utoo-manifest.json
+//!  └── cache: HashMap<name, ProjectPackageCache>
+//!      ├── specs:     spec → version      ("^2.1" → "2.1.1")
+//!      └── manifests: version → VersionManifest  (serde, owned)
+//! ```
+//!
+//! # Memory Layout
+//!
+//! ```text
+//!  MemoryCache ─ Clone ─► (cheap: Arc ref-count)
+//!  │
+//!  └──► Arc<MemoryCacheInner>              single allocation
+//!       ├── RwLock<HashMap<FullManifest>>   full package metadata
+//!       ├── RwLock<HashMap<VersionsInfo>>   version lists + dist-tags
+//!       └── RwLock<HashMap<Arc<VersionManifest>>>
+//!                           │
+//!                           ▼
+//!                    Arc<VersionManifest>   value-level sharing
+//!                    ├── get → Arc clone    O(1) ref-count
+//!                    ├── set → Arc clone    O(1) ref-count
+//!                    └── used by PackageNode, ResolvedPackage, preload
+//!
+//!  Global singleton: GLOBAL_MEMORY_CACHE (LazyLock)
+//!  └── all UnifiedRegistry instances share the same cache
+//! ```
+//!
+//! # Lookup Flow
+//!
+//! ```text
+//!  resolve(name, spec)
+//!    │
+//!    ├─ 1. Memory hit?  ──yes──► Arc<VersionManifest> clone → done
+//!    │
+//!    ├─ 2. Disk hit?    ──yes──► deserialize → Arc::new() → store memory → done
+//!    │
+//!    └─ 3. Network      ──────► fetch JSON → Arc::new() → store memory + disk → done
+//!
+//!  Project cache is loaded at startup (cold) and saved at end (cold).
+//!  It pre-populates memory cache to skip network on subsequent runs.
 //! ```
 
 use std::collections::HashMap;
@@ -55,87 +85,90 @@ use std::sync::{Arc, LazyLock};
 
 use parking_lot::RwLock;
 
-/// Thread-safe in-memory cache using Arc<parking_lot::RwLock>.
-///
-/// Supports multi-threaded access for both native CLI and WASM environments.
-/// Uses parking_lot for better performance and simpler API (no poison).
+/// Thread-safe in-memory cache using a single `Arc` wrapper with
+/// per-collection `parking_lot::RwLock` for fine-grained concurrency.
 #[derive(Clone)]
-pub struct MemoryCache {
-    full_manifests: Arc<RwLock<HashMap<String, FullManifest>>>,
-    versions_info: Arc<RwLock<HashMap<String, VersionsInfo>>>,
-    version_manifests: Arc<RwLock<HashMap<String, VersionManifest>>>,
+pub struct MemoryCache(Arc<MemoryCacheInner>);
+
+struct MemoryCacheInner {
+    full_manifests: RwLock<HashMap<String, FullManifest>>,
+    versions_info: RwLock<HashMap<String, VersionsInfo>>,
+    version_manifests: RwLock<HashMap<String, Arc<VersionManifest>>>,
 }
 
 /// Global singleton for memory cache.
 /// This ensures all UnifiedRegistry instances share the same cache.
-static GLOBAL_MEMORY_CACHE: LazyLock<MemoryCache> = LazyLock::new(|| MemoryCache {
-    full_manifests: Arc::new(RwLock::new(HashMap::new())),
-    versions_info: Arc::new(RwLock::new(HashMap::new())),
-    version_manifests: Arc::new(RwLock::new(HashMap::new())),
+static GLOBAL_MEMORY_CACHE: LazyLock<MemoryCache> = LazyLock::new(|| {
+    MemoryCache(Arc::new(MemoryCacheInner {
+        full_manifests: RwLock::new(HashMap::new()),
+        versions_info: RwLock::new(HashMap::new()),
+        version_manifests: RwLock::new(HashMap::new()),
+    }))
 });
 
 impl Default for MemoryCache {
     fn default() -> Self {
-        // Return the global singleton
         GLOBAL_MEMORY_CACHE.clone()
     }
 }
 
 impl MemoryCache {
     /// Get the global memory cache singleton.
-    ///
-    /// All `MemoryCache` instances share the same underlying data.
-    /// Use `Default::default()` as an alternative.
     pub fn global() -> Self {
         GLOBAL_MEMORY_CACHE.clone()
     }
 
     // Full manifests
     pub fn get_full_manifest(&self, name: &str) -> Option<FullManifest> {
-        self.full_manifests.read().get(name).cloned()
+        self.0.full_manifests.read().get(name).cloned()
     }
 
     pub fn set_full_manifest(&self, name: String, manifest: FullManifest) {
-        self.full_manifests.write().insert(name, manifest);
+        self.0.full_manifests.write().insert(name, manifest);
     }
 
     // Versions info
     pub fn get_versions(&self, name: &str) -> Option<VersionsInfo> {
-        self.versions_info.read().get(name).cloned()
+        self.0.versions_info.read().get(name).cloned()
     }
 
     pub fn set_versions(&self, name: String, info: VersionsInfo) {
-        self.versions_info.write().insert(name, info);
+        self.0.versions_info.write().insert(name, info);
     }
 
-    // Version manifests
-    pub fn get_version_manifest(&self, name: &str, version: &str) -> Option<VersionManifest> {
+    // Version manifests (Arc-wrapped for cheap cloning)
+    pub fn get_version_manifest(&self, name: &str, version: &str) -> Option<Arc<VersionManifest>> {
         let key = format!("{name}@{version}");
-        self.version_manifests.read().get(&key).cloned()
+        self.0.version_manifests.read().get(&key).cloned()
     }
 
-    pub fn set_version_manifest(&self, name: String, version: String, manifest: VersionManifest) {
+    pub fn set_version_manifest(
+        &self,
+        name: String,
+        version: String,
+        manifest: Arc<VersionManifest>,
+    ) {
         let key = format!("{name}@{version}");
-        self.version_manifests.write().insert(key, manifest);
+        self.0.version_manifests.write().insert(key, manifest);
     }
 
     // Stats
     pub fn full_manifest_count(&self) -> usize {
-        self.full_manifests.read().len()
+        self.0.full_manifests.read().len()
     }
 
     pub fn versions_count(&self) -> usize {
-        self.versions_info.read().len()
+        self.0.versions_info.read().len()
     }
 
     pub fn version_manifest_count(&self) -> usize {
-        self.version_manifests.read().len()
+        self.0.version_manifests.read().len()
     }
 
     /// Export all version manifests for persistence.
-    /// Returns iterator of (key, manifest) pairs where key is "name@version".
-    pub fn export_version_manifests(&self) -> Vec<(String, VersionManifest)> {
-        self.version_manifests
+    pub fn export_version_manifests(&self) -> Vec<(String, Arc<VersionManifest>)> {
+        self.0
+            .version_manifests
             .read()
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
@@ -234,7 +267,7 @@ impl PackageCache {
     }
 
     /// Get version manifest from memory cache.
-    pub fn get_version_manifest(&self, name: &str, version: &str) -> Option<VersionManifest> {
+    pub fn get_version_manifest(&self, name: &str, version: &str) -> Option<Arc<VersionManifest>> {
         let result = self.memory.get_version_manifest(name, version);
         if result.is_some() {
             tracing::debug!("Memory cache hit for version manifest: {name}@{version}");
@@ -243,7 +276,12 @@ impl PackageCache {
     }
 
     /// Set version manifest in memory cache.
-    pub fn set_version_manifest(&self, name: String, version: String, manifest: VersionManifest) {
+    pub fn set_version_manifest(
+        &self,
+        name: String,
+        version: String,
+        manifest: Arc<VersionManifest>,
+    ) {
         tracing::debug!("Caching version manifest in memory: {name}@{version}");
         self.memory.set_version_manifest(name, version, manifest);
     }
@@ -305,7 +343,7 @@ impl PackageCache {
         &self,
         name: &str,
         version: &str,
-    ) -> Option<VersionManifest> {
+    ) -> Option<Arc<VersionManifest>> {
         let cache_dir = self.cache_dir.as_ref()?;
         let path = get_manifest_cache_path(cache_dir, name, version);
 
@@ -316,6 +354,7 @@ impl PackageCache {
         match super::fs::read_json::<VersionManifest>(&path).await {
             Ok(manifest) => {
                 tracing::debug!("Disk cache hit for manifest: {name}@{version}");
+                let manifest = Arc::new(manifest);
                 // Also cache in memory
                 self.memory.set_version_manifest(
                     name.to_string(),
@@ -365,7 +404,7 @@ impl PackageCache {
 
     /// Export all version manifests for persistence.
     /// Returns iterator of (key, manifest) pairs where key is "name@version".
-    pub fn export_version_manifests(&self) -> Vec<(String, VersionManifest)> {
+    pub fn export_version_manifests(&self) -> Vec<(String, Arc<VersionManifest>)> {
         self.memory.export_version_manifests()
     }
 
@@ -443,20 +482,20 @@ impl ProjectCache {
             .cloned()
     }
 
-    pub fn get_manifest(&self, name: &str, version: &str) -> Option<VersionManifest> {
+    pub fn get_manifest(&self, name: &str, version: &str) -> Option<Arc<VersionManifest>> {
         self.data
             .read()
             .cache
             .get(name)
             .and_then(|pkg| pkg.manifests.get(version))
-            .cloned()
+            .map(|m| Arc::new(m.clone()))
     }
 
-    pub fn set_resolved(&self, name: &str, spec: &str, version: &str, manifest: VersionManifest) {
+    pub fn set_resolved(&self, name: &str, spec: &str, version: &str, manifest: &VersionManifest) {
         let mut data = self.data.write();
         let pkg = data.cache.entry(name.to_string()).or_default();
         pkg.specs.insert(spec.to_string(), version.to_string());
-        pkg.manifests.insert(version.to_string(), manifest);
+        pkg.manifests.insert(version.to_string(), manifest.clone());
     }
 
     pub fn export(&self) -> ProjectCacheData {
@@ -562,7 +601,7 @@ mod tests {
             ..Default::default()
         };
 
-        cache.set_version_manifest("test".to_string(), "1.0.0".to_string(), manifest.clone());
+        cache.set_version_manifest("test".to_string(), "1.0.0".to_string(), Arc::new(manifest));
 
         let retrieved = cache.get_version_manifest("test", "1.0.0").unwrap();
         assert_eq!(retrieved.name, "test");

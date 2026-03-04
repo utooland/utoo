@@ -4,6 +4,7 @@
 //! its transitive dependencies are immediately added to the queue.
 
 use std::collections::{HashSet, VecDeque};
+use std::sync::Arc;
 
 use futures::stream::{FuturesUnordered, StreamExt};
 
@@ -110,7 +111,7 @@ pub async fn preload_manifests<R, E, F>(
 where
     R: RegistryClient,
     E: EventReceiver,
-    F: FnMut(&str, VersionManifest),
+    F: FnMut(&str, Arc<VersionManifest>),
 {
     let mut stats = PreloadStats::default();
     let mut processed: HashSet<String> = HashSet::new();
@@ -193,7 +194,7 @@ where
                 });
 
                 // Send PackageResolved event for pipeline downloading
-                receiver.on_event(BuildEvent::PackageResolved((&resolved.manifest).into()));
+                receiver.on_event(BuildEvent::PackageResolved((&*resolved.manifest).into()));
 
                 pending.extend(extract_transitive_deps(&resolved.manifest, &config));
                 on_manifest(&name, resolved.manifest);
@@ -266,7 +267,7 @@ mod tests {
         let mut registry = MockRegistryClient::new();
         registry.add_package("lodash", "4.17.21", manifest("lodash", "4.17.21"));
 
-        let cache: Rc<RefCell<HashMap<String, VersionManifest>>> = Default::default();
+        let cache: Rc<RefCell<HashMap<String, Arc<VersionManifest>>>> = Default::default();
         let cache_clone = Rc::clone(&cache);
 
         let stats = preload_manifests(
@@ -294,7 +295,7 @@ mod tests {
         );
         registry.add_package("b", "1.0.0", manifest("b", "1.0.0"));
 
-        let cache: Rc<RefCell<HashMap<String, VersionManifest>>> = Default::default();
+        let cache: Rc<RefCell<HashMap<String, Arc<VersionManifest>>>> = Default::default();
         let cache_clone = Rc::clone(&cache);
 
         let stats = preload_manifests(
@@ -316,7 +317,7 @@ mod tests {
     #[tokio::test]
     async fn test_preload_missing() {
         let registry = MockRegistryClient::new();
-        let cache: Rc<RefCell<HashMap<String, VersionManifest>>> = Default::default();
+        let cache: Rc<RefCell<HashMap<String, Arc<VersionManifest>>>> = Default::default();
         let cache_clone = Rc::clone(&cache);
 
         let stats = preload_manifests(

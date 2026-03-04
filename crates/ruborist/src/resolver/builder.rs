@@ -19,7 +19,6 @@
 //! while keeping the graph building logic simple and deterministic.
 
 use petgraph::graph::NodeIndex;
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
@@ -387,7 +386,7 @@ pub async fn process_dependency<R: RegistryClient>(
             add_edges_from(
                 graph,
                 new_index,
-                &resolved.manifest,
+                &*resolved.manifest,
                 legacy_peer_deps,
                 false,
             );
@@ -601,7 +600,7 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
                                     .get_node(node_index)
                                     .map(|parent| parent.path.as_path());
                                 receiver.on_event(BuildEvent::PackagePlaced {
-                                    package: manifest.into(),
+                                    package: manifest.as_ref().into(),
                                     path: &node.path,
                                     parent_path,
                                 });
@@ -642,7 +641,7 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
 // High-level API
 // ============================================================================
 
-use crate::model::package_lock::{LockPackage, PackageLock};
+use crate::model::package_lock::PackageLock;
 use std::path::Path;
 
 /// Build package-lock.json from a package.json.
@@ -699,17 +698,15 @@ fn graph_to_package_lock(
     pkg: &PackageJson,
     root_path: &Path,
 ) -> PackageLock {
-    let (packages_value, _total) = graph.serialize_to_packages(root_path);
-
-    // Convert Value to HashMap<String, LockPackage>
-    let packages: HashMap<String, LockPackage> =
-        serde_json::from_value(packages_value).unwrap_or_default();
-
+    let (packages, _total) = graph.serialize_to_packages(root_path);
     PackageLock::new(&pkg.name, &pkg.version, packages)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
     use super::*;
     use crate::model::manifest::VersionManifest;
     use crate::traits::registry::mock::MockRegistryClient;
@@ -844,7 +841,7 @@ mod tests {
         let source = PackageNode::from_version_manifest(
             "source".to_string(),
             PathBuf::from("node_modules/source"),
-            create_version_manifest("source", "1.0.0"),
+            Arc::new(create_version_manifest("source", "1.0.0")),
         );
         let source_index = graph.add_node(source);
 
@@ -852,7 +849,7 @@ mod tests {
         let target = PackageNode::from_version_manifest(
             "target".to_string(),
             PathBuf::from("node_modules/target"),
-            create_version_manifest("target", "1.0.0"),
+            Arc::new(create_version_manifest("target", "1.0.0")),
         );
         let target_index = graph.add_node(target);
 

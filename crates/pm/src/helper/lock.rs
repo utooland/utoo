@@ -11,7 +11,7 @@ use crate::util::save_type::{PackageAction, SaveType};
 use crate::util::user_config::{get_legacy_peer_deps, set_package_json};
 use crate::util::{cloner::clone_package, downloader::download_to_cache};
 use utoo_ruborist::lock::{LockPackage, PackageLock};
-use utoo_ruborist::manifest::{DepsView, PackageJson};
+use utoo_ruborist::manifest::{DepsView, EnginesView, PackageJson};
 use utoo_ruborist::registry::resolve_package;
 use utoo_ruborist::util::parse_package_spec;
 
@@ -329,7 +329,7 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
         .and_then(|p| p.as_object())
         .ok_or_else(|| anyhow!("Invalid package-lock.json format"))?;
 
-    // prepare packages to check: (relative_path, deps, engines)
+    // prepare packages to check: (relative_path, deps)
     let mut pkgs_to_check: Vec<(String, DepsView)> = vec![("".to_string(), pkg)];
 
     // populate all workspaces (load only the deps view for each)
@@ -346,12 +346,11 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
 
     let legacy_peer_deps = get_legacy_peer_deps().await;
 
-    // new workspace not found
-    for (path, pkg) in pkgs_to_check {
-        let lock = match packages.get(&path) {
+    for (path, pkg) in &pkgs_to_check {
+        let lock = match packages.get(path.as_str()) {
             Some(lock) => lock,
             None => {
-                let name = if path.is_empty() { "root" } else { &path };
+                let name = if path.is_empty() { "root" } else { path };
                 tracing::warn!("package-lock.json is outdated, new workspace {name} not found");
                 return Ok(true);
             }
@@ -359,19 +358,19 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
 
         // check dependencies whether changed
         if !deps_map_equals_lock(&pkg.dependencies, lock.get("dependencies")) {
-            let name = if path.is_empty() { "root" } else { &path };
+            let name = if path.is_empty() { "root" } else { path };
             tracing::warn!("package-lock.json is outdated, {name} dependencies changed");
             return Ok(true);
         }
 
         if !deps_map_equals_lock(&pkg.optional_dependencies, lock.get("optionalDependencies")) {
-            let name = if path.is_empty() { "root" } else { &path };
+            let name = if path.is_empty() { "root" } else { path };
             tracing::warn!("package-lock.json is outdated, {name} optionalDependencies changed");
             return Ok(true);
         }
 
         if !deps_map_equals_lock(&pkg.dev_dependencies, lock.get("devDependencies")) {
-            let name = if path.is_empty() { "root" } else { &path };
+            let name = if path.is_empty() { "root" } else { path };
             tracing::warn!("package-lock.json is outdated, {name} devDependencies changed");
             return Ok(true);
         }
@@ -379,36 +378,38 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
         if !legacy_peer_deps
             && !deps_map_equals_lock(&pkg.peer_dependencies, lock.get("peerDependencies"))
         {
-            let name = if path.is_empty() { "root" } else { &path };
+            let name = if path.is_empty() { "root" } else { path };
             tracing::warn!("package-lock.json is outdated, {name} peerDependencies changed");
             return Ok(true);
         }
+    }
 
-        // only check engines for root workspace
-        if path.is_empty() {
-            // Normalize: None/empty -> None
-            let pkg_engines = pkg.engines.as_ref().filter(|m| !m.is_empty());
-            let lock_engines = lock
-                .get("engines")
-                .filter(|v| !v.is_null())
-                .and_then(|v| v.as_object())
-                .filter(|obj| !obj.is_empty());
+    // engines: root package only
+    let root_engines: EnginesView = load_package_json(root_path).await?;
+    let root_lock = packages
+        .get("")
+        .ok_or_else(|| anyhow!("Missing root in package-lock.json"))?;
 
-            let engines_match = match (pkg_engines, lock_engines) {
-                (None, None) => true,
-                (Some(p), Some(l)) => {
-                    p.len() == l.len()
-                        && p.iter()
-                            .all(|(k, v)| l.get(k).and_then(|x| x.as_str()) == Some(v.as_str()))
-                }
-                _ => false,
-            };
+    let pkg_engines = root_engines.engines.as_ref().filter(|m| !m.is_empty());
+    let lock_engines = root_lock
+        .get("engines")
+        .filter(|v| !v.is_null())
+        .and_then(|v| v.as_object())
+        .filter(|obj| !obj.is_empty());
 
-            if !engines_match {
-                tracing::warn!("package-lock.json is outdated, engines changed");
-                return Ok(true);
-            }
+    let engines_match = match (pkg_engines, lock_engines) {
+        (None, None) => true,
+        (Some(p), Some(l)) => {
+            p.len() == l.len()
+                && p.iter()
+                    .all(|(k, v)| l.get(k).and_then(|x| x.as_str()) == Some(v.as_str()))
         }
+        _ => false,
+    };
+
+    if !engines_match {
+        tracing::warn!("package-lock.json is outdated, engines changed");
+        return Ok(true);
     }
 
     Ok(false)

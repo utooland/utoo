@@ -179,7 +179,10 @@ impl PackageInstallView {
     }
 }
 
-/// View for lockfile freshness check: deps + engines.
+/// View for lockfile freshness check: dependency maps only.
+///
+/// Does not include `engines` — that is root-only and loaded separately
+/// via [`EnginesView`].
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DepsView {
@@ -191,6 +194,14 @@ pub struct DepsView {
     pub peer_dependencies: HashMap<String, String>,
     #[serde(default)]
     pub optional_dependencies: HashMap<String, String>,
+}
+
+/// View for root-only engine requirements.
+///
+/// Used alongside [`DepsView`] for lockfile freshness checks — engines
+/// are only relevant for the root package, not workspace members.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct EnginesView {
     #[serde(default, deserialize_with = "deserialize_or_default")]
     pub engines: Option<HashMap<String, String>>,
 }
