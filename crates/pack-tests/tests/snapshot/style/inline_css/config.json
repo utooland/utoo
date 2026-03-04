@@ -1,0 +1,14 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "sourceMaps": false,
+    "styles": {
+      "inlineCss": {}
+    }
+  }
+}
