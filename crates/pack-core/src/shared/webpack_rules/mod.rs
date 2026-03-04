@@ -17,15 +17,11 @@ use turbopack_core::{
 use crate::{
     config::Config,
     embed_js::embed_file_path,
-    shared::webpack_rules::{
-        less::get_less_loader_rules, sass::get_sass_loader_rules,
-        style_loader::get_style_loader_rules,
-    },
+    shared::webpack_rules::{less::get_less_loader_rules, sass::get_sass_loader_rules},
 };
 
 pub(crate) mod less;
 pub(crate) mod sass;
-pub(crate) mod style_loader;
 
 #[derive(
     Copy,
@@ -143,15 +139,13 @@ pub async fn webpack_loader_options(
 ) -> Result<Vc<OptionWebpackLoadersOptions>> {
     let mut rules = config.webpack_rules(project_path.clone()).owned().await?;
 
-    let (mut sass_rules, mut less_rules, mut style_loader_rules) = futures::try_join!(
+    let (mut sass_rules, mut less_rules) = futures::try_join!(
         get_sass_loader_rules(config.sass_config()),
         get_less_loader_rules(config.less_config()),
-        get_style_loader_rules(config.inline_css()),
     )?;
 
     rules.append(&mut sass_rules);
     rules.append(&mut less_rules);
-    rules.append(&mut style_loader_rules);
 
     if rules.is_empty() {
         return Ok(Vc::cell(None));
