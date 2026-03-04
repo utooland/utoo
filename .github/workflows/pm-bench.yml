@@ -56,6 +56,15 @@ jobs:
         with:
           shared-key: pm-bench-${{ matrix.os }}
 
+      - name: Install baseline utoo from npm
+        run: |
+          npm install -g utoo
+          BASELINE_PATH=$(which utoo)
+          cp "$BASELINE_PATH" /tmp/utoo-baseline
+          chmod +x /tmp/utoo-baseline
+          echo "Baseline utoo version: $(/tmp/utoo-baseline --version)"
+          echo "UTOO_BASELINE_BIN=/tmp/utoo-baseline" >> $GITHUB_ENV
+
       - name: Build utoo-pm
         run: cargo build --release --bin utoo -p utoo-pm
 

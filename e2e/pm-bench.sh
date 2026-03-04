@@ -19,9 +19,24 @@ PM_LIST=${2:-utoo,bun}
 # Parse PM list into array
 IFS=',' read -ra PACKAGE_MANAGERS <<< "$PM_LIST"
 
-# Check for required commands
+# If UTOO_BASELINE_BIN is set and executable, insert utoo-baseline before utoo
+if [[ -n "$UTOO_BASELINE_BIN" && -x "$UTOO_BASELINE_BIN" ]]; then
+  NEW_PMS=()
+  for pm in "${PACKAGE_MANAGERS[@]}"; do
+    if [[ "$pm" == "utoo" ]]; then
+      NEW_PMS+=("utoo-baseline")
+    fi
+    NEW_PMS+=("$pm")
+  done
+  PACKAGE_MANAGERS=("${NEW_PMS[@]}")
+fi
+
+# Check for required commands (skip utoo-baseline — it's a path, not in $PATH)
 REQUIRED_CMDS=(git node hyperfine /usr/bin/time)
 for pm in "${PACKAGE_MANAGERS[@]}"; do
+  if [[ "$pm" == "utoo-baseline" ]]; then
+    continue
+  fi
   REQUIRED_CMDS+=("$pm")
 done
 
@@ -81,7 +96,7 @@ cd "$PROJECT_DIR" && git clean -dfx
 
 if [ "$COLD" = "--cold" ]; then
   case "$PM" in
-    utoo) rm -rf "$UTOO_CACHE_DIR" ;;
+    utoo|utoo-baseline) rm -rf "$UTOO_CACHE_DIR" ;;
     yarn) yarn cache clean 2>/dev/null || rm -rf ~/.yarn/cache "$(yarn cache dir 2>/dev/null)" ;;
     pnpm) pnpm store prune 2>/dev/null || rm -rf "$PNPM_STORE_DIR" ;;
     bun)  rm -rf "$BUN_INSTALL_DIR"; bun pm cache rm 2>/dev/null || true ;;
@@ -214,6 +229,9 @@ get_install_cmd() {
   case $pm in
     utoo)
       echo "utoo install --ignore-scripts --registry=$registry"
+      ;;
+    utoo-baseline)
+      echo "$UTOO_BASELINE_BIN install --ignore-scripts --registry=$registry"
       ;;
     yarn)
       echo "yarn install --ignore-scripts --registry $registry"
