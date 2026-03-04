@@ -11,7 +11,6 @@ permissions:
 
 jobs:
   build:
-    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '(wasm)')) || (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(wasm)'))
     name: utooweb-ci-build-wasm
     runs-on: ubuntu-latest
     steps:

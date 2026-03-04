@@ -60,7 +60,17 @@ impl std::fmt::Display for FetchError {
 ///   resets or pooled connection failures, so we retry these too
 /// - Everything else (e.g. `is_builder()`, `is_decode()`): permanent
 fn classify_reqwest_error(e: reqwest::Error) -> FetchError {
-    if e.is_timeout() || e.is_connect() || e.is_body() || e.is_request() {
+    let is_retryable = e.is_timeout() || e.is_body() || e.is_request() || {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            e.is_connect()
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            false
+        }
+    };
+    if is_retryable {
         FetchError::Retryable(anyhow!(e))
     } else {
         FetchError::Permanent(anyhow!(e))
