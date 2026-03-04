@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use glob::glob;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use utoo_ruborist::util::PackageNameStr;
 
 use crate::helper::lock::{Package, path_to_pkg_name};
 use crate::helper::workspace;
@@ -80,7 +81,7 @@ async fn remove_stale_entries(node_modules: &Path) -> Result<()> {
 
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if name.starts_with('@') {
+        if name.is_scoped() {
             remove_scoped_symlinks(&path).await?;
         } else if is_legacy_npminstall(&name) {
             tracing::debug!("Removing legacy package: {}", path.display());

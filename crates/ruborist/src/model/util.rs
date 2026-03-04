@@ -33,6 +33,18 @@ pub async fn read_package_json(dir: &Path) -> Result<PackageJson> {
     simd_json::serde::from_slice(&mut bytes).context(format!("Failed to parse {}", path.display()))
 }
 
+/// Extension trait for package name strings.
+pub trait PackageNameStr {
+    /// Returns `true` if this is a scoped package name (e.g. `@babel/parser`).
+    fn is_scoped(&self) -> bool;
+}
+
+impl PackageNameStr for str {
+    fn is_scoped(&self) -> bool {
+        self.starts_with('@')
+    }
+}
+
 /// Parse a package spec string into (name, version_spec).
 ///
 /// # Examples

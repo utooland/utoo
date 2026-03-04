@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use crate::helper::fuzzy_select;
-use crate::helper::package::parse_package_name;
 use crate::helper::workspace::{find_workspace_path, update_cwd_to_project};
 use crate::model::package::PackageInfo;
 use crate::service::script::ScriptService;
@@ -81,8 +80,6 @@ pub async fn run_script(
         get_or_load_package_json(&updated_cwd).await?
     };
 
-    let (_scope, name, fullname) = parse_package_name(&pkg.name);
-
     let package = PackageInfo {
         path: if let Some(workspace_name) = workspace {
             find_workspace_path(&updated_cwd, workspace_name)
@@ -94,8 +91,7 @@ pub async fn run_script(
         bin_files: Default::default(),
         scripts: pkg.scripts_or_empty().clone(),
         lifecycle_scripts: Default::default(),
-        fullname,
-        name,
+        name: pkg.name.clone(),
     };
 
     if package.scripts.is_empty() {

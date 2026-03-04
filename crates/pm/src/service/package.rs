@@ -1,4 +1,3 @@
-use crate::helper::package::parse_package_name;
 use crate::model::package::{LifecycleScripts, PackageInfo};
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
 use anyhow::{Context, Result};
@@ -98,8 +97,6 @@ impl PackageService {
                 continue;
             }
 
-            // Parse package name and create PackageInfo without reading package.json
-            let (_scope, name, fullname) = parse_package_name(path);
             let package_path = PathBuf::from(format!("{}/{}", root_path.display(), path));
 
             // Skip if package directory doesn't exist (e.g., omitted by --production/--omit)
@@ -126,8 +123,7 @@ impl PackageService {
                 bin_files,
                 scripts: Default::default(),
                 lifecycle_scripts,
-                name,
-                fullname,
+                name: package_name,
             };
 
             packages.push((package_info, is_optional));
@@ -247,21 +243,21 @@ impl PackageService {
                     let script = script.clone();
                     let is_optional = *is_optional;
                     async move {
-                        log_progress(&format!("{} {}", package.fullname, script_name));
+                        log_progress(&format!("{} {}", package.name, script_name));
                         let start = std::time::Instant::now();
                         let result = ScriptService::execute_script(&package, script_name, false)
                             .await
                             .with_context(|| {
                                 format!(
                                     "Failed to execute {} script for {} (command: {})",
-                                    script_name, package.fullname, script
+                                    script_name, package.name, script
                                 )
                             });
                         let elapsed = start.elapsed();
                         tracing::debug!(
                             "[{:.2}s] {} {} completed (path: {}, script: {})",
                             elapsed.as_secs_f64(),
-                            package.fullname,
+                            package.name,
                             script_name,
                             package.path.display(),
                             script
@@ -301,7 +297,7 @@ impl PackageService {
     async fn execute_binary_linking(queue: &[(Rc<PackageInfo>, bool)]) -> Result<()> {
         for (package, _is_optional) in queue {
             if !package.bin_files.is_empty() {
-                tracing::debug!("Linking binary files for {}", package.fullname);
+                tracing::debug!("Linking binary files for {}", package.name);
                 for (bin_name, relative_path) in &package.bin_files {
                     let target_path = package.path.join(relative_path);
                     if !crate::fs::try_exists(&target_path).await? {
@@ -312,10 +308,9 @@ impl PackageService {
                         continue;
                     }
 
-                    let bin_dir = package.get_bin_dir().context(format!(
-                        "Failed to get bin directory for {}",
-                        package.fullname
-                    ))?;
+                    let bin_dir = package
+                        .get_bin_dir()
+                        .context(format!("Failed to get bin directory for {}", package.name))?;
                     let link_path = bin_dir.join(bin_name);
 
                     ScriptService::ensure_executable(&target_path)
@@ -323,7 +318,7 @@ impl PackageService {
                         .with_context(|| {
                             format!(
                                 "Failed to ensure binary is executable for {} (path: {})",
-                                package.fullname,
+                                package.name,
                                 target_path.display()
                             )
                         })?;
@@ -332,12 +327,12 @@ impl PackageService {
                         .await
                         .context(format!(
                             "Failed to create symbolic link for {} (from: {} to: {})",
-                            package.fullname,
+                            package.name,
                             target_path.display(),
                             link_path.display()
                         ))?;
                 }
-                tracing::debug!("Linking binary files for {} successfully", package.fullname);
+                tracing::debug!("Linking binary files for {} successfully", package.name);
             }
         }
         Ok(())
@@ -701,7 +696,6 @@ mod tests {
             scripts: Default::default(),
             lifecycle_scripts: LifecycleScripts::default(),
             name: "test-bin-missing".to_string(),
-            fullname: "test-bin-missing".to_string(),
         };
 
         // Prepare queues: only bin linking queue has this package
@@ -822,7 +816,7 @@ mod tests {
             assert!(
                 !package_info.bin_files.is_empty(),
                 "Package {} should have bin_files in ignore_scripts mode",
-                package_info.fullname
+                package_info.name
             );
         }
     }
@@ -897,7 +891,7 @@ mod tests {
 
         // Should only collect the cross-platform package (win-only filtered out by platform check)
         assert_eq!(packages_collected.len(), 1);
-        assert_eq!(packages_collected[0].0.fullname, "cross-platform");
+        assert_eq!(packages_collected[0].0.name, "cross-platform");
     }
 
     #[tokio::test]
@@ -983,7 +977,7 @@ mod tests {
 
         // Verify is_optional flags are correctly set
         for (pkg_info, is_optional) in &packages_collected {
-            match pkg_info.fullname.as_str() {
+            match pkg_info.name.as_str() {
                 "regular-pkg" => {
                     assert!(!is_optional, "regular-pkg should not be optional");
                 }
@@ -993,7 +987,7 @@ mod tests {
                 "dev-optional-pkg" => {
                     assert!(is_optional, "dev-optional-pkg should be optional");
                 }
-                _ => panic!("Unexpected package: {}", pkg_info.fullname),
+                _ => panic!("Unexpected package: {}", pkg_info.name),
             }
         }
     }
@@ -1031,7 +1025,6 @@ mod tests {
                 ..Default::default()
             },
             name: "test-optional-fail".to_string(),
-            fullname: "test-optional-fail".to_string(),
         };
 
         // Test with is_optional = true: should NOT return error

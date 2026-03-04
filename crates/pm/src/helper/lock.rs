@@ -13,6 +13,7 @@ use crate::util::{cloner::clone_package, downloader::download_to_cache};
 use utoo_ruborist::lock::{LockPackage, PackageLock};
 use utoo_ruborist::manifest::{DepsView, EnginesView, PackageJson};
 use utoo_ruborist::registry::resolve_package;
+use utoo_ruborist::util::PackageNameStr;
 use utoo_ruborist::util::parse_package_spec;
 
 use crate::fs;
@@ -307,7 +308,7 @@ pub fn path_to_pkg_name(path_str: &str) -> Option<&str> {
         let pkg_name = &path_str[idx + "node_modules/".len()..];
         let parts: Vec<&str> = pkg_name.split('/').collect();
         // Only allow ora or @scope/ora, skip @pkg/name/path/custom/package.json
-        if parts.len() > 2 || (parts.len() == 2 && !parts[0].starts_with('@')) {
+        if parts.len() > 2 || (parts.len() == 2 && !parts[0].is_scoped()) {
             return None;
         }
         Some(pkg_name)

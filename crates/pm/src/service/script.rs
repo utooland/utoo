@@ -117,7 +117,7 @@ impl ScriptService {
                 tracing::debug!(
                     "Injecting {} binary mirror envs for {}",
                     envs.len(),
-                    package.fullname
+                    package.name
                 );
                 for (key, value) in envs {
                     if let Some(value_str) = value.as_str() {
@@ -430,7 +430,6 @@ mod tests {
             bin_files: Default::default(),
             scripts: Default::default(),
             lifecycle_scripts: LifecycleScripts::default(),
-            fullname: "test-package".to_string(),
             name: "test-package".to_string(),
         };
 
@@ -686,7 +685,6 @@ mod tests {
             bin_files: Default::default(),
             scripts: Default::default(),
             lifecycle_scripts: LifecycleScripts::default(),
-            fullname: "test-package".to_string(),
             name: "test-package".to_string(),
         };
         assert!(ScriptService::is_node_gyp_pkg(&package));

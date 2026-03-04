@@ -128,8 +128,7 @@ pub struct PackageInfo {
     pub bin_files: Vec<(String, String)>, // (bin_name, relative_path)
     pub scripts: HashMap<String, String>,
     pub lifecycle_scripts: LifecycleScripts,
-    pub fullname: String, // exp "@babel/parser"
-    pub name: String,     // exp "parser" or "@babel/parser"
+    pub name: String, // Full scoped name, e.g. "@babel/parser"
 }
 
 impl PackageInfo {
@@ -174,7 +173,6 @@ impl PackageInfo {
             lifecycle_scripts: LifecycleScripts::from_scripts(pkg.scripts_or_empty()),
             scripts: pkg.scripts_or_empty().clone(),
             name: pkg.name.clone(),
-            fullname: pkg.name.clone(),
         })
     }
 
@@ -189,7 +187,6 @@ impl PackageInfo {
             lifecycle_scripts: LifecycleScripts::from_scripts(&pkg.scripts),
             scripts: pkg.scripts.clone(),
             name: pkg.name.clone(),
-            fullname: pkg.name.clone(),
         })
     }
 
@@ -273,7 +270,6 @@ mod tests {
         let package_info = PackageInfo::from_path(&package_dir).await.unwrap();
 
         assert_eq!(package_info.name, "test-package");
-        assert_eq!(package_info.fullname, "test-package");
         assert_eq!(package_info.bin_files.len(), 1);
         assert_eq!(package_info.bin_files[0].0, "test-cli");
         assert_eq!(package_info.bin_files[0].1, "./bin/cli.js");
@@ -301,7 +297,6 @@ mod tests {
         let package_info = PackageInfo::from_path(&package_dir).await.unwrap();
 
         assert_eq!(package_info.name, "@scope/test-package");
-        assert_eq!(package_info.fullname, "@scope/test-package");
     }
 
     #[tokio::test]

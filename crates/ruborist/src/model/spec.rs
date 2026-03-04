@@ -16,6 +16,8 @@
 
 use std::str::FromStr;
 
+use super::util::PackageNameStr;
+
 // ---------------------------------------------------------------------------
 // Protocol
 // ---------------------------------------------------------------------------
@@ -201,7 +203,7 @@ impl From<&str> for PackageSpec {
             None => {
                 // Bare GitHub shorthand: user/repo or user/repo#ref
                 // npm treats "user/repo" (no protocol, not scoped) as github:user/repo
-                if !raw.starts_with('@') {
+                if !raw.is_scoped() {
                     let (path, commit_ish) = split_fragment(raw);
                     if let Some((owner, repo)) = path.split_once('/')
                         && !owner.is_empty()

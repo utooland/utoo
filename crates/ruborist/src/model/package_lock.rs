@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::util::deserialize_or_default;
+use super::util::{PackageNameStr, deserialize_or_default};
 
 /// Represents a license field that can be either a string or an array of strings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,7 +79,7 @@ impl LockPackage {
             let pkg_name = &path_str[idx + "node_modules/".len()..];
             let parts: Vec<&str> = pkg_name.split('/').collect();
             // Only allow pkg or @scope/pkg, skip deep paths
-            if parts.len() > 2 || (parts.len() == 2 && !parts[0].starts_with('@')) {
+            if parts.len() > 2 || (parts.len() == 2 && !parts[0].is_scoped()) {
                 return None;
             }
             Some(pkg_name)
