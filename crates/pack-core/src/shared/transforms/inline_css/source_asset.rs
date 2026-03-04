@@ -57,7 +57,7 @@ impl Asset for InlineCssFileSource {
                 writeln!(
                     result,
                     "import api from {};",
-                    StringifyJs("@utoo/pack-runtime/style-loader/injectStylesIntoLinkTag.js")
+                    StringifyJs("@utoo/pack-runtime/inline_css/injectStylesIntoLinkTag.js")
                 )?;
                 writeln!(result, "var content = {};", StringifyJs(css_text.as_ref()))?;
                 writeln!(result)?;
@@ -78,7 +78,7 @@ impl Asset for InlineCssFileSource {
                 writeln!(
                     result,
                     "import api from {};",
-                    StringifyJs("@utoo/pack-runtime/style-loader/injectStylesIntoStyleTag.js")
+                    StringifyJs("@utoo/pack-runtime/inline_css/injectStylesIntoStyleTag.js")
                 )?;
                 writeln!(result, "var content = {};", StringifyJs(css_text.as_ref()))?;
                 writeln!(result)?;
@@ -117,7 +117,7 @@ impl Asset for InlineCssFileSource {
                 writeln!(
                     result,
                     "import api from {};",
-                    StringifyJs("@utoo/pack-runtime/style-loader/injectStylesIntoStyleTag.js")
+                    StringifyJs("@utoo/pack-runtime/inline_css/injectStylesIntoStyleTag.js")
                 )?;
                 writeln!(result, "var content = {};", StringifyJs(css_text.as_ref()))?;
                 writeln!(result)?;
