@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use futures::stream::{FuturesUnordered, StreamExt};
 
-use crate::model::manifest::VersionManifest;
+use crate::model::manifest::CoreVersionManifest;
 use crate::resolver::registry::resolve_package;
 use crate::traits::progress::{BuildEvent, EventReceiver};
 use crate::traits::registry::RegistryClient;
@@ -90,7 +90,7 @@ pub fn collect_manifest_deps(
 
 /// Extract transitive dependencies from a resolved manifest.
 /// Note: devDependencies are NOT included (only root packages install devDeps).
-fn extract_transitive_deps(manifest: &VersionManifest, config: &PreloadConfig) -> Vec<Dep> {
+fn extract_transitive_deps(manifest: &CoreVersionManifest, config: &PreloadConfig) -> Vec<Dep> {
     let mut deps = Vec::new();
     deps.extend(collect_deps(manifest.dependencies.as_ref()));
     if !config.legacy_peer_deps {
@@ -111,7 +111,7 @@ pub async fn preload_manifests<R, E, F>(
 where
     R: RegistryClient,
     E: EventReceiver,
-    F: FnMut(&str, Arc<VersionManifest>),
+    F: FnMut(&str, Arc<CoreVersionManifest>),
 {
     let mut stats = PreloadStats::default();
     let mut processed: HashSet<String> = HashSet::new();
@@ -234,23 +234,27 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::manifest::VersionManifest;
+    use crate::model::manifest::CoreVersionManifest;
     use crate::traits::progress::NoopReceiver;
     use crate::traits::registry::mock::MockRegistryClient;
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::rc::Rc;
 
-    fn manifest(name: &str, version: &str) -> VersionManifest {
-        VersionManifest {
+    fn manifest(name: &str, version: &str) -> CoreVersionManifest {
+        CoreVersionManifest {
             name: name.to_string(),
             version: version.to_string(),
             ..Default::default()
         }
     }
 
-    fn manifest_with_deps(name: &str, version: &str, deps: Vec<(&str, &str)>) -> VersionManifest {
-        VersionManifest {
+    fn manifest_with_deps(
+        name: &str,
+        version: &str,
+        deps: Vec<(&str, &str)>,
+    ) -> CoreVersionManifest {
+        CoreVersionManifest {
             name: name.to_string(),
             version: version.to_string(),
             dependencies: Some(
@@ -267,7 +271,7 @@ mod tests {
         let mut registry = MockRegistryClient::new();
         registry.add_package("lodash", "4.17.21", manifest("lodash", "4.17.21"));
 
-        let cache: Rc<RefCell<HashMap<String, Arc<VersionManifest>>>> = Default::default();
+        let cache: Rc<RefCell<HashMap<String, Arc<CoreVersionManifest>>>> = Default::default();
         let cache_clone = Rc::clone(&cache);
 
         let stats = preload_manifests(
@@ -295,7 +299,7 @@ mod tests {
         );
         registry.add_package("b", "1.0.0", manifest("b", "1.0.0"));
 
-        let cache: Rc<RefCell<HashMap<String, Arc<VersionManifest>>>> = Default::default();
+        let cache: Rc<RefCell<HashMap<String, Arc<CoreVersionManifest>>>> = Default::default();
         let cache_clone = Rc::clone(&cache);
 
         let stats = preload_manifests(
@@ -317,7 +321,7 @@ mod tests {
     #[tokio::test]
     async fn test_preload_missing() {
         let registry = MockRegistryClient::new();
-        let cache: Rc<RefCell<HashMap<String, Arc<VersionManifest>>>> = Default::default();
+        let cache: Rc<RefCell<HashMap<String, Arc<CoreVersionManifest>>>> = Default::default();
         let cache_clone = Rc::clone(&cache);
 
         let stats = preload_manifests(

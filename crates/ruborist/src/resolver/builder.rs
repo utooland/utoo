@@ -708,11 +708,11 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::model::manifest::VersionManifest;
+    use crate::model::manifest::CoreVersionManifest;
     use crate::traits::registry::mock::MockRegistryClient;
 
-    fn create_version_manifest(name: &str, version: &str) -> VersionManifest {
-        VersionManifest {
+    fn create_version_manifest(name: &str, version: &str) -> CoreVersionManifest {
+        CoreVersionManifest {
             name: name.to_string(),
             version: version.to_string(),
             ..Default::default()
@@ -723,12 +723,12 @@ mod tests {
         name: &str,
         version: &str,
         deps: Vec<(&str, &str)>,
-    ) -> VersionManifest {
+    ) -> CoreVersionManifest {
         let dependencies = deps
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
-        VersionManifest {
+        CoreVersionManifest {
             name: name.to_string(),
             version: version.to_string(),
             dependencies: Some(dependencies),

@@ -10,7 +10,7 @@ use anyhow::{Result, anyhow};
 use tokio_retry::RetryIf;
 
 use super::http::get_client;
-use crate::model::manifest::{FullManifest, VersionManifest};
+use crate::model::manifest::{CoreVersionManifest, FullManifest};
 
 /// Fixed retry delays.
 const RETRY_DELAYS: [Duration; 5] = [
@@ -156,13 +156,17 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                         .and_then(|v| v.to_str().ok())
                         .map(|s| s.to_string());
 
-                    let mut bytes = response
+                    let raw_bytes = response
                         .bytes()
                         .await
                         .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
                         .to_vec();
-                    let manifest: FullManifest = simd_json::serde::from_slice(&mut bytes)
-                        .map_err(|e| FetchError::Permanent(anyhow!("JSON parse error: {e}")))?;
+                    // Save raw bytes before simd_json mutates the parse buffer
+                    let mut parse_buf = raw_bytes.clone();
+                    let mut manifest: FullManifest =
+                        simd_json::serde::from_slice(&mut parse_buf)
+                            .map_err(|e| FetchError::Permanent(anyhow!("JSON parse error: {e}")))?;
+                    manifest.raw = std::sync::Arc::from(raw_bytes);
 
                     Ok(FetchManifestResult::Ok(manifest, new_etag))
                 } else {
@@ -219,7 +223,7 @@ pub struct FetchVersionManifestOptions<'a> {
 /// Fetch version manifest with retry.
 pub async fn fetch_version_manifest(
     opts: FetchVersionManifestOptions<'_>,
-) -> Result<VersionManifest> {
+) -> Result<CoreVersionManifest> {
     let url = format!("{}/{}/{}", opts.registry_url, opts.name, opts.spec);
 
     let accept = match opts.format {

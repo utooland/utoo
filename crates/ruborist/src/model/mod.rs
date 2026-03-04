@@ -8,16 +8,21 @@
 //! │                                                                │
 //! │   FullManifest                 1 package, all versions          │
 //! │   ├── name, dist_tags, time                                    │
-//! │   └── versions: HashMap<String, VersionManifest>               │
-//! │                                    │                           │
-//! │   VersionManifest                  │  1 specific version       │
-//! │   ├── name, version, dist          │  (extracted & Arc-shared) │
-//! │   ├── dependencies                 │                           │
-//! │   ├── peer_dependencies            │                           │
-//! │   └── optional_dependencies        │                           │
-//! │                                    ▼                           │
-//! │                        Arc<VersionManifest>                    │
+//! │   ├── versions: Vec<String>          (version keys only)       │
+//! │   └── raw: Arc<[u8]>                 (HTTP response bytes)     │
+//! │              │                                                 │
+//! │              └──► extract_version(ver) ──on demand──►          │
+//! │                                                                │
+//! │   CoreVersionManifest          1 specific version (hot path)   │
+//! │   ├── name, version, dist      (13 fields for resolve/install) │
+//! │   ├── dependencies             (extracted & Arc-shared)        │
+//! │   ├── peer_dependencies                                        │
+//! │   └── optional_dependencies          ▼                         │
+//! │                        Arc<CoreVersionManifest>                 │
 //! │                        (shared across cache + graph)           │
+//! │                                                                │
+//! │   VersionManifest              full 28 fields (cold path)      │
+//! │   └── used only by `ut view` via get_full_version()            │
 //! └─────────────────────────────────────────────────────────────────┘
 //!
 //! ┌─────────────────────────────────────────────────────────────────┐
@@ -34,8 +39,8 @@
 //! │ Unified Abstraction                                            │
 //! │                                                                │
 //! │   NodeManifest                                                 │
-//! │   ├── Local(PackageJson)              ← root / workspace      │
-//! │   └── Registry(Arc<VersionManifest>)  ← resolved dependency   │
+//! │   ├── Local(PackageJson)                  ← root / workspace   │
+//! │   └── Registry(Arc<CoreVersionManifest>)  ← resolved dep      │
 //! │                                                                │
 //! │   Provides unified accessors:                                  │
 //! │     name(), version(), dependencies(), peer_dependencies(),    │
@@ -61,16 +66,16 @@
 //!
 //! # Ownership & Sharing
 //!
-//! `VersionManifest` is the hot type in the resolution pipeline — it flows
+//! `CoreVersionManifest` is the hot type in the resolution pipeline — it flows
 //! from registry/cache into graph nodes. Wrapping it in `Arc` avoids deep
 //! cloning at every cache read and graph insertion:
 //!
 //! ```text
 //!   MemoryCache ──┐
-//!                 ├── Arc<VersionManifest> ── (ref-count clone)
+//!                 ├── Arc<CoreVersionManifest> ── (ref-count clone)
 //!   PackageNode ──┘
 //!
-//!   Cold paths (disk I/O, serde) still use owned VersionManifest,
+//!   Cold paths (disk I/O, serde) still use owned CoreVersionManifest,
 //!   wrapping in Arc::new() at the boundary.
 //! ```
 //!

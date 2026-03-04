@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use petgraph::graph::{EdgeIndex, NodeIndex};
 
 use crate::model::graph::DependencyGraph;
-use crate::model::manifest::VersionManifest;
+use crate::model::manifest::CoreVersionManifest;
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
 
@@ -75,7 +75,7 @@ impl DependencySource for PackageJson {
     }
 }
 
-impl DependencySource for VersionManifest {
+impl DependencySource for CoreVersionManifest {
     fn for_each_dep<F>(&self, legacy_peer_deps: bool, include_dev: bool, mut f: F)
     where
         F: FnMut(EdgeType, &str, &str),

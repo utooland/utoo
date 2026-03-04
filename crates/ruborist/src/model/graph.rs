@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use std::sync::Arc;
 
-use super::manifest::{NodeManifest, VersionManifest};
+use super::manifest::{CoreVersionManifest, NodeManifest};
 use super::node::{EdgeType, NodeType};
 use super::override_rule::{OverrideRule, Overrides};
 use super::package_json::PackageJson;
@@ -38,11 +38,11 @@ pub struct PackageNode {
 }
 
 impl PackageNode {
-    /// Create a new regular package node from VersionManifest.
+    /// Create a new regular package node from CoreVersionManifest.
     pub fn from_version_manifest(
         name: String,
         path: PathBuf,
-        manifest: Arc<VersionManifest>,
+        manifest: Arc<CoreVersionManifest>,
     ) -> Self {
         let version = manifest.version.clone();
         Self {
@@ -594,8 +594,8 @@ mod tests {
         PackageJson::new(name, version)
     }
 
-    fn create_version_manifest(name: &str, version: &str) -> Arc<VersionManifest> {
-        Arc::new(VersionManifest {
+    fn create_version_manifest(name: &str, version: &str) -> Arc<CoreVersionManifest> {
+        Arc::new(CoreVersionManifest {
             name: name.to_string(),
             version: version.to_string(),
             ..Default::default()

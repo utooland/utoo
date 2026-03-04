@@ -15,7 +15,7 @@
 //!  ProjectCacheData                tier 3 — per-project .utoo-manifest.json
 //!  └── cache: HashMap<name, ProjectPackageCache>
 //!      ├── specs:     spec → version      ("^2.1" → "2.1.1")
-//!      └── manifests: version → VersionManifest  (serde, owned)
+//!      └── manifests: version → CoreVersionManifest  (serde, owned)
 //! ```
 //!
 //! # Memory Layout
@@ -26,10 +26,10 @@
 //!  └──► Arc<MemoryCacheInner>              single allocation
 //!       ├── RwLock<HashMap<FullManifest>>   full package metadata
 //!       ├── RwLock<HashMap<VersionsInfo>>   version lists + dist-tags
-//!       └── RwLock<HashMap<Arc<VersionManifest>>>
+//!       └── RwLock<HashMap<Arc<CoreVersionManifest>>>
 //!                           │
 //!                           ▼
-//!                    Arc<VersionManifest>   value-level sharing
+//!                    Arc<CoreVersionManifest>   value-level sharing
 //!                    ├── get → Arc clone    O(1) ref-count
 //!                    ├── set → Arc clone    O(1) ref-count
 //!                    └── used by PackageNode, ResolvedPackage, preload
@@ -43,7 +43,7 @@
 //! ```text
 //!  resolve(name, spec)
 //!    │
-//!    ├─ 1. Memory hit?  ──yes──► Arc<VersionManifest> clone → done
+//!    ├─ 1. Memory hit?  ──yes──► Arc<CoreVersionManifest> clone → done
 //!    │
 //!    ├─ 2. Disk hit?    ──yes──► deserialize → Arc::new() → store memory → done
 //!    │
@@ -59,7 +59,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::model::manifest::{FullManifest, VersionManifest};
+use crate::model::manifest::{CoreVersionManifest, FullManifest};
 
 /// Lightweight versions info for disk cache.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,7 +93,7 @@ pub struct MemoryCache(Arc<MemoryCacheInner>);
 struct MemoryCacheInner {
     full_manifests: RwLock<HashMap<String, FullManifest>>,
     versions_info: RwLock<HashMap<String, VersionsInfo>>,
-    version_manifests: RwLock<HashMap<String, Arc<VersionManifest>>>,
+    version_manifests: RwLock<HashMap<String, Arc<CoreVersionManifest>>>,
 }
 
 /// Global singleton for memory cache.
@@ -137,7 +137,11 @@ impl MemoryCache {
     }
 
     // Version manifests (Arc-wrapped for cheap cloning)
-    pub fn get_version_manifest(&self, name: &str, version: &str) -> Option<Arc<VersionManifest>> {
+    pub fn get_version_manifest(
+        &self,
+        name: &str,
+        version: &str,
+    ) -> Option<Arc<CoreVersionManifest>> {
         let key = format!("{name}@{version}");
         self.0.version_manifests.read().get(&key).cloned()
     }
@@ -146,7 +150,7 @@ impl MemoryCache {
         &self,
         name: String,
         version: String,
-        manifest: Arc<VersionManifest>,
+        manifest: Arc<CoreVersionManifest>,
     ) {
         let key = format!("{name}@{version}");
         self.0.version_manifests.write().insert(key, manifest);
@@ -166,7 +170,7 @@ impl MemoryCache {
     }
 
     /// Export all version manifests for persistence.
-    pub fn export_version_manifests(&self) -> Vec<(String, Arc<VersionManifest>)> {
+    pub fn export_version_manifests(&self) -> Vec<(String, Arc<CoreVersionManifest>)> {
         self.0
             .version_manifests
             .read()
@@ -267,7 +271,11 @@ impl PackageCache {
     }
 
     /// Get version manifest from memory cache.
-    pub fn get_version_manifest(&self, name: &str, version: &str) -> Option<Arc<VersionManifest>> {
+    pub fn get_version_manifest(
+        &self,
+        name: &str,
+        version: &str,
+    ) -> Option<Arc<CoreVersionManifest>> {
         let result = self.memory.get_version_manifest(name, version);
         if result.is_some() {
             tracing::debug!("Memory cache hit for version manifest: {name}@{version}");
@@ -280,7 +288,7 @@ impl PackageCache {
         &self,
         name: String,
         version: String,
-        manifest: Arc<VersionManifest>,
+        manifest: Arc<CoreVersionManifest>,
     ) {
         tracing::debug!("Caching version manifest in memory: {name}@{version}");
         self.memory.set_version_manifest(name, version, manifest);
@@ -343,7 +351,7 @@ impl PackageCache {
         &self,
         name: &str,
         version: &str,
-    ) -> Option<Arc<VersionManifest>> {
+    ) -> Option<Arc<CoreVersionManifest>> {
         let cache_dir = self.cache_dir.as_ref()?;
         let path = get_manifest_cache_path(cache_dir, name, version);
 
@@ -351,7 +359,7 @@ impl PackageCache {
             return None;
         }
 
-        match super::fs::read_json::<VersionManifest>(&path).await {
+        match super::fs::read_json::<CoreVersionManifest>(&path).await {
             Ok(manifest) => {
                 tracing::debug!("Disk cache hit for manifest: {name}@{version}");
                 let manifest = Arc::new(manifest);
@@ -375,7 +383,7 @@ impl PackageCache {
         &self,
         name: &str,
         version: &str,
-        manifest: &VersionManifest,
+        manifest: &CoreVersionManifest,
     ) {
         let Some(cache_dir) = &self.cache_dir else {
             return;
@@ -404,7 +412,7 @@ impl PackageCache {
 
     /// Export all version manifests for persistence.
     /// Returns iterator of (key, manifest) pairs where key is "name@version".
-    pub fn export_version_manifests(&self) -> Vec<(String, Arc<VersionManifest>)> {
+    pub fn export_version_manifests(&self) -> Vec<(String, Arc<CoreVersionManifest>)> {
         self.memory.export_version_manifests()
     }
 
@@ -455,7 +463,7 @@ pub struct ProjectPackageCache {
     pub specs: HashMap<String, String>,
     /// version -> manifest
     #[serde(default)]
-    pub manifests: HashMap<String, VersionManifest>,
+    pub manifests: HashMap<String, CoreVersionManifest>,
 }
 
 /// Thread-safe project cache for dependency resolution state.
@@ -482,7 +490,7 @@ impl ProjectCache {
             .cloned()
     }
 
-    pub fn get_manifest(&self, name: &str, version: &str) -> Option<Arc<VersionManifest>> {
+    pub fn get_manifest(&self, name: &str, version: &str) -> Option<Arc<CoreVersionManifest>> {
         self.data
             .read()
             .cache
@@ -491,7 +499,13 @@ impl ProjectCache {
             .map(|m| Arc::new(m.clone()))
     }
 
-    pub fn set_resolved(&self, name: &str, spec: &str, version: &str, manifest: &VersionManifest) {
+    pub fn set_resolved(
+        &self,
+        name: &str,
+        spec: &str,
+        version: &str,
+        manifest: &CoreVersionManifest,
+    ) {
         let mut data = self.data.write();
         let pkg = data.cache.entry(name.to_string()).or_default();
         pkg.specs.insert(spec.to_string(), version.to_string());
@@ -595,7 +609,7 @@ mod tests {
     fn test_memory_cache_version_manifest() {
         let cache = MemoryCache::global();
 
-        let manifest = VersionManifest {
+        let manifest = CoreVersionManifest {
             name: "test".to_string(),
             version: "1.0.0".to_string(),
             ..Default::default()
