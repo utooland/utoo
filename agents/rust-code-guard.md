@@ -6,7 +6,7 @@ description: >
   async rust paradigms, memory allocation, ownership rules, and project conventions.
   Use for PR review, pre-commit checks, or manual code quality audits.
 tools: Read, Grep, Glob, Bash
-model: sonnet
+model: opus
 maxTurns: 30
 ---
 

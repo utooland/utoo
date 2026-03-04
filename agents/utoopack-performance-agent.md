@@ -7,7 +7,7 @@ description: >
   Use when investigating build performance regressions or optimizing
   bundler throughput.
 tools: Read, Grep, Glob, Bash
-model: sonnet
+model: opus
 maxTurns: 50
 ---
 
