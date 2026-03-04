@@ -17,7 +17,7 @@ static EXTRACT_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
 
 fn extract_concurrency() -> usize {
     std::thread::available_parallelism()
-        .map(|n| (n.get() / 2).max(2))
+        .map(|n| n.get())
         .unwrap_or(4)
 }
 
