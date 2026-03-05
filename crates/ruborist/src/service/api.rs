@@ -27,7 +27,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use super::cache::{PackageCache, load_project_cache, save_project_cache};
 use super::fs::Glob;
@@ -35,7 +35,7 @@ use super::registry::UnifiedRegistry;
 use crate::model::graph::{DependencyGraph, PackageNode};
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
-use crate::model::package_lock::{LockPackage, PackageLock};
+use crate::model::package_lock::PackageLock;
 use crate::model::util::parse_package_spec;
 use crate::resolver::builder::{BuildDepsConfig, add_edges_from, build_deps_with_config};
 use crate::resolver::runtime::install_runtime_from_map;
@@ -143,7 +143,10 @@ where
         if !runtime_deps.is_empty() {
             tracing::debug!("Injecting {} runtime dependencies", runtime_deps.len());
             for (name, version) in runtime_deps {
-                pkg.optional_dependencies.entry(name).or_insert(version);
+                pkg.optional_dependencies
+                    .get_or_insert_with(HashMap::new)
+                    .entry(name)
+                    .or_insert(version);
             }
         }
     }
@@ -178,7 +181,7 @@ where
         let dep_edge_id = graph.add_dependency_edge(
             root_index,
             workspace.name.clone(),
-            ws_pkg.version.clone(),
+            &ws_pkg.version,
             EdgeType::Prod,
         );
         graph.mark_dependency_resolved(dep_edge_id, workspace_index);
@@ -214,7 +217,11 @@ where
         for (spec, version) in &pkg_cache.specs {
             if let Some(manifest) = pkg_cache.manifests.get(version) {
                 // Cache key is "name@spec" (e.g., "lodash@^4.17.0")
-                package_cache.set_version_manifest(name.clone(), spec.clone(), manifest.clone());
+                package_cache.set_version_manifest(
+                    name.clone(),
+                    spec.clone(),
+                    Arc::new(manifest.clone()),
+                );
                 cache_count += 1;
             } else {
                 // Spec points to version but manifest is missing - cache is corrupted
@@ -278,9 +285,7 @@ where
         .map_err(|e| anyhow::anyhow!("Dependency resolution failed: {}", e))?;
 
     // 11. Serialize to PackageLock
-    let (packages_value, _total) = graph.serialize_to_packages(&root_path);
-    let packages: HashMap<String, LockPackage> = serde_json::from_value(packages_value)
-        .context("Failed to convert packages to lock format")?;
+    let (packages, _total) = graph.serialize_to_packages(&root_path);
 
     // 12. Save project cache (export from memory cache)
     let mut new_cache_data = super::cache::ProjectCacheData::default();
@@ -295,7 +300,7 @@ where
         // specs: spec -> version (e.g., "^2.1.1" -> "2.1.1")
         pkg_cache.specs.insert(spec.to_string(), version.clone());
         // manifests: version -> manifest (e.g., "2.1.1" -> {...})
-        pkg_cache.manifests.insert(version, manifest);
+        pkg_cache.manifests.insert(version, (*manifest).clone());
     }
 
     if !new_cache_data.cache.is_empty()
@@ -304,11 +309,7 @@ where
         tracing::warn!("Failed to save project cache: {}", e);
     }
 
-    Ok(PackageLock::new(
-        pkg.name.clone(),
-        pkg.version.clone(),
-        packages,
-    ))
+    Ok(PackageLock::new(&pkg.name, &pkg.version, packages))
 }
 
 #[cfg(test)]

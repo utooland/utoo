@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use std::io::{self, Write};
 
 use crate::util::cache::{collect_matching_versions, matches_pattern};
-use utoo_ruborist::util::parse_package_spec;
+use utoo_ruborist::util::{PackageNameStr, parse_package_spec};
 
 pub async fn clean(pattern: &str) -> Result<()> {
     let cache_dir = dirs::home_dir()
@@ -19,7 +19,7 @@ pub async fn clean(pattern: &str) -> Result<()> {
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
 
-        if name_str.starts_with('@') {
+        if name_str.is_scoped() {
             // Handle scoped packages
             let mut pkg_entries = fs::read_dir(entry.path()).await?;
             while let Some(pkg_entry) = pkg_entries.next_entry().await? {

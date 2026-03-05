@@ -914,9 +914,12 @@ checksum = "b94f61472cee1439c0b966b47e3aca9ae07e45d070759512cd390ea2bebc6675"
 
 [[package]]
 name = "clru"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbd0f76e066e64fdc5631e3bb46381254deab9ef1158292f27c8c57e3bf3fe59"
+checksum = "197fd99cb113a8d5d9b6376f3aa817f32c1078f2343b714fff7d2ca44fdf67d5"
+dependencies = [
+ "hashbrown 0.16.0",
+]
 
 [[package]]
 name = "cmake"
@@ -9951,7 +9954,6 @@ dependencies = [
  "turbo-tasks-fs",
  "turbo-tasks-hash",
  "turbopack-core",
- "turbopack-css",
  "turbopack-ecmascript",
  "turbopack-ecmascript-runtime",
  "turbopack-resolve",
@@ -10653,10 +10655,12 @@ dependencies = [
  "reqwest 0.12.24",
  "serde",
  "serde_json",
+ "simd-json",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tokio-fs-ext",
+ "tokio-retry",
  "tracing",
 ]
 
@@ -10669,6 +10673,7 @@ dependencies = [
  "deno_semver",
  "flate2",
  "futures",
+ "getrandom 0.2.16",
  "js-sys",
  "oneshot",
  "opfs-project",

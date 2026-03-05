@@ -2,11 +2,9 @@ use anyhow::{Result, anyhow};
 use chrono::Utc;
 use owo_colors::OwoColorize;
 use utoo_ruborist::manifest::{FullManifest, VersionManifest};
-use utoo_ruborist::registry::resolve_package;
-use utoo_ruborist::service::fetch_full_manifest;
+use utoo_ruborist::service::{MetadataFormat, fetch_full_manifest_fresh};
 use utoo_ruborist::util::parse_package_spec;
 
-use crate::helper::ruborist_context::Context;
 use crate::util::format_print::print_grid;
 use crate::util::user_config::get_registry;
 
@@ -19,22 +17,34 @@ pub async fn view(package_spec: &str) -> Result<()> {
 
     tracing::debug!("Resolved package: {name} (spec: {version_spec})");
 
-    // Fetch full manifest directly from registry (no ETag/304 caching)
+    // Fetch full manifest directly from registry (Complete format for display, no ETag)
     let registry_url = get_registry();
-    let (full_manifest, _etag) = fetch_full_manifest(&registry_url, name, false, None)
-        .await
-        .map_err(|e| anyhow!("Failed to fetch package info for {}: {}", package_spec, e))?;
+    let (full_manifest, _etag) =
+        fetch_full_manifest_fresh(&registry_url, name, MetadataFormat::Complete)
+            .await
+            .map_err(|e| anyhow!("Failed to fetch package info for {}: {}", package_spec, e))?;
 
     tracing::debug!("Fetched package info: {full_manifest:?}");
 
-    // Create registry client for version resolution
-    let registry = Context::registry();
+    // Resolve version and get full VersionManifest (with all display fields)
+    let version_list: Vec<String> = full_manifest.versions.clone();
+    let resolved_version = utoo_ruborist::resolver::version::resolve_target_version(
+        &full_manifest.dist_tags,
+        &version_list,
+        version_spec,
+    )
+    .map_err(|e| {
+        anyhow!(
+            "Version resolution failed for {}@{}: {}",
+            name,
+            version_spec,
+            e
+        )
+    })?;
 
-    // Get the specific version manifest
-    let resolved_package = resolve_package(&registry, name, version_spec)
-        .await
-        .map_err(|e| anyhow!("{}", e))?;
-    let version_manifest = resolved_package.manifest;
+    let version_manifest: VersionManifest = full_manifest
+        .get_full_version(&resolved_version)
+        .ok_or_else(|| anyhow!("Version {} not found for {}", resolved_version, name))?;
 
     // Print package information in npm view format
     print_package_info(&full_manifest, &version_manifest)?;

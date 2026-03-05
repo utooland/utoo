@@ -1,5 +1,5 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-76, ((__turbopack_context__) => {
+"[project]/webpack-loaders/sass/input/index.ts [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 ;

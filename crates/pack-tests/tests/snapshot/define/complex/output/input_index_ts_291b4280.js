@@ -1,5 +1,5 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-82, ((__turbopack_context__, module, exports) => {
+"[project]/define/complex/input/index.ts [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
 
 console.log(("TURBOPACK compile-time value", {
     "TEST1": ("TURBOPACK compile-time value", "TEST1_VALUE"),

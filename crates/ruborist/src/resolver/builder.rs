@@ -497,7 +497,7 @@ pub async fn process_dependency<R: RegistryClient>(
             add_edges_from(
                 graph,
                 new_index,
-                &resolved.manifest,
+                &*resolved.manifest,
                 config.legacy_peer_deps,
                 false,
             );
@@ -709,7 +709,7 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
                                     .get_node(node_index)
                                     .map(|parent| parent.path.as_path());
                                 receiver.on_event(BuildEvent::PackagePlaced {
-                                    package: manifest.into(),
+                                    package: manifest.as_ref().into(),
                                     path: &node.path,
                                     parent_path,
                                 });
@@ -750,7 +750,7 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
 // High-level API
 // ============================================================================
 
-use crate::model::package_lock::{LockPackage, PackageLock};
+use crate::model::package_lock::PackageLock;
 use std::path::Path;
 
 /// Build package-lock.json from a package.json.
@@ -807,23 +807,21 @@ fn graph_to_package_lock(
     pkg: &PackageJson,
     root_path: &Path,
 ) -> PackageLock {
-    let (packages_value, _total) = graph.serialize_to_packages(root_path);
-
-    // Convert Value to HashMap<String, LockPackage>
-    let packages: HashMap<String, LockPackage> =
-        serde_json::from_value(packages_value).unwrap_or_default();
-
-    PackageLock::new(pkg.name.clone(), pkg.version.clone(), packages)
+    let (packages, _total) = graph.serialize_to_packages(root_path);
+    PackageLock::new(&pkg.name, &pkg.version, packages)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
     use super::*;
-    use crate::model::manifest::VersionManifest;
+    use crate::model::manifest::CoreVersionManifest;
     use crate::traits::registry::mock::MockRegistryClient;
 
-    fn create_version_manifest(name: &str, version: &str) -> VersionManifest {
-        VersionManifest {
+    fn create_version_manifest(name: &str, version: &str) -> CoreVersionManifest {
+        CoreVersionManifest {
             name: name.to_string(),
             version: version.to_string(),
             ..Default::default()
@@ -834,12 +832,12 @@ mod tests {
         name: &str,
         version: &str,
         deps: Vec<(&str, &str)>,
-    ) -> VersionManifest {
+    ) -> CoreVersionManifest {
         let dependencies = deps
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
-        VersionManifest {
+        CoreVersionManifest {
             name: name.to_string(),
             version: version.to_string(),
             dependencies: Some(dependencies),
@@ -856,13 +854,13 @@ mod tests {
             create_version_manifest("lodash", "4.17.21"),
         );
 
+        let root_pkg = PackageJson::new("test-project", "1.0.0");
         let root_pkg = PackageJson {
-            name: "test-project".to_string(),
-            version: "1.0.0".to_string(),
-            dependencies: [("lodash".to_string(), "^4.17.0".to_string())]
-                .into_iter()
-                .collect(),
-            ..Default::default()
+            dependencies: Some(HashMap::from([(
+                "lodash".to_string(),
+                "^4.17.0".to_string(),
+            )])),
+            ..root_pkg
         };
 
         let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg.clone());
@@ -894,13 +892,13 @@ mod tests {
         );
         registry.add_package("debug", "4.3.0", create_version_manifest("debug", "4.3.0"));
 
+        let root_pkg = PackageJson::new("test-project", "1.0.0");
         let root_pkg = PackageJson {
-            name: "test-project".to_string(),
-            version: "1.0.0".to_string(),
-            dependencies: [("express".to_string(), "^4.0.0".to_string())]
-                .into_iter()
-                .collect(),
-            ..Default::default()
+            dependencies: Some(HashMap::from([(
+                "express".to_string(),
+                "^4.0.0".to_string(),
+            )])),
+            ..root_pkg
         };
 
         let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg.clone());
@@ -922,13 +920,13 @@ mod tests {
             create_version_manifest("lodash", "4.17.21"),
         );
 
+        let pkg = PackageJson::new("test-project", "1.0.0");
         let pkg = PackageJson {
-            name: "test-project".to_string(),
-            version: "1.0.0".to_string(),
-            dependencies: [("lodash".to_string(), "^4.17.0".to_string())]
-                .into_iter()
-                .collect(),
-            ..Default::default()
+            dependencies: Some(HashMap::from([(
+                "lodash".to_string(),
+                "^4.17.0".to_string(),
+            )])),
+            ..pkg
         };
 
         let lock = resolve(&pkg, &registry).await.unwrap();
@@ -945,18 +943,14 @@ mod tests {
     // Helper to create a graph with source -> target for testing update_node_type_from_edge
     // Returns (graph, source_index, target_index) where source is NOT root
     fn create_source_target_graph() -> (DependencyGraph, NodeIndex, NodeIndex) {
-        let root_pkg = PackageJson {
-            name: "root".to_string(),
-            version: "1.0.0".to_string(),
-            ..Default::default()
-        };
+        let root_pkg = PackageJson::new("root", "1.0.0");
         let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg);
 
         // Add source node (non-root)
         let source = PackageNode::from_version_manifest(
             "source".to_string(),
             PathBuf::from("node_modules/source"),
-            create_version_manifest("source", "1.0.0"),
+            Arc::new(create_version_manifest("source", "1.0.0")),
         );
         let source_index = graph.add_node(source);
 
@@ -964,7 +958,7 @@ mod tests {
         let target = PackageNode::from_version_manifest(
             "target".to_string(),
             PathBuf::from("node_modules/target"),
-            create_version_manifest("target", "1.0.0"),
+            Arc::new(create_version_manifest("target", "1.0.0")),
         );
         let target_index = graph.add_node(target);
 

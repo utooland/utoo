@@ -3,12 +3,17 @@ use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use crate::cmd::deps::build_deps;
+use crate::fs;
 use crate::helper::global_bin::get_global_bin_dir;
 use crate::helper::lock::{
-    Package, extract_package_name, group_by_depth, prepare_global_package_json, update_package_json,
+    Package, UpdatePackageJsonOptions, extract_package_name, group_by_depth,
+    prepare_global_package_json, update_package_json,
 };
+use crate::helper::workspace::update_cwd_to_root;
 use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
+use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
 use crate::util::save_type::{OmitType, PackageAction, SaveType};
@@ -185,15 +190,21 @@ impl InstallService {
         let cwd = std::env::current_dir().context("Failed to get current directory")?;
 
         // Update working directory to project root (if in workspace)
-        let root_path = crate::helper::workspace::update_cwd_to_root(&cwd).await?;
+        let root_path = update_cwd_to_root(&cwd).await?;
 
         // Update package.json and package-lock.json for all packages in batch
-        update_package_json(&root_path, &action, specs, &workspace, &save_type)
-            .await
-            .context("Failed to update package.json")?;
+        update_package_json(&UpdatePackageJsonOptions {
+            cwd: &root_path,
+            action,
+            specs,
+            workspace: workspace.as_deref(),
+            save_type,
+        })
+        .await
+        .context("Failed to update package.json")?;
 
         // Rebuild dependencies - the result will be used by install() via ensure_package_lock()
-        crate::cmd::deps::build_deps(&root_path)
+        build_deps(&root_path)
             .await
             .context("Failed to build package-lock.json")?;
 
@@ -211,19 +222,18 @@ impl InstallService {
     ) -> Result<()> {
         let lock_path = root_path.join("package-lock.json");
 
-        let (package_lock, pipeline_handles) =
-            if crate::fs::try_exists(&lock_path).await.unwrap_or(false) {
-                // Lock exists: install directly, skip manifest resolution
-                let lock: utoo_ruborist::lock::PackageLock =
-                    crate::util::json::read_json_file(&lock_path).await?;
-                (lock, None)
-            } else {
-                // No lock: full pipeline flow (resolve + concurrent download/clone)
-                start_progress_bar();
-                let result = super::pipeline::resolve_with_pipeline(root_path).await?;
-                finish_progress_bar("package-lock.json resolved");
-                (result.package_lock, Some(result.handles))
-            };
+        let (package_lock, pipeline_handles) = if fs::try_exists(&lock_path).await.unwrap_or(false)
+        {
+            // Lock exists: install directly, skip manifest resolution
+            let lock = load_package_lock_json_from_path(root_path).await?;
+            (lock, None)
+        } else {
+            // No lock: full pipeline flow (resolve + concurrent download/clone)
+            start_progress_bar();
+            let result = super::pipeline::resolve_with_pipeline(root_path).await?;
+            finish_progress_bar("package-lock.json resolved");
+            (result.package_lock, Some(result.handles))
+        };
 
         let groups = group_by_depth(&package_lock.packages);
 

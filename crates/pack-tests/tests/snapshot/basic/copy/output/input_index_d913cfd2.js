@@ -1,5 +1,5 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-58, ((__turbopack_context__, module, exports) => {
+"[project]/basic/copy/input/index.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
 
 console.log('copy example');
 }),

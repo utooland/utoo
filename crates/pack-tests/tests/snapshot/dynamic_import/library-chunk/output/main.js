@@ -2,7 +2,7 @@
 // Dummy runtime
 })([["main.js", {
 
-23: ((__turbopack_context__) => {
+"[project]/dynamic_import/library-chunk/input/a.ts [library] (ecmascript)": ((__turbopack_context__) => {
 "use strict";
 
 const a = "a";
@@ -12,11 +12,11 @@ __turbopack_context__.s([
     a
 ]);
 }),
-71: ((__turbopack_context__) => {
+"[project]/dynamic_import/library-chunk/input/index.ts [library] (ecmascript)": ((__turbopack_context__) => {
 "use strict";
 
 async function Test() {
-    const module = await Promise.resolve().then(()=>__turbopack_context__.i(23));
+    const module = await Promise.resolve().then(()=>__turbopack_context__.i("[project]/dynamic_import/library-chunk/input/a.ts [library] (ecmascript)"));
     return module;
 }
 __turbopack_context__.s([
@@ -26,7 +26,7 @@ __turbopack_context__.s([
 ]);
 }),
 },
-{"otherChunks":[],"runtimeModuleIds":[71]},
+{"otherChunks":[],"runtimeModuleIds":["[project]/dynamic_import/library-chunk/input/index.ts [library] (ecmascript)"]},
 ]]);
 
 

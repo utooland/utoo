@@ -69,7 +69,7 @@ impl ScriptService {
         script_type: &str,
         show_output: bool,
     ) -> Result<()> {
-        let script = package.scripts.get_script(script_type);
+        let script = package.lifecycle_scripts.get_script(script_type);
 
         if let Some(script) = script {
             tracing::debug!(
@@ -117,7 +117,7 @@ impl ScriptService {
                 tracing::debug!(
                     "Injecting {} binary mirror envs for {}",
                     envs.len(),
-                    package.fullname
+                    package.name
                 );
                 for (key, value) in envs {
                     if let Some(value_str) = value.as_str() {
@@ -396,7 +396,7 @@ impl ScriptService {
 
 #[cfg(test)]
 mod tests {
-    use crate::model::package::Scripts;
+    use crate::model::package::LifecycleScripts;
 
     use super::*;
     use std::fs;
@@ -428,8 +428,8 @@ mod tests {
         let package = PackageInfo {
             path: package_path.to_path_buf(),
             bin_files: Default::default(),
-            scripts: Scripts::default(),
-            fullname: "test-package".to_string(),
+            scripts: Default::default(),
+            lifecycle_scripts: LifecycleScripts::default(),
             name: "test-package".to_string(),
         };
 
@@ -683,8 +683,8 @@ mod tests {
         let package = PackageInfo {
             path: package_path.to_path_buf(),
             bin_files: Default::default(),
-            scripts: Scripts::default(),
-            fullname: "test-package".to_string(),
+            scripts: Default::default(),
+            lifecycle_scripts: LifecycleScripts::default(),
             name: "test-package".to_string(),
         };
         assert!(ScriptService::is_node_gyp_pkg(&package));
