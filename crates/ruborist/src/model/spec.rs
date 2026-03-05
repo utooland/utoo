@@ -51,31 +51,27 @@ pub enum Protocol {
     Http,
 }
 
-/// All known protocol prefixes, in detection order (most specific first).
-const PROTOCOL_PREFIXES: &[(Protocol, &[&str])] = &[
-    (Protocol::Git, &["git+", "git://"]),
-    (Protocol::GitHub, &["github:"]),
-    (Protocol::File, &["file:"]),
-    (Protocol::Link, &["link:"]),
-    (Protocol::Workspace, &["workspace:"]),
-    (Protocol::Portal, &["portal:"]),
-    (Protocol::Http, &["https://", "http://"]),
-];
-
 impl Protocol {
     /// Strip a known protocol prefix from a raw spec string.
     ///
     /// Returns the protocol and the remainder after the prefix,
     /// or `None` if no known protocol prefix is found.
     pub fn strip_prefix(spec: &str) -> Option<(Self, &str)> {
-        for &(proto, prefixes) in PROTOCOL_PREFIXES {
-            for prefix in prefixes {
-                if let Some(rest) = spec.strip_prefix(prefix) {
-                    return Some((proto, rest));
-                }
-            }
-        }
-        None
+        // Flat table: one row per prefix, most-specific entries first.
+        const PREFIXES: &[(Protocol, &str)] = &[
+            (Protocol::Git, "git+"),
+            (Protocol::Git, "git://"),
+            (Protocol::GitHub, "github:"),
+            (Protocol::File, "file:"),
+            (Protocol::Link, "link:"),
+            (Protocol::Workspace, "workspace:"),
+            (Protocol::Portal, "portal:"),
+            (Protocol::Http, "https://"),
+            (Protocol::Http, "http://"),
+        ];
+        PREFIXES
+            .iter()
+            .find_map(|&(proto, pfx)| spec.strip_prefix(pfx).map(|rest| (proto, rest)))
     }
 
     /// Returns `true` if this is a local protocol (`file`, `link`, `workspace`, `portal`).
@@ -160,6 +156,16 @@ impl PackageSpec {
     /// Returns `true` if this is a registry spec.
     pub fn is_registry(&self) -> bool {
         matches!(self, PackageSpec::Registry { .. })
+    }
+
+    /// Return the clone-ready URL for a git spec, stripping the `git+` prefix.
+    ///
+    /// Returns `None` for non-git variants.
+    pub fn clone_url(&self) -> Option<&str> {
+        match self {
+            PackageSpec::Git { url, .. } => Some(url.strip_prefix("git+").unwrap_or(url)),
+            _ => None,
+        }
     }
 }
 
@@ -376,6 +382,27 @@ mod tests {
                 version_spec: "1.0.0".to_string(),
             }
         );
+    }
+
+    // -- PackageSpec: clone_url --
+
+    #[test]
+    fn test_clone_url_strips_git_prefix() {
+        let s = spec("git+https://github.com/user/repo.git#main");
+        assert_eq!(s.clone_url(), Some("https://github.com/user/repo.git"));
+    }
+
+    #[test]
+    fn test_clone_url_bare_protocol() {
+        // git:// URLs don't have the git+ prefix, so clone_url() returns them as-is
+        let s = spec("git://github.com/user/repo.git");
+        assert_eq!(s.clone_url(), Some("git://github.com/user/repo.git"));
+    }
+
+    #[test]
+    fn test_clone_url_non_git_returns_none() {
+        let s = spec("lodash@^4.17.0");
+        assert_eq!(s.clone_url(), None);
     }
 
     // -- PackageSpec: Git --
