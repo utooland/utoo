@@ -118,6 +118,7 @@
 //! ```
 
 pub mod compatibility;
+pub mod git;
 pub mod graph;
 pub mod manifest;
 pub mod node;
