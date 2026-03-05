@@ -12,6 +12,20 @@ on:
           - both
           - npmjs
           - npmmirror
+      pm_list:
+        description: 'Package managers to benchmark'
+        required: true
+        default: 'utoo,bun'
+        type: choice
+        options:
+          - utoo,bun
+          - utoo,pnpm,bun
+          - all
+      baseline:
+        description: 'Compare with published utoo from npm'
+        required: false
+        default: true
+        type: boolean
   pull_request:
     types: [labeled]
 
@@ -42,10 +56,20 @@ jobs:
         with:
           toolchain: nightly-2026-02-05
 
-      # - name: Cache cargo
-      #   uses: Swatinem/rust-cache@v2
-      #   with:
-      #     shared-key: pm-bench-${{ matrix.os }}
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pm-bench-${{ matrix.os }}
+
+      - name: Install baseline utoo from npm
+        if: github.event.inputs.baseline != 'false'
+        run: |
+          npm install -g utoo
+          BASELINE_PATH=$(which utoo)
+          cp "$BASELINE_PATH" /tmp/utoo-baseline
+          chmod +x /tmp/utoo-baseline
+          echo "Baseline utoo version: $(/tmp/utoo-baseline --version)"
+          echo "UTOO_BASELINE_BIN=/tmp/utoo-baseline" >> $GITHUB_ENV
 
       - name: Build utoo-pm
         run: cargo build --release --bin utoo -p utoo-pm
@@ -56,27 +80,48 @@ jobs:
       - name: Create ut symlink
         run: ln -sf utoo $(dirname $(which utoo))/ut
 
-      - name: Install yarn
-        run: npm install -g yarn
+      - name: Resolve pm_list
+        id: pm
+        run: |
+          PM_LIST="${{ github.event.inputs.pm_list || 'utoo,bun' }}"
+          if [ "$PM_LIST" = "all" ]; then
+            PM_LIST="utoo,pnpm,yarn,bun"
+          fi
+          echo "list=$PM_LIST" >> $GITHUB_OUTPUT
 
       - name: Install pnpm
+        if: contains(steps.pm.outputs.list, 'pnpm')
         uses: pnpm/action-setup@v4
         with:
           version: latest
 
+      - name: Install yarn
+        if: contains(steps.pm.outputs.list, 'yarn')
+        run: npm install -g yarn
+
       - name: Install bun
+        if: contains(steps.pm.outputs.list, 'bun')
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      - name: Verify package managers
+      - name: Install hyperfine and GNU time
         run: |
-          echo "utoo: $(utoo --version)"
-          echo "yarn: $(yarn --version)"
-          echo "pnpm: $(pnpm --version)"
-          echo "bun: $(bun --version)"
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y hyperfine time
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            brew install hyperfine
+          fi
+
+      - name: Verify tools
+        run: |
+          echo "hyperfine: $(hyperfine --version)"
+          IFS=',' read -ra PMS <<< "${{ steps.pm.outputs.list }}"
+          for pm in "${PMS[@]}"; do
+            echo "$pm: $($pm --version 2>&1 || echo 'not installed')"
+          done
 
       - name: Run benchmark
         run: |
           chmod +x e2e/pm-bench.sh
-          bash e2e/pm-bench.sh ${{ github.event.inputs.registry || 'both' }}
+          bash e2e/pm-bench.sh ${{ github.event.inputs.registry || 'both' }} ${{ steps.pm.outputs.list }}
