@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -eo pipefail
 
 # Usage: pm-bench.sh [registry_mode] [pm_list]
 #   $1: both | npmjs | npmmirror (default: both)
@@ -60,8 +60,9 @@ if [ "$REGISTRY_MODE" = "both" ] || [ "$REGISTRY_MODE" = "npmmirror" ]; then
 fi
 
 RESULTS_DIR="/tmp/pm-bench-results"
+LOG_DIR="$RESULTS_DIR/logs"
 BENCH_DIR="/tmp/pm-bench"
-mkdir -p "$RESULTS_DIR"
+mkdir -p "$RESULTS_DIR" "$LOG_DIR"
 
 echo -e "${YELLOW}========================================${NC}"
 echo -e "${YELLOW}  PM Benchmark Starting...${NC}"
@@ -268,8 +269,9 @@ run_cold_benchmarks() {
     local json_file="$RESULTS_DIR/${project}_${reg_short}_cold_${pm}.json"
     local metrics_file="$RESULTS_DIR/${project}_${reg_short}_cold_${pm}_metrics.jsonl"
     local cmd_script="$RESULTS_DIR/cmd_cold_${pm}.sh"
+    local log_file="$LOG_DIR/${project}_${reg_short}_cold_${pm}.log"
 
-    echo "cd $project_dir && $install_cmd" > "$cmd_script"
+    printf 'set -eo pipefail\ncd %s && %s 2>&1 | tee %s\n' "$project_dir" "$install_cmd" "$log_file" > "$cmd_script"
     > "$metrics_file"
 
     echo -e "    ${CYAN}$pm${NC}..."
@@ -280,6 +282,13 @@ run_cold_benchmarks() {
       -n "$pm" \
       "bash $METRICS_WRAPPER $metrics_file $cmd_script" \
       2>&1 | tail -1 || echo -e "    ${RED}$pm cold install failed${NC}"
+
+    # Print install output for verification
+    if [ -f "$log_file" ]; then
+      echo -e "    ${YELLOW}[$pm output]${NC}"
+      sed 's/^/      /' "$log_file"
+      echo ""
+    fi
   done
 }
 
@@ -296,13 +305,22 @@ run_warm_benchmarks() {
   for pm in "${PACKAGE_MANAGERS[@]}"; do
     local install_cmd
     install_cmd=$(get_install_cmd "$pm" "$registry" "false")
+    local prepop_log="$LOG_DIR/${project}_${reg_short}_prepopulate_${pm}.log"
     cd "$project_dir"
     git clean -dfx
     if [ "$pm" = "pnpm" ]; then
       setup_pnpm_workspace "$project_dir"
     fi
     echo -e "    ${CYAN}Pre-populating $pm cache...${NC}"
-    eval "$install_cmd" >/dev/null 2>&1 || echo -e "    ${RED}$pm cache pre-populate failed${NC}"
+    if eval "$install_cmd" > "$prepop_log" 2>&1; then
+      echo -e "    ${YELLOW}[$pm pre-populate output]${NC}"
+      sed 's/^/      /' "$prepop_log"
+      echo ""
+    else
+      echo -e "    ${RED}$pm cache pre-populate failed${NC}"
+      sed 's/^/      /' "$prepop_log"
+      echo ""
+    fi
   done
 
   # Build hyperfine args
@@ -318,14 +336,26 @@ run_warm_benchmarks() {
     install_cmd=$(get_install_cmd "$pm" "$registry" "false")
     local metrics_file="$RESULTS_DIR/${project}_${reg_short}_warm_${pm}_metrics.jsonl"
     local cmd_script="$RESULTS_DIR/cmd_warm_${pm}.sh"
+    local log_file="$LOG_DIR/${project}_${reg_short}_warm_${pm}.log"
 
-    echo "cd $project_dir && $install_cmd" > "$cmd_script"
+    # Tee output to log file (overwrites each run, keeps the last run's output)
+    printf 'set -eo pipefail\ncd %s && %s 2>&1 | tee %s\n' "$project_dir" "$install_cmd" "$log_file" > "$cmd_script"
     > "$metrics_file"
 
     hyperfine_args+=(-n "$pm" --prepare "bash $PREPARE_SCRIPT $project_dir $pm" "bash $METRICS_WRAPPER $metrics_file $cmd_script")
   done
 
   hyperfine "${hyperfine_args[@]}" 2>&1 || echo -e "  ${RED}Warm benchmark failed${NC}"
+
+  # Print last run's output for each PM
+  for pm in "${PACKAGE_MANAGERS[@]}"; do
+    local log_file="$LOG_DIR/${project}_${reg_short}_warm_${pm}.log"
+    if [ -f "$log_file" ]; then
+      echo -e "    ${YELLOW}[$pm warm output (last run)]${NC}"
+      sed 's/^/      /' "$log_file"
+      echo ""
+    fi
+  done
 }
 
 # ---------------------------------------------------------------------------
@@ -475,6 +505,7 @@ print_results() {
 
 main() {
   rm -f "$RESULTS_DIR"/*.json "$RESULTS_DIR"/*.jsonl
+  rm -rf "$LOG_DIR" && mkdir -p "$LOG_DIR"
 
   clone_projects
 
