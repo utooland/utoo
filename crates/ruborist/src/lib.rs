@@ -39,8 +39,11 @@ pub mod graph {
 
 /// Package manifest types.
 pub mod manifest {
-    pub use crate::model::manifest::{Dist, FullManifest, VersionManifest};
-    pub use crate::model::package_json::PackageJson;
+    pub use crate::model::manifest::{CoreVersionManifest, Dist, FullManifest, VersionManifest};
+    pub use crate::model::package_json::{
+        DepsView, EnginesView, IdentityView, PackageInstallView, PackageJson, PublishConfig,
+        ScriptsView,
+    };
 }
 
 /// Package lock types (package-lock.json).
@@ -88,5 +91,5 @@ pub mod git {
 
 /// Utility functions.
 pub mod util {
-    pub use crate::model::util::{parse_package_spec, read_package_json};
+    pub use crate::model::util::{PackageNameStr, parse_package_spec, read_package_json};
 }

@@ -5,15 +5,18 @@ use std::path::{Path, PathBuf};
 
 use super::ruborist_context::Context;
 use crate::helper::workspace::find_workspaces;
-use crate::util::json::{load_package_json_from_path, load_package_lock_json_from_path};
+use crate::util::json::{load_package_json, load_package_lock_json_from_path, read_json_file};
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
 use crate::util::save_type::{PackageAction, SaveType};
-use crate::util::user_config::get_legacy_peer_deps;
+use crate::util::user_config::{get_legacy_peer_deps, set_package_json};
 use crate::util::{cloner::clone_package, downloader::download_to_cache};
 use utoo_ruborist::lock::{LockPackage, PackageLock};
-use utoo_ruborist::manifest::PackageJson;
+use utoo_ruborist::manifest::{DepsView, EnginesView, PackageJson};
 use utoo_ruborist::registry::resolve_package;
+use utoo_ruborist::util::PackageNameStr;
 use utoo_ruborist::util::parse_package_spec;
+
+use crate::fs;
 
 use super::workspace::find_workspace_path;
 
@@ -75,15 +78,12 @@ fn deps_map_equals_lock(pkg_deps: &HashMap<String, String>, lock_field: Option<&
 
 pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
     // Check package.json exists in project directory
-    if crate::fs::metadata(root_path.join("package.json"))
-        .await
-        .is_err()
-    {
+    if fs::metadata(root_path.join("package.json")).await.is_err() {
         return Err(anyhow!("package.json not found"));
     }
 
     // Check if we need to regenerate package-lock.json
-    let needs_regenerate = crate::fs::metadata(root_path.join("package-lock.json"))
+    let needs_regenerate = fs::metadata(root_path.join("package-lock.json"))
         .await
         .is_err()
         || is_pkg_lock_outdated(root_path).await?;
@@ -108,48 +108,49 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
 
     // Load existing package-lock.json only when it's valid and up-to-date
     tracing::debug!("Loading package-lock.json from current project");
-    let package_lock: PackageLock =
-        crate::util::json::read_json_file(&root_path.join("package-lock.json")).await?;
+    let package_lock: PackageLock = load_package_lock_json_from_path(root_path).await?;
 
     Ok(package_lock)
 }
 
 /// Batch update package.json for multiple package specifications to reduce file I/O operations
-pub async fn update_package_json(
-    cwd: &Path,
-    action: &PackageAction,
-    specs: &[&str],
-    workspace: &Option<String>,
-    save_type: &SaveType,
-) -> Result<()> {
-    if specs.is_empty() {
+pub struct UpdatePackageJsonOptions<'a> {
+    pub cwd: &'a Path,
+    pub action: PackageAction,
+    pub specs: &'a [&'a str],
+    pub workspace: Option<&'a str>,
+    pub save_type: SaveType,
+}
+
+pub async fn update_package_json(opts: &UpdatePackageJsonOptions<'_>) -> Result<()> {
+    if opts.specs.is_empty() {
         return Ok(());
     }
 
     // 1. Find target workspace if specified
-    let target_dir = if let Some(ws) = workspace {
-        find_workspace_path(cwd, ws)
+    let target_dir = if let Some(ws) = opts.workspace {
+        find_workspace_path(opts.cwd, ws)
             .await
             .context("Failed to find workspace path")?
     } else {
-        cwd.to_path_buf()
+        opts.cwd.to_path_buf()
     };
 
     // 2. Parse all package specs in parallel
     let mut package_specs = Vec::new();
-    for spec in specs {
+    for spec in opts.specs {
         let (name, version, version_spec) = resolve_package_spec(spec).await?;
         package_specs.push((name, version, version_spec));
     }
 
     // 3. Read package.json once and detect trailing newline
     let package_json_path = target_dir.join("package.json");
-    let package_json_content = crate::fs::read_to_string(&package_json_path).await?;
+    let package_json_content = fs::read_to_string(&package_json_path).await?;
     let has_trailing_newline =
         package_json_content.ends_with(LINE_ENDING) || package_json_content.ends_with('\n');
     let mut package_json: Value = serde_json::from_str(&package_json_content)?;
 
-    let dep_field = match save_type {
+    let dep_field = match opts.save_type {
         SaveType::Dev => "devDependencies",
         SaveType::Peer => "peerDependencies",
         SaveType::Optional => "optionalDependencies",
@@ -157,7 +158,7 @@ pub async fn update_package_json(
     };
 
     // 4. Ensure dependencies field exists if we're adding packages
-    if *action == PackageAction::Add && package_json.get(dep_field).is_none() {
+    if opts.action == PackageAction::Add && package_json.get(dep_field).is_none() {
         package_json[dep_field] = Value::Object(serde_json::Map::new());
     }
 
@@ -166,7 +167,7 @@ pub async fn update_package_json(
         && let Some(deps_obj) = deps.as_object_mut()
     {
         for (name, version, version_spec) in package_specs {
-            match action {
+            match opts.action {
                 PackageAction::Add => {
                     let version_to_write = match version_spec {
                         spec if spec.is_empty() || spec == "*" || spec == "latest" => {
@@ -188,7 +189,12 @@ pub async fn update_package_json(
     if has_trailing_newline {
         content.push_str(LINE_ENDING);
     }
-    crate::fs::write(&package_json_path, content).await?;
+    fs::write(&package_json_path, content).await?;
+
+    // Write-through: update the package.json cache
+    if let Ok(updated_pkg) = serde_json::from_value::<PackageJson>(package_json) {
+        set_package_json(&target_dir, updated_pkg);
+    }
 
     Ok(())
 }
@@ -222,7 +228,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
 
     // Create global package directory
     let package_path = lib_path.join(&name);
-    crate::fs::create_dir_all(&package_path).await?;
+    fs::create_dir_all(&package_path).await?;
 
     // Get package info from registry
     let resolved = resolve_package(&Context::registry(), &name, &version_spec)
@@ -247,11 +253,11 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
     // so we need to copy the file to the package directory to avoid effect other packages
     if resolved.manifest.has_install_script == Some(true) {
         let has_install_script_flag_path = cache_path.join("_hasInstallScript");
-        if !crate::fs::try_exists(&has_install_script_flag_path)
+        if !fs::try_exists(&has_install_script_flag_path)
             .await
             .unwrap_or(false)
         {
-            crate::fs::write(has_install_script_flag_path, "").await?;
+            fs::write(has_install_script_flag_path, "").await?;
         }
     }
 
@@ -267,7 +273,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
 
     // Remove devDependencies from package.json
     let package_json_path = package_path.join("package.json");
-    let package_json_content = crate::fs::read_to_string(&package_json_path).await?;
+    let package_json_content = fs::read_to_string(&package_json_path).await?;
     let mut package_json: Value = serde_json::from_str(&package_json_content)?;
 
     // Remove specified dependency fields and scripts.prepare
@@ -285,7 +291,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
     }
 
     // Write back the modified package.json
-    crate::fs::write(
+    fs::write(
         &package_json_path,
         serde_json::to_string_pretty(&package_json)?,
     )
@@ -302,7 +308,7 @@ pub fn path_to_pkg_name(path_str: &str) -> Option<&str> {
         let pkg_name = &path_str[idx + "node_modules/".len()..];
         let parts: Vec<&str> = pkg_name.split('/').collect();
         // Only allow ora or @scope/ora, skip @pkg/name/path/custom/package.json
-        if parts.len() > 2 || (parts.len() == 2 && !parts[0].starts_with('@')) {
+        if parts.len() > 2 || (parts.len() == 2 && !parts[0].is_scoped()) {
             return None;
         }
         Some(pkg_name)
@@ -312,10 +318,11 @@ pub fn path_to_pkg_name(path_str: &str) -> Option<&str> {
 }
 
 pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
-    let pkg_value = load_package_json_from_path(root_path).await?;
-    let pkg: PackageJson =
-        serde_json::from_value(pkg_value).context("Failed to parse package.json")?;
-    let lock_file = load_package_lock_json_from_path(root_path).await?;
+    // Always read from disk — this function checks whether the on-disk
+    // package.json has diverged from the lock file, so it must not use the
+    // in-process cache.
+    let pkg: DepsView = load_package_json(root_path).await?;
+    let lock_file: Value = read_json_file(&root_path.join("package-lock.json")).await?;
 
     // get packages in package-lock.json
     let packages = lock_file
@@ -323,28 +330,28 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
         .and_then(|p| p.as_object())
         .ok_or_else(|| anyhow!("Invalid package-lock.json format"))?;
 
-    // prepare packages to check
-    let mut pkgs_to_check: Vec<(String, PackageJson)> = vec![("".to_string(), pkg.clone())];
+    // prepare packages to check: (relative_path, deps)
+    let mut pkgs_to_check: Vec<(String, DepsView)> = vec![("".to_string(), pkg)];
 
-    // populate all workspaces
+    // populate all workspaces (load only the deps view for each)
     let workspaces = find_workspaces(root_path).await?;
-    for (_, path, workspace_pkg) in workspaces {
+    for (_, path, _) in workspaces {
         let target_path = path
             .strip_prefix(root_path)
             .unwrap_or(&path)
             .to_string_lossy()
             .to_string();
-        pkgs_to_check.push((target_path, workspace_pkg));
+        let ws_deps: DepsView = load_package_json(&path).await?;
+        pkgs_to_check.push((target_path, ws_deps));
     }
 
     let legacy_peer_deps = get_legacy_peer_deps().await;
 
-    // new workspace not found
-    for (path, pkg) in pkgs_to_check {
-        let lock = match packages.get(&path) {
+    for (path, pkg) in &pkgs_to_check {
+        let lock = match packages.get(path.as_str()) {
             Some(lock) => lock,
             None => {
-                let name = if path.is_empty() { "root" } else { &path };
+                let name = if path.is_empty() { "root" } else { path };
                 tracing::warn!("package-lock.json is outdated, new workspace {name} not found");
                 return Ok(true);
             }
@@ -352,19 +359,19 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
 
         // check dependencies whether changed
         if !deps_map_equals_lock(&pkg.dependencies, lock.get("dependencies")) {
-            let name = if path.is_empty() { "root" } else { &path };
+            let name = if path.is_empty() { "root" } else { path };
             tracing::warn!("package-lock.json is outdated, {name} dependencies changed");
             return Ok(true);
         }
 
         if !deps_map_equals_lock(&pkg.optional_dependencies, lock.get("optionalDependencies")) {
-            let name = if path.is_empty() { "root" } else { &path };
+            let name = if path.is_empty() { "root" } else { path };
             tracing::warn!("package-lock.json is outdated, {name} optionalDependencies changed");
             return Ok(true);
         }
 
         if !deps_map_equals_lock(&pkg.dev_dependencies, lock.get("devDependencies")) {
-            let name = if path.is_empty() { "root" } else { &path };
+            let name = if path.is_empty() { "root" } else { path };
             tracing::warn!("package-lock.json is outdated, {name} devDependencies changed");
             return Ok(true);
         }
@@ -372,36 +379,38 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
         if !legacy_peer_deps
             && !deps_map_equals_lock(&pkg.peer_dependencies, lock.get("peerDependencies"))
         {
-            let name = if path.is_empty() { "root" } else { &path };
+            let name = if path.is_empty() { "root" } else { path };
             tracing::warn!("package-lock.json is outdated, {name} peerDependencies changed");
             return Ok(true);
         }
+    }
 
-        // only check engines for root workspace
-        if path.is_empty() {
-            // Normalize: None/empty -> None
-            let pkg_engines = pkg.engines.as_ref().filter(|m| !m.is_empty());
-            let lock_engines = lock
-                .get("engines")
-                .filter(|v| !v.is_null())
-                .and_then(|v| v.as_object())
-                .filter(|obj| !obj.is_empty());
+    // engines: root package only
+    let root_engines: EnginesView = load_package_json(root_path).await?;
+    let root_lock = packages
+        .get("")
+        .ok_or_else(|| anyhow!("Missing root in package-lock.json"))?;
 
-            let engines_match = match (pkg_engines, lock_engines) {
-                (None, None) => true,
-                (Some(p), Some(l)) => {
-                    p.len() == l.len()
-                        && p.iter()
-                            .all(|(k, v)| l.get(k).and_then(|x| x.as_str()) == Some(v.as_str()))
-                }
-                _ => false,
-            };
+    let pkg_engines = root_engines.engines.as_ref().filter(|m| !m.is_empty());
+    let lock_engines = root_lock
+        .get("engines")
+        .filter(|v| !v.is_null())
+        .and_then(|v| v.as_object())
+        .filter(|obj| !obj.is_empty());
 
-            if !engines_match {
-                tracing::warn!("package-lock.json is outdated, engines changed");
-                return Ok(true);
-            }
+    let engines_match = match (pkg_engines, lock_engines) {
+        (None, None) => true,
+        (Some(p), Some(l)) => {
+            p.len() == l.len()
+                && p.iter()
+                    .all(|(k, v)| l.get(k).and_then(|x| x.as_str()) == Some(v.as_str()))
         }
+        _ => false,
+    };
+
+    if !engines_match {
+        tracing::warn!("package-lock.json is outdated, engines changed");
+        return Ok(true);
     }
 
     Ok(false)
@@ -414,10 +423,10 @@ pub async fn save_package_lock(path: &Path, package_lock: &PackageLock) -> Resul
 
     // PackageLock now has all required fields (name, version, lockfile_version, requires, packages)
     let content = serde_json::to_string_pretty(package_lock)?;
-    crate::fs::write(&temp_path, content)
+    fs::write(&temp_path, content)
         .await
         .context("Failed to write temporary package-lock.json")?;
-    crate::fs::rename(temp_path, target_path)
+    fs::rename(temp_path, target_path)
         .await
         .context("Failed to rename package-lock.json")?;
 
@@ -717,13 +726,13 @@ mod tests {
 "#;
         fs::write(temp_path.join("package.json"), pkg_json_with_newline).unwrap();
 
-        update_package_json(
-            temp_path,
-            &PackageAction::Add,
-            &["lodash@4.17.21"],
-            &None,
-            &SaveType::Prod,
-        )
+        update_package_json(&UpdatePackageJsonOptions {
+            cwd: temp_path,
+            action: PackageAction::Add,
+            specs: &["lodash@4.17.21"],
+            workspace: None,
+            save_type: SaveType::Prod,
+        })
         .await
         .unwrap();
 
@@ -738,13 +747,13 @@ mod tests {
 }"#;
         fs::write(temp_path.join("package.json"), pkg_json_no_newline).unwrap();
 
-        update_package_json(
-            temp_path,
-            &PackageAction::Add,
-            &["react@18.0.0"],
-            &None,
-            &SaveType::Prod,
-        )
+        update_package_json(&UpdatePackageJsonOptions {
+            cwd: temp_path,
+            action: PackageAction::Add,
+            specs: &["react@18.0.0"],
+            workspace: None,
+            save_type: SaveType::Prod,
+        })
         .await
         .unwrap();
 
@@ -765,13 +774,13 @@ mod tests {
         let pkg_json_crlf = "{\r\n  \"name\": \"test-package\",\r\n  \"version\": \"1.0.0\",\r\n  \"dependencies\": {}\r\n}\r\n";
         fs::write(temp_path.join("package.json"), pkg_json_crlf).unwrap();
 
-        update_package_json(
-            temp_path,
-            &PackageAction::Add,
-            &["lodash@4.17.21"],
-            &None,
-            &SaveType::Prod,
-        )
+        update_package_json(&UpdatePackageJsonOptions {
+            cwd: temp_path,
+            action: PackageAction::Add,
+            specs: &["lodash@4.17.21"],
+            workspace: None,
+            save_type: SaveType::Prod,
+        })
         .await
         .unwrap();
 

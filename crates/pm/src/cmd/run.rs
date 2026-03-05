@@ -1,15 +1,13 @@
 use std::path::Path;
 
 use crate::helper::fuzzy_select;
-use crate::helper::package::parse_package_name;
 use crate::helper::workspace::{find_workspace_path, update_cwd_to_project};
-use crate::model::package::{PackageInfo, Scripts};
+use crate::model::package::PackageInfo;
 use crate::service::script::ScriptService;
 use crate::service::workspace::WorkspaceService;
-use crate::util::json::load_package_json_from_path;
+use crate::util::user_config::get_or_load_package_json;
 use anyhow::{Context, Result};
 use colored::Colorize;
-use serde_json::Value;
 use tokio::task::JoinSet;
 
 /// Unified run function that handles both single workspace and multi-workspace script execution
@@ -77,13 +75,10 @@ pub async fn run_script(
             workspace_name,
             workspace_dir.display()
         );
-        load_package_json_from_path(&workspace_dir).await?
+        get_or_load_package_json(&workspace_dir).await?
     } else {
-        load_package_json_from_path(&updated_cwd).await?
+        get_or_load_package_json(&updated_cwd).await?
     };
-
-    let (_scope, name, fullname) =
-        parse_package_name(pkg.get("name").and_then(|v| v.as_str()).unwrap_or_default());
 
     let package = PackageInfo {
         path: if let Some(workspace_name) = workspace {
@@ -94,21 +89,18 @@ pub async fn run_script(
             updated_cwd.to_path_buf()
         },
         bin_files: Default::default(),
-        scripts: Scripts::default(),
-        fullname,
-        name,
+        scripts: pkg.scripts_or_empty().clone(),
+        lifecycle_scripts: Default::default(),
+        name: pkg.name.clone(),
     };
 
-    // Get all scripts from package.json
-    let scripts = if let Some(Value::Object(scripts)) = pkg.get("scripts") {
-        scripts
-    } else {
+    if package.scripts.is_empty() {
         anyhow::bail!("No scripts found in package.json");
-    };
+    }
 
     // Execute pre script if exists
     let pre_script_name = format!("pre{script_name}");
-    if let Some(Value::String(pre_script)) = scripts.get(&pre_script_name) {
+    if let Some(pre_script) = package.scripts.get(&pre_script_name) {
         tracing::debug!(cmd = %pre_script, args = "", "Executing command");
         println!("> {pre_script} ");
         println!();
@@ -118,7 +110,7 @@ pub async fn run_script(
     }
 
     // Execute main script
-    let script_content = if let Some(Value::String(content)) = scripts.get(script_name) {
+    let script_content = if let Some(content) = package.scripts.get(script_name) {
         content
     } else {
         anyhow::bail!("Script '{script_name}' not found in package.json");
@@ -140,7 +132,7 @@ pub async fn run_script(
 
     // Execute post script if exists
     let post_script_name = format!("post{script_name}");
-    if let Some(Value::String(post_script)) = scripts.get(&post_script_name) {
+    if let Some(post_script) = package.scripts.get(&post_script_name) {
         tracing::debug!(cmd = %post_script, args = "", "Executing command");
         println!("> {post_script} ");
         println!();
@@ -164,7 +156,7 @@ async fn need_run(cwd: &Path, workspace_name: &str, script_name: &str) -> Result
     };
 
     // Load package.json from workspace
-    let pkg = match load_package_json_from_path(&workspace_dir).await {
+    let pkg = match get_or_load_package_json(&workspace_dir).await {
         Ok(pkg) => pkg,
         Err(_) => {
             tracing::debug!("No package.json found in workspace '{workspace_name}', skipping");
@@ -173,18 +165,13 @@ async fn need_run(cwd: &Path, workspace_name: &str, script_name: &str) -> Result
     };
 
     // Check if the script exists in package.json
-    if let Some(Value::Object(scripts)) = pkg.get("scripts") {
-        let has_script = scripts.contains_key(script_name);
-        if !has_script {
-            tracing::debug!(
-                "Script '{script_name}' not found in workspace '{workspace_name}', skipping"
-            );
-        }
-        Ok(has_script)
-    } else {
-        tracing::debug!("No scripts section found in workspace '{workspace_name}', skipping");
-        Ok(false)
+    let has_script = pkg.scripts_or_empty().contains_key(script_name);
+    if !has_script {
+        tracing::debug!(
+            "Script '{script_name}' not found in workspace '{workspace_name}', skipping"
+        );
     }
+    Ok(has_script)
 }
 
 /// Run script in all workspaces with topological ordering and concurrent execution

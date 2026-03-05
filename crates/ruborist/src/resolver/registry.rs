@@ -7,6 +7,8 @@
 //! - For semver-supporting registries: directly fetches specific version
 //! - For traditional registries: fetches full manifest and resolves locally
 
+use std::sync::Arc;
+
 use crate::model::manifest::FullManifest;
 use crate::model::node::EdgeType;
 use crate::resolver::semver::normalize_spec;
@@ -99,7 +101,7 @@ pub fn resolve_from_manifest<E: std::error::Error + 'static>(
     manifest: &FullManifest,
     spec: &str,
 ) -> Result<ResolvedPackage, ResolveError<E>> {
-    let version_list: Vec<String> = manifest.versions.keys().cloned().collect();
+    let version_list: Vec<String> = manifest.versions.clone();
 
     if version_list.is_empty() {
         return Err(ResolveError::NoVersions(manifest.name.clone()));
@@ -109,11 +111,10 @@ pub fn resolve_from_manifest<E: std::error::Error + 'static>(
     let resolved_version = resolve_target_version(&manifest.dist_tags, &version_list, spec)
         .map_err(|e| ResolveError::Version(format!("{}@{}: {}", manifest.name, spec, e)))?;
 
-    // Get manifest for resolved version
+    // Get manifest for resolved version (lazy: parse from Value on demand)
     let version_manifest = manifest
-        .versions
-        .get(&resolved_version)
-        .cloned()
+        .get_core_version(&resolved_version)
+        .map(Arc::new)
         .ok_or_else(|| ResolveError::ManifestNotFound {
             name: manifest.name.clone(),
             version: resolved_version.clone(),
@@ -152,11 +153,11 @@ pub async fn resolve_dependency<R: RegistryClient>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::manifest::VersionManifest;
+    use crate::model::manifest::CoreVersionManifest;
     use crate::traits::registry::mock::MockRegistryClient;
 
-    fn create_version_manifest(name: &str, version: &str) -> VersionManifest {
-        VersionManifest {
+    fn create_version_manifest(name: &str, version: &str) -> CoreVersionManifest {
+        CoreVersionManifest {
             name: name.to_string(),
             version: version.to_string(),
             ..Default::default()

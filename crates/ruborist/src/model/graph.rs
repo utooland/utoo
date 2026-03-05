@@ -3,11 +3,12 @@
 use petgraph::Direction::{Incoming, Outgoing};
 use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
 use petgraph::visit::EdgeRef;
-use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use super::manifest::{NodeManifest, VersionManifest};
+use std::sync::Arc;
+
+use super::manifest::{CoreVersionManifest, NodeManifest};
 use super::node::{EdgeType, NodeType};
 use super::override_rule::{OverrideRule, Overrides};
 use super::package_json::PackageJson;
@@ -37,8 +38,12 @@ pub struct PackageNode {
 }
 
 impl PackageNode {
-    /// Create a new regular package node from VersionManifest.
-    pub fn from_version_manifest(name: String, path: PathBuf, manifest: VersionManifest) -> Self {
+    /// Create a new regular package node from CoreVersionManifest.
+    pub fn from_version_manifest(
+        name: String,
+        path: PathBuf,
+        manifest: Arc<CoreVersionManifest>,
+    ) -> Self {
         let version = manifest.version.clone();
         Self {
             path,
@@ -71,10 +76,12 @@ impl PackageNode {
 
     /// Create a root project node from PackageJson.
     pub fn root_from_package_json(path: PathBuf, pkg: PackageJson) -> Self {
+        let name = pkg.name.clone();
+        let version = pkg.version.clone();
         Self {
             path,
-            name: pkg.name.clone(),
-            version: pkg.version.clone(),
+            name,
+            version,
             manifest: NodeManifest::Local(pkg),
             node_type: NodeType::Root,
             is_prod: false,
@@ -86,6 +93,7 @@ impl PackageNode {
 
     /// Create a workspace package node from PackageJson.
     pub fn workspace_from_package_json(path: PathBuf, pkg: PackageJson) -> Self {
+        let name = pkg.name.clone();
         let version = if pkg.version.is_empty() {
             "*".to_string()
         } else {
@@ -93,7 +101,7 @@ impl PackageNode {
         };
         Self {
             path,
-            name: pkg.name.clone(),
+            name,
             version,
             manifest: NodeManifest::Local(pkg),
             node_type: NodeType::Workspace,
@@ -106,10 +114,12 @@ impl PackageNode {
 
     /// Create a symlinked package node from PackageJson.
     pub fn link_from_package_json(path: PathBuf, pkg: PackageJson) -> Self {
+        let name = pkg.name.clone();
+        let version = pkg.version.clone();
         Self {
             path,
-            name: pkg.name.clone(),
-            version: pkg.version.clone(),
+            name,
+            version,
             manifest: NodeManifest::Local(pkg),
             node_type: NodeType::Link,
             is_prod: false,
@@ -333,9 +343,13 @@ impl DependencyGraph {
 
     /// Serialize graph to package-lock.json format.
     ///
+    /// Builds `LockPackage` structs directly — no intermediate `serde_json::Value`.
     /// Delegates to `package_lock::serialize_to_packages` for the actual implementation.
     #[inline]
-    pub fn serialize_to_packages(&self, root_path: &Path) -> (Value, i32) {
+    pub fn serialize_to_packages(
+        &self,
+        root_path: &Path,
+    ) -> (HashMap<String, super::package_lock::LockPackage>, i32) {
         super::package_lock::serialize_to_packages(self, root_path)
     }
 
@@ -580,12 +594,12 @@ mod tests {
         PackageJson::new(name, version)
     }
 
-    fn create_version_manifest(name: &str, version: &str) -> VersionManifest {
-        VersionManifest {
+    fn create_version_manifest(name: &str, version: &str) -> Arc<CoreVersionManifest> {
+        Arc::new(CoreVersionManifest {
             name: name.to_string(),
             version: version.to_string(),
             ..Default::default()
-        }
+        })
     }
 
     #[test]
