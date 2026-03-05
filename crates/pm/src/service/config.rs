@@ -81,7 +81,7 @@ impl ConfigService {
             (cmd::INIT_NAME, cmd::INIT_ALIAS, cmd::INIT_ABOUT),
             (
                 cmd::COMPLETIONS_NAME,
-                "",
+                cmd::COMPLETIONS_ALIAS,
                 "Generate shell completion scripts",
             ),
             ("*", "", "→ ut run *"),
