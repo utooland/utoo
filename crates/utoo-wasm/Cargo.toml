@@ -45,6 +45,9 @@ turbo-tasks-malloc       = { workspace = true, default-features = false, feature
 turbopack-core           = { workspace = true, optional = true }
 turbopack-node           = { workspace = true, default-features = false, features = ["worker_pool"], optional = true }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+
 [features]
 default  = ["utoopack"]
 utoopack = [
