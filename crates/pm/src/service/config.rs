@@ -73,10 +73,17 @@ impl ConfigService {
             (cmd::CONFIG_NAME, cmd::CONFIG_ALIAS, cmd::CONFIG_ABOUT),
             (cmd::RUN_NAME, cmd::RUN_ALIAS, cmd::RUN_ABOUT),
             (cmd::PACK_NAME, cmd::PACK_ALIAS, cmd::PACK_ABOUT),
+            (cmd::PUBLISH_NAME, cmd::PUBLISH_ALIAS, cmd::PUBLISH_ABOUT),
             (cmd::PING_NAME, cmd::PING_ALIAS, cmd::PING_ABOUT),
             (cmd::LOGIN_NAME, cmd::LOGIN_ALIAS, cmd::LOGIN_ABOUT),
             (cmd::LOGOUT_NAME, cmd::LOGOUT_ALIAS, cmd::LOGOUT_ABOUT),
             (cmd::WHOAMI_NAME, cmd::WHOAMI_ALIAS, cmd::WHOAMI_ABOUT),
+            (cmd::INIT_NAME, cmd::INIT_ALIAS, cmd::INIT_ABOUT),
+            (
+                cmd::COMPLETIONS_NAME,
+                "",
+                "Generate shell completion scripts",
+            ),
             ("*", "", "→ ut run *"),
         ];
 
