@@ -16,25 +16,30 @@ NC='\033[0m' # No Color
 REGISTRY_MODE=${1:-both}
 PM_LIST=${2:-utoo,bun}
 
+# Run counts (configurable via env, default 3)
+BENCH_COLD_RUNS=${BENCH_COLD_RUNS:-3}
+BENCH_WARM_RUNS=${BENCH_WARM_RUNS:-3}
+
 # Parse PM list into array
 IFS=',' read -ra PACKAGE_MANAGERS <<< "$PM_LIST"
 
-# If UTOO_BASELINE_BIN is set and executable, insert utoo-baseline before utoo
-if [[ -n "$UTOO_BASELINE_BIN" && -x "$UTOO_BASELINE_BIN" ]]; then
+# Insert utoo-npm and/or utoo-next before utoo when their binaries are available
+if [[ -n "$UTOO_NPM_BIN" && -x "$UTOO_NPM_BIN" ]] || [[ -n "$UTOO_NEXT_BIN" && -x "$UTOO_NEXT_BIN" ]]; then
   NEW_PMS=()
   for pm in "${PACKAGE_MANAGERS[@]}"; do
     if [[ "$pm" == "utoo" ]]; then
-      NEW_PMS+=("utoo-baseline")
+      [[ -n "$UTOO_NPM_BIN" && -x "$UTOO_NPM_BIN" ]] && NEW_PMS+=("utoo-npm")
+      [[ -n "$UTOO_NEXT_BIN" && -x "$UTOO_NEXT_BIN" ]] && NEW_PMS+=("utoo-next")
     fi
     NEW_PMS+=("$pm")
   done
   PACKAGE_MANAGERS=("${NEW_PMS[@]}")
 fi
 
-# Check for required commands (skip utoo-baseline — it's a path, not in $PATH)
+# Check for required commands (skip utoo-npm/utoo-next — they're paths, not in $PATH)
 REQUIRED_CMDS=(git node hyperfine /usr/bin/time)
 for pm in "${PACKAGE_MANAGERS[@]}"; do
-  if [[ "$pm" == "utoo-baseline" ]]; then
+  if [[ "$pm" == "utoo-npm" || "$pm" == "utoo-next" ]]; then
     continue
   fi
   REQUIRED_CMDS+=("$pm")
@@ -71,6 +76,7 @@ echo -e "Registry mode: ${CYAN}$REGISTRY_MODE${NC}"
 echo -e "Projects: ${CYAN}${PROJECTS[*]}${NC}"
 echo -e "Package managers: ${CYAN}${PACKAGE_MANAGERS[*]}${NC}"
 echo -e "Platform: ${CYAN}$OS${NC}"
+echo -e "Cold runs: ${CYAN}$BENCH_COLD_RUNS${NC}, Warm runs: ${CYAN}$BENCH_WARM_RUNS${NC}"
 echo ""
 
 # Cache path configuration
@@ -97,7 +103,7 @@ cd "$PROJECT_DIR" && git clean -dfx
 
 if [ "$COLD" = "--cold" ]; then
   case "$PM" in
-    utoo|utoo-baseline) rm -rf "$UTOO_CACHE_DIR" ;;
+    utoo|utoo-npm|utoo-next) rm -rf "$UTOO_CACHE_DIR" ;;
     yarn) yarn cache clean 2>/dev/null || rm -rf ~/.yarn/cache "$(yarn cache dir 2>/dev/null)" ;;
     pnpm) pnpm store prune 2>/dev/null || rm -rf "$PNPM_STORE_DIR" ;;
     bun)  rm -rf "$BUN_INSTALL_DIR"; bun pm cache rm 2>/dev/null || true ;;
@@ -231,8 +237,11 @@ get_install_cmd() {
     utoo)
       echo "utoo install --ignore-scripts --registry=$registry"
       ;;
-    utoo-baseline)
-      echo "$UTOO_BASELINE_BIN install --ignore-scripts --registry=$registry"
+    utoo-npm)
+      echo "$UTOO_NPM_BIN install --ignore-scripts --registry=$registry"
+      ;;
+    utoo-next)
+      echo "$UTOO_NEXT_BIN install --ignore-scripts --registry=$registry"
       ;;
     yarn)
       echo "yarn install --ignore-scripts --registry $registry"
@@ -261,7 +270,7 @@ run_cold_benchmarks() {
   local registry=$2
   local reg_short=$3
 
-  echo -e "  ${YELLOW}Cold installs (1 run each):${NC}"
+  echo -e "  ${YELLOW}Cold installs ($BENCH_COLD_RUNS runs each):${NC}"
 
   for pm in "${PACKAGE_MANAGERS[@]}"; do
     local install_cmd
@@ -269,26 +278,18 @@ run_cold_benchmarks() {
     local json_file="$RESULTS_DIR/${project}_${reg_short}_cold_${pm}.json"
     local metrics_file="$RESULTS_DIR/${project}_${reg_short}_cold_${pm}_metrics.jsonl"
     local cmd_script="$RESULTS_DIR/cmd_cold_${pm}.sh"
-    local log_file="$LOG_DIR/${project}_${reg_short}_cold_${pm}.log"
 
-    printf 'set -eo pipefail\ncd %s && %s 2>&1 | tee %s\n' "$project_dir" "$install_cmd" "$log_file" > "$cmd_script"
+    printf 'set -eo pipefail\ncd %s && %s\n' "$project_dir" "$install_cmd" > "$cmd_script"
     > "$metrics_file"
 
     echo -e "    ${CYAN}$pm${NC}..."
     hyperfine \
-      --runs 1 \
+      --runs "$BENCH_COLD_RUNS" \
       --prepare "bash $PREPARE_SCRIPT $project_dir $pm --cold" \
       --export-json "$json_file" \
       -n "$pm" \
       "bash $METRICS_WRAPPER $metrics_file $cmd_script" \
       2>&1 | tail -1 || echo -e "    ${RED}$pm cold install failed${NC}"
-
-    # Print install output for verification
-    if [ -f "$log_file" ]; then
-      echo -e "    ${YELLOW}[$pm output]${NC}"
-      sed 's/^/      /' "$log_file"
-      echo ""
-    fi
   done
 }
 
@@ -299,7 +300,7 @@ run_warm_benchmarks() {
   local registry=$2
   local reg_short=$3
 
-  echo -e "  ${YELLOW}Warm installs (3 runs, 1 warmup):${NC}"
+  echo -e "  ${YELLOW}Warm installs ($BENCH_WARM_RUNS runs, 1 warmup):${NC}"
 
   # Pre-populate global caches: one install per PM
   for pm in "${PACKAGE_MANAGERS[@]}"; do
@@ -312,14 +313,8 @@ run_warm_benchmarks() {
       setup_pnpm_workspace "$project_dir"
     fi
     echo -e "    ${CYAN}Pre-populating $pm cache...${NC}"
-    if eval "$install_cmd" > "$prepop_log" 2>&1; then
-      echo -e "    ${YELLOW}[$pm pre-populate output]${NC}"
-      sed 's/^/      /' "$prepop_log"
-      echo ""
-    else
+    if ! eval "$install_cmd" > "$prepop_log" 2>&1; then
       echo -e "    ${RED}$pm cache pre-populate failed${NC}"
-      sed 's/^/      /' "$prepop_log"
-      echo ""
     fi
   done
 
@@ -327,7 +322,7 @@ run_warm_benchmarks() {
   local json_file="$RESULTS_DIR/${project}_${reg_short}_warm.json"
   local hyperfine_args=(
     --warmup 1
-    --runs 3
+    --runs "$BENCH_WARM_RUNS"
     --export-json "$json_file"
   )
 
@@ -336,26 +331,14 @@ run_warm_benchmarks() {
     install_cmd=$(get_install_cmd "$pm" "$registry" "false")
     local metrics_file="$RESULTS_DIR/${project}_${reg_short}_warm_${pm}_metrics.jsonl"
     local cmd_script="$RESULTS_DIR/cmd_warm_${pm}.sh"
-    local log_file="$LOG_DIR/${project}_${reg_short}_warm_${pm}.log"
 
-    # Tee output to log file (overwrites each run, keeps the last run's output)
-    printf 'set -eo pipefail\ncd %s && %s 2>&1 | tee %s\n' "$project_dir" "$install_cmd" "$log_file" > "$cmd_script"
+    printf 'set -eo pipefail\ncd %s && %s\n' "$project_dir" "$install_cmd" > "$cmd_script"
     > "$metrics_file"
 
     hyperfine_args+=(-n "$pm" --prepare "bash $PREPARE_SCRIPT $project_dir $pm" "bash $METRICS_WRAPPER $metrics_file $cmd_script")
   done
 
   hyperfine "${hyperfine_args[@]}" 2>&1 || echo -e "  ${RED}Warm benchmark failed${NC}"
-
-  # Print last run's output for each PM
-  for pm in "${PACKAGE_MANAGERS[@]}"; do
-    local log_file="$LOG_DIR/${project}_${reg_short}_warm_${pm}.log"
-    if [ -f "$log_file" ]; then
-      echo -e "    ${YELLOW}[$pm warm output (last run)]${NC}"
-      sed 's/^/      /' "$log_file"
-      echo ""
-    fi
-  done
 }
 
 # ---------------------------------------------------------------------------
