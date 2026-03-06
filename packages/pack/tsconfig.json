@@ -11,5 +11,5 @@
     "lib": ["dom", "dom.iterable", "esnext"]
   },
   "include": ["src"],
-  "exclude": ["es", "cjs"]
+  "exclude": ["es", "cjs", "src/__test__"]
 }
