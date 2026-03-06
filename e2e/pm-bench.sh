@@ -79,6 +79,11 @@ echo -e "Platform: ${CYAN}$OS${NC}"
 echo -e "Cold runs: ${CYAN}$BENCH_COLD_RUNS${NC}, Warm runs: ${CYAN}$BENCH_WARM_RUNS${NC}"
 echo ""
 
+# Cache path configuration
+UTOO_CACHE_DIR="${UTOO_CACHE_DIR:-$HOME/.cache/nm}"
+PNPM_STORE_DIR="${PNPM_STORE_DIR:-$(pnpm store path 2>/dev/null || echo "$HOME/.pnpm-store")}"
+BUN_INSTALL_DIR="${BUN_INSTALL_DIR:-$HOME/.bun/install}"
+
 # Filesystem check: detect cross-device between cache and bench dir
 echo -e "${YELLOW}Filesystem check:${NC}"
 mkdir -p "$UTOO_CACHE_DIR" "$BENCH_DIR"
@@ -98,11 +103,6 @@ else
 fi
 df -h "$UTOO_CACHE_DIR" "$BENCH_DIR" 2>/dev/null || true
 echo ""
-
-# Cache path configuration
-UTOO_CACHE_DIR="${UTOO_CACHE_DIR:-$HOME/.cache/nm}"
-PNPM_STORE_DIR="${PNPM_STORE_DIR:-$(pnpm store path 2>/dev/null || echo "$HOME/.pnpm-store")}"
-BUN_INSTALL_DIR="${BUN_INSTALL_DIR:-$HOME/.bun/install}"
 
 # ---------------------------------------------------------------------------
 # Generate helper scripts (called by hyperfine in subprocesses)
