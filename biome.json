@@ -23,7 +23,8 @@
       "!next.js/**",
       "!crates/pack-tests/**/package.json",
       "!**/dist",
-      "!**/.turbopack"
+      "!**/.turbopack",
+      "!e2e/pm/arborist/**"
     ]
   },
   "formatter": {

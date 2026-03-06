@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "aaaaaa": "file:./node_modules/abbrev",
+    "abbrev": "*",
+    "monorepo": "../cli-750",
+    "zzzzzz": "file:./node_modules/abbrev"
+  },
+  "name": "test-external-link-dep"
+}

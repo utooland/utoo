@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "mkdirp": "^1.0.2"
+  },
+  "name": "test-yarn-lock-mkdirp"
+}
