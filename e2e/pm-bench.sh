@@ -84,26 +84,6 @@ UTOO_CACHE_DIR="${UTOO_CACHE_DIR:-$HOME/.cache/nm}"
 PNPM_STORE_DIR="${PNPM_STORE_DIR:-$(pnpm store path 2>/dev/null || echo "$HOME/.pnpm-store")}"
 BUN_INSTALL_DIR="${BUN_INSTALL_DIR:-$HOME/.bun/install}"
 
-# Filesystem check: detect cross-device between cache and bench dir
-echo -e "${YELLOW}Filesystem check:${NC}"
-mkdir -p "$UTOO_CACHE_DIR" "$BENCH_DIR"
-if [ "$OS" = "Linux" ]; then
-  CACHE_DEV=$(stat -c '%d' "$UTOO_CACHE_DIR")
-  BENCH_DEV=$(stat -c '%d' "$BENCH_DIR")
-else
-  CACHE_DEV=$(stat -f '%d' "$UTOO_CACHE_DIR")
-  BENCH_DEV=$(stat -f '%d' "$BENCH_DIR")
-fi
-echo -e "  Cache dir: ${CYAN}$UTOO_CACHE_DIR${NC} (dev=$CACHE_DEV)"
-echo -e "  Bench dir: ${CYAN}$BENCH_DIR${NC} (dev=$BENCH_DEV)"
-if [ "$CACHE_DEV" != "$BENCH_DEV" ]; then
-  echo -e "  ${RED}WARNING: cross-device! hardlink will fall back to copy${NC}"
-else
-  echo -e "  ${GREEN}Same filesystem, hardlink OK${NC}"
-fi
-df -h "$UTOO_CACHE_DIR" "$BENCH_DIR" 2>/dev/null || true
-echo ""
-
 # ---------------------------------------------------------------------------
 # Generate helper scripts (called by hyperfine in subprocesses)
 # ---------------------------------------------------------------------------
