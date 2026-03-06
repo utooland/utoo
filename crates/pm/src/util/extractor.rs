@@ -130,27 +130,22 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
         }
     }
 
-    // Create directories — sorted shallowest-first so that a single mkdir()
-    // succeeds most of the time, avoiding the stat-per-component overhead of
-    // create_dir_all().
+    // Collect every ancestor directory (up to `dest`), then create them
+    // shallowest-first so a single mkdir() per dir is sufficient.
     let mut seen = HashSet::new();
-    let mut dirs = Vec::new();
-    for entry in entries.iter() {
-        if let Some(parent) = entry.path.parent()
-            && seen.insert(parent.to_path_buf())
-        {
-            dirs.push(parent.to_path_buf());
+    for entry in &entries {
+        let mut p = entry.path.parent();
+        while let Some(dir) = p {
+            if dir == dest || !seen.insert(dir.to_path_buf()) {
+                break;
+            }
+            p = dir.parent();
         }
     }
+    let mut dirs: Vec<_> = seen.into_iter().collect();
     dirs.sort_unstable_by_key(|p| p.as_os_str().len());
     for dir in &dirs {
-        if let Err(e) = fs::create_dir(dir)
-            && e.kind() == std::io::ErrorKind::NotFound
-        {
-            // Parent missing — fall back to recursive creation.
-            // AlreadyExists and other errors are non-fatal.
-            fs::create_dir_all(dir).ok();
-        }
+        fs::create_dir(dir).ok();
     }
 
     // Write files in parallel using rayon
