@@ -1,0 +1,52 @@
+{
+  "$schema": "../../packages/pack/config_schema.json",
+  "entry": [
+    {
+      "import": "./src/index.tsx",
+      "html": {
+        "template": "./index.html"
+      },
+      "name": "index"
+    }
+  ],
+  "output": {
+    "path": "./dist",
+    "filename": "with-proxy.[contenthash:8].js",
+    "chunkFilename": "with-proxy.[contenthash:8].js",
+    "cssFilename": "with-proxy.[contenthash:8].css",
+    "assetModuleFilename": "with-proxy.[contenthash:8].css",
+    "clean": true
+  },
+  "optimization": {
+    "minify": false
+  },
+  "react": {
+    "runtime": "classic"
+  },
+  "devServer": {
+    "port": 3000,
+    "proxy": [
+      {
+        "context": "/api",
+        "target": "https://jsonplaceholder.typicode.com",
+        "pathRewrite": {
+          "^/api": ""
+        },
+        "changeOrigin": true,
+        "secure": true
+      },
+      {
+        "context": [
+          "/placeholder",
+          "/json"
+        ],
+        "target": "https://jsonplaceholder.typicode.com",
+        "pathRewrite": {
+          "^/placeholder": "",
+          "^/json": ""
+        },
+        "changeOrigin": true
+      }
+    ]
+  }
+}

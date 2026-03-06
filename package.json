@@ -6,7 +6,7 @@
   "main": "index.js",
   "scripts": {
     "build": "turbo run build",
-    "test": "turbo run test",
+    "test": "vitest run",
     "lint": "turbo run lint",
     "dev": "turbo run dev",
     "clean": "turbo run clean",
@@ -20,7 +20,8 @@
     "@biomejs/biome": "2.1.2",
     "husky": "^9.1.7",
     "tombi": "^0.7.32",
-    "turbo": "^2.6.3"
+    "turbo": "^2.6.3",
+    "vitest": "^3.2.4"
   },
   "workspaces": [
     "packages/pack",
