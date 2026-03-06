@@ -101,6 +101,18 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
             .path()
             .with_context(|| "Failed to get entry path")?
             .into_owned();
+
+        // Guard against path traversal (Tar Slip): reject absolute paths
+        // and entries containing ".." components.
+        if path.is_absolute()
+            || path
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            tracing::warn!("Skipping tar entry with unsafe path: {}", path.display());
+            continue;
+        }
+
         let full_path = dest.join(&path);
 
         if !entry.header().entry_type().is_dir() {

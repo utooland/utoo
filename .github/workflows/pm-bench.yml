@@ -56,27 +56,6 @@ jobs:
         os: [macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Check cross-device filesystem
-        run: |
-          CACHE_DIR="${HOME}/.cache/nm"
-          BENCH_DIR="/tmp/pm-bench"
-          mkdir -p "$CACHE_DIR" "$BENCH_DIR"
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            CACHE_DEV=$(stat -c '%d' "$CACHE_DIR")
-            BENCH_DEV=$(stat -c '%d' "$BENCH_DIR")
-          else
-            CACHE_DEV=$(stat -f '%d' "$CACHE_DIR")
-            BENCH_DEV=$(stat -f '%d' "$BENCH_DIR")
-          fi
-          echo "Cache dir: $CACHE_DIR (dev=$CACHE_DEV)"
-          echo "Bench dir: $BENCH_DIR (dev=$BENCH_DEV)"
-          if [ "$CACHE_DEV" != "$BENCH_DEV" ]; then
-            echo "::warning::Cross-device detected! hardlink will fall back to copy"
-          else
-            echo "Same filesystem, hardlink OK"
-          fi
-          df -h "$CACHE_DIR" "$BENCH_DIR"
-
       - uses: actions/checkout@v4
 
       - name: Init git submodules

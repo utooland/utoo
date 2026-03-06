@@ -168,37 +168,11 @@ mod hardlink_clone {
             }
 
             // Phase 3: Clone files (hardlink first, fallback to copy)
-            let mut hardlink_count: u32 = 0;
-            let mut copy_count: u32 = 0;
             for entry in &files {
-                if !use_copy {
-                    match fs::hard_link(&entry.src, &entry.dst) {
-                        Ok(()) => {
-                            hardlink_count += 1;
-                            continue;
-                        }
-                        Err(e) => {
-                            if copy_count == 0 {
-                                tracing::warn!(
-                                    "hardlink failed ({}), falling back to copy: {} -> {}",
-                                    e,
-                                    entry.src.display(),
-                                    entry.dst.display()
-                                );
-                            }
-                        }
-                    }
+                if !use_copy && fs::hard_link(&entry.src, &entry.dst).is_ok() {
+                    continue;
                 }
                 copy_file_sync(&entry.src, &entry.dst)?;
-                copy_count += 1;
-            }
-            if copy_count > 0 {
-                tracing::warn!(
-                    "clone stats: {} hardlinked, {} copied (use_copy={})",
-                    hardlink_count,
-                    copy_count,
-                    use_copy
-                );
             }
             Ok(())
         })
