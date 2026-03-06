@@ -118,13 +118,26 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
         }
     }
 
-    // Create directories
-    let mut created_dirs = HashSet::new();
+    // Create directories — sorted shallowest-first so that a single mkdir()
+    // succeeds most of the time, avoiding the stat-per-component overhead of
+    // create_dir_all().
+    let mut seen = HashSet::new();
+    let mut dirs = Vec::new();
     for entry in entries.iter() {
         if let Some(parent) = entry.path.parent()
-            && created_dirs.insert(parent.to_path_buf())
+            && seen.insert(parent.to_path_buf())
         {
-            fs::create_dir_all(parent).ok();
+            dirs.push(parent.to_path_buf());
+        }
+    }
+    dirs.sort_unstable_by_key(|p| p.as_os_str().len());
+    for dir in &dirs {
+        if let Err(e) = fs::create_dir(dir)
+            && e.kind() == std::io::ErrorKind::NotFound
+        {
+            // Parent missing — fall back to recursive creation.
+            // AlreadyExists and other errors are non-fatal.
+            fs::create_dir_all(dir).ok();
         }
     }
 
@@ -135,10 +148,11 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
         file.write_all(&entry.content)
             .with_context(|| format!("Failed to write: {}", entry.path.display()))?;
 
+        // Skip chmod for 0o644 (most files) — File::create() already produces
+        // this via umask (0o666 & ~0o022 = 0o644).
         #[cfg(unix)]
-        {
-            let perms = fs::Permissions::from_mode(entry.mode);
-            fs::set_permissions(&entry.path, perms).ok();
+        if entry.mode != 0o644 {
+            fs::set_permissions(&entry.path, fs::Permissions::from_mode(entry.mode)).ok();
         }
         Ok(())
     })?;
