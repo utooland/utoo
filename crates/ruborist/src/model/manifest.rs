@@ -784,4 +784,52 @@ mod tests {
         assert_eq!(manifest.license, Some("MIT".to_string()));
         assert!(manifest.dependencies.is_some());
     }
+
+    #[test]
+    fn test_license_array_does_not_break_parsing() {
+        // Some old packages use "license" as an array of objects instead of a string
+        let json = r#"{
+            "name": "xss",
+            "version": "0.2.0",
+            "license": [{"type":"MIT","url":"https://example.com/MIT-License"}],
+            "dist": {"tarball":"https://registry.npmjs.org/xss/-/xss-0.2.0.tgz","shasum":"abc123"}
+        }"#;
+
+        let manifest: CoreVersionManifest = serde_json::from_str(json).unwrap();
+        assert_eq!(manifest.name, "xss");
+        assert_eq!(manifest.version, "0.2.0");
+        assert_eq!(manifest.license, None); // skip_on_error should handle this
+
+        let manifest2: VersionManifest = serde_json::from_str(json).unwrap();
+        assert_eq!(manifest2.license, None);
+    }
+
+    #[test]
+    fn test_licenses_plural_field_does_not_break_parsing() {
+        // "licenses" (plural array) instead of "license" (string) should be silently ignored
+        let json = r#"{
+            "name": "legacy-pkg",
+            "version": "0.1.20",
+            "description": "A package with legacy licenses field",
+            "dependencies": {"commander": "2.1.x"},
+            "devDependencies": {"mocha": "1.8.2"},
+            "licenses": [{"type":"MIT","url":"https://opensource.org/licenses/MIT"}],
+            "dist": {
+                "shasum": "539f38e2427e37e6fa13cd417f98f644d2d0c4a6",
+                "tarball": "https://registry.npmjs.org/legacy-pkg/-/legacy-pkg-0.1.20.tgz",
+                "integrity": "sha512-f4BQyF9YKKI7Y5O"
+            },
+            "bin": {"legacy": "./bin/legacy"}
+        }"#;
+
+        let manifest: CoreVersionManifest = serde_json::from_str(json).unwrap();
+        assert_eq!(manifest.name, "legacy-pkg");
+        assert_eq!(manifest.version, "0.1.20");
+        assert_eq!(manifest.license, None); // "licenses" is unknown field, ignored
+        assert!(manifest.dependencies.is_some());
+        assert_eq!(
+            manifest.dependencies.as_ref().unwrap().get("commander"),
+            Some(&"2.1.x".to_string())
+        );
+    }
 }

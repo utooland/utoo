@@ -14,4 +14,5 @@ pub mod oncemap;
 pub mod registry;
 pub mod retry;
 pub mod save_type;
+pub mod sysconf;
 pub mod user_config;
