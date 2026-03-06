@@ -12,5 +12,6 @@
     "skipLibCheck": true,
     "noImplicitReturns": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/__test__"]
 }
