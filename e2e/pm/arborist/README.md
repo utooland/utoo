@@ -137,6 +137,45 @@ directories have the same package name.
 
 ---
 
+## Assertion Coverage (TODO)
+
+Current tests only verify that `utoo install` exits with code 0 (or non-zero
+for expected failures) and that `node_modules/` is created. This is
+**smoke testing** — it catches crashes but cannot detect wrong versions,
+incorrect tree structure, or broken peer dep resolution.
+
+npm/cli's arborist tests use multi-layered assertions:
+
+| Assertion Type | npm/cli | utoo (current) |
+|---|---|---|
+| Tree structure snapshot | `matchSnapshot(printTree(tree))` | not checked |
+| Resolved version checks | `tree.children.get('once').version === '1.3.3'` | not checked |
+| File system layout | verifies dirs exist/absent, bin symlinks | `node_modules/` exists only |
+| Lock file content | snapshots `package-lock.json`, checks metadata flags | not checked |
+| Error codes | `rejects(…, { code: 'ERESOLVE' })` | exit code non-zero only |
+| Omitted dep absence | verifies omitted packages not on disk | not checked |
+| Idempotence | `reify()` twice → same result | not checked |
+
+### Planned improvements
+
+**Phase 1 — version & structure assertions:**
+- Add expected version checks for 15–20 key fixtures (peer-deps, dedup,
+  workspace variants) using `node -e "require('./node_modules/pkg/package.json').version"`
+- Verify expected packages exist (and unexpected ones don't) in `node_modules/`
+- Validate `package-lock.json` is valid JSON
+
+**Phase 2 — tree snapshots & error validation:**
+- Snapshot `utoo ls --json` output and compare against baselines
+- Check specific error messages/codes for expected-failure fixtures
+- Verify omitted deps are truly absent on disk for omit test cases
+
+**Phase 3 — full parity:**
+- Bin symlink verification
+- Lock file content snapshots
+- Idempotent reinstall validation (install twice, compare results)
+
+---
+
 ## Test Sections
 
 | Section | Description | Count |
