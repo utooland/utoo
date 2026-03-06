@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import * as utooPack from "@utoo/pack";
 import fs from "fs";
 import path from "path";
@@ -23,7 +24,7 @@ export async function resolveFromConfigFile(
     if (!fs.existsSync(configPath)) continue;
 
     if (name.endsWith(".json")) {
-      const content = await fs.promises.readFile(configPath, { encoding: "utf-8" });
+      const content = await readFile(configPath, "utf8");
       return JSON.parse(content) as Record<string, unknown>;
     }
 
