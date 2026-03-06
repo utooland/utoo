@@ -327,12 +327,7 @@ enum Commands {
 }
 
 fn main() {
-    // Windows default thread stack is 1MB, insufficient for libdeflater + tar + rayon work-stealing.
-    #[cfg(target_os = "windows")]
-    rayon::ThreadPoolBuilder::new()
-        .stack_size(8 * 1024 * 1024)
-        .build_global()
-        .ok();
+    crate::util::sysconf::init();
 
     let worker_threads = std::thread::available_parallelism()
         .map(|n| n.get())
