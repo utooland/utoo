@@ -1,10 +1,12 @@
 //! Registry client trait for dependency resolution.
 
-use crate::model::manifest::{FullManifest, VersionManifest};
-use crate::resolver::semver::normalize_spec;
-use crate::resolver::version::resolve_target_version;
 use std::collections::HashMap;
 use std::future::Future;
+use std::sync::Arc;
+
+use crate::model::manifest::{CoreVersionManifest, FullManifest};
+use crate::resolver::semver::normalize_spec;
+use crate::resolver::version::resolve_target_version;
 
 /// Check if a registry URL is the official npm registry.
 ///
@@ -58,8 +60,8 @@ pub struct ResolvedPackage {
     pub name: String,
     /// Resolved version
     pub version: String,
-    /// Full package manifest (package.json content for this version)
-    pub manifest: VersionManifest,
+    /// Slim package manifest for resolution/install (Arc-shared)
+    pub manifest: Arc<CoreVersionManifest>,
 }
 
 /// Versions info for a package (lightweight, without full manifests).
@@ -151,19 +153,18 @@ pub trait RegistryClient {
         &self,
         name: &str,
         spec: &str,
-    ) -> impl Future<Output = Result<VersionManifest, Self::Error>> {
+    ) -> impl Future<Output = Result<Arc<CoreVersionManifest>, Self::Error>> {
         async move {
             let manifest = self.fetch_full_manifest(name).await?;
-            let version_list: Vec<String> = manifest.versions.keys().cloned().collect();
+            let version_list: Vec<String> = manifest.versions.clone();
 
             // Resolve version using shared logic
             let resolved_version = resolve_target_version(&manifest.dist_tags, &version_list, spec)
                 .map_err(|e| RegistryError(anyhow::anyhow!("{}@{}: {}", name, spec, e)))?;
 
             manifest
-                .versions
-                .get(&resolved_version)
-                .cloned()
+                .get_core_version(&resolved_version)
+                .map(Arc::new)
                 .ok_or_else(|| {
                     RegistryError(anyhow::anyhow!(
                         "Version {} not found in manifest for {}",
@@ -225,7 +226,7 @@ pub trait RegistryClient {
                     fetch_spec
                 );
                 let full_manifest = self.fetch_full_manifest(&fetch_name).await?;
-                let version_list: Vec<String> = full_manifest.versions.keys().cloned().collect();
+                let version_list: Vec<String> = full_manifest.versions.clone();
 
                 if version_list.is_empty() {
                     return Err(RegistryError(anyhow::anyhow!(
@@ -240,9 +241,8 @@ pub trait RegistryClient {
                         .map_err(|e| RegistryError(anyhow::anyhow!("{}@{}: {}", name, spec, e)))?;
 
                 let version_manifest = full_manifest
-                    .versions
-                    .get(&resolved_version)
-                    .cloned()
+                    .get_core_version(&resolved_version)
+                    .map(Arc::new)
                     .ok_or_else(|| {
                         RegistryError(anyhow::anyhow!(
                             "Version {} not found in manifest for {}",
@@ -271,7 +271,7 @@ pub trait RegistryClient {
         async move {
             let manifest = self.fetch_full_manifest(name).await?;
             Ok(VersionsInfo {
-                version_list: manifest.versions.keys().cloned().collect(),
+                version_list: manifest.versions.clone(),
                 dist_tags: manifest.dist_tags,
             })
         }
@@ -304,7 +304,12 @@ pub trait RegistryClient {
     /// allowing build phase to directly hit memory cache without traversing full_manifest.
     ///
     /// Default implementation is no-op (no caching).
-    fn cache_version_manifest(&self, _name: &str, _spec: &str, _manifest: VersionManifest) {
+    fn cache_version_manifest(
+        &self,
+        _name: &str,
+        _spec: &str,
+        _manifest: Arc<CoreVersionManifest>,
+    ) {
         // Default: no-op
     }
 }
@@ -314,9 +319,16 @@ pub trait RegistryClient {
 pub mod mock {
     use super::*;
 
+    /// Internal package data for mock registry.
+    struct MockPackage {
+        name: String,
+        dist_tags: HashMap<String, String>,
+        versions: HashMap<String, serde_json::Value>,
+    }
+
     /// Mock registry client that returns predefined packages.
     pub struct MockRegistryClient {
-        packages: HashMap<String, FullManifest>,
+        packages: HashMap<String, MockPackage>,
     }
 
     impl MockRegistryClient {
@@ -326,29 +338,29 @@ pub mod mock {
             }
         }
 
-        pub fn add_package(&mut self, name: &str, version: &str, manifest: VersionManifest) {
-            let full_manifest =
-                self.packages
-                    .entry(name.to_string())
-                    .or_insert_with(|| FullManifest {
-                        name: name.to_string(),
-                        versions: HashMap::new(),
-                        dist_tags: HashMap::new(),
-                        ..Default::default()
-                    });
+        pub fn add_package(&mut self, name: &str, version: &str, manifest: CoreVersionManifest) {
+            let pkg = self
+                .packages
+                .entry(name.to_string())
+                .or_insert_with(|| MockPackage {
+                    name: name.to_string(),
+                    dist_tags: HashMap::new(),
+                    versions: HashMap::new(),
+                });
 
-            full_manifest.versions.insert(version.to_string(), manifest);
+            pkg.versions.insert(
+                version.to_string(),
+                serde_json::to_value(&manifest).expect("CoreVersionManifest serialization"),
+            );
             // Only set latest if not already set
-            full_manifest
-                .dist_tags
+            pkg.dist_tags
                 .entry("latest".to_string())
                 .or_insert_with(|| version.to_string());
         }
 
         pub fn set_latest(&mut self, name: &str, version: &str) {
-            if let Some(manifest) = self.packages.get_mut(name) {
-                manifest
-                    .dist_tags
+            if let Some(pkg) = self.packages.get_mut(name) {
+                pkg.dist_tags
                     .insert("latest".to_string(), version.to_string());
             }
         }
@@ -381,10 +393,26 @@ pub mod mock {
         type Error = MockError;
 
         async fn fetch_full_manifest(&self, name: &str) -> Result<FullManifest, Self::Error> {
-            self.packages
+            let pkg = self
+                .packages
                 .get(name)
-                .cloned()
-                .ok_or_else(|| MockError(format!("Package not found: {}", name)))
+                .ok_or_else(|| MockError(format!("Package not found: {}", name)))?;
+
+            // Build JSON and serialize to raw bytes for on-demand extraction
+            let json = serde_json::json!({
+                "name": &pkg.name,
+                "dist-tags": &pkg.dist_tags,
+                "versions": &pkg.versions,
+            });
+            let raw = serde_json::to_vec(&json).expect("mock JSON serialization");
+
+            Ok(FullManifest {
+                name: pkg.name.clone(),
+                dist_tags: pkg.dist_tags.clone(),
+                versions: pkg.versions.keys().cloned().collect(),
+                raw: Arc::from(raw),
+                ..Default::default()
+            })
         }
     }
 }

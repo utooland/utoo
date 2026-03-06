@@ -3,9 +3,11 @@
 //! These types represent the JSON responses from npm registry API.
 //! Used by both PM (native) and WASM (browser) implementations.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
 
 /// Skip on error - try to deserialize, return None if fails.
 /// This handles malformed npm registry data gracefully.
@@ -35,8 +37,12 @@ pub struct FullManifest {
     #[serde(rename = "dist-tags")]
     pub dist_tags: HashMap<String, String>,
 
-    #[serde(default)]
-    pub versions: HashMap<String, VersionManifest>,
+    #[serde(default, deserialize_with = "deserialize_version_keys")]
+    pub versions: Vec<String>,
+
+    /// Raw HTTP response bytes. Injected post-parse; used for on-demand version extraction.
+    #[serde(skip)]
+    pub raw: Arc<[u8]>,
 
     pub time: HashMap<String, String>,
 
@@ -67,6 +73,60 @@ pub struct FullManifest {
     #[serde(rename = "readmeFilename")]
     #[serde(deserialize_with = "skip_on_error")]
     pub readme_filename: Option<String>,
+}
+
+impl FullManifest {
+    /// Extract a single version from raw bytes on demand.
+    ///
+    /// Copies raw bytes, parses with `simd_json::to_borrowed_value`, navigates
+    /// to `versions[ver]`, then converts to the target type via `serde_json::Value`.
+    fn extract_version<T: for<'de> Deserialize<'de>>(&self, version: &str) -> Option<T> {
+        use simd_json::prelude::ValueObjectAccess;
+        let mut buf = self.raw.to_vec();
+        let parsed = simd_json::to_borrowed_value(&mut buf).ok()?;
+        let version_obj = parsed.get("versions")?.get(version)?;
+        let value = serde_json::to_value(version_obj).ok()?;
+        serde_json::from_value(value).ok()
+    }
+
+    /// Parse a single version on demand into CoreVersionManifest (hot path).
+    pub fn get_core_version(&self, version: &str) -> Option<CoreVersionManifest> {
+        self.extract_version(version)
+    }
+
+    /// Parse a single version on demand into full VersionManifest (cold path, e.g. `ut view`).
+    pub fn get_full_version(&self, version: &str) -> Option<VersionManifest> {
+        self.extract_version(version)
+    }
+}
+
+/// Deserialize a versions map by extracting only the keys, skipping all values.
+///
+/// Uses `IgnoredAny` to skip over version manifest JSON objects without allocating,
+/// only collecting the version number strings.
+fn deserialize_version_keys<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct VersionKeysVisitor;
+    impl<'de> serde::de::Visitor<'de> for VersionKeysVisitor {
+        type Value = Vec<String>;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("a map of version strings to objects")
+        }
+        fn visit_map<M: serde::de::MapAccess<'de>>(
+            self,
+            mut map: M,
+        ) -> Result<Vec<String>, M::Error> {
+            let mut keys = Vec::with_capacity(map.size_hint().unwrap_or(0));
+            while let Some(key) = map.next_key::<String>()? {
+                map.next_value::<serde::de::IgnoredAny>()?;
+                keys.push(key);
+            }
+            Ok(keys)
+        }
+    }
+    deserializer.deserialize_map(VersionKeysVisitor)
 }
 
 /// Version-specific manifest from npm registry.
@@ -235,6 +295,90 @@ pub struct VersionManifest {
         skip_serializing_if = "Option::is_none"
     )]
     pub directories: Option<Directories>,
+}
+
+/// Slim version manifest for the hot path (resolution + lockfile + install).
+///
+/// Contains only the ~13 fields needed for dependency resolution, installation,
+/// and lockfile serialization. Display-only fields (description, author, homepage,
+/// keywords, bugs, repository, npm_user, etc.) are omitted.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CoreVersionManifest {
+    pub name: String,
+    pub version: String,
+
+    #[serde(
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub dependencies: Option<HashMap<String, String>>,
+
+    #[serde(rename = "devDependencies")]
+    #[serde(
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub dev_dependencies: Option<HashMap<String, String>>,
+
+    #[serde(rename = "peerDependencies")]
+    #[serde(
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub peer_dependencies: Option<HashMap<String, String>>,
+
+    #[serde(rename = "optionalDependencies")]
+    #[serde(
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub optional_dependencies: Option<HashMap<String, String>>,
+
+    pub dist: Dist,
+
+    #[serde(
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub bin: Option<Value>,
+
+    #[serde(
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub engines: Option<HashMap<String, String>>,
+
+    #[serde(
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub os: Option<Value>,
+
+    #[serde(
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cpu: Option<Value>,
+
+    #[serde(
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub scripts: Option<HashMap<String, String>>,
+
+    #[serde(rename = "hasInstallScript")]
+    #[serde(
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub has_install_script: Option<bool>,
+
+    #[serde(
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub license: Option<String>,
 }
 
 /// Package author information.
@@ -420,8 +564,8 @@ use super::package_json::PackageJson;
 pub enum NodeManifest {
     /// Local package.json (root or workspace)
     Local(PackageJson),
-    /// Registry package manifest (resolved dependency)
-    Registry(VersionManifest),
+    /// Registry package manifest (resolved dependency, Arc-shared for cheap cloning)
+    Registry(Arc<CoreVersionManifest>),
 }
 
 impl NodeManifest {
@@ -444,57 +588,37 @@ impl NodeManifest {
     /// Get production dependencies.
     pub fn dependencies(&self) -> Option<&HashMap<String, String>> {
         match self {
-            NodeManifest::Local(pkg) => {
-                if pkg.dependencies.is_empty() {
-                    None
-                } else {
-                    Some(&pkg.dependencies)
-                }
-            }
+            NodeManifest::Local(pkg) => pkg.dependencies.as_ref(),
             NodeManifest::Registry(manifest) => manifest.dependencies.as_ref(),
         }
+        .filter(|m| !m.is_empty())
     }
 
     /// Get peer dependencies.
     pub fn peer_dependencies(&self) -> Option<&HashMap<String, String>> {
         match self {
-            NodeManifest::Local(pkg) => {
-                if pkg.peer_dependencies.is_empty() {
-                    None
-                } else {
-                    Some(&pkg.peer_dependencies)
-                }
-            }
+            NodeManifest::Local(pkg) => pkg.peer_dependencies.as_ref(),
             NodeManifest::Registry(manifest) => manifest.peer_dependencies.as_ref(),
         }
+        .filter(|m| !m.is_empty())
     }
 
     /// Get optional dependencies.
     pub fn optional_dependencies(&self) -> Option<&HashMap<String, String>> {
         match self {
-            NodeManifest::Local(pkg) => {
-                if pkg.optional_dependencies.is_empty() {
-                    None
-                } else {
-                    Some(&pkg.optional_dependencies)
-                }
-            }
+            NodeManifest::Local(pkg) => pkg.optional_dependencies.as_ref(),
             NodeManifest::Registry(manifest) => manifest.optional_dependencies.as_ref(),
         }
+        .filter(|m| !m.is_empty())
     }
 
     /// Get dev dependencies (only for local packages).
     pub fn dev_dependencies(&self) -> Option<&HashMap<String, String>> {
         match self {
-            NodeManifest::Local(pkg) => {
-                if pkg.dev_dependencies.is_empty() {
-                    None
-                } else {
-                    Some(&pkg.dev_dependencies)
-                }
-            }
-            NodeManifest::Registry(_) => None, // Registry packages don't include devDeps
+            NodeManifest::Local(pkg) => pkg.dev_dependencies.as_ref(),
+            NodeManifest::Registry(_) => None,
         }
+        .filter(|m| !m.is_empty())
     }
 
     /// Get engines requirements.
@@ -553,15 +677,10 @@ impl NodeManifest {
     /// Get scripts.
     pub fn scripts(&self) -> Option<&HashMap<String, String>> {
         match self {
-            NodeManifest::Local(pkg) => {
-                if pkg.scripts.is_empty() {
-                    None
-                } else {
-                    Some(&pkg.scripts)
-                }
-            }
+            NodeManifest::Local(pkg) => pkg.scripts.as_ref(),
             NodeManifest::Registry(manifest) => manifest.scripts.as_ref(),
         }
+        .filter(|m| !m.is_empty())
     }
 
     /// Get distribution info (tarball, integrity).
@@ -598,8 +717,8 @@ impl From<PackageJson> for NodeManifest {
     }
 }
 
-impl From<VersionManifest> for NodeManifest {
-    fn from(manifest: VersionManifest) -> Self {
+impl From<Arc<CoreVersionManifest>> for NodeManifest {
+    fn from(manifest: Arc<CoreVersionManifest>) -> Self {
         NodeManifest::Registry(manifest)
     }
 }

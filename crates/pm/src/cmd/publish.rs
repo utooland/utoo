@@ -5,15 +5,14 @@ use std::io::{self, Write};
 use crate::helper::workspace::update_cwd_to_project;
 use crate::model::package::{PackageInfo, PublishMeta};
 use crate::service::publish::{self as publish_service, PublishOptions};
-use crate::util::json::load_package_json_from_path;
-use crate::util::user_config::get_registry;
+use crate::util::user_config::{get_or_load_package_json, get_registry};
 
 pub async fn publish(tag: Option<&str>, dry_run: bool, otp: Option<&str>) -> Result<()> {
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
     let package_root = update_cwd_to_project(&cwd).await?;
-    let package_json = load_package_json_from_path(&package_root).await?;
+    let pkg = get_or_load_package_json(&package_root).await?;
 
-    let meta = PublishMeta::from_json(&package_json);
+    let meta = PublishMeta::from_package_json(&pkg);
     meta.validate()?;
 
     let tag = meta.resolve_tag(tag)?;
@@ -23,7 +22,7 @@ pub async fn publish(tag: Option<&str>, dry_run: bool, otp: Option<&str>) -> Res
         .as_deref()
         .map(String::from)
         .unwrap_or_else(get_registry);
-    let package_info = PackageInfo::from_json(&package_root, &package_json)?;
+    let package_info = PackageInfo::from_package_json(&package_root, &pkg)?;
     let result = publish_service::publish(&PublishOptions {
         package_info: &package_info,
         registry: &registry,

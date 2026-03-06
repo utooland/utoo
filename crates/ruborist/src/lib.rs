@@ -39,8 +39,11 @@ pub mod graph {
 
 /// Package manifest types.
 pub mod manifest {
-    pub use crate::model::manifest::{Dist, FullManifest, VersionManifest};
-    pub use crate::model::package_json::PackageJson;
+    pub use crate::model::manifest::{CoreVersionManifest, Dist, FullManifest, VersionManifest};
+    pub use crate::model::package_json::{
+        DepsView, EnginesView, IdentityView, PackageInstallView, PackageJson, PublishConfig,
+        ScriptsView,
+    };
 }
 
 /// Package lock types (package-lock.json).
@@ -81,12 +84,15 @@ pub mod spec {
     pub use crate::model::spec::{PackageSpec, Protocol, SpecStr};
 }
 
-/// Git clone and resolution types.
+/// Git clone and resolution helpers.
 pub mod git {
-    pub use crate::traits::git::GitCloneResult;
+    pub use crate::model::git::GitCloneResult;
+
+    #[cfg(feature = "native-git")]
+    pub use crate::resolver::git::{GitCloneCache, ensure_repo_cached};
 }
 
 /// Utility functions.
 pub mod util {
-    pub use crate::model::util::{parse_package_spec, read_package_json};
+    pub use crate::model::util::{PackageNameStr, parse_package_spec, read_package_json};
 }

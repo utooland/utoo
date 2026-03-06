@@ -8,7 +8,7 @@ use tar::Builder;
 use crate::model::package::PackageInfo;
 use crate::service::script::ScriptService;
 use crate::util::integrity::compute_integrity;
-use crate::util::json::load_package_json_from_path;
+use crate::util::user_config::get_or_load_package_json;
 
 #[derive(Default)]
 pub struct PackResult {
@@ -35,12 +35,11 @@ impl PackResult {
 }
 
 pub async fn pack(package_root: &Path) -> Result<PackResult> {
-    let data = load_package_json_from_path(package_root).await?;
-    let package_info = PackageInfo::from_json(package_root, &data)?;
-    let version = data["version"]
-        .as_str()
-        .ok_or_else(|| anyhow::anyhow!("Missing 'version' field in package.json"))?
-        .to_string();
+    let pkg = get_or_load_package_json(package_root).await?;
+    let package_info = PackageInfo::from_package_json(package_root, &pkg)?;
+    if pkg.version.is_empty() {
+        anyhow::bail!("Missing 'version' field in package.json");
+    }
 
     ScriptService::execute_script(&package_info, "prepack", true).await?;
 
@@ -48,7 +47,7 @@ pub async fn pack(package_root: &Path) -> Result<PackResult> {
     // Run on a blocking thread to avoid stalling the tokio runtime.
     let package_root_owned = package_root.to_path_buf();
     let collected = tokio::task::spawn_blocking({
-        let data = data.clone();
+        let data = pkg.to_value();
         let package_root = package_root_owned.clone();
         move || collect_pack_files(&package_root, &data)
     })
@@ -73,7 +72,7 @@ pub async fn pack(package_root: &Path) -> Result<PackResult> {
         tarball_data: tar_data,
         files: file_paths,
         name: package_info.name,
-        version,
+        version: pkg.version.clone(),
         integrity,
         unpacked_size,
         packed_size,

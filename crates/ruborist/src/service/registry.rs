@@ -40,7 +40,7 @@ fn current_timestamp_secs() -> u64 {
 
 use super::cache::{PackageCache, Versions, VersionsInfo};
 use super::manifest;
-use crate::model::manifest::{FullManifest, VersionManifest};
+use crate::model::manifest::{CoreVersionManifest, FullManifest};
 use crate::resolver::semver::normalize_spec;
 use crate::resolver::version::resolve_target_version;
 use crate::traits::registry::{RegistryClient, RegistryError, ResolvedPackage, is_npm_registry};
@@ -230,7 +230,7 @@ impl UnifiedRegistry {
                 // 5. Extract and cache versions info (lightweight)
                 let versions_info = VersionsInfo {
                     versions: Versions {
-                        version_list: manifest.versions.keys().cloned().collect(),
+                        version_list: manifest.versions.clone(),
                         dist_tags: manifest.dist_tags.clone(),
                     },
                     etag: new_etag.clone(),
@@ -269,7 +269,7 @@ impl UnifiedRegistry {
 
                     let versions_info = VersionsInfo {
                         versions: Versions {
-                            version_list: manifest.versions.keys().cloned().collect(),
+                            version_list: manifest.versions.clone(),
                             dist_tags: manifest.dist_tags.clone(),
                         },
                         etag: new_etag.clone(),
@@ -298,7 +298,7 @@ impl UnifiedRegistry {
         &self,
         name: &str,
         spec: &str,
-    ) -> Result<VersionManifest, RegistryError> {
+    ) -> Result<Arc<CoreVersionManifest>, RegistryError> {
         // 1. Check memory cache using name@spec as key
         if let Some(manifest) = self.cache.get_version_manifest(name, spec) {
             tracing::debug!("Memory cache hit for version manifest: {}@{}", name, spec);
@@ -331,6 +331,8 @@ impl UnifiedRegistry {
         })
         .await
         .map_err(RegistryError)?;
+
+        let manifest = Arc::new(manifest);
 
         // 4. Cache in memory
         self.cache
@@ -367,7 +369,7 @@ impl RegistryClient for UnifiedRegistry {
             })
     }
 
-    fn cache_version_manifest(&self, name: &str, spec: &str, manifest: VersionManifest) {
+    fn cache_version_manifest(&self, name: &str, spec: &str, manifest: Arc<CoreVersionManifest>) {
         self.cache
             .set_version_manifest(name.to_string(), spec.to_string(), manifest);
     }
@@ -390,7 +392,7 @@ impl RegistryClient for UnifiedRegistry {
         &self,
         name: &str,
         spec: &str,
-    ) -> Result<VersionManifest, Self::Error> {
+    ) -> Result<Arc<CoreVersionManifest>, Self::Error> {
         // 1. Check memory cache first
         if let Some(manifest) = self.cache.get_version_manifest(name, spec) {
             tracing::debug!("Memory cache hit for version manifest: {}@{}", name, spec);
@@ -423,6 +425,8 @@ impl RegistryClient for UnifiedRegistry {
         })
         .await
         .map_err(RegistryError)?;
+
+        let manifest = Arc::new(manifest);
 
         // 4. Cache the result
         self.cache
@@ -482,14 +486,13 @@ impl RegistryClient for UnifiedRegistry {
                 fetch_name,
                 fetch_spec
             );
-            let version_list: Vec<String> = full_manifest.versions.keys().cloned().collect();
+            let version_list: Vec<String> = full_manifest.versions.clone();
             let resolved_version =
                 resolve_target_version(&full_manifest.dist_tags, &version_list, &fetch_spec)
                     .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
             let version_manifest = full_manifest
-                .versions
-                .get(&resolved_version)
-                .cloned()
+                .get_core_version(&resolved_version)
+                .map(Arc::new)
                 .ok_or_else(|| {
                     RegistryError(anyhow!(
                         "Version {} not found in manifest for {}",
@@ -583,8 +586,7 @@ impl RegistryClient for UnifiedRegistry {
             let resolve_result = match self.resolve_full_manifest(&fetch_name).await? {
                 FullManifestResult::Full(full_manifest) => {
                     // Got full manifest, resolve from it
-                    let version_list: Vec<String> =
-                        full_manifest.versions.keys().cloned().collect();
+                    let version_list: Vec<String> = full_manifest.versions.clone();
 
                     if version_list.is_empty() {
                         return Err(RegistryError(anyhow!(
@@ -601,16 +603,15 @@ impl RegistryClient for UnifiedRegistry {
                     .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
 
                     let version_manifest = full_manifest
-                        .versions
-                        .get(&resolved_version)
-                        .cloned()
+                        .get_core_version(&resolved_version)
+                        .map(Arc::new)
                         .ok_or_else(|| {
-                        RegistryError(anyhow!(
-                            "Version {} not found in manifest for {}",
-                            resolved_version,
-                            fetch_name
-                        ))
-                    })?;
+                            RegistryError(anyhow!(
+                                "Version {} not found in manifest for {}",
+                                resolved_version,
+                                fetch_name
+                            ))
+                        })?;
 
                     (resolved_version, version_manifest)
                 }

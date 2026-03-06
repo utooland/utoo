@@ -1,6 +1,4 @@
-use crate::helper::package::parse_package_name;
-use crate::model::package::{PackageInfo, Scripts};
-use crate::util::json::load_package_json_from_path;
+use crate::model::package::{LifecycleScripts, PackageInfo};
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
 use anyhow::{Context, Result};
 use futures;
@@ -8,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 use utoo_ruborist::lock::PackageLock;
+use utoo_ruborist::manifest::ScriptsView;
 use utoo_ruborist::model::package_json::parse_bin_field;
 
 use super::script::ScriptService;
@@ -27,8 +26,7 @@ pub struct PackageService;
 
 impl PackageService {
     pub async fn process_project_hooks(root_path: &Path) -> Result<()> {
-        let data = load_package_json_from_path(root_path).await?;
-        let package_info = PackageInfo::from_json(root_path, &data)?;
+        let package_info = PackageInfo::load(root_path).await?;
 
         let hooks = [
             "preinstall",
@@ -41,7 +39,7 @@ impl PackageService {
         ];
 
         for hook in hooks {
-            if package_info.scripts.get_script(hook).is_some() {
+            if package_info.lifecycle_scripts.get_script(hook).is_some() {
                 tracing::debug!("Executing project hook: {hook}");
                 ScriptService::execute_script(&package_info, hook, true)
                     .await
@@ -52,9 +50,9 @@ impl PackageService {
         Ok(())
     }
 
-    async fn read_package_scripts(package_path: &Path) -> Result<Scripts> {
-        let data = load_package_json_from_path(package_path).await?;
-        Ok(Scripts::from_json(&data))
+    async fn read_lifecycle_scripts(package_path: &Path) -> Result<LifecycleScripts> {
+        let s: ScriptsView = crate::util::json::load_package_json(package_path).await?;
+        Ok(LifecycleScripts::from_scripts(&s.scripts))
     }
 
     /// Collect packages from memory PackageLock object with early filtering
@@ -99,8 +97,6 @@ impl PackageService {
                 continue;
             }
 
-            // Parse package name and create PackageInfo without reading package.json
-            let (_scope, name, fullname) = parse_package_name(path);
             let package_path = PathBuf::from(format!("{}/{}", root_path.display(), path));
 
             // Skip if package directory doesn't exist (e.g., omitted by --production/--omit)
@@ -109,14 +105,13 @@ impl PackageService {
                 continue;
             }
 
-            // Read scripts from package.json only if needed
-            let scripts = if has_scripts || !ignore_scripts {
-                Self::read_package_scripts(&package_path)
+            // Read lifecycle scripts from package.json only if needed
+            let lifecycle_scripts = if has_scripts || !ignore_scripts {
+                Self::read_lifecycle_scripts(&package_path)
                     .await
                     .context(format!("Failed to read scripts for package: {path}"))?
             } else {
-                // Create empty scripts for ignore_scripts mode
-                Scripts::default()
+                LifecycleScripts::default()
             };
 
             // Check if this package is an optional dependency (based on edge type)
@@ -126,9 +121,9 @@ impl PackageService {
             let package_info = PackageInfo {
                 path: package_path,
                 bin_files,
-                scripts,
-                name,
-                fullname,
+                scripts: Default::default(),
+                lifecycle_scripts,
+                name: package_name,
             };
 
             packages.push((package_info, is_optional));
@@ -150,15 +145,15 @@ impl PackageService {
 
             // Script queues - skip in bins_only mode
             if !ignore_scripts {
-                if package.scripts.preinstall.is_some() {
+                if package.lifecycle_scripts.preinstall.is_some() {
                     tracing::debug!("Adding {} to preinstall queue", package.path.display());
                     queues.preinstall.push((Rc::clone(&package), is_optional));
                 }
-                if package.scripts.install.is_some() {
+                if package.lifecycle_scripts.install.is_some() {
                     tracing::debug!("Adding {} to install queue", package.path.display());
                     queues.install.push((Rc::clone(&package), is_optional));
                 }
-                if package.scripts.postinstall.is_some() {
+                if package.lifecycle_scripts.postinstall.is_some() {
                     tracing::debug!("Adding {} to postinstall queue", package.path.display());
                     queues.postinstall.push((Rc::clone(&package), is_optional));
                 }
@@ -237,9 +232,9 @@ impl PackageService {
             .iter()
             .filter_map(|(package, is_optional)| {
                 let script_option = match script_name {
-                    "preinstall" => &package.scripts.preinstall,
-                    "install" => &package.scripts.install,
-                    "postinstall" => &package.scripts.postinstall,
+                    "preinstall" => &package.lifecycle_scripts.preinstall,
+                    "install" => &package.lifecycle_scripts.install,
+                    "postinstall" => &package.lifecycle_scripts.postinstall,
                     _ => return None,
                 };
 
@@ -248,21 +243,21 @@ impl PackageService {
                     let script = script.clone();
                     let is_optional = *is_optional;
                     async move {
-                        log_progress(&format!("{} {}", package.fullname, script_name));
+                        log_progress(&format!("{} {}", package.name, script_name));
                         let start = std::time::Instant::now();
                         let result = ScriptService::execute_script(&package, script_name, false)
                             .await
                             .with_context(|| {
                                 format!(
                                     "Failed to execute {} script for {} (command: {})",
-                                    script_name, package.fullname, script
+                                    script_name, package.name, script
                                 )
                             });
                         let elapsed = start.elapsed();
                         tracing::debug!(
                             "[{:.2}s] {} {} completed (path: {}, script: {})",
                             elapsed.as_secs_f64(),
-                            package.fullname,
+                            package.name,
                             script_name,
                             package.path.display(),
                             script
@@ -302,7 +297,7 @@ impl PackageService {
     async fn execute_binary_linking(queue: &[(Rc<PackageInfo>, bool)]) -> Result<()> {
         for (package, _is_optional) in queue {
             if !package.bin_files.is_empty() {
-                tracing::debug!("Linking binary files for {}", package.fullname);
+                tracing::debug!("Linking binary files for {}", package.name);
                 for (bin_name, relative_path) in &package.bin_files {
                     let target_path = package.path.join(relative_path);
                     if !crate::fs::try_exists(&target_path).await? {
@@ -313,10 +308,9 @@ impl PackageService {
                         continue;
                     }
 
-                    let bin_dir = package.get_bin_dir().context(format!(
-                        "Failed to get bin directory for {}",
-                        package.fullname
-                    ))?;
+                    let bin_dir = package
+                        .get_bin_dir()
+                        .context(format!("Failed to get bin directory for {}", package.name))?;
                     let link_path = bin_dir.join(bin_name);
 
                     ScriptService::ensure_executable(&target_path)
@@ -324,7 +318,7 @@ impl PackageService {
                         .with_context(|| {
                             format!(
                                 "Failed to ensure binary is executable for {} (path: {})",
-                                package.fullname,
+                                package.name,
                                 target_path.display()
                             )
                         })?;
@@ -333,12 +327,12 @@ impl PackageService {
                         .await
                         .context(format!(
                             "Failed to create symbolic link for {} (from: {} to: {})",
-                            package.fullname,
+                            package.name,
                             target_path.display(),
                             link_path.display()
                         ))?;
                 }
-                tracing::debug!("Linking binary files for {} successfully", package.fullname);
+                tracing::debug!("Linking binary files for {} successfully", package.name);
             }
         }
         Ok(())
@@ -699,9 +693,9 @@ mod tests {
         let package_info = PackageInfo {
             path: package_path.to_path_buf(),
             bin_files: vec![("testbin".to_string(), "not-exist.js".to_string())],
-            scripts: Scripts::default(),
+            scripts: Default::default(),
+            lifecycle_scripts: LifecycleScripts::default(),
             name: "test-bin-missing".to_string(),
-            fullname: "test-bin-missing".to_string(),
         };
 
         // Prepare queues: only bin linking queue has this package
@@ -822,7 +816,7 @@ mod tests {
             assert!(
                 !package_info.bin_files.is_empty(),
                 "Package {} should have bin_files in ignore_scripts mode",
-                package_info.fullname
+                package_info.name
             );
         }
     }
@@ -897,7 +891,7 @@ mod tests {
 
         // Should only collect the cross-platform package (win-only filtered out by platform check)
         assert_eq!(packages_collected.len(), 1);
-        assert_eq!(packages_collected[0].0.fullname, "cross-platform");
+        assert_eq!(packages_collected[0].0.name, "cross-platform");
     }
 
     #[tokio::test]
@@ -983,7 +977,7 @@ mod tests {
 
         // Verify is_optional flags are correctly set
         for (pkg_info, is_optional) in &packages_collected {
-            match pkg_info.fullname.as_str() {
+            match pkg_info.name.as_str() {
                 "regular-pkg" => {
                     assert!(!is_optional, "regular-pkg should not be optional");
                 }
@@ -993,7 +987,7 @@ mod tests {
                 "dev-optional-pkg" => {
                     assert!(is_optional, "dev-optional-pkg should be optional");
                 }
-                _ => panic!("Unexpected package: {}", pkg_info.fullname),
+                _ => panic!("Unexpected package: {}", pkg_info.name),
             }
         }
     }
@@ -1025,12 +1019,12 @@ mod tests {
         let package_info = PackageInfo {
             path: package_path.to_path_buf(),
             bin_files: vec![],
-            scripts: Scripts {
+            scripts: Default::default(),
+            lifecycle_scripts: LifecycleScripts {
                 postinstall: Some("exit 1".to_string()),
                 ..Default::default()
             },
             name: "test-optional-fail".to_string(),
-            fullname: "test-optional-fail".to_string(),
         };
 
         // Test with is_optional = true: should NOT return error

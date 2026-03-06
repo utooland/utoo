@@ -1,6 +1,6 @@
 use crate::fs;
 use crate::util::http::client;
-use crate::util::json::load_package_json_from_path;
+use crate::util::json::read_json_file;
 use crate::util::user_config::get_registry;
 use anyhow::{Context, Result};
 use regex::Regex;
@@ -75,7 +75,7 @@ fn update_binary_config(pkg: &mut Value, binary_mirror: &Map<String, Value>) {
 
 async fn handle_node_pre_gyp_versioning(dir: &Path) -> Result<()> {
     let versioning_file = dir.join("node_modules/node-pre-gyp/lib/util/versioning.js");
-    if crate::fs::try_exists(&versioning_file).await? {
+    if fs::try_exists(&versioning_file).await? {
         let content = fs::read_to_string(&versioning_file)
             .await
             .context("Failed to read versioning.js")?;
@@ -152,7 +152,7 @@ async fn handle_replace_host(dir: &Path, binary_mirror: &Map<String, Value>) -> 
     let replace_host_files = get_replace_host_files(binary_mirror);
     for file in replace_host_files {
         let file_path = dir.join(file);
-        if crate::fs::try_exists(&file_path).await? {
+        if fs::try_exists(&file_path).await? {
             let content = fs::read_to_string(&file_path)
                 .await
                 .context("Failed to read file")?;
@@ -200,7 +200,7 @@ async fn handle_cypress(
     let os = target_os.unwrap_or(std::env::consts::OS);
     if let Some(target_platform) = platforms[os].as_str() {
         let download_file = dir.join("lib/tasks/download.js");
-        if crate::fs::try_exists(&download_file).await? {
+        if fs::try_exists(&download_file).await? {
             let content = fs::read_to_string(&download_file)
                 .await
                 .context("Failed to read download.js")?;
@@ -244,9 +244,9 @@ pub async fn update_package_binary(dir: &Path, name: &str) -> Result<()> {
             .as_object()
             .ok_or_else(|| anyhow::anyhow!("Invalid binary mirror format"))?;
 
-        // Read package.json
+        // Read package.json as raw Value for in-place mutation
         let pkg_path = dir.join("package.json");
-        let mut pkg = load_package_json_from_path(dir).await?;
+        let mut pkg: Value = read_json_file(&pkg_path).await?;
 
         // has install script and not replaceHostFiles
         let should_update_binary = pkg["scripts"].as_object().is_some_and(|scripts| {
@@ -424,7 +424,7 @@ mod tests {
 
         // Create necessary directory structure
         let lib_tasks_dir = dir.join("lib/tasks");
-        crate::fs::create_dir_all(&lib_tasks_dir).await.unwrap();
+        fs::create_dir_all(&lib_tasks_dir).await.unwrap();
         println!("Created directory: {lib_tasks_dir:?}");
 
         // Create test download.js file
@@ -433,9 +433,7 @@ mod tests {
             return version ? prepend(`desktop/${version}`) : prepend('desktop');
             return version ? prepend('desktop/' + version) : prepend('desktop');
         "#;
-        crate::fs::write(&download_file, original_content)
-            .await
-            .unwrap();
+        fs::write(&download_file, original_content).await.unwrap();
         println!("Created file: {download_file:?}");
 
         let pkg = json!({
@@ -457,7 +455,7 @@ mod tests {
             .await
             .unwrap();
 
-        let content = crate::fs::read_to_string(&download_file).await.unwrap();
+        let content = fs::read_to_string(&download_file).await.unwrap();
         println!("File content after modification:\n{content}");
 
         assert!(
@@ -487,16 +485,14 @@ mod tests {
         });
 
         let pkg_path = dir.join("package.json");
-        crate::fs::write(&pkg_path, pkg_json.to_string())
-            .await
-            .unwrap();
+        fs::write(&pkg_path, pkg_json.to_string()).await.unwrap();
 
         // Call the function
         update_package_binary(dir, "fsevents").await.unwrap();
 
         // Read the updated package.json
         let updated_pkg: Value =
-            serde_json::from_str(&crate::fs::read_to_string(pkg_path).await.unwrap()).unwrap();
+            serde_json::from_str(&fs::read_to_string(pkg_path).await.unwrap()).unwrap();
 
         // Should not change version
         assert_eq!(updated_pkg["name"], "fsevents");

@@ -7,6 +7,8 @@
 //! - For semver-supporting registries: directly fetches specific version
 //! - For traditional registries: fetches full manifest and resolves locally
 
+use std::sync::Arc;
+
 use crate::model::manifest::FullManifest;
 use crate::model::node::EdgeType;
 use crate::resolver::semver::normalize_spec;
@@ -25,7 +27,9 @@ pub enum ResolveError<E> {
     /// Resolved version not found in manifest
     ManifestNotFound { name: String, version: String },
     /// Git resolution failed
-    Git { url: String, message: String },
+    Git { url: String, source: anyhow::Error },
+    /// Dependency type not yet supported (e.g. local file path, HTTP tarball)
+    Unsupported { spec: String, reason: &'static str },
 }
 
 impl<E: std::fmt::Display> std::fmt::Display for ResolveError<E> {
@@ -37,8 +41,11 @@ impl<E: std::fmt::Display> std::fmt::Display for ResolveError<E> {
             ResolveError::ManifestNotFound { name, version } => {
                 write!(f, "Manifest not found for {}@{}", name, version)
             }
-            ResolveError::Git { url, message } => {
-                write!(f, "Git resolution failed for '{}': {}", url, message)
+            ResolveError::Git { url, source } => {
+                write!(f, "Git resolution failed for {}: {}", url, source)
+            }
+            ResolveError::Unsupported { spec, reason } => {
+                write!(f, "Unsupported dependency '{spec}': {reason}")
             }
         }
     }
@@ -51,7 +58,8 @@ impl<E: std::error::Error + 'static> std::error::Error for ResolveError<E> {
             ResolveError::Version(_)
             | ResolveError::NoVersions(_)
             | ResolveError::ManifestNotFound { .. }
-            | ResolveError::Git { .. } => None,
+            | ResolveError::Unsupported { .. } => None,
+            ResolveError::Git { source, .. } => Some(source.as_ref()),
         }
     }
 }
@@ -99,7 +107,7 @@ pub fn resolve_from_manifest<E: std::error::Error + 'static>(
     manifest: &FullManifest,
     spec: &str,
 ) -> Result<ResolvedPackage, ResolveError<E>> {
-    let version_list: Vec<String> = manifest.versions.keys().cloned().collect();
+    let version_list: Vec<String> = manifest.versions.clone();
 
     if version_list.is_empty() {
         return Err(ResolveError::NoVersions(manifest.name.clone()));
@@ -109,11 +117,10 @@ pub fn resolve_from_manifest<E: std::error::Error + 'static>(
     let resolved_version = resolve_target_version(&manifest.dist_tags, &version_list, spec)
         .map_err(|e| ResolveError::Version(format!("{}@{}: {}", manifest.name, spec, e)))?;
 
-    // Get manifest for resolved version
+    // Get manifest for resolved version (lazy: parse from Value on demand)
     let version_manifest = manifest
-        .versions
-        .get(&resolved_version)
-        .cloned()
+        .get_core_version(&resolved_version)
+        .map(Arc::new)
         .ok_or_else(|| ResolveError::ManifestNotFound {
             name: manifest.name.clone(),
             version: resolved_version.clone(),
@@ -126,11 +133,11 @@ pub fn resolve_from_manifest<E: std::error::Error + 'static>(
     })
 }
 
-/// Resolve a dependency with edge type awareness.
+/// Resolve a registry dependency with edge type awareness.
 ///
 /// For optional dependencies, returns `Ok(None)` on resolution failure
 /// instead of propagating the error.
-pub async fn resolve_dependency<R: RegistryClient>(
+pub async fn resolve_registry_dep<R: RegistryClient>(
     registry: &R,
     name: &str,
     spec: &str,
@@ -152,11 +159,11 @@ pub async fn resolve_dependency<R: RegistryClient>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::manifest::VersionManifest;
+    use crate::model::manifest::CoreVersionManifest;
     use crate::traits::registry::mock::MockRegistryClient;
 
-    fn create_version_manifest(name: &str, version: &str) -> VersionManifest {
-        VersionManifest {
+    fn create_version_manifest(name: &str, version: &str) -> CoreVersionManifest {
+        CoreVersionManifest {
             name: name.to_string(),
             version: version.to_string(),
             ..Default::default()
@@ -220,7 +227,7 @@ mod tests {
         let registry = MockRegistryClient::new();
 
         let result =
-            resolve_dependency(&registry, "nonexistent", "^1.0.0", &EdgeType::Optional).await;
+            resolve_registry_dep(&registry, "nonexistent", "^1.0.0", &EdgeType::Optional).await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }
@@ -229,7 +236,8 @@ mod tests {
     async fn test_resolve_prod_dependency_failure() {
         let registry = MockRegistryClient::new();
 
-        let result = resolve_dependency(&registry, "nonexistent", "^1.0.0", &EdgeType::Prod).await;
+        let result =
+            resolve_registry_dep(&registry, "nonexistent", "^1.0.0", &EdgeType::Prod).await;
         assert!(result.is_err());
     }
 }
