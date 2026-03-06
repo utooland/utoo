@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "tap": "12"
+  },
+  "name": "test-dep-missing-resolved"
+}

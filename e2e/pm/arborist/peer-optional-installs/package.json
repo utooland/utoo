@@ -1,0 +1,18 @@
+{
+  "peerDependencies": {
+    "abbrev": "",
+    "wrappy": ""
+  },
+  "devDependencies": {
+    "wrappy": ""
+  },
+  "peerDependenciesMeta": {
+    "wrappy": {
+      "optional": true
+    },
+    "abbrev": {
+      "optional": true
+    }
+  },
+  "name": "test-peer-optional-installs"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "b",
+  "version": "1.0.0",
+  "devDependencies": {
+    "ajv": "5.11.2"
+  }
+}

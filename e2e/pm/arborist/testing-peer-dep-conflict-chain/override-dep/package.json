@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "@isaacs/testing-peer-dep-conflict-chain-override": "1"
+  },
+  "name": "test-conflict-chain-override-dep"
+}
