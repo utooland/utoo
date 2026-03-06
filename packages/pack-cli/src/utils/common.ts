@@ -23,7 +23,7 @@ export async function resolveFromConfigFile(
     if (!fs.existsSync(configPath)) continue;
 
     if (name.endsWith(".json")) {
-      const content = fs.readFileSync(configPath, { encoding: "utf-8" });
+      const content = await fs.promises.readFile(configPath, { encoding: "utf-8" });
       return JSON.parse(content) as Record<string, unknown>;
     }
 
