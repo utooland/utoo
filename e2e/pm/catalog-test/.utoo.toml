@@ -1,0 +1,7 @@
+[catalog]
+lodash = "^4.17.21"
+debug = "^4.3.4"
+typescript = "^5.0.0"
+
+[catalogs.legacy]
+debug = "^3.2.7"

@@ -34,8 +34,9 @@ use super::fs::Glob;
 use super::registry::UnifiedRegistry;
 use crate::model::graph::{DependencyGraph, PackageNode};
 use crate::model::node::EdgeType;
-use crate::model::package_json::PackageJson;
+use crate::model::package_json::{PackageJson, ResolveCatalogs};
 use crate::model::package_lock::PackageLock;
+use crate::model::spec::Catalogs;
 use crate::model::util::parse_package_spec;
 use crate::resolver::builder::{BuildDepsConfig, add_edges_from, build_deps_with_config};
 use crate::resolver::runtime::install_runtime_from_map;
@@ -61,6 +62,9 @@ pub struct BuildDepsOptions<G, R> {
     pub receiver: R,
     /// Explicit semver support override (None = auto-detect from registry URL)
     pub supports_semver: Option<bool>,
+    /// Catalog definitions for the `catalog:` dependency protocol.
+    /// Key `""` = default catalog, other keys = named catalogs.
+    pub catalogs: Catalogs,
 }
 
 impl<G, R> BuildDepsOptions<G, R> {
@@ -79,6 +83,7 @@ impl<G, R> BuildDepsOptions<G, R> {
             glob,
             receiver,
             supports_semver: None,
+            catalogs: HashMap::new(),
         }
     }
 }
@@ -125,6 +130,7 @@ where
         glob,
         receiver,
         supports_semver,
+        catalogs,
     } = options;
 
     // 1. Find root path (workspace root if applicable)
@@ -137,7 +143,10 @@ where
         .await
         .map_err(|e| anyhow::anyhow!("Failed to read/parse package.json: {}", e))?;
 
-    // 3. Inject runtime dependencies (node-bin packages)
+    // 3. Resolve catalog: specifiers in root package.json
+    pkg.resolve_catalogs(&catalogs);
+
+    // 4. Inject runtime dependencies (node-bin packages)
     if let Some(engines) = &pkg.engines {
         let runtime_deps = install_runtime_from_map(engines);
         if !runtime_deps.is_empty() {
@@ -162,7 +171,10 @@ where
     let workspaces = discovery.find_workspaces_from_pkg(&root_path, &pkg).await?;
 
     for workspace in workspaces {
-        let ws_pkg = workspace.package_json;
+        let mut ws_pkg = workspace.package_json;
+
+        // Resolve catalog: specifiers in workspace package.json
+        ws_pkg.resolve_catalogs(&catalogs);
 
         // Create workspace node
         let workspace_node =
@@ -312,6 +324,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::spec::resolve_catalog_specs;
     use crate::service::fs::NoopGlob;
     use crate::traits::progress::NoopReceiver;
 
@@ -326,11 +339,214 @@ mod tests {
             glob: NoopGlob,
             receiver: NoopReceiver,
             supports_semver: None,
+            catalogs: HashMap::new(),
         };
 
         assert_eq!(options.concurrency, 20);
         assert!(options.legacy_peer_deps);
         assert!(options.supports_semver.is_none());
+    }
+
+    #[test]
+    fn test_resolve_catalog_specs_default() {
+        let mut catalogs: Catalogs = HashMap::new();
+        catalogs.insert(
+            String::new(),
+            HashMap::from([
+                ("lodash".to_string(), "^4.17.21".to_string()),
+                ("react".to_string(), "^18.0.0".to_string()),
+            ]),
+        );
+
+        let mut deps = HashMap::from([
+            ("lodash".to_string(), "catalog:".to_string()),
+            ("express".to_string(), "^4.18.0".to_string()),
+        ]);
+
+        resolve_catalog_specs(&mut deps, &catalogs);
+
+        assert_eq!(deps.get("lodash").unwrap(), "^4.17.21");
+        // Non-catalog specs are untouched
+        assert_eq!(deps.get("express").unwrap(), "^4.18.0");
+    }
+
+    #[test]
+    fn test_resolve_catalog_specs_explicit_default() {
+        let mut catalogs: Catalogs = HashMap::new();
+        catalogs.insert(
+            String::new(),
+            HashMap::from([("typescript".to_string(), "^5.0.0".to_string())]),
+        );
+
+        let mut deps = HashMap::from([("typescript".to_string(), "catalog:default".to_string())]);
+
+        resolve_catalog_specs(&mut deps, &catalogs);
+
+        assert_eq!(deps.get("typescript").unwrap(), "^5.0.0");
+    }
+
+    #[test]
+    fn test_resolve_catalog_specs_named() {
+        let mut catalogs: Catalogs = HashMap::new();
+        catalogs.insert(
+            "legacy".to_string(),
+            HashMap::from([("express".to_string(), "^3.0.0".to_string())]),
+        );
+
+        let mut deps = HashMap::from([("express".to_string(), "catalog:legacy".to_string())]);
+
+        resolve_catalog_specs(&mut deps, &catalogs);
+
+        assert_eq!(deps.get("express").unwrap(), "^3.0.0");
+    }
+
+    #[test]
+    fn test_resolve_catalog_specs_missing_catalog() {
+        let catalogs: Catalogs = HashMap::new();
+        let mut deps = HashMap::from([("lodash".to_string(), "catalog:".to_string())]);
+
+        resolve_catalog_specs(&mut deps, &catalogs);
+
+        // Left as-is when catalog not found
+        assert_eq!(deps.get("lodash").unwrap(), "catalog:");
+    }
+
+    #[test]
+    fn test_resolve_catalog_specs_missing_package() {
+        let mut catalogs: Catalogs = HashMap::new();
+        catalogs.insert(
+            String::new(),
+            HashMap::from([("react".to_string(), "^18.0.0".to_string())]),
+        );
+
+        let mut deps = HashMap::from([("lodash".to_string(), "catalog:".to_string())]);
+
+        resolve_catalog_specs(&mut deps, &catalogs);
+
+        // Left as-is when package not in catalog
+        assert_eq!(deps.get("lodash").unwrap(), "catalog:");
+    }
+
+    #[test]
+    fn test_resolve_catalog_specs_empty_catalogs_noop() {
+        let catalogs: Catalogs = HashMap::new();
+        let mut deps = HashMap::from([("lodash".to_string(), "^4.17.21".to_string())]);
+
+        resolve_catalog_specs(&mut deps, &catalogs);
+
+        assert_eq!(deps.get("lodash").unwrap(), "^4.17.21");
+    }
+
+    #[test]
+    fn test_resolve_catalogs_all_dep_types() {
+        let mut catalogs: Catalogs = HashMap::new();
+        catalogs.insert(
+            String::new(),
+            HashMap::from([
+                ("lodash".to_string(), "^4.17.21".to_string()),
+                ("vitest".to_string(), "^1.0.0".to_string()),
+                ("react".to_string(), "^18.0.0".to_string()),
+                ("zod".to_string(), "^3.0.0".to_string()),
+            ]),
+        );
+
+        let mut pkg = PackageJson {
+            name: "test".to_string(),
+            version: "1.0.0".to_string(),
+            dependencies: Some(HashMap::from([(
+                "lodash".to_string(),
+                "catalog:".to_string(),
+            )])),
+            dev_dependencies: Some(HashMap::from([(
+                "vitest".to_string(),
+                "catalog:".to_string(),
+            )])),
+            peer_dependencies: Some(HashMap::from([(
+                "react".to_string(),
+                "catalog:".to_string(),
+            )])),
+            optional_dependencies: Some(HashMap::from([(
+                "zod".to_string(),
+                "catalog:".to_string(),
+            )])),
+            ..Default::default()
+        };
+
+        pkg.resolve_catalogs(&catalogs);
+
+        assert_eq!(
+            pkg.dependencies.as_ref().unwrap().get("lodash").unwrap(),
+            "^4.17.21"
+        );
+        assert_eq!(
+            pkg.dev_dependencies
+                .as_ref()
+                .unwrap()
+                .get("vitest")
+                .unwrap(),
+            "^1.0.0"
+        );
+        assert_eq!(
+            pkg.peer_dependencies
+                .as_ref()
+                .unwrap()
+                .get("react")
+                .unwrap(),
+            "^18.0.0"
+        );
+        assert_eq!(
+            pkg.optional_dependencies
+                .as_ref()
+                .unwrap()
+                .get("zod")
+                .unwrap(),
+            "^3.0.0"
+        );
+    }
+
+    #[test]
+    fn test_resolve_catalogs_empty_is_noop() {
+        let catalogs: Catalogs = HashMap::new();
+        let mut pkg = PackageJson {
+            name: "test".to_string(),
+            version: "1.0.0".to_string(),
+            dependencies: Some(HashMap::from([(
+                "lodash".to_string(),
+                "catalog:".to_string(),
+            )])),
+            ..Default::default()
+        };
+
+        pkg.resolve_catalogs(&catalogs);
+
+        // catalog: spec left as-is when catalogs is empty
+        assert_eq!(
+            pkg.dependencies.as_ref().unwrap().get("lodash").unwrap(),
+            "catalog:"
+        );
+    }
+
+    #[test]
+    fn test_resolve_catalog_specs_mixed_default_and_named() {
+        let mut catalogs: Catalogs = HashMap::new();
+        catalogs.insert(
+            String::new(),
+            HashMap::from([("debug".to_string(), "^4.3.4".to_string())]),
+        );
+        catalogs.insert(
+            "legacy".to_string(),
+            HashMap::from([("debug".to_string(), "^3.2.7".to_string())]),
+        );
+
+        let mut deps_default = HashMap::from([("debug".to_string(), "catalog:".to_string())]);
+        let mut deps_named = HashMap::from([("debug".to_string(), "catalog:legacy".to_string())]);
+
+        resolve_catalog_specs(&mut deps_default, &catalogs);
+        resolve_catalog_specs(&mut deps_named, &catalogs);
+
+        // Same package, different versions from different catalogs
+        assert_eq!(deps_default.get("debug").unwrap(), "^4.3.4");
+        assert_eq!(deps_named.get("debug").unwrap(), "^3.2.7");
     }
 
     #[test]

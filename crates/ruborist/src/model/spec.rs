@@ -49,6 +49,8 @@ pub enum Protocol {
     GitHub,
     /// `http://`, `https://` — HTTP URL (may be tarball)
     Http,
+    /// `catalog:` — catalog protocol reference (resolved before registry lookup)
+    Catalog,
 }
 
 /// All known protocol prefixes, in detection order (most specific first).
@@ -60,6 +62,7 @@ const PROTOCOL_PREFIXES: &[(Protocol, &[&str])] = &[
     (Protocol::Workspace, &["workspace:"]),
     (Protocol::Portal, &["portal:"]),
     (Protocol::Http, &["https://", "http://"]),
+    (Protocol::Catalog, &["catalog:"]),
 ];
 
 impl Protocol {
@@ -112,6 +115,7 @@ impl std::fmt::Display for Protocol {
             Self::Git => write!(f, "git"),
             Self::GitHub => write!(f, "github"),
             Self::Http => write!(f, "http"),
+            Self::Catalog => write!(f, "catalog"),
         }
     }
 }
@@ -191,7 +195,11 @@ impl From<&str> for PackageSpec {
                 }
             }
             Some((
-                proto @ (Protocol::File | Protocol::Link | Protocol::Workspace | Protocol::Portal),
+                proto @ (Protocol::File
+                | Protocol::Link
+                | Protocol::Workspace
+                | Protocol::Portal
+                | Protocol::Catalog),
                 rest,
             )) => Self::Local {
                 protocol: proto,
@@ -259,6 +267,76 @@ impl SpecStr for str {
 
     fn is_registry_spec(&self) -> bool {
         self.parse_spec().is_registry()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Catalog protocol
+// ---------------------------------------------------------------------------
+
+use std::collections::HashMap;
+
+/// Catalog definitions for the `catalog:` dependency protocol.
+///
+/// Maps catalog name to (package_name -> version_spec).
+/// The default catalog uses key `""` (empty string).
+pub type Catalogs = HashMap<String, HashMap<String, String>>;
+
+/// Resolve `catalog:` specifiers in a single dependency map.
+///
+/// ```text
+///  deps: { "lodash": "catalog:", "debug": "catalog:legacy" }
+///         |                       |
+///         v                       v
+///  catalogs[""]["lodash"]   catalogs["legacy"]["debug"]
+///         |                       |
+///         v                       v
+///  deps: { "lodash": "^4.17.21", "debug": "^3.2.7" }
+/// ```
+///
+/// - `"catalog:"` or `"catalog:default"` -> default catalog (key `""`)
+/// - `"catalog:<name>"` -> named catalog
+///
+/// Unknown catalog names or missing package entries are logged as warnings
+/// and left as-is.
+pub fn resolve_catalog_specs(deps: &mut HashMap<String, String>, catalogs: &Catalogs) {
+    for (pkg_name, spec) in deps.iter_mut() {
+        if let Some(catalog_ref) = spec.strip_prefix("catalog:") {
+            let catalog_key = if catalog_ref.is_empty() || catalog_ref == "default" {
+                ""
+            } else {
+                catalog_ref
+            };
+            let display_name = if catalog_key.is_empty() {
+                "default"
+            } else {
+                catalog_key
+            };
+
+            if let Some(catalog) = catalogs.get(catalog_key) {
+                if let Some(resolved) = catalog.get(pkg_name.as_str()) {
+                    tracing::debug!(
+                        "catalog: resolved {}@catalog:{} -> {}",
+                        pkg_name,
+                        display_name,
+                        resolved
+                    );
+                    *spec = resolved.clone();
+                } else {
+                    tracing::warn!(
+                        "catalog: package '{}' not found in catalog '{}'",
+                        pkg_name,
+                        display_name
+                    );
+                }
+            } else {
+                tracing::warn!(
+                    "catalog: catalog '{}' not found (referenced by {})",
+                    display_name,
+                    pkg_name
+                );
+            }
+        }
     }
 }
 

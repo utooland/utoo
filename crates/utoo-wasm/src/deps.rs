@@ -42,6 +42,7 @@ pub async fn build_deps_from_file(
         glob: OpfsGlob,
         receiver: NoopReceiver,
         supports_semver: None,
+        catalogs: std::collections::HashMap::new(),
     };
 
     build_deps(options).await

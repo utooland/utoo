@@ -120,4 +120,33 @@ utoo install --registry=https://registry.npmjs.org || { echo -e "${RED}FAIL: uto
 echo -e "${GREEN}PASS: ant-design cloned and installed${NC}"
 cd ../../../
 
+# Case 9: catalog protocol test
+echo -e "${YELLOW}Case 9: catalog protocol test${NC}"
+cd e2e/pm/catalog-test
+rm -rf node_modules package-lock.json packages/*/node_modules
+utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for catalog-test${NC}"; exit 1; }
+
+# Verify root dependencies resolved from catalog
+if [ ! -d "node_modules/lodash" ]; then
+    echo -e "${RED}FAIL: lodash not installed (catalog: default)${NC}"
+    exit 1
+fi
+if [ ! -d "node_modules/typescript" ]; then
+    echo -e "${RED}FAIL: typescript not installed (catalog:default)${NC}"
+    exit 1
+fi
+
+# Verify package-lock.json was created and contains resolved versions (not catalog: refs)
+if ! grep -q '"lodash"' package-lock.json; then
+    echo -e "${RED}FAIL: lodash not in package-lock.json${NC}"
+    exit 1
+fi
+if grep -q '"catalog:' package-lock.json; then
+    echo -e "${RED}FAIL: unresolved catalog: specs found in package-lock.json${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}PASS: catalog protocol test successful${NC}"
+cd ../../..
+
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"

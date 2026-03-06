@@ -196,6 +196,51 @@ pub struct DepsView {
     pub optional_dependencies: HashMap<String, String>,
 }
 
+// ── Catalog protocol ─────────────────────────────────────────────────
+
+use super::spec::{Catalogs, resolve_catalog_specs};
+
+/// Trait for types that carry dependency maps and can resolve `catalog:` specifiers.
+pub trait ResolveCatalogs {
+    /// Replace all `catalog:` specifiers with their resolved versions.
+    fn resolve_catalogs(&mut self, catalogs: &Catalogs);
+}
+
+impl ResolveCatalogs for PackageJson {
+    fn resolve_catalogs(&mut self, catalogs: &Catalogs) {
+        if catalogs.is_empty() {
+            return;
+        }
+        for deps in [
+            &mut self.dependencies,
+            &mut self.dev_dependencies,
+            &mut self.peer_dependencies,
+            &mut self.optional_dependencies,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            resolve_catalog_specs(deps, catalogs);
+        }
+    }
+}
+
+impl ResolveCatalogs for DepsView {
+    fn resolve_catalogs(&mut self, catalogs: &Catalogs) {
+        if catalogs.is_empty() {
+            return;
+        }
+        for deps in [
+            &mut self.dependencies,
+            &mut self.dev_dependencies,
+            &mut self.peer_dependencies,
+            &mut self.optional_dependencies,
+        ] {
+            resolve_catalog_specs(deps, catalogs);
+        }
+    }
+}
+
 /// View for root-only engine requirements.
 ///
 /// Used alongside [`DepsView`] for lockfile freshness checks — engines

@@ -42,7 +42,7 @@ pub mod manifest {
     pub use crate::model::manifest::{CoreVersionManifest, Dist, FullManifest, VersionManifest};
     pub use crate::model::package_json::{
         DepsView, EnginesView, IdentityView, PackageInstallView, PackageJson, PublishConfig,
-        ScriptsView,
+        ResolveCatalogs, ScriptsView,
     };
 }
 
@@ -81,7 +81,7 @@ pub mod compat {
 
 /// Package specification types.
 pub mod spec {
-    pub use crate::model::spec::{PackageSpec, Protocol, SpecStr};
+    pub use crate::model::spec::{Catalogs, PackageSpec, Protocol, SpecStr, resolve_catalog_specs};
 }
 
 /// Git clone and resolution types.

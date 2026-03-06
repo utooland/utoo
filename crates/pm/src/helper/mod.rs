@@ -1,4 +1,5 @@
 pub mod auto_update;
+pub mod catalog;
 pub mod deps;
 pub mod fuzzy_select;
 pub mod git;

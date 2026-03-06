@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use utoo_ruborist::service::{BuildDepsOptions, Glob, UnifiedRegistry};
 
+use crate::helper::catalog::load_catalogs;
 use crate::service::pipeline::{PipelineChannels, PipelineReceiver};
 use crate::util::cache::get_cache_dir;
 use crate::util::logger::ProgressReceiver;
@@ -40,6 +41,7 @@ impl Context {
         cwd: PathBuf,
         receiver: R,
     ) -> BuildDepsOptions<GlobImpl, R> {
+        let catalogs = load_catalogs(&cwd);
         BuildDepsOptions {
             cwd,
             registry_url: get_registry(),
@@ -49,6 +51,7 @@ impl Context {
             glob: TokioGlob,
             receiver,
             supports_semver: get_supports_semver(),
+            catalogs,
         }
     }
 

@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use super::catalog::load_catalogs;
 use super::ruborist_context::Context;
 use crate::helper::workspace::find_workspaces;
 use crate::util::json::{load_package_json, load_package_lock_json_from_path, read_json_file};
@@ -11,7 +12,7 @@ use crate::util::save_type::{PackageAction, SaveType};
 use crate::util::user_config::{get_legacy_peer_deps, set_package_json};
 use crate::util::{cloner::clone_package, downloader::download_to_cache};
 use utoo_ruborist::lock::{LockPackage, PackageLock};
-use utoo_ruborist::manifest::{DepsView, EnginesView, PackageJson};
+use utoo_ruborist::manifest::{DepsView, EnginesView, PackageJson, ResolveCatalogs};
 use utoo_ruborist::registry::resolve_package;
 use utoo_ruborist::util::PackageNameStr;
 use utoo_ruborist::util::parse_package_spec;
@@ -321,8 +322,12 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
     // Always read from disk — this function checks whether the on-disk
     // package.json has diverged from the lock file, so it must not use the
     // in-process cache.
-    let pkg: DepsView = load_package_json(root_path).await?;
+    let mut pkg: DepsView = load_package_json(root_path).await?;
     let lock_file: Value = read_json_file(&root_path.join("package-lock.json")).await?;
+
+    // Load catalogs to resolve catalog: specs before comparison
+    let catalogs = load_catalogs(root_path);
+    pkg.resolve_catalogs(&catalogs);
 
     // get packages in package-lock.json
     let packages = lock_file
@@ -341,7 +346,8 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
             .unwrap_or(&path)
             .to_string_lossy()
             .to_string();
-        let ws_deps: DepsView = load_package_json(&path).await?;
+        let mut ws_deps: DepsView = load_package_json(&path).await?;
+        ws_deps.resolve_catalogs(&catalogs);
         pkgs_to_check.push((target_path, ws_deps));
     }
 
@@ -707,6 +713,88 @@ mod tests {
 
         // Test that missing field and empty object are treated as equal
         assert!(!is_pkg_lock_outdated(temp_path).await.unwrap());
+    }
+
+    #[test]
+    fn test_resolve_deps_view_catalogs_default() {
+        let mut catalogs = std::collections::HashMap::new();
+        catalogs.insert(
+            String::new(),
+            std::collections::HashMap::from([
+                ("lodash".to_string(), "^4.17.21".to_string()),
+                ("debug".to_string(), "^4.3.4".to_string()),
+            ]),
+        );
+
+        let mut deps = DepsView {
+            dependencies: HashMap::from([("lodash".to_string(), "catalog:".to_string())]),
+            dev_dependencies: HashMap::from([("debug".to_string(), "catalog:default".to_string())]),
+            peer_dependencies: HashMap::new(),
+            optional_dependencies: HashMap::new(),
+        };
+
+        deps.resolve_catalogs(&catalogs);
+
+        assert_eq!(deps.dependencies.get("lodash").unwrap(), "^4.17.21");
+        assert_eq!(deps.dev_dependencies.get("debug").unwrap(), "^4.3.4");
+    }
+
+    #[test]
+    fn test_resolve_deps_view_catalogs_named() {
+        let mut catalogs = std::collections::HashMap::new();
+        catalogs.insert(
+            "legacy".to_string(),
+            std::collections::HashMap::from([("express".to_string(), "^3.0.0".to_string())]),
+        );
+
+        let mut deps = DepsView {
+            dependencies: HashMap::from([("express".to_string(), "catalog:legacy".to_string())]),
+            dev_dependencies: HashMap::new(),
+            peer_dependencies: HashMap::new(),
+            optional_dependencies: HashMap::new(),
+        };
+
+        deps.resolve_catalogs(&catalogs);
+
+        assert_eq!(deps.dependencies.get("express").unwrap(), "^3.0.0");
+    }
+
+    #[test]
+    fn test_resolve_deps_view_catalogs_empty_noop() {
+        let catalogs: utoo_ruborist::spec::Catalogs = std::collections::HashMap::new();
+
+        let mut deps = DepsView {
+            dependencies: HashMap::from([("lodash".to_string(), "catalog:".to_string())]),
+            dev_dependencies: HashMap::new(),
+            peer_dependencies: HashMap::new(),
+            optional_dependencies: HashMap::new(),
+        };
+
+        deps.resolve_catalogs(&catalogs);
+
+        // catalog: spec left untouched when catalogs is empty
+        assert_eq!(deps.dependencies.get("lodash").unwrap(), "catalog:");
+    }
+
+    #[test]
+    fn test_resolve_deps_view_catalogs_missing_entry() {
+        let mut catalogs = std::collections::HashMap::new();
+        catalogs.insert(
+            String::new(),
+            std::collections::HashMap::from([("react".to_string(), "^18.0.0".to_string())]),
+        );
+
+        let mut deps = DepsView {
+            dependencies: HashMap::from([("lodash".to_string(), "catalog:".to_string())]),
+            dev_dependencies: HashMap::new(),
+            peer_dependencies: HashMap::new(),
+            optional_dependencies: HashMap::new(),
+        };
+
+        deps.resolve_catalogs(&catalogs);
+
+        // lodash not in catalog, left as-is
+        assert_eq!(deps.dependencies.get("lodash").unwrap(), "catalog:");
     }
 
     #[tokio::test]
