@@ -28,6 +28,22 @@ export interface NapiTaskMessage {
 }
 export declare function recvTaskMessageInWorker(workerId: number): Promise<NapiTaskMessage>
 export declare function sendTaskMessage(message: NapiTaskMessage): Promise<void>
+/** Arguments for `NapiTurbopackCallbacks::throw_turbopack_internal_error`. */
+export interface TurbopackInternalErrorOpts {
+  message: string
+  anonymizedLocation?: string
+}
+export interface NapiTurbopackCallbacksJsObject {
+  /**
+   * Called when we've encountered a bug in Turbopack and not in the user's code. Constructs and
+   * throws a `TurbopackInternalError` type. Logs to anonymized telemetry.
+   *
+   * As a result of the use of `ErrorStrategy::CalleeHandled`, the first argument is an error if
+   * there's a runtime conversion error. This should never happen, but if it does, the function
+   * can throw it instead.
+   */
+  throwTurbopackInternalError: (conversionError: Error | null, opts: TurbopackInternalErrorOpts) => never
+}
 export interface NapiEndpointConfig {
   
 }
@@ -133,7 +149,7 @@ export interface NapiTurboEngineOptions {
   /** Track dependencies between tasks. If false, any change during build will error. */
   dependencyTracking?: boolean
 }
-export declare function projectNew(options: NapiProjectOptions, turboEngineOptions: NapiTurboEngineOptions): Promise<{ __napiType: "Project" }>
+export declare function projectNew(options: NapiProjectOptions, turboEngineOptions: NapiTurboEngineOptions, napiCallbacks: NapiTurbopackCallbacksJsObject): Promise<{ __napiType: "Project" }>
 export declare function projectUpdate(project: { __napiType: "Project" }, options: NapiPartialProjectOptions): Promise<void>
 /**
  * Runs exit handlers for the project registered using the [`ExitHandler`] API.

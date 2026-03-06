@@ -37,7 +37,7 @@ use turbopack_css::chunk::{CssChunk, source_map::CssChunkSourceMapAsset};
 use turbopack_ecmascript::{
     async_chunk::module::AsyncLoaderModule,
     chunk::{EcmascriptChunk, EcmascriptChunkType},
-    manifest::{chunk_asset::ManifestAsyncModule, loader_item::ManifestLoaderChunkItem},
+    manifest::{chunk_asset::ManifestAsyncModule, loader_module::ManifestLoaderModule},
 };
 use turbopack_ecmascript_runtime::RuntimeType;
 
@@ -514,12 +514,13 @@ impl ChunkingContext for LibraryChunkingContext {
     #[turbo_tasks::function]
     async fn asset_path(
         &self,
-        content_hash: RcStr,
+        content_hash: Vc<RcStr>,
         original_asset_ident: Vc<AssetIdent>,
         _tag: Option<RcStr>,
     ) -> Result<Vc<FileSystemPath>> {
         let source_path = original_asset_ident.path().await?;
         let basename = source_path.file_name();
+        let content_hash = content_hash.await?;
 
         let asset_path = match &self.asset_module_filename {
             Some(filename_template) => {
@@ -708,13 +709,25 @@ impl ChunkingContext for LibraryChunkingContext {
         module_graph: Vc<ModuleGraph>,
         availability_info: AvailabilityInfo,
     ) -> Result<Vc<Box<dyn ChunkItem>>> {
-        let manifest_asset =
-            ManifestAsyncModule::new(module, module_graph, Vc::upcast(self), availability_info);
-        Ok(Vc::upcast(ManifestLoaderChunkItem::new(
-            manifest_asset,
-            module_graph,
-            Vc::upcast(self),
-        )))
+        let chunking_context: ResolvedVc<Box<dyn ChunkingContext>> =
+            Vc::upcast::<Box<dyn ChunkingContext>>(self)
+                .to_resolved()
+                .await?;
+        Ok(if self.await?.manifest_chunks {
+            let manifest_asset = ManifestAsyncModule::new(
+                module,
+                module_graph,
+                *chunking_context,
+                availability_info,
+            )
+            .to_resolved()
+            .await?;
+            let loader_module = ManifestLoaderModule::new(*manifest_asset);
+            loader_module.as_chunk_item(module_graph, *chunking_context)
+        } else {
+            let module = AsyncLoaderModule::new(module, *chunking_context, availability_info);
+            module.as_chunk_item(module_graph, *chunking_context)
+        })
     }
 
     #[turbo_tasks::function]

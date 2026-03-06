@@ -84,9 +84,10 @@ pub async fn initialize_project_container(
     ));
     let project_container = turbo_tasks
         .run(async move {
-            let project_container = ProjectContainer::new("utoopack-cli".into(), dev);
-            let project_container = project_container.to_resolved().await?;
-            project_container.initialize(options).await?;
+            let project_container_op = ProjectContainer::new_operation("utoopack-cli".into(), dev);
+            ProjectContainer::initialize(project_container_op, options).await?;
+            let project_container: ResolvedVc<ProjectContainer> =
+                project_container_op.connect().to_resolved().await?;
             Ok(project_container)
         })
         .await?;

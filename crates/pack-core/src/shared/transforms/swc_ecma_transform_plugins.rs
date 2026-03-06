@@ -4,7 +4,6 @@ use turbo_rcstr::RcStr;
 use turbo_tasks::Vc;
 use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::ModuleRule;
-
 #[allow(unused_imports)]
 use turbopack_core::{context::AssetContext, resolve::origin::ResolveOrigin};
 
@@ -67,13 +66,13 @@ pub async fn get_swc_ecma_transform_rule_impl(
     enable_mdx_rs: bool,
 ) -> Result<Option<ModuleRule>> {
     use anyhow::bail;
-    use turbo_tasks::{TryFlatJoinIterExt, ValueToString};
+    use turbo_tasks::TryFlatJoinIterExt;
     use turbo_tasks_fs::FileContent;
     use turbopack_core::{
         asset::Asset,
         module::Module,
         reference_type::{CommonJsReferenceSubType, ReferenceType},
-        resolve::{ResolveErrorMode, handle_resolve_error, parse::Request, resolve},
+        resolve::{ResolveErrorMode, error::handle_resolve_error, parse::Request, resolve},
     };
     use turbopack_ecmascript_plugins::transform::swc_ecma_transform_plugins::{
         SwcEcmaTransformPluginsTransformer, SwcPluginModule,
@@ -134,11 +133,9 @@ pub async fn get_swc_ecma_transform_rule_impl(
                 };
 
                 let Some(plugin_source) = &*plugin_module.source().await? else {
-                    use anyhow::bail;
-
-                    bail!(
+                    turbo_tasks::turbobail!(
                         "Expected source for plugin module: {}",
-                        plugin_module.ident().to_string().await?
+                        plugin_module.ident()
                     );
                 };
 

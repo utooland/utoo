@@ -21,7 +21,7 @@ pub async fn run(options: ProjectOptions) -> Result<()> {
 
     let (turbo_tasks, project_container) = initialize_project_container(options, dev).await?;
 
-    let (entrypoints, _issues, _diagnostics) = turbo_tasks
+    let (_entrypoints, _issues, _diagnostics) = turbo_tasks
         .run(async move {
             let entrypoints_with_issues_op =
                 get_all_written_entrypoints_with_issues_operation(project_container);
@@ -42,20 +42,7 @@ pub async fn run(options: ProjectOptions) -> Result<()> {
 
     tracing::info!("all project entrypoints wrote to disk.");
 
-    tracing::info!(
-        "pack tasks with {} apps {} libraries finished in {:?}",
-        entrypoints
-            .apps
-            .as_ref()
-            .map(|apps| apps.0.len())
-            .unwrap_or_default(),
-        entrypoints
-            .libraries
-            .as_ref()
-            .map(|libraries| libraries.0.len())
-            .unwrap_or_default(),
-        start.elapsed()
-    );
+    tracing::info!("pack tasks finished in {:?}", start.elapsed());
 
     let memory = TurboMalloc::memory_usage();
     tracing::info!("memory usage: {} MiB", memory / 1024 / 1024);

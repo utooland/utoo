@@ -291,10 +291,11 @@ pub async fn init_pack_project(dev: bool) -> Result<()> {
             let turbo_tasks = create_turbo_tasks()?;
             let container = turbo_tasks
                 .run_once(async move {
-                    let container = ProjectContainer::new("utoopack-web".into(), options.dev)
-                        .to_resolved()
-                        .await?;
-                    container.initialize(options).await?;
+                    let container_op =
+                        ProjectContainer::new_operation("utoopack-web".into(), options.dev);
+                    ProjectContainer::initialize(container_op, options).await?;
+                    let container: ResolvedVc<ProjectContainer> =
+                        container_op.connect().to_resolved().await?;
                     Ok(container)
                 })
                 .await?;

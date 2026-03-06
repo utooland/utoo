@@ -172,18 +172,17 @@ pub async fn webpack_loader_options(
 #[turbo_tasks::function]
 #[allow(unused_variables)]
 async fn loader_runner_package_mapping() -> Result<Vc<ImportMapping>> {
-    Ok(
-        ImportMapping::Direct(ResolveResult::primary(ResolveResultItem::Source(
-            ResolvedVc::upcast(
-                FileSource::new(
-                    embed_file_path(rcstr!("loader-runner/lib/LoaderRunner.js"))
-                        .owned()
-                        .await?,
-                )
-                .to_resolved()
-                .await?,
-            ),
+    Ok(ImportMapping::Direct(
+        ResolveResult::primary(ResolveResultItem::Source(ResolvedVc::upcast(
+            FileSource::new(
+                embed_file_path(rcstr!("loader-runner/lib/LoaderRunner.js"))
+                    .owned()
+                    .await?,
+            )
+            .to_resolved()
+            .await?,
         )))
-        .cell(),
+        .resolved_cell(),
     )
+    .cell())
 }

@@ -1,4 +1,7 @@
 use anyhow::{Context, Result, bail};
+use bincode::{Decode, Encode};
+#[cfg(any(feature = "process_pool", feature = "worker_pool"))]
+use pack_core::config::PluginRuntimeStrategy;
 use pack_core::{
     client::context::{
         ClientChunkingContextOptions, get_client_chunking_context, get_client_compile_time_info,
@@ -8,17 +11,19 @@ use pack_core::{
     mode::Mode,
     util::{Runtime, convert_to_project_relative},
 };
-use serde::Deserialize;
+use rustc_hash::FxHashMap;
+use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::{MAIN_SEPARATOR, Path, PathBuf},
     time::Duration,
 };
-use tracing::Instrument;
+use tracing::{Instrument, field::Empty};
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{
-    Completion, Completions, IntoTraitRef, OperationValue, OperationVc, ReadRef, ResolvedVc, State,
-    TransientInstance, TryFlatJoinIterExt, TryJoinIterExt, Vc, mark_root,
+    Completion, Completions, IntoTraitRef, NonLocalValue, OperationValue, OperationVc, ReadRef,
+    ResolvedVc, State, TaskInput, TransientInstance, TryFlatJoinIterExt, TryJoinIterExt, Vc,
+    trace::TraceRawVcs,
 };
 use turbo_tasks_env::{EnvMap, ProcessEnv};
 use turbo_tasks_fs::{
@@ -61,7 +66,11 @@ use turbopack_core::{
         NotFoundVersion, OptionVersionedContent, Update, Version, VersionState, VersionedContent,
     },
 };
+#[cfg(feature = "process_pool")]
+use turbopack_node::child_process_backend;
 use turbopack_node::execution_context::ExecutionContext;
+#[cfg(feature = "worker_pool")]
+use turbopack_node::worker_threads_backend;
 use turbopack_nodejs::NodeJsChunkingContext;
 
 use crate::{
@@ -72,8 +81,22 @@ use crate::{
     versioned_content_map::VersionedContentMap,
 };
 
-#[turbo_tasks::value]
-#[derive(Default, Debug, Clone, Deserialize, OperationValue)]
+#[derive(
+    Debug,
+    Default,
+    Serialize,
+    Deserialize,
+    Clone,
+    TaskInput,
+    PartialEq,
+    Eq,
+    Hash,
+    TraceRawVcs,
+    NonLocalValue,
+    OperationValue,
+    Encode,
+    Decode,
+)]
 #[serde(rename_all = "camelCase")]
 pub struct WatchOptions {
     /// Whether to watch the filesystem for file changes.
@@ -93,8 +116,18 @@ pub fn default_ignored_paths() -> Vec<RcStr> {
     vec!["node_modules".into()]
 }
 
-#[turbo_tasks::value]
-#[derive(Debug, Clone, Deserialize, OperationValue)]
+#[derive(
+    Debug,
+    Deserialize,
+    Clone,
+    PartialEq,
+    Eq,
+    TraceRawVcs,
+    NonLocalValue,
+    OperationValue,
+    Encode,
+    Decode,
+)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectOptions {
     /// A root path from which all files must be nested under. Trying to access
@@ -176,8 +209,8 @@ pub struct ProjectContainer {
 
 #[turbo_tasks::value_impl]
 impl ProjectContainer {
-    #[turbo_tasks::function]
-    pub async fn new(name: RcStr, dev: bool) -> Result<Vc<Self>> {
+    #[turbo_tasks::function(operation)]
+    pub fn new_operation(name: RcStr, dev: bool) -> Result<Vc<Self>> {
         Ok(ProjectContainer {
             name,
             // we only need to enable versioning in dev mode, since build
@@ -194,6 +227,11 @@ impl ProjectContainer {
 }
 
 #[turbo_tasks::function(operation)]
+fn project_operation(project: ResolvedVc<ProjectContainer>) -> Vc<Project> {
+    project.project()
+}
+
+#[turbo_tasks::function(operation)]
 fn project_fs_operation(project: ResolvedVc<Project>) -> Vc<DiskFileSystem> {
     project.project_fs(project.dist_dir())
 }
@@ -203,106 +241,121 @@ fn output_fs_operation(project: ResolvedVc<Project>) -> Vc<DiskFileSystem> {
     project.output_fs()
 }
 
-impl ProjectContainer {
-    #[tracing::instrument(level = "trace", name = "initialize project", skip_all)]
-    pub async fn initialize(self: ResolvedVc<Self>, options: ProjectOptions) -> Result<()> {
-        let watch = options.watch.clone();
+enum EnvDiffType {
+    Added,
+    Removed,
+    Modified,
+}
 
-        self.await?.options_state.set(Some(options));
+fn env_diff(old: &[(RcStr, RcStr)], new: &[(RcStr, RcStr)]) -> Vec<(RcStr, EnvDiffType)> {
+    let mut diffs = Vec::new();
+    let mut old_map: FxHashMap<_, _> = old.iter().cloned().collect();
 
-        let project = self.project().to_resolved().await?;
-        let project_fs = project_fs_operation(project)
-            .read_strongly_consistent()
-            .await?;
-        if watch.enable {
-            project_fs
-                .start_watching_with_invalidation_reason(watch.poll_interval)
-                .await?;
-        } else {
-            project_fs.invalidate_with_reason(|path| invalidation::Initialize {
-                path: RcStr::from(path.to_string_lossy()),
-            });
+    for (key, new_value) in new.iter() {
+        match old_map.remove(key) {
+            Some(old_value) => {
+                if &old_value != new_value {
+                    diffs.push((key.clone(), EnvDiffType::Modified));
+                }
+            }
+            None => {
+                diffs.push((key.clone(), EnvDiffType::Added));
+            }
         }
-        let output_fs = output_fs_operation(project)
-            .read_strongly_consistent()
-            .await?;
-        output_fs.invalidate_with_reason(|path| invalidation::Initialize {
-            path: RcStr::from(path.to_string_lossy()),
-        });
-        Ok(())
     }
 
-    #[tracing::instrument(level = "trace", name = "update project", skip_all)]
-    pub async fn update(self: Vc<Self>, options: PartialProjectOptions) -> Result<()> {
-        let PartialProjectOptions {
-            root_path,
-            project_path,
-            config,
-            process_env,
-            define_env,
-            watch,
-            build_id,
-            pack_path,
-        } = options;
-
-        let this = self.await?;
-
-        let mut new_options = this
-            .options_state
-            .get()
-            .clone()
-            .context("ProjectContainer need to be initialized with initialize()")?;
-
-        if let Some(root_path) = root_path {
-            new_options.root_path = root_path;
+    for (key, _) in old.iter() {
+        if old_map.contains_key(key) {
+            diffs.push((key.clone(), EnvDiffType::Removed));
         }
-        if let Some(project_path) = project_path {
-            new_options.project_path = project_path;
-        }
-        if let Some(config) = config {
-            new_options.config = config;
-        }
-        if let Some(process_env) = process_env {
-            new_options.process_env = process_env;
-        }
-        if let Some(define_env) = define_env {
-            new_options.define_env = define_env;
-        }
-        if let Some(watch) = watch {
-            new_options.watch = watch;
-        }
+    }
 
-        if let Some(build_id) = build_id {
-            new_options.build_id = build_id;
+    diffs
+}
+
+fn env_diff_report(old: &[(RcStr, RcStr)], new: &[(RcStr, RcStr)]) -> String {
+    use std::fmt::Write;
+
+    let diff = env_diff(old, new);
+
+    let mut report = String::new();
+    for (key, diff_type) in diff {
+        let symbol = match diff_type {
+            EnvDiffType::Added => "+",
+            EnvDiffType::Removed => "-",
+            EnvDiffType::Modified => "*",
+        };
+        if !report.is_empty() {
+            report.push_str(", ");
         }
+        write!(report, "{}{}", symbol, key).unwrap();
+    }
+    report
+}
 
-        if let Some(pack_path) = pack_path {
-            new_options.pack_path = pack_path;
+fn define_env_diff_report(old: &DefineEnv, new: &DefineEnv) -> String {
+    use std::fmt::Write;
+
+    let mut report = String::new();
+    for (name, old, new) in [
+        ("client", &old.client, &new.client),
+        ("edge", &old.edge, &new.edge),
+        ("nodejs", &old.nodejs, &new.nodejs),
+    ] {
+        let diff = env_diff_report(old, new);
+        if !diff.is_empty() {
+            if !report.is_empty() {
+                report.push_str(", ");
+            }
+            write!(report, "{name}: {{ {diff} }}").unwrap();
         }
+    }
+    report
+}
 
-        // TODO: Handle mode switch, should prevent mode being switched.
-        let watch = new_options.watch.clone();
+impl ProjectContainer {
+    /// Set up filesystems, watchers, and construct the [`Project`] instance inside the container.
+    ///
+    /// This function is intended to be called inside of [`turbo_tasks::TurboTasks::run`], but not
+    /// part of a [`turbo_tasks::function`]. We don't want it to be possibly re-executed.
+    ///
+    /// This is an associated function instead of a method because we don't currently implement
+    /// [`std::ops::Receiver`] on [`OperationVc`].
+    // #[tracing::instrument(level = "trace", name = "initialize project", skip_all)]
+    pub async fn initialize(this_op: OperationVc<Self>, options: ProjectOptions) -> Result<()> {
+        let this = this_op.read_strongly_consistent().await?;
+        let span = tracing::info_span!(
+            "initialize project",
+            project_name = %this.name,
+            env_diff = Empty
+        );
 
-        let project = self.project().to_resolved().await?;
-        let prev_project_fs = project_fs_operation(project)
-            .read_strongly_consistent()
-            .await?;
-        let prev_output_fs = output_fs_operation(project)
-            .read_strongly_consistent()
-            .await?;
+        let span_clone = span.clone();
 
-        this.options_state.set(Some(new_options));
-        let project = self.project().to_resolved().await?;
-        let project_fs = project_fs_operation(project)
-            .read_strongly_consistent()
-            .await?;
-        let output_fs = output_fs_operation(project)
-            .read_strongly_consistent()
-            .await?;
+        async move {
+            let watch = options.watch.clone();
 
-        if !ReadRef::ptr_eq(&prev_project_fs, &project_fs) {
+            if let Some(old_options) = &*this.options_state.get_untracked() {
+                span.record(
+                    "env_diff",
+                    define_env_diff_report(&old_options.define_env, &options.define_env).as_str(),
+                );
+            }
+            this.options_state.set(Some(options));
+
+            #[turbo_tasks::function(operation)]
+            fn project_from_container_operation(
+                container: OperationVc<ProjectContainer>,
+            ) -> Vc<Project> {
+                container.connect().project()
+            }
+            let project = project_from_container_operation(this_op)
+                .resolve_strongly_consistent()
+                .await?;
+            let project_fs = project_fs_operation(project)
+                .read_strongly_consistent()
+                .await?;
             if watch.enable {
-                // TODO stop watching: prev_project_fs.stop_watching()?;
                 project_fs
                     .start_watching_with_invalidation_reason(watch.poll_interval)
                     .await?;
@@ -312,14 +365,136 @@ impl ProjectContainer {
                     path: RcStr::from(path.to_string_lossy()),
                 });
             }
-        }
-        if !ReadRef::ptr_eq(&prev_output_fs, &output_fs) {
-            prev_output_fs.invalidate_with_reason(|path| invalidation::Initialize {
+            let output_fs = output_fs_operation(project)
+                .read_strongly_consistent()
+                .await?;
+            output_fs.invalidate_with_reason(|path| invalidation::Initialize {
                 path: RcStr::from(path.to_string_lossy()),
             });
+            Ok(())
         }
+        .instrument(span_clone)
+        .await
+    }
 
-        Ok(())
+    pub async fn update(self: ResolvedVc<Self>, options: PartialProjectOptions) -> Result<()> {
+        let span = tracing::info_span!(
+            "update project options",
+            project_name = %self.await?.name,
+            env_diff = Empty
+        );
+        let span_clone = span.clone();
+        async move {
+            // HACK: `update` is called from a top-level function. Top-level functions are not
+            // allowed to perform eventually consistent reads. Create a stub operation
+            // to upgrade the `ResolvedVc` to an `OperationVc`. This is mostly okay
+            // because we can assume the `ProjectContainer` was originally resolved with
+            // strong consistency, and is rarely updated.
+            #[turbo_tasks::function(operation)]
+            fn project_container_operation_hack(
+                container: ResolvedVc<ProjectContainer>,
+            ) -> Vc<ProjectContainer> {
+                *container
+            }
+            let this = project_container_operation_hack(self)
+                .read_strongly_consistent()
+                .await?;
+            let PartialProjectOptions {
+                root_path,
+                project_path,
+                config,
+                process_env,
+                define_env,
+                watch,
+                build_id,
+                pack_path,
+            } = options;
+            let mut new_options = this
+                .options_state
+                .get()
+                .clone()
+                .context("ProjectContainer need to be initialized with initialize()")?;
+
+            if let Some(root_path) = root_path {
+                new_options.root_path = root_path;
+            }
+            if let Some(project_path) = project_path {
+                new_options.project_path = project_path;
+            }
+            if let Some(config) = config {
+                new_options.config = config;
+            }
+            if let Some(process_env) = process_env {
+                new_options.process_env = process_env;
+            }
+            if let Some(define_env) = define_env {
+                new_options.define_env = define_env;
+            }
+            if let Some(watch) = watch {
+                new_options.watch = watch;
+            }
+
+            if let Some(build_id) = build_id {
+                new_options.build_id = build_id;
+            }
+
+            if let Some(pack_path) = pack_path {
+                new_options.pack_path = pack_path;
+            }
+
+            // TODO: Handle mode switch, should prevent mode being switched.
+            let watch = new_options.watch.clone();
+
+            let project = project_operation(self)
+                .resolve_strongly_consistent()
+                .await?;
+            let prev_project_fs = project_fs_operation(project)
+                .read_strongly_consistent()
+                .await?;
+            let prev_output_fs = output_fs_operation(project)
+                .read_strongly_consistent()
+                .await?;
+
+            if let Some(old_options) = &*this.options_state.get_untracked() {
+                span.record(
+                    "env_diff",
+                    define_env_diff_report(&old_options.define_env, &new_options.define_env)
+                        .as_str(),
+                );
+            }
+            this.options_state.set(Some(new_options));
+            let project = project_operation(self)
+                .resolve_strongly_consistent()
+                .await?;
+            let project_fs = project_fs_operation(project)
+                .read_strongly_consistent()
+                .await?;
+            let output_fs = output_fs_operation(project)
+                .read_strongly_consistent()
+                .await?;
+            if !ReadRef::ptr_eq(&prev_project_fs, &project_fs) {
+                if watch.enable {
+                    // TODO stop watching: prev_project_fs.stop_watching()?;
+                    project_fs
+                        .start_watching_with_invalidation_reason(watch.poll_interval)
+                        .await?;
+                } else {
+                    project_fs.invalidate_with_reason(|path| invalidation::Initialize {
+                        // this path is just used for display purposes
+                        path: RcStr::from(path.to_string_lossy()),
+                    });
+                }
+            }
+            if !ReadRef::ptr_eq(&prev_output_fs, &output_fs) {
+                prev_output_fs.invalidate_with_reason(|path| invalidation::Initialize {
+                    path: RcStr::from(path.to_string_lossy()),
+                });
+            }
+
+            Ok(())
+        }
+        .instrument(span_clone)
+        .await
     }
 }
 
@@ -815,33 +990,48 @@ impl Project {
             SourceMapsType::None
         };
 
-        let build_environment = node_build_environment().to_resolved().await?;
-        let execution_chunking_context = Vc::upcast(
-            NodeJsChunkingContext::builder(
-                project_root,
-                node_root.clone(),
-                node_root_to_root_path,
-                node_root.clone(),
-                node_root.clone(),
-                node_root.clone(),
-                build_environment,
-                mode.runtime_type(),
-            )
-            .source_maps(
-                if cfg!(all(target_family = "wasm", target_os = "unknown")) {
-                    SourceMapsType::None
-                } else {
-                    source_maps
-                },
-            )
-            .build(),
-        );
+        #[cfg(not(any(feature = "process_pool", feature = "worker_pool")))]
+        bail!("execution_context requires process_pool or worker_pool feature");
 
-        Ok(ExecutionContext::new(
-            self.project_path().owned().await?,
-            execution_chunking_context,
-            self.env(),
-        ))
+        #[cfg(any(feature = "process_pool", feature = "worker_pool"))]
+        {
+            let strategy = *self.config().plugin_runtime_strategy().await?;
+            let node_backend = match strategy {
+                #[cfg(feature = "worker_pool")]
+                PluginRuntimeStrategy::WorkerThreads => worker_threads_backend(),
+                #[cfg(feature = "process_pool")]
+                PluginRuntimeStrategy::ChildProcesses => child_process_backend(),
+            };
+
+            let build_environment = node_build_environment().to_resolved().await?;
+            let execution_chunking_context = Vc::upcast(
+                NodeJsChunkingContext::builder(
+                    project_root,
+                    node_root.clone(),
+                    node_root_to_root_path,
+                    node_root.clone(),
+                    node_root.clone(),
+                    node_root.clone(),
+                    build_environment,
+                    mode.runtime_type(),
+                )
+                .source_maps(
+                    if cfg!(all(target_family = "wasm", target_os = "unknown")) {
+                        SourceMapsType::None
+                    } else {
+                        source_maps
+                    },
+                )
+                .build(),
+            );
+
+            Ok(ExecutionContext::new(
+                self.project_path().owned().await?,
+                execution_chunking_context,
+                self.env(),
+                node_backend,
+            ))
+        }
     }
 
     #[turbo_tasks::function]
@@ -939,10 +1129,12 @@ impl Project {
 
             // At this point all modules have been computed and we can get rid of the node.js
             // process pools
+            let execution_context = self.execution_context().await?;
+            let node_backend = execution_context.node_backend.into_trait_ref().await?;
             if *self.is_watch_enabled().await? {
-                turbopack_node::evaluate::scale_down();
+                node_backend.scale_down()?;
             } else {
-                turbopack_node::evaluate::scale_zero();
+                node_backend.scale_zero()?;
             }
 
             Ok(module_graphs_vc)
@@ -1372,8 +1564,6 @@ async fn copy_directory_recursive_helper(
 async fn whole_app_module_graph_operation(
     project: ResolvedVc<Project>,
 ) -> Result<Vc<BaseAndFullModuleGraph>> {
-    mark_root();
-
     let mode = project.mode();
     let mode_ref = mode.await?;
     let should_trace = mode_ref.is_production();

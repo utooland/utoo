@@ -6,7 +6,7 @@ use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{FxIndexMap, ResolvedVc, Vc};
 use turbo_tasks_fs::{FileSystem, FileSystemPath};
 use turbopack_core::resolve::{
-    ExternalTraced, ExternalType, ResolveAliasMap, ResolveResult, ResolveResultItem, SubpathValue,
+    ExternalTraced, ExternalType, ResolveAliasMap, SubpathValue,
     options::{ConditionValue, ImportMap, ImportMapping, ResolvedMap},
 };
 use turbopack_node::execution_context::ExecutionContext;
@@ -25,15 +25,12 @@ pub fn mdx_import_source_file() -> RcStr {
 #[turbo_tasks::function]
 #[allow(unused_variables)]
 pub async fn get_postcss_package_mapping() -> Result<Vc<ImportMapping>> {
-    Ok(
-        ImportMapping::Direct(ResolveResult::primary(ResolveResultItem::External {
-            name: rcstr!("postcss"),
-            ty: ExternalType::CommonJs,
-            traced: ExternalTraced::Untraced,
-            target: None,
-        }))
-        .cell(),
+    Ok(ImportMapping::External(
+        Some(rcstr!("postcss")),
+        ExternalType::CommonJs,
+        ExternalTraced::Untraced,
     )
+    .cell())
 }
 
 /// Computes the client fallback import map, which provides

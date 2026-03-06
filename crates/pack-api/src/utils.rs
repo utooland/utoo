@@ -10,11 +10,13 @@ use turbopack_core::{
     issue::{CollectibleIssuesExt, IssueFilter, IssueSeverity, PlainIssue, StyledString},
 };
 
-use crate::endpoint::{Endpoint, EndpointIssuesAndDiags, endpoint_server_changed_operation};
+use crate::endpoint::{
+    Endpoint, EndpointIssuesAndDiags, OptionEndpoint, endpoint_server_changed_operation,
+};
 
 #[turbo_tasks::function(operation)]
 pub async fn subscribe_issues_and_diags_operation(
-    endpoint_op: OperationVc<Box<dyn Endpoint>>,
+    endpoint_op: OperationVc<OptionEndpoint>,
     should_include_issues: bool,
 ) -> Result<Vc<EndpointIssuesAndDiags>> {
     let changed_op = endpoint_server_changed_operation(endpoint_op);
@@ -42,10 +44,14 @@ pub async fn subscribe_issues_and_diags_operation(
 }
 
 #[turbo_tasks::function(operation)]
-pub fn endpoint_client_changed_operation(
-    endpoint_op: OperationVc<Box<dyn Endpoint>>,
-) -> Vc<Completion> {
-    endpoint_op.connect().client_changed()
+pub async fn endpoint_client_changed_operation(
+    endpoint: OperationVc<OptionEndpoint>,
+) -> Result<Vc<Completion>> {
+    Ok(if let Some(endpoint) = *endpoint.connect().await? {
+        endpoint.client_changed()
+    } else {
+        Completion::new()
+    })
 }
 
 // Await the source and return fatal issues if there are any, otherwise
