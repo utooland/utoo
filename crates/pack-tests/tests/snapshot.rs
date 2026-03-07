@@ -121,9 +121,7 @@ async fn run(resource: PathBuf) -> Result<()> {
     ));
     tt.run_once(async move {
         #[turbo_tasks::function(operation)]
-        async fn snapshot_issues_operation(
-            out_op: OperationVc<FileSystemPath>,
-        ) -> Result<Vc<()>> {
+        async fn snapshot_issues_operation(out_op: OperationVc<FileSystemPath>) -> Result<Vc<()>> {
             let out_path = out_op.resolve_strongly_consistent().await?.owned().await?;
             let plain_issues = out_op
                 .peek_issues()
@@ -144,9 +142,7 @@ async fn run(resource: PathBuf) -> Result<()> {
             // Run snapshot_issues as its own operation so its path.write() effects
             // are tracked as collectibles of snap_op (not of inner_operation).
             let snap_op = snapshot_issues_operation(out_op);
-            snap_op
-                .read_strongly_consistent()
-                .await?;
+            snap_op.read_strongly_consistent().await?;
 
             // Collect and apply the snapshot write effects from within the operation
             // (calling get_effects / apply inside a turbo-tasks function is allowed).
