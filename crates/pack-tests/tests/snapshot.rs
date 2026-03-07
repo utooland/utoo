@@ -20,7 +20,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use turbo_rcstr::{RcStr, rcstr};
-use turbo_tasks::{Effects, ResolvedVc, TurboTasks, ValueToString, Vc, get_effects};
+use turbo_tasks::{Effects, OperationVc, ResolvedVc, TurboTasks, ValueToString, Vc, get_effects};
 use turbo_tasks_backend::{BackendOptions, TurboTasksBackend, noop_backing_storage};
 use turbo_tasks_fs::FileSystemPath;
 use turbopack_core::{
@@ -121,18 +121,36 @@ async fn run(resource: PathBuf) -> Result<()> {
     ));
     tt.run_once(async move {
         #[turbo_tasks::function(operation)]
-        async fn inner_operation(resource: RcStr) -> Result<Vc<Effects>> {
-            let out_op = run_test_operation(resource);
-            let out_vc = out_op.resolve_strongly_consistent().await?.owned().await?;
-
+        async fn snapshot_issues_operation(
+            out_op: OperationVc<FileSystemPath>,
+        ) -> Result<Vc<()>> {
+            let out_path = out_op.resolve_strongly_consistent().await?.owned().await?;
             let plain_issues = out_op
                 .peek_issues()
                 .get_plain_issues(IssueFilter::everything())
                 .await?;
-
-            snapshot_issues(plain_issues, out_vc.join("issues")?, &REPO_ROOT)
+            snapshot_issues(plain_issues, out_path.join("issues")?, &REPO_ROOT)
                 .await
                 .context("Unable to handle issues")?;
+            Ok(Default::default())
+        }
+
+        #[turbo_tasks::function(operation)]
+        async fn inner_operation(resource: RcStr) -> Result<Vc<Effects>> {
+            let out_op = run_test_operation(resource);
+            // Ensure bundling is complete before peeking issues or reading path.
+            out_op.resolve_strongly_consistent().await?;
+
+            // Run snapshot_issues as its own operation so its path.write() effects
+            // are tracked as collectibles of snap_op (not of inner_operation).
+            let snap_op = snapshot_issues_operation(out_op);
+            snap_op
+                .read_strongly_consistent()
+                .await?;
+
+            // Collect and apply the snapshot write effects from within the operation
+            // (calling get_effects / apply inside a turbo-tasks function is allowed).
+            get_effects(snap_op).await?.apply().await?;
 
             Ok(get_effects(out_op).await?.cell())
         }
