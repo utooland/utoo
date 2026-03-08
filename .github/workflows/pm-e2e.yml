@@ -33,6 +33,12 @@ jobs:
       - name: Init git submodules
         run: git submodule update --init --recursive --depth 1
 
+      # Disable Windows Defender real-time scanning to speed up I/O-heavy builds (~30-50% faster)
+      - name: Disable Windows Defender
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
       - name: Install x86_64 Node.js via nvm
         if: matrix.settings.target == 'x86_64-apple-darwin'
         run: |
