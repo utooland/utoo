@@ -5,6 +5,7 @@ pub mod config_file;
 pub mod downloader;
 pub mod extractor;
 pub mod format_print;
+pub mod git_resolver;
 pub mod http;
 pub mod integrity;
 pub mod json;
