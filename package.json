@@ -30,6 +30,7 @@
     "crates/pack-core/js",
     "crates/pack/js",
     "examples/define",
+    "examples/config-js",
     "examples/externals",
     "examples/multi-entries-heavy",
     "examples/webpack-compat",

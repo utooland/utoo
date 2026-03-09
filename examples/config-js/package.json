@@ -1,0 +1,14 @@
+{
+  "name": "example-config-js",
+  "version": "1.0.0",
+  "description": "Example: utoopack with JS config (utoopack.config.mjs)",
+  "private": true,
+  "scripts": {
+    "build": "up build",
+    "dev": "up dev"
+  },
+  "devDependencies": {
+    "@utoo/pack": "*",
+    "@utoo/pack-cli": "*"
+  }
+}
