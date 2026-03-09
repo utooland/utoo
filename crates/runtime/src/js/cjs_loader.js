@@ -348,8 +348,32 @@ function __cjs_require(specifier) {
   try {
     fn_ = (0, eval)(wrapped);
   } catch (e) {
-    Deno.core.ops.op_console_error("[cjs_loader] parse error in " + resolved + ": " + e.message);
-    throw e;
+    // Node.js 22+ supports require() of ESM modules. If the file contains
+    // ES module syntax (import/export), transpile it to CJS and retry.
+    if (e instanceof SyntaxError && !resolved.endsWith(".ts") && !resolved.endsWith(".tsx")) {
+      var hasESM = /\b(import\s|export\s)/.test(source);
+      if (hasESM) {
+        Deno.core.ops.op_console_warn("[cjs_loader] ESM syntax detected in " + resolved + ", transpiling to CJS");
+        source = __cjsOps.op_cjs_transpile(source, resolved);
+        if (__ModuleClass && typeof __ModuleClass.wrap === "function") {
+          wrapped = __ModuleClass.wrap(source);
+        } else {
+          wrapped = "(function(exports,require,module,__filename,__dirname){\n" + source + "\n})";
+        }
+        try {
+          fn_ = (0, eval)(wrapped);
+        } catch (e2) {
+          Deno.core.ops.op_console_error("[cjs_loader] parse error in " + resolved + " (after ESM transpile): " + e2.message);
+          throw e2;
+        }
+      } else {
+        Deno.core.ops.op_console_error("[cjs_loader] parse error in " + resolved + ": " + e.message);
+        throw e;
+      }
+    } else {
+      Deno.core.ops.op_console_error("[cjs_loader] parse error in " + resolved + ": " + e.message);
+      throw e;
+    }
   }
 
   const prev = globalThis.__cjs_current_file;

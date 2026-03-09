@@ -8762,9 +8762,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-fs-ext"
-version = "0.7.3"
+version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e76a6a499b9517434351b923ebe4d3326c383ad8f415e946488085c947a64b04"
+checksum = "912f3435ecb4330fed82d1b3a8cddf6354ea6472d40fadfb9063a3e9da1c6dec"
 dependencies = [
  "bitflags 2.9.4",
  "cfg-if",
@@ -9326,7 +9326,6 @@ dependencies = [
  "serde_json",
  "shrink-to-fit",
  "smallvec",
- "thiserror 1.0.69",
  "tokio",
  "tokio-util",
  "tracing",
@@ -9536,6 +9535,7 @@ dependencies = [
  "turbo-tasks-fs",
  "turbo-tasks-hash",
  "turbopack-core",
+ "turbopack-css",
  "turbopack-ecmascript",
  "turbopack-ecmascript-runtime",
  "turbopack-resolve",
