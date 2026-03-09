@@ -50,13 +50,13 @@ console.log(__TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$in
 ;
 __turbopack_context__.s([]);
 }),
-"[project]/basic/alias/input/a.ts [client] (ecmascript) <export a as aliasB>", ((__turbopack_context__) => {
+"[project]/basic/alias/input/a.ts [client] (ecmascript) <export a as aliasA> <export aliasA as aliasB>", ((__turbopack_context__) => {
 "use strict";
 
-var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$a$2e$ts__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/alias/input/a.ts [client] (ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$a$2e$ts__$5b$client$5d$__$28$ecmascript$29$__$3c$export__a__as__aliasA$3e$__ = __turbopack_context__.i("[project]/basic/alias/input/a.ts [client] (ecmascript) <export a as aliasA>");
 __turbopack_context__.s([
     "aliasB",
-    ()=>__TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$a$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["a"]
+    ()=>__TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$a$2e$ts__$5b$client$5d$__$28$ecmascript$29$__$3c$export__a__as__aliasA$3e$__["aliasA"]
 ]);
 }),
 "[project]/node_modules/browserslist/browser.js [client] (ecmascript)", ((__turbopack_context__) => {
@@ -112,7 +112,7 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$a
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$alias$2d$pkg$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__ = __turbopack_context__.i("[project]/node_modules/alias-pkg/index.js [client] (ecmascript) <locals>");
 var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$a$2e$ts__$5b$client$5d$__$28$ecmascript$29$__$3c$export__a__as__aliasA$3e$__ = __turbopack_context__.i("[project]/basic/alias/input/a.ts [client] (ecmascript) <export a as aliasA>");
 var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$b$2e$js__$5b$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__ = __turbopack_context__.i("[project]/basic/alias/input/b.js [client] (ecmascript) <locals>");
-var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$a$2e$ts__$5b$client$5d$__$28$ecmascript$29$__$3c$export__a__as__aliasB$3e$__ = __turbopack_context__.i("[project]/basic/alias/input/a.ts [client] (ecmascript) <export a as aliasB>");
+var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$a$2e$ts__$5b$client$5d$__$28$ecmascript$29$__$3c$export__a__as__aliasA$3e$__$3c$export__aliasA__as__aliasB$3e$__ = __turbopack_context__.i("[project]/basic/alias/input/a.ts [client] (ecmascript) <export a as aliasA> <export aliasA as aliasB>");
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$browserslist$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__ = __turbopack_context__.i("[project]/node_modules/browserslist/index.js [client] (ecmascript) <locals>");
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$browserslist$2f$browser$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/browserslist/browser.js [client] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$index$2e$less$3f$modules__$5b$client$5d$__$28$css__module$29$__ = __turbopack_context__.i("[project]/basic/alias/input/index.less?modules [client] (css module)");
@@ -131,9 +131,9 @@ console.log('a', __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$
 console.log('style', __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$index$2e$less$3f$modules__$5b$client$5d$__$28$css__module$29$__["default"]);
 console.log(__TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$browserslist$2f$browser$2e$js__$5b$client$5d$__$28$ecmascript$29$__["a"], __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$a$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["foo"], __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$alias$2d$pkg$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["aliasPkg"], __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$a$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["bar"]);
 console.log('a from alias-pkg', __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$a$2e$ts__$5b$client$5d$__$28$ecmascript$29$__$3c$export__a__as__aliasA$3e$__["aliasA"]);
-console.log('b from alias-pkg', __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$a$2e$ts__$5b$client$5d$__$28$ecmascript$29$__$3c$export__a__as__aliasB$3e$__["aliasB"]);
+console.log('b from alias-pkg', __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$alias$2f$input$2f$a$2e$ts__$5b$client$5d$__$28$ecmascript$29$__$3c$export__a__as__aliasA$3e$__$3c$export__aliasA__as__aliasB$3e$__["aliasB"]);
 __turbopack_context__.s([]);
 }),
 ]);
 
-//# sourceMappingURL=_project___ce347b56.js.map
+//# sourceMappingURL=_project___63bc685e.js.map

@@ -272,14 +272,15 @@ fn handle_external_config(
                         // If no script URL is provided, just use root
                         advanced.root.to_string()
                     };
-                    return ResolveResultOption::some(*ResolveResult::primary(
-                        ResolveResultItem::External {
+                    return ResolveResultOption::some(
+                        ResolveResult::primary(ResolveResultItem::External {
                             name: external_name.into(),
                             ty: ExternalType::Script,
                             traced: ExternalTraced::Traced,
                             target: None,
-                        },
-                    ));
+                        })
+                        .cell(),
+                    );
                 }
                 Some(crate::config::ExternalType::Global) => ExternalType::Global,
                 None => ExternalType::Global,
@@ -298,12 +299,15 @@ fn handle_external_config(
         }
     };
 
-    ResolveResultOption::some(*ResolveResult::primary(ResolveResultItem::External {
-        name: external_name,
-        ty: external_type,
-        traced: ExternalTraced::Traced,
-        target: None,
-    }))
+    ResolveResultOption::some(
+        ResolveResult::primary(ResolveResultItem::External {
+            name: external_name,
+            ty: external_type,
+            traced: ExternalTraced::Traced,
+            target: None,
+        })
+        .cell(),
+    )
 }
 
 #[turbo_tasks::value]
@@ -519,10 +523,13 @@ impl AfterResolvePlugin for ExternalsPlugin {
                         let external_name = match &rule.target {
                             ExternalSubPathTarget::Empty => {
                                 // Return empty external to skip this module
-                                return Ok(ResolveResultOption::some(*ResolveResult::primary(
-                                    // ignore will just skip this module and the code which import the module will be undefined.
-                                    ResolveResultItem::Ignore,
-                                )));
+                                return Ok(ResolveResultOption::some(
+                                    ResolveResult::primary(
+                                        // ignore will just skip this module and the code which import the module will be undefined.
+                                        ResolveResultItem::Ignore,
+                                    )
+                                    .cell(),
+                                ));
                             }
                             ExternalSubPathTarget::Tpl(template) => {
                                 // Replace regex capture groups in template
@@ -572,14 +579,15 @@ impl AfterResolvePlugin for ExternalsPlugin {
                             None => ExternalType::Global,
                         };
 
-                        return Ok(ResolveResultOption::some(*ResolveResult::primary(
-                            ResolveResultItem::External {
+                        return Ok(ResolveResultOption::some(
+                            ResolveResult::primary(ResolveResultItem::External {
                                 name: external_name.into(),
                                 ty: external_type,
                                 traced: ExternalTraced::Traced,
                                 target: None,
-                            },
-                        )));
+                            })
+                            .cell(),
+                        ));
                     }
                 }
             }
