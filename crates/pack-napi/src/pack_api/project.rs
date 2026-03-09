@@ -7,6 +7,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::pack_api::turbopack_ctx::{
+    NapiTurbopackCallbacks, NapiTurbopackCallbacksJsObject, RootTask, TurbopackContext,
+};
 use anyhow::{Context, Result, anyhow, bail};
 use bincode::{Decode, Encode};
 use futures_util::TryFutureExt;
@@ -27,7 +30,6 @@ use pack_api::{
     operation::EntrypointsOperation,
     project::{DefineEnv, PartialProjectOptions, ProjectContainer, ProjectOptions, WatchOptions},
     source_map::get_source_map_rope,
-    tasks::{NapiTurbopackCallbacks, NapiTurbopackCallbacksJsObject, RootTask, TurbopackContext},
 };
 use pack_core::tracing_presets::{
     TRACING_OVERVIEW_TARGETS, TRACING_TARGETS, TRACING_TURBO_TASKS_TARGETS,

@@ -5194,8 +5194,6 @@ dependencies = [
  "bincode 2.0.1",
  "either",
  "futures",
- "napi",
- "napi-derive",
  "pack-core",
  "parking_lot",
  "qstring",

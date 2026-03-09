@@ -76,7 +76,8 @@ default      = ["process_pool"]
 plugin       = ["swc_core/plugin_transform_host_native", "turbopack-ecmascript-plugins/swc_ecma_transform_plugin"]
 process_pool = ["turbopack-node/process_pool"]
 test         = ["turbopack-browser/test", "turbopack-ecmascript-runtime/test"]
-worker_pool  = ["turbopack-node/worker_pool_napi"]
+worker_pool      = ["turbopack-node/worker_pool"]
+worker_pool_napi = ["worker_pool", "turbopack-node/worker_pool_napi"]
 
 [lints]
 workspace = true
