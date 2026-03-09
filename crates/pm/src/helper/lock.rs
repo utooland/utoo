@@ -1,24 +1,25 @@
-use anyhow::{Context as _, Result, anyhow};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use anyhow::{Context as _, Result, anyhow};
+use serde_json::Value;
+use utoo_ruborist::lock::{LockPackage, PackageLock};
+use utoo_ruborist::manifest::{DepsView, EnginesView, PackageJson};
+use utoo_ruborist::registry::resolve_package;
+use utoo_ruborist::spec::{PackageSpec, Protocol};
+use utoo_ruborist::util::PackageNameStr;
+
 use super::ruborist_context::Context;
+use super::workspace::find_workspace_path;
+use crate::fs;
 use crate::helper::workspace::find_workspaces;
+use crate::util::cloner::clone_package;
+use crate::util::downloader::{is_git_url, resolve_cache_path};
+use crate::util::git_resolver::{resolve_git_spec, resolve_github_spec};
 use crate::util::json::{load_package_json, load_package_lock_json_from_path, read_json_file};
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
 use crate::util::save_type::{PackageAction, SaveType};
 use crate::util::user_config::{get_legacy_peer_deps, set_package_json};
-use crate::util::{cloner::clone_package, downloader::download_to_cache};
-use utoo_ruborist::lock::{LockPackage, PackageLock};
-use utoo_ruborist::manifest::{DepsView, EnginesView, PackageJson};
-use utoo_ruborist::registry::resolve_package;
-use utoo_ruborist::util::PackageNameStr;
-use utoo_ruborist::util::parse_package_spec;
-
-use crate::fs;
-
-use super::workspace::find_workspace_path;
 
 // Platform-specific line endings
 #[cfg(target_os = "windows")]
@@ -169,13 +170,10 @@ pub async fn update_package_json(opts: &UpdatePackageJsonOptions<'_>) -> Result<
         for (name, version, version_spec) in package_specs {
             match opts.action {
                 PackageAction::Add => {
-                    let version_to_write = match version_spec {
-                        spec if spec.is_empty() || spec == "*" || spec == "latest" => {
-                            format!("^{version}")
-                        }
-                        spec => spec.to_string(),
-                    };
-                    deps_obj.insert(name, Value::String(version_to_write));
+                    deps_obj.insert(
+                        name,
+                        Value::String(format_save_spec(&version_spec, &version)),
+                    );
                 }
                 PackageAction::Remove => {
                     deps_obj.remove(&name);
@@ -199,12 +197,58 @@ pub async fn update_package_json(opts: &UpdatePackageJsonOptions<'_>) -> Result<
     Ok(())
 }
 
+/// Format a version spec for writing into package.json.
+///
+/// Git/non-registry specs are written as-is (e.g. the resolved URL with pinned commit).
+/// Wildcard specs (`*`, `latest`, empty) are pinned to `^<resolved_version>`.
+/// Everything else (semver ranges, exact versions) passes through unchanged.
+fn format_save_spec(version_spec: &str, resolved_version: &str) -> String {
+    // Non-registry specs (git, github, file, http, etc.) are written as-is.
+    if version_spec.parse::<Protocol>().is_ok() {
+        return version_spec.to_string();
+    }
+    match version_spec {
+        "" | "*" | "latest" => format!("^{resolved_version}"),
+        _ => version_spec.to_string(),
+    }
+}
+
 pub async fn resolve_package_spec(spec: &str) -> Result<(String, String, String)> {
-    let (name, version_spec) = parse_package_spec(spec);
-    let resolved = resolve_package(&Context::registry(), name, version_spec)
-        .await
-        .map_err(|e| anyhow!("{}", e))?;
-    Ok((name.to_string(), resolved.version, version_spec.to_string()))
+    let parsed = PackageSpec::from(spec);
+    match parsed {
+        PackageSpec::Registry { name, version_spec } => {
+            let resolved = resolve_package(&Context::registry(), &name, &version_spec)
+                .await
+                .map_err(|e| anyhow!("{}", e))?;
+            Ok((name, resolved.version, version_spec))
+        }
+        PackageSpec::Git { url, commit_ish } => {
+            let resolved = resolve_git_spec(&url, commit_ish.as_deref(), None).await?;
+            Ok((
+                resolved.name.clone(),
+                resolved.version.clone(),
+                resolved.resolved_url.clone(),
+            ))
+        }
+        PackageSpec::GitHub {
+            owner,
+            repo,
+            commit_ish,
+        } => {
+            let resolved = resolve_github_spec(&owner, &repo, commit_ish.as_deref()).await?;
+            Ok((
+                resolved.name.clone(),
+                resolved.version.clone(),
+                resolved.resolved_url.clone(),
+            ))
+        }
+        PackageSpec::Local { protocol, .. } => {
+            anyhow::bail!("Local spec ({protocol}:) not supported in this context")
+        }
+        PackageSpec::Http { url } => {
+            anyhow::bail!("HTTP tarball spec ({url}) not supported in this context")
+        }
+    }
 }
 
 pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -> Result<PathBuf> {
@@ -244,7 +288,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
         .ok_or_else(|| anyhow!("Failed to get tarball URL from manifest"))?;
 
     // Download and extract package to cache
-    let cache_path = download_to_cache(&name, &resolved.version, tarball_url)
+    let cache_path = resolve_cache_path(&name, &resolved.version, tarball_url)
         .await
         .ok_or_else(|| anyhow!("Failed to download package {name}"))?;
 
@@ -267,9 +311,15 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
         cache_path.display(),
         package_path.display()
     );
-    clone_package(&cache_path, &package_path, &name, &resolved.version)
-        .await
-        .context("Failed to clone package")?;
+    clone_package(
+        &cache_path,
+        &package_path,
+        &name,
+        &resolved.version,
+        !is_git_url(tarball_url),
+    )
+    .await
+    .context("Failed to clone package")?;
 
     // Remove devDependencies from package.json
     let package_json_path = package_path.join("package.json");
@@ -435,10 +485,12 @@ pub async fn save_package_lock(path: &Path, package_lock: &PackageLock) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use serde_json::json;
     use std::fs;
+
+    use serde_json::json;
     use tempfile::TempDir;
+
+    use super::*;
 
     #[test]
     fn test_version_to_write() {
@@ -464,6 +516,41 @@ mod tests {
                 "Failed for version: {version}, spec: {spec}",
             );
         }
+    }
+
+    #[test]
+    fn test_format_save_spec() {
+        // Wildcard / empty specs pin to ^resolved
+        assert_eq!(format_save_spec("", "1.2.3"), "^1.2.3");
+        assert_eq!(format_save_spec("*", "1.2.3"), "^1.2.3");
+        assert_eq!(format_save_spec("latest", "1.2.3"), "^1.2.3");
+
+        // Normal semver specs pass through
+        assert_eq!(format_save_spec("^1.0.0", "1.2.3"), "^1.0.0");
+        assert_eq!(format_save_spec("~1.2.0", "1.2.3"), "~1.2.0");
+        assert_eq!(format_save_spec("1.2.3", "1.2.3"), "1.2.3");
+
+        // Non-registry specs pass through as-is
+        assert_eq!(
+            format_save_spec("git+https://github.com/user/repo.git#abc123", "1.0.0"),
+            "git+https://github.com/user/repo.git#abc123"
+        );
+        assert_eq!(
+            format_save_spec("git://github.com/user/repo.git", "1.0.0"),
+            "git://github.com/user/repo.git"
+        );
+        assert_eq!(
+            format_save_spec("github:user/repo", "1.0.0"),
+            "github:user/repo"
+        );
+        assert_eq!(
+            format_save_spec("https://example.com/pkg.tgz", "1.0.0"),
+            "https://example.com/pkg.tgz"
+        );
+        assert_eq!(
+            format_save_spec("file:../local-pkg", "1.0.0"),
+            "file:../local-pkg"
+        );
     }
 
     #[test]
@@ -711,8 +798,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_package_json_preserves_trailing_newline() {
-        use crate::util::save_type::{PackageAction, SaveType};
         use tempfile::tempdir;
+
+        use crate::util::save_type::{PackageAction, SaveType};
 
         let temp_dir = tempdir().unwrap();
         let temp_path = temp_dir.path();
@@ -764,8 +852,9 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[tokio::test]
     async fn test_update_package_json_preserves_crlf() {
-        use crate::util::save_type::{PackageAction, SaveType};
         use tempfile::tempdir;
+
+        use crate::util::save_type::{PackageAction, SaveType};
 
         let temp_dir = tempdir().unwrap();
         let temp_path = temp_dir.path();

@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::model::manifest::VersionManifest;
+use crate::model::manifest::CoreVersionManifest;
 
 /// Metadata returned after cloning and caching a git package.
 ///
@@ -22,20 +22,21 @@ pub struct GitCloneResult {
     pub path: PathBuf,
     /// Pinned URL, e.g. `git+https://github.com/user/repo.git#<sha>`.
     pub resolved_url: String,
-    /// Pre-built manifest from the cloned `package.json`.
+    /// Slim manifest from the cloned `package.json`.
     ///
-    /// The `dist.tarball` field is set to [`resolved_url`](Self::resolved_url)
-    /// so callers can use this directly as a [`ResolvedPackage`] manifest
-    /// without any further I/O.
+    /// Only the fields needed for resolution, installation, and lockfile
+    /// serialization are kept. The `dist.tarball` field is set to
+    /// [`resolved_url`](Self::resolved_url) so callers can use this
+    /// directly as a [`ResolvedPackage`] manifest without any further I/O.
     ///
     /// [`ResolvedPackage`]: crate::traits::registry::ResolvedPackage
-    pub manifest: VersionManifest,
+    pub manifest: CoreVersionManifest,
 }
 
 impl GitCloneResult {
     /// Construct a new `GitCloneResult`, asserting that the top-level fields
     /// are consistent with the embedded manifest.
-    pub fn new(path: PathBuf, resolved_url: String, manifest: VersionManifest) -> Self {
+    pub fn new(path: PathBuf, resolved_url: String, manifest: CoreVersionManifest) -> Self {
         let name = manifest.name.clone();
         let version = manifest.version.clone();
         debug_assert_eq!(

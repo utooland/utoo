@@ -26,7 +26,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow};
 
 use crate::model::git::GitCloneResult;
-use crate::model::manifest::{Dist, VersionManifest};
+use crate::model::manifest::{CoreVersionManifest, Dist};
 use crate::model::spec::PackageSpec;
 use crate::traits::registry::ResolvedPackage;
 
@@ -78,11 +78,14 @@ fn try_inject_token_into_https_url(url: &str, token: &str) -> String {
 }
 
 /// Read `package.json` from the root of a git tree and deserialize it as a
-/// [`VersionManifest`].
+/// [`CoreVersionManifest`].
 ///
 /// Only reads the single `package.json` blob — does **not** extract the full
 /// tree, so this is cheap even for large repositories.
-fn read_pkg_manifest(repo: &gix::Repository, tree_id: gix::ObjectId) -> Result<VersionManifest> {
+fn read_pkg_manifest(
+    repo: &gix::Repository,
+    tree_id: gix::ObjectId,
+) -> Result<CoreVersionManifest> {
     let tree = repo
         .find_object(tree_id)?
         .try_into_tree()
@@ -92,8 +95,8 @@ fn read_pkg_manifest(repo: &gix::Repository, tree_id: gix::ObjectId) -> Result<V
         let entry = entry?;
         if entry.filename() == b"package.json" {
             let obj = repo.find_object(entry.object_id())?;
-            let manifest: VersionManifest = serde_json::from_slice(&obj.data)
-                .context("Failed to parse package.json as VersionManifest from git tree")?;
+            let manifest: CoreVersionManifest = serde_json::from_slice(&obj.data)
+                .context("Failed to parse package.json from git tree")?;
             return Ok(manifest);
         }
     }
@@ -133,7 +136,7 @@ fn read_cached_git_result(
 ) -> Result<GitCloneResult> {
     let pkg_bytes = std::fs::read(package_dir.join("package.json"))
         .context("failed to read cached package.json")?;
-    let mut manifest: VersionManifest =
+    let mut manifest: CoreVersionManifest =
         serde_json::from_slice(&pkg_bytes).context("failed to parse cached package.json")?;
 
     if manifest.name.is_empty() {
@@ -354,7 +357,7 @@ fn clone_repo_blocking(
 
     let tree_id = commit.tree_id()?;
 
-    // Deserialize package.json from the git blob directly into a VersionManifest.
+    // Deserialize package.json from the git blob directly into a CoreVersionManifest.
     // This is cheap (single object read) and avoids any serde_json::Value round-trip.
     let mut manifest = read_pkg_manifest(&checkout, tree_id.into())?;
 
@@ -517,7 +520,7 @@ pub async fn ensure_repo_cached(
 ///
 /// 1. Extracts the clone URL and `commit_ish` from the spec.
 /// 2. Clones the repository via [`ensure_repo_cached`].
-/// 3. Returns the pre-built [`VersionManifest`] from [`GitCloneResult`] —
+/// 3. Returns the pre-built [`CoreVersionManifest`] from [`GitCloneResult`] —
 ///    no additional I/O required.
 // TODO: refactor this to be more extendable
 pub(crate) async fn resolve_non_registry_dep(
@@ -554,7 +557,7 @@ pub(crate) async fn resolve_non_registry_dep(
     Ok(ResolvedPackage {
         name: result.name.clone(),
         version: result.version.clone(),
-        manifest: result.manifest.clone(),
+        manifest: Arc::new(result.manifest.clone()),
     })
 }
 
