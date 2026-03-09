@@ -15,7 +15,7 @@ use crate::fs;
 use crate::helper::workspace::find_workspaces;
 use crate::util::cloner::clone_package;
 use crate::util::downloader::{is_git_url, resolve_cache_path};
-use crate::util::git_resolver::{new_git_clone_cache, resolve_git_spec, resolve_github_spec};
+use crate::util::git_resolver::{resolve_git_spec, resolve_github_spec};
 use crate::util::json::{load_package_json, load_package_lock_json_from_path, read_json_file};
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
 use crate::util::save_type::{PackageAction, SaveType};
@@ -223,8 +223,7 @@ pub async fn resolve_package_spec(spec: &str) -> Result<(String, String, String)
             Ok((name, resolved.version, version_spec))
         }
         PackageSpec::Git { url, commit_ish } => {
-            let cache = new_git_clone_cache();
-            let resolved = resolve_git_spec(&url, commit_ish.as_deref(), None, &cache).await?;
+            let resolved = resolve_git_spec(&url, commit_ish.as_deref(), None).await?;
             Ok((
                 resolved.name.clone(),
                 resolved.version.clone(),
@@ -236,9 +235,7 @@ pub async fn resolve_package_spec(spec: &str) -> Result<(String, String, String)
             repo,
             commit_ish,
         } => {
-            let cache = new_git_clone_cache();
-            let resolved =
-                resolve_github_spec(&owner, &repo, commit_ish.as_deref(), &cache).await?;
+            let resolved = resolve_github_spec(&owner, &repo, commit_ish.as_deref()).await?;
             Ok((
                 resolved.name.clone(),
                 resolved.version.clone(),
