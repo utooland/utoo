@@ -53,17 +53,19 @@ impl Config {
         let mut config = Self::load_from_path(&Self::global_config_path()?).await?;
 
         // Use cached local content if available, otherwise read from disk
-        if let Some(content) = LOCAL_CONTENT.get().and_then(|opt| opt.as_ref()) {
-            let local_config: Config = toml::from_str(content)?;
-            config.values.extend(local_config.values);
-            config.arrays.extend(local_config.arrays);
+        let local_config = if let Some(content) = LOCAL_CONTENT.get().and_then(|opt| opt.as_ref()) {
+            Some(toml::from_str::<Config>(content)?)
         } else {
             let local_path = Self::local_config_path()?;
             if crate::fs::try_exists(&local_path).await? {
-                let local_config = Self::load_from_path(&local_path).await?;
-                config.values.extend(local_config.values);
-                config.arrays.extend(local_config.arrays);
+                Some(Self::load_from_path(&local_path).await?)
+            } else {
+                None
             }
+        };
+        if let Some(local) = local_config {
+            config.values.extend(local.values);
+            config.arrays.extend(local.arrays);
         }
 
         let _ = MERGED_CONFIG.set(config.clone());

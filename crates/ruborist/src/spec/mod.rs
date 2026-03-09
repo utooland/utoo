@@ -71,6 +71,7 @@ impl Protocol {
             (Protocol::Git, "git+"),
             (Protocol::Git, "git://"),
             (Protocol::GitHub, "github:"),
+            (Protocol::Catalog, "catalog:"),
             (Protocol::File, "file:"),
             (Protocol::Link, "link:"),
             (Protocol::Workspace, "workspace:"),
@@ -85,10 +86,10 @@ impl Protocol {
 
     /// Returns `true` if this is a local protocol (`file`, `link`, `workspace`, `portal`).
     pub fn is_local(self) -> bool {
-        matches!(
-            self,
-            Self::File | Self::Link | Self::Workspace | Self::Portal
-        )
+        match self {
+            Self::File | Self::Link | Self::Workspace | Self::Portal => true,
+            Self::Git | Self::GitHub | Self::Http | Self::Catalog => false,
+        }
     }
 }
 

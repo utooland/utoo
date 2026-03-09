@@ -131,6 +131,10 @@ pub fn transform_specs(deps: &mut HashMap<String, String>, ctx: &TransformContex
         return;
     }
     for (pkg_name, spec) in deps.iter_mut() {
+        // Fast path: most specs are plain semver ranges without a protocol prefix.
+        if !spec.contains(':') {
+            continue;
+        }
         for t in TRANSFORMS {
             if let Some(rest) = spec.strip_prefix(t.prefix()) {
                 if let TransformResult::Rewritten(new_spec) = t.transform(pkg_name, rest, ctx) {

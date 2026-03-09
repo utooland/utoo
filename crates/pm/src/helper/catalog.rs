@@ -93,9 +93,9 @@ fn toml_value_to_string(value: &toml::Value) -> Option<String> {
     }
 }
 
-fn toml_map_to_string_map(map: &HashMap<String, toml::Value>) -> HashMap<String, String> {
-    map.iter()
-        .filter_map(|(k, v)| toml_value_to_string(v).map(|s| (k.clone(), s)))
+fn toml_map_to_string_map(map: HashMap<String, toml::Value>) -> HashMap<String, String> {
+    map.into_iter()
+        .filter_map(|(k, v)| toml_value_to_string(&v).map(|s| (k, s)))
         .collect()
 }
 
@@ -135,7 +135,7 @@ fn parse_catalogs(content: &str) -> Catalogs {
 
     // Default catalog -> key ""
     if !config.catalog.is_empty() {
-        let default_catalog = toml_map_to_string_map(&config.catalog);
+        let default_catalog = toml_map_to_string_map(config.catalog);
         tracing::debug!(
             "Loaded default catalog with {} entries from .utoo.toml",
             default_catalog.len()
@@ -144,14 +144,14 @@ fn parse_catalogs(content: &str) -> Catalogs {
     }
 
     // Named catalogs
-    for (name, entries) in &config.catalogs {
+    for (name, entries) in config.catalogs {
         let named = toml_map_to_string_map(entries);
         tracing::debug!(
             "Loaded catalog '{}' with {} entries from .utoo.toml",
             name,
             named.len()
         );
-        catalogs.insert(name.clone(), named);
+        catalogs.insert(name, named);
     }
 
     catalogs
