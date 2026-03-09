@@ -13,17 +13,10 @@ anyhow                       = { workspace = true, features = ["backtrace"] }
 bincode                      = { workspace = true }
 console-subscriber           = { workspace = true, optional = true }
 dhat                         = { version = "0.3.2", optional = true }
-napi                         = { version = "2", default-features = false, features = [
-  # Lightningcss uses this features
-  "compat-mode",
-  "error_anyhow",
-  "napi3",
-  "napi4",
-  "napi5",
-  "serde-json",
-  "tokio_rt",
-] }
-napi-derive                  = "2"
+either                       = { workspace = true }
+futures-util                 = { workspace = true }
+napi                         = { workspace = true }
+napi-derive                  = { workspace = true }
 owo-colors                   = { workspace = true }
 pack-api                     = { workspace = true }
 pack-core                    = { workspace = true }
@@ -64,8 +57,8 @@ serde_json   = { workspace = true }
 vergen-gitcl = { version = "1.0.8", features = ["cargo"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-pack-api                          = { workspace = true }
-pack-core                         = { workspace = true }
+pack-api                          = { workspace = true, features = ["process_pool"] }
+pack-core                         = { workspace = true, features = ["process_pool"] }
 tokio                             = { workspace = true, features = ["full"] }
 turbo-rcstr                       = { workspace = true, features = ["napi"] }
 turbo-tasks                       = { workspace = true }
@@ -77,7 +70,7 @@ turbopack                         = { workspace = true }
 turbopack-core                    = { workspace = true }
 turbopack-ecmascript-hmr-protocol = { workspace = true }
 turbopack-ecmascript-plugins      = { workspace = true, optional = true }
-turbopack-node                    = { workspace = true, default-features = false, features = ["worker_pool"] }
+turbopack-node                    = { workspace = true, default-features = false, features = ["worker_pool_napi"] }
 turbopack-trace-server            = { workspace = true }
 turbopack-trace-utils             = { workspace = true }
 

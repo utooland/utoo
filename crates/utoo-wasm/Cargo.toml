@@ -33,8 +33,8 @@ utoo-ruborist            = { path = "../ruborist" }
 wasm-bindgen             = "0.2.108"
 wasm-bindgen-futures     = "0.4.58"
 ## turbpack specific - conditional on utoopack feature
-pack-api                 = { workspace = true, optional = true }
-pack-core                = { workspace = true, optional = true }
+pack-api                 = { workspace = true, default-features = false, optional = true }
+pack-core                = { workspace = true, default-features = false, optional = true }
 parking_lot              = { workspace = true, features = ["nightly"] }
 swc_core                 = { workspace = true, features = ["base", "ecma_ast"] }
 turbo-rcstr              = { workspace = true, optional = true }
@@ -46,7 +46,10 @@ turbopack-core           = { workspace = true, optional = true }
 turbopack-node           = { workspace = true, default-features = false, features = ["worker_pool"], optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.2", features = ["js"] }
+getrandom    = { version = "0.2", features = ["js"] }
+# rand v0.10+ pulls in getrandom v0.4 which requires wasm_js on wasm32-unknown-unknown.
+# Use a package alias so Cargo's feature unification propagates wasm_js to all v0.4 users.
+getrandom-v4 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }
 
 [features]
 default  = ["utoopack"]

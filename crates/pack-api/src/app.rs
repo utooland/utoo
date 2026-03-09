@@ -367,7 +367,7 @@ impl Endpoint for AppEndpoint {
             let dist_root = this.project.dist_root().await?;
 
             let written_endpoint = EndpointOutputPaths::NodeJs {
-                server_entry_path: dist_root.path.to_string(),
+                server_entry_path: dist_root.path.clone(),
                 // TODO: set right server path when server rendering supported
                 server_paths: vec![],
                 client_paths: vec![],

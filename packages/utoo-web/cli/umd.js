@@ -69,6 +69,7 @@ const config = {
       'fs/promises': path.resolve(__dirname, '../src/webpackLoaders/polyfills/fsPromisesPolyfill.ts'),
       v8: path.resolve(__dirname, './mocks/v8.js'),
       perf_hooks: path.resolve(__dirname, './mocks/perf_hooks.js'),
+      env: path.resolve(__dirname, './mocks/env.js'),
     },
   },
   module: {

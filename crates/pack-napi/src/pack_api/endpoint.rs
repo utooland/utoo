@@ -1,9 +1,12 @@
 use std::ops::Deref;
 
+use super::utils::{NapiDiagnostic, NapiIssue, TurbopackResult, subscribe};
+use crate::util::DetachedVc;
+use futures_util::TryFutureExt;
 use napi::{JsFunction, bindgen_prelude::External};
 use pack_api::{
     endpoint::{
-        Endpoint, EndpointIssuesAndDiags, EndpointOutputPaths, WrittenEndpointWithIssues,
+        EndpointIssuesAndDiags, EndpointOutputPaths, OptionEndpoint, WrittenEndpointWithIssues,
         get_written_endpoint_with_issues_operation,
     },
     paths::ServerPath,
@@ -11,9 +14,7 @@ use pack_api::{
     utils::{endpoint_client_changed_operation, subscribe_issues_and_diags_operation},
 };
 use tracing::Instrument;
-use turbo_tasks::{PrettyPrintError, ReadRef};
-
-use super::utils::{NapiDiagnostic, NapiIssue, TurbopackResult, VcArc, subscribe};
+use turbo_tasks::ReadRef;
 
 #[napi(object)]
 #[derive(Default)]
@@ -54,7 +55,7 @@ impl From<Option<EndpointOutputPaths>> for NapiWrittenEndpoint {
                 client_paths,
             }) => Self {
                 r#type: "nodejs".to_string(),
-                entry_path: Some(server_entry_path),
+                entry_path: Some(server_entry_path.into_owned()),
                 client_paths: client_paths.into_iter().map(From::from).collect(),
                 server_paths: server_paths.into_iter().map(From::from).collect(),
                 ..Default::default()
@@ -68,7 +69,7 @@ impl From<Option<EndpointOutputPaths>> for NapiWrittenEndpoint {
                 server_paths: server_paths.into_iter().map(From::from).collect(),
                 ..Default::default()
             },
-            None => Self {
+            Some(EndpointOutputPaths::NotFound) | None => Self {
                 r#type: "none".to_string(),
                 ..Default::default()
             },
@@ -82,10 +83,10 @@ impl From<Option<EndpointOutputPaths>> for NapiWrittenEndpoint {
 //    some async functions (in this case `endpoint_write_to_disk`) can cause
 //    higher-ranked lifetime errors. See https://github.com/rust-lang/rust/issues/102211
 // 2. the type_complexity clippy lint.
-pub struct ExternalEndpoint(pub VcArc<Box<dyn Endpoint>>);
+pub struct ExternalEndpoint(pub DetachedVc<OptionEndpoint>);
 
 impl Deref for ExternalEndpoint {
-    type Target = VcArc<Box<dyn Endpoint>>;
+    type Target = DetachedVc<OptionEndpoint>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -97,10 +98,12 @@ impl Deref for ExternalEndpoint {
 pub async fn endpoint_write_to_disk(
     #[napi(ts_arg_type = "{ __napiType: \"Endpoint\" }")] endpoint: External<ExternalEndpoint>,
 ) -> napi::Result<TurbopackResult<NapiWrittenEndpoint>> {
-    let turbo_tasks = endpoint.turbo_tasks().clone();
+    let ctx = endpoint.turbopack_ctx();
     let endpoint_op = ***endpoint;
-    let (written, issues, diags) = turbo_tasks
-        .run_once(async move {
+    let (written, issues, diags) = endpoint
+        .turbopack_ctx()
+        .turbo_tasks()
+        .run(async move {
             let written_entrypoint_with_issues_op =
                 get_written_endpoint_with_issues_operation(endpoint_op);
             let WrittenEndpointWithIssues {
@@ -115,8 +118,8 @@ pub async fn endpoint_write_to_disk(
 
             Ok((written.clone(), issues.clone(), diagnostics.clone()))
         })
-        .await
-        .map_err(|e| napi::Error::from_reason(PrettyPrintError(&e).to_string()))?;
+        .or_else(|e| ctx.throw_turbopack_internal_result(&e.into()))
+        .await?;
     Ok(TurbopackResult {
         result: NapiWrittenEndpoint::from(written.map(ReadRef::into_owned)),
         issues: issues.iter().map(|i| NapiIssue::from(&**i)).collect(),
@@ -130,10 +133,10 @@ pub fn endpoint_server_changed_subscribe(
     issues: bool,
     func: JsFunction,
 ) -> napi::Result<External<RootTask>> {
-    let turbo_tasks = endpoint.turbo_tasks().clone();
+    let turbopack_ctx = endpoint.turbopack_ctx().clone();
     let endpoint = ***endpoint;
     subscribe(
-        turbo_tasks,
+        turbopack_ctx,
         func,
         move || {
             async move {
@@ -142,7 +145,7 @@ pub fn endpoint_server_changed_subscribe(
                 result.effects.apply().await?;
                 Ok(result)
             }
-            .instrument(tracing::trace_span!("server changes subscription"))
+            .instrument(tracing::info_span!("server changes subscription"))
         },
         |ctx| {
             let EndpointIssuesAndDiags {
@@ -169,10 +172,10 @@ pub fn endpoint_client_changed_subscribe(
     #[napi(ts_arg_type = "{ __napiType: \"Endpoint\" }")] endpoint: External<ExternalEndpoint>,
     func: JsFunction,
 ) -> napi::Result<External<RootTask>> {
-    let turbo_tasks = endpoint.turbo_tasks().clone();
+    let turbopack_ctx = endpoint.turbopack_ctx().clone();
     let endpoint_op = ***endpoint;
     subscribe(
-        turbo_tasks,
+        turbopack_ctx,
         func,
         move || {
             async move {
