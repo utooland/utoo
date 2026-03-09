@@ -132,7 +132,7 @@ fn validate_package_name(name: &str) -> Result<()> {
 fn read_cached_git_result(
     package_dir: &Path,
     sha: &str,
-    original_url: &str,
+    resolved_url: &str,
 ) -> Result<GitCloneResult> {
     let pkg_bytes = std::fs::read(package_dir.join("package.json"))
         .context("failed to read cached package.json")?;
@@ -146,9 +146,9 @@ fn read_cached_git_result(
         manifest.version = "0.0.0".to_string();
     }
 
-    let resolved_url = format!("{}#{}", original_url, sha);
+    let pinned_url = format!("{}#{}", resolved_url, sha);
     manifest.dist = Dist {
-        tarball: Some(resolved_url.clone()),
+        tarball: Some(pinned_url.clone()),
         integrity: None,
         ..Default::default()
     };
@@ -158,7 +158,7 @@ fn read_cached_git_result(
 
     Ok(GitCloneResult::new(
         package_dir.to_path_buf(),
-        resolved_url,
+        pinned_url,
         manifest,
     ))
 }
@@ -255,7 +255,7 @@ fn clone_repo_blocking(
     cache_dir: &Path,
     clone_url: &str,
     commit_ish: Option<&str>,
-    original_url: &str,
+    resolved_url: &str,
     name: &str,
 ) -> Result<GitCloneResult> {
     // Validate the caller-supplied name before using it in any path operation.
@@ -274,7 +274,7 @@ fn clone_repo_blocking(
         let sha = commit_ish.unwrap();
         let package_dir = cache_dir.join(name).join(sha);
         if package_dir.join("_resolved").exists() {
-            match read_cached_git_result(&package_dir, sha, original_url) {
+            match read_cached_git_result(&package_dir, sha, resolved_url) {
                 Ok(result) => {
                     tracing::debug!(
                         "Git cache hit: {}@{} (SHA: {})",
@@ -382,7 +382,7 @@ fn clone_repo_blocking(
     // Using the full commit SHA as the version directory avoids collisions
     // with registry versions and between different commits of the same repo.
     let package_dir = cache_dir.join(&name).join(&commit_hex);
-    let resolved_url = format!("{}#{}", original_url, commit_hex);
+    let pinned_url = format!("{}#{}", resolved_url, commit_hex);
     let resolved_marker = package_dir.join("_resolved");
 
     // Fill in git-specific manifest fields.
@@ -390,7 +390,7 @@ fn clone_repo_blocking(
     // identify the source. `has_install_script` is computed from `scripts`
     // because package.json doesn't carry this pre-computed flag.
     manifest.dist = Dist {
-        tarball: Some(resolved_url.clone()),
+        tarball: Some(pinned_url.clone()),
         integrity: None,
         ..Default::default()
     };
@@ -399,7 +399,7 @@ fn clone_repo_blocking(
     }));
 
     if resolved_marker.exists() {
-        return Ok(GitCloneResult::new(package_dir, resolved_url, manifest));
+        return Ok(GitCloneResult::new(package_dir, pinned_url, manifest));
     }
 
     // Extract into a per-process unique staging directory, then atomically
@@ -439,7 +439,7 @@ fn clone_repo_blocking(
         }
     }
 
-    Ok(GitCloneResult::new(package_dir, resolved_url, manifest))
+    Ok(GitCloneResult::new(package_dir, pinned_url, manifest))
 }
 
 // ============================================================================
@@ -459,7 +459,7 @@ fn clone_repo_blocking(
 ///
 /// # Arguments
 /// * `cache_dir` - Root cache directory
-/// * `url` - Git URL, optionally with `git+` prefix
+/// * `url` - Git URL with `git+` prefix (e.g. `git+https://github.com/foo/bar.git`)
 /// * `commit_ish` - Optional branch, tag, or commit SHA to check out
 /// * `name` - Package name (from the dependency edge)
 /// * `clone_cache` - Shared dedup cache for concurrent clone operations
@@ -470,9 +470,7 @@ pub async fn ensure_repo_cached(
     name: &str,
     clone_cache: &GitCloneCache,
 ) -> Result<Arc<GitCloneResult>> {
-    // The caller should pass a clone-ready URL (no `git+` prefix) via
-    // PackageSpec::clone_url(). We still strip defensively in case raw URLs
-    // are threaded through.
+    // Strip the `git+` prefix to get a clone-ready URL.
     let canonical_url = url.strip_prefix("git+").unwrap_or(url);
     let key = format!("{}#{}", canonical_url, commit_ish.unwrap_or("HEAD"));
 
@@ -485,7 +483,7 @@ pub async fn ensure_repo_cached(
     };
 
     let clone_url = canonical_url.to_string();
-    let original_url = url.to_string();
+    let resolved_url = url.to_string();
     let cache_dir = cache_dir.to_path_buf();
     let commit_ish_owned = commit_ish.map(|s| s.to_string());
     let name_owned = name.to_string();
@@ -496,7 +494,7 @@ pub async fn ensure_repo_cached(
                 &cache_dir,
                 &clone_url,
                 commit_ish_owned.as_deref(),
-                &original_url,
+                &resolved_url,
                 &name_owned,
             )
             .map(Arc::new)
@@ -530,15 +528,13 @@ pub(crate) async fn resolve_non_registry_dep(
     clone_cache: &GitCloneCache,
 ) -> anyhow::Result<ResolvedPackage> {
     let (url, commit_ish) = match spec {
-        PackageSpec::Git { commit_ish, .. } => {
-            (spec.clone_url().unwrap().to_string(), commit_ish.clone())
-        }
+        PackageSpec::Git { url, commit_ish } => (url.clone(), commit_ish.clone()),
         PackageSpec::GitHub {
             owner,
             repo,
             commit_ish,
         } => (
-            format!("https://github.com/{owner}/{repo}.git"),
+            format!("git+https://github.com/{owner}/{repo}.git"),
             commit_ish.clone(),
         ),
         // Exhaustive enumeration — new PackageSpec variants will cause a
