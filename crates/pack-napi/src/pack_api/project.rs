@@ -268,7 +268,7 @@ pub fn project_new(
     turbo_engine_options: NapiTurboEngineOptions,
     napi_callbacks: NapiTurbopackCallbacksJsObject,
 ) -> napi::Result<JsObject> {
-    let napi_callbacks = NapiTurbopackCallbacks::from_js(napi_callbacks)?;
+    let napi_callbacks = NapiTurbopackCallbacks::from_js(&env, napi_callbacks)?;
     let (exit, exit_receiver) = ExitHandler::new_receiver();
 
     if let Some(dhat_profiler) = DhatProfilerGuard::try_init() {

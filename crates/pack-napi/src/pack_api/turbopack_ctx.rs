@@ -2,7 +2,7 @@
 
 use std::{future::Future, sync::Arc};
 
-use napi::{JsFunction, threadsafe_function::ThreadsafeFunction};
+use napi::{Env, JsFunction, threadsafe_function::ThreadsafeFunction};
 use napi_derive::napi;
 use pack_api::tasks::UtooTurboTasks;
 use turbo_tasks::{PrettyPrintError, TaskId, backend::TurboTasksExecutionError};
@@ -117,16 +117,20 @@ pub struct NapiTurbopackCallbacksJsObject {
 }
 
 impl NapiTurbopackCallbacks {
-    pub fn from_js(obj: NapiTurbopackCallbacksJsObject) -> napi::Result<Self> {
-        Ok(NapiTurbopackCallbacks {
-            throw_turbopack_internal_error: obj
-                .throw_turbopack_internal_error
+    pub fn from_js(env: &Env, obj: NapiTurbopackCallbacksJsObject) -> napi::Result<Self> {
+        let mut throw_turbopack_internal_error: ThreadsafeFunction<TurbopackInternalErrorOpts> =
+            obj.throw_turbopack_internal_error
                 .create_threadsafe_function(0, |ctx| {
                     // Avoid unpacking the struct into positional arguments, we really want to make
                     // sure we don't incorrectly order arguments and accidentally log a potentially
                     // PII-containing message in anonymized telemetry.
                     Ok(vec![ctx.value])
-                })?,
+                })?;
+        // Unref so this ThreadsafeFunction doesn't keep the Node.js event loop alive
+        // after shutdown.
+        let _ = throw_turbopack_internal_error.unref(env);
+        Ok(NapiTurbopackCallbacks {
+            throw_turbopack_internal_error,
         })
     }
 }
