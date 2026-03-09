@@ -111,8 +111,45 @@ fi
 echo -e "${GREEN}PASS: cowsay global install successful${NC}"
 
 
-# Case 8: reinstall ant-design
-echo -e "${YELLOW}Case 8: Clone and install ant-design${NC} by npmjs.org"
+# Case 8: git dependency install
+echo -e "${YELLOW}Case 8: git dependency install${NC}"
+cd e2e/pm/git-deps
+rm -rf node_modules package-lock.json
+utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for git-deps${NC}"; exit 1; }
+if [ ! -d "node_modules" ]; then
+    echo -e "${RED}FAIL: node_modules directory not created${NC}"
+    exit 1
+fi
+# github:owner/repo shorthand
+if [ ! -d "node_modules/abbrev" ]; then
+    echo -e "${RED}FAIL: abbrev (github: shorthand) not installed${NC}"
+    exit 1
+fi
+# git+https:// with tag ref
+if [ ! -d "node_modules/ini" ]; then
+    echo -e "${RED}FAIL: ini (git+https with tag) not installed${NC}"
+    exit 1
+fi
+# bare owner/repo shorthand with tag
+if [ ! -d "node_modules/isexe" ]; then
+    echo -e "${RED}FAIL: isexe (bare github shorthand) not installed${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: git dependency install successful${NC}"
+
+# Case 8.1: git dependency warm install (cache hit)
+echo -e "${YELLOW}Case 8.1: git dependency warm install${NC}"
+rm -rf node_modules package-lock.json
+utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo warm install failed for git-deps${NC}"; exit 1; }
+if [ ! -d "node_modules/abbrev" ] || [ ! -d "node_modules/ini" ] || [ ! -d "node_modules/isexe" ]; then
+    echo -e "${RED}FAIL: git deps missing after warm install${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: git dependency warm install successful${NC}"
+cd ../../..
+
+# Case 9: reinstall ant-design
+echo -e "${YELLOW}Case 9: Clone and install ant-design${NC} by npmjs.org"
 cd e2e/pm/ant-design/ant-design
 git clean -dfx
 echo "Installing dependencies for ant-design by npmjs.org..."
