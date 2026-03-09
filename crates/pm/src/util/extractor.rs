@@ -101,6 +101,18 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
             .path()
             .with_context(|| "Failed to get entry path")?
             .into_owned();
+
+        // Guard against path traversal (Tar Slip): reject absolute paths
+        // and entries containing ".." components.
+        if path.is_absolute()
+            || path
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            tracing::warn!("Skipping tar entry with unsafe path: {}", path.display());
+            continue;
+        }
+
         let full_path = dest.join(&path);
 
         if !entry.header().entry_type().is_dir() {
@@ -118,14 +130,22 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
         }
     }
 
-    // Create directories
-    let mut created_dirs = HashSet::new();
-    for entry in entries.iter() {
-        if let Some(parent) = entry.path.parent()
-            && created_dirs.insert(parent.to_path_buf())
-        {
-            fs::create_dir_all(parent).ok();
+    // Collect every ancestor directory (up to `dest`), then create them
+    // shallowest-first so a single mkdir() per dir is sufficient.
+    let mut seen = HashSet::new();
+    for entry in &entries {
+        let mut p = entry.path.parent();
+        while let Some(dir) = p {
+            if dir == dest || !seen.insert(dir.to_path_buf()) {
+                break;
+            }
+            p = dir.parent();
         }
+    }
+    let mut dirs: Vec<_> = seen.into_iter().collect();
+    dirs.sort_unstable_by_key(|p| p.as_os_str().len());
+    for dir in &dirs {
+        fs::create_dir(dir).ok();
     }
 
     // Write files in parallel using rayon
@@ -135,10 +155,11 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
         file.write_all(&entry.content)
             .with_context(|| format!("Failed to write: {}", entry.path.display()))?;
 
+        // Skip chmod for 0o644 (most files) — File::create() already produces
+        // this via umask (0o666 & ~0o022 = 0o644).
         #[cfg(unix)]
-        {
-            let perms = fs::Permissions::from_mode(entry.mode);
-            fs::set_permissions(&entry.path, perms).ok();
+        if entry.mode != 0o644 {
+            fs::set_permissions(&entry.path, fs::Permissions::from_mode(entry.mode)).ok();
         }
         Ok(())
     })?;

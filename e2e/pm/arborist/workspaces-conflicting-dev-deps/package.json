@@ -1,0 +1,10 @@
+{
+  "name": "workspace-conflicting-dev-deps",
+  "devDependencies": {
+    "ajv": "6.10.2"
+  },
+  "workspaces": [
+    "a",
+    "b"
+  ]
+}

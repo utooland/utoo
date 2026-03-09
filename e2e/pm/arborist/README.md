@@ -1,0 +1,203 @@
+# Arborist E2E Test Fixtures
+
+Test fixtures ported from [npm/cli `workspaces/arborist/test/fixtures/`](https://github.com/npm/cli/tree/latest/workspaces/arborist/test/fixtures).
+163 fixtures covering dependency resolution, installation, and edge cases.
+
+All `@isaacs/testing-*` and `@isaacs/dedupe-tests-*` packages are real packages
+published to the npm registry (created by npm team for arborist testing).
+No mock registry is needed for most fixtures.
+
+## Usage
+
+```bash
+./e2e/pm-arborist.sh              # run all (skip known unsupported)
+./e2e/pm-arborist.sh --all        # run everything including skipped
+./e2e/pm-arborist.sh peer         # filter by keyword
+./e2e/pm-arborist.sh --list       # list all fixtures with skip status
+```
+
+## Skip Categories (TODO)
+
+Features utoo PM does not yet support. Tests are skipped in the runner and
+tracked here. Remove entries from both this file and `pm-arborist.sh` as
+each feature is implemented.
+
+---
+
+### `file:` protocol dependencies
+
+**Fixtures (20):**
+`link-dep`, `link-dep-empty`, `link-dep-nested`, `link-dep-cycle`,
+`link-dep-has-dep-with-optional-dep`, `link-dep-lifecycle-scripts`,
+`link-dev-dep`, `link-meta-deps`, `link-meta-deps-empty`, `external-link-dep`,
+`cli-750`, `cli-750-fresh`, `old-lock-with-link`,
+`conflict-bundle-file-dep`, `root-bundler`, `tarball-dependencies`,
+`testing-asymmetrical-bin-no-lock`, `testing-asymmetrical-bin-with-lock`,
+`workspaces-with-files-spec`, `workspace4`
+
+**Error:** `Registry error: Failed to fetch linked-dep@file:target: HTTP 500`
+
+**Root cause:** utoo sends `file:path` to the registry as a version specifier
+instead of resolving it as a local filesystem path.
+
+**Expected behavior:** Resolve `file:` paths relative to the package root,
+symlink (or copy) the target into `node_modules`, and install its transitive
+dependencies.
+
+---
+
+### Optional transitive dep failure tolerance
+
+**Fixtures (3):**
+`optional-dep-tgz-missing`, `optional-metadep-missing`, `optional-metadep-enotarget`
+
+**Error:** `Dependency resolution failed: Registry error: Failed to fetch ...`
+
+**Root cause:** When an optional dependency has a transitive dependency that is
+missing or unreachable, utoo hard-fails the entire install instead of skipping
+the optional subtree.
+
+**Expected behavior:** If any dependency in an optional dep's subtree cannot be
+resolved, skip the entire optional package gracefully (like npm does) and
+continue installing the rest.
+
+---
+
+### Strict peer dep conflict detection (ERESOLVE)
+
+**Fixtures (1):** `testing-peer-deps-unresolvable`
+
+**Error:** Install succeeds when it should fail.
+
+**Root cause:** utoo does not validate whether peer dependency constraints are
+mutually satisfiable. The fixture has `@isaacs/testing-peer-deps-c@1` and
+`@isaacs/testing-peer-deps-b@2` (which peer-depends on `c@2`) — these conflict.
+
+**Expected behavior:** Detect unsatisfiable peer dep constraints and exit with
+an ERESOLVE-style error, similar to npm v7+.
+
+---
+
+### Platform mismatch rejection
+
+**Fixtures (1):** `platform-specification`
+
+**Error:** Install succeeds when it should fail.
+
+**Root cause:** utoo does not check the `os`, `cpu`, or `libc` fields in
+dependency package.json files against the current platform.
+
+**Expected behavior:** For non-optional dependencies, check `os`/`cpu`/`libc`
+fields and refuse to install if the current platform does not match
+(EBADPLATFORM).
+
+---
+
+### Duplicate workspace name detection
+
+**Fixtures (1):** `workspaces-duplicate`
+
+**Error:** Install succeeds when it should fail.
+
+**Root cause:** utoo does not check whether multiple workspace packages declare
+the same `name` in their package.json.
+
+**Expected behavior:** Error with EDUPLICATEWORKSPACE when two or more workspace
+directories have the same package name.
+
+---
+
+### Mock-registry-only packages
+
+**Fixtures (3):**
+`audit-linked-package`, `pathological-dep-nesting-cycle`, `testing-missing-tgz`
+
+**Details:**
+- `audit-linked-package` — depends on `electron-test-app@1.0.0` which does not
+  exist on the real npm registry (only in npm's mock `@npmcli/mock-registry`).
+- `pathological-dep-nesting-cycle` — depends on `@isaacs/pathological-dep-nesting-a`
+  which creates a deeply recursive A→B→A→B cycle. utoo gets killed (OOM/timeout)
+  instead of handling the cycle gracefully.
+- `testing-missing-tgz` — has a `preinstall` script `"this never gets run"` which
+  utoo tries to execute (it should be a zero-dep package with no install needed).
+
+---
+
+### Misc
+
+**Fixtures (5):**
+
+| Fixture | Error | Root cause |
+|---------|-------|------------|
+| `workspaces-conflicting-dev-deps` | `Failed to fetch ajv@5.11.2: Package not found` | ajv@5.11.2 was unpublished from registry |
+| `yarn-stuff` | `Failed to fetch remote@https://...abbrev-1.1.1.tgz` | Has `"remote": "https://...tgz"` dep spec — utoo does not support URL-as-version |
+| `rebuild-foreground-scripts` | file: dep in sub-package | Contains `file:` protocol dependency in nested package |
+| `testing-rebuild-script-env-flags` | file: dep in sub-package | Contains `file:` protocol dependency in nested package |
+| `audit-mkdirp` | `Failed to fetch mkdirp-unfixable@file:mkdirp-unfixable` | Has `file:` protocol dependency |
+
+---
+
+## Assertion Coverage (TODO)
+
+Current tests only verify that `utoo install` exits with code 0 (or non-zero
+for expected failures) and that `node_modules/` is created. This is
+**smoke testing** — it catches crashes but cannot detect wrong versions,
+incorrect tree structure, or broken peer dep resolution.
+
+npm/cli's arborist tests use multi-layered assertions:
+
+| Assertion Type | npm/cli | utoo (current) |
+|---|---|---|
+| Tree structure snapshot | `matchSnapshot(printTree(tree))` | not checked |
+| Resolved version checks | `tree.children.get('once').version === '1.3.3'` | not checked |
+| File system layout | verifies dirs exist/absent, bin symlinks | `node_modules/` exists only |
+| Lock file content | snapshots `package-lock.json`, checks metadata flags | not checked |
+| Error codes | `rejects(…, { code: 'ERESOLVE' })` | exit code non-zero only |
+| Omitted dep absence | verifies omitted packages not on disk | not checked |
+| Idempotence | `reify()` twice → same result | not checked |
+
+### Planned improvements
+
+**Phase 1 — version & structure assertions:**
+- Add expected version checks for 15–20 key fixtures (peer-deps, dedup,
+  workspace variants) using `node -e "require('./node_modules/pkg/package.json').version"`
+- Verify expected packages exist (and unexpected ones don't) in `node_modules/`
+- Validate `package-lock.json` is valid JSON
+
+**Phase 2 — tree snapshots & error validation:**
+- Snapshot `utoo ls --json` output and compare against baselines
+- Check specific error messages/codes for expected-failure fixtures
+- Verify omitted deps are truly absent on disk for omit test cases
+
+**Phase 3 — full parity:**
+- Bin symlink verification
+- Lock file content snapshots
+- Idempotent reinstall validation (install twice, compare results)
+
+---
+
+## Test Sections
+
+| Section | Description | Count |
+|---------|-------------|-------|
+| Peer Dependencies | Basic, nested, cyclic, conflict chain | ~16 + sub-fixtures |
+| Optional Dependencies | Missing, enotarget, script failures | ~17 |
+| Production Dep Errors | Expected failures for missing/bad deps | 7 |
+| Deduplication | Version dedup strategies | 4 |
+| Workspaces | Simple, conflicting, scoped, transitive, etc. | ~31 |
+| Link Dependencies | file: protocol, nested, cyclic | 13 |
+| Bundled Dependencies | bundleDependencies scenarios | 12 |
+| Dev/Optional Flags | omit flags | 3 |
+| Shrinkwrap & Lockfiles | shrinkwrap, lockfile v1/v2 | 10 |
+| Yarn Lock | yarn.lock compat | 4 |
+| Bin Handling | bin field linking | 3 |
+| Engine & Platform | engine/os/cpu checks | 2 |
+| Lifecycle Scripts | pre/post/install script failures | 6 |
+| Tarball & Git | tgz and git dependencies | 3 |
+| Update & Outdated | update scenarios | 3 |
+| Prune | prune unused deps | 6 |
+| Real-World Packages | sax, yargs, mkdirp, etc. | 8 |
+| Large Integration | tap, react, flow | 3 |
+| Package.json Edge Cases | shorthands, indentation, malformed | 4 |
+| Audit | npm audit scenarios | 9 |
+| Idempotent Reinstall | reinstall consistency | 5 |

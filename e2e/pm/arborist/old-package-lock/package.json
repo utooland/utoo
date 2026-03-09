@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "once": "^1.4.0"
+  },
+  "name": "test-old-package-lock"
+}

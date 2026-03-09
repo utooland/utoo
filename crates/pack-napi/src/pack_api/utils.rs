@@ -1,24 +1,26 @@
+use futures_util::TryFutureExt;
 use std::{future::Future, ops::Deref, path::PathBuf, sync::Arc};
 
 use anyhow::{Result, anyhow};
+use either::Either;
 use napi::{
     JsFunction, JsObject, JsUnknown, NapiRaw, NapiValue, Status,
     bindgen_prelude::{External, ToNapiValue},
     threadsafe_function::{ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
 use pack_api::{
-    tasks::{BundlerTurboTasks, RootTask},
+    tasks::{BundlerTurboTasks, RootTask, TurbopackContext, UtooTurboTasks},
     utils::StyledStringSerialize,
 };
 use rustc_hash::FxHashMap;
 use serde::Serialize;
 use turbo_tasks::{
-    OperationVc, PrettyPrintError, TurboTasks, TurboTasksApi, Vc,
+    OperationVc, TurboTasks, TurboTasksCallApi, Vc,
     message_queue::{CompilationEvent, Severity},
 };
 use turbo_tasks_backend::{
-    GitVersionInfo, StartupCacheState, db_invalidation::invalidation_reasons,
-    default_backing_storage, noop_backing_storage,
+    BackendOptions, GitVersionInfo, StartupCacheState, StorageMode, TurboTasksBackend,
+    db_invalidation::invalidation_reasons, default_backing_storage, noop_backing_storage,
 };
 use turbo_tasks_fs::FileContent;
 use turbopack_core::{
@@ -27,14 +29,12 @@ use turbopack_core::{
     source_pos::SourcePos,
 };
 
-use crate::util::log_internal_error_and_inform;
-
 pub fn create_turbo_tasks(
     output_path: PathBuf,
     persistent_caching: bool,
     _memory_limit: usize,
     dependency_tracking: bool,
-) -> Result<BundlerTurboTasks> {
+) -> Result<UtooTurboTasks> {
     Ok(if persistent_caching {
         let version_info = GitVersionInfo {
             describe: env!("VERGEN_GIT_DESCRIBE"),
@@ -52,34 +52,32 @@ pub fn create_turbo_tasks(
             is_ci,
             is_short_session,
         )?;
-        let tt = TurboTasks::new(turbo_tasks_backend::TurboTasksBackend::new(
-            turbo_tasks_backend::BackendOptions {
+        let tt = TurboTasks::new(TurboTasksBackend::new(
+            BackendOptions {
                 storage_mode: Some(if std::env::var("TURBO_ENGINE_READ_ONLY").is_ok() {
-                    turbo_tasks_backend::StorageMode::ReadOnly
+                    StorageMode::ReadOnly
                 } else {
-                    turbo_tasks_backend::StorageMode::ReadWrite
+                    StorageMode::ReadWrite
                 }),
                 dependency_tracking,
                 num_workers: Some(tokio::runtime::Handle::current().metrics().num_workers()),
                 ..Default::default()
             },
-            backing_storage,
+            Either::Left(backing_storage),
         ));
         if let StartupCacheState::Invalidated { reason_code } = cache_state {
             tt.send_compilation_event(Arc::new(StartupCacheInvalidationEvent { reason_code }));
         }
 
-        BundlerTurboTasks::PersistentCaching(tt)
+        tt
     } else {
-        BundlerTurboTasks::Memory(TurboTasks::new(
-            turbo_tasks_backend::TurboTasksBackend::new(
-                turbo_tasks_backend::BackendOptions {
-                    storage_mode: None,
-                    dependency_tracking,
-                    ..Default::default()
-                },
-                noop_backing_storage(),
-            ),
+        TurboTasks::new(TurboTasksBackend::new(
+            BackendOptions {
+                storage_mode: None,
+                dependency_tracking,
+                ..Default::default()
+            },
+            Either::Right(noop_backing_storage()),
         ))
     })
 }
@@ -149,7 +147,10 @@ pub fn root_task_dispose(
     #[napi(ts_arg_type = "{ __napiType: \"RootTask\" }")] mut root_task: External<RootTask>,
 ) -> napi::Result<()> {
     if let Some(task) = root_task.task_id.take() {
-        root_task.turbo_tasks.dispose_root_task(task);
+        root_task
+            .turbopack_ctx
+            .turbo_tasks()
+            .dispose_root_task(task);
     }
     Ok(())
 }
@@ -315,36 +316,35 @@ impl<T: ToNapiValue> ToNapiValue for TurbopackResult<T> {
 }
 
 pub fn subscribe<T: 'static + Send + Sync, F: Future<Output = Result<T>> + Send, V: ToNapiValue>(
-    turbo_tasks: BundlerTurboTasks,
+    ctx: TurbopackContext,
     func: JsFunction,
     handler: impl 'static + Sync + Send + Clone + Fn() -> F,
     mapper: impl 'static + Sync + Send + FnMut(ThreadSafeCallContext<T>) -> napi::Result<Vec<V>>,
 ) -> napi::Result<External<RootTask>> {
     let func: ThreadsafeFunction<T> = func.create_threadsafe_function(0, mapper)?;
-    let task_id = turbo_tasks.spawn_root_task(move || {
-        let handler = handler.clone();
-        let func = func.clone();
-        Box::pin(async move {
-            let result = handler().await;
+    let task_id = ctx.turbo_tasks().spawn_root_task({
+        let ctx = ctx.clone();
+        move || {
+            let ctx = ctx.clone();
+            let handler = handler.clone();
+            let func = func.clone();
+            async move {
+                let result = handler()
+                    .or_else(|e| ctx.throw_turbopack_internal_result(&e))
+                    .await;
 
-            let status = func.call(
-                result.map_err(|e| {
-                    let error = PrettyPrintError(&e).to_string();
-                    log_internal_error_and_inform(&error);
-                    napi::Error::from_reason(error)
-                }),
-                ThreadsafeFunctionCallMode::NonBlocking,
-            );
-            if !matches!(status, Status::Ok) {
-                let error = anyhow!("Error calling JS function: {}", status);
-                eprintln!("{error}");
-                return Err::<Vc<()>, _>(error);
+                let status = func.call(result, ThreadsafeFunctionCallMode::NonBlocking);
+                if !matches!(status, Status::Ok) {
+                    let error = anyhow!("Error calling JS function: {}", status);
+                    eprintln!("{error}");
+                    return Err::<Vc<()>, _>(error);
+                }
+                Ok(Default::default())
             }
-            Ok(Default::default())
-        })
+        }
     });
     Ok(External::new(RootTask {
-        turbo_tasks,
+        turbopack_ctx: ctx,
         task_id: Some(task_id),
     }))
 }

@@ -80,9 +80,12 @@ pub mod compat {
     pub use crate::model::compatibility::{is_cpu_compatible, is_os_compatible};
 }
 
-/// Git clone and resolution types.
+/// Git clone and resolution helpers.
 pub mod git {
-    pub use crate::traits::git::GitCloneResult;
+    pub use crate::model::git::GitCloneResult;
+
+    #[cfg(feature = "native-git")]
+    pub use crate::resolver::git::{GitCloneCache, ensure_repo_cached};
 }
 
 /// Utility functions.

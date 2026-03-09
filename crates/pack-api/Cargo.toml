@@ -8,7 +8,10 @@ license.workspace = true
 [dependencies]
 anyhow              = { workspace = true, features = ["backtrace"] }
 bincode             = { workspace = true }
+either              = { workspace = true }
 futures             = { workspace = true }
+napi                = { workspace = true }
+napi-derive         = { workspace = true }
 parking_lot         = { workspace = true }
 qstring             = { workspace = true }
 rustc-hash          = { workspace = true }
@@ -40,6 +43,11 @@ turbopack-static    = { workspace = true }
 [build-dependencies]
 anyhow = { workspace = true }
 vergen = { version = "9.0.6", features = ["cargo"] }
+
+[features]
+default      = ["process_pool"]
+process_pool = ["pack-core/process_pool", "turbopack-node/process_pool"]
+worker_pool  = ["pack-core/worker_pool", "turbopack-node/worker_pool_napi"]
 
 [lints]
 workspace = true

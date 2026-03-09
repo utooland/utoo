@@ -33,6 +33,12 @@ jobs:
       - name: Init git submodules
         run: git submodule update --init --recursive --depth 1
 
+      # Disable Windows Defender real-time scanning to speed up I/O-heavy builds (~30-50% faster)
+      - name: Disable Windows Defender
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
       - name: Install x86_64 Node.js via nvm
         if: matrix.settings.target == 'x86_64-apple-darwin'
         run: |
@@ -128,9 +134,9 @@ jobs:
           utoo --version
           ut --version
 
-      - name: Make script executable
+      - name: Make scripts executable
         if: matrix.settings.host != 'windows-latest'
-        run: chmod +x e2e/utoo-pm.sh
+        run: chmod +x e2e/utoo-pm.sh e2e/pm-arborist.sh
 
       - name: Run e2e tests (Unix)
         if: matrix.settings.host != 'windows-latest'
@@ -147,19 +153,34 @@ jobs:
           fi
         shell: bash
 
+      - name: Run arborist e2e tests (Unix)
+        if: matrix.settings.host != 'windows-latest'
+        run: |
+          if [ "${{ matrix.settings.target }}" = "x86_64-apple-darwin" ]; then
+            arch -x86_64 bash -c '
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            nvm use 22
+            bash e2e/pm-arborist.sh
+            '
+          else
+            bash e2e/pm-arborist.sh
+          fi
+        shell: bash
+
       - name: Run e2e tests (Windows)
         if: matrix.settings.host == 'windows-latest'
         shell: pwsh
         run: |
           git config --system core.longpaths true
-          
+
           # Ensure binaries are in PATH
           $binPath = "${{ github.workspace }}\target\${{ matrix.settings.target }}\release"
           $env:PATH = "$binPath;$env:PATH"
-          
+
           Write-Host "Running e2e tests..."
           Write-Host "Working directory: $(Get-Location)"
-          
+
           pwsh -File e2e/utoo-pm.ps1 --verbose
 
       - name: Upload e2e artifacts on failure (Unix)

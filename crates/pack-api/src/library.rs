@@ -332,7 +332,7 @@ impl Endpoint for LibraryEndpoint {
 
             let written_endpoint = EndpointOutputPaths::NodeJs {
                 // FIXME: No server path when bundling library
-                server_entry_path: dist_root.to_string(),
+                server_entry_path: dist_root.path.clone(),
                 server_paths: vec![],
                 client_paths: vec![],
             };

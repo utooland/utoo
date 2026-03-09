@@ -3,11 +3,25 @@
 //! This module provides strongly-typed representations of package.json content,
 //! avoiding the need to pass raw `serde_json::Value` through the API.
 
+use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
 use super::util::deserialize_or_default;
+
+/// Deserialize a `scripts` map, silently dropping entries whose values are not
+/// strings (e.g. `"blanket": {"pattern": "xss/lib"}`).
+fn deserialize_string_map<'de, D>(deserializer: D) -> Result<HashMap<String, String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw: HashMap<String, Value> = HashMap::deserialize(deserializer)?;
+    Ok(raw
+        .into_iter()
+        .filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_owned())))
+        .collect())
+}
 
 /// Parsed package.json content.
 ///
@@ -145,7 +159,7 @@ impl WorkspacesConfig {
 /// Minimal view for rebuild: only lifecycle scripts.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ScriptsView {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_string_map")]
     pub scripts: HashMap<String, String>,
 }
 
@@ -165,7 +179,7 @@ pub struct PackageInstallView {
     pub name: String,
     #[serde(default)]
     pub bin: Option<Value>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_string_map")]
     pub scripts: HashMap<String, String>,
 }
 

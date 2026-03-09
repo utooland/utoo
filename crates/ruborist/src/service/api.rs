@@ -279,10 +279,13 @@ where
     // 10. Build dependency tree
     // Skip preload if project cache exists (cache is already warm)
     let skip_preload = cache_count > 0;
-    let config = BuildDepsConfig::default()
+    let mut config = BuildDepsConfig::default()
         .with_legacy_peer_deps(legacy_peer_deps)
         .with_concurrency(concurrency)
         .with_skip_preload(skip_preload);
+    if let Some(dir) = cache_dir {
+        config = config.with_cache_dir(dir);
+    }
 
     if skip_preload {
         tracing::debug!(

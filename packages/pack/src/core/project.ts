@@ -7,6 +7,7 @@ import type {
   NapiUpdateMessage,
   NapiWrittenEndpoint,
   StackFrame,
+  TurbopackInternalErrorOpts,
 } from "../binding";
 import * as binding from "../binding";
 import {
@@ -27,20 +28,45 @@ import {
   Update,
 } from "./types";
 
+/**
+ * An error caused by a bug in Turbopack, and not the user's code (e.g. a Rust panic). These should
+ * be written to a log file and details should not be shown to the user.
+ *
+ * These are constructed in Turbopack by calling `throwTurbopackInternalError`.
+ */
 export class TurbopackInternalError extends Error {
   name = "TurbopackInternalError";
+  location: string | undefined;
 
-  constructor(cause: Error) {
-    super(cause.message);
-    this.stack = cause.stack;
+  constructor({ message, anonymizedLocation }: TurbopackInternalErrorOpts) {
+    super(message);
+    this.location = anonymizedLocation;
   }
+}
+
+/**
+ * A helper used by the napi Rust entrypoints to construct and throw a `TurbopackInternalError`.
+ */
+function throwTurbopackInternalError(
+  conversionError: Error | null,
+  opts: TurbopackInternalErrorOpts,
+): never {
+  if (conversionError != null) {
+    throw new Error(
+      "NAPI type conversion error in throwTurbopackInternalError",
+      { cause: conversionError },
+    );
+  }
+  throw new TurbopackInternalError(opts);
 }
 
 async function withErrorCause<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (nativeError: any) {
-    throw new TurbopackInternalError(nativeError);
+    throw new TurbopackInternalError({
+      message: nativeError?.message ?? String(nativeError),
+    });
   }
 }
 
@@ -302,7 +328,7 @@ export function projectFactory() {
       } catch (e) {
         if (e === cancel) return;
         if (e instanceof Error) {
-          throw new TurbopackInternalError(e);
+          throw new TurbopackInternalError({ message: e.message });
         }
         throw e;
       } finally {
@@ -498,6 +524,9 @@ export function projectFactory() {
       await binding.projectNew(
         await rustifyProjectOptions(options),
         turboEngineOptions || {},
+        {
+          throwTurbopackInternalError,
+        },
       ),
     );
   };
