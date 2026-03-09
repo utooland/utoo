@@ -6,7 +6,7 @@ use serde_json::Value;
 use utoo_ruborist::lock::{LockPackage, PackageLock};
 use utoo_ruborist::manifest::{DepsView, EnginesView, PackageJson};
 use utoo_ruborist::registry::resolve_package;
-use utoo_ruborist::spec::PackageSpec;
+use utoo_ruborist::spec::{PackageSpec, Protocol};
 use utoo_ruborist::util::PackageNameStr;
 
 use super::ruborist_context::Context;
@@ -203,7 +203,8 @@ pub async fn update_package_json(opts: &UpdatePackageJsonOptions<'_>) -> Result<
 /// Wildcard specs (`*`, `latest`, empty) are pinned to `^<resolved_version>`.
 /// Everything else (semver ranges, exact versions) passes through unchanged.
 fn format_save_spec(version_spec: &str, resolved_version: &str) -> String {
-    if is_git_url(version_spec) {
+    // Non-registry specs (git, github, file, http, etc.) are written as-is.
+    if version_spec.parse::<Protocol>().is_ok() {
         return version_spec.to_string();
     }
     match version_spec {
@@ -532,7 +533,7 @@ mod tests {
         assert_eq!(format_save_spec("~1.2.0", "1.2.3"), "~1.2.0");
         assert_eq!(format_save_spec("1.2.3", "1.2.3"), "1.2.3");
 
-        // Git URLs pass through as-is
+        // Non-registry specs pass through as-is
         assert_eq!(
             format_save_spec("git+https://github.com/user/repo.git#abc123", "1.0.0"),
             "git+https://github.com/user/repo.git#abc123"
@@ -540,6 +541,18 @@ mod tests {
         assert_eq!(
             format_save_spec("git://github.com/user/repo.git", "1.0.0"),
             "git://github.com/user/repo.git"
+        );
+        assert_eq!(
+            format_save_spec("github:user/repo", "1.0.0"),
+            "github:user/repo"
+        );
+        assert_eq!(
+            format_save_spec("https://example.com/pkg.tgz", "1.0.0"),
+            "https://example.com/pkg.tgz"
+        );
+        assert_eq!(
+            format_save_spec("file:../local-pkg", "1.0.0"),
+            "file:../local-pkg"
         );
     }
 

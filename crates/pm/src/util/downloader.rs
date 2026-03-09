@@ -8,6 +8,7 @@ use once_cell::sync::Lazy;
 use reqwest::{Client, StatusCode};
 use tokio::sync::Semaphore;
 use tokio_retry::RetryIf;
+use utoo_ruborist::spec::Protocol;
 
 use super::cache::get_cache_dir;
 use super::extractor::extract_and_write;
@@ -34,8 +35,8 @@ pub fn download_count() -> usize {
 }
 
 /// Check whether a tarball URL refers to a git-resolved package.
-pub fn is_git_url(tarball_url: &str) -> bool {
-    tarball_url.starts_with("git+") || tarball_url.starts_with("git://")
+pub fn is_git_url(url: &str) -> bool {
+    matches!(url.parse::<Protocol>(), Ok(Protocol::Git))
 }
 
 /// Look up the cache path for a git-resolved package.
