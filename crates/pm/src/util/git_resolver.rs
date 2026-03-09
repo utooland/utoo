@@ -18,7 +18,8 @@ pub fn new_git_clone_cache() -> GitCloneCache {
 /// Extract a reasonable package name from a git URL for cache-path purposes.
 fn name_from_url(url: &str) -> &str {
     let clean = url.strip_prefix("git+").unwrap_or(url);
-    let segment = clean.rsplit('/').next().unwrap_or("unknown");
+    let without_fragment = clean.split_once('#').map_or(clean, |(base, _)| base);
+    let segment = without_fragment.rsplit('/').next().unwrap_or("unknown");
     segment.strip_suffix(".git").unwrap_or(segment)
 }
 
@@ -44,4 +45,47 @@ pub async fn resolve_github_spec(
 ) -> Result<Arc<GitCloneResult>> {
     let url = format!("git+https://github.com/{}/{}.git", owner, repo);
     resolve_git_spec(&url, commit_ish, Some(repo), clone_cache).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_name_from_url_basic() {
+        assert_eq!(
+            name_from_url("git+https://github.com/user/repo.git"),
+            "repo"
+        );
+    }
+
+    #[test]
+    fn test_name_from_url_with_fragment() {
+        assert_eq!(
+            name_from_url("git+https://github.com/user/repo.git#v1.0.0"),
+            "repo"
+        );
+        assert_eq!(
+            name_from_url("git+https://github.com/user/repo.git#abc123"),
+            "repo"
+        );
+    }
+
+    #[test]
+    fn test_name_from_url_no_git_suffix() {
+        assert_eq!(
+            name_from_url("git+https://github.com/user/my-lib"),
+            "my-lib"
+        );
+        assert_eq!(
+            name_from_url("git+https://github.com/user/my-lib#main"),
+            "my-lib"
+        );
+    }
+
+    #[test]
+    fn test_name_from_url_bare_protocol() {
+        assert_eq!(name_from_url("https://github.com/user/repo.git"), "repo");
+        assert_eq!(name_from_url("git://github.com/user/repo.git"), "repo");
+    }
 }

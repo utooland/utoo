@@ -381,6 +381,27 @@ pub struct CoreVersionManifest {
     pub license: Option<String>,
 }
 
+impl From<VersionManifest> for CoreVersionManifest {
+    fn from(m: VersionManifest) -> Self {
+        Self {
+            name: m.name,
+            version: m.version,
+            dependencies: m.dependencies,
+            dev_dependencies: m.dev_dependencies,
+            peer_dependencies: m.peer_dependencies,
+            optional_dependencies: m.optional_dependencies,
+            dist: m.dist,
+            bin: m.bin,
+            engines: m.engines,
+            os: m.os,
+            cpu: m.cpu,
+            scripts: m.scripts,
+            has_install_script: m.has_install_script,
+            license: m.license,
+        }
+    }
+}
+
 /// Package author information.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Author {

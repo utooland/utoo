@@ -521,6 +521,29 @@ mod tests {
     }
 
     #[test]
+    fn test_format_save_spec() {
+        // Wildcard / empty specs pin to ^resolved
+        assert_eq!(format_save_spec("", "1.2.3"), "^1.2.3");
+        assert_eq!(format_save_spec("*", "1.2.3"), "^1.2.3");
+        assert_eq!(format_save_spec("latest", "1.2.3"), "^1.2.3");
+
+        // Normal semver specs pass through
+        assert_eq!(format_save_spec("^1.0.0", "1.2.3"), "^1.0.0");
+        assert_eq!(format_save_spec("~1.2.0", "1.2.3"), "~1.2.0");
+        assert_eq!(format_save_spec("1.2.3", "1.2.3"), "1.2.3");
+
+        // Git URLs pass through as-is
+        assert_eq!(
+            format_save_spec("git+https://github.com/user/repo.git#abc123", "1.0.0"),
+            "git+https://github.com/user/repo.git#abc123"
+        );
+        assert_eq!(
+            format_save_spec("git://github.com/user/repo.git", "1.0.0"),
+            "git://github.com/user/repo.git"
+        );
+    }
+
+    #[test]
     fn test_path_to_pkg_name() {
         // Normal nested package
         assert_eq!(

@@ -551,26 +551,10 @@ pub(crate) async fn resolve_non_registry_dep(
     let result =
         ensure_repo_cached(cache_dir, &url, commit_ish.as_deref(), name, clone_cache).await?;
 
-    let m = &result.manifest;
     Ok(ResolvedPackage {
         name: result.name.clone(),
         version: result.version.clone(),
-        manifest: Arc::new(CoreVersionManifest {
-            name: m.name.clone(),
-            version: m.version.clone(),
-            dependencies: m.dependencies.clone(),
-            dev_dependencies: m.dev_dependencies.clone(),
-            peer_dependencies: m.peer_dependencies.clone(),
-            optional_dependencies: m.optional_dependencies.clone(),
-            dist: m.dist.clone(),
-            bin: m.bin.clone(),
-            engines: m.engines.clone(),
-            os: m.os.clone(),
-            cpu: m.cpu.clone(),
-            scripts: m.scripts.clone(),
-            has_install_script: m.has_install_script,
-            license: m.license.clone(),
-        }),
+        manifest: Arc::new(CoreVersionManifest::from(result.manifest.clone())),
     })
 }
 

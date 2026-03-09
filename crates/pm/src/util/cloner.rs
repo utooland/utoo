@@ -776,6 +776,30 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn test_clone_package_git_flat_layout() -> Result<()> {
+        let temp = TempDir::new()?;
+        // Git packages are extracted flat — package.json is at the root,
+        // not inside a `package/` subdirectory.
+        let cache_dir = temp.path().join("cache/my-git-pkg/abc123");
+        let dst_dir = temp.path().join("node_modules/my-git-pkg");
+
+        // Create source with flat layout (no package/ wrapper)
+        fs::create_dir_all(&cache_dir).await?;
+        let pkg_json = create_package_json("my-git-pkg", "1.0.0");
+        fs::write(cache_dir.join("package.json"), &pkg_json).await?;
+        fs::write(cache_dir.join("index.js"), "module.exports = {}").await?;
+
+        clone_package(&cache_dir, &dst_dir, "my-git-pkg", "1.0.0", false).await?;
+
+        // Should clone directly from cache root (not looking for package/ subdir)
+        assert!(dst_dir.join("package.json").exists());
+        assert!(dst_dir.join("index.js").exists());
+        let content = fs::read_to_string(dst_dir.join("package.json")).await?;
+        assert!(content.contains("my-git-pkg"));
+        Ok(())
+    }
+
     #[cfg(not(target_os = "macos"))]
     mod hardlink_clone_tests {
         use tokio::io::AsyncReadExt;
