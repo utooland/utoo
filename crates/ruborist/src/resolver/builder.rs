@@ -88,7 +88,7 @@ struct NodeFlags {
 
 /// Gather all unresolved deps from root and workspace nodes for preloading.
 fn gather_preload_deps(graph: &DependencyGraph, legacy_peer_deps: bool) -> Vec<(String, String)> {
-    use crate::model::spec::SpecStr;
+    use crate::spec::SpecStr;
     use std::collections::HashSet;
 
     let mut deps = HashSet::new();

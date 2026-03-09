@@ -25,6 +25,7 @@
 pub mod model;
 pub mod resolver;
 pub mod service;
+pub mod spec;
 pub mod traits;
 
 // ============================================================================
@@ -42,7 +43,7 @@ pub mod manifest {
     pub use crate::model::manifest::{CoreVersionManifest, Dist, FullManifest, VersionManifest};
     pub use crate::model::package_json::{
         DepsView, EnginesView, IdentityView, PackageInstallView, PackageJson, PublishConfig,
-        ResolveCatalogs, ScriptsView,
+        ScriptsView,
     };
 }
 
@@ -77,11 +78,6 @@ pub mod progress {
 /// Platform compatibility checks.
 pub mod compat {
     pub use crate::model::compatibility::{is_cpu_compatible, is_os_compatible};
-}
-
-/// Package specification types.
-pub mod spec {
-    pub use crate::model::spec::{Catalogs, PackageSpec, Protocol, SpecStr, resolve_catalog_specs};
 }
 
 /// Git clone and resolution types.

@@ -14,9 +14,16 @@
 //! assert!(matches!(spec, PackageSpec::Git { .. }));
 //! ```
 
+pub mod capability;
+pub mod transform;
+
+// Re-exports for ergonomic access
+pub use capability::Capability;
+pub use transform::{TransformContext, TransformSpecs, transform_specs};
+
 use std::str::FromStr;
 
-use super::util::PackageNameStr;
+use crate::model::util::PackageNameStr;
 
 // ---------------------------------------------------------------------------
 // Protocol
@@ -195,16 +202,24 @@ impl From<&str> for PackageSpec {
                 }
             }
             Some((
-                proto @ (Protocol::File
-                | Protocol::Link
-                | Protocol::Workspace
-                | Protocol::Portal
-                | Protocol::Catalog),
+                proto @ (Protocol::File | Protocol::Link | Protocol::Workspace | Protocol::Portal),
                 rest,
             )) => Self::Local {
                 protocol: proto,
                 path: rest.to_owned(),
             },
+            Some((Protocol::Catalog, _)) => {
+                // catalog: specs must be resolved in-place before spec parsing.
+                // Reaching here means resolve_catalogs() was not called.
+                tracing::warn!(
+                    "unresolved catalog: specifier reached spec parser: {:?}",
+                    raw
+                );
+                Self::Registry {
+                    name: raw.to_owned(),
+                    version_spec: String::new(),
+                }
+            }
             Some((Protocol::Http, _)) => Self::Http {
                 url: raw.to_owned(),
             },
@@ -226,7 +241,7 @@ impl From<&str> for PackageSpec {
                 }
 
                 // Default: registry spec
-                let (name, version_spec) = super::util::parse_package_spec(raw);
+                let (name, version_spec) = crate::model::util::parse_package_spec(raw);
                 Self::Registry {
                     name: name.to_owned(),
                     version_spec: version_spec.to_owned(),
@@ -281,64 +296,6 @@ use std::collections::HashMap;
 /// Maps catalog name to (package_name -> version_spec).
 /// The default catalog uses key `""` (empty string).
 pub type Catalogs = HashMap<String, HashMap<String, String>>;
-
-/// Resolve `catalog:` specifiers in a single dependency map.
-///
-/// ```text
-///  deps: { "lodash": "catalog:", "debug": "catalog:legacy" }
-///         |                       |
-///         v                       v
-///  catalogs[""]["lodash"]   catalogs["legacy"]["debug"]
-///         |                       |
-///         v                       v
-///  deps: { "lodash": "^4.17.21", "debug": "^3.2.7" }
-/// ```
-///
-/// - `"catalog:"` or `"catalog:default"` -> default catalog (key `""`)
-/// - `"catalog:<name>"` -> named catalog
-///
-/// Unknown catalog names or missing package entries are logged as warnings
-/// and left as-is.
-pub fn resolve_catalog_specs(deps: &mut HashMap<String, String>, catalogs: &Catalogs) {
-    for (pkg_name, spec) in deps.iter_mut() {
-        if let Some(catalog_ref) = spec.strip_prefix("catalog:") {
-            let catalog_key = if catalog_ref.is_empty() || catalog_ref == "default" {
-                ""
-            } else {
-                catalog_ref
-            };
-            let display_name = if catalog_key.is_empty() {
-                "default"
-            } else {
-                catalog_key
-            };
-
-            if let Some(catalog) = catalogs.get(catalog_key) {
-                if let Some(resolved) = catalog.get(pkg_name.as_str()) {
-                    tracing::debug!(
-                        "catalog: resolved {}@catalog:{} -> {}",
-                        pkg_name,
-                        display_name,
-                        resolved
-                    );
-                    *spec = resolved.clone();
-                } else {
-                    tracing::warn!(
-                        "catalog: package '{}' not found in catalog '{}'",
-                        pkg_name,
-                        display_name
-                    );
-                }
-            } else {
-                tracing::warn!(
-                    "catalog: catalog '{}' not found (referenced by {})",
-                    display_name,
-                    pkg_name
-                );
-            }
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Helpers

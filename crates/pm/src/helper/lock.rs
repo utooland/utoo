@@ -12,8 +12,9 @@ use crate::util::save_type::{PackageAction, SaveType};
 use crate::util::user_config::{get_legacy_peer_deps, set_package_json};
 use crate::util::{cloner::clone_package, downloader::download_to_cache};
 use utoo_ruborist::lock::{LockPackage, PackageLock};
-use utoo_ruborist::manifest::{DepsView, EnginesView, PackageJson, ResolveCatalogs};
+use utoo_ruborist::manifest::{DepsView, EnginesView, PackageJson};
 use utoo_ruborist::registry::resolve_package;
+use utoo_ruborist::spec::{TransformContext, TransformSpecs};
 use utoo_ruborist::util::PackageNameStr;
 use utoo_ruborist::util::parse_package_spec;
 
@@ -325,9 +326,11 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
     let mut pkg: DepsView = load_package_json(root_path).await?;
     let lock_file: Value = read_json_file(&root_path.join("package-lock.json")).await?;
 
-    // Load catalogs to resolve catalog: specs before comparison
-    let catalogs = load_catalogs(root_path);
-    pkg.resolve_catalogs(&catalogs);
+    // Transform protocol specifiers (catalog:, etc.) before comparison
+    let transform_ctx = TransformContext {
+        catalogs: load_catalogs(root_path),
+    };
+    pkg.transform_specs(&transform_ctx);
 
     // get packages in package-lock.json
     let packages = lock_file
@@ -347,7 +350,7 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
             .to_string_lossy()
             .to_string();
         let mut ws_deps: DepsView = load_package_json(&path).await?;
-        ws_deps.resolve_catalogs(&catalogs);
+        ws_deps.transform_specs(&transform_ctx);
         pkgs_to_check.push((target_path, ws_deps));
     }
 
@@ -716,15 +719,15 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_deps_view_catalogs_default() {
-        let mut catalogs = std::collections::HashMap::new();
-        catalogs.insert(
+    fn test_transform_deps_view_catalogs_default() {
+        let catalogs = std::collections::HashMap::from([(
             String::new(),
             std::collections::HashMap::from([
                 ("lodash".to_string(), "^4.17.21".to_string()),
                 ("debug".to_string(), "^4.3.4".to_string()),
             ]),
-        );
+        )]);
+        let ctx = TransformContext { catalogs };
 
         let mut deps = DepsView {
             dependencies: HashMap::from([("lodash".to_string(), "catalog:".to_string())]),
@@ -733,19 +736,19 @@ mod tests {
             optional_dependencies: HashMap::new(),
         };
 
-        deps.resolve_catalogs(&catalogs);
+        deps.transform_specs(&ctx);
 
         assert_eq!(deps.dependencies.get("lodash").unwrap(), "^4.17.21");
         assert_eq!(deps.dev_dependencies.get("debug").unwrap(), "^4.3.4");
     }
 
     #[test]
-    fn test_resolve_deps_view_catalogs_named() {
-        let mut catalogs = std::collections::HashMap::new();
-        catalogs.insert(
+    fn test_transform_deps_view_catalogs_named() {
+        let catalogs = std::collections::HashMap::from([(
             "legacy".to_string(),
             std::collections::HashMap::from([("express".to_string(), "^3.0.0".to_string())]),
-        );
+        )]);
+        let ctx = TransformContext { catalogs };
 
         let mut deps = DepsView {
             dependencies: HashMap::from([("express".to_string(), "catalog:legacy".to_string())]),
@@ -754,14 +757,16 @@ mod tests {
             optional_dependencies: HashMap::new(),
         };
 
-        deps.resolve_catalogs(&catalogs);
+        deps.transform_specs(&ctx);
 
         assert_eq!(deps.dependencies.get("express").unwrap(), "^3.0.0");
     }
 
     #[test]
-    fn test_resolve_deps_view_catalogs_empty_noop() {
-        let catalogs: utoo_ruborist::spec::Catalogs = std::collections::HashMap::new();
+    fn test_transform_deps_view_catalogs_empty_noop() {
+        let ctx = TransformContext {
+            catalogs: std::collections::HashMap::new(),
+        };
 
         let mut deps = DepsView {
             dependencies: HashMap::from([("lodash".to_string(), "catalog:".to_string())]),
@@ -770,19 +775,19 @@ mod tests {
             optional_dependencies: HashMap::new(),
         };
 
-        deps.resolve_catalogs(&catalogs);
+        deps.transform_specs(&ctx);
 
         // catalog: spec left untouched when catalogs is empty
         assert_eq!(deps.dependencies.get("lodash").unwrap(), "catalog:");
     }
 
     #[test]
-    fn test_resolve_deps_view_catalogs_missing_entry() {
-        let mut catalogs = std::collections::HashMap::new();
-        catalogs.insert(
+    fn test_transform_deps_view_catalogs_missing_entry() {
+        let catalogs = std::collections::HashMap::from([(
             String::new(),
             std::collections::HashMap::from([("react".to_string(), "^18.0.0".to_string())]),
-        );
+        )]);
+        let ctx = TransformContext { catalogs };
 
         let mut deps = DepsView {
             dependencies: HashMap::from([("lodash".to_string(), "catalog:".to_string())]),
@@ -791,7 +796,7 @@ mod tests {
             optional_dependencies: HashMap::new(),
         };
 
-        deps.resolve_catalogs(&catalogs);
+        deps.transform_specs(&ctx);
 
         // lodash not in catalog, left as-is
         assert_eq!(deps.dependencies.get("lodash").unwrap(), "catalog:");

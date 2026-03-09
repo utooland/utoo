@@ -8,7 +8,14 @@ use std::sync::OnceLock;
 
 pub type ConfigResult<T> = Result<T>;
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+/// Cached merged config (global + local). Set on first `Config::load(false)`.
+static MERGED_CONFIG: OnceLock<Config> = OnceLock::new();
+
+/// Cached raw content of the local `.utoo.toml` file.
+/// Set by `Config::init_local()` with the project root path.
+static LOCAL_CONTENT: OnceLock<Option<String>> = OnceLock::new();
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     values: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -18,18 +25,48 @@ pub struct Config {
 // global config path is ~/.utoo/config.toml
 // local config path is .utoo.toml
 impl Config {
+    /// Cache the local `.utoo.toml` content from the project root.
+    ///
+    /// Call once after determining the project root (e.g. after
+    /// `update_cwd_to_root`). Subsequent calls to `local_content()`
+    /// and `load_catalogs()` will use the cached content instead of
+    /// re-reading from disk.
+    pub fn init_local(root_path: &Path) {
+        LOCAL_CONTENT.get_or_init(|| fs::read_to_string(root_path.join(".utoo.toml")).ok());
+    }
+
+    /// Get cached local `.utoo.toml` content (for catalog parsing, etc.).
+    pub fn local_content() -> Option<&'static str> {
+        LOCAL_CONTENT.get().and_then(|opt| opt.as_deref())
+    }
+
     pub async fn load(global: bool) -> ConfigResult<Self> {
         if global {
             return Self::load_from_path(&Self::global_config_path()?).await;
         }
 
+        // Return cached merged config if available
+        if let Some(config) = MERGED_CONFIG.get() {
+            return Ok(config.clone());
+        }
+
         let mut config = Self::load_from_path(&Self::global_config_path()?).await?;
-        let local_path = Self::local_config_path()?;
-        if crate::fs::try_exists(&local_path).await? {
-            let local_config = Self::load_from_path(&local_path).await?;
+
+        // Use cached local content if available, otherwise read from disk
+        if let Some(content) = LOCAL_CONTENT.get().and_then(|opt| opt.as_ref()) {
+            let local_config: Config = toml::from_str(content)?;
             config.values.extend(local_config.values);
             config.arrays.extend(local_config.arrays);
+        } else {
+            let local_path = Self::local_config_path()?;
+            if crate::fs::try_exists(&local_path).await? {
+                let local_config = Self::load_from_path(&local_path).await?;
+                config.values.extend(local_config.values);
+                config.arrays.extend(local_config.arrays);
+            }
         }
+
+        let _ = MERGED_CONFIG.set(config.clone());
         Ok(config)
     }
 
@@ -57,13 +94,11 @@ impl Config {
     }
 
     pub(crate) async fn load_from_path(path: &Path) -> ConfigResult<Self> {
-        if !crate::fs::try_exists(path).await? {
-            return Ok(Config::default());
+        match fs::read_to_string(path) {
+            Ok(content) => Ok(toml::from_str(&content)?),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
+            Err(e) => Err(e.into()),
         }
-
-        let content = fs::read_to_string(path)?;
-        let config = toml::from_str(&content)?;
-        Ok(config)
     }
 
     pub fn save(&self, global: bool) -> ConfigResult<()> {
@@ -147,15 +182,18 @@ impl<T: Clone + Debug + 'static> ConfigValue<T> {
             return value.clone();
         }
 
-        // load from config
-        let config_result = Config::load(false).await;
-        if let Ok(config) = config_result {
-            let value_result = config.get(self.key);
-            if let Ok(Some(value)) = value_result {
-                let parsed_value = self.parse_config_value(&value);
-                let _ = self.value.set(parsed_value.clone());
-                return parsed_value;
-            }
+        // Ensure merged config is loaded and cached
+        if MERGED_CONFIG.get().is_none() {
+            let _ = Config::load(false).await; // populates MERGED_CONFIG
+        }
+
+        // Read from cached merged config (no clone of Config itself)
+        if let Some(config) = MERGED_CONFIG.get()
+            && let Ok(Some(value)) = config.get(self.key)
+        {
+            let parsed_value = self.parse_config_value(&value);
+            let _ = self.value.set(parsed_value.clone());
+            return parsed_value;
         }
 
         self.default.clone()
