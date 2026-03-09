@@ -43,10 +43,10 @@ anyhow = { workspace = true }
 vergen = { version = "9.0.6", features = ["cargo"] }
 
 [features]
-default      = ["process_pool"]
-process_pool = ["pack-core/process_pool", "turbopack-node/process_pool"]
+default          = ["process_pool"]
+process_pool     = ["pack-core/process_pool", "turbopack-node/process_pool"]
 worker_pool      = ["pack-core/worker_pool", "turbopack-node/worker_pool"]
-worker_pool_napi = ["worker_pool", "pack-core/worker_pool_napi", "turbopack-node/worker_pool_napi"]
+worker_pool_napi = ["pack-core/worker_pool_napi", "turbopack-node/worker_pool_napi", "worker_pool"]
 
 [lints]
 workspace = true
