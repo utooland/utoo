@@ -1,6 +1,7 @@
 use std::ops::Deref;
 
 use super::utils::{NapiDiagnostic, NapiIssue, TurbopackResult, subscribe};
+use crate::pack_api::turbopack_ctx::RootTask;
 use crate::util::DetachedVc;
 use futures_util::TryFutureExt;
 use napi::{JsFunction, bindgen_prelude::External};
@@ -10,7 +11,6 @@ use pack_api::{
         get_written_endpoint_with_issues_operation,
     },
     paths::ServerPath,
-    tasks::RootTask,
     utils::{endpoint_client_changed_operation, subscribe_issues_and_diags_operation},
 };
 use tracing::Instrument;

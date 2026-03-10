@@ -33,7 +33,7 @@ utoo-ruborist            = { path = "../ruborist" }
 wasm-bindgen             = "0.2.108"
 wasm-bindgen-futures     = "0.4.58"
 ## turbpack specific - conditional on utoopack feature
-pack-api                 = { workspace = true, default-features = false, optional = true }
+pack-api                 = { workspace = true, default-features = false, features = ["worker_pool"], optional = true }
 pack-core                = { workspace = true, default-features = false, optional = true }
 parking_lot              = { workspace = true, features = ["nightly"] }
 swc_core                 = { workspace = true, features = ["base", "ecma_ast"] }
