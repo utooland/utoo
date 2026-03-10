@@ -66,8 +66,7 @@ pub async fn find_project_path(cwd: &Path) -> Result<PathBuf> {
         .await
 }
 
-/// Initialize the project context: resolve the workspace root, change into
-/// it, and cache the local `.utoo.toml` config for later use.
+/// Resolve the workspace root and change into it.
 ///
 /// This is the standard entry point for commands that operate on the
 /// project root (install, update, deps, etc.).
@@ -80,8 +79,6 @@ pub async fn init_project_root(cwd: &Path) -> Result<PathBuf> {
         );
         env::set_current_dir(&root_dir).context("Failed to change to root directory")?;
     }
-
-    crate::util::config_file::Config::init_local(&root_dir).await;
 
     Ok(root_dir)
 }

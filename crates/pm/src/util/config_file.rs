@@ -11,10 +11,6 @@ pub type ConfigResult<T> = Result<T>;
 /// Cached merged config (global + local). Set on first `Config::load(false)`.
 static MERGED_CONFIG: OnceLock<Config> = OnceLock::new();
 
-/// Cached raw content of the local `.utoo.toml` file.
-/// Set by `Config::init_local()` with the project root path.
-static LOCAL_CONTENT: OnceLock<Option<String>> = OnceLock::new();
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     values: HashMap<String, String>,
@@ -25,26 +21,6 @@ pub struct Config {
 // global config path is ~/.utoo/config.toml
 // local config path is .utoo.toml
 impl Config {
-    /// Cache the local `.utoo.toml` content from the project root.
-    ///
-    /// Call once after determining the project root (e.g. after
-    /// `init_project_root`). Subsequent calls to `local_content()`
-    /// and `load_catalogs()` will use the cached content instead of
-    /// re-reading from disk.
-    pub async fn init_local(root_path: &Path) {
-        let path = root_path.join(".utoo.toml");
-        LOCAL_CONTENT.get_or_init(|| {
-            // Use std::fs here because OnceLock::get_or_init requires a sync closure.
-            // This is acceptable: the file is tiny (<1KB) and this runs exactly once.
-            fs::read_to_string(path).ok()
-        });
-    }
-
-    /// Get cached local `.utoo.toml` content (for catalog parsing, etc.).
-    pub fn local_content() -> Option<&'static str> {
-        LOCAL_CONTENT.get().and_then(|opt| opt.as_deref())
-    }
-
     pub async fn load(global: bool) -> ConfigResult<Self> {
         if global {
             return Self::load_from_path(&Self::global_config_path()?).await;
@@ -57,10 +33,7 @@ impl Config {
 
         let mut config = Self::load_from_path(&Self::global_config_path()?).await?;
 
-        // Use cached local content if available, otherwise read from disk
-        let local_config = if let Some(content) = LOCAL_CONTENT.get().and_then(|opt| opt.as_ref()) {
-            Some(toml::from_str::<Config>(content)?)
-        } else {
+        let local_config = {
             let local_path = Self::local_config_path()?;
             if crate::fs::try_exists(&local_path).await? {
                 Some(Self::load_from_path(&local_path).await?)
@@ -101,7 +74,7 @@ impl Config {
     }
 
     pub(crate) async fn load_from_path(path: &Path) -> ConfigResult<Self> {
-        match tokio::fs::read_to_string(path).await {
+        match crate::fs::read_to_string(path).await {
             Ok(content) => Ok(toml::from_str(&content)?),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
             Err(e) => Err(e.into()),

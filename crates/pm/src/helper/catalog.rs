@@ -57,8 +57,6 @@ use std::path::Path;
 use serde::Deserialize;
 use utoo_ruborist::spec::Catalogs;
 
-use crate::util::config_file::Config;
-
 /// Model for the catalog-related sections of .utoo.toml.
 ///
 /// Uses `#[serde(default)]` so missing sections are silently ignored,
@@ -77,21 +75,12 @@ struct CatalogConfig {
 
 /// Load catalog definitions from `.utoo.toml` in the given directory.
 ///
-/// Uses cached `.utoo.toml` content from `Config::init_local()` when
-/// available, falling back to a direct file read otherwise.
-///
 /// Returns an empty map if the file doesn't exist or contains no
 /// catalog sections.  The default catalog is stored under key `""`
 /// (empty string).
 pub async fn load_catalogs(root_path: &Path) -> Catalogs {
-    // Use cached .utoo.toml content from Config::init_local() if available
-    if let Some(content) = Config::local_content() {
-        return parse_catalogs(content);
-    }
-
-    // Fallback: read from disk (Config::init_local not called yet, e.g. in tests)
     let toml_path = root_path.join(".utoo.toml");
-    match tokio::fs::read_to_string(&toml_path).await {
+    match crate::fs::read_to_string(&toml_path).await {
         Ok(content) => parse_catalogs(&content),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
         Err(e) => {
