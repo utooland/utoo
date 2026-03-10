@@ -225,6 +225,9 @@ export interface InitOutput {
     readonly fs_write: (a: number, b: number, c: any) => any;
     readonly fs_writeString: (a: number, b: number, c: number, d: number) => any;
     readonly fs_writeSync: (a: number, b: number, c: any) => [number, number];
+    readonly __wbg_roottask_free: (a: number, b: number) => void;
+    readonly registerWorkerScheduler: (a: any, b: any) => void;
+    readonly workerCreated: (a: number) => void;
     readonly initLogFilter: (a: number, b: number) => void;
     readonly init_pack: () => void;
     readonly __wbg_project_free: (a: number, b: number) => void;
@@ -242,9 +245,6 @@ export interface InitOutput {
     readonly project_writeAllToDisk: (a: any) => void;
     readonly getWasmMemory: () => any;
     readonly getWasmModule: () => any;
-    readonly __wbg_roottask_free: (a: number, b: number) => void;
-    readonly registerWorkerScheduler: (a: any, b: any) => void;
-    readonly workerCreated: (a: number) => void;
     readonly ERR_ABORT: () => [number, number];
     readonly ERR_INVALID_STATE: () => [number, number];
     readonly ERR_KEY_ALREADY_EXISTS: () => [number, number];
@@ -256,8 +256,6 @@ export interface InitOutput {
     readonly rust_mi_get_default_heap: () => number;
     readonly rust_mi_get_thread_id: () => number;
     readonly rust_mi_set_default_heap: (a: number) => void;
-    readonly napi_register_module_v1: (a: number, b: number) => number;
-    readonly napi_register_wasm_v1: (a: number, b: number) => number;
     readonly __wbg_get_wasmtaskmessage_taskId: (a: number) => number;
     readonly __wbg_get_webworkercreation_options: (a: number) => number;
     readonly __wbg_get_webworkeroptions_cwd: (a: number) => [number, number];
@@ -280,16 +278,16 @@ export interface InitOutput {
     readonly __wbg_createsyncaccesshandleoptions_free: (a: number, b: number) => void;
     readonly wasm_thread_entry_point: (a: number) => void;
     readonly wasm_bindgen_88411090ffecf438___closure__destroy___dyn_core_c4872891b5a3ae73___ops__function__FnMut_____Output_______: (a: number, b: number) => void;
-    readonly wasm_bindgen_88411090ffecf438___closure__destroy___dyn_core_c4872891b5a3ae73___ops__function__Fn__js_sys_93f8810da3dc1392___Array____Output_______: (a: number, b: number) => void;
     readonly wasm_bindgen_88411090ffecf438___closure__destroy___dyn_core_c4872891b5a3ae73___ops__function__FnMut__wasm_bindgen_88411090ffecf438___JsValue____Output_______: (a: number, b: number) => void;
     readonly wasm_bindgen_88411090ffecf438___closure__destroy___dyn_core_c4872891b5a3ae73___ops__function__FnMut__web_sys_fd67284640957d89___features__gen_MessageEvent__MessageEvent____Output_______: (a: number, b: number) => void;
     readonly wasm_bindgen_88411090ffecf438___closure__destroy___dyn_core_c4872891b5a3ae73___ops__function__FnMut_____Output________1_: (a: number, b: number) => void;
     readonly wasm_bindgen_88411090ffecf438___closure__destroy___dyn_for__a__core_c4872891b5a3ae73___ops__function__FnMut____a_web_sys_fd67284640957d89___features__gen_MessageEvent__MessageEvent____Output_______: (a: number, b: number) => void;
+    readonly wasm_bindgen_88411090ffecf438___closure__destroy___dyn_core_c4872891b5a3ae73___ops__function__Fn__js_sys_93f8810da3dc1392___Array____Output_______: (a: number, b: number) => void;
     readonly wasm_bindgen_88411090ffecf438___convert__closures_____invoke___js_sys_93f8810da3dc1392___Function__js_sys_93f8810da3dc1392___Function_____: (a: number, b: number, c: any, d: any) => void;
-    readonly wasm_bindgen_88411090ffecf438___convert__closures_____invoke___js_sys_93f8810da3dc1392___Array_____: (a: number, b: number, c: any) => void;
     readonly wasm_bindgen_88411090ffecf438___convert__closures_____invoke___wasm_bindgen_88411090ffecf438___JsValue_____: (a: number, b: number, c: any) => void;
     readonly wasm_bindgen_88411090ffecf438___convert__closures_____invoke___web_sys_fd67284640957d89___features__gen_MessageEvent__MessageEvent_____: (a: number, b: number, c: any) => void;
     readonly wasm_bindgen_88411090ffecf438___convert__closures________invoke___web_sys_fd67284640957d89___features__gen_MessageEvent__MessageEvent_____: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_88411090ffecf438___convert__closures_____invoke___js_sys_93f8810da3dc1392___Array_____: (a: number, b: number, c: any) => void;
     readonly wasm_bindgen_88411090ffecf438___convert__closures_____invoke______: (a: number, b: number) => void;
     readonly wasm_bindgen_88411090ffecf438___convert__closures_____invoke_______1_: (a: number, b: number) => void;
     readonly memory: WebAssembly.Memory;

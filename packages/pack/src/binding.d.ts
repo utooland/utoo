@@ -28,22 +28,6 @@ export interface NapiTaskMessage {
 }
 export declare function recvTaskMessageInWorker(workerId: number): Promise<NapiTaskMessage>
 export declare function sendTaskMessage(message: NapiTaskMessage): Promise<void>
-/** Arguments for `NapiTurbopackCallbacks::throw_turbopack_internal_error`. */
-export interface TurbopackInternalErrorOpts {
-  message: string
-  anonymizedLocation?: string
-}
-export interface NapiTurbopackCallbacksJsObject {
-  /**
-   * Called when we've encountered a bug in Turbopack and not in the user's code. Constructs and
-   * throws a `TurbopackInternalError` type. Logs to anonymized telemetry.
-   *
-   * As a result of the use of `ErrorStrategy::CalleeHandled`, the first argument is an error if
-   * there's a runtime conversion error. This should never happen, but if it does, the function
-   * can throw it instead.
-   */
-  throwTurbopackInternalError: (conversionError: Error | null, opts: TurbopackInternalErrorOpts) => never
-}
 export interface NapiEndpointConfig {
   
 }
@@ -214,6 +198,28 @@ export declare function projectTraceSource(project: { __napiType: "Project" }, f
 export declare function projectGetSourceForAsset(project: { __napiType: "Project" }, filePath: string): Promise<string | null>
 export declare function projectGetSourceMap(project: { __napiType: "Project" }, filePath: RcStr): Promise<string | null>
 export declare function projectGetSourceMapSync(project: { __napiType: "Project" }, filePath: RcStr): string | null
+/** Arguments for `NapiTurbopackCallbacks::throw_turbopack_internal_error`. */
+export interface TurbopackInternalErrorOpts {
+  message: string
+  anonymizedLocation?: string
+}
+/**
+ * A version of [`NapiTurbopackCallbacks`] that can accepted as an argument to a napi function.
+ *
+ * This can be converted into a [`NapiTurbopackCallbacks`] with
+ * [`NapiTurbopackCallbacks::from_js`].
+ */
+export interface NapiTurbopackCallbacksJsObject {
+  /**
+   * Called when we've encountered a bug in Turbopack and not in the user's code. Constructs and
+   * throws a `TurbopackInternalError` type. Logs to anonymized telemetry.
+   *
+   * As a result of the use of `ErrorStrategy::CalleeHandled`, the first argument is an error if
+   * there's a runtime conversion error. This should never happen, but if it does, the function
+   * can throw it instead.
+   */
+  throwTurbopackInternalError: (conversionError: Error | null, opts: TurbopackInternalErrorOpts) => never
+}
 export declare function rootTaskDispose(rootTask: { __napiType: "RootTask" }): void
 export interface NapiIssue {
   severity: string

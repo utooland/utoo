@@ -37,10 +37,10 @@ use std::{
     time::Instant,
 };
 
+use crate::pack_api::turbopack_ctx::TurbopackContext;
 use anyhow::anyhow;
 use napi::bindgen_prelude::{External, Status};
 use owo_colors::OwoColorize;
-use pack_api::tasks::TurbopackContext;
 use tracing_chrome::{ChromeLayerBuilder, FlushGuard};
 use tracing_subscriber::{Layer, filter, prelude::*, util::SubscriberInitExt};
 use turbo_tasks::OperationVc;

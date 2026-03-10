@@ -1,6 +1,7 @@
 use futures_util::TryFutureExt;
 use std::{future::Future, ops::Deref, path::PathBuf, sync::Arc};
 
+use crate::pack_api::turbopack_ctx::{RootTask, TurbopackContext};
 use anyhow::{Result, anyhow};
 use either::Either;
 use napi::{
@@ -9,7 +10,7 @@ use napi::{
     threadsafe_function::{ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
 use pack_api::{
-    tasks::{BundlerTurboTasks, RootTask, TurbopackContext, UtooTurboTasks},
+    tasks::{BundlerTurboTasks, UtooTurboTasks},
     utils::StyledStringSerialize,
 };
 use rustc_hash::FxHashMap;
