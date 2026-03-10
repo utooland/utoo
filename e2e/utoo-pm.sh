@@ -148,8 +148,8 @@ fi
 echo -e "${GREEN}PASS: git dependency warm install successful${NC}"
 cd ../../..
 
-# Case 9: reinstall ant-design
-echo -e "${YELLOW}Case 9: Clone and install ant-design${NC} by npmjs.org"
+# Case 9: reinstall ant-design by npmjs.org
+echo -e "${YELLOW}Case 9: reinstall ant-design${NC} by npmjs.org"
 cd e2e/pm/ant-design/ant-design
 git clean -dfx
 echo "Installing dependencies for ant-design by npmjs.org..."
@@ -157,8 +157,8 @@ utoo install --registry=https://registry.npmjs.org || { echo -e "${RED}FAIL: uto
 echo -e "${GREEN}PASS: ant-design cloned and installed${NC}"
 cd ../../../
 
-# Case 9: catalog protocol test
-echo -e "${YELLOW}Case 9: catalog protocol test${NC}"
+# Case 10: catalog protocol test
+echo -e "${YELLOW}Case 10: catalog protocol test${NC}"
 cd e2e/pm/catalog-test
 rm -rf node_modules package-lock.json packages/*/node_modules
 utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for catalog-test${NC}"; exit 1; }
@@ -183,7 +183,70 @@ if grep -q '"catalog:' package-lock.json; then
     exit 1
 fi
 
-echo -e "${GREEN}PASS: catalog protocol test successful${NC}"
+echo -e "${GREEN}PASS: catalog protocol basic install successful${NC}"
+
+# --- Catalog update flow ---
+# Update default catalog: pin lodash to exact 4.17.20
+echo -e "${YELLOW}Case 10b: catalog update flow${NC}"
+cp .utoo.toml .utoo.toml.bak
+
+cat > .utoo.toml <<'EOF'
+[catalog]
+lodash = "4.17.20"
+debug = "^4.3.4"
+typescript = "^5.0.0"
+
+[catalogs.legacy]
+debug = "^3.2.7"
+EOF
+
+rm -rf node_modules package-lock.json packages/*/node_modules
+utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed after catalog update${NC}"; mv .utoo.toml.bak .utoo.toml; exit 1; }
+
+# Verify lodash resolved to exactly 4.17.20 (not 4.17.21)
+LODASH_VERSION=$(node -e "console.log(require('./node_modules/lodash/package.json').version)")
+if [ "$LODASH_VERSION" != "4.17.20" ]; then
+    echo -e "${RED}FAIL: expected lodash 4.17.20 after catalog update, got $LODASH_VERSION${NC}"
+    mv .utoo.toml.bak .utoo.toml
+    exit 1
+fi
+
+# Verify named catalog (legacy) debug is still ^3.x in utils workspace
+UTILS_DEBUG_VERSION=$(node -e "console.log(require('./packages/utils/node_modules/debug/package.json').version)")
+UTILS_DEBUG_MAJOR=$(echo "$UTILS_DEBUG_VERSION" | cut -d. -f1)
+if [ "$UTILS_DEBUG_MAJOR" != "3" ]; then
+    echo -e "${RED}FAIL: expected debug 3.x for catalogs.legacy, got $UTILS_DEBUG_VERSION${NC}"
+    mv .utoo.toml.bak .utoo.toml
+    exit 1
+fi
+
+# Update named catalog: change legacy debug to ^4.3.4
+cat > .utoo.toml <<'EOF'
+[catalog]
+lodash = "4.17.20"
+debug = "^4.3.4"
+typescript = "^5.0.0"
+
+[catalogs.legacy]
+debug = "^4.3.4"
+EOF
+
+rm -rf node_modules package-lock.json packages/*/node_modules
+utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed after named catalog update${NC}"; mv .utoo.toml.bak .utoo.toml; exit 1; }
+
+# Now utils debug should be 4.x
+UTILS_DEBUG_VERSION=$(node -e "console.log(require('./packages/utils/node_modules/debug/package.json').version)" 2>/dev/null || node -e "console.log(require('./node_modules/debug/package.json').version)")
+UTILS_DEBUG_MAJOR=$(echo "$UTILS_DEBUG_VERSION" | cut -d. -f1)
+if [ "$UTILS_DEBUG_MAJOR" != "4" ]; then
+    echo -e "${RED}FAIL: expected debug 4.x after named catalog update, got $UTILS_DEBUG_VERSION${NC}"
+    mv .utoo.toml.bak .utoo.toml
+    exit 1
+fi
+
+echo -e "${GREEN}PASS: catalog update flow successful${NC}"
+
+# Restore original .utoo.toml
+mv .utoo.toml.bak .utoo.toml
 cd ../../..
 
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"
