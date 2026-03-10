@@ -34,5 +34,6 @@
       "root": "ReactDOM",
       "commonjs": "react-dom"
     }
-  }
+  },
+  "stats": true
 }

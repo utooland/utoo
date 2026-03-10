@@ -1,21 +1,25 @@
-use anyhow::{Context as _, Result, anyhow};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use anyhow::{Context as _, Result, anyhow};
+use serde_json::Value;
+use utoo_ruborist::lock::{LockPackage, PackageLock};
+use utoo_ruborist::manifest::{DepsView, EnginesView, PackageJson};
+use utoo_ruborist::registry::resolve_package;
+use utoo_ruborist::spec::{PackageSpec, Protocol};
+use utoo_ruborist::util::PackageNameStr;
+
 use super::ruborist_context::Context;
+use super::workspace::find_workspace_path;
+use crate::fs;
 use crate::helper::workspace::find_workspaces;
-use crate::util::json::{load_package_json_from_path, load_package_lock_json_from_path};
+use crate::util::cloner::clone_package;
+use crate::util::downloader::{is_git_url, resolve_cache_path};
+use crate::util::git_resolver::{resolve_git_spec, resolve_github_spec};
+use crate::util::json::{load_package_json, load_package_lock_json_from_path, read_json_file};
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
 use crate::util::save_type::{PackageAction, SaveType};
-use crate::util::user_config::get_legacy_peer_deps;
-use crate::util::{cloner::clone_package, downloader::download_to_cache};
-use utoo_ruborist::lock::{LockPackage, PackageLock};
-use utoo_ruborist::manifest::PackageJson;
-use utoo_ruborist::registry::resolve_package;
-use utoo_ruborist::util::parse_package_spec;
-
-use super::workspace::find_workspace_path;
+use crate::util::user_config::{get_legacy_peer_deps, set_package_json};
 
 // Platform-specific line endings
 #[cfg(target_os = "windows")]
@@ -49,41 +53,26 @@ pub fn extract_package_name(path: &str) -> String {
     }
 }
 
-/// Compare a PackageJson dependency map with a lock file Value field.
+/// Compare a PackageJson dependency map with a lock file dependency map.
 /// Treats empty maps and None/empty objects as equal.
-fn deps_map_equals_lock(pkg_deps: &HashMap<String, String>, lock_field: Option<&Value>) -> bool {
-    // Convert lock field to HashMap for comparison
-    let lock_deps: HashMap<String, String> = match lock_field {
-        Some(val) => val
-            .as_object()
-            .map(|obj| {
-                obj.iter()
-                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        None => HashMap::new(),
-    };
-
-    // Treat empty maps as equal
-    if pkg_deps.is_empty() && lock_deps.is_empty() {
-        return true;
+fn deps_map_equals_lock(
+    pkg_deps: &HashMap<String, String>,
+    lock_deps: Option<&HashMap<String, String>>,
+) -> bool {
+    match lock_deps {
+        Some(ld) => *pkg_deps == *ld,
+        None => pkg_deps.is_empty(),
     }
-
-    *pkg_deps == lock_deps
 }
 
 pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
     // Check package.json exists in project directory
-    if crate::fs::metadata(root_path.join("package.json"))
-        .await
-        .is_err()
-    {
+    if fs::metadata(root_path.join("package.json")).await.is_err() {
         return Err(anyhow!("package.json not found"));
     }
 
     // Check if we need to regenerate package-lock.json
-    let needs_regenerate = crate::fs::metadata(root_path.join("package-lock.json"))
+    let needs_regenerate = fs::metadata(root_path.join("package-lock.json"))
         .await
         .is_err()
         || is_pkg_lock_outdated(root_path).await?;
@@ -108,48 +97,49 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
 
     // Load existing package-lock.json only when it's valid and up-to-date
     tracing::debug!("Loading package-lock.json from current project");
-    let package_lock: PackageLock =
-        crate::util::json::read_json_file(&root_path.join("package-lock.json")).await?;
+    let package_lock: PackageLock = load_package_lock_json_from_path(root_path).await?;
 
     Ok(package_lock)
 }
 
 /// Batch update package.json for multiple package specifications to reduce file I/O operations
-pub async fn update_package_json(
-    cwd: &Path,
-    action: &PackageAction,
-    specs: &[&str],
-    workspace: &Option<String>,
-    save_type: &SaveType,
-) -> Result<()> {
-    if specs.is_empty() {
+pub struct UpdatePackageJsonOptions<'a> {
+    pub cwd: &'a Path,
+    pub action: PackageAction,
+    pub specs: &'a [&'a str],
+    pub workspace: Option<&'a str>,
+    pub save_type: SaveType,
+}
+
+pub async fn update_package_json(opts: &UpdatePackageJsonOptions<'_>) -> Result<()> {
+    if opts.specs.is_empty() {
         return Ok(());
     }
 
     // 1. Find target workspace if specified
-    let target_dir = if let Some(ws) = workspace {
-        find_workspace_path(cwd, ws)
+    let target_dir = if let Some(ws) = opts.workspace {
+        find_workspace_path(opts.cwd, ws)
             .await
             .context("Failed to find workspace path")?
     } else {
-        cwd.to_path_buf()
+        opts.cwd.to_path_buf()
     };
 
     // 2. Parse all package specs in parallel
     let mut package_specs = Vec::new();
-    for spec in specs {
+    for spec in opts.specs {
         let (name, version, version_spec) = resolve_package_spec(spec).await?;
         package_specs.push((name, version, version_spec));
     }
 
     // 3. Read package.json once and detect trailing newline
     let package_json_path = target_dir.join("package.json");
-    let package_json_content = crate::fs::read_to_string(&package_json_path).await?;
+    let package_json_content = fs::read_to_string(&package_json_path).await?;
     let has_trailing_newline =
         package_json_content.ends_with(LINE_ENDING) || package_json_content.ends_with('\n');
     let mut package_json: Value = serde_json::from_str(&package_json_content)?;
 
-    let dep_field = match save_type {
+    let dep_field = match opts.save_type {
         SaveType::Dev => "devDependencies",
         SaveType::Peer => "peerDependencies",
         SaveType::Optional => "optionalDependencies",
@@ -157,7 +147,7 @@ pub async fn update_package_json(
     };
 
     // 4. Ensure dependencies field exists if we're adding packages
-    if *action == PackageAction::Add && package_json.get(dep_field).is_none() {
+    if opts.action == PackageAction::Add && package_json.get(dep_field).is_none() {
         package_json[dep_field] = Value::Object(serde_json::Map::new());
     }
 
@@ -166,15 +156,12 @@ pub async fn update_package_json(
         && let Some(deps_obj) = deps.as_object_mut()
     {
         for (name, version, version_spec) in package_specs {
-            match action {
+            match opts.action {
                 PackageAction::Add => {
-                    let version_to_write = match version_spec {
-                        spec if spec.is_empty() || spec == "*" || spec == "latest" => {
-                            format!("^{version}")
-                        }
-                        spec => spec.to_string(),
-                    };
-                    deps_obj.insert(name, Value::String(version_to_write));
+                    deps_obj.insert(
+                        name,
+                        Value::String(format_save_spec(&version_spec, &version)),
+                    );
                 }
                 PackageAction::Remove => {
                     deps_obj.remove(&name);
@@ -188,17 +175,68 @@ pub async fn update_package_json(
     if has_trailing_newline {
         content.push_str(LINE_ENDING);
     }
-    crate::fs::write(&package_json_path, content).await?;
+    fs::write(&package_json_path, content).await?;
+
+    // Write-through: update the package.json cache
+    if let Ok(updated_pkg) = serde_json::from_value::<PackageJson>(package_json) {
+        set_package_json(&target_dir, updated_pkg);
+    }
 
     Ok(())
 }
 
+/// Format a version spec for writing into package.json.
+///
+/// Git/non-registry specs are written as-is (e.g. the resolved URL with pinned commit).
+/// Wildcard specs (`*`, `latest`, empty) are pinned to `^<resolved_version>`.
+/// Everything else (semver ranges, exact versions) passes through unchanged.
+fn format_save_spec(version_spec: &str, resolved_version: &str) -> String {
+    // Non-registry specs (git, github, file, http, etc.) are written as-is.
+    if version_spec.parse::<Protocol>().is_ok() {
+        return version_spec.to_string();
+    }
+    match version_spec {
+        "" | "*" | "latest" => format!("^{resolved_version}"),
+        _ => version_spec.to_string(),
+    }
+}
+
 pub async fn resolve_package_spec(spec: &str) -> Result<(String, String, String)> {
-    let (name, version_spec) = parse_package_spec(spec);
-    let resolved = resolve_package(&Context::registry(), name, version_spec)
-        .await
-        .map_err(|e| anyhow!("{}", e))?;
-    Ok((name.to_string(), resolved.version, version_spec.to_string()))
+    let parsed = PackageSpec::from(spec);
+    match parsed {
+        PackageSpec::Registry { name, version_spec } => {
+            let resolved = resolve_package(&Context::registry(), &name, &version_spec)
+                .await
+                .map_err(|e| anyhow!("{}", e))?;
+            Ok((name, resolved.version, version_spec))
+        }
+        PackageSpec::Git { url, commit_ish } => {
+            let resolved = resolve_git_spec(&url, commit_ish.as_deref(), None).await?;
+            Ok((
+                resolved.name.clone(),
+                resolved.version.clone(),
+                resolved.resolved_url.clone(),
+            ))
+        }
+        PackageSpec::GitHub {
+            owner,
+            repo,
+            commit_ish,
+        } => {
+            let resolved = resolve_github_spec(&owner, &repo, commit_ish.as_deref()).await?;
+            Ok((
+                resolved.name.clone(),
+                resolved.version.clone(),
+                resolved.resolved_url.clone(),
+            ))
+        }
+        PackageSpec::Local { protocol, .. } => {
+            anyhow::bail!("Local spec ({protocol}:) not supported in this context")
+        }
+        PackageSpec::Http { url } => {
+            anyhow::bail!("HTTP tarball spec ({url}) not supported in this context")
+        }
+    }
 }
 
 pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -> Result<PathBuf> {
@@ -222,7 +260,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
 
     // Create global package directory
     let package_path = lib_path.join(&name);
-    crate::fs::create_dir_all(&package_path).await?;
+    fs::create_dir_all(&package_path).await?;
 
     // Get package info from registry
     let resolved = resolve_package(&Context::registry(), &name, &version_spec)
@@ -238,7 +276,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
         .ok_or_else(|| anyhow!("Failed to get tarball URL from manifest"))?;
 
     // Download and extract package to cache
-    let cache_path = download_to_cache(&name, &resolved.version, tarball_url)
+    let cache_path = resolve_cache_path(&name, &resolved.version, tarball_url)
         .await
         .ok_or_else(|| anyhow!("Failed to download package {name}"))?;
 
@@ -247,11 +285,11 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
     // so we need to copy the file to the package directory to avoid effect other packages
     if resolved.manifest.has_install_script == Some(true) {
         let has_install_script_flag_path = cache_path.join("_hasInstallScript");
-        if !crate::fs::try_exists(&has_install_script_flag_path)
+        if !fs::try_exists(&has_install_script_flag_path)
             .await
             .unwrap_or(false)
         {
-            crate::fs::write(has_install_script_flag_path, "").await?;
+            fs::write(has_install_script_flag_path, "").await?;
         }
     }
 
@@ -261,13 +299,19 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
         cache_path.display(),
         package_path.display()
     );
-    clone_package(&cache_path, &package_path, &name, &resolved.version)
-        .await
-        .context("Failed to clone package")?;
+    clone_package(
+        &cache_path,
+        &package_path,
+        &name,
+        &resolved.version,
+        !is_git_url(tarball_url),
+    )
+    .await
+    .context("Failed to clone package")?;
 
     // Remove devDependencies from package.json
     let package_json_path = package_path.join("package.json");
-    let package_json_content = crate::fs::read_to_string(&package_json_path).await?;
+    let package_json_content = fs::read_to_string(&package_json_path).await?;
     let mut package_json: Value = serde_json::from_str(&package_json_content)?;
 
     // Remove specified dependency fields and scripts.prepare
@@ -285,7 +329,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
     }
 
     // Write back the modified package.json
-    crate::fs::write(
+    fs::write(
         &package_json_path,
         serde_json::to_string_pretty(&package_json)?,
     )
@@ -302,7 +346,7 @@ pub fn path_to_pkg_name(path_str: &str) -> Option<&str> {
         let pkg_name = &path_str[idx + "node_modules/".len()..];
         let parts: Vec<&str> = pkg_name.split('/').collect();
         // Only allow ora or @scope/ora, skip @pkg/name/path/custom/package.json
-        if parts.len() > 2 || (parts.len() == 2 && !parts[0].starts_with('@')) {
+        if parts.len() > 2 || (parts.len() == 2 && !parts[0].is_scoped()) {
             return None;
         }
         Some(pkg_name)
@@ -312,96 +356,88 @@ pub fn path_to_pkg_name(path_str: &str) -> Option<&str> {
 }
 
 pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
-    let pkg_value = load_package_json_from_path(root_path).await?;
-    let pkg: PackageJson =
-        serde_json::from_value(pkg_value).context("Failed to parse package.json")?;
-    let lock_file = load_package_lock_json_from_path(root_path).await?;
+    // Always read from disk — this function checks whether the on-disk
+    // package.json has diverged from the lock file, so it must not use the
+    // in-process cache.
+    let pkg: DepsView = load_package_json(root_path).await?;
+    let lock_file: PackageLock = read_json_file(&root_path.join("package-lock.json")).await?;
 
-    // get packages in package-lock.json
-    let packages = lock_file
-        .get("packages")
-        .and_then(|p| p.as_object())
-        .ok_or_else(|| anyhow!("Invalid package-lock.json format"))?;
+    let packages = &lock_file.packages;
 
-    // prepare packages to check
-    let mut pkgs_to_check: Vec<(String, PackageJson)> = vec![("".to_string(), pkg.clone())];
+    // prepare packages to check: (relative_path, deps)
+    let mut pkgs_to_check: Vec<(String, DepsView)> = vec![("".to_string(), pkg)];
 
-    // populate all workspaces
+    // populate all workspaces (load only the deps view for each)
     let workspaces = find_workspaces(root_path).await?;
-    for (_, path, workspace_pkg) in workspaces {
+    for (_, path, _) in workspaces {
         let target_path = path
             .strip_prefix(root_path)
             .unwrap_or(&path)
             .to_string_lossy()
             .to_string();
-        pkgs_to_check.push((target_path, workspace_pkg));
+        let ws_deps: DepsView = load_package_json(&path).await?;
+        pkgs_to_check.push((target_path, ws_deps));
     }
 
     let legacy_peer_deps = get_legacy_peer_deps().await;
 
-    // new workspace not found
-    for (path, pkg) in pkgs_to_check {
-        let lock = match packages.get(&path) {
+    for (path, pkg) in &pkgs_to_check {
+        let lock = match packages.get(path.as_str()) {
             Some(lock) => lock,
             None => {
-                let name = if path.is_empty() { "root" } else { &path };
+                let name = if path.is_empty() { "root" } else { path };
                 tracing::warn!("package-lock.json is outdated, new workspace {name} not found");
                 return Ok(true);
             }
         };
 
+        let name = if path.is_empty() { "root" } else { path };
+
         // check dependencies whether changed
-        if !deps_map_equals_lock(&pkg.dependencies, lock.get("dependencies")) {
-            let name = if path.is_empty() { "root" } else { &path };
+        if !deps_map_equals_lock(&pkg.dependencies, lock.dependencies.as_ref()) {
             tracing::warn!("package-lock.json is outdated, {name} dependencies changed");
             return Ok(true);
         }
 
-        if !deps_map_equals_lock(&pkg.optional_dependencies, lock.get("optionalDependencies")) {
-            let name = if path.is_empty() { "root" } else { &path };
+        if !deps_map_equals_lock(
+            &pkg.optional_dependencies,
+            lock.optional_dependencies.as_ref(),
+        ) {
             tracing::warn!("package-lock.json is outdated, {name} optionalDependencies changed");
             return Ok(true);
         }
 
-        if !deps_map_equals_lock(&pkg.dev_dependencies, lock.get("devDependencies")) {
-            let name = if path.is_empty() { "root" } else { &path };
+        if !deps_map_equals_lock(&pkg.dev_dependencies, lock.dev_dependencies.as_ref()) {
             tracing::warn!("package-lock.json is outdated, {name} devDependencies changed");
             return Ok(true);
         }
 
         if !legacy_peer_deps
-            && !deps_map_equals_lock(&pkg.peer_dependencies, lock.get("peerDependencies"))
+            && !deps_map_equals_lock(&pkg.peer_dependencies, lock.peer_dependencies.as_ref())
         {
-            let name = if path.is_empty() { "root" } else { &path };
             tracing::warn!("package-lock.json is outdated, {name} peerDependencies changed");
             return Ok(true);
         }
+    }
 
-        // only check engines for root workspace
-        if path.is_empty() {
-            // Normalize: None/empty -> None
-            let pkg_engines = pkg.engines.as_ref().filter(|m| !m.is_empty());
-            let lock_engines = lock
-                .get("engines")
-                .filter(|v| !v.is_null())
-                .and_then(|v| v.as_object())
-                .filter(|obj| !obj.is_empty());
+    // engines: root package only
+    let root_engines: EnginesView = load_package_json(root_path).await?;
+    let root_lock = packages
+        .get("")
+        .ok_or_else(|| anyhow!("Missing root in package-lock.json"))?;
 
-            let engines_match = match (pkg_engines, lock_engines) {
-                (None, None) => true,
-                (Some(p), Some(l)) => {
-                    p.len() == l.len()
-                        && p.iter()
-                            .all(|(k, v)| l.get(k).and_then(|x| x.as_str()) == Some(v.as_str()))
-                }
-                _ => false,
-            };
+    let pkg_engines = root_engines.engines.as_ref().filter(|m| !m.is_empty());
+    let lock_engines = root_lock.engines.as_ref().filter(|m| !m.is_empty());
 
-            if !engines_match {
-                tracing::warn!("package-lock.json is outdated, engines changed");
-                return Ok(true);
-            }
-        }
+    let engines_match = match (pkg_engines, lock_engines) {
+        (None, None) => true,
+        (Some(p), Some(l)) => *p == *l,
+        _ => false,
+    };
+
+    if !engines_match {
+        tracing::warn!("package-lock.json is outdated, engines changed");
+        return Ok(true);
     }
 
     Ok(false)
@@ -414,10 +450,10 @@ pub async fn save_package_lock(path: &Path, package_lock: &PackageLock) -> Resul
 
     // PackageLock now has all required fields (name, version, lockfile_version, requires, packages)
     let content = serde_json::to_string_pretty(package_lock)?;
-    crate::fs::write(&temp_path, content)
+    fs::write(&temp_path, content)
         .await
         .context("Failed to write temporary package-lock.json")?;
-    crate::fs::rename(temp_path, target_path)
+    fs::rename(temp_path, target_path)
         .await
         .context("Failed to rename package-lock.json")?;
 
@@ -426,10 +462,12 @@ pub async fn save_package_lock(path: &Path, package_lock: &PackageLock) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use serde_json::json;
     use std::fs;
+
+    use serde_json::json;
     use tempfile::TempDir;
+
+    use super::*;
 
     #[test]
     fn test_version_to_write() {
@@ -455,6 +493,41 @@ mod tests {
                 "Failed for version: {version}, spec: {spec}",
             );
         }
+    }
+
+    #[test]
+    fn test_format_save_spec() {
+        // Wildcard / empty specs pin to ^resolved
+        assert_eq!(format_save_spec("", "1.2.3"), "^1.2.3");
+        assert_eq!(format_save_spec("*", "1.2.3"), "^1.2.3");
+        assert_eq!(format_save_spec("latest", "1.2.3"), "^1.2.3");
+
+        // Normal semver specs pass through
+        assert_eq!(format_save_spec("^1.0.0", "1.2.3"), "^1.0.0");
+        assert_eq!(format_save_spec("~1.2.0", "1.2.3"), "~1.2.0");
+        assert_eq!(format_save_spec("1.2.3", "1.2.3"), "1.2.3");
+
+        // Non-registry specs pass through as-is
+        assert_eq!(
+            format_save_spec("git+https://github.com/user/repo.git#abc123", "1.0.0"),
+            "git+https://github.com/user/repo.git#abc123"
+        );
+        assert_eq!(
+            format_save_spec("git://github.com/user/repo.git", "1.0.0"),
+            "git://github.com/user/repo.git"
+        );
+        assert_eq!(
+            format_save_spec("github:user/repo", "1.0.0"),
+            "github:user/repo"
+        );
+        assert_eq!(
+            format_save_spec("https://example.com/pkg.tgz", "1.0.0"),
+            "https://example.com/pkg.tgz"
+        );
+        assert_eq!(
+            format_save_spec("file:../local-pkg", "1.0.0"),
+            "file:../local-pkg"
+        );
     }
 
     #[test]
@@ -702,8 +775,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_package_json_preserves_trailing_newline() {
-        use crate::util::save_type::{PackageAction, SaveType};
         use tempfile::tempdir;
+
+        use crate::util::save_type::{PackageAction, SaveType};
 
         let temp_dir = tempdir().unwrap();
         let temp_path = temp_dir.path();
@@ -717,13 +791,13 @@ mod tests {
 "#;
         fs::write(temp_path.join("package.json"), pkg_json_with_newline).unwrap();
 
-        update_package_json(
-            temp_path,
-            &PackageAction::Add,
-            &["lodash@4.17.21"],
-            &None,
-            &SaveType::Prod,
-        )
+        update_package_json(&UpdatePackageJsonOptions {
+            cwd: temp_path,
+            action: PackageAction::Add,
+            specs: &["lodash@4.17.21"],
+            workspace: None,
+            save_type: SaveType::Prod,
+        })
         .await
         .unwrap();
 
@@ -738,13 +812,13 @@ mod tests {
 }"#;
         fs::write(temp_path.join("package.json"), pkg_json_no_newline).unwrap();
 
-        update_package_json(
-            temp_path,
-            &PackageAction::Add,
-            &["react@18.0.0"],
-            &None,
-            &SaveType::Prod,
-        )
+        update_package_json(&UpdatePackageJsonOptions {
+            cwd: temp_path,
+            action: PackageAction::Add,
+            specs: &["react@18.0.0"],
+            workspace: None,
+            save_type: SaveType::Prod,
+        })
         .await
         .unwrap();
 
@@ -755,8 +829,9 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[tokio::test]
     async fn test_update_package_json_preserves_crlf() {
-        use crate::util::save_type::{PackageAction, SaveType};
         use tempfile::tempdir;
+
+        use crate::util::save_type::{PackageAction, SaveType};
 
         let temp_dir = tempdir().unwrap();
         let temp_path = temp_dir.path();
@@ -765,13 +840,13 @@ mod tests {
         let pkg_json_crlf = "{\r\n  \"name\": \"test-package\",\r\n  \"version\": \"1.0.0\",\r\n  \"dependencies\": {}\r\n}\r\n";
         fs::write(temp_path.join("package.json"), pkg_json_crlf).unwrap();
 
-        update_package_json(
-            temp_path,
-            &PackageAction::Add,
-            &["lodash@4.17.21"],
-            &None,
-            &SaveType::Prod,
-        )
+        update_package_json(&UpdatePackageJsonOptions {
+            cwd: temp_path,
+            action: PackageAction::Add,
+            specs: &["lodash@4.17.21"],
+            workspace: None,
+            save_type: SaveType::Prod,
+        })
         .await
         .unwrap();
 

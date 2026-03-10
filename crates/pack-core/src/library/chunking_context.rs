@@ -16,7 +16,7 @@ use turbopack_browser::chunking_context::{
 use turbopack_core::{
     asset::{Asset, AssetContent},
     chunk::{
-        Chunk, ChunkGroupResult, ChunkItem, ChunkableModule, ChunkingConfig, ChunkingConfigs,
+        ChunkGroupResult, ChunkItem, ChunkableModule, ChunkingConfig, ChunkingConfigs,
         ChunkingContext, EntryChunkGroupResult, EvaluatableAsset, EvaluatableAssets, MinifyType,
         SourceMapSourceType, SourceMapsType, UnusedReferences,
         availability_info::AvailabilityInfo,
@@ -37,7 +37,7 @@ use turbopack_css::chunk::{CssChunk, source_map::CssChunkSourceMapAsset};
 use turbopack_ecmascript::{
     async_chunk::module::AsyncLoaderModule,
     chunk::{EcmascriptChunk, EcmascriptChunkType},
-    manifest::{chunk_asset::ManifestAsyncModule, loader_item::ManifestLoaderChunkItem},
+    manifest::{chunk_asset::ManifestAsyncModule, loader_module::ManifestLoaderModule},
 };
 use turbopack_ecmascript_runtime::RuntimeType;
 
@@ -284,35 +284,6 @@ impl LibraryChunkingContext {
 #[turbo_tasks::value_impl]
 impl LibraryChunkingContext {
     #[turbo_tasks::function]
-    async fn generate_chunk(
-        self: Vc<Self>,
-        ident: Vc<AssetIdent>,
-        chunk: Vc<Box<dyn Chunk>>,
-        evaluatable_assets: Vc<EvaluatableAssets>,
-    ) -> Result<Vc<Box<dyn OutputAsset>>> {
-        let chunk = chunk.to_resolved().await?;
-        Ok(
-            if let Some(ecmascript_chunk) = ResolvedVc::try_downcast_type::<EcmascriptChunk>(chunk)
-            {
-                let ident =
-                    self.ecmascript_chunk_ident_with_filename_template(ident, *ecmascript_chunk);
-                Vc::upcast(EcmascriptLibraryEvaluateChunk::new(
-                    self,
-                    ident,
-                    *ecmascript_chunk,
-                    evaluatable_assets,
-                ))
-            } else if let Some(output_asset) =
-                ResolvedVc::try_sidecast::<Box<dyn OutputAsset>>(chunk)
-            {
-                *output_asset
-            } else {
-                bail!("Unable to generate output asset for chunk");
-            },
-        )
-    }
-
-    #[turbo_tasks::function]
     pub(crate) async fn ecmascript_chunk_ident_with_filename_template(
         self: Vc<Self>,
         ident: Vc<AssetIdent>,
@@ -543,12 +514,13 @@ impl ChunkingContext for LibraryChunkingContext {
     #[turbo_tasks::function]
     async fn asset_path(
         &self,
-        content_hash: RcStr,
+        content_hash: Vc<RcStr>,
         original_asset_ident: Vc<AssetIdent>,
         _tag: Option<RcStr>,
     ) -> Result<Vc<FileSystemPath>> {
         let source_path = original_asset_ident.path().await?;
         let basename = source_path.file_name();
+        let content_hash = content_hash.await?;
 
         let asset_path = match &self.asset_module_filename {
             Some(filename_template) => {
@@ -661,9 +633,46 @@ impl ChunkingContext for LibraryChunkingContext {
 
             let assets: Vec<ResolvedVc<Box<dyn OutputAsset>>> = chunks
                 .iter()
-                .map(|chunk| {
-                    self.generate_chunk(ident, **chunk, evaluatable_assets)
-                        .to_resolved()
+                .map(async |chunk| {
+                    if let Some(ecmascript_chunk) =
+                        ResolvedVc::try_downcast_type::<EcmascriptChunk>(*chunk)
+                    {
+                        let ident = self.ecmascript_chunk_ident_with_filename_template(
+                            ident,
+                            *ecmascript_chunk,
+                        );
+                        let other_chunks = chunks
+                            .iter()
+                            .filter_map(|c| {
+                                // We have no more than two output chunks for library,
+                                // one .js chunk and one .css chunk, so this is simple enough
+                                if c == chunk {
+                                    None
+                                } else {
+                                    ResolvedVc::try_sidecast::<Box<dyn OutputAsset>>(*c)
+                                }
+                            })
+                            .collect::<Vec<_>>();
+
+                        Ok(ResolvedVc::upcast(
+                            EcmascriptLibraryEvaluateChunk::new(
+                                *self,
+                                ident,
+                                *ecmascript_chunk,
+                                Vc::cell(other_chunks),
+                                evaluatable_assets,
+                                module_graph,
+                            )
+                            .to_resolved()
+                            .await?,
+                        ))
+                    } else if let Some(output_asset) =
+                        ResolvedVc::try_sidecast::<Box<dyn OutputAsset>>(*chunk)
+                    {
+                        Ok(output_asset)
+                    } else {
+                        bail!("Unable to generate output asset for chunk");
+                    }
                 })
                 .try_join()
                 .await?;
@@ -700,13 +709,25 @@ impl ChunkingContext for LibraryChunkingContext {
         module_graph: Vc<ModuleGraph>,
         availability_info: AvailabilityInfo,
     ) -> Result<Vc<Box<dyn ChunkItem>>> {
-        let manifest_asset =
-            ManifestAsyncModule::new(module, module_graph, Vc::upcast(self), availability_info);
-        Ok(Vc::upcast(ManifestLoaderChunkItem::new(
-            manifest_asset,
-            module_graph,
-            Vc::upcast(self),
-        )))
+        let chunking_context: ResolvedVc<Box<dyn ChunkingContext>> =
+            Vc::upcast::<Box<dyn ChunkingContext>>(self)
+                .to_resolved()
+                .await?;
+        Ok(if self.await?.manifest_chunks {
+            let manifest_asset = ManifestAsyncModule::new(
+                module,
+                module_graph,
+                *chunking_context,
+                availability_info,
+            )
+            .to_resolved()
+            .await?;
+            let loader_module = ManifestLoaderModule::new(*manifest_asset);
+            loader_module.as_chunk_item(module_graph, *chunking_context)
+        } else {
+            let module = AsyncLoaderModule::new(module, *chunking_context, availability_info);
+            module.as_chunk_item(module_graph, *chunking_context)
+        })
     }
 
     #[turbo_tasks::function]

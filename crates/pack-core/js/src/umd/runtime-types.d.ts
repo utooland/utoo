@@ -41,10 +41,7 @@ type EsmImport = (
   allowExportDefault: boolean,
 ) => EsmNamespaceObject | Promise<EsmNamespaceObject>;
 type InvokeAsyncLoader = (moduleId: ModuleId) => Promise<Exports>;
-type EsmExport = (
-  exportGetters: Record<string, () => any>,
-  id: ModuleId | undefined,
-) => void;
+type EsmExport = (bindings: any, id: ModuleId | undefined) => void;
 type ExportValue = (value: any, id: ModuleId | undefined) => void;
 type ExportNamespace = (namespace: any, id: ModuleId | undefined) => void;
 type DynamicExport = (
@@ -57,7 +54,7 @@ type LoadScript = (scriptUrl: string) => Promise<void>;
 
 type ModuleCache<M> = Record<ModuleId, M>;
 // TODO properly type values here
-type ModuleFactories = Record<ModuleId, Function>;
+type ModuleFactories = Map<ModuleId, Function>;
 // The value is an array with scope hoisting
 type CompressedModuleFactories = Record<
   ModuleId,
@@ -79,6 +76,7 @@ type AsyncModule = (
 
 type ResolveAbsolutePath = (modulePath?: string) => string;
 type GetWorkerBlobURL = (chunks: ChunkPath[]) => string;
+type GetPublicPath = () => string;
 
 type ExternalRequire = (
   id: DependencySpecifier,
@@ -92,13 +90,11 @@ type ExternalImport = (
 interface Module {
   exports: Function | Exports | Promise<Exports> | AsyncModulePromise;
   error: Error | undefined;
-  loaded: boolean;
   id: ModuleId;
   namespaceObject?:
     | EsmNamespaceObject
     | Promise<EsmNamespaceObject>
     | AsyncModulePromise<EsmNamespaceObject>;
-  [REEXPORTED_OBJECTS]?: any[];
 }
 
 interface ModuleWithDirection extends Module {
@@ -108,7 +104,7 @@ interface ModuleWithDirection extends Module {
 
 interface TurbopackBaseContext<M> {
   a: AsyncModule;
-  e: Module["exports"];
+  e: Exports;
   r: CommonJsRequire;
   t: RuntimeRequire;
   f: ModuleContextFactory;
@@ -126,6 +122,7 @@ interface TurbopackBaseContext<M> {
   g: typeof globalThis;
   P: ResolveAbsolutePath;
   U: RelativeURL;
+  p: GetPublicPath;
   x: ExternalRequire;
   y: ExternalImport;
   z: CommonJsRequire;

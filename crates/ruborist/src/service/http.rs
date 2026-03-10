@@ -1,181 +1,166 @@
-//! HTTP client for registry operations.
+//! HTTP request chain for registry operations.
 //!
-//! Provides retry with exponential backoff for both native and WASM targets.
+//! # Architecture
+//!
+//! ```text
+//!   registry.rs                      resolve_package(name, spec)
+//!       |                                     |
+//!       |          +------------- supports_semver? -------------+
+//!       |          |                                            |
+//!       |        true (npmmirror)                     false (npmjs.org)
+//!       |          |                                            |
+//!       |   fetch_version_manifest          resolve_full_manifest
+//!       |   GET /{name}/{spec}              GET /{name}
+//!       |   Accept: abbreviated             Accept: abbreviated
+//!       |          |                        + If-None-Match: {etag}
+//!       |          |                                  |
+//!       |          |                        +---------+---------+
+//!       |          |                      200 OK          304 Not Modified
+//!       |          |                    parse manifest     use disk cache
+//!       |          |                    cache etag         + fetch version
+//!       |          |                        |                   |
+//!       v          v                        v                   v
+//!  +-----------------------------------------------------------------+
+//!  |  manifest.rs -- Retry Layer                                     |
+//!  |  RetryIf + FetchError { Retryable, Permanent }                  |
+//!  |  delays: 100ms -> 200ms -> 500ms -> 1s -> 2s  (5 attempts max) |
+//!  +-----------------------------------------------------------------+
+//!       |
+//!       v
+//!  +-----------------------------------------------------------------+
+//!  |  http.rs -- HTTP Client  (this file)                            |
+//!  |  global singleton reqwest::Client (LazyLock)                    |
+//!  |  rustls TLS + no_proxy + env proxy + CachingResolver            |
+//!  +-----------------------------------------------------------------+
+//!       |
+//!       v
+//!  +-----------------------------------------------------------------+
+//!  |  dns.rs -- CachingResolver                                      |
+//!  |  wraps OS getaddrinfo + in-memory cache (TTL 300s)              |
+//!  |  single-flight: concurrent lookups coalesced via OnceCell       |
+//!  +-----------------------------------------------------------------+
+//! ```
+//!
+//! # Abbreviated metadata
+//!
+//! `Accept: application/vnd.npm.install-v1+json` returns only install-relevant
+//! fields (deps, dist, engines, bin), 10-50x smaller than full JSON.
+//! Controlled by [`manifest::MetadataFormat`].
+//!
+//! # ETag / 304 Not Modified
+//!
+//! Only for `fetch_full_manifest` on non-semver registries. First request
+//! returns `ETag`; subsequent requests send `If-None-Match`. On 304, the
+//! disk-cached version list is reused and individual versions are fetched
+//! separately. See [`manifest::FetchManifestResult`].
+//!
+//! # Retry classification
+//!
+//! Errors are classified structurally (not by string matching):
+//! - **Retryable**: timeout, connect, body (stream reset), request (h2 reset),
+//!   HTTP 429, HTTP 5xx
+//! - **Permanent**: HTTP 404, JSON parse, other 4xx
+//!
+//! See [`manifest::FetchError`] and [`manifest::classify_status`].
+//!
+//! # Proxy
+//!
+//! System proxy is disabled (`no_proxy`). Only env vars are read:
+//! `ALL_PROXY` > `HTTPS_PROXY` + `HTTP_PROXY` (+ lowercase variants).
+//!
+//! # DNS caching
+//!
+//! Replaces `hickory-dns` with OS resolver (`getaddrinfo` via
+//! `tokio::net::lookup_host`) wrapped in [`dns::CachingResolver`].
+//! More compatible with sandboxed environments where direct DNS is blocked.
+//! WASM targets skip DNS entirely (browser handles it).
 
-use anyhow::{Result, anyhow};
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
-use crate::model::manifest::{FullManifest, VersionManifest};
+use anyhow::{Context, Result, anyhow};
 
-/// Global HTTP client with connection pooling
-static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-
-fn get_client() -> &'static reqwest::Client {
-    HTTP_CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .build()
-            .expect("Failed to build reqwest client")
-    })
-}
-
-/// Check if an error is retryable.
-/// Only retry on network errors or 5xx/429 server errors.
-fn is_retryable_error(err: &anyhow::Error) -> bool {
-    let err_str = err.to_string();
-    // Retry on network/connection errors
-    if err_str.contains("Network error")
-        || err_str.contains("timeout")
-        || err_str.contains("connection")
-    {
-        return true;
-    }
-    // Retry on 5xx server errors and 429 rate limiting
-    if err_str.contains("HTTP 5") || err_str.contains("HTTP 429") {
-        return true;
-    }
-    // Don't retry 3xx, 4xx (except 429), or other errors
-    false
-}
-
-/// Simple retry with exponential backoff.
-/// Only retries on network errors, 5xx server errors, and 429 rate limiting.
-async fn with_retry<T, F, Fut>(max_retries: usize, mut f: F) -> Result<T>
-where
-    F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = Result<T>>,
-{
-    let delays = [100, 200, 500, 1000, 2000];
-    let mut last_error = anyhow!("No attempts made");
-
-    for attempt in 0..=max_retries {
-        match f().await {
-            Ok(result) => return Ok(result),
-            Err(e) => {
-                // Only retry on retryable errors
-                if !is_retryable_error(&e) {
-                    return Err(e);
-                }
-                tracing::debug!("Retryable error (attempt {}): {}", attempt + 1, e);
-                last_error = e;
-                if attempt < max_retries {
-                    let delay_ms = delays.get(attempt).copied().unwrap_or(2000);
-                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms as u64)).await;
-                }
-            }
-        }
-    }
-
-    Err(last_error)
-}
-
-/// Fetch full manifest with retry and ETag support
-pub async fn fetch_full_manifest(
-    registry_url: &str,
-    name: &str,
-    use_abbreviated: bool,
-    etag: Option<&str>,
-) -> Result<(FullManifest, Option<String>)> {
-    let url = format!("{}/{}", registry_url, name);
-    let etag_owned = etag.map(|s| s.to_string());
-
-    tracing::debug!("Fetching full manifest for {} from {}", name, url);
-
-    with_retry(5, || {
-        let url = url.clone();
-        let etag = etag_owned.clone();
-        async move {
-            let accept = if use_abbreviated {
-                "application/vnd.npm.install-v1+json"
-            } else {
-                "application/json"
-            };
-
-            let mut request = get_client().get(&url).header("Accept", accept);
-            if let Some(etag_value) = &etag {
-                request = request.header("If-None-Match", etag_value);
-            }
-
-            let response = request
-                .send()
-                .await
-                .map_err(|e| anyhow!("Network error: {e}"))?;
-
-            if response.status().is_success() {
-                let new_etag = response
-                    .headers()
-                    .get("etag")
-                    .and_then(|v| v.to_str().ok())
-                    .map(|s| s.to_string());
-
-                let manifest: FullManifest = response
-                    .json()
-                    .await
-                    .map_err(|e| anyhow!("JSON parse error: {e}"))?;
-
-                Ok((manifest, new_etag))
-            } else if response.status().as_u16() == 304 {
-                Err(anyhow!("Not modified"))
-            } else if response.status().as_u16() == 404 {
-                Err(anyhow!("Package not found"))
-            } else {
-                tracing::warn!("HTTP error for {}: {}", url, response.status());
-                Err(anyhow!("HTTP {}", response.status()))
-            }
-        }
-    })
-    .await
-    .map_err(|e| anyhow!("Failed to fetch {}: {}", name, e))
-}
-
-/// Fetch version manifest with retry
+/// Global HTTP client with connection pooling and DNS caching.
 ///
-/// `use_abbreviated`: Whether to use abbreviated manifest format.
-/// Only semver-supporting registries (npmmirror) support this.
-/// For npm registry, use false to get standard JSON format.
-pub async fn fetch_version_manifest(
-    registry_url: &str,
-    name: &str,
-    spec: &str,
-    use_abbreviated: bool,
-) -> Result<VersionManifest> {
-    let url = format!("{}/{}/{}", registry_url, name, spec);
+/// Stores `Result<Client, String>` so that proxy-configuration errors are
+/// surfaced to callers instead of panicking or calling `process::exit`.
+static HTTP_CLIENT: LazyLock<Result<reqwest::Client, String>> = LazyLock::new(|| {
+    client_builder()
+        .and_then(|b| b.build().context("Failed to build reqwest client"))
+        .map_err(|e| e.to_string())
+});
 
-    tracing::debug!(
-        "Fetching version manifest for {}@{} from {}",
-        name,
-        spec,
-        url
-    );
+pub(crate) fn get_client() -> Result<&'static reqwest::Client> {
+    HTTP_CLIENT.as_ref().map_err(|e| anyhow!("{e}"))
+}
 
-    with_retry(5, || {
-        let url = url.clone();
-        async move {
-            let accept = if use_abbreviated {
-                "application/vnd.npm.install-v1+json"
-            } else {
-                "application/json"
-            };
+/// Create a [`reqwest::ClientBuilder`] with TLS, DNS caching, and proxy
+/// from environment variables.
+///
+/// This is the shared base for all HTTP clients. Callers can further customize
+/// the builder (e.g. add `user_agent`, `http1_only`, timeouts) before building.
+///
+/// On native targets: uses rustls TLS, caching DNS resolver, and reads proxy
+/// from `ALL_PROXY` > `HTTPS_PROXY` / `HTTP_PROXY` (and their lowercase variants).
+///
+/// On WASM targets: returns a minimal builder (browser handles TLS, DNS, proxy).
+///
+/// Returns `Err` if a proxy URL from the environment is malformed.
+pub fn client_builder() -> Result<reqwest::ClientBuilder> {
+    let builder = reqwest::Client::builder();
 
-            let response = get_client()
-                .get(&url)
-                .header("Accept", accept)
-                .send()
-                .await
-                .map_err(|e| anyhow!("Network error: {e}"))?;
+    #[cfg(not(target_arch = "wasm32"))]
+    let builder = {
+        use crate::service::dns::shared_resolver;
 
-            if response.status().is_success() {
-                response
-                    .json()
-                    .await
-                    .map_err(|e| anyhow!("JSON parse error: {e}"))
-            } else if response.status().as_u16() == 404 {
-                Err(anyhow!("Package not found"))
-            } else {
-                tracing::warn!("HTTP error for {}: {}", url, response.status());
-                Err(anyhow!("HTTP {}", response.status()))
+        let mut builder = builder
+            .use_rustls_tls()
+            .no_proxy()
+            .dns_resolver(shared_resolver());
+
+        match env_var("ALL_PROXY") {
+            Some(url) => {
+                builder = builder.proxy(
+                    reqwest::Proxy::all(&url).context(format!("invalid ALL_PROXY url: {url}"))?,
+                );
+            }
+            None => {
+                // HTTPS_PROXY and HTTP_PROXY are checked independently (both can be set)
+                if let Some(url) = env_var("HTTPS_PROXY") {
+                    builder = builder.proxy(
+                        reqwest::Proxy::https(&url)
+                            .context(format!("invalid HTTPS_PROXY url: {url}"))?,
+                    );
+                }
+                if let Some(url) = env_var("HTTP_PROXY") {
+                    builder = builder.proxy(
+                        reqwest::Proxy::http(&url)
+                            .context(format!("invalid HTTP_PROXY url: {url}"))?,
+                    );
+                }
             }
         }
-    })
-    .await
-    .map_err(|e| anyhow!("Failed to fetch {}@{}: {}", name, spec, e))
+
+        builder
+    };
+
+    Ok(builder)
+}
+
+/// Read a proxy env var, checking uppercase then lowercase.
+///
+/// Empty strings are treated as unset. This matters in Claude Code's sandbox,
+/// which sets `ALL_PROXY=""` (empty uppercase) alongside `all_proxy=socks5://...`
+/// (valid lowercase). Without filtering empties first, `std::env::var("ALL_PROXY")`
+/// returns `Ok("")` — an `Ok`, not `Err` — so a naive `Result::or_else` fallback
+/// to the lowercase variant would never fire.
+#[cfg(not(target_arch = "wasm32"))]
+fn env_var(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            std::env::var(key.to_lowercase())
+                .ok()
+                .filter(|s| !s.is_empty())
+        })
 }

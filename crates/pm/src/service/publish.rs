@@ -34,7 +34,7 @@ use crate::service::pm_pack;
 use crate::service::script::ScriptService;
 use crate::util::format_print::print_pack_details;
 use crate::util::integrity::compute_shasum;
-use crate::util::json::load_package_json_from_path;
+use crate::util::user_config::get_or_load_package_json;
 
 /// Options for publishing a package, resolved by the cmd layer.
 pub struct PublishOptions<'a> {
@@ -75,9 +75,9 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
     let token = auth::require_token(opts.registry).await?;
 
     // Load package.json for version metadata in the publish payload
-    let package_json = load_package_json_from_path(&opts.package_info.path).await?;
+    let pkg = get_or_load_package_json(&opts.package_info.path).await?;
     let payload = PublishPayload::new(&PublishPayloadInput {
-        package_json: &package_json,
+        package_json: &pkg,
         name: &pack_result.name,
         version: &pack_result.version,
         tag: opts.tag,

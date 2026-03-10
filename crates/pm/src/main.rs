@@ -30,18 +30,19 @@ mod service;
 mod util;
 
 use crate::constants::cmd::{
-    CLEAN_ABOUT, CLEAN_ALIAS, CLEAN_NAME, COMPLETIONS_ABOUT, COMPLETIONS_NAME, CONFIG_ABOUT,
-    CONFIG_ALIAS, CONFIG_NAME, DEPS_ABOUT, DEPS_ALIAS, DEPS_NAME, EXECUTE_ABOUT, EXECUTE_ALIAS,
-    EXECUTE_NAME, INIT_ABOUT, INIT_ALIAS, INIT_NAME, INSTALL_ABOUT, INSTALL_ALIAS, INSTALL_NAME,
-    LINK_ABOUT, LINK_ALIAS, LINK_NAME, LIST_ALIAS, LIST_NAME, LOGIN_ABOUT, LOGIN_ALIAS, LOGIN_NAME,
-    LOGOUT_ABOUT, LOGOUT_ALIAS, LOGOUT_NAME, PACK_ABOUT, PACK_ALIAS, PACK_NAME, PING_ABOUT,
-    PING_ALIAS, PING_NAME, PUBLISH_ABOUT, PUBLISH_ALIAS, PUBLISH_NAME, REBUILD_ABOUT,
-    REBUILD_ALIAS, REBUILD_NAME, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT, UNINSTALL_ALIAS,
-    UNINSTALL_NAME, UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT, VIEW_ALIAS,
-    VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME, WHOAMI_ABOUT, WHOAMI_ALIAS, WHOAMI_NAME,
+    CLEAN_ABOUT, CLEAN_ALIAS, CLEAN_NAME, COMPLETIONS_ABOUT, COMPLETIONS_ALIAS, COMPLETIONS_NAME,
+    CONFIG_ABOUT, CONFIG_ALIAS, CONFIG_NAME, DEPS_ABOUT, DEPS_ALIAS, DEPS_NAME, EXECUTE_ABOUT,
+    EXECUTE_ALIAS, EXECUTE_NAME, INIT_ABOUT, INIT_ALIAS, INIT_NAME, INSTALL_ABOUT, INSTALL_ALIAS,
+    INSTALL_NAME, LINK_ABOUT, LINK_ALIAS, LINK_NAME, LIST_ALIAS, LIST_NAME, LOGIN_ABOUT,
+    LOGIN_ALIAS, LOGIN_NAME, LOGOUT_ABOUT, LOGOUT_ALIAS, LOGOUT_NAME, PACK_ABOUT, PACK_ALIAS,
+    PACK_NAME, PING_ABOUT, PING_ALIAS, PING_NAME, PUBLISH_ABOUT, PUBLISH_ALIAS, PUBLISH_NAME,
+    REBUILD_ABOUT, REBUILD_ALIAS, REBUILD_NAME, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT,
+    UNINSTALL_ALIAS, UNINSTALL_NAME, UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT,
+    VIEW_ALIAS, VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME, WHOAMI_ABOUT, WHOAMI_ALIAS,
+    WHOAMI_NAME,
 };
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
-use crate::helper::workspace::update_cwd_to_root;
+use crate::helper::workspace::init_project_root;
 
 fn detect_shell_from_env() -> Option<clap_complete::Shell> {
     // Most common on Unix-like systems.
@@ -317,7 +318,7 @@ enum Commands {
     },
 
     /// Generate shell completion scripts
-    #[command(name = COMPLETIONS_NAME, about = COMPLETIONS_ABOUT)]
+    #[command(name = COMPLETIONS_NAME, alias = COMPLETIONS_ALIAS, about = COMPLETIONS_ABOUT)]
     Completions {
         /// Shell to generate completions for (auto-detected if omitted)
         #[arg(value_enum)]
@@ -326,12 +327,7 @@ enum Commands {
 }
 
 fn main() {
-    // Windows default thread stack is 1MB, insufficient for libdeflater + tar + rayon work-stealing.
-    #[cfg(target_os = "windows")]
-    rayon::ThreadPoolBuilder::new()
-        .stack_size(8 * 1024 * 1024)
-        .build_global()
-        .ok();
+    crate::util::sysconf::init();
 
     let worker_threads = std::thread::available_parallelism()
         .map(|n| n.get())
@@ -485,7 +481,7 @@ async fn async_main() -> Result<()> {
                 }
             } else {
                 let cwd = std::env::current_dir()?;
-                let root_path = update_cwd_to_root(&cwd).await?;
+                let root_path = init_project_root(&cwd).await?;
                 install(ignore_scripts, &root_path).await?;
                 log_time_end("All packages installed");
             }
@@ -523,7 +519,7 @@ async fn async_main() -> Result<()> {
         }
         Some(Commands::Deps { workspace_only }) => {
             let cwd = std::env::current_dir()?;
-            let root_path = update_cwd_to_root(&cwd).await?;
+            let root_path = init_project_root(&cwd).await?;
             if workspace_only {
                 build_workspace(&root_path).await.map(|_| ())?
             } else {
@@ -561,15 +557,16 @@ async fn async_main() -> Result<()> {
             view(&package).await?;
         }
         Some(Commands::Link { packages, prefix }) => {
+            let cwd = std::env::current_dir().context("Failed to get current directory")?;
             match packages {
                 None => {
                     // Link current package to global
-                    let package_name = link_current_to_global(prefix.as_deref()).await?;
+                    let package_name = link_current_to_global(&cwd, prefix.as_deref()).await?;
                     log_time_end(&format!("{package_name} linked"));
                 }
                 Some(packages) => {
                     for package in packages.iter() {
-                        link_global_to_local(package, prefix.as_deref()).await?;
+                        link_global_to_local(&cwd, package, prefix.as_deref()).await?;
                     }
                     log_time_end(&format!("'{}' linked to local", packages.join(", ")));
                 }
@@ -643,7 +640,7 @@ async fn async_main() -> Result<()> {
             } else {
                 // Default to install if no arguments
                 let cwd = std::env::current_dir()?;
-                let root_path = update_cwd_to_root(&cwd).await?;
+                let root_path = init_project_root(&cwd).await?;
                 install(cli.ignore_scripts, &root_path).await?;
                 log_time_end("All packages installed");
             }

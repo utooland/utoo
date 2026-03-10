@@ -24,7 +24,8 @@ export default defineCommand({
     },
   },
   async run({ args }) {
-    const { projectOptions, projectPath, rootPath } = resolveBuildOptions(args);
+    const { projectOptions, projectPath, rootPath } =
+      await resolveBuildOptions(args);
     await utooPack.serve(projectOptions, projectPath, rootPath, {
       logServerInfo: true,
       port: 3000,

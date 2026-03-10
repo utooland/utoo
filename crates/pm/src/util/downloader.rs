@@ -1,13 +1,14 @@
-use anyhow::{Context, Result};
-use bytes::Bytes;
-use once_cell::sync::Lazy;
-use reqwest::Client;
-use reqwest::StatusCode;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+
+use anyhow::{Context, Result};
+use bytes::Bytes;
+use once_cell::sync::Lazy;
+use reqwest::{Client, StatusCode};
 use tokio::sync::Semaphore;
 use tokio_retry::RetryIf;
+use utoo_ruborist::spec::Protocol;
 
 use super::cache::get_cache_dir;
 use super::extractor::extract_and_write;
@@ -33,10 +34,56 @@ pub fn download_count() -> usize {
     DOWNLOAD_COUNT.load(Ordering::Relaxed)
 }
 
-/// Download a package tarball to the global cache directory, returning the cache path.
+/// Check whether a tarball URL refers to a git-resolved package.
+pub fn is_git_url(url: &str) -> bool {
+    matches!(url.parse::<Protocol>(), Ok(Protocol::Git))
+}
+
+/// Look up the cache path for a git-resolved package.
+///
+/// Git packages are cloned during BFS resolution (inside ruborist) and
+/// stored at `<cache_dir>/<name>/<commit_sha>/`.
+pub async fn git_cache_lookup(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
+    let commit_sha = tarball_url.split_once('#').map(|(_, frag)| frag)?;
+    if commit_sha.contains("..") || commit_sha.contains('/') || commit_sha.contains('\\') {
+        tracing::warn!("Suspicious commit SHA fragment in URL: {}", tarball_url);
+        return None;
+    }
+    let cache_dir = get_cache_dir();
+    let cache_path = cache_dir.join(name).join(commit_sha);
+    if crate::fs::try_exists(&cache_path.join("_resolved"))
+        .await
+        .unwrap_or(false)
+    {
+        tracing::debug!("Git package cache hit: {}@{}", name, version);
+        return Some(cache_path);
+    }
+    tracing::warn!(
+        "Git package {}@{} not found in cache, expected pre-resolution",
+        name,
+        version
+    );
+    None
+}
+
+/// Resolve the local cache path for a package, downloading if necessary.
+///
+/// Routes git URLs to [`git_cache_lookup`] and registry tarballs to
+/// [`download_to_cache`].
+pub async fn resolve_cache_path(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
+    if is_git_url(tarball_url) {
+        git_cache_lookup(name, version, tarball_url).await
+    } else {
+        download_to_cache(name, version, tarball_url).await
+    }
+}
+
+/// Download a registry tarball to the global cache directory, returning the cache path.
 ///
 /// Uses `OnceMap` to deduplicate: the same `name@version` is only downloaded once,
 /// even when called concurrently from multiple tasks (pipeline workers, install phase, etc.).
+///
+/// For git-resolved packages, use [`resolve_cache_path`] instead.
 pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
     let key = format!("{}@{}", name, version);
     let cache_dir = get_cache_dir();
@@ -138,12 +185,14 @@ pub async fn download_bytes(url: &str) -> Result<Bytes> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::io::Write;
+
     use flate2::Compression;
     use flate2::write::GzEncoder;
-    use std::io::Write;
     use tar::Builder;
     use tempfile::TempDir;
+
+    use super::*;
 
     // Helper to create a simple tar.gz archive in memory
     fn create_tar_gz() -> Vec<u8> {

@@ -1,7 +1,7 @@
 //! Package tarball metadata for downloading and verification.
 
 use crate::model::compatibility::{is_cpu_compatible, is_os_compatible};
-use crate::model::manifest::VersionManifest;
+use crate::model::manifest::CoreVersionManifest;
 
 /// Package tarball information for downloading.
 ///
@@ -41,8 +41,8 @@ impl PackageTarballInfo<'_> {
     }
 }
 
-impl<'a> From<&'a VersionManifest> for PackageTarballInfo<'a> {
-    fn from(m: &'a VersionManifest) -> Self {
+impl<'a> From<&'a CoreVersionManifest> for PackageTarballInfo<'a> {
+    fn from(m: &'a CoreVersionManifest) -> Self {
         Self {
             name: &m.name,
             version: &m.version,

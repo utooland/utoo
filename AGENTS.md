@@ -67,10 +67,10 @@ Bundler snapshot tests live in `crates/pack-tests/tests/snapshot/`. Each test ca
 
 - Format JS/JSON: `npm run biome` (Biome, double quotes, 2-space indent)
 - Format Rust: `cargo fmt`
-- Format TOML: `RUST_LOG=warn taplo format`
+- Format TOML: `tombi format` (or `npx tombi format`)
 - Spellcheck: `typos`
 
-The pre-push hook runs: `cargo fmt --check`, `taplo format --check`, `npx biome ci`, `typos`.
+The pre-push hook runs: `cargo fmt --check`, `tombi format --check`, `npx biome ci`, `typos`.
 
 ## Coding Style & Conventions
 
@@ -92,8 +92,19 @@ Agent definitions live in `agents/` and are symlinked to `.claude/agents/` for C
 
 | Agent | Path | Purpose |
 |-------|------|---------|
-| **code-guard** | `agents/code-guard.md` | Rust idiom & style review agent. Enforces idiomatic patterns and project conventions based on real PR review cases. |
+| **rust-code-guard** | `agents/rust-code-guard.md` | Rust idiom & style review agent. Enforces idiomatic patterns and project conventions based on real PR review cases. |
 | **utoopack-performance** | `agents/utoopack-performance-agent.md` | Turbopack performance diagnostics via Chrome Trace analysis across a 5-tier priority matrix. |
+
+## Post-Edit Verification
+
+After modifying Rust code, **always** run these checks before considering the task done:
+
+```bash
+cargo fmt
+cargo clippy --all-targets -- -D warnings --no-deps
+```
+
+Fix any issues found. Do not leave clippy warnings or formatting drift for the user to clean up.
 
 ## Agent-Specific Notes
 

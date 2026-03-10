@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "mkdirp-unfixable": "file:mkdirp-unfixable"
+  },
+  "name": "test-audit-mkdirp"
+}

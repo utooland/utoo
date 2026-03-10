@@ -7,15 +7,15 @@ Thank you for your interest in contributing to Utoo! This document provides a gu
 Utoo is a unified toolchain composed of several key layers:
 
 1.  **Core (Rust)**: The high-performance engine.
-    *   `crates/pm`: The `utoo` package manager (alias `ut`).
-    *   `crates/pack-core`: The bundler core, built on **Turbopack**.
+    - `crates/pm`: The `utoo` package manager (alias `ut`).
+    - `crates/pack-core`: The bundler core, built on **Turbopack**.
 2.  **Bindings**: Bridging Rust to other environments.
-    *   `crates/pack-napi`: Node.js bindings for the bundler.
-    *   `crates/utoo-wasm`: WebAssembly bindings for browser usage.
+    - `crates/pack-napi`: Node.js bindings for the bundler.
+    - `crates/utoo-wasm`: WebAssembly bindings for browser usage.
 3.  **Packages (TypeScript)**: User-facing tools and APIs.
-    *   `@utoo/pack`: The main bundler library.
-    *   `@utoo/pack-cli`: The `utoopack` CLI.
-    *   `@utoo/web`: The browser-compatible toolchain.
+    - `@utoo/pack`: The main bundler library.
+    - `@utoo/pack-cli`: The `utoopack` CLI.
+    - `@utoo/web`: The browser-compatible toolchain.
 
 ## 🛠️ Prerequisites
 
@@ -23,11 +23,37 @@ Before you begin, ensure you have the following installed:
 
 - **Node.js**: Version 20 or higher.
 - **npm**: Version 10 or higher (managed via `packageManager` in `package.json`).
-- **Rust**: We use a specific nightly version defined in [rust-toolchain.toml](rust-toolchain.toml). It will be automatically installed when you run Cargo commands.
+- **Rust**: We use a specific nightly version defined in [rust-toolchain.toml](rust-toolchain.toml). It will be automatically installed when running Cargo commands.
 - **wasm-bindgen-cli**: Required for building the web version.
+
+  Install:
+
   ```bash
   cargo install wasm-bindgen-cli@0.2.106
   ```
+
+- **typos**: Spell checker for code and docs, used in pre-push git hook.
+
+  Install: `cargo install typos-cli --locked` or `brew install typos-cli`.
+  Config: [.typos.toml](.typos.toml)
+
+- **LLVM (macOS only)**: Required to build `utoo-wasm` on macOS for `@utoo/web`. The dependency `libmimalloc-sys` compiles C code to `wasm32-unknown-unknown`; Apple Clang does not support that target.
+
+  Install:
+
+  ```sh
+  brew install llvm
+  ```
+
+  Then add the following to your shell config (e.g. `~/.zshrc` or `~/.bash_profile`) to ensure the build uses clang from Homebrew:
+
+  ```bash
+  export PATH="$(brew --prefix llvm)/bin:$PATH"
+  export CC="$(brew --prefix llvm)/bin/clang"
+  export AR="$(brew --prefix llvm)/bin/llvm-ar"
+  ```
+
+  Restart the terminal or run `source ~/.zshrc` (or your config file) for the changes to take effect.
 
 ## 📦 Submodules
 
@@ -35,6 +61,7 @@ Utoo leverages a fork of Next.js to access and modify Turbopack crates.
 
 1.  **Initialize Submodules**:
     If you haven't cloned with `--recursive`, run:
+
     ```bash
     git submodule update --init --recursive
     ```
@@ -42,12 +69,13 @@ Utoo leverages a fork of Next.js to access and modify Turbopack crates.
 2.  **Next.js Integration**:
     The `next.js` folder is a git submodule pointing to `utooland/next.js`. Many Rust crates in `crates/` depend on Turbopack crates located within this submodule (e.g., `next.js/turbopack/crates/turbo-tasks`).
 
-    > [!IMPORTANT]
-    > When updating dependencies in `Cargo.toml` that point to the submodule, ensure the paths remain correct and consistent with the submodule's structure.
+> [!IMPORTANT]
+> When updating dependencies in `Cargo.toml` that reference the submodule, verify that the specified path remains valid within the submodule.
 
 ## 🚀 Setup
 
 1. **Clone the repository**:
+
    ```bash
    git clone https://github.com/utooland/utoo.git
    cd utoo
@@ -135,6 +163,7 @@ UPDATE=1 cargo test -p pack-tests
 ## 🚢 Release
 
 Releases are managed via GitHub Actions.
+
 - **`pack-release.yml`**: Releases `@utoo/pack`, `@utoo/pack-cli`, and `@utoo/pack-shared`.
 - **`utooweb-release.yml`**: Releases `@utoo/web`.
 

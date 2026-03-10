@@ -1,9 +1,14 @@
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, OnceLock};
+
+use anyhow::Result;
+use dashmap::DashMap;
+use utoo_ruborist::manifest::PackageJson;
 
 use super::config_file::{Config, ConfigValue};
 use super::http::client_builder;
+use super::json::load_package_json;
 use super::registry::{REGISTRY_NPMMIRROR, select_fastest_registry};
 use super::save_type::OmitType;
 
@@ -57,6 +62,15 @@ pub async fn init_registry(registry: Option<String>) {
 
 pub fn get_registry() -> String {
     REGISTRY.get_sync()
+}
+
+#[allow(dead_code)] // used by catalog protocol (upcoming)
+pub async fn get_catalogs()
+-> std::collections::HashMap<String, std::collections::HashMap<String, String>> {
+    Config::load(false)
+        .await
+        .map(|c| c.catalogs())
+        .unwrap_or_default()
 }
 
 pub fn set_legacy_peer_deps(value: Option<bool>) {
@@ -117,6 +131,30 @@ pub async fn set_cache_dir(cache_dir: Option<String>) {
 
 pub fn get_cache_dir() -> PathBuf {
     PathBuf::from(CACHE_DIR.get_sync())
+}
+
+// Package.json cache — keyed by directory path, covers root + workspace members.
+// node_modules packages should use json::load_package_json directly.
+static PACKAGE_JSON_CACHE: LazyLock<DashMap<PathBuf, PackageJson>> = LazyLock::new(DashMap::new);
+
+/// Load and cache a package.json by directory path.
+///
+/// First call reads from disk and deserializes into `PackageJson`; subsequent
+/// calls with the same path return the cached clone. Use for root project and
+/// workspace member package.json files.
+pub async fn get_or_load_package_json(path: &Path) -> Result<PackageJson> {
+    if let Some(entry) = PACKAGE_JSON_CACHE.get(path) {
+        return Ok(entry.value().clone());
+    }
+    let pkg: PackageJson = load_package_json(path).await?;
+    PACKAGE_JSON_CACHE.insert(path.to_path_buf(), pkg.clone());
+    Ok(pkg)
+}
+
+/// Write-through update: call after writing package.json to disk to keep the
+/// cache consistent.
+pub fn set_package_json(path: &Path, pkg: PackageJson) {
+    PACKAGE_JSON_CACHE.insert(path.to_path_buf(), pkg);
 }
 
 // Semver support detection and caching

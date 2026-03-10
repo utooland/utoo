@@ -36,6 +36,9 @@ const getOrInstantiateModuleFromParent: GetOrInstantiateModuleFromParent<
   const module = moduleCache[id];
 
   if (module) {
+    if (module.error) {
+      throw module.error;
+    }
     return module;
   }
 
@@ -47,7 +50,7 @@ function instantiateModule(
   sourceType: SourceType,
   sourceData: SourceData,
 ): Module {
-  const moduleFactory = moduleFactories[id];
+  const moduleFactory = moduleFactories.get(id);
   if (typeof moduleFactory !== "function") {
     // This can happen if modules incorrectly handle HMR disposes/updates,
     // e.g. when they keep a `setTimeout` around which still executes old code
@@ -56,19 +59,22 @@ function instantiateModule(
   }
 
   const module: Module = createModuleObject(id);
+  const exports = module.exports;
 
   moduleCache[id] = module;
 
   // NOTE(alexkirsz) This can fail when the module encounters a runtime error.
+  const context = new (Context as any as ContextConstructor<Module>)(
+    module,
+    exports,
+  );
   try {
-    const context = new (Context as any as ContextConstructor<Module>)(module);
-    moduleFactory(context);
+    moduleFactory(context, module, exports);
   } catch (error) {
     module.error = error as any;
     throw error;
   }
 
-  module.loaded = true;
   if (module.namespaceObject && module.exports !== module.namespaceObject) {
     // in case of a circular dependency: cjs1 -> esm2 -> cjs1
     interopEsm(module.exports, module.namespaceObject);

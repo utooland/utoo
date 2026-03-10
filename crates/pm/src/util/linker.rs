@@ -86,7 +86,7 @@ async fn create_symlink(src: &Path, dst: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{env, fs};
+    use std::fs;
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -101,7 +101,7 @@ mod tests {
         let dst_path = temp_path.join("dest1.txt");
 
         assert!(!dst_path.exists());
-        env::set_current_dir(temp_path).unwrap();
+
         link(&src_path, &dst_path).await.unwrap();
 
         assert!(dst_path.exists());
@@ -122,7 +122,6 @@ mod tests {
 
         let dst_path = temp_path.join("nested/dir/dest2.txt");
 
-        env::set_current_dir(temp_path).unwrap();
         link(&src_path, &dst_path).await.unwrap();
 
         assert!(dst_path.exists());
@@ -141,7 +140,6 @@ mod tests {
 
         let dst_path = temp_path.join("dest3.txt");
 
-        env::set_current_dir(temp_path).unwrap();
         link(&src_path, &dst_path).await.unwrap();
         let result = link(&src_path, &dst_path);
         assert!(result.await.is_ok());
@@ -159,7 +157,6 @@ mod tests {
 
         let dst_path = temp_path.join("dest4.txt");
 
-        env::set_current_dir(temp_path).unwrap();
         link(&src1_path, &dst_path).await.unwrap();
         let result = link(&src2_path, &dst_path);
         assert!(result.await.is_ok());
@@ -179,7 +176,6 @@ mod tests {
         fs::create_dir_all(&dst_path).unwrap();
         fs::write(dst_path.join("file.txt"), "content").unwrap();
 
-        env::set_current_dir(temp_path).unwrap();
         let result = link(&src_path, &dst_path).await;
         assert!(result.is_ok());
 

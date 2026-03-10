@@ -1,14 +1,16 @@
-use anyhow::{Context, Result};
-use once_cell::sync::Lazy;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use super::downloader::download_to_cache;
-use super::json::load_package_json_from_path;
+use anyhow::{Context, Result};
+use once_cell::sync::Lazy;
+use tokio_retry::Retry;
+use utoo_ruborist::manifest::IdentityView;
+
+use super::downloader::{is_git_url, resolve_cache_path};
+use super::json::load_package_json;
 use super::oncemap::OnceMap;
 use super::retry::create_retry_strategy;
 use crate::fs;
-use tokio_retry::Retry;
 
 /// Global clone cache shared between pipeline and install phases.
 /// Key: target path, Value: ()
@@ -46,10 +48,14 @@ pub async fn clone_package_once(
     let tarball_url = tarball_url.to_string();
     let target_path = target_path.to_path_buf();
 
+    // Git packages are extracted flat (no `package/` wrapper directory),
+    // so skip `find_real_src` which would incorrectly pick a subdirectory.
+    let is_git = is_git_url(&tarball_url);
+
     CLONE_CACHE
         .get_or_init(key, || async move {
-            let cache_path = download_to_cache(&name, &version, &tarball_url).await?;
-            clone_package(&cache_path, &target_path, &name, &version)
+            let cache_path = resolve_cache_path(&name, &version, &tarball_url).await?;
+            clone_package(&cache_path, &target_path, &name, &version, !is_git)
                 .await
                 .inspect_err(|e| {
                     tracing::warn!(
@@ -71,19 +77,20 @@ pub async fn clone_package_once(
 }
 
 #[cfg(target_os = "macos")]
-use libc::clonefile;
-#[cfg(target_os = "macos")]
 use std::ffi::CString;
 #[cfg(target_os = "macos")]
 use std::os::unix::ffi::OsStrExt;
 
+#[cfg(target_os = "macos")]
+use libc::clonefile;
+
 #[cfg(not(target_os = "macos"))]
 mod hardlink_clone {
-    use anyhow::{Context, Result};
     use std::collections::HashSet;
-    use std::fs;
-    use std::io;
     use std::path::{Path, PathBuf};
+    use std::{fs, io};
+
+    use anyhow::{Context, Result};
 
     struct CloneEntry {
         src: PathBuf,
@@ -382,15 +389,24 @@ async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
 
 /// Validate that the package.json in dst has matching name and version
 async fn validate_name_version(dst: &Path, name: &str, version: &str) -> bool {
-    let Ok(pkg) = load_package_json_from_path(dst).await else {
+    let Ok(pkg) = load_package_json::<IdentityView>(dst).await else {
         return false;
     };
-    pkg.get("name").and_then(|v| v.as_str()) == Some(name)
-        && pkg.get("version").and_then(|v| v.as_str()) == Some(version)
+    pkg.name == name && pkg.version == version
 }
 
-/// Clone a package from cache to destination with name/version validation
-pub async fn clone_package(src: &Path, dst: &Path, name: &str, version: &str) -> Result<()> {
+/// Clone a package from cache to destination with name/version validation.
+///
+/// `find_real`: if `true`, look for the first subdirectory in `src` (registry
+/// tarballs use a `package/` wrapper); if `false`, use `src` directly (git
+/// packages are extracted flat).
+pub async fn clone_package(
+    src: &Path,
+    dst: &Path,
+    name: &str,
+    version: &str,
+    find_real: bool,
+) -> Result<()> {
     match crate::fs::try_exists(dst).await? {
         true if validate_name_version(dst, name, version).await => {
             tracing::debug!(
@@ -409,17 +425,18 @@ pub async fn clone_package(src: &Path, dst: &Path, name: &str, version: &str) ->
             if let Err(e) = fs::remove_dir_all(dst).await {
                 tracing::warn!("Failed to clean target directory {}: {}", dst.display(), e);
             }
-            clone(src, dst, true).await
+            clone(src, dst, find_real).await
         }
-        false => clone(src, dst, true).await,
+        false => clone(src, dst, find_real).await,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tempfile::TempDir;
     use tokio::io::AsyncWriteExt;
+
+    use super::*;
 
     async fn create_test_file(dir: &Path, name: &str, content: &[u8]) -> Result<PathBuf> {
         let path = dir.join(name);
@@ -700,7 +717,7 @@ mod tests {
         // Add a marker file to verify it wasn't re-cloned
         fs::write(dst_dir.join("marker.txt"), "original").await?;
 
-        clone_package(&cache_dir, &dst_dir, "lodash", "4.17.21").await?;
+        clone_package(&cache_dir, &dst_dir, "lodash", "4.17.21", true).await?;
 
         // Marker file should still exist (wasn't deleted and re-cloned)
         assert!(dst_dir.join("marker.txt").exists());
@@ -725,7 +742,7 @@ mod tests {
         fs::write(dst_dir.join("package.json"), &old_pkg_json).await?;
         fs::write(dst_dir.join("marker.txt"), "should be deleted").await?;
 
-        clone_package(&cache_dir, &dst_dir, "lodash", "4.17.21").await?;
+        clone_package(&cache_dir, &dst_dir, "lodash", "4.17.21", true).await?;
 
         // Marker file should be gone (directory was deleted and re-cloned)
         assert!(!dst_dir.join("marker.txt").exists());
@@ -750,7 +767,7 @@ mod tests {
         // Destination doesn't exist
         assert!(!dst_dir.exists());
 
-        clone_package(&cache_dir, &dst_dir, "lodash", "4.17.21").await?;
+        clone_package(&cache_dir, &dst_dir, "lodash", "4.17.21", true).await?;
 
         // Should be cloned
         assert!(dst_dir.join("package.json").exists());
@@ -759,11 +776,36 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn test_clone_package_git_flat_layout() -> Result<()> {
+        let temp = TempDir::new()?;
+        // Git packages are extracted flat — package.json is at the root,
+        // not inside a `package/` subdirectory.
+        let cache_dir = temp.path().join("cache/my-git-pkg/abc123");
+        let dst_dir = temp.path().join("node_modules/my-git-pkg");
+
+        // Create source with flat layout (no package/ wrapper)
+        fs::create_dir_all(&cache_dir).await?;
+        let pkg_json = create_package_json("my-git-pkg", "1.0.0");
+        fs::write(cache_dir.join("package.json"), &pkg_json).await?;
+        fs::write(cache_dir.join("index.js"), "module.exports = {}").await?;
+
+        clone_package(&cache_dir, &dst_dir, "my-git-pkg", "1.0.0", false).await?;
+
+        // Should clone directly from cache root (not looking for package/ subdir)
+        assert!(dst_dir.join("package.json").exists());
+        assert!(dst_dir.join("index.js").exists());
+        let content = fs::read_to_string(dst_dir.join("package.json")).await?;
+        assert!(content.contains("my-git-pkg"));
+        Ok(())
+    }
+
     #[cfg(not(target_os = "macos"))]
     mod hardlink_clone_tests {
+        use tokio::io::AsyncReadExt;
+
         use super::*;
         use crate::fs::File;
-        use tokio::io::AsyncReadExt;
 
         #[tokio::test]
         async fn test_clone_dir_basic() -> Result<()> {

@@ -1,0 +1,11 @@
+{
+  "name": "e2e-git-deps",
+  "version": "1.0.0",
+  "private": true,
+  "description": "e2e test for git dependency resolution",
+  "dependencies": {
+    "abbrev": "github:npm/abbrev-js",
+    "ini": "git+https://github.com/npm/ini.git#v5.0.0",
+    "isexe": "isaacs/isexe#v3.1.1"
+  }
+}

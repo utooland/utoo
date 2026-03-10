@@ -47,6 +47,12 @@ jobs:
       
       - name: Init git submodules
         run: git submodule update --init --recursive --depth 1
+
+      # Disable Windows Defender real-time scanning to speed up I/O-heavy builds (~30-50% faster)
+      - name: Disable Windows Defender
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
       
       # Add: Configure Git longpaths on Windows
       - name: Configure Git (Windows)
@@ -81,7 +87,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         if: ${{ !matrix.settings.docker }}
         with:
-          toolchain: nightly-2026-02-05
+          toolchain: nightly-2026-02-18
           targets: ${{ matrix.settings.target }}
       
       # - name: Cache cargo

@@ -19,6 +19,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.1.2",
     "husky": "^9.1.7",
+    "tombi": "^0.7.32",
     "turbo": "^2.6.3"
   },
   "workspaces": [
@@ -29,6 +30,7 @@
     "crates/pack-core/js",
     "crates/pack/js",
     "examples/define",
+    "examples/config-js",
     "examples/externals",
     "examples/multi-entries-heavy",
     "examples/webpack-compat",

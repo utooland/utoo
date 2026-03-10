@@ -124,6 +124,8 @@ pub struct Config {
     react: Option<ReactConfig>,
     optimization: Option<OptimizationConfig>,
     stats: Option<bool>,
+    #[cfg(any(feature = "process_pool", feature = "worker_pool"))]
+    plugin_runtime_strategy: Option<PluginRuntimeStrategy>,
     persistent_caching: Option<bool>,
     cache_handler: Option<RcStr>,
     node_polyfill: Option<bool>,
@@ -604,6 +606,20 @@ pub enum ModuleIds {
 
 #[turbo_tasks::value(transparent)]
 pub struct OptionModuleIds(pub Option<ModuleIds>);
+
+// PluginRuntimeStrategy only makes sense when at least one pool backend is enabled.
+// On WASM targets (no pool features), skip this type entirely to avoid empty-enum
+// issues with derived macros (e.g. turbo_tasks::ShrinkToFit generates a non-exhaustive match).
+#[cfg(any(feature = "process_pool", feature = "worker_pool"))]
+#[turbo_tasks::value(operation)]
+#[derive(Copy, Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PluginRuntimeStrategy {
+    #[cfg(feature = "worker_pool")]
+    WorkerThreads,
+    #[cfg(feature = "process_pool")]
+    ChildProcesses,
+}
 
 #[turbo_tasks::value(shared, operation)]
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -1603,6 +1619,22 @@ impl Config {
         Ok(Vc::cell(
             format!("{}/", public_path.trim_end_matches("/")).into(),
         ))
+    }
+}
+
+// Separate value_impl block so the cfg gate can exclude the entire block (including
+// turbo_tasks-generated symbols) when no pool feature is enabled.
+#[cfg(any(feature = "process_pool", feature = "worker_pool"))]
+#[turbo_tasks::value_impl]
+impl Config {
+    #[turbo_tasks::function]
+    pub fn plugin_runtime_strategy(&self) -> Vc<PluginRuntimeStrategy> {
+        #[cfg(feature = "process_pool")]
+        let default = PluginRuntimeStrategy::ChildProcesses;
+        #[cfg(all(feature = "worker_pool", not(feature = "process_pool")))]
+        let default = PluginRuntimeStrategy::WorkerThreads;
+
+        self.plugin_runtime_strategy.unwrap_or(default).cell()
     }
 }
 

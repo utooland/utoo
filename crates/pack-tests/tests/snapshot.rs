@@ -20,7 +20,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use turbo_rcstr::{RcStr, rcstr};
-use turbo_tasks::{ResolvedVc, TurboTasks, ValueToString, Vc, apply_effects};
+use turbo_tasks::{Effects, OperationVc, ResolvedVc, TurboTasks, ValueToString, Vc, get_effects};
 use turbo_tasks_backend::{BackendOptions, TurboTasksBackend, noop_backing_storage};
 use turbo_tasks_fs::FileSystemPath;
 use turbopack_core::{
@@ -46,7 +46,8 @@ fn default_config() -> String {
             },
             "mode": "production",
             "optimization": {
-                "minify": false
+                "minify": false,
+                "moduleIds": "named"
             }
         },
         "runtimeType": "dummy"
@@ -119,30 +120,45 @@ async fn run(resource: PathBuf) -> Result<()> {
         noop_backing_storage(),
     ));
     tt.run_once(async move {
-        let emit_op = run_inner_options(resource.to_string_lossy().into());
-        emit_op.read_strongly_consistent().await?;
-        apply_effects(emit_op).await?;
+        #[turbo_tasks::function(operation)]
+        async fn snapshot_issues_operation(out_op: OperationVc<FileSystemPath>) -> Result<Vc<()>> {
+            let out_path = out_op.resolve_strongly_consistent().await?.owned().await?;
+            let plain_issues = out_op
+                .peek_issues()
+                .get_plain_issues(IssueFilter::everything())
+                .await?;
+            snapshot_issues(plain_issues, out_path.join("issues")?, &REPO_ROOT)
+                .await
+                .context("Unable to handle issues")?;
+            Ok(Default::default())
+        }
+
+        #[turbo_tasks::function(operation)]
+        async fn inner_operation(resource: RcStr) -> Result<Vc<Effects>> {
+            let out_op = run_test_operation(resource);
+            // Ensure bundling is complete before peeking issues or reading path.
+            out_op.resolve_strongly_consistent().await?;
+
+            // Run snapshot_issues as its own operation so its path.write() effects
+            // are tracked as collectibles of snap_op (not of inner_operation).
+            let snap_op = snapshot_issues_operation(out_op);
+            snap_op.read_strongly_consistent().await?;
+
+            // Collect and apply the snapshot write effects from within the operation
+            // (calling get_effects / apply inside a turbo-tasks function is allowed).
+            get_effects(snap_op).await?.apply().await?;
+
+            Ok(get_effects(out_op).await?.cell())
+        }
+        inner_operation(resource.to_str().unwrap().into())
+            .read_strongly_consistent()
+            .await?
+            .apply()
+            .await?;
 
         Ok(())
     })
     .await?;
-
-    Ok(())
-}
-
-#[turbo_tasks::function(operation)]
-async fn run_inner_options(resource: RcStr) -> Result<()> {
-    let out_op = run_test_operation(resource);
-    let out_vc = out_op.resolve_strongly_consistent().await?.owned().await?;
-
-    let captured_issues = out_op.peek_issues();
-    let plain_issues = captured_issues
-        .get_plain_issues(IssueFilter::everything())
-        .await?;
-
-    snapshot_issues(plain_issues, out_vc.join("issues")?, &REPO_ROOT)
-        .await
-        .context("Failed to handle issues")?;
 
     Ok(())
 }
@@ -216,6 +232,7 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
     if user_config.get("optimization").is_none() {
         let default_optimization = serde_json::json!({
             "minify": false,
+            "moduleIds": "named",
         });
         user_config["optimization"] = default_optimization;
     }
@@ -265,9 +282,9 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
     };
 
     // Initialize project container
-    let project_container = ProjectContainer::new(rcstr!("project"), project_options.dev);
-    let project_container = project_container.to_resolved().await?;
-    project_container.initialize(project_options).await?;
+    let container_op = ProjectContainer::new_operation(rcstr!("project"), project_options.dev);
+    ProjectContainer::initialize(container_op, project_options).await?;
+    let project_container = container_op.resolve_strongly_consistent().await?;
 
     // Run bundling operation using the same pattern as build.rs
     let entrypoints_with_issues_op =

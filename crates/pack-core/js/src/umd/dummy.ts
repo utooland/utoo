@@ -1,13 +1,6 @@
+// @ts-nocheck
 /// <reference path="./runtime-utils.ts" />
 
-// Make sure that `require` is available for runtime-utils.ts.
-declare var require: ((moduleId: ModuleId) => Exports) & {
-  resolve: (
-    moduleId: ModuleId,
-    options?: {
-      paths?: string[];
-    },
-  ) => ModuleId;
-};
+declare var importScripts: (url: string) => void;
 
-declare var BACKEND: RuntimeBackend;
+// No BACKEND here to avoid redeclare error with runtime-backend-dom.ts.

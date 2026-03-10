@@ -3,9 +3,25 @@
 //! This module provides strongly-typed representations of package.json content,
 //! avoiding the need to pass raw `serde_json::Value` through the API.
 
+use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+
+use super::util::deserialize_or_default;
+
+/// Deserialize a `scripts` map, silently dropping entries whose values are not
+/// strings (e.g. `"blanket": {"pattern": "xss/lib"}`).
+fn deserialize_string_map<'de, D>(deserializer: D) -> Result<HashMap<String, String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw: HashMap<String, Value> = HashMap::deserialize(deserializer)?;
+    Ok(raw
+        .into_iter()
+        .filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_owned())))
+        .collect())
+}
 
 /// Parsed package.json content.
 ///
@@ -15,28 +31,28 @@ use std::collections::HashMap;
 #[serde(rename_all = "camelCase")]
 pub struct PackageJson {
     /// Package name
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub name: String,
 
     /// Package version
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub version: String,
 
     /// Production dependencies
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub dependencies: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dependencies: Option<HashMap<String, String>>,
 
     /// Development dependencies
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub dev_dependencies: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dev_dependencies: Option<HashMap<String, String>>,
 
     /// Peer dependencies
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub peer_dependencies: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer_dependencies: Option<HashMap<String, String>>,
 
     /// Optional dependencies
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub optional_dependencies: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub optional_dependencies: Option<HashMap<String, String>>,
 
     /// Overrides (npm) / resolutions (yarn)
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -47,7 +63,11 @@ pub struct PackageJson {
     pub workspaces: Option<WorkspacesConfig>,
 
     /// Engine requirements
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_or_default"
+    )]
     pub engines: Option<HashMap<String, String>>,
 
     /// Binary definitions (string or object)
@@ -59,8 +79,8 @@ pub struct PackageJson {
     pub license: Option<LicenseConfig>,
 
     /// Scripts
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub scripts: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scripts: Option<HashMap<String, String>>,
 
     /// OS constraints
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -77,6 +97,34 @@ pub struct PackageJson {
     /// Distribution info (from registry)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dist: Option<DistInfo>,
+
+    /// Package description
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// Whether package is private
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub private: Option<bool>,
+
+    /// Files whitelist for publishing
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files: Option<Vec<String>>,
+
+    /// Main entry point
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub main: Option<String>,
+
+    /// TypeScript types entry
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub types: Option<String>,
+
+    /// TypeScript typings entry (legacy alias for types)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub typings: Option<String>,
+
+    /// Publish configuration
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publish_config: Option<PublishConfig>,
 
     /// Preserve other fields we don't explicitly model
     #[serde(flatten)]
@@ -101,6 +149,75 @@ impl WorkspacesConfig {
             WorkspacesConfig::Object { packages } => packages,
         }
     }
+}
+
+// ── Lightweight views ───────────────────────────────────────────────
+// Each view only declares the fields it needs; serde silently skips the
+// rest, so non-standard fields in third-party packages cannot break the
+// parse.
+
+/// Minimal view for rebuild: only lifecycle scripts.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ScriptsView {
+    #[serde(default, deserialize_with = "deserialize_string_map")]
+    pub scripts: HashMap<String, String>,
+}
+
+/// Minimal view for cache validation: name + version.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct IdentityView {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub version: String,
+}
+
+/// View for post-install processing (rebuild / bin linking).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct PackageInstallView {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub bin: Option<Value>,
+    #[serde(default, deserialize_with = "deserialize_string_map")]
+    pub scripts: HashMap<String, String>,
+}
+
+impl PackageInstallView {
+    /// Get binary entries as (name, path) pairs.
+    pub fn bin_entries(&self) -> Vec<(String, String)> {
+        self.bin
+            .as_ref()
+            .map(|bin| parse_bin_field(bin, &self.name))
+            .unwrap_or_default()
+    }
+}
+
+/// View for lockfile freshness check: dependency maps only.
+///
+/// Does not include `engines` — that is root-only and loaded separately
+/// via [`EnginesView`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DepsView {
+    #[serde(default)]
+    pub dependencies: HashMap<String, String>,
+    #[serde(default)]
+    pub dev_dependencies: HashMap<String, String>,
+    #[serde(default)]
+    pub peer_dependencies: HashMap<String, String>,
+    #[serde(default)]
+    pub optional_dependencies: HashMap<String, String>,
+}
+
+/// View for root-only engine requirements.
+///
+/// Used alongside [`DepsView`] for lockfile freshness checks — engines
+/// are only relevant for the root package, not workspace members.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct EnginesView {
+    #[serde(default, deserialize_with = "deserialize_or_default")]
+    pub engines: Option<HashMap<String, String>>,
 }
 
 /// Parse bin field from JSON Value.
@@ -142,6 +259,22 @@ impl LicenseConfig {
     }
 }
 
+/// Publish configuration from package.json.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PublishConfig {
+    /// Distribution tag (e.g., "latest", "beta")
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+
+    /// Registry URL override
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registry: Option<String>,
+
+    /// Package access level ("public" or "restricted")
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access: Option<String>,
+}
+
 /// Distribution information from registry.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DistInfo {
@@ -166,6 +299,10 @@ pub struct DistInfo {
     pub unpacked_size: Option<u64>,
 }
 
+/// Empty map constant for convenience methods that return references.
+static EMPTY_MAP: std::sync::LazyLock<HashMap<String, String>> =
+    std::sync::LazyLock::new(HashMap::new);
+
 impl PackageJson {
     /// Create a new empty PackageJson.
     pub fn new(name: impl Into<String>, version: impl Into<String>) -> Self {
@@ -186,21 +323,46 @@ impl PackageJson {
         serde_json::to_value(self).unwrap_or_default()
     }
 
+    /// Get dependencies, defaulting to empty map.
+    pub fn deps(&self) -> &HashMap<String, String> {
+        self.dependencies.as_ref().unwrap_or(&EMPTY_MAP)
+    }
+
+    /// Get dev dependencies, defaulting to empty map.
+    pub fn dev_deps(&self) -> &HashMap<String, String> {
+        self.dev_dependencies.as_ref().unwrap_or(&EMPTY_MAP)
+    }
+
+    /// Get peer dependencies, defaulting to empty map.
+    pub fn peer_deps(&self) -> &HashMap<String, String> {
+        self.peer_dependencies.as_ref().unwrap_or(&EMPTY_MAP)
+    }
+
+    /// Get optional dependencies, defaulting to empty map.
+    pub fn optional_deps(&self) -> &HashMap<String, String> {
+        self.optional_dependencies.as_ref().unwrap_or(&EMPTY_MAP)
+    }
+
+    /// Get scripts, defaulting to empty map.
+    pub fn scripts_or_empty(&self) -> &HashMap<String, String> {
+        self.scripts.as_ref().unwrap_or(&EMPTY_MAP)
+    }
+
     /// Check if package has any dependencies.
     pub fn has_dependencies(&self) -> bool {
-        !self.dependencies.is_empty()
-            || !self.dev_dependencies.is_empty()
-            || !self.peer_dependencies.is_empty()
-            || !self.optional_dependencies.is_empty()
+        !self.deps().is_empty()
+            || !self.dev_deps().is_empty()
+            || !self.peer_deps().is_empty()
+            || !self.optional_deps().is_empty()
     }
 
     /// Get all dependency types as iterator.
     pub fn all_dependencies(&self) -> impl Iterator<Item = (&str, &HashMap<String, String>)> {
         [
-            ("dependencies", &self.dependencies),
-            ("devDependencies", &self.dev_dependencies),
-            ("peerDependencies", &self.peer_dependencies),
-            ("optionalDependencies", &self.optional_dependencies),
+            ("dependencies", self.deps()),
+            ("devDependencies", self.dev_deps()),
+            ("peerDependencies", self.peer_deps()),
+            ("optionalDependencies", self.optional_deps()),
         ]
         .into_iter()
         .filter(|(_, deps)| !deps.is_empty())
@@ -243,7 +405,7 @@ mod tests {
         let pkg = PackageJson::from_value(&value).unwrap();
         assert_eq!(pkg.name, "test-package");
         assert_eq!(pkg.version, "1.0.0");
-        assert_eq!(pkg.dependencies.get("lodash"), Some(&"^4.17.0".to_string()));
+        assert_eq!(pkg.deps().get("lodash"), Some(&"^4.17.0".to_string()));
     }
 
     #[test]
@@ -367,6 +529,76 @@ mod tests {
             Some("https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz")
         );
         assert_eq!(pkg.integrity(), Some("sha512-xyz"));
+    }
+
+    #[test]
+    fn test_parse_publish_fields() {
+        let value = json!({
+            "name": "my-pkg",
+            "version": "1.0.0",
+            "description": "A great package",
+            "private": true,
+            "files": ["dist", "lib"],
+            "main": "./lib/index.js",
+            "types": "./lib/index.d.ts",
+            "typings": "./lib/index.d.ts",
+            "publishConfig": {
+                "tag": "beta",
+                "registry": "https://custom.registry.org",
+                "access": "public"
+            }
+        });
+
+        let pkg = PackageJson::from_value(&value).unwrap();
+        assert_eq!(pkg.description.as_deref(), Some("A great package"));
+        assert_eq!(pkg.private, Some(true));
+        assert_eq!(
+            pkg.files.as_deref(),
+            Some(&["dist".to_string(), "lib".to_string()][..])
+        );
+        assert_eq!(pkg.main.as_deref(), Some("./lib/index.js"));
+        assert_eq!(pkg.types.as_deref(), Some("./lib/index.d.ts"));
+        assert_eq!(pkg.typings.as_deref(), Some("./lib/index.d.ts"));
+
+        let pc = pkg.publish_config.as_ref().unwrap();
+        assert_eq!(pc.tag.as_deref(), Some("beta"));
+        assert_eq!(pc.registry.as_deref(), Some("https://custom.registry.org"));
+        assert_eq!(pc.access.as_deref(), Some("public"));
+
+        // Round-trip: ensure new fields survive to_value
+        let rt = pkg.to_value();
+        assert_eq!(rt["description"], "A great package");
+        assert_eq!(rt["private"], true);
+        assert_eq!(rt["main"], "./lib/index.js");
+        assert_eq!(rt["publishConfig"]["tag"], "beta");
+    }
+
+    #[test]
+    fn test_engines_non_standard_array_format() {
+        // ansi-html-community uses `"engines": ["node >= 0.8.0"]` (array instead of map).
+        // This should NOT fail the entire parse; engines should default to None.
+        let value = json!({
+            "name": "ansi-html-community",
+            "version": "0.0.8",
+            "engines": ["node >= 0.8.0"]
+        });
+
+        let pkg = PackageJson::from_value(&value).unwrap();
+        assert_eq!(pkg.name, "ansi-html-community");
+        assert!(pkg.engines.is_none());
+    }
+
+    #[test]
+    fn test_engines_standard_map_format() {
+        let value = json!({
+            "name": "some-package",
+            "version": "1.0.0",
+            "engines": { "node": ">=18" }
+        });
+
+        let pkg = PackageJson::from_value(&value).unwrap();
+        let engines = pkg.engines.unwrap();
+        assert_eq!(engines.get("node"), Some(&">=18".to_string()));
     }
 
     #[test]

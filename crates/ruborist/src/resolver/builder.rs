@@ -21,15 +21,49 @@
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
 use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
+use crate::model::spec::{PackageSpec, Protocol};
 use crate::resolver::preload::{PreloadConfig, preload_manifests};
-use crate::resolver::registry::{ResolveError, resolve_dependency};
+use crate::resolver::registry::{ResolveError, resolve_registry_dep};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
 use crate::traits::registry::{RegistryClient, ResolvedPackage};
+
+/// Resolve a non-registry dependency spec (git/github).
+///
+/// Dispatches to the real `gix`-backed implementation when the `native-git`
+/// feature is enabled; otherwise returns an error telling the caller to enable
+/// the feature.
+async fn resolve_non_registry_dep(
+    cache_dir: Option<&std::path::Path>,
+    spec: &PackageSpec,
+    name: &str,
+    clone_cache: &GitCloneCache,
+) -> anyhow::Result<ResolvedPackage> {
+    #[cfg(feature = "native-git")]
+    {
+        crate::resolver::git::resolve_non_registry_dep(cache_dir, spec, name, clone_cache).await
+    }
+    #[cfg(not(feature = "native-git"))]
+    {
+        let _ = (cache_dir, name, clone_cache);
+        anyhow::bail!(
+            "Git resolution not available for spec '{spec:?}' (enable the 'native-git' feature)"
+        )
+    }
+}
+
+// Re-export the git clone cache type so callers can construct a `BuildDepsConfig`
+// without depending on the `native-git` feature directly.
+#[cfg(feature = "native-git")]
+use crate::resolver::git::GitCloneCache;
+
+#[cfg(not(feature = "native-git"))]
+type GitCloneCache = tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::OnceCell<Arc<()>>>>>;
 
 // Re-export edge types
 pub use super::edges::{
@@ -45,6 +79,10 @@ pub struct BuildDepsConfig {
     pub concurrency: usize,
     /// Whether to skip preload phase (useful when cache is already warm)
     pub skip_preload: bool,
+    /// Cache directory for git clones (defaults to `~/.cache/nm`)
+    pub cache_dir: Option<PathBuf>,
+    /// Shared dedup cache for concurrent git clone operations
+    pub git_clone_cache: Arc<GitCloneCache>,
 }
 
 impl Default for BuildDepsConfig {
@@ -53,6 +91,8 @@ impl Default for BuildDepsConfig {
             legacy_peer_deps: true,
             concurrency: crate::resolver::preload::DEFAULT_CONCURRENCY,
             skip_preload: false,
+            cache_dir: dirs::home_dir().map(|d| d.join(".cache/nm")),
+            git_clone_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
 }
@@ -73,6 +113,12 @@ impl BuildDepsConfig {
     /// Create config that skips preload phase
     pub fn with_skip_preload(mut self, skip: bool) -> Self {
         self.skip_preload = skip;
+        self
+    }
+
+    /// Set the cache directory for git clones
+    pub fn with_cache_dir(mut self, cache_dir: PathBuf) -> Self {
+        self.cache_dir = Some(cache_dir);
         self
     }
 }
@@ -260,15 +306,18 @@ pub enum ProcessResult {
 ///
 /// This is the core logic for resolving a dependency:
 /// 1. Check if an existing compatible version can be reused
-/// 2. If not, resolve from registry and create a new node
+/// 2. If not, resolve from registry (or git) and create a new node
 /// 3. Handle conflicts by installing nested
+///
+/// Non-registry specs (git, github, etc.) are routed through
+/// [`resolve_non_registry_dep`] instead of the registry.
 ///
 /// # Arguments
 /// * `graph` - The dependency graph
 /// * `registry` - Registry client for fetching packages
 /// * `node_index` - The node that has this dependency
 /// * `edge_info` - Information about the dependency edge
-/// * `legacy_peer_deps` - If true, skip peer dependencies when adding edges
+/// * `config` - Build configuration (legacy_peer_deps, cache_dir, etc.)
 ///
 /// # Returns
 /// The result of processing (reused, created, or skipped)
@@ -277,7 +326,7 @@ pub async fn process_dependency<R: RegistryClient>(
     registry: &R,
     node_index: NodeIndex,
     edge_info: &DependencyEdgeInfo,
-    legacy_peer_deps: bool,
+    config: &BuildDepsConfig,
 ) -> Result<ProcessResult, ResolveError<R::Error>> {
     tracing::debug!(
         "Processing dependency {}@{} from [{:?}]",
@@ -316,23 +365,84 @@ pub async fn process_dependency<R: RegistryClient>(
                 conflict_parent
             );
 
-            // Resolve from registry first to get the version
-            let resolved = match resolve_dependency(
-                registry,
-                &edge_info.name,
-                &edge_info.spec,
-                &edge_info.edge_type,
-            )
-            .await?
-            {
-                Some(resolved) => resolved,
-                None => {
+            // Parse spec once and exhaustively route by variant.
+            // The exhaustive match ensures the compiler forces a decision for any
+            // new PackageSpec variant — no silent fall-through to the wrong resolver.
+            let parsed_spec = PackageSpec::from(edge_info.spec.as_str());
+            let resolved: ResolvedPackage = match &parsed_spec {
+                PackageSpec::Git { .. } | PackageSpec::GitHub { .. } => {
+                    // TODO: add spec => version expiry check so stale git caches
+                    // are invalidated (e.g. branch refs that have moved forward).
+                    match resolve_non_registry_dep(
+                        config.cache_dir.as_deref(),
+                        &parsed_spec,
+                        &edge_info.name,
+                        &config.git_clone_cache,
+                    )
+                    .await
+                    {
+                        Ok(r) => r,
+                        Err(_) if edge_info.edge_type == EdgeType::Optional => {
+                            tracing::debug!(
+                                "Skipped optional non-registry dependency {}@{}",
+                                edge_info.name,
+                                edge_info.spec
+                            );
+                            return Ok(ProcessResult::Skipped);
+                        }
+                        Err(e) => {
+                            return Err(ResolveError::Git {
+                                url: edge_info.spec.clone(),
+                                source: e,
+                            });
+                        }
+                    }
+                }
+                PackageSpec::Local {
+                    protocol: Protocol::Workspace,
+                    ..
+                } => {
+                    // workspace: deps are resolved during graph initialisation.
+                    // If we reach here the workspace node wasn't found — skip
+                    // silently rather than aborting the whole resolution.
                     tracing::debug!(
-                        "Skipped optional dependency {}@{}",
+                        "Skipping unresolved workspace dependency {}@{}",
                         edge_info.name,
                         edge_info.spec
                     );
                     return Ok(ProcessResult::Skipped);
+                }
+                PackageSpec::Local { .. } => {
+                    return Err(ResolveError::Unsupported {
+                        spec: edge_info.spec.clone(),
+                        reason: "local (file:/link:/portal:) dependencies are not yet supported",
+                    });
+                }
+                PackageSpec::Http { .. } => {
+                    return Err(ResolveError::Unsupported {
+                        spec: edge_info.spec.clone(),
+                        reason: "HTTP URL dependencies are not yet supported",
+                    });
+                }
+                PackageSpec::Registry { .. } => {
+                    match resolve_registry_dep(
+                        registry,
+                        &edge_info.name,
+                        &edge_info.spec,
+                        &edge_info.edge_type,
+                    )
+                    .await?
+                    {
+                        Some(resolved) => resolved,
+                        None => {
+                            tracing::debug!(
+                                "Skipped optional dependency {}@{}",
+                                edge_info.name,
+                                edge_info.spec
+                            );
+                            return Ok(ProcessResult::Skipped);
+                        }
+                    }
                 }
             };
 
@@ -348,7 +458,7 @@ pub async fn process_dependency<R: RegistryClient>(
                     override_spec
                 );
                 // Re-resolve with override spec
-                match resolve_dependency(
+                match resolve_registry_dep(
                     registry,
                     &edge_info.name,
                     &override_spec,
@@ -387,8 +497,8 @@ pub async fn process_dependency<R: RegistryClient>(
             add_edges_from(
                 graph,
                 new_index,
-                &resolved.manifest,
-                legacy_peer_deps,
+                &*resolved.manifest,
+                config.legacy_peer_deps,
                 false,
             );
 
@@ -482,7 +592,7 @@ pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
     run_preload_phase(graph, registry, &config, receiver).await;
 
     // Phase 2: BFS traversal to build the dependency tree
-    run_bfs_phase(graph, registry, config.legacy_peer_deps, receiver).await?;
+    run_bfs_phase(graph, registry, &config, receiver).await?;
 
     receiver.on_event(BuildEvent::Complete {
         total_nodes: graph.graph.node_count(),
@@ -547,7 +657,7 @@ async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
 async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
     graph: &mut DependencyGraph,
     registry: &R,
-    legacy_peer_deps: bool,
+    config: &BuildDepsConfig,
     receiver: &E,
 ) -> Result<(), ResolveError<R::Error>> {
     let start = tokio::time::Instant::now();
@@ -583,9 +693,7 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
                 receiver.on_event(BuildEvent::Resolving {
                     name: &edge_info.name,
                 });
-                match process_dependency(graph, registry, node_index, &edge_info, legacy_peer_deps)
-                    .await?
-                {
+                match process_dependency(graph, registry, node_index, &edge_info, config).await? {
                     ProcessResult::Created(idx) => {
                         // Extract node info for events
                         if let Some(node) = graph.get_node(idx) {
@@ -601,7 +709,7 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
                                     .get_node(node_index)
                                     .map(|parent| parent.path.as_path());
                                 receiver.on_event(BuildEvent::PackagePlaced {
-                                    package: manifest.into(),
+                                    package: manifest.as_ref().into(),
                                     path: &node.path,
                                     parent_path,
                                 });
@@ -642,7 +750,7 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
 // High-level API
 // ============================================================================
 
-use crate::model::package_lock::{LockPackage, PackageLock};
+use crate::model::package_lock::PackageLock;
 use std::path::Path;
 
 /// Build package-lock.json from a package.json.
@@ -699,23 +807,21 @@ fn graph_to_package_lock(
     pkg: &PackageJson,
     root_path: &Path,
 ) -> PackageLock {
-    let (packages_value, _total) = graph.serialize_to_packages(root_path);
-
-    // Convert Value to HashMap<String, LockPackage>
-    let packages: HashMap<String, LockPackage> =
-        serde_json::from_value(packages_value).unwrap_or_default();
-
-    PackageLock::new(pkg.name.clone(), pkg.version.clone(), packages)
+    let (packages, _total) = graph.serialize_to_packages(root_path);
+    PackageLock::new(&pkg.name, &pkg.version, packages)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
     use super::*;
-    use crate::model::manifest::VersionManifest;
+    use crate::model::manifest::CoreVersionManifest;
     use crate::traits::registry::mock::MockRegistryClient;
 
-    fn create_version_manifest(name: &str, version: &str) -> VersionManifest {
-        VersionManifest {
+    fn create_version_manifest(name: &str, version: &str) -> CoreVersionManifest {
+        CoreVersionManifest {
             name: name.to_string(),
             version: version.to_string(),
             ..Default::default()
@@ -726,12 +832,12 @@ mod tests {
         name: &str,
         version: &str,
         deps: Vec<(&str, &str)>,
-    ) -> VersionManifest {
+    ) -> CoreVersionManifest {
         let dependencies = deps
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
-        VersionManifest {
+        CoreVersionManifest {
             name: name.to_string(),
             version: version.to_string(),
             dependencies: Some(dependencies),
@@ -748,13 +854,13 @@ mod tests {
             create_version_manifest("lodash", "4.17.21"),
         );
 
+        let root_pkg = PackageJson::new("test-project", "1.0.0");
         let root_pkg = PackageJson {
-            name: "test-project".to_string(),
-            version: "1.0.0".to_string(),
-            dependencies: [("lodash".to_string(), "^4.17.0".to_string())]
-                .into_iter()
-                .collect(),
-            ..Default::default()
+            dependencies: Some(HashMap::from([(
+                "lodash".to_string(),
+                "^4.17.0".to_string(),
+            )])),
+            ..root_pkg
         };
 
         let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg.clone());
@@ -786,13 +892,13 @@ mod tests {
         );
         registry.add_package("debug", "4.3.0", create_version_manifest("debug", "4.3.0"));
 
+        let root_pkg = PackageJson::new("test-project", "1.0.0");
         let root_pkg = PackageJson {
-            name: "test-project".to_string(),
-            version: "1.0.0".to_string(),
-            dependencies: [("express".to_string(), "^4.0.0".to_string())]
-                .into_iter()
-                .collect(),
-            ..Default::default()
+            dependencies: Some(HashMap::from([(
+                "express".to_string(),
+                "^4.0.0".to_string(),
+            )])),
+            ..root_pkg
         };
 
         let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg.clone());
@@ -814,13 +920,13 @@ mod tests {
             create_version_manifest("lodash", "4.17.21"),
         );
 
+        let pkg = PackageJson::new("test-project", "1.0.0");
         let pkg = PackageJson {
-            name: "test-project".to_string(),
-            version: "1.0.0".to_string(),
-            dependencies: [("lodash".to_string(), "^4.17.0".to_string())]
-                .into_iter()
-                .collect(),
-            ..Default::default()
+            dependencies: Some(HashMap::from([(
+                "lodash".to_string(),
+                "^4.17.0".to_string(),
+            )])),
+            ..pkg
         };
 
         let lock = resolve(&pkg, &registry).await.unwrap();
@@ -837,18 +943,14 @@ mod tests {
     // Helper to create a graph with source -> target for testing update_node_type_from_edge
     // Returns (graph, source_index, target_index) where source is NOT root
     fn create_source_target_graph() -> (DependencyGraph, NodeIndex, NodeIndex) {
-        let root_pkg = PackageJson {
-            name: "root".to_string(),
-            version: "1.0.0".to_string(),
-            ..Default::default()
-        };
+        let root_pkg = PackageJson::new("root", "1.0.0");
         let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg);
 
         // Add source node (non-root)
         let source = PackageNode::from_version_manifest(
             "source".to_string(),
             PathBuf::from("node_modules/source"),
-            create_version_manifest("source", "1.0.0"),
+            Arc::new(create_version_manifest("source", "1.0.0")),
         );
         let source_index = graph.add_node(source);
 
@@ -856,7 +958,7 @@ mod tests {
         let target = PackageNode::from_version_manifest(
             "target".to_string(),
             PathBuf::from("node_modules/target"),
-            create_version_manifest("target", "1.0.0"),
+            Arc::new(create_version_manifest("target", "1.0.0")),
         );
         let target_index = graph.add_node(target);
 

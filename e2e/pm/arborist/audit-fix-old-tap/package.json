@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "mkdirp": "^0.5.1",
+    "tap": "^13.0.3"
+  },
+  "name": "test-audit-fix-old-tap"
+}

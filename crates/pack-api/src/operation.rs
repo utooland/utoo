@@ -2,7 +2,10 @@ use anyhow::Result;
 use turbo_tasks::{CollectiblesSource, OperationVc, ResolvedVc, Vc, get_effects};
 use turbopack_core::{diagnostics::Diagnostic, issue::CollectibleIssuesExt};
 
-use crate::{endpoint::Endpoint, entrypoint::Entrypoints};
+use crate::{
+    endpoint::{Endpoint, OptionEndpoint},
+    entrypoint::Entrypoints,
+};
 
 /// Based on [`Entrypoints`], but with [`OperationVc<Endpoint>`][OperationVc] for every endpoint.
 ///
@@ -14,8 +17,8 @@ use crate::{endpoint::Endpoint, entrypoint::Entrypoints};
 /// This is needed to call `write_to_disk` which expects an `OperationVc<Endpoint>`.
 #[turbo_tasks::value(shared)]
 pub struct EntrypointsOperation {
-    pub apps: Option<AppOperation>,
-    pub libraries: Option<LibraryOperation>,
+    pub apps: OperationVc<OptionEndpoint>,
+    pub libraries: OperationVc<OptionEndpoint>,
 }
 
 /// HACK: Wraps an `OperationVc<Entrypoints>` inside of a second `OperationVc`.
@@ -45,42 +48,37 @@ impl EntrypointsOperation {
         let entrypoints = entrypoints_without_collectibles_operation(entrypoints);
         Ok(Self {
             apps: match e.apps.as_ref() {
-                Some(es) => {
-                    let endpoints: Vec<_> =
-                        es.await?.iter().map(|e| wrap(*e, entrypoints)).collect();
-
-                    Some(AppOperation(endpoints))
-                }
-                None => None,
+                Some(es) => match es.await?.first().copied() {
+                    Some(endpoint) => wrap_as_option_endpoint(endpoint, entrypoints),
+                    None => empty_option_endpoint(),
+                },
+                None => empty_option_endpoint(),
             },
             libraries: match e.libraries.as_ref() {
-                Some(es) => {
-                    let endpoints: Vec<_> =
-                        es.await?.iter().map(|e| wrap(*e, entrypoints)).collect();
-
-                    Some(LibraryOperation(endpoints))
-                }
-                None => None,
+                Some(es) => match es.await?.first().copied() {
+                    Some(endpoint) => wrap_as_option_endpoint(endpoint, entrypoints),
+                    None => empty_option_endpoint(),
+                },
+                None => empty_option_endpoint(),
             },
         }
         .cell())
     }
 }
 
-/// Given a resolved `Endpoint` and the `Entrypoints` operation that it comes from, connect the
-/// operation and return a `OperationVc` of the `Entrypoint`. This `Endpoint` operation will keep
-/// the entire `Entrypoints` operation alive.
+/// Wraps a resolved `Endpoint` as `OptionEndpoint(Some(...))` while keeping the `Entrypoints`
+/// operation alive via `op.connect()`.
 #[turbo_tasks::function(operation)]
-fn wrap(
+fn wrap_as_option_endpoint(
     endpoint: ResolvedVc<Box<dyn Endpoint>>,
     op: OperationVc<Entrypoints>,
-) -> Vc<Box<dyn Endpoint>> {
+) -> Vc<OptionEndpoint> {
     let _ = op.connect();
-    *endpoint
+    OptionEndpoint(Some(endpoint)).cell()
 }
 
-#[turbo_tasks::value(shared)]
-pub struct LibraryOperation(pub Vec<OperationVc<Box<dyn Endpoint>>>);
-
-#[turbo_tasks::value]
-pub struct AppOperation(pub Vec<OperationVc<Box<dyn Endpoint>>>);
+/// Returns an `OperationVc<OptionEndpoint>` representing the absent-endpoint case.
+#[turbo_tasks::function(operation)]
+fn empty_option_endpoint() -> Vc<OptionEndpoint> {
+    OptionEndpoint(None).cell()
+}

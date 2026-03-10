@@ -45,7 +45,7 @@ pub trait Endpoint {
 pub enum EndpointOutputPaths {
     NodeJs {
         /// Relative to the root_path
-        server_entry_path: String,
+        server_entry_path: RcStr,
         server_paths: Vec<ServerPath>,
         client_paths: Vec<RcStr>,
     },
@@ -53,6 +53,7 @@ pub enum EndpointOutputPaths {
         server_paths: Vec<ServerPath>,
         client_paths: Vec<RcStr>,
     },
+    NotFound,
     // TODO: add library paths
 }
 
@@ -60,17 +61,25 @@ pub enum EndpointOutputPaths {
 pub struct Endpoints(pub Vec<ResolvedVc<Box<dyn Endpoint>>>);
 
 #[turbo_tasks::function(operation)]
-pub fn endpoint_server_changed_operation(
-    endpoint: OperationVc<Box<dyn Endpoint>>,
-) -> Vc<Completion> {
-    endpoint.connect().server_changed()
+pub async fn endpoint_server_changed_operation(
+    endpoint: OperationVc<OptionEndpoint>,
+) -> Result<Vc<Completion>> {
+    Ok(if let Some(endpoint) = *endpoint.connect().await? {
+        endpoint.server_changed()
+    } else {
+        Completion::new()
+    })
 }
 
 #[turbo_tasks::function(operation)]
-pub fn endpoint_write_to_disk_operation(
-    endpoint: OperationVc<Box<dyn Endpoint>>,
-) -> Vc<EndpointOutputPaths> {
-    endpoint_write_to_disk(endpoint.connect())
+pub async fn endpoint_write_to_disk_operation(
+    endpoint: OperationVc<OptionEndpoint>,
+) -> Result<Vc<EndpointOutputPaths>> {
+    Ok(if let Some(endpoint) = *endpoint.connect().await? {
+        endpoint_write_to_disk(*endpoint)
+    } else {
+        EndpointOutputPaths::NotFound.cell()
+    })
 }
 
 #[turbo_tasks::function]
@@ -113,9 +122,12 @@ pub struct WrittenEndpointWithIssues {
     pub effects: Arc<Effects>,
 }
 
+#[turbo_tasks::value(transparent)]
+pub struct OptionEndpoint(pub Option<ResolvedVc<Box<dyn Endpoint>>>);
+
 #[turbo_tasks::function(operation)]
 pub async fn get_written_endpoint_with_issues_operation(
-    endpoint_op: OperationVc<Box<dyn Endpoint>>,
+    endpoint_op: OperationVc<OptionEndpoint>,
 ) -> Result<Vc<WrittenEndpointWithIssues>> {
     let write_to_disk_op = endpoint_write_to_disk_operation(endpoint_op);
     let (written, issues, diagnostics, effects) =

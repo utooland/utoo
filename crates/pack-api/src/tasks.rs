@@ -1,6 +1,7 @@
-use std::{future::Future, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
+use either::Either;
 use turbo_tasks::{
     TaskId, TurboTasks, TurboTasksApi, UpdateInfo, Vc, task_statistics::TaskStatisticsApi,
     trace::TraceRawVcs,
@@ -10,6 +11,14 @@ use turbo_tasks_backend::{NoopBackingStorage, TurboTasksBackend};
 
 #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 use turbo_tasks_backend::DefaultBackingStorage;
+
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+pub type UtooTurboTasks =
+    Arc<TurboTasks<TurboTasksBackend<Either<DefaultBackingStorage, NoopBackingStorage>>>>;
+
+// In WASM builds there is no disk persistence; always use the noop backing storage.
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+pub type UtooTurboTasks = Arc<TurboTasks<TurboTasksBackend<NoopBackingStorage>>>;
 
 #[derive(Clone)]
 pub enum BundlerTurboTasks {
@@ -105,19 +114,5 @@ impl BundlerTurboTasks {
             #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
             BundlerTurboTasks::PersistentCaching(turbo_tasks) => turbo_tasks.task_statistics(),
         }
-    }
-}
-
-/// The root of our turbopack computation.
-pub struct RootTask {
-    #[allow(dead_code)]
-    pub turbo_tasks: BundlerTurboTasks,
-    #[allow(dead_code)]
-    pub task_id: Option<TaskId>,
-}
-
-impl Drop for RootTask {
-    fn drop(&mut self) {
-        // TODO stop the root task
     }
 }

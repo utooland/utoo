@@ -31,16 +31,19 @@ use std::{
     env,
     fs::OpenOptions,
     io::{self, BufRead, Write},
+    ops::Deref,
     path::PathBuf,
     sync::{LazyLock, Mutex, Once},
     time::Instant,
 };
 
+use crate::pack_api::turbopack_ctx::TurbopackContext;
 use anyhow::anyhow;
 use napi::bindgen_prelude::{External, Status};
 use owo_colors::OwoColorize;
 use tracing_chrome::{ChromeLayerBuilder, FlushGuard};
 use tracing_subscriber::{Layer, filter, prelude::*, util::SubscriberInitExt};
+use turbo_tasks::OperationVc;
 
 static LOG_THROTTLE: Mutex<Option<Instant>> = Mutex::new(None);
 static LOG_DIVIDER: &str = "---------------------------";
@@ -213,5 +216,41 @@ pub fn teardown_trace_subscriber(guard_external: External<RefCell<Option<FlushGu
 
     if let Some(guard) = guard_cell.take() {
         drop(guard);
+    }
+}
+
+/// An [`OperationVc`] that can be passed back and forth to JS across the [`napi`][mod@napi]
+/// boundary via [`External`].
+///
+/// It is a helper type to hold both a [`OperationVc`] and the [`NextTurbopackContext`]. Without
+/// this, we'd need to pass both individually all over the place.
+///
+/// This napi-specific abstraction does not implement [`turbo_tasks::NonLocalValue`] or
+/// [`turbo_tasks::OperationValue`] and should be dereferenced to an [`OperationVc`] before being
+/// passed to a [`turbo_tasks::function`].
+//
+// TODO: If we add a tracing garbage collector to turbo-tasks, this should be tracked as a GC root.
+#[derive(Clone)]
+pub struct DetachedVc<T> {
+    turbopack_ctx: TurbopackContext,
+    /// The Vc. Must be unresolved, otherwise you are referencing an inactive operation.
+    vc: OperationVc<T>,
+}
+
+impl<T> DetachedVc<T> {
+    pub fn new(turbopack_ctx: TurbopackContext, vc: OperationVc<T>) -> Self {
+        Self { turbopack_ctx, vc }
+    }
+
+    pub fn turbopack_ctx(&self) -> &TurbopackContext {
+        &self.turbopack_ctx
+    }
+}
+
+impl<T> Deref for DetachedVc<T> {
+    type Target = OperationVc<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.vc
     }
 }
