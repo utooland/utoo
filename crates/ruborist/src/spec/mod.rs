@@ -214,14 +214,15 @@ impl From<&str> for PackageSpec {
             },
             Some((Protocol::Catalog, _)) => {
                 // catalog: specs must be resolved in-place before spec parsing.
-                // Reaching here means resolve_catalogs() was not called.
-                tracing::warn!(
-                    "unresolved catalog: specifier reached spec parser: {:?}",
+                // Reaching here means transform_specs() was not called — this is a bug.
+                tracing::error!(
+                    "BUG: unresolved catalog: specifier reached spec parser: {:?}. \
+                     Ensure transform_specs() is called before parsing.",
                     raw
                 );
                 Self::Registry {
-                    name: raw.to_owned(),
-                    version_spec: String::new(),
+                    name: String::new(),
+                    version_spec: raw.to_owned(),
                 }
             }
             Some((Protocol::Http, _)) => Self::Http {
@@ -646,6 +647,20 @@ mod tests {
             spec("https://example.com/pkg"),
             PackageSpec::Http {
                 url: "https://example.com/pkg".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_unresolved_catalog_spec() {
+        // Unresolved catalog: specs fall back to Registry with empty name
+        // (indicates a bug — transform_specs() was not called)
+        let s = spec("catalog:default");
+        assert_eq!(
+            s,
+            PackageSpec::Registry {
+                name: String::new(),
+                version_spec: "catalog:default".to_string(),
             }
         );
     }

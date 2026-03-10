@@ -368,4 +368,26 @@ mod tests {
         assert_eq!(deps["debug"], "workspace:*");
         assert_eq!(deps["local"], "file:../lib");
     }
+
+    #[test]
+    fn test_catalog_default_name_collision() {
+        // When both [catalog] and [catalogs.default] exist,
+        // "catalog:default" resolves to the unnamed [catalog] section (key "").
+        let ctx = make_ctx(HashMap::from([
+            (
+                String::new(),
+                HashMap::from([("react".into(), "^18.0.0".into())]),
+            ),
+            (
+                "default".into(),
+                HashMap::from([("react".into(), "^17.0.0".into())]),
+            ),
+        ]));
+
+        let mut deps = HashMap::from([("react".into(), "catalog:default".into())]);
+        transform_specs(&mut deps, &ctx);
+
+        // "catalog:default" always means the unnamed [catalog], not [catalogs.default]
+        assert_eq!(deps["react"], "^18.0.0");
+    }
 }

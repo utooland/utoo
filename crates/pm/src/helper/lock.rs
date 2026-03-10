@@ -365,7 +365,7 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
 
     // Transform protocol specifiers (catalog:, etc.) before comparison
     let transform_ctx = TransformContext {
-        catalogs: load_catalogs(root_path),
+        catalogs: load_catalogs(root_path).await,
     };
     pkg.transform_specs(&transform_ctx);
 

@@ -80,10 +80,10 @@ struct CatalogConfig {
 /// Uses cached `.utoo.toml` content from `Config::init_local()` when
 /// available, falling back to a direct file read otherwise.
 ///
-/// Returns an empty map if the file doesn't exist, can't be parsed, or
-/// contains no catalog sections.  The default catalog is stored under
-/// key `""` (empty string).
-pub fn load_catalogs(root_path: &Path) -> Catalogs {
+/// Returns an empty map if the file doesn't exist or contains no
+/// catalog sections.  The default catalog is stored under key `""`
+/// (empty string).
+pub async fn load_catalogs(root_path: &Path) -> Catalogs {
     // Use cached .utoo.toml content from Config::init_local() if available
     if let Some(content) = Config::local_content() {
         return parse_catalogs(content);
@@ -91,9 +91,13 @@ pub fn load_catalogs(root_path: &Path) -> Catalogs {
 
     // Fallback: read from disk (Config::init_local not called yet, e.g. in tests)
     let toml_path = root_path.join(".utoo.toml");
-    match std::fs::read_to_string(&toml_path) {
+    match tokio::fs::read_to_string(&toml_path).await {
         Ok(content) => parse_catalogs(&content),
-        Err(_) => HashMap::new(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
+        Err(e) => {
+            tracing::warn!("Failed to read {}: {}", toml_path.display(), e);
+            HashMap::new()
+        }
     }
 }
 
@@ -107,25 +111,15 @@ fn parse_catalogs(content: &str) -> Catalogs {
         }
     };
 
-    let mut catalogs: Catalogs = HashMap::new();
+    let mut catalogs: Catalogs = config.catalogs;
 
     // Default catalog -> key ""
     if !config.catalog.is_empty() {
-        tracing::debug!(
-            "Loaded default catalog with {} entries from .utoo.toml",
-            config.catalog.len()
-        );
         catalogs.insert(String::new(), config.catalog);
     }
 
-    // Named catalogs
-    for (name, entries) in config.catalogs {
-        tracing::debug!(
-            "Loaded catalog '{}' with {} entries from .utoo.toml",
-            name,
-            entries.len()
-        );
-        catalogs.insert(name, entries);
+    if !catalogs.is_empty() {
+        tracing::debug!("Loaded {} catalog(s) from .utoo.toml", catalogs.len());
     }
 
     catalogs
@@ -137,8 +131,8 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    #[test]
-    fn test_load_catalogs_default_and_named() {
+    #[tokio::test]
+    async fn test_load_catalogs_default_and_named() {
         let dir = TempDir::new().unwrap();
         let toml_content = r#"
 [catalog]
@@ -151,7 +145,7 @@ path-to-regexp = "^1.9.0"
 "#;
         fs::write(dir.path().join(".utoo.toml"), toml_content).unwrap();
 
-        let catalogs = load_catalogs(dir.path());
+        let catalogs = load_catalogs(dir.path()).await;
 
         // Default catalog
         let default = catalogs.get("").unwrap();
@@ -164,24 +158,24 @@ path-to-regexp = "^1.9.0"
         assert_eq!(legacy.get("path-to-regexp"), Some(&"^1.9.0".to_string()));
     }
 
-    #[test]
-    fn test_load_catalogs_no_file() {
+    #[tokio::test]
+    async fn test_load_catalogs_no_file() {
         let dir = TempDir::new().unwrap();
-        let catalogs = load_catalogs(dir.path());
+        let catalogs = load_catalogs(dir.path()).await;
         assert!(catalogs.is_empty());
     }
 
-    #[test]
-    fn test_load_catalogs_empty_file() {
+    #[tokio::test]
+    async fn test_load_catalogs_empty_file() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join(".utoo.toml"), "").unwrap();
 
-        let catalogs = load_catalogs(dir.path());
+        let catalogs = load_catalogs(dir.path()).await;
         assert!(catalogs.is_empty());
     }
 
-    #[test]
-    fn test_load_catalogs_coexists_with_existing_config() {
+    #[tokio::test]
+    async fn test_load_catalogs_coexists_with_existing_config() {
         let dir = TempDir::new().unwrap();
         // .utoo.toml may already have key-value pairs for other settings
         let toml_content = r#"
@@ -192,13 +186,13 @@ lodash = "^4.17.21"
 "#;
         fs::write(dir.path().join(".utoo.toml"), toml_content).unwrap();
 
-        let catalogs = load_catalogs(dir.path());
+        let catalogs = load_catalogs(dir.path()).await;
         let default = catalogs.get("").unwrap();
         assert_eq!(default.get("lodash"), Some(&"^4.17.21".to_string()));
     }
 
-    #[test]
-    fn test_load_catalogs_multiple_named() {
+    #[tokio::test]
+    async fn test_load_catalogs_multiple_named() {
         let dir = TempDir::new().unwrap();
         let toml_content = r#"
 [catalog]
@@ -212,7 +206,7 @@ react = "^19.0.0"
 "#;
         fs::write(dir.path().join(".utoo.toml"), toml_content).unwrap();
 
-        let catalogs = load_catalogs(dir.path());
+        let catalogs = load_catalogs(dir.path()).await;
 
         let default = catalogs.get("").unwrap();
         assert_eq!(default.get("react"), Some(&"^18.0.0".to_string()));

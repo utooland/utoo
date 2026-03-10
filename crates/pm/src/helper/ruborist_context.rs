@@ -41,7 +41,7 @@ impl Context {
         cwd: PathBuf,
         receiver: R,
     ) -> BuildDepsOptions<GlobImpl, R> {
-        let catalogs = load_catalogs(&cwd);
+        let catalogs = load_catalogs(&cwd).await;
         BuildDepsOptions {
             cwd,
             registry_url: get_registry(),

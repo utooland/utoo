@@ -81,7 +81,7 @@ pub async fn init_project_root(cwd: &Path) -> Result<PathBuf> {
         env::set_current_dir(&root_dir).context("Failed to change to root directory")?;
     }
 
-    crate::util::config_file::Config::init_local(&root_dir);
+    crate::util::config_file::Config::init_local(&root_dir).await;
 
     Ok(root_dir)
 }

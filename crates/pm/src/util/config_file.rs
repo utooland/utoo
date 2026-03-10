@@ -31,8 +31,13 @@ impl Config {
     /// `init_project_root`). Subsequent calls to `local_content()`
     /// and `load_catalogs()` will use the cached content instead of
     /// re-reading from disk.
-    pub fn init_local(root_path: &Path) {
-        LOCAL_CONTENT.get_or_init(|| fs::read_to_string(root_path.join(".utoo.toml")).ok());
+    pub async fn init_local(root_path: &Path) {
+        let path = root_path.join(".utoo.toml");
+        LOCAL_CONTENT.get_or_init(|| {
+            // Use std::fs here because OnceLock::get_or_init requires a sync closure.
+            // This is acceptable: the file is tiny (<1KB) and this runs exactly once.
+            fs::read_to_string(path).ok()
+        });
     }
 
     /// Get cached local `.utoo.toml` content (for catalog parsing, etc.).
@@ -96,7 +101,7 @@ impl Config {
     }
 
     pub(crate) async fn load_from_path(path: &Path) -> ConfigResult<Self> {
-        match fs::read_to_string(path) {
+        match tokio::fs::read_to_string(path).await {
             Ok(content) => Ok(toml::from_str(&content)?),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
             Err(e) => Err(e.into()),
