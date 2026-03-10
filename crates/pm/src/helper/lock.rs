@@ -54,28 +54,16 @@ pub fn extract_package_name(path: &str) -> String {
     }
 }
 
-/// Compare a PackageJson dependency map with a lock file Value field.
+/// Compare a PackageJson dependency map with a lock file dependency map.
 /// Treats empty maps and None/empty objects as equal.
-fn deps_map_equals_lock(pkg_deps: &HashMap<String, String>, lock_field: Option<&Value>) -> bool {
-    // Convert lock field to HashMap for comparison
-    let lock_deps: HashMap<String, String> = match lock_field {
-        Some(val) => val
-            .as_object()
-            .map(|obj| {
-                obj.iter()
-                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        None => HashMap::new(),
-    };
-
-    // Treat empty maps as equal
-    if pkg_deps.is_empty() && lock_deps.is_empty() {
-        return true;
+fn deps_map_equals_lock(
+    pkg_deps: &HashMap<String, String>,
+    lock_deps: Option<&HashMap<String, String>>,
+) -> bool {
+    match lock_deps {
+        Some(ld) => *pkg_deps == *ld,
+        None => pkg_deps.is_empty(),
     }
-
-    *pkg_deps == lock_deps
 }
 
 pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
@@ -373,7 +361,7 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
     // package.json has diverged from the lock file, so it must not use the
     // in-process cache.
     let mut pkg: DepsView = load_package_json(root_path).await?;
-    let lock_file: Value = read_json_file(&root_path.join("package-lock.json")).await?;
+    let lock_file: PackageLock = read_json_file(&root_path.join("package-lock.json")).await?;
 
     // Transform protocol specifiers (catalog:, etc.) before comparison
     let transform_ctx = TransformContext {
@@ -381,11 +369,7 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
     };
     pkg.transform_specs(&transform_ctx);
 
-    // get packages in package-lock.json
-    let packages = lock_file
-        .get("packages")
-        .and_then(|p| p.as_object())
-        .ok_or_else(|| anyhow!("Invalid package-lock.json format"))?;
+    let packages = &lock_file.packages;
 
     // prepare packages to check: (relative_path, deps)
     let mut pkgs_to_check: Vec<(String, DepsView)> = vec![("".to_string(), pkg)];
@@ -415,29 +399,30 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
             }
         };
 
+        let name = if path.is_empty() { "root" } else { path };
+
         // check dependencies whether changed
-        if !deps_map_equals_lock(&pkg.dependencies, lock.get("dependencies")) {
-            let name = if path.is_empty() { "root" } else { path };
+        if !deps_map_equals_lock(&pkg.dependencies, lock.dependencies.as_ref()) {
             tracing::warn!("package-lock.json is outdated, {name} dependencies changed");
             return Ok(true);
         }
 
-        if !deps_map_equals_lock(&pkg.optional_dependencies, lock.get("optionalDependencies")) {
-            let name = if path.is_empty() { "root" } else { path };
+        if !deps_map_equals_lock(
+            &pkg.optional_dependencies,
+            lock.optional_dependencies.as_ref(),
+        ) {
             tracing::warn!("package-lock.json is outdated, {name} optionalDependencies changed");
             return Ok(true);
         }
 
-        if !deps_map_equals_lock(&pkg.dev_dependencies, lock.get("devDependencies")) {
-            let name = if path.is_empty() { "root" } else { path };
+        if !deps_map_equals_lock(&pkg.dev_dependencies, lock.dev_dependencies.as_ref()) {
             tracing::warn!("package-lock.json is outdated, {name} devDependencies changed");
             return Ok(true);
         }
 
         if !legacy_peer_deps
-            && !deps_map_equals_lock(&pkg.peer_dependencies, lock.get("peerDependencies"))
+            && !deps_map_equals_lock(&pkg.peer_dependencies, lock.peer_dependencies.as_ref())
         {
-            let name = if path.is_empty() { "root" } else { path };
             tracing::warn!("package-lock.json is outdated, {name} peerDependencies changed");
             return Ok(true);
         }
@@ -450,19 +435,11 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
         .ok_or_else(|| anyhow!("Missing root in package-lock.json"))?;
 
     let pkg_engines = root_engines.engines.as_ref().filter(|m| !m.is_empty());
-    let lock_engines = root_lock
-        .get("engines")
-        .filter(|v| !v.is_null())
-        .and_then(|v| v.as_object())
-        .filter(|obj| !obj.is_empty());
+    let lock_engines = root_lock.engines.as_ref().filter(|m| !m.is_empty());
 
     let engines_match = match (pkg_engines, lock_engines) {
         (None, None) => true,
-        (Some(p), Some(l)) => {
-            p.len() == l.len()
-                && p.iter()
-                    .all(|(k, v)| l.get(k).and_then(|x| x.as_str()) == Some(v.as_str()))
-        }
+        (Some(p), Some(l)) => *p == *l,
         _ => false,
     };
 
