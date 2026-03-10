@@ -8,11 +8,21 @@ use std::sync::OnceLock;
 
 pub type ConfigResult<T> = Result<T>;
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+/// Cached merged config (global + local). Set on first `Config::load(false)`.
+static MERGED_CONFIG: OnceLock<Config> = OnceLock::new();
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
+    #[serde(default)]
     values: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     arrays: HashMap<String, Vec<String>>,
+    /// Default catalog: `[catalog]` section.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    catalog: HashMap<String, String>,
+    /// Named catalogs: `[catalogs.<name>]` sections.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    catalogs: HashMap<String, HashMap<String, String>>,
 }
 
 // global config path is ~/.utoo/config.toml
@@ -23,13 +33,30 @@ impl Config {
             return Self::load_from_path(&Self::global_config_path()?).await;
         }
 
-        let mut config = Self::load_from_path(&Self::global_config_path()?).await?;
-        let local_path = Self::local_config_path()?;
-        if crate::fs::try_exists(&local_path).await? {
-            let local_config = Self::load_from_path(&local_path).await?;
-            config.values.extend(local_config.values);
-            config.arrays.extend(local_config.arrays);
+        // Return cached merged config if available
+        if let Some(config) = MERGED_CONFIG.get() {
+            return Ok(config.clone());
         }
+
+        let mut config = Self::load_from_path(&Self::global_config_path()?).await?;
+
+        let local_config = {
+            let local_path = Self::local_config_path()?;
+            if crate::fs::try_exists(&local_path).await? {
+                Some(Self::load_from_path(&local_path).await?)
+            } else {
+                None
+            }
+        };
+        if let Some(local) = local_config {
+            config.values.extend(local.values);
+            config.arrays.extend(local.arrays);
+            // Catalogs are project-local only; take them from the local config
+            config.catalog = local.catalog;
+            config.catalogs = local.catalogs;
+        }
+
+        let _ = MERGED_CONFIG.set(config.clone());
         Ok(config)
     }
 
@@ -56,14 +83,22 @@ impl Config {
         self.save(global)
     }
 
-    pub(crate) async fn load_from_path(path: &Path) -> ConfigResult<Self> {
-        if !crate::fs::try_exists(path).await? {
-            return Ok(Config::default());
+    /// Build a `Catalogs` map from the parsed `[catalog]` and `[catalogs.*]` sections.
+    #[allow(dead_code)] // used by catalog protocol (upcoming)
+    pub fn catalogs(&self) -> HashMap<String, HashMap<String, String>> {
+        let mut result = self.catalogs.clone();
+        if !self.catalog.is_empty() {
+            result.insert(String::new(), self.catalog.clone());
         }
+        result
+    }
 
-        let content = fs::read_to_string(path)?;
-        let config = toml::from_str(&content)?;
-        Ok(config)
+    pub(crate) async fn load_from_path(path: &Path) -> ConfigResult<Self> {
+        match crate::fs::read_to_string(path).await {
+            Ok(content) => Ok(toml::from_str(&content)?),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
+            Err(e) => Err(e.into()),
+        }
     }
 
     pub fn save(&self, global: bool) -> ConfigResult<()> {
@@ -147,15 +182,18 @@ impl<T: Clone + Debug + 'static> ConfigValue<T> {
             return value.clone();
         }
 
-        // load from config
-        let config_result = Config::load(false).await;
-        if let Ok(config) = config_result {
-            let value_result = config.get(self.key);
-            if let Ok(Some(value)) = value_result {
-                let parsed_value = self.parse_config_value(&value);
-                let _ = self.value.set(parsed_value.clone());
-                return parsed_value;
-            }
+        // Ensure merged config is loaded and cached
+        if MERGED_CONFIG.get().is_none() {
+            let _ = Config::load(false).await; // populates MERGED_CONFIG
+        }
+
+        // Read from cached merged config (no clone of Config itself)
+        if let Some(config) = MERGED_CONFIG.get()
+            && let Ok(Some(value)) = config.get(self.key)
+        {
+            let parsed_value = self.parse_config_value(&value);
+            let _ = self.value.set(parsed_value.clone());
+            return parsed_value;
         }
 
         self.default.clone()
@@ -253,5 +291,58 @@ mod tests {
                 assert_eq!(config.get("keep").unwrap(), Some("yes".into()));
             });
         });
+    }
+
+    #[test]
+    fn test_catalogs_default_and_named() {
+        let config: Config = toml::from_str(
+            r#"
+[catalog]
+lodash = "^4.17.21"
+react = "^18.0.0"
+
+[catalogs.legacy]
+path-to-regexp = "^1.9.0"
+"#,
+        )
+        .unwrap();
+
+        let catalogs = config.catalogs();
+        let default = catalogs.get("").unwrap();
+        assert_eq!(default.get("lodash"), Some(&"^4.17.21".to_string()));
+        assert_eq!(default.get("react"), Some(&"^18.0.0".to_string()));
+
+        let legacy = catalogs.get("legacy").unwrap();
+        assert_eq!(legacy.get("path-to-regexp"), Some(&"^1.9.0".to_string()));
+    }
+
+    #[test]
+    fn test_catalogs_empty() {
+        let config: Config = toml::from_str("").unwrap();
+        assert!(config.catalogs().is_empty());
+    }
+
+    #[test]
+    fn test_catalogs_coexists_with_config_values() {
+        let config: Config = toml::from_str(
+            r#"
+[values]
+registry = "https://registry.npmmirror.com"
+
+[catalog]
+lodash = "^4.17.21"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.get("registry").unwrap(),
+            Some("https://registry.npmmirror.com".to_string())
+        );
+        let catalogs = config.catalogs();
+        assert_eq!(
+            catalogs.get("").unwrap().get("lodash"),
+            Some(&"^4.17.21".to_string())
+        );
     }
 }
