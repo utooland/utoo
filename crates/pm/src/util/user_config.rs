@@ -64,6 +64,13 @@ pub fn get_registry() -> String {
     REGISTRY.get_sync()
 }
 
+pub async fn get_catalogs() -> utoo_ruborist::spec::Catalogs {
+    Config::load(false)
+        .await
+        .map(|c| c.catalogs())
+        .unwrap_or_default()
+}
+
 pub fn set_legacy_peer_deps(value: Option<bool>) {
     LEGACY_PEER_DEPS.set(value);
 }

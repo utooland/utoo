@@ -13,9 +13,16 @@ static MERGED_CONFIG: OnceLock<Config> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
+    #[serde(default)]
     values: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     arrays: HashMap<String, Vec<String>>,
+    /// Default catalog: `[catalog]` section.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    catalog: HashMap<String, String>,
+    /// Named catalogs: `[catalogs.<name>]` sections.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    catalogs: HashMap<String, HashMap<String, String>>,
 }
 
 // global config path is ~/.utoo/config.toml
@@ -44,6 +51,9 @@ impl Config {
         if let Some(local) = local_config {
             config.values.extend(local.values);
             config.arrays.extend(local.arrays);
+            // Catalogs are project-local only; take them from the local config
+            config.catalog = local.catalog;
+            config.catalogs = local.catalogs;
         }
 
         let _ = MERGED_CONFIG.set(config.clone());
@@ -71,6 +81,15 @@ impl Config {
     pub fn set_array(&mut self, key: &str, value: Vec<String>, global: bool) -> ConfigResult<()> {
         self.arrays.insert(key.to_string(), value);
         self.save(global)
+    }
+
+    /// Build a `Catalogs` map from the parsed `[catalog]` and `[catalogs.*]` sections.
+    pub fn catalogs(&self) -> utoo_ruborist::spec::Catalogs {
+        let mut result = self.catalogs.clone();
+        if !self.catalog.is_empty() {
+            result.insert(String::new(), self.catalog.clone());
+        }
+        result
     }
 
     pub(crate) async fn load_from_path(path: &Path) -> ConfigResult<Self> {
@@ -271,5 +290,58 @@ mod tests {
                 assert_eq!(config.get("keep").unwrap(), Some("yes".into()));
             });
         });
+    }
+
+    #[test]
+    fn test_catalogs_default_and_named() {
+        let config: Config = toml::from_str(
+            r#"
+[catalog]
+lodash = "^4.17.21"
+react = "^18.0.0"
+
+[catalogs.legacy]
+path-to-regexp = "^1.9.0"
+"#,
+        )
+        .unwrap();
+
+        let catalogs = config.catalogs();
+        let default = catalogs.get("").unwrap();
+        assert_eq!(default.get("lodash"), Some(&"^4.17.21".to_string()));
+        assert_eq!(default.get("react"), Some(&"^18.0.0".to_string()));
+
+        let legacy = catalogs.get("legacy").unwrap();
+        assert_eq!(legacy.get("path-to-regexp"), Some(&"^1.9.0".to_string()));
+    }
+
+    #[test]
+    fn test_catalogs_empty() {
+        let config: Config = toml::from_str("").unwrap();
+        assert!(config.catalogs().is_empty());
+    }
+
+    #[test]
+    fn test_catalogs_coexists_with_config_values() {
+        let config: Config = toml::from_str(
+            r#"
+[values]
+registry = "https://registry.npmmirror.com"
+
+[catalog]
+lodash = "^4.17.21"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.get("registry").unwrap(),
+            Some("https://registry.npmmirror.com".to_string())
+        );
+        let catalogs = config.catalogs();
+        assert_eq!(
+            catalogs.get("").unwrap().get("lodash"),
+            Some(&"^4.17.21".to_string())
+        );
     }
 }
