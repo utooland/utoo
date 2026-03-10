@@ -1,13 +1,10 @@
 use crate::service::update::clean_package_lock;
-use crate::{
-    cmd::install::install, helper::workspace::update_cwd_to_root, util::config_file::Config,
-};
+use crate::{cmd::install::install, helper::workspace::init_project_root};
 use anyhow::{Context, Result};
 
 pub async fn update(ignore_scripts: bool) -> Result<()> {
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
-    let root_path = update_cwd_to_root(&cwd).await?;
-    Config::init_local(&root_path);
+    let root_path = init_project_root(&cwd).await?;
 
     // Clean package-lock.json
     tracing::debug!("Cleaning package-lock.json...");

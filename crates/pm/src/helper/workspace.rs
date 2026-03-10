@@ -66,8 +66,12 @@ pub async fn find_project_path(cwd: &Path) -> Result<PathBuf> {
         .await
 }
 
-/// Update current working directory to project root (with workspaces).
-pub async fn update_cwd_to_root(cwd: &Path) -> Result<PathBuf> {
+/// Initialize the project context: resolve the workspace root, change into
+/// it, and cache the local `.utoo.toml` config for later use.
+///
+/// This is the standard entry point for commands that operate on the
+/// project root (install, update, deps, etc.).
+pub async fn init_project_root(cwd: &Path) -> Result<PathBuf> {
     let root_dir = find_root_path(cwd).await?;
     if !compare_paths(cwd, &root_dir) {
         tracing::debug!(
@@ -76,6 +80,8 @@ pub async fn update_cwd_to_root(cwd: &Path) -> Result<PathBuf> {
         );
         env::set_current_dir(&root_dir).context("Failed to change to root directory")?;
     }
+
+    crate::util::config_file::Config::init_local(&root_dir);
 
     Ok(root_dir)
 }
@@ -179,9 +185,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_update_cwd_to_root_in_root() {
+    async fn test_init_project_root_in_root() {
         let (_temp_dir, root_path) = setup_test_workspace().await;
-        update_cwd_to_root(&root_path).await.unwrap();
+        init_project_root(&root_path).await.unwrap();
         let result = update_cwd_to_project(&root_path).await.unwrap();
         assert!(compare_paths(&result, &root_path));
     }

@@ -42,8 +42,7 @@ use crate::constants::cmd::{
     WHOAMI_NAME,
 };
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
-use crate::helper::workspace::update_cwd_to_root;
-use crate::util::config_file::Config;
+use crate::helper::workspace::init_project_root;
 
 fn detect_shell_from_env() -> Option<clap_complete::Shell> {
     // Most common on Unix-like systems.
@@ -482,8 +481,7 @@ async fn async_main() -> Result<()> {
                 }
             } else {
                 let cwd = std::env::current_dir()?;
-                let root_path = update_cwd_to_root(&cwd).await?;
-                Config::init_local(&root_path);
+                let root_path = init_project_root(&cwd).await?;
                 install(ignore_scripts, &root_path).await?;
                 log_time_end("All packages installed");
             }
@@ -521,8 +519,7 @@ async fn async_main() -> Result<()> {
         }
         Some(Commands::Deps { workspace_only }) => {
             let cwd = std::env::current_dir()?;
-            let root_path = update_cwd_to_root(&cwd).await?;
-            Config::init_local(&root_path);
+            let root_path = init_project_root(&cwd).await?;
             if workspace_only {
                 build_workspace(&root_path).await.map(|_| ())?
             } else {
@@ -643,8 +640,7 @@ async fn async_main() -> Result<()> {
             } else {
                 // Default to install if no arguments
                 let cwd = std::env::current_dir()?;
-                let root_path = update_cwd_to_root(&cwd).await?;
-                Config::init_local(&root_path);
+                let root_path = init_project_root(&cwd).await?;
                 install(cli.ignore_scripts, &root_path).await?;
                 log_time_end("All packages installed");
             }

@@ -28,7 +28,7 @@ impl Config {
     /// Cache the local `.utoo.toml` content from the project root.
     ///
     /// Call once after determining the project root (e.g. after
-    /// `update_cwd_to_root`). Subsequent calls to `local_content()`
+    /// `init_project_root`). Subsequent calls to `local_content()`
     /// and `load_catalogs()` will use the cached content instead of
     /// re-reading from disk.
     pub fn init_local(root_path: &Path) {
