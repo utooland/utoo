@@ -68,35 +68,11 @@ use crate::util::config_file::Config;
 struct CatalogConfig {
     /// Default catalog: `[catalog]` section.
     #[serde(default)]
-    catalog: HashMap<String, toml::Value>,
+    catalog: HashMap<String, String>,
 
     /// Named catalogs: `[catalogs.<name>]` sections.
     #[serde(default)]
-    catalogs: HashMap<String, HashMap<String, toml::Value>>,
-}
-
-/// Convert a toml::Value to a String.
-///
-/// TOML may parse unquoted integer-like values as integers, so we need to
-/// handle both string and numeric types.
-fn toml_value_to_string(value: &toml::Value) -> Option<String> {
-    match value {
-        toml::Value::String(s) => Some(s.clone()),
-        toml::Value::Integer(n) => Some(n.to_string()),
-        other => {
-            tracing::warn!(
-                "unsupported TOML value type for catalog entry: {}",
-                other.type_str()
-            );
-            None
-        }
-    }
-}
-
-fn toml_map_to_string_map(map: HashMap<String, toml::Value>) -> HashMap<String, String> {
-    map.into_iter()
-        .filter_map(|(k, v)| toml_value_to_string(&v).map(|s| (k, s)))
-        .collect()
+    catalogs: HashMap<String, HashMap<String, String>>,
 }
 
 /// Load catalog definitions from `.utoo.toml` in the given directory.
@@ -135,23 +111,21 @@ fn parse_catalogs(content: &str) -> Catalogs {
 
     // Default catalog -> key ""
     if !config.catalog.is_empty() {
-        let default_catalog = toml_map_to_string_map(config.catalog);
         tracing::debug!(
             "Loaded default catalog with {} entries from .utoo.toml",
-            default_catalog.len()
+            config.catalog.len()
         );
-        catalogs.insert(String::new(), default_catalog);
+        catalogs.insert(String::new(), config.catalog);
     }
 
     // Named catalogs
     for (name, entries) in config.catalogs {
-        let named = toml_map_to_string_map(entries);
         tracing::debug!(
             "Loaded catalog '{}' with {} entries from .utoo.toml",
             name,
-            named.len()
+            entries.len()
         );
-        catalogs.insert(name, named);
+        catalogs.insert(name, entries);
     }
 
     catalogs

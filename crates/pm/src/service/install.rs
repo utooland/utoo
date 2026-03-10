@@ -191,6 +191,7 @@ impl InstallService {
 
         // Update working directory to project root (if in workspace)
         let root_path = update_cwd_to_root(&cwd).await?;
+        crate::util::config_file::Config::init_local(&root_path);
 
         // Update package.json and package-lock.json for all packages in batch
         update_package_json(&UpdatePackageJsonOptions {

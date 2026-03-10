@@ -14,11 +14,9 @@
 //! assert!(matches!(spec, PackageSpec::Git { .. }));
 //! ```
 
-pub mod capability;
 pub mod transform;
 
 // Re-exports for ergonomic access
-pub use capability::Capability;
 pub use transform::{TransformContext, TransformSpecs, transform_specs};
 
 use std::str::FromStr;

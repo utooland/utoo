@@ -77,10 +77,6 @@ pub async fn update_cwd_to_root(cwd: &Path) -> Result<PathBuf> {
         env::set_current_dir(&root_dir).context("Failed to change to root directory")?;
     }
 
-    // Cache the local .utoo.toml content from the project root.
-    // All subsequent config/catalog reads will use this cached content.
-    crate::util::config_file::Config::init_local(&root_dir);
-
     Ok(root_dir)
 }
 
