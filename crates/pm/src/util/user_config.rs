@@ -64,6 +64,15 @@ pub fn get_registry() -> String {
     REGISTRY.get_sync()
 }
 
+#[allow(dead_code)] // used by catalog protocol (upcoming)
+pub async fn get_catalogs()
+-> std::collections::HashMap<String, std::collections::HashMap<String, String>> {
+    Config::load(false)
+        .await
+        .map(|c| c.catalogs())
+        .unwrap_or_default()
+}
+
 pub fn set_legacy_peer_deps(value: Option<bool>) {
     LEGACY_PEER_DEPS.set(value);
 }

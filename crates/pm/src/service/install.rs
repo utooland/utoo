@@ -10,7 +10,7 @@ use crate::helper::lock::{
     Package, UpdatePackageJsonOptions, extract_package_name, group_by_depth,
     prepare_global_package_json, update_package_json,
 };
-use crate::helper::workspace::update_cwd_to_root;
+use crate::helper::workspace::init_project_root;
 use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
 use crate::util::json::load_package_lock_json_from_path;
@@ -190,7 +190,7 @@ impl InstallService {
         let cwd = std::env::current_dir().context("Failed to get current directory")?;
 
         // Update working directory to project root (if in workspace)
-        let root_path = update_cwd_to_root(&cwd).await?;
+        let root_path = init_project_root(&cwd).await?;
 
         // Update package.json and package-lock.json for all packages in batch
         update_package_json(&UpdatePackageJsonOptions {
