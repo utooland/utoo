@@ -1,19 +1,31 @@
+/**
+ * Dev server implementation using Hono + @hono/node-server + @hono/node-ws.
+ * Keeps the same public API as dev.ts; do not remove dev.ts until this is verified.
+ */
+
+import { serve as honoServe } from "@hono/node-server";
+import { serveStatic } from "@hono/node-server/serve-static";
+import { createNodeWebSocket } from "@hono/node-ws";
+import type { DevServerConfig } from "@utoo/pack-shared";
 import fs from "fs";
-import http, { IncomingMessage, ServerResponse } from "http";
+import getPort from "get-port";
+import { Hono } from "hono";
 import https from "https";
-import { isIPv6 } from "net";
 import path from "path";
-import send from "send";
-import { Duplex, Writable } from "stream";
-import url from "url";
 import { BundleOptions } from "../config/types";
-import { resolveBundleOptions, WebpackConfig } from "../config/webpackCompat";
+import {
+  resolveBundleOptions,
+  type WebpackConfig,
+} from "../config/webpackCompat";
+import type { HotReloaderInterface } from "../core/hmr";
 import { createHotReloader } from "../core/hmr";
 import { blockStdout, getPackPath } from "../utils/common";
 import { findRootDir } from "../utils/findRoot";
 import { createSelfSignedCertificate } from "../utils/mkcert";
 import { printServerInfo } from "../utils/printServerInfo";
 import { xcodeProfilingReady } from "../utils/xcodeProfile";
+
+// --- Path helpers (same logic as dev.ts, not exported) ---
 
 function parsePath(pathStr: string): {
   pathname: string;
@@ -41,27 +53,18 @@ function pathHasPrefix(pathStr: string, prefix: string): boolean {
   if (typeof pathStr !== "string") {
     return false;
   }
-
   const { pathname } = parsePath(pathStr);
   return pathname === prefix || pathname.startsWith(prefix + "/");
 }
 
 function removePathPrefix(pathStr: string, prefix: string): string {
-  // If the path doesn't start with the prefix we can return it as is.
   if (!pathHasPrefix(pathStr, prefix)) {
     return pathStr;
   }
-
-  // Remove the prefix from the path via slicing.
   const withoutPrefix = pathStr.slice(prefix.length);
-
-  // If the path without the prefix starts with a `/` we can return it as is.
   if (withoutPrefix.startsWith("/")) {
     return withoutPrefix;
   }
-
-  // If the path without the prefix doesn't start with a `/` we need to add it
-  // back to the path to make sure it's a valid path.
   return `/${withoutPrefix}`;
 }
 
@@ -74,85 +77,15 @@ function normalizedPublicPath(publicPath: string | undefined): string {
 
   try {
     if (URL.canParse(escapedPublicPath)) {
-      const url = new URL(escapedPublicPath).toString();
-      return url.endsWith("/") ? url.slice(0, -1) : url;
+      const u = new URL(escapedPublicPath).toString();
+      return u.endsWith("/") ? u.slice(0, -1) : u;
     }
   } catch {}
 
   return `/${escapedPublicPath}`;
 }
 
-export function serve(
-  options: BundleOptions | WebpackConfig,
-  projectPath?: string,
-  rootPath?: string,
-  serverOptions?: StartServerOptions,
-) {
-  const bundleOptions = resolveBundleOptions(options, projectPath, rootPath);
-
-  if (!rootPath) {
-    rootPath = findRootDir(projectPath || process.cwd());
-  }
-  return serveInternal(bundleOptions, projectPath, rootPath, serverOptions);
-}
-
-async function serveInternal(
-  options: BundleOptions,
-  projectPath?: string,
-  rootPath?: string,
-  serverOptions?: StartServerOptions,
-) {
-  blockStdout();
-
-  if (process.env.XCODE_PROFILE) {
-    await xcodeProfilingReady();
-  }
-
-  // FIXME: fix any type
-  const cfgDevServer = (options.config?.devServer || {}) as any;
-
-  const serverOpts: StartServerOptions = {
-    hostname: serverOptions?.hostname || cfgDevServer.host || "localhost",
-    port:
-      typeof serverOptions?.port !== "undefined"
-        ? serverOptions!.port
-        : cfgDevServer.port || 3000,
-    https:
-      typeof serverOptions?.https !== "undefined"
-        ? serverOptions!.https
-        : cfgDevServer.https,
-    logServerInfo: serverOptions?.logServerInfo,
-    selfSignedCertificate: serverOptions?.selfSignedCertificate,
-  } as StartServerOptions;
-
-  // If HTTPS is requested and no certificate provided, attempt to generate one.
-  if (serverOpts.https && !serverOpts.selfSignedCertificate) {
-    try {
-      // createSelfSignedCertificate may return undefined on failure
-      const cert = await createSelfSignedCertificate(serverOpts.hostname);
-      if (cert) serverOpts.selfSignedCertificate = cert;
-    } catch (e) {
-      // ignore and fall back to http if certificate generation fails
-    }
-  }
-
-  await startServer(
-    serverOpts,
-    {
-      ...options,
-      config: {
-        ...options.config,
-        devServer: {
-          hot: true,
-          ...(options.config.devServer || {}),
-        },
-      },
-      packPath: getPackPath(),
-    },
-    projectPath || process.cwd(),
-    rootPath,
-  );
-}
+// --- Public types (match dev.ts for index switch) ---
 
 export interface SelfSignedCertificate {
   key: string;
@@ -168,458 +101,242 @@ export interface StartServerOptions {
   selfSignedCertificate?: SelfSignedCertificate;
 }
 
-export type RequestHandler = (
-  req: IncomingMessage,
-  res: ServerResponse,
-) => Promise<void>;
-
-export type UpgradeHandler = (
-  req: IncomingMessage,
-  socket: Duplex,
-  head: Buffer,
-) => Promise<void>;
-
-export type ServerInitResult = {
-  requestHandler: RequestHandler;
-  upgradeHandler: UpgradeHandler;
-  closeUpgraded: () => void;
-};
-
-export async function startServer(
-  serverOptions: StartServerOptions,
-  bundleOptions: BundleOptions,
-  projectPath: string,
-  rootPath?: string,
-): Promise<void> {
-  let { port, hostname, selfSignedCertificate } = serverOptions;
-
-  process.title = "utoopack-dev-server";
-  let handlersReady = () => {};
-  let handlersError = () => {};
-
-  let handlersPromise: Promise<void> | undefined = new Promise<void>(
-    (resolve, reject) => {
-      handlersReady = resolve;
-      handlersError = reject;
-    },
-  );
-  let requestHandler = async (
-    req: IncomingMessage,
-    res: ServerResponse,
-  ): Promise<void> => {
-    if (handlersPromise) {
-      await handlersPromise;
-      return requestHandler(req, res);
-    }
-    throw new Error("Invariant request handler was not setup");
-  };
-  let upgradeHandler = async (
-    req: IncomingMessage,
-    socket: Duplex,
-    head: Buffer,
-  ): Promise<void> => {
-    if (handlersPromise) {
-      await handlersPromise;
-      return upgradeHandler(req, socket, head);
-    }
-    throw new Error("Invariant upgrade handler was not setup");
-  };
-
-  async function requestListener(req: IncomingMessage, res: ServerResponse) {
-    try {
-      if (handlersPromise) {
-        await handlersPromise;
-        handlersPromise = undefined;
-      }
-      await requestHandler(req, res);
-    } catch (err) {
-      res.statusCode = 500;
-      res.end("Internal Server Error");
-      console.error(`Failed to handle request for ${req.url}`);
-      console.error(err);
-    }
-  }
-
-  const server = selfSignedCertificate
-    ? https.createServer(
-        {
-          key: fs.readFileSync(selfSignedCertificate.key),
-          cert: fs.readFileSync(selfSignedCertificate.cert),
-        },
-        requestListener,
-      )
-    : http.createServer(requestListener);
-
-  server.on("upgrade", async (req, socket, head) => {
-    try {
-      await upgradeHandler(req, socket, head);
-    } catch (err) {
-      socket.destroy();
-      console.error(`Failed to handle request for ${req.url}`);
-      console.error(err);
-    }
-  });
-
-  let portRetryCount = 0;
-  const originalPort = port;
-
-  server.on("error", (err: NodeJS.ErrnoException) => {
-    if (port && err.code === "EADDRINUSE" && portRetryCount < 10) {
-      port += 1;
-      portRetryCount += 1;
-      server.listen(port, hostname);
-    } else {
-      console.error(`Failed to start server`);
-      console.error(err);
-      process.exit(1);
-    }
-  });
-
-  await new Promise<void>((resolve) => {
-    server.on("listening", async () => {
-      const addr = server.address();
-      const actualHostname = formatHostname(
-        typeof addr === "object"
-          ? addr?.address || hostname || "localhost"
-          : addr,
-      );
-      const formattedHostname =
-        !hostname || actualHostname === "0.0.0.0"
-          ? "localhost"
-          : actualHostname === "[::]"
-            ? "[::1]"
-            : formatHostname(hostname);
-      port = typeof addr === "object" ? addr?.port || port : port;
-
-      if (portRetryCount) {
-        console.warn(
-          `Port ${originalPort} is in use, using available port ${port} instead.`,
-        );
-      }
-
-      if (serverOptions.logServerInfo !== false) {
-        printServerInfo(
-          serverOptions.https ? "https" : "http",
-          formattedHostname,
-          port,
-        );
-      }
-
-      try {
-        let cleanupStarted = false;
-        let closeUpgraded: (() => void) | null = null;
-        const cleanup = () => {
-          if (cleanupStarted) {
-            return;
-          }
-          cleanupStarted = true;
-          (async () => {
-            console.debug("start-server process cleanup");
-
-            await new Promise<void>((res) => {
-              server.close((err) => {
-                if (err) console.error(err);
-                res();
-              });
-              server.closeAllConnections();
-              closeUpgraded?.();
-            });
-
-            console.debug("start-server process cleanup finished");
-            process.exit(0);
-          })();
-        };
-        const exception = (err: Error) => {
-          console.error(err);
-        };
-        process.on("SIGINT", cleanup);
-        process.on("SIGTERM", cleanup);
-        process.on("rejectionHandled", () => {});
-        process.on("uncaughtException", exception);
-        process.on("unhandledRejection", exception);
-
-        const initResult = await initialize(
-          bundleOptions,
-          projectPath,
-          rootPath,
-        );
-        requestHandler = initResult.requestHandler;
-        upgradeHandler = initResult.upgradeHandler;
-        closeUpgraded = initResult.closeUpgraded;
-        handlersReady();
-      } catch (err) {
-        handlersError();
-        console.error(err);
-        process.exit(1);
-      }
-
-      resolve();
-    });
-    server.listen(port, hostname);
-  });
+/** Options for honoServe excluding fetch; we only use HTTP or HTTPS (no HTTP/2). */
+interface ServeOptsBase {
+  port: number;
+  hostname: string;
+  createServer?: typeof https.createServer;
+  serverOptions?: { key: Buffer; cert: Buffer };
 }
 
-export async function initialize(
-  bundleOptions: BundleOptions,
-  projectPath: string,
+interface ResolvedDevConfig {
+  bundleOptions: BundleOptions;
+  projectPathResolved: string;
+  rootPathResolved: string;
+  serveOptsBase: ServeOptsBase;
+}
+
+async function resolveDevConfig(
+  options: BundleOptions,
+  projectPath: string | undefined,
+  rootPath: string | undefined,
+  serverOptions: StartServerOptions | undefined,
+): Promise<ResolvedDevConfig> {
+  const cfgDevServer: DevServerConfig = options.config?.devServer ?? {};
+  const port =
+    typeof serverOptions?.port !== "undefined"
+      ? serverOptions.port
+      : (cfgDevServer.port ?? 3000);
+  const hostname = serverOptions?.hostname ?? cfgDevServer.host ?? "localhost";
+  const useHttps =
+    typeof serverOptions?.https !== "undefined"
+      ? serverOptions.https
+      : cfgDevServer.https;
+
+  let selfSignedCertificate = serverOptions?.selfSignedCertificate;
+  if (useHttps && !selfSignedCertificate) {
+    try {
+      const cert = await createSelfSignedCertificate(hostname);
+      if (cert) selfSignedCertificate = cert;
+    } catch {
+      // fall back to http
+    }
+  }
+  const bundleOptions: BundleOptions = {
+    ...options,
+    config: {
+      ...options.config,
+      devServer: {
+        hot: true,
+        ...(options.config?.devServer || {}),
+      },
+    },
+    packPath: getPackPath(),
+  };
+
+  const projectPathResolved = projectPath || process.cwd();
+  const rootPathResolved = rootPath ?? projectPathResolved;
+
+  const actualPort = await getPort({ port, host: hostname });
+  if (actualPort !== port) {
+    console.warn(
+      `Port ${port} is in use, using available port ${actualPort} instead.`,
+    );
+  }
+  const serveOptsBase: ServeOptsBase = {
+    port: actualPort,
+    hostname,
+    ...(useHttps && selfSignedCertificate
+      ? {
+          createServer: https.createServer,
+          serverOptions: {
+            key: fs.readFileSync(selfSignedCertificate.key),
+            cert: fs.readFileSync(selfSignedCertificate.cert),
+          },
+        }
+      : {}),
+  };
+  return {
+    bundleOptions,
+    projectPathResolved,
+    rootPathResolved,
+    serveOptsBase,
+  };
+}
+
+// --- Entry ---
+
+export function serve(
+  options: BundleOptions | WebpackConfig,
+  projectPath?: string,
   rootPath?: string,
-): Promise<ServerInitResult> {
+  serverOptions?: StartServerOptions,
+) {
+  const bundleOptions = resolveBundleOptions(options, projectPath, rootPath);
+
+  if (!rootPath) {
+    rootPath = findRootDir(projectPath || process.cwd());
+  }
+  return runDev(bundleOptions, projectPath, rootPath, serverOptions);
+}
+
+const HMR_PATH = "/turbopack-hmr";
+
+async function runDev(
+  options: BundleOptions,
+  projectPath?: string,
+  rootPath?: string,
+  serverOptions?: StartServerOptions,
+): Promise<void> {
+  blockStdout();
+  process.title = "utoopack-dev-server";
+
+  if (process.env.XCODE_PROFILE) {
+    await xcodeProfilingReady();
+  }
+
   process.env.NODE_ENV = "development";
 
-  const hotReloader = await createHotReloader(
+  const {
     bundleOptions,
-    projectPath,
-    rootPath,
+    projectPathResolved,
+    rootPathResolved,
+    serveOptsBase,
+  } = await resolveDevConfig(options, projectPath, rootPath, serverOptions);
+
+  const hotReloader: HotReloaderInterface = await createHotReloader(
+    bundleOptions,
+    projectPathResolved,
+    rootPathResolved,
   );
   await hotReloader.start();
 
-  const requestHandlerImpl = async (
-    req: IncomingMessage,
-    res: ServerResponse,
-  ) => {
-    req.on("error", console.error);
-    res.on("error", console.error);
+  const distRoot = path.resolve(
+    projectPathResolved,
+    options.config?.output?.path || "./dist",
+  );
+  const publicPath = options.config?.output?.publicPath;
+  // Skip prefix stripping for "runtime" and when publicPath is absent (match dev.ts).
+  const normalizedPrefix =
+    publicPath && publicPath !== "runtime"
+      ? normalizedPublicPath(publicPath)
+      : "";
 
-    const handleRequest = async () => {
-      if (!(req.method === "GET" || req.method === "HEAD")) {
-        res.setHeader("Allow", ["GET", "HEAD"]);
-        res.statusCode = 405;
-        res.end();
-      }
+  const app = new Hono();
+  const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
 
-      const distRoot = path.resolve(
-        projectPath,
-        bundleOptions.config.output?.path || "./dist",
-      );
+  const rewriteRequestPath = (reqPath: string): string => {
+    if (!normalizedPrefix) return reqPath;
+    // Absolute-URL publicPath: do not rewrite (match dev.ts).
+    if (
+      normalizedPrefix.startsWith("http://") ||
+      normalizedPrefix.startsWith("https://")
+    ) {
+      return reqPath;
+    }
+    if (pathHasPrefix(reqPath, normalizedPrefix)) {
+      return removePathPrefix(reqPath, normalizedPrefix);
+    }
+    return reqPath;
+  };
 
-      const publicPath = bundleOptions.config.output?.publicPath;
-
-      try {
-        const reqUrl = req.url || "";
-        let requestPath = url.parse(reqUrl).pathname || "";
-
-        if (publicPath && publicPath !== "runtime") {
-          const normalizedPrefix = normalizedPublicPath(publicPath);
-
-          const isAbsoluteUrl =
-            normalizedPrefix.startsWith("http://") ||
-            normalizedPrefix.startsWith("https://");
-
-          if (!isAbsoluteUrl && normalizedPrefix) {
-            if (pathHasPrefix(requestPath, normalizedPrefix)) {
-              requestPath = removePathPrefix(requestPath, normalizedPrefix);
-            }
-          }
+  // HMR WebSocket route must be registered before "/*" so it is not handled by serveStatic
+  app.get(
+    HMR_PATH,
+    upgradeWebSocket((_c) => ({
+      onOpen(_ev, ws) {
+        hotReloader.registerClient(ws);
+      },
+      onMessage(ev, ws) {
+        try {
+          const data =
+            typeof ev.data === "string" ? ev.data : ev.data.toString();
+          hotReloader.handleClientMessage(ws, data);
+        } catch (err) {
+          console.error("HMR message error", err);
         }
+      },
+      onClose(_ev, ws) {
+        hotReloader.unregisterClient(ws);
+      },
+      onError(err) {
+        console.error("HMR WebSocket error", err);
+      },
+    })),
+  );
 
-        return await serveStatic(req, res, requestPath, { root: distRoot });
-      } catch (err: any) {
-        res.setHeader(
-          "Cache-Control",
-          "private, no-cache, no-store, max-age=0, must-revalidate",
-        );
-        res.statusCode = 404;
-        res.end();
-      }
-    };
+  // GET handles HEAD automatically in Hono; serveStatic serves both
+  app.get(
+    "/*",
+    serveStatic({
+      root: distRoot,
+      rewriteRequestPath,
+    }),
+  );
 
-    try {
-      await handleRequest();
-    } catch (err) {
-      res.statusCode = 500;
-      res.end("Internal Server Error");
-    }
-  };
+  app.all("*", (c) => c.body(null, 405, { Allow: "GET, HEAD" }));
 
-  let requestHandler: RequestHandler = requestHandlerImpl;
+  const server = honoServe({
+    ...serveOptsBase,
+    fetch: app.fetch,
+  });
+  injectWebSocket(server);
 
-  const logError = async (
-    type: "uncaughtException" | "unhandledRejection",
-    err: Error | undefined,
-  ) => {
-    if (type === "unhandledRejection") {
-      console.error("unhandledRejection: ", err);
-    } else if (type === "uncaughtException") {
-      console.error("uncaughtException: ", err);
-    }
-  };
-
-  process.on("uncaughtException", logError.bind(null, "uncaughtException"));
-  process.on("unhandledRejection", logError.bind(null, "unhandledRejection"));
-
-  const upgradeHandler = async (
-    req: IncomingMessage,
-    socket: Duplex,
-    head: Buffer,
-  ) => {
-    try {
-      const isHMRRequest = req.url?.includes("turbopack-hmr");
-
-      if (isHMRRequest) {
-        hotReloader.onHMR(req, socket, head);
-      } else {
-        socket.end();
-      }
-    } catch (err) {
-      console.error("Error handling upgrade request", err);
-      socket.end();
-    }
-  };
-
-  return {
-    requestHandler,
-    upgradeHandler,
-    closeUpgraded() {
-      hotReloader.close();
-    },
-  };
-}
-
-export async function pipeToNodeResponse(
-  readable: ReadableStream<Uint8Array>,
-  res: ServerResponse,
-  waitUntilForEnd?: Promise<unknown>,
-) {
-  try {
-    const { errored, destroyed } = res;
-    if (errored || destroyed) return;
-
-    const controller = createAbortController(res);
-
-    const writer = createWriterFromResponse(res, waitUntilForEnd);
-
-    await readable.pipeTo(writer, { signal: controller.signal });
-  } catch (err: any) {
-    if (isAbortError(err)) return;
-
-    throw new Error("failed to pipe response", { cause: err });
+  if (serverOptions?.logServerInfo !== false) {
+    const scheme = serveOptsBase.serverOptions ? "https" : "http";
+    const displayHost =
+      serveOptsBase.hostname === "0.0.0.0"
+        ? "localhost"
+        : serveOptsBase.hostname;
+    printServerInfo(scheme, displayHost, serveOptsBase.port);
   }
-}
 
-export function createAbortController(response: Writable): AbortController {
-  const controller = new AbortController();
-
-  response.once("close", () => {
-    if (response.writableFinished) return;
-
-    controller.abort(new ResponseAborted());
-  });
-
-  return controller;
-}
-
-export function isAbortError(e: any): e is Error & { name: "AbortError" } {
-  return e?.name === "AbortError" || e?.name === ResponseAbortedName;
-}
-
-export const ResponseAbortedName = "ResponseAborted";
-export class ResponseAborted extends Error {
-  public readonly name = ResponseAbortedName;
-}
-
-function createWriterFromResponse(
-  res: ServerResponse,
-  waitUntilForEnd?: Promise<unknown>,
-): WritableStream<Uint8Array> {
-  let started = false;
-
-  let drained = new DetachedPromise<void>();
-  function onDrain() {
-    drained.resolve();
-  }
-  res.on("drain", onDrain);
-
-  res.once("close", () => {
-    res.off("drain", onDrain);
-    drained.resolve();
-  });
-
-  const finished = new DetachedPromise<void>();
-  res.once("finish", () => {
-    finished.resolve();
-  });
-
-  return new WritableStream<Uint8Array>({
-    write: async (chunk) => {
-      if (!started) {
-        started = true;
-
-        res.flushHeaders();
+  const cleanup = () => {
+    hotReloader.close();
+    // We always create HTTP/1.1 server (http or https), so closeAllConnections exists; Hono's
+    // ServerType union includes HTTP/2, so TS does not narrow. Use runtime check to satisfy types.
+    if (
+      "closeAllConnections" in server &&
+      typeof server.closeAllConnections === "function"
+    ) {
+      server.closeAllConnections();
+    }
+    server.close((err) => {
+      if (err) {
+        console.error(err);
+        process.exit(1);
       }
-
-      try {
-        const ok = res.write(chunk);
-
-        if ("flush" in res && typeof res.flush === "function") {
-          res.flush();
-        }
-
-        if (!ok) {
-          await drained.promise;
-
-          drained = new DetachedPromise<void>();
-        }
-      } catch (err) {
-        res.end();
-        throw new Error("failed to write chunk to response", { cause: err });
-      }
-    },
-    abort: (err) => {
-      if (res.writableFinished) return;
-
-      res.destroy(err);
-    },
-    close: async () => {
-      if (waitUntilForEnd) {
-        await waitUntilForEnd;
-      }
-
-      if (res.writableFinished) return;
-
-      res.end();
-      return finished.promise;
-    },
-  });
-}
-
-export class DetachedPromise<T = any> {
-  public readonly resolve: (value: T | PromiseLike<T>) => void;
-  public readonly reject: (reason: any) => void;
-  public readonly promise: Promise<T>;
-
-  constructor() {
-    let resolve: (value: T | PromiseLike<T>) => void;
-    let reject: (reason: any) => void;
-
-    this.promise = new Promise<T>((res, rej) => {
-      resolve = res;
-      reject = rej;
+      process.exit(0);
     });
+  };
 
-    this.resolve = resolve!;
-    this.reject = reject!;
-  }
-}
+  const exception = (err: Error) => {
+    console.error(err);
+  };
 
-export function serveStatic(
-  req: IncomingMessage,
-  res: ServerResponse,
-  path: string,
-  opts?: Parameters<typeof send>[2],
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    send(req, path, opts)
-      .on("directory", () => {
-        const err: any = new Error("No directory access");
-        err.code = "ENOENT";
-        reject(err);
-      })
-      .on("error", reject)
-      .pipe(res)
-      .on("finish", resolve);
-  });
-}
-
-export function formatHostname(hostname: string): string {
-  return isIPv6(hostname) ? `[${hostname}]` : hostname;
+  process.on("SIGINT", cleanup);
+  process.on("SIGTERM", cleanup);
+  process.on("rejectionHandled", () => {});
+  process.on("uncaughtException", exception);
+  process.on("unhandledRejection", exception);
 }

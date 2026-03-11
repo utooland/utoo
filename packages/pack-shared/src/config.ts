@@ -128,6 +128,21 @@ export type ExternalConfig = string | ExternalAdvanced;
  */
 export type ProviderConfig = Record<string, string | [string, string]>;
 
+/**
+ * Development server options (port, host, HTTPS, HMR).
+ * Used by the dev server and by config resolution for startup options.
+ */
+export interface DevServerConfig {
+  /** Enable Hot Module Replacement. */
+  hot?: boolean;
+  /** Port to listen on. */
+  port?: number;
+  /** Host to bind (e.g. localhost, 0.0.0.0). */
+  host?: string;
+  /** Use HTTPS; when true without a certificate, a self-signed cert may be generated. */
+  https?: boolean;
+}
+
 export interface ConfigComplete {
   entry: EntryOptions[];
   mode?: "production" | "development";
@@ -226,12 +241,7 @@ export interface ConfigComplete {
   stats?: boolean;
   persistentCaching?: boolean;
   nodePolyfill?: boolean;
-  devServer?: {
-    hot?: boolean;
-    port?: number;
-    host?: string;
-    https?: boolean;
-  };
+  devServer?: DevServerConfig;
   cacheHandler?: string;
   experimental?: ExperimentalConfig;
 }
