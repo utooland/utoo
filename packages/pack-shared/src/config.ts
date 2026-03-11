@@ -224,6 +224,7 @@ export interface ConfigComplete {
     importSource?: string;
   };
   stats?: boolean;
+  pluginRuntimeStrategy?: "workerThreads" | "childProcesses";
   persistentCaching?: boolean;
   nodePolyfill?: boolean;
   devServer?: {
