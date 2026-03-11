@@ -11,7 +11,7 @@ use pack_api::{
         EntrypointsWithIssues, all_output_assets_operation,
         get_all_written_entrypoints_with_issues_operation,
     },
-    project::{DefineEnv, ProjectContainer, ProjectOptions, WatchOptions},
+    project::{ProjectContainer, ProjectOptions, WatchOptions},
 };
 use rustc_hash::FxHashSet;
 use std::{
@@ -270,7 +270,7 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
             ),
             ("TURBOPACK".into(), "1".into()),
         ],
-        define_env: DefineEnv::default(),
+
         watch: WatchOptions::default(),
         dev: !is_production,
         build_id: "test".into(),

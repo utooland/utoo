@@ -914,6 +914,12 @@ pub struct ExternalsConfig(
     #[bincode(with = "turbo_bincode::indexmap")] FxIndexMap<RcStr, ExternalConfig>,
 );
 
+#[turbo_tasks::value]
+pub enum Platform {
+    Web,
+    Node,
+}
+
 fn turbopack_config_documentation_link() -> RcStr {
     rcstr!(
         "https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#configuring-webpack-loaders"
@@ -1074,7 +1080,7 @@ impl Config {
 
     // refer to: https://github.com/utooland/utoo/issues/2526
     #[turbo_tasks::function]
-    pub async fn chunk_loading_global(
+    pub async fn client_chunk_loading_global(
         &self,
         project_path: FileSystemPath,
     ) -> Result<Vc<Option<RcStr>>> {
@@ -1140,6 +1146,43 @@ impl Config {
         Vc::cell(self.target.clone().unwrap_or(
             "last 1 Chrome versions, last 1 Firefox versions, last 1 Safari versions, last 1 Edge versions".into()
         ))
+    }
+
+    #[turbo_tasks::function]
+    pub fn platform(&self) -> Vc<Platform> {
+        let target = if let Some(target) = self.target.as_ref() {
+            target
+        } else {
+            return Platform::Web.cell();
+        };
+
+        let distribs = browserslist::resolve(
+            target.split(","),
+            &browserslist::Opts {
+                ignore_unknown_versions: true,
+                ..Default::default()
+            },
+        );
+
+        match distribs {
+            Ok(distribs) => match distribs.first() {
+                Some(distrib) => {
+                    if distrib.name() == "node" {
+                        Platform::Node.cell()
+                    } else {
+                        Platform::Web.cell()
+                    }
+                }
+                None => Platform::Web.cell(),
+            },
+            Err(_) => {
+                if target == "node" {
+                    Platform::Node.cell()
+                } else {
+                    Platform::Web.cell()
+                }
+            }
+        }
     }
 
     #[turbo_tasks::function]

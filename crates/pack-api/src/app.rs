@@ -3,6 +3,10 @@ use pack_core::client::context::{
     get_client_module_options_context, get_client_resolve_options_context,
     get_client_runtime_entries,
 };
+use pack_core::config::Platform;
+use pack_core::server::contexts::{
+    get_server_module_options_context, get_server_resolve_options_context,
+};
 use pack_core::util::convert_to_project_relative;
 use qstring::QString;
 use tracing::Instrument;
@@ -12,12 +16,13 @@ use turbo_tasks_fs::{File, FileContent};
 use turbopack::{
     ModuleAssetContext, module_options::ModuleOptionsContext, transition::TransitionOptions,
 };
+use turbopack_core::chunk::ChunkingContextExt;
+use turbopack_core::output::OutputAssetsWithReferenced;
 use turbopack_core::resolve::origin::ResolveOrigin;
 use turbopack_core::{
     asset::AssetContent,
     chunk::{
-        ChunkGroupResult, ChunkingContext, EvaluatableAsset, EvaluatableAssets,
-        availability_info::AvailabilityInfo,
+        ChunkingContext, EvaluatableAsset, EvaluatableAssets, availability_info::AvailabilityInfo,
     },
     context::AssetContext,
     ident::{AssetIdent, Layer},
@@ -181,17 +186,15 @@ impl AppEntrypoint {
     }
 
     #[turbo_tasks::function]
-    async fn chunk_group_for_entry(
+    async fn client_chunk_group(
         self: Vc<Self>,
         asset_context: Vc<Box<dyn AssetContext>>,
         runtime_entries: Vc<EvaluatableAssets>,
-    ) -> Result<Vc<ChunkGroupResult>> {
+    ) -> Result<Vc<OutputAssetsWithReferenced>> {
         async move {
             let this = self.await?;
 
             let project = self.project();
-
-            let app_chunking_context = project.client_chunking_context();
 
             let module_graph = self.module_graph_for_entry(asset_context, runtime_entries);
 
@@ -203,21 +206,65 @@ impl AppEntrypoint {
                 format!("?{query}")
             };
 
-            let app_chunk_group = app_chunking_context.evaluated_chunk_group(
-                AssetIdent::from_path(project.project_path().await?.join(this.import.as_str())?)
+            let app_chunk_group = project
+                .client_chunking_context()
+                .evaluated_chunk_group_assets(
+                    AssetIdent::from_path(
+                        project.project_path().await?.join(this.import.as_str())?,
+                    )
                     .with_query(query.into()),
-                ChunkGroup::Entry(
-                    self.entry_evaluatable_assets(asset_context, runtime_entries)
-                        .await?
-                        .iter()
-                        .map(|m| ResolvedVc::upcast(*m))
-                        .collect(),
-                ),
-                module_graph,
-                AvailabilityInfo::root(),
-            );
+                    ChunkGroup::Entry(
+                        self.entry_evaluatable_assets(asset_context, runtime_entries)
+                            .await?
+                            .iter()
+                            .map(|m| ResolvedVc::upcast(*m))
+                            .collect(),
+                    ),
+                    module_graph,
+                    AvailabilityInfo::root(),
+                );
 
             Ok(app_chunk_group)
+        }
+        .instrument(tracing::trace_span!("app chunk rendering"))
+        .await
+    }
+
+    #[turbo_tasks::function]
+    async fn server_chunk_group(
+        self: Vc<Self>,
+        asset_context: Vc<Box<dyn AssetContext>>,
+        runtime_entries: Vc<EvaluatableAssets>,
+    ) -> Result<Vc<OutputAssetsWithReferenced>> {
+        async move {
+            let this = self.await?;
+
+            let project = self.project();
+
+            let module_graph = self.module_graph_for_entry(asset_context, runtime_entries);
+
+            let dist_root = project.dist_root().owned().await?;
+            let entry_filename = format!("{}.js", this.name);
+            let entry_path = dist_root.join(&entry_filename)?;
+
+            let app_chunk_group = project
+                .server_chunking_context()
+                .entry_chunk_group(
+                    entry_path,
+                    self.entry_evaluatable_assets(asset_context, runtime_entries),
+                    module_graph,
+                    OutputAssets::empty(),
+                    OutputAssets::empty(),
+                    AvailabilityInfo::root(),
+                )
+                .await?;
+
+            Ok(OutputAssetsWithReferenced {
+                assets: ResolvedVc::cell(vec![app_chunk_group.asset]),
+                referenced_assets: ResolvedVc::cell(vec![]),
+                references: ResolvedVc::cell(vec![]),
+            }
+            .cell())
         }
         .instrument(tracing::trace_span!("app chunk rendering"))
         .await
@@ -229,10 +276,21 @@ impl AppEntrypoint {
         asset_context: Vc<Box<dyn AssetContext>>,
         runtime_entries: Vc<EvaluatableAssets>,
     ) -> Result<Vc<OutputAssets>> {
-        let chunk_group_assets = *self
-            .chunk_group_for_entry(asset_context, runtime_entries)
-            .await?
-            .assets;
+        let platform = &*self.project().platform().await?;
+        let chunk_group_assets = match platform {
+            Platform::Web => {
+                *self
+                    .client_chunk_group(asset_context, runtime_entries)
+                    .await?
+                    .assets
+            }
+            Platform::Node => {
+                *self
+                    .server_chunk_group(asset_context, runtime_entries)
+                    .await?
+                    .assets
+            }
+        };
         Ok(chunk_group_assets)
     }
 }
@@ -252,66 +310,104 @@ impl AppEndpoint {
 
     #[turbo_tasks::function]
     pub async fn app_runtime_entries(self: Vc<Self>) -> Result<Vc<EvaluatableAssets>> {
-        let watch = self.project().await?.watch.enable;
-        Ok(get_client_runtime_entries(
-            self.project().project_path().owned().await?,
-            self.project().mode(),
-            self.project().config(),
-            self.project().execution_context(),
-            self.project().pack_path().owned().await?,
-            Vc::cell(watch),
-            Vc::cell(
-                watch
-                    && self
-                        .project()
-                        .config()
-                        .dev_server()
-                        .await?
-                        .hot
-                        .unwrap_or_default(),
-            ),
-        )
-        .resolve_entries(Vc::upcast(self.app_module_context())))
+        match &*self.project().platform().await? {
+            Platform::Web => {
+                let watch = self.project().await?.watch.enable;
+                Ok(get_client_runtime_entries(
+                    self.project().project_path().owned().await?,
+                    self.project().mode(),
+                    self.project().config(),
+                    self.project().execution_context(),
+                    self.project().pack_path().owned().await?,
+                    Vc::cell(watch),
+                    Vc::cell(
+                        watch
+                            && self
+                                .project()
+                                .config()
+                                .dev_server()
+                                .await?
+                                .hot
+                                .unwrap_or_default(),
+                    ),
+                )
+                .resolve_entries(Vc::upcast(self.app_module_context())))
+            }
+            Platform::Node => Ok(EvaluatableAssets::empty()),
+        }
     }
 
     #[turbo_tasks::function]
     pub async fn app_module_context(self: Vc<Self>) -> Result<Vc<ModuleAssetContext>> {
+        let platform = &*self.project().platform().await?;
+
+        let compile_time_info = match platform {
+            Platform::Web => self.project().client_compile_time_info(),
+            Platform::Node => self.project().server_compile_time_info(),
+        };
+
+        let layer = match platform {
+            Platform::Web => {
+                Layer::new_with_user_friendly_name(rcstr!("client"), rcstr!("Browser"))
+            }
+            Platform::Node => {
+                Layer::new_with_user_friendly_name(rcstr!("server"), rcstr!("Nodejs"))
+            }
+        };
+
         Ok(ModuleAssetContext::new(
             // FIXME:
             TransitionOptions {
                 ..Default::default()
             }
             .cell(),
-            self.project().client_compile_time_info(),
+            compile_time_info,
             self.app_module_options_context(),
             self.app_resolve_options_context(),
-            // TODO: add server Layer for SSR
-            Layer::new_with_user_friendly_name(rcstr!("client"), rcstr!("Browser")),
+            layer,
         ))
     }
 
     #[turbo_tasks::function]
     async fn app_module_options_context(self: Vc<Self>) -> Result<Vc<ModuleOptionsContext>> {
-        Ok(get_client_module_options_context(
-            self.project().project_path().owned().await?,
-            self.project().execution_context(),
-            self.project().client_compile_time_info().environment(),
-            self.project().mode(),
-            self.project().config(),
-            Vc::cell(self.project().await?.watch.enable),
-            self.project().pack_path().owned().await?,
-        ))
+        match &*self.project().platform().await? {
+            Platform::Web => Ok(get_client_module_options_context(
+                self.project().project_path().owned().await?,
+                self.project().execution_context(),
+                self.project().client_compile_time_info().environment(),
+                self.project().mode(),
+                self.project().config(),
+                Vc::cell(self.project().await?.watch.enable),
+                self.project().pack_path().owned().await?,
+            )),
+            Platform::Node => Ok(get_server_module_options_context(
+                self.project().project_path().owned().await?,
+                self.project().execution_context(),
+                self.project().server_compile_time_info().environment(),
+                self.project().mode(),
+                self.project().config(),
+            )),
+        }
     }
 
     #[turbo_tasks::function]
     async fn app_resolve_options_context(self: Vc<Self>) -> Result<Vc<ResolveOptionsContext>> {
-        Ok(get_client_resolve_options_context(
-            self.project().project_path().owned().await?,
-            self.project().mode(),
-            self.project().config(),
-            self.project().execution_context(),
-            self.project().pack_path().owned().await?,
-        ))
+        match &*self.project().platform().await? {
+            Platform::Web => Ok(get_client_resolve_options_context(
+                self.project().project_path().owned().await?,
+                self.project().mode(),
+                self.project().config(),
+                self.project().execution_context(),
+                self.project().pack_path().owned().await?,
+            )),
+            Platform::Node => Ok(get_server_resolve_options_context(
+                self.project().project_path().owned().await?,
+                self.project().mode(),
+                self.project().config(),
+                self.project().execution_context(),
+                self.project().pack_path().owned().await?,
+            )),
+        }
     }
 }
 

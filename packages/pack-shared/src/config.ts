@@ -16,12 +16,6 @@ export interface LibraryOptions {
   export?: Array<string>;
 }
 
-export interface DefineEnv {
-  client: RustifiedEnv;
-  edge: RustifiedEnv;
-  nodejs: RustifiedEnv;
-}
-
 export type RustifiedEnv = { name: string; value: string }[];
 
 export interface ExperimentalConfig {
@@ -288,8 +282,6 @@ export interface BundleOptions {
    */
   processEnv?: Record<string, string>;
 
-  defineEnv?: DefineEnv;
-
   /**
    * Whether to watch the filesystem for file changes.
    */
@@ -321,10 +313,7 @@ export interface BundleOptions {
  */
 export type UserConfig = ConfigComplete &
   Partial<
-    Pick<
-      BundleOptions,
-      "processEnv" | "defineEnv" | "watch" | "dev" | "buildId" | "packPath"
-    >
+    Pick<BundleOptions, "processEnv" | "watch" | "dev" | "buildId" | "packPath">
   > & {
     rootPath?: string;
     projectPath?: string;
