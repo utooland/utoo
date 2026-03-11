@@ -556,7 +556,10 @@ pub async fn project_write_all_entrypoints_to_disk(
     let napi_entrypoints =
         NapiEntrypoints::from_entrypoints_op(&entrypoints, &project.turbopack_ctx)?;
 
-    tracing::info!("Compile done in {:?}", start.elapsed());
+    tracing::info!(
+        "Compile done in {:?}",
+        start.elapsed()
+    );
 
     Ok(TurbopackResult {
         result: napi_entrypoints,
