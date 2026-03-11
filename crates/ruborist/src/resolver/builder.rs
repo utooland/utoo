@@ -27,9 +27,9 @@ use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
 use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
-use crate::model::spec::{PackageSpec, Protocol};
 use crate::resolver::preload::{PreloadConfig, preload_manifests};
 use crate::resolver::registry::{ResolveError, resolve_registry_dep};
+use crate::spec::{Catalogs, PackageSpec, Protocol, resolve_catalog_spec};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
 use crate::traits::registry::{RegistryClient, ResolvedPackage};
 
@@ -83,6 +83,9 @@ pub struct BuildDepsConfig {
     pub cache_dir: Option<PathBuf>,
     /// Shared dedup cache for concurrent git clone operations
     pub git_clone_cache: Arc<GitCloneCache>,
+    /// Catalog definitions for the `catalog:` dependency protocol.
+    /// Key `""` = default catalog, other keys = named catalogs.
+    pub catalogs: Catalogs,
 }
 
 impl Default for BuildDepsConfig {
@@ -93,6 +96,7 @@ impl Default for BuildDepsConfig {
             skip_preload: false,
             cache_dir: dirs::home_dir().map(|d| d.join(".cache/nm")),
             git_clone_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            catalogs: HashMap::new(),
         }
     }
 }
@@ -121,6 +125,12 @@ impl BuildDepsConfig {
         self.cache_dir = Some(cache_dir);
         self
     }
+
+    /// Set catalog definitions for `catalog:` protocol resolution.
+    pub fn with_catalogs(mut self, catalogs: Catalogs) -> Self {
+        self.catalogs = catalogs;
+        self
+    }
 }
 
 /// Snapshot of node dependency flags to avoid borrowing conflicts.
@@ -135,7 +145,7 @@ struct NodeFlags {
 
 /// Gather all unresolved deps from root and workspace nodes for preloading.
 fn gather_preload_deps(graph: &DependencyGraph, legacy_peer_deps: bool) -> Vec<(String, String)> {
-    use crate::model::spec::SpecStr;
+    use crate::spec::SpecStr;
     use std::collections::HashSet;
 
     let mut deps = HashSet::new();
@@ -411,6 +421,38 @@ pub async fn process_dependency<R: RegistryClient>(
                         edge_info.spec
                     );
                     return Ok(ProcessResult::Skipped);
+                }
+                PackageSpec::Local {
+                    protocol: Protocol::Catalog,
+                    ..
+                } => {
+                    let resolved_spec =
+                        resolve_catalog_spec(&edge_info.name, &edge_info.spec, &config.catalogs)
+                            .ok_or_else(|| ResolveError::Unsupported {
+                                spec: edge_info.spec.clone(),
+                                reason: "catalog entry not found",
+                            })?;
+                    // Update the edge spec so the lockfile writes the resolved
+                    // version range instead of the raw `catalog:` reference.
+                    graph.update_dependency_spec(edge_info.edge_id, resolved_spec.to_string());
+                    match resolve_registry_dep(
+                        registry,
+                        &edge_info.name,
+                        resolved_spec,
+                        &edge_info.edge_type,
+                    )
+                    .await?
+                    {
+                        Some(resolved) => resolved,
+                        None => {
+                            tracing::debug!(
+                                "Skipped optional catalog dependency {}@{}",
+                                edge_info.name,
+                                edge_info.spec
+                            );
+                            return Ok(ProcessResult::Skipped);
+                        }
+                    }
                 }
                 PackageSpec::Local { .. } => {
                     return Err(ResolveError::Unsupported {

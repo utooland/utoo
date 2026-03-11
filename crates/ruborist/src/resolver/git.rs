@@ -27,7 +27,7 @@ use anyhow::{Context, Result, anyhow};
 
 use crate::model::git::GitCloneResult;
 use crate::model::manifest::{CoreVersionManifest, Dist};
-use crate::model::spec::PackageSpec;
+use crate::spec::PackageSpec;
 use crate::traits::registry::ResolvedPackage;
 
 // ============================================================================

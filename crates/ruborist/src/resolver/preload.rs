@@ -50,7 +50,7 @@ pub struct PreloadStats {
 
 /// Collect dependencies from any deps map, filtering out non-registry specs.
 fn collect_deps(map: Option<&std::collections::HashMap<String, String>>) -> Vec<Dep> {
-    use crate::model::spec::SpecStr;
+    use crate::spec::SpecStr;
     map.into_iter()
         .flatten()
         .filter(|(_, spec)| spec.is_registry_spec())
@@ -341,7 +341,7 @@ mod tests {
 
     #[test]
     fn test_is_registry_spec() {
-        use crate::model::spec::SpecStr;
+        use crate::spec::SpecStr;
 
         // Local specs — not registry
         assert!(!"file:../foo".is_registry_spec());

@@ -40,6 +40,7 @@ use crate::model::util::parse_package_spec;
 use crate::resolver::builder::{BuildDepsConfig, add_edges_from, build_deps_with_config};
 use crate::resolver::runtime::install_runtime_from_map;
 use crate::resolver::workspace::WorkspaceDiscovery;
+use crate::spec::Catalogs;
 use crate::traits::progress::EventReceiver;
 
 /// Options for dependency resolution.
@@ -61,6 +62,9 @@ pub struct BuildDepsOptions<G, R> {
     pub receiver: R,
     /// Explicit semver support override (None = auto-detect from registry URL)
     pub supports_semver: Option<bool>,
+    /// Catalog definitions for the `catalog:` dependency protocol.
+    /// Key `""` = default catalog, other keys = named catalogs.
+    pub catalogs: Catalogs,
 }
 
 impl<G, R> BuildDepsOptions<G, R> {
@@ -79,6 +83,7 @@ impl<G, R> BuildDepsOptions<G, R> {
             glob,
             receiver,
             supports_semver: None,
+            catalogs: HashMap::new(),
         }
     }
 }
@@ -125,6 +130,7 @@ where
         glob,
         receiver,
         supports_semver,
+        catalogs,
     } = options;
 
     // 1. Find root path (workspace root if applicable)
@@ -154,7 +160,7 @@ where
     // 4. Initialize dependency graph
     let mut graph = DependencyGraph::from_package_json(root_path.clone(), pkg.clone());
 
-    // 5. Add root dependency edges
+    // 5. Add root dependency edges (catalog: specs stay as-is; resolved in process_dependency)
     let root_index = graph.root_index;
     add_edges_from(&mut graph, root_index, &pkg, legacy_peer_deps, true);
 
@@ -192,7 +198,7 @@ where
             workspace.path
         );
 
-        // Add workspace dependencies
+        // Add workspace dependencies (catalog: specs stay as-is; resolved in process_dependency)
         add_edges_from(&mut graph, workspace_index, &ws_pkg, legacy_peer_deps, true);
     }
 
@@ -268,7 +274,8 @@ where
     let mut config = BuildDepsConfig::default()
         .with_legacy_peer_deps(legacy_peer_deps)
         .with_concurrency(concurrency)
-        .with_skip_preload(skip_preload);
+        .with_skip_preload(skip_preload)
+        .with_catalogs(catalogs);
     if let Some(dir) = cache_dir {
         config = config.with_cache_dir(dir);
     }
@@ -329,6 +336,7 @@ mod tests {
             glob: NoopGlob,
             receiver: NoopReceiver,
             supports_semver: None,
+            catalogs: HashMap::new(),
         };
 
         assert_eq!(options.concurrency, 20);
