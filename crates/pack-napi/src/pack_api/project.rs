@@ -551,25 +551,12 @@ pub async fn project_write_all_entrypoints_to_disk(
         .or_else(|e| ctx.throw_turbopack_internal_result(&e.into()))
         .await?;
 
-    tracing::info!("all project entrypoints wrote to disk.");
+    tracing::info!("All project entrypoints wrote to disk.");
 
     let napi_entrypoints =
         NapiEntrypoints::from_entrypoints_op(&entrypoints, &project.turbopack_ctx)?;
 
-    tracing::info!(
-        "pack tasks with {} apps {} libraries finished in {:?}",
-        napi_entrypoints
-            .apps
-            .as_ref()
-            .map(|v| v.len())
-            .unwrap_or_default(),
-        napi_entrypoints
-            .libraries
-            .as_ref()
-            .map(|v| v.len())
-            .unwrap_or_default(),
-        start.elapsed()
-    );
+    tracing::info!("Compile done in {:?}", start.elapsed());
 
     Ok(TurbopackResult {
         result: napi_entrypoints,
