@@ -5,6 +5,7 @@ use std::fmt::Debug;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use utoo_ruborist::spec::Catalogs;
 
 pub type ConfigResult<T> = Result<T>;
 
@@ -84,11 +85,17 @@ impl Config {
     }
 
     /// Build a `Catalogs` map from the parsed `[catalog]` and `[catalogs.*]` sections.
-    #[allow(dead_code)] // used by catalog protocol (upcoming)
-    pub fn catalogs(&self) -> HashMap<String, HashMap<String, String>> {
+    ///
+    /// The default catalog (`[catalog]`) is stored under both `""` and `"default"`
+    /// so that `catalog:` and `catalog:default` both resolve without extra normalization.
+    pub fn catalogs(&self) -> Catalogs {
         let mut result = self.catalogs.clone();
         if !self.catalog.is_empty() {
             result.insert(String::new(), self.catalog.clone());
+        }
+        // Duplicate default catalog under "default" key for direct lookup
+        if let Some(default) = result.get("").cloned() {
+            result.entry("default".to_string()).or_insert(default);
         }
         result
     }

@@ -1,0 +1,10 @@
+{
+  "name": "@catalog-test/utils",
+  "version": "1.0.0",
+  "dependencies": {
+    "debug": "catalog:legacy"
+  },
+  "devDependencies": {
+    "typescript": "catalog:"
+  }
+}

@@ -6,7 +6,7 @@ use serde_json::Value;
 use utoo_ruborist::lock::{LockPackage, PackageLock};
 use utoo_ruborist::manifest::{DepsView, EnginesView, PackageJson};
 use utoo_ruborist::registry::resolve_package;
-use utoo_ruborist::spec::{PackageSpec, Protocol};
+use utoo_ruborist::spec::{PackageSpec, Protocol, resolve_catalog_spec};
 use utoo_ruborist::util::PackageNameStr;
 
 use super::ruborist_context::Context;
@@ -19,7 +19,7 @@ use crate::util::git_resolver::{resolve_git_spec, resolve_github_spec};
 use crate::util::json::{load_package_json, load_package_lock_json_from_path, read_json_file};
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
 use crate::util::save_type::{PackageAction, SaveType};
-use crate::util::user_config::{get_legacy_peer_deps, set_package_json};
+use crate::util::user_config::{get_catalogs, get_legacy_peer_deps, set_package_json};
 
 // Platform-specific line endings
 #[cfg(target_os = "windows")]
@@ -50,18 +50,6 @@ pub fn extract_package_name(path: &str) -> String {
         package_path.to_string()
     } else {
         path.to_string()
-    }
-}
-
-/// Compare a PackageJson dependency map with a lock file dependency map.
-/// Treats empty maps and None/empty objects as equal.
-fn deps_map_equals_lock(
-    pkg_deps: &HashMap<String, String>,
-    lock_deps: Option<&HashMap<String, String>>,
-) -> bool {
-    match lock_deps {
-        Some(ld) => *pkg_deps == *ld,
-        None => pkg_deps.is_empty(),
     }
 }
 
@@ -362,6 +350,22 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
     let pkg: DepsView = load_package_json(root_path).await?;
     let lock_file: PackageLock = read_json_file(&root_path.join("package-lock.json")).await?;
 
+    let catalogs = get_catalogs().await;
+    let deps_match = |pkg_deps: &HashMap<String, String>,
+                      lock_deps: Option<&HashMap<String, String>>|
+     -> bool {
+        match lock_deps {
+            None => pkg_deps.is_empty(),
+            Some(ld) => {
+                pkg_deps.len() == ld.len()
+                    && pkg_deps.iter().all(|(name, spec)| {
+                        let resolved = resolve_catalog_spec(name, spec, &catalogs).unwrap_or(spec);
+                        ld.get(name).is_some_and(|v| v == resolved)
+                    })
+            }
+        }
+    };
+
     let packages = &lock_file.packages;
 
     // prepare packages to check: (relative_path, deps)
@@ -394,12 +398,12 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
         let name = if path.is_empty() { "root" } else { path };
 
         // check dependencies whether changed
-        if !deps_map_equals_lock(&pkg.dependencies, lock.dependencies.as_ref()) {
+        if !deps_match(&pkg.dependencies, lock.dependencies.as_ref()) {
             tracing::warn!("package-lock.json is outdated, {name} dependencies changed");
             return Ok(true);
         }
 
-        if !deps_map_equals_lock(
+        if !deps_match(
             &pkg.optional_dependencies,
             lock.optional_dependencies.as_ref(),
         ) {
@@ -407,13 +411,12 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
             return Ok(true);
         }
 
-        if !deps_map_equals_lock(&pkg.dev_dependencies, lock.dev_dependencies.as_ref()) {
+        if !deps_match(&pkg.dev_dependencies, lock.dev_dependencies.as_ref()) {
             tracing::warn!("package-lock.json is outdated, {name} devDependencies changed");
             return Ok(true);
         }
 
-        if !legacy_peer_deps
-            && !deps_map_equals_lock(&pkg.peer_dependencies, lock.peer_dependencies.as_ref())
+        if !legacy_peer_deps && !deps_match(&pkg.peer_dependencies, lock.peer_dependencies.as_ref())
         {
             tracing::warn!("package-lock.json is outdated, {name} peerDependencies changed");
             return Ok(true);

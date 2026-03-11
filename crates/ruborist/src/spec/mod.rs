@@ -1,9 +1,8 @@
-//! Package specification types for different dependency sources.
+//! Package specification types.
 //!
-//! Supports registry (semver), git, GitHub shorthand, local, and HTTP URL specs.
+//! [`PackageSpec::from()`] parses a spec string into a typed enum for the
+//! resolver. Parsing is infallible:
 //!
-//! # Parsing
-//! Specs implement [`From<&str>`] (infallible):
 //! ```
 //! use utoo_ruborist::spec::{PackageSpec, SpecStr};
 //!
@@ -13,10 +12,23 @@
 //! let spec = PackageSpec::from("git+https://github.com/user/repo.git#main");
 //! assert!(matches!(spec, PackageSpec::Git { .. }));
 //! ```
+//!
+//! ## Supported protocols
+//!
+//! | Protocol        | PackageSpec variant | Notes                           |
+//! |-----------------|---------------------|---------------------------------|
+//! | `catalog:`      | `Local`             | Resolved in `process_dependency`|
+//! | `workspace:`    | `Local`             | Resolved during graph init      |
+//! | `git+`/`git://` | `Git`              | Resolved by builder             |
+//! | `github:`       | `GitHub`            | Resolved by builder             |
+//! | `file:`/`link:` | `Local`             | Resolved by builder             |
+//! | `http:`/`https:`| `Http`              | Resolved by builder             |
+//! | `npm:`          | `Registry` (planned)| Aliasing, any manifest          |
+//! | (semver)        | `Registry`          | Resolved by registry            |
 
 use std::str::FromStr;
 
-use super::util::PackageNameStr;
+use crate::model::util::PackageNameStr;
 
 // ---------------------------------------------------------------------------
 // Protocol
@@ -49,6 +61,8 @@ pub enum Protocol {
     GitHub,
     /// `http://`, `https://` — HTTP URL (may be tarball)
     Http,
+    /// `catalog:` — catalog protocol reference (resolved before registry lookup)
+    Catalog,
 }
 
 impl Protocol {
@@ -62,6 +76,7 @@ impl Protocol {
             (Protocol::Git, "git+"),
             (Protocol::Git, "git://"),
             (Protocol::GitHub, "github:"),
+            (Protocol::Catalog, "catalog:"),
             (Protocol::File, "file:"),
             (Protocol::Link, "link:"),
             (Protocol::Workspace, "workspace:"),
@@ -76,10 +91,10 @@ impl Protocol {
 
     /// Returns `true` if this is a local protocol (`file`, `link`, `workspace`, `portal`).
     pub fn is_local(self) -> bool {
-        matches!(
-            self,
-            Self::File | Self::Link | Self::Workspace | Self::Portal
-        )
+        match self {
+            Self::File | Self::Link | Self::Workspace | Self::Portal => true,
+            Self::Git | Self::GitHub | Self::Http | Self::Catalog => false,
+        }
     }
 }
 
@@ -108,6 +123,7 @@ impl std::fmt::Display for Protocol {
             Self::Git => write!(f, "git"),
             Self::GitHub => write!(f, "github"),
             Self::Http => write!(f, "http"),
+            Self::Catalog => write!(f, "catalog"),
         }
     }
 }
@@ -203,6 +219,10 @@ impl From<&str> for PackageSpec {
                 protocol: proto,
                 path: rest.to_owned(),
             },
+            Some((Protocol::Catalog, rest)) => Self::Local {
+                protocol: Protocol::Catalog,
+                path: rest.to_owned(),
+            },
             Some((Protocol::Http, _)) => Self::Http {
                 url: raw.to_owned(),
             },
@@ -224,7 +244,7 @@ impl From<&str> for PackageSpec {
                 }
 
                 // Default: registry spec
-                let (name, version_spec) = super::util::parse_package_spec(raw);
+                let (name, version_spec) = crate::model::util::parse_package_spec(raw);
                 Self::Registry {
                     name: name.to_owned(),
                     version_spec: version_spec.to_owned(),
@@ -266,6 +286,34 @@ impl SpecStr for str {
     fn is_registry_spec(&self) -> bool {
         self.parse_spec().is_registry()
     }
+}
+
+// ---------------------------------------------------------------------------
+// Catalog protocol
+// ---------------------------------------------------------------------------
+
+use std::collections::HashMap;
+
+/// Catalog definitions for the `catalog:` dependency protocol.
+///
+/// Maps catalog name to (package_name -> version_spec).
+/// The default catalog uses key `""` (empty string).
+pub type Catalogs = HashMap<String, HashMap<String, String>>;
+
+/// Resolve a `catalog:` spec to its concrete version spec.
+///
+/// Returns the original spec unchanged if it does not start with `catalog:`.
+/// Returns `None` if the catalog or package entry is missing.
+pub fn resolve_catalog_spec<'a>(
+    pkg_name: &str,
+    spec: &'a str,
+    catalogs: &'a Catalogs,
+) -> Option<&'a str> {
+    let catalog_name = spec.strip_prefix("catalog:")?;
+    catalogs
+        .get(catalog_name)
+        .and_then(|c| c.get(pkg_name))
+        .map(|s| s.as_str())
 }
 
 // ---------------------------------------------------------------------------
@@ -347,6 +395,7 @@ mod tests {
         assert!(!Protocol::Git.is_local());
         assert!(!Protocol::GitHub.is_local());
         assert!(!Protocol::Http.is_local());
+        assert!(!Protocol::Catalog.is_local());
     }
 
     // -- PackageSpec: Registry --
@@ -613,6 +662,37 @@ mod tests {
             spec("https://example.com/pkg"),
             PackageSpec::Http {
                 url: "https://example.com/pkg".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_catalog_spec() {
+        // catalog: specs are parsed as Local with Protocol::Catalog
+        let s = spec("catalog:default");
+        assert_eq!(
+            s,
+            PackageSpec::Local {
+                protocol: Protocol::Catalog,
+                path: "default".to_string(),
+            }
+        );
+
+        let s = spec("catalog:");
+        assert_eq!(
+            s,
+            PackageSpec::Local {
+                protocol: Protocol::Catalog,
+                path: String::new(),
+            }
+        );
+
+        let s = spec("catalog:legacy");
+        assert_eq!(
+            s,
+            PackageSpec::Local {
+                protocol: Protocol::Catalog,
+                path: "legacy".to_string(),
             }
         );
     }

@@ -293,19 +293,21 @@ fn create_root_lock_package(graph: &DependencyGraph, node_index: NodeIndex) -> L
     let node = graph.get_node(node_index).expect("Node must exist");
     let manifest = &node.manifest;
 
-    LockPackage {
+    let mut pkg = LockPackage {
         name: Some(node.name.clone()),
         version: Some(node.version.clone()),
         engines: manifest.engines().cloned(),
         workspaces: manifest
             .workspaces()
             .and_then(|v| serde_json::from_value(v).ok()),
-        dependencies: manifest.dependencies().cloned(),
-        dev_dependencies: manifest.dev_dependencies().cloned(),
-        peer_dependencies: manifest.peer_dependencies().cloned(),
-        optional_dependencies: manifest.optional_dependencies().cloned(),
         ..LockPackage::default()
-    }
+    };
+
+    // Read deps from graph edges (not manifest) so that resolved `catalog:` specs
+    // are written to the lockfile instead of the raw protocol references.
+    collect_edge_deps(graph, node_index, &mut pkg);
+
+    pkg
 }
 
 /// Create LockPackage for non-root nodes.

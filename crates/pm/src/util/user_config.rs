@@ -5,6 +5,7 @@ use std::sync::{LazyLock, OnceLock};
 use anyhow::Result;
 use dashmap::DashMap;
 use utoo_ruborist::manifest::PackageJson;
+use utoo_ruborist::spec::Catalogs;
 
 use super::config_file::{Config, ConfigValue};
 use super::http::client_builder;
@@ -64,13 +65,18 @@ pub fn get_registry() -> String {
     REGISTRY.get_sync()
 }
 
-#[allow(dead_code)] // used by catalog protocol (upcoming)
-pub async fn get_catalogs()
--> std::collections::HashMap<String, std::collections::HashMap<String, String>> {
-    Config::load(false)
+static CATALOGS: tokio::sync::OnceCell<Catalogs> = tokio::sync::OnceCell::const_new();
+
+pub async fn get_catalogs() -> Catalogs {
+    CATALOGS
+        .get_or_init(|| async {
+            Config::load(false)
+                .await
+                .map(|c| c.catalogs())
+                .unwrap_or_default()
+        })
         .await
-        .map(|c| c.catalogs())
-        .unwrap_or_default()
+        .clone()
 }
 
 pub fn set_legacy_peer_deps(value: Option<bool>) {

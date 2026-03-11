@@ -148,13 +148,103 @@ fi
 echo -e "${GREEN}PASS: git dependency warm install successful${NC}"
 cd ../../..
 
-# Case 9: reinstall ant-design
-echo -e "${YELLOW}Case 9: Clone and install ant-design${NC} by npmjs.org"
+# Case 9: reinstall ant-design by npmjs.org
+echo -e "${YELLOW}Case 9: reinstall ant-design${NC} by npmjs.org"
 cd e2e/pm/ant-design/ant-design
 git clean -dfx
 echo "Installing dependencies for ant-design by npmjs.org..."
 utoo install --registry=https://registry.npmjs.org || { echo -e "${RED}FAIL: utoo install failed for ant-design${NC}"; exit 1; }
 echo -e "${GREEN}PASS: ant-design cloned and installed${NC}"
-cd ../../../
+cd ../../../../
+
+# Case 10: catalog protocol test
+echo -e "${YELLOW}Case 10: catalog protocol test${NC}"
+cd e2e/pm/catalog-test
+rm -rf node_modules package-lock.json packages/*/node_modules
+utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for catalog-test${NC}"; exit 1; }
+
+# Verify root dependencies resolved from catalog
+if [ ! -d "node_modules/lodash" ]; then
+    echo -e "${RED}FAIL: lodash not installed (catalog: default)${NC}"
+    exit 1
+fi
+if [ ! -d "node_modules/typescript" ]; then
+    echo -e "${RED}FAIL: typescript not installed (catalog:default)${NC}"
+    exit 1
+fi
+
+# Verify package-lock.json was created and contains resolved versions (not catalog: refs)
+if ! grep -q '"lodash"' package-lock.json; then
+    echo -e "${RED}FAIL: lodash not in package-lock.json${NC}"
+    exit 1
+fi
+if grep -q '"catalog:' package-lock.json; then
+    echo -e "${RED}FAIL: unresolved catalog: specs found in package-lock.json${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}PASS: catalog protocol basic install successful${NC}"
+
+# --- Catalog update flow ---
+# Update default catalog: pin lodash to exact 4.17.20
+echo -e "${YELLOW}Case 10b: catalog update flow${NC}"
+cp .utoo.toml .utoo.toml.bak
+
+cat > .utoo.toml <<'EOF'
+[catalog]
+lodash = "^4.17.0"
+debug = "^4.3.4"
+typescript = "^5.0.0"
+
+[catalogs.legacy]
+debug = "^3.2.7"
+EOF
+
+rm -rf node_modules package-lock.json packages/*/node_modules
+utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed after catalog update${NC}"; mv .utoo.toml.bak .utoo.toml; exit 1; }
+
+# Verify lockfile has the updated lodash spec from catalog
+LODASH_SPEC=$(node -e "const lock=require('./package-lock.json'); console.log(lock.packages[''].dependencies.lodash)")
+if [ "$LODASH_SPEC" != "^4.17.0" ]; then
+    echo -e "${RED}FAIL: expected lodash ^4.17.0 in lockfile after catalog update, got $LODASH_SPEC${NC}"
+    mv .utoo.toml.bak .utoo.toml
+    exit 1
+fi
+
+# Verify named catalog (legacy) debug resolved to ^3.2.7 in lockfile
+UTILS_DEBUG_SPEC=$(node -e "const lock=require('./package-lock.json'); console.log(lock.packages['packages/utils'].dependencies.debug)")
+if [ "$UTILS_DEBUG_SPEC" != "^3.2.7" ]; then
+    echo -e "${RED}FAIL: expected debug ^3.2.7 for catalogs.legacy in lockfile, got $UTILS_DEBUG_SPEC${NC}"
+    mv .utoo.toml.bak .utoo.toml
+    exit 1
+fi
+
+# Update named catalog: change legacy debug to ^4.3.4
+cat > .utoo.toml <<'EOF'
+[catalog]
+lodash = "^4.17.0"
+debug = "^4.3.4"
+typescript = "^5.0.0"
+
+[catalogs.legacy]
+debug = "^4.3.4"
+EOF
+
+rm -rf node_modules package-lock.json packages/*/node_modules
+utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed after named catalog update${NC}"; mv .utoo.toml.bak .utoo.toml; exit 1; }
+
+# Now utils debug should be ^4.3.4 in lockfile
+UTILS_DEBUG_SPEC=$(node -e "const lock=require('./package-lock.json'); console.log(lock.packages['packages/utils'].dependencies.debug)")
+if [ "$UTILS_DEBUG_SPEC" != "^4.3.4" ]; then
+    echo -e "${RED}FAIL: expected debug ^4.3.4 after named catalog update, got $UTILS_DEBUG_SPEC${NC}"
+    mv .utoo.toml.bak .utoo.toml
+    exit 1
+fi
+
+echo -e "${GREEN}PASS: catalog update flow successful${NC}"
+
+# Restore original .utoo.toml
+mv .utoo.toml.bak .utoo.toml
+cd ../../..
 
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"

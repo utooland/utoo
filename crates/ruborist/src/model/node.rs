@@ -14,7 +14,7 @@ pub enum EdgeType {
 }
 
 /// Node type representing the kind of package in the graph.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeType {
     /// Root project package
     Root,

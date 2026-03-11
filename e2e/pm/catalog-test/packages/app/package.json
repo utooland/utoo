@@ -1,0 +1,11 @@
+{
+  "name": "@catalog-test/app",
+  "version": "1.0.0",
+  "dependencies": {
+    "lodash": "catalog:",
+    "debug": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:"
+  }
+}

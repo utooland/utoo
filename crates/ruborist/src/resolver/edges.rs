@@ -99,6 +99,9 @@ impl DependencySource for CoreVersionManifest {
 }
 
 /// Add dependency edges from any source that implements `DependencySource`.
+///
+/// Specs are added to the graph as-is. Protocol-prefixed specs like `catalog:`
+/// are resolved later in `process_dependency`.
 pub fn add_edges_from<S: DependencySource>(
     graph: &mut DependencyGraph,
     node_index: NodeIndex,

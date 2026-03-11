@@ -306,6 +306,13 @@ impl DependencyGraph {
         }
     }
 
+    /// Update the spec on a dependency edge (e.g. after resolving `catalog:` protocol).
+    pub fn update_dependency_spec(&mut self, edge_id: EdgeIndex, spec: String) {
+        if let Some(GraphEdge::Dependency(dep)) = self.graph.edge_weight_mut(edge_id) {
+            dep.spec = spec;
+        }
+    }
+
     /// Get node by index.
     pub fn get_node(&self, index: NodeIndex) -> Option<&PackageNode> {
         self.graph.node_weight(index)

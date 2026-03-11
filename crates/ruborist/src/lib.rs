@@ -25,6 +25,7 @@
 pub mod model;
 pub mod resolver;
 pub mod service;
+pub mod spec;
 pub mod traits;
 
 // ============================================================================
@@ -79,9 +80,9 @@ pub mod compat {
     pub use crate::model::compatibility::{is_cpu_compatible, is_os_compatible};
 }
 
-/// Package specification types.
-pub mod spec {
-    pub use crate::model::spec::{PackageSpec, Protocol, SpecStr};
+/// Node types for the dependency graph.
+pub mod node {
+    pub use crate::model::node::NodeType;
 }
 
 /// Git clone and resolution helpers.
