@@ -35,21 +35,41 @@ __turbopack_context__.s([
 var __TURBOPACK__default__export__ = "date-picker-style";
 __turbopack_context__.s([]);
 }),
-"[project]/optimization/modularize_imports_keba_case/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/optimization/modularize_imports_keba_case/input/index.ts [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$antd$2f$es$2f$button$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/antd/es/button/index.js [client] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$antd$2f$es$2f$button$2f$style$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/antd/es/button/style/index.js [client] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$antd$2f$es$2f$date$2d$picker$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/antd/es/date-picker/index.js [client] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$antd$2f$es$2f$date$2d$picker$2f$style$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/antd/es/date-picker/style/index.js [client] (ecmascript)");
+(()=>{
+    const e = new Error("Cannot find module 'antd/es/upload-props'");
+    e.code = 'MODULE_NOT_FOUND';
+    throw e;
+})();
+(()=>{
+    const e = new Error("Cannot find module 'antd/es/upload-props/style'");
+    e.code = 'MODULE_NOT_FOUND';
+    throw e;
+})();
 ;
 ;
 ;
 ;
+;
+;
+const props = {
+    name: "test"
+};
+const file = {
+    name: "file"
+};
+console.log('props', props);
+console.log('file', file);
 console.log(__TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$antd$2f$es$2f$button$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__["default"]);
 console.log(__TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$antd$2f$es$2f$date$2d$picker$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__["default"]);
 __turbopack_context__.s([]);
 }),
 ]);
 
-//# sourceMappingURL=_project___acb58d5a.js.map
+//# sourceMappingURL=_project___2fe66d90.js.map
