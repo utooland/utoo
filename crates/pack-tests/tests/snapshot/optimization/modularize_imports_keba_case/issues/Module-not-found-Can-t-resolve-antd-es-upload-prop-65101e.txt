@@ -1,0 +1,18 @@
+error - [resolve] /optimization/modularize_imports_keba_case/input/index.ts:2:0  Module not found: Can't resolve 'antd/es/upload-props'
+  
+       1 | import { Button, DatePicker } from "antd";
+         + v---------------------------------v
+       2 + import { UploadProps } from "antd";
+         + ^---------------------------------^
+       3 | import type { UploadFile } from "antd";
+       4 | 
+       5 | const props: UploadProps = {
+       6 |     name: "test"
+  
+  
+  
+  | It was not possible to find the requested file.
+  | Parsed request as written in source code: module 'antd' with subpath '/es/upload-props'
+  | Path where resolving has started: [project]/optimization/modularize_imports_keba_case/input/index.ts
+  | Type of request: EcmaScript Modules (part) request
+  |
