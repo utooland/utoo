@@ -57,6 +57,12 @@ export interface WebpackStats {
   toString(options?: any): string;
 }
 
+/** Client handle for HMR: any object with send(data) usable as Set/WeakMap key (e.g. ws WebSocket or hono WSContext). */
+export interface WSLike {
+  send(data: string): void;
+  close(code?: number, reason?: string): void;
+}
+
 export interface HotReloaderInterface {
   turbopackProject?: Project;
   serverStats: WebpackStats | null;
@@ -64,12 +70,21 @@ export interface HotReloaderInterface {
   clearHmrServerError(): void;
   start(): Promise<void>;
   send(action: HMR_ACTION_TYPES): void;
+  /**
+   * @deprecated Used by legacy dev server (dev-legacy.ts). Prefer registerClient / unregisterClient / handleClientMessage (e.g. dev.ts).
+   */
   onHMR(
     req: IncomingMessage,
     socket: Duplex,
     head: Buffer,
     onUpgrade?: (client: { send(data: string): void }) => void,
   ): void;
+  /** Register a WebSocket client (e.g. from @hono/node-ws upgradeWebSocket). Call unregisterClient on close. */
+  registerClient(ws: WSLike): void;
+  /** Unregister and cleanup subscriptions for a client. */
+  unregisterClient(ws: WSLike): void;
+  /** Handle a message from a client (JSON string). */
+  handleClientMessage(ws: WSLike, data: string): void;
   buildFallbackError(): Promise<void>;
   close(): void;
 }
@@ -150,10 +165,10 @@ export async function createHotReloader(
   let hmrEventHappened = false;
   let hmrHash = 0;
 
-  const clients = new Set<WebSocket>();
-  const clientStates = new WeakMap<WebSocket, ClientState>();
+  const clients = new Set<WSLike>();
+  const clientStates = new WeakMap<WSLike, ClientState>();
 
-  function sendToClient(client: WebSocket, payload: HMR_ACTION_TYPES) {
+  function sendToClient(client: WSLike, payload: HMR_ACTION_TYPES) {
     client.send(JSON.stringify(payload));
   }
 
@@ -192,7 +207,7 @@ export async function createHotReloader(
     sendEnqueuedMessagesDebounce();
   }
 
-  async function subscribeToHmrEvents(client: WebSocket, id: string) {
+  async function subscribeToHmrEvents(client: WSLike, id: string) {
     const state = clientStates.get(client);
     if (!state || state.subscriptions.has(id)) {
       return;
@@ -227,7 +242,7 @@ export async function createHotReloader(
     }
   }
 
-  function unsubscribeFromHmrEvents(client: WebSocket, id: string) {
+  function unsubscribeFromHmrEvents(client: WSLike, id: string) {
     const state = clientStates.get(client);
     if (!state) {
       return;
@@ -386,6 +401,87 @@ export async function createHotReloader(
       });
     },
 
+    registerClient(ws) {
+      const subscriptions: Map<string, AsyncIterator<any>> = new Map();
+      clients.add(ws);
+      clientStates.set(ws, {
+        hmrPayloads: new Map(),
+        turbopackUpdates: [],
+        subscriptions,
+      });
+
+      const turbopackConnected: TurbopackConnectedAction = {
+        action: HMR_ACTIONS_SENT_TO_BROWSER.TURBOPACK_CONNECTED,
+        data: { sessionId },
+      };
+      sendToClient(ws, turbopackConnected);
+
+      const errors: CompilationError[] = [];
+      const sync: SyncAction = {
+        action: HMR_ACTIONS_SENT_TO_BROWSER.SYNC,
+        errors,
+        warnings: [],
+        hash: "",
+      };
+      sendToClient(ws, sync);
+    },
+
+    unregisterClient(ws) {
+      const state = clientStates.get(ws);
+      if (state) {
+        for (const subscription of state.subscriptions.values()) {
+          subscription.return?.();
+        }
+      }
+      clientStates.delete(ws);
+      clients.delete(ws);
+    },
+
+    handleClientMessage(ws, data) {
+      const parsedData = JSON.parse(data);
+
+      switch (parsedData.event) {
+        case "client-error":
+        case "client-warning":
+        case "client-success":
+        case "client-full-reload": {
+          const { hadRuntimeError, dependencyChain } = parsedData;
+          if (hadRuntimeError) {
+            console.warn(FAST_REFRESH_RUNTIME_RELOAD);
+          }
+          if (
+            Array.isArray(dependencyChain) &&
+            typeof dependencyChain[0] === "string"
+          ) {
+            const cleanedModulePath = dependencyChain[0]
+              .replace(/^\[project\]/, ".")
+              .replace(/ \[.*\] \(.*\)$/, "");
+            console.warn(
+              `Fast Refresh had to perform a full reload when ${cleanedModulePath} changed.`,
+            );
+          }
+          break;
+        }
+        default:
+          if (!parsedData.type) {
+            throw new Error(`unrecognized HMR message "${data}"`);
+          }
+      }
+
+      switch (parsedData.type) {
+        case "turbopack-subscribe":
+          subscribeToHmrEvents(ws, parsedData.path);
+          break;
+        case "turbopack-unsubscribe":
+          unsubscribeFromHmrEvents(ws, parsedData.path);
+          break;
+        default:
+          if (!parsedData.event) {
+            throw new Error(`unrecognized Turbopack HMR message "${data}"`);
+          }
+      }
+    },
+
     send(action) {
       const payload = JSON.stringify(action);
       for (const client of clients) {
@@ -407,8 +503,7 @@ export async function createHotReloader(
 
     close() {
       for (const wsClient of clients) {
-        // it's okay to not cleanly close these websocket connections, this is dev
-        wsClient.terminate();
+        wsClient.close();
       }
       clients.clear();
     },
