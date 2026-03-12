@@ -16,7 +16,7 @@ use turbopack_core::{
         UnusedReferences, chunk_id_strategy::ModuleIdStrategy,
     },
     compile_time_info::CompileTimeInfo,
-    environment::{Environment, ExecutionEnvironment, NodeJsEnvironment},
+    environment::{Environment, ExecutionEnvironment, NodeJsEnvironment, NodeJsVersion},
     module_graph::binding_usage_info::OptionBindingUsageInfo,
 };
 use turbopack_css::chunk::CssChunkType;
@@ -58,19 +58,42 @@ use crate::{
 
 #[turbo_tasks::function]
 pub async fn get_server_compile_time_info(
-    _browserslist_query: RcStr,
+    browserslist_query: RcStr,
     define_env: Vc<EnvMap>,
     provider_config: Vc<ProviderConfig>,
 ) -> Result<Vc<CompileTimeInfo>> {
-    let define_env = (*define_env.await?).clone();
+    let distribs = browserslist::resolve(
+        browserslist_query.split(","),
+        &browserslist::Opts {
+            ignore_unknown_versions: true,
+            ..Default::default()
+        },
+    );
 
-    let define_env = Vc::cell(define_env);
-    let environment = NodeJsEnvironment::default().resolved_cell();
+    let node_version = match distribs {
+        Ok(distribs) => {
+            if let Some(distrib) = distribs.first()
+                && distrib.name() == "node"
+            {
+                NodeJsVersion::Static(ResolvedVc::cell(distrib.version().into()))
+            } else {
+                NodeJsVersion::default()
+            }
+        }
+        Err(_) => NodeJsVersion::default(),
+    };
+
+    let environment = NodeJsEnvironment {
+        node_version: node_version.resolved_cell(),
+        ..Default::default()
+    };
 
     CompileTimeInfo::builder(
-        Environment::new(ExecutionEnvironment::NodeJsLambda(environment))
-            .to_resolved()
-            .await?,
+        Environment::new(ExecutionEnvironment::NodeJsLambda(
+            environment.resolved_cell(),
+        ))
+        .to_resolved()
+        .await?,
     )
     .defines(defines(define_env).to_resolved().await?)
     .free_var_references(free_vars(define_env, provider_config).to_resolved().await?)

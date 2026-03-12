@@ -6,7 +6,7 @@
       "name": "main"
     }
   ],
-  "target": "node",
+  "target": "node 16.20",
   "output": {
     "path": "./dist",
     "clean": true

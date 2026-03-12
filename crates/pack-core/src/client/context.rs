@@ -504,7 +504,7 @@ pub async fn get_client_chunking_context(
         environment.to_resolved().await?,
         runtime_type,
     )
-    .minify_type(if *minify.await? {
+    .minify_type(if mode.is_production() && *minify.await? {
         MinifyType::Minify {
             mangle: (!*no_mangling.await?).then_some(MangleType::OptimalSize),
         }

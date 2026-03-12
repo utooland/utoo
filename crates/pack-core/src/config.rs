@@ -1141,6 +1141,8 @@ impl Config {
         self.dev_server.clone().unwrap_or_default().cell()
     }
 
+    // Almost align to https://webpack.js.org/configuration/target/#target,
+    // support configured via browserslist query, support target web or node
     #[turbo_tasks::function]
     pub fn target(&self) -> Vc<RcStr> {
         Vc::cell(self.target.clone().unwrap_or(
