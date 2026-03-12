@@ -18,9 +18,9 @@ pub async fn get_emotion_transform_rule(config: Vc<Config>) -> Result<Option<Mod
         return Ok(None);
     }
 
-    EmotionTransformer::new(&EmotionTransformConfig::default())
-        .map(|transformer| {
+    Ok(
+        EmotionTransformer::new(&EmotionTransformConfig::default()).map(|transformer| {
             get_ecma_transform_rule(Box::new(transformer), false, EcmascriptTransformStage::Main)
-        })
-        .map(Some)
+        }),
+    )
 }
