@@ -23,12 +23,12 @@
 //! | `github:`       | `GitHub`            | Resolved by builder             |
 //! | `file:`/`link:` | `Local`             | Resolved by builder             |
 //! | `http:`/`https:`| `Http`              | Resolved by builder             |
-//! | `npm:`          | `Registry` (planned)| Aliasing, any manifest          |
+//! | `npm:`          | `Registry`          | Alias: `npm:lodash@^4`          |
 //! | (semver)        | `Registry`          | Resolved by registry            |
 
 use std::str::FromStr;
 
-use crate::model::util::PackageNameStr;
+use crate::model::util::{PackageNameStr, parse_package_spec};
 
 // ---------------------------------------------------------------------------
 // Protocol
@@ -63,6 +63,8 @@ pub enum Protocol {
     Http,
     /// `catalog:` — catalog protocol reference (resolved before registry lookup)
     Catalog,
+    /// `npm:` — npm alias (e.g., `npm:lodash@^4.17.0`)
+    NpmAlias,
 }
 
 impl Protocol {
@@ -81,6 +83,7 @@ impl Protocol {
             (Protocol::Link, "link:"),
             (Protocol::Workspace, "workspace:"),
             (Protocol::Portal, "portal:"),
+            (Protocol::NpmAlias, "npm:"),
             (Protocol::Http, "https://"),
             (Protocol::Http, "http://"),
         ];
@@ -93,7 +96,7 @@ impl Protocol {
     pub fn is_local(self) -> bool {
         match self {
             Self::File | Self::Link | Self::Workspace | Self::Portal => true,
-            Self::Git | Self::GitHub | Self::Http | Self::Catalog => false,
+            Self::Git | Self::GitHub | Self::Http | Self::Catalog | Self::NpmAlias => false,
         }
     }
 }
@@ -124,6 +127,7 @@ impl std::fmt::Display for Protocol {
             Self::GitHub => write!(f, "github"),
             Self::Http => write!(f, "http"),
             Self::Catalog => write!(f, "catalog"),
+            Self::NpmAlias => write!(f, "npm"),
         }
     }
 }
@@ -188,6 +192,13 @@ impl PackageSpec {
 impl From<&str> for PackageSpec {
     fn from(raw: &str) -> Self {
         match Protocol::strip_prefix(raw) {
+            Some((Protocol::NpmAlias, rest)) => {
+                let (name, version_spec) = parse_package_spec(rest);
+                Self::Registry {
+                    name: name.to_owned(),
+                    version_spec: version_spec.to_owned(),
+                }
+            }
             Some((Protocol::Git, _)) => {
                 let (url, commit_ish) = split_fragment(raw);
                 Self::Git {
@@ -244,7 +255,7 @@ impl From<&str> for PackageSpec {
                 }
 
                 // Default: registry spec
-                let (name, version_spec) = crate::model::util::parse_package_spec(raw);
+                let (name, version_spec) = parse_package_spec(raw);
                 Self::Registry {
                     name: name.to_owned(),
                     version_spec: version_spec.to_owned(),
@@ -396,6 +407,7 @@ mod tests {
         assert!(!Protocol::GitHub.is_local());
         assert!(!Protocol::Http.is_local());
         assert!(!Protocol::Catalog.is_local());
+        assert!(!Protocol::NpmAlias.is_local());
     }
 
     // -- PackageSpec: Registry --
@@ -693,6 +705,41 @@ mod tests {
             PackageSpec::Local {
                 protocol: Protocol::Catalog,
                 path: "legacy".to_string(),
+            }
+        );
+    }
+
+    // -- PackageSpec: npm alias --
+
+    #[test]
+    fn test_parse_npm_alias() {
+        assert_eq!(
+            spec("npm:lodash@^4.17.0"),
+            PackageSpec::Registry {
+                name: "lodash".to_string(),
+                version_spec: "^4.17.0".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_npm_alias_scoped() {
+        assert_eq!(
+            spec("npm:@scope/pkg@^1.0.0"),
+            PackageSpec::Registry {
+                name: "@scope/pkg".to_string(),
+                version_spec: "^1.0.0".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_npm_alias_no_version() {
+        assert_eq!(
+            spec("npm:lodash"),
+            PackageSpec::Registry {
+                name: "lodash".to_string(),
+                version_spec: "*".to_string(),
             }
         );
     }

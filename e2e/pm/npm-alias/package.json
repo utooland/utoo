@@ -1,0 +1,16 @@
+{
+  "name": "e2e-npm-alias",
+  "version": "1.0.0",
+  "private": true,
+  "description": "e2e test for npm: alias dependency resolution",
+  "dependencies": {
+    "my-jquery": "npm:jquery@3",
+    "my-types": "npm:@types/node@^20",
+    "string-width-cjs": "npm:string-width@^4.2.0",
+    "undici-types": "npm:lodash@^4",
+    "ms": "npm:raw-body@2.1.3",
+    "debug": "^4",
+    "@myorg/utils": "npm:lodash@^4",
+    "@myorg/types": "npm:@types/node@^20"
+  }
+}
