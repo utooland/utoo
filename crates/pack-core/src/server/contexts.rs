@@ -20,7 +20,7 @@ use turbopack_core::{
     module_graph::binding_usage_info::OptionBindingUsageInfo,
 };
 use turbopack_css::chunk::CssChunkType;
-use turbopack_ecmascript::{TypeofWindow, chunk::EcmascriptChunkType};
+use turbopack_ecmascript::chunk::EcmascriptChunkType;
 use turbopack_node::{
     execution_context::ExecutionContext,
     transforms::postcss::{PostCssConfigLocation, PostCssTransformOptions},
@@ -198,13 +198,12 @@ pub async fn get_server_module_options_context(
     };
     let module_options_context = ModuleOptionsContext {
         ecmascript: EcmascriptOptionsContext {
-            enable_typeof_window_inlining: Some(TypeofWindow::Object),
             source_maps,
             import_externals: *config.import_externals().await?,
             enable_typescript_transform: Some(
                 TypescriptTransformOptions::default().resolved_cell(),
             ),
-            ignore_dynamic_requests: true,
+            ignore_dynamic_requests: false,
             ..Default::default()
         },
         css: CssOptionsContext {
@@ -304,6 +303,9 @@ pub async fn get_server_resolve_options_context(
     let custom_conditions = vec![mode.await?.condition().into()];
     let resolve_options_context = ResolveOptionsContext {
         enable_node_modules: Some(project_path.root().owned().await?),
+        enable_node_externals: true,
+        enable_mjs_extension: true,
+        enable_node_native_modules: true,
         custom_conditions,
         import_map: Some(server_import_map),
         fallback_import_map: Some(server_fallback_import_map),

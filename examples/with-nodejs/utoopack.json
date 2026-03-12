@@ -12,23 +12,6 @@
     "clean": true
   },
   "sourceMaps": true,
-  "externals": {
-    "http": "commonjs http",
-    "http2": "commonjs http2",
-    "https": "commonjs https",
-    "stream": "commonjs stream",
-    "crypto": "commonjs crypto",
-    "net": "commonjs net",
-    "tls": "commonjs tls",
-    "os": "commonjs os",
-    "fs": "commonjs fs",
-    "path": "commonjs path",
-    "url": "commonjs url",
-    "util": "commonjs util",
-    "events": "commonjs events",
-    "buffer": "commonjs buffer",
-    "zlib": "commonjs zlib"
-  },
   "define": {
     "process.env.APP_VERSION": "\"1.0.0\""
   },
