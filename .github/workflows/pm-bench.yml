@@ -44,6 +44,10 @@ on:
   pull_request:
     types: [labeled]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   benchmark:
     # Run on manual trigger or when PR is labeled with 'benchmark'
