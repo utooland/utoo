@@ -35,11 +35,11 @@ __turbopack_context__.s([
     css
 ]);
 }),
-"[project]/style/emotion_react/input/index.tsx [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/style/emotion_no_pragma/input/index.tsx [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$emotion$2f$react$2f$jsx$2d$runtime$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/@emotion/react/jsx-runtime.js [client] (ecmascript)");
-/** @jsxImportSource @emotion/react */ var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$emotion$2f$react$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/@emotion/react/index.js [client] (ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$emotion$2f$react$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/@emotion/react/index.js [client] (ecmascript)");
 ;
 ;
 const buttonStyle = (0, /*#__PURE__*/ __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$emotion$2f$react$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__["css"])("color:hotpink;font-weight:bold;");
