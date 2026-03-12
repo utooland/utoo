@@ -697,7 +697,7 @@ function compatOptimization(
     noMangling: webpackOptimization.mangleExports === false,
     minify: minimize,
     concatenateModules,
-    treeShaking: enableTreeShaking,
+    treeShaking: false,
     removeUnusedExports: enableTreeShaking,
     removeUnusedImports: enableTreeShaking,
   };
