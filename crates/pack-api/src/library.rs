@@ -7,7 +7,6 @@ use pack_core::{
     library::contexts::{LibraryChunkingContextOptions, get_library_chunking_context},
     util::convert_to_project_relative,
 };
-use qstring::QString;
 use tracing::{Instrument, trace_span};
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{Completion, JoinIterExt, ResolvedVc, ValueToString, Vc};
@@ -276,13 +275,7 @@ impl LibraryEndpoint {
 
             let module_graph = self.library_module_graph();
 
-            let query = QString::new(vec![("name", this.name.as_str())]).to_string();
-            let query = if query.is_empty() {
-                // If name is empty, provide a default fallback
-                QString::new(vec![("name", "index")]).to_string()
-            } else {
-                format!("?{query}")
-            };
+            let query = format!("?name={}", this.name);
 
             let library_chunk_group = library_chunking_context.evaluated_chunk_group(
                 AssetIdent::from_path(project.project_path().await?.join(this.import.as_str())?)

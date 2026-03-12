@@ -546,14 +546,20 @@ impl Project {
             .iter()
             .filter_map(|e| {
                 e.library.as_ref().map(|l| {
+                    let name = e.name.clone().unwrap_or(
+                        PathBuf::from(e.import.as_str())
+                            .file_stem()
+                            .unwrap()
+                            .to_string_lossy()
+                            .into(),
+                    );
+                    let name = if name.ends_with(".js") {
+                        name
+                    } else {
+                        format!("{name}.js").into()
+                    };
                     anyhow::Ok(LibraryEntrypoint {
-                        name: e.name.clone().unwrap_or(
-                            PathBuf::from(e.import.as_str())
-                                .file_stem()
-                                .unwrap()
-                                .to_string_lossy()
-                                .into(),
-                        ),
+                        name,
                         import: convert_to_project_relative(&e.import, &this.project_path)?,
                         runtime_root: l.name.clone(),
                         runtime_export: l.export.clone(),
@@ -583,16 +589,22 @@ impl Project {
             .filter_map(|e| {
                 e.library.as_ref().map_or_else(
                     || {
+                        let name = e.name.clone().unwrap_or(
+                            PathBuf::from(e.import.as_str())
+                                .file_stem()
+                                .unwrap()
+                                .to_string_lossy()
+                                .into(),
+                        );
+                        let name = if name.ends_with(".js") {
+                            name
+                        } else {
+                            format!("{name}.js").into()
+                        };
                         Some(async {
                             Ok(AppEntrypoint {
+                                name,
                                 project: self.to_resolved().await?,
-                                name: e.name.clone().unwrap_or(
-                                    PathBuf::from(e.import.as_str())
-                                        .file_stem()
-                                        .unwrap()
-                                        .to_string_lossy()
-                                        .into(),
-                                ),
                                 import: convert_to_project_relative(&e.import, &this.project_path)?,
                             })
                         })

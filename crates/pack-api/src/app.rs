@@ -8,7 +8,6 @@ use pack_core::server::contexts::{
     get_server_module_options_context, get_server_resolve_options_context,
 };
 use pack_core::util::convert_to_project_relative;
-use qstring::QString;
 use tracing::Instrument;
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{Completion, JoinIterExt, ResolvedVc, TryJoinIterExt, ValueToString, Vc};
@@ -198,13 +197,7 @@ impl AppEntrypoint {
 
             let module_graph = self.module_graph_for_entry(asset_context, runtime_entries);
 
-            let query = QString::new(vec![("name", this.name.as_str())]).to_string();
-            let query = if query.is_empty() {
-                // If name is empty, provide a default fallback
-                QString::new(vec![("name", "index")]).to_string()
-            } else {
-                format!("?{query}")
-            };
+            let query = format!("?name={}", this.name);
 
             let app_chunk_group = project
                 .client_chunking_context()
