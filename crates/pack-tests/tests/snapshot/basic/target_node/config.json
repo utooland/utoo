@@ -11,6 +11,5 @@
       "minify": false,
       "moduleIds": "named"
     }
-  },
-  "runtimeType": "dummy"
+  }
 }
