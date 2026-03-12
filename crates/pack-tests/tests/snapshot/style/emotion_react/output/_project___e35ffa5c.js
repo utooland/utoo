@@ -29,19 +29,33 @@ function Global() {
 function keyframes() {
     return 'purposefully empty stub for @emotion/react/index.js';
 }
-__turbopack_context__.s([]);
+__turbopack_context__.s([
+    "css",
+    0,
+    css
+]);
 }),
-"[project]/basic/jsx/input/index.tsx [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/style/emotion_react/input/index.tsx [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$emotion$2f$react$2f$jsx$2d$runtime$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/@emotion/react/jsx-runtime.js [client] (ecmascript)");
 /** @jsxImportSource @emotion/react */ var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$emotion$2f$react$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/@emotion/react/index.js [client] (ecmascript)");
 ;
 ;
-function App(props) {
-    // @ts-ignore make lsp happy.
+const buttonStyle = (0, /*#__PURE__*/ __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$emotion$2f$react$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__["css"])("color:hotpink;font-weight:bold;");
+const containerStyle = (0, /*#__PURE__*/ __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$emotion$2f$react$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__["css"])("padding:16px;background:#f0f0f0;");
+function Button({ children }) {
+    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$emotion$2f$react$2f$jsx$2d$runtime$2e$js__$5b$client$5d$__$28$ecmascript$29$__["jsx"])("button", {
+        css: buttonStyle,
+        children: children
+    });
+}
+function App() {
     return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$emotion$2f$react$2f$jsx$2d$runtime$2e$js__$5b$client$5d$__$28$ecmascript$29$__["jsx"])("div", {
-        children: props.content
+        css: containerStyle,
+        children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$emotion$2f$react$2f$jsx$2d$runtime$2e$js__$5b$client$5d$__$28$ecmascript$29$__["jsx"])(Button, {
+            children: "Click me"
+        })
     });
 }
 var __TURBOPACK__default__export__ = App;
@@ -52,5 +66,3 @@ __turbopack_context__.s([
 ]);
 }),
 ]);
-
-//# sourceMappingURL=_project___e95e9ae8.js.map

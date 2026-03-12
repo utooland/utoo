@@ -71,7 +71,7 @@ turbopack-ecmascript-plugins = { workspace = true, default-features = false }
 
 [target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]
 turbo-tasks-fetch            = { workspace = true }
-turbopack-ecmascript-plugins = { workspace = true, default-features = true }
+turbopack-ecmascript-plugins = { workspace = true, default-features = true, features = ["transform_emotion"] }
 
 [features]
 default          = ["process_pool"]
