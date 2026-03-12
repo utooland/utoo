@@ -70,7 +70,6 @@ export async function resolveBuildOptions(flags: {
     const rawOptions = await resolveFromConfigFile(configDir);
     const {
       processEnv,
-      defineEnv,
       watch,
       dev,
       buildId,
@@ -82,7 +81,6 @@ export async function resolveBuildOptions(flags: {
     projectOptions = {
       config,
       processEnv,
-      defineEnv,
       watch,
       dev,
       buildId,

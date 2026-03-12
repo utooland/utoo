@@ -7,7 +7,7 @@ import { BundleOptions } from "../config/types";
 import { resolveBundleOptions, WebpackConfig } from "../config/webpackCompat";
 import { projectFactory } from "../core/project";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
-import { blockStdout, createDefineEnv, getPackPath } from "../utils/common";
+import { blockStdout, getPackPath } from "../utils/common";
 import { findRootDir } from "../utils/findRoot";
 import { getInitialAssetsFromStats } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
@@ -48,11 +48,6 @@ async function buildInternal(
   const project = await createProject(
     {
       processEnv: bundleOptions.processEnv ?? {},
-      defineEnv: createDefineEnv({
-        config: bundleOptions.config,
-        dev: bundleOptions.dev ?? false,
-        optionDefineEnv: bundleOptions.defineEnv,
-      }),
       watch: {
         enable: false,
       },

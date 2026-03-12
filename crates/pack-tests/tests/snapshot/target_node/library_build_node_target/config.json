@@ -1,0 +1,18 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main",
+        "library": {
+          "name": "MyNodeLibrary"
+        }
+      }
+    ],
+    "target": "node 18",
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    }
+  }
+}

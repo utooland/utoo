@@ -278,7 +278,6 @@ pub async fn init_pack_project(dev: bool) -> Result<()> {
             enable: true,
             ..Default::default()
         },
-        define_env: Default::default(),
         dev,
         pack_path: rcstr!("./"),
         process_env: Default::default(),

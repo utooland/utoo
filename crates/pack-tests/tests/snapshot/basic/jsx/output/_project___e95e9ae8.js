@@ -20,6 +20,15 @@ __turbopack_context__.s([
 function jsx() {
     return 'purposefully empty stub for @emotion/react/index.js';
 }
+function css() {
+    return 'purposefully empty stub for @emotion/react/index.js';
+}
+function Global() {
+    return 'purposefully empty stub for @emotion/react/index.js';
+}
+function keyframes() {
+    return 'purposefully empty stub for @emotion/react/index.js';
+}
 __turbopack_context__.s([]);
 }),
 "[project]/basic/jsx/input/index.tsx [client] (ecmascript)", ((__turbopack_context__) => {

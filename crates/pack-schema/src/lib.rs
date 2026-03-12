@@ -734,6 +734,16 @@ pub struct SchemaStyleConfig {
     #[schemars(description = "Styled components configuration")]
     pub styled_components: Option<serde_json::Value>,
 
+    /// Enable @emotion/react transform support
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Enable @emotion/react transform support")]
+    pub emotion: Option<bool>,
+
+    /// Enable automatic CSS Modules transform (defaults to true)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Enable automatic CSS Modules transform")]
+    pub auto_css_modules: Option<bool>,
+
     /// Sass configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Sass configuration")]

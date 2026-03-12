@@ -1,0 +1,22 @@
+{
+  "$schema": "../../packages/pack/config_schema.json",
+  "entry": [
+    {
+      "import": "./src/index.ts",
+      "name": "main"
+    }
+  ],
+  "target": "node 16.20",
+  "output": {
+    "path": "./dist",
+    "clean": true
+  },
+  "sourceMaps": true,
+  "define": {
+    "process.env.APP_VERSION": "\"1.0.0\""
+  },
+  "optimization": {
+    "moduleIds": "named",
+    "minify": false
+  }
+}

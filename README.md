@@ -3,9 +3,20 @@
 <h1>Utoo</h1>
 <p><strong>Unified Toolchain: Open & Optimized</strong></p>
 
-[![License](https://img.shields.io/github/license/utooland/utoo?style=flat-square)](./LICENSE)
+[![license](https://img.shields.io/github/license/utooland/utoo?style=flat-square)](./LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](./CONTRIBUTING.md)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/utooland/utoo)
+
+[![npm](https://img.shields.io/npm/v/utoo?style=flat-square&label=utoo)](https://www.npmjs.com/package/utoo)
+[![npm](https://img.shields.io/npm/v/@utoo/pack?style=flat-square&label=@utoo/pack)](https://www.npmjs.com/package/@utoo/pack)
+[![npm](https://img.shields.io/npm/v/@utoo/web?style=flat-square&label=@utoo/web)](https://www.npmjs.com/package/@utoo/web)
+
+[![downloads](https://img.shields.io/npm/dm/utoo?style=flat-square&label=utoo%20downloads)](https://www.npmjs.com/package/utoo)
+[![downloads](https://img.shields.io/npm/dm/@utoo/pack?style=flat-square&label=@utoo/pack%20downloads)](https://www.npmjs.com/package/@utoo/pack)
+[![downloads](https://img.shields.io/npm/dm/@utoo/web?style=flat-square&label=@utoo/web%20downloads)](https://www.npmjs.com/package/@utoo/web)
+
+[![PM CI](https://img.shields.io/github/actions/workflow/status/utooland/utoo/pm-ci.yml?style=flat-square&label=PM%20CI)](https://github.com/utooland/utoo/actions/workflows/pm-ci.yml)
+[![Pack CI](https://img.shields.io/github/actions/workflow/status/utooland/utoo/pack-ci.yml?style=flat-square&label=Pack%20CI)](https://github.com/utooland/utoo/actions/workflows/pack-ci.yml)
 
 </div>
 

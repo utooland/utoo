@@ -134,7 +134,6 @@ fn main() {
                 project_path,
                 config: partial_project_options.config.to_string().into(),
                 process_env: partial_project_options.process_env.unwrap_or_default(),
-                define_env: partial_project_options.define_env.unwrap_or_default(),
 
                 watch: WatchOptions {
                     enable: watch,

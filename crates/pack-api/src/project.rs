@@ -6,12 +6,14 @@ use pack_core::{
     client::context::{
         ClientChunkingContextOptions, get_client_chunking_context, get_client_compile_time_info,
     },
-    config::{Config, ModuleIds as ModuleIdStrategyConfig},
+    config::{Config, ModuleIds as ModuleIdStrategyConfig, Platform},
     emit_assets,
     mode::Mode,
+    server::contexts::{
+        ServerChunkingContextOptions, get_server_chunking_context, get_server_compile_time_info,
+    },
     util::{Runtime, convert_to_project_relative},
 };
-use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -143,10 +145,6 @@ pub struct ProjectOptions {
     /// A map of environment variables to use when compiling code.
     pub process_env: Vec<(RcStr, RcStr)>,
 
-    /// A map of environment variables which should get injected at compile
-    /// time.
-    pub define_env: DefineEnv,
-
     /// Filesystem watcher options.
     pub watch: WatchOptions,
 
@@ -177,10 +175,6 @@ pub struct PartialProjectOptions {
     /// A map of environment variables to use when compiling code.
     pub process_env: Option<Vec<(RcStr, RcStr)>>,
 
-    /// A map of environment variables which should get injected at compile
-    /// time.
-    pub define_env: Option<DefineEnv>,
-
     /// Filesystem watcher options.
     pub watch: Option<WatchOptions>,
 
@@ -191,14 +185,10 @@ pub struct PartialProjectOptions {
     pub pack_path: Option<RcStr>,
 }
 
-#[turbo_tasks::value]
+#[turbo_tasks::value(transparent)]
 #[derive(Default, Debug, Clone, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
-pub struct DefineEnv {
-    pub client: Vec<(RcStr, RcStr)>,
-    pub edge: Vec<(RcStr, RcStr)>,
-    pub nodejs: Vec<(RcStr, RcStr)>,
-}
+pub struct DefineEnv(pub Vec<(RcStr, RcStr)>);
 
 #[turbo_tasks::value]
 pub struct ProjectContainer {
@@ -241,78 +231,6 @@ fn output_fs_operation(project: ResolvedVc<Project>) -> Vc<DiskFileSystem> {
     project.output_fs()
 }
 
-enum EnvDiffType {
-    Added,
-    Removed,
-    Modified,
-}
-
-fn env_diff(old: &[(RcStr, RcStr)], new: &[(RcStr, RcStr)]) -> Vec<(RcStr, EnvDiffType)> {
-    let mut diffs = Vec::new();
-    let mut old_map: FxHashMap<_, _> = old.iter().cloned().collect();
-
-    for (key, new_value) in new.iter() {
-        match old_map.remove(key) {
-            Some(old_value) => {
-                if &old_value != new_value {
-                    diffs.push((key.clone(), EnvDiffType::Modified));
-                }
-            }
-            None => {
-                diffs.push((key.clone(), EnvDiffType::Added));
-            }
-        }
-    }
-
-    for (key, _) in old.iter() {
-        if old_map.contains_key(key) {
-            diffs.push((key.clone(), EnvDiffType::Removed));
-        }
-    }
-
-    diffs
-}
-
-fn env_diff_report(old: &[(RcStr, RcStr)], new: &[(RcStr, RcStr)]) -> String {
-    use std::fmt::Write;
-
-    let diff = env_diff(old, new);
-
-    let mut report = String::new();
-    for (key, diff_type) in diff {
-        let symbol = match diff_type {
-            EnvDiffType::Added => "+",
-            EnvDiffType::Removed => "-",
-            EnvDiffType::Modified => "*",
-        };
-        if !report.is_empty() {
-            report.push_str(", ");
-        }
-        write!(report, "{}{}", symbol, key).unwrap();
-    }
-    report
-}
-
-fn define_env_diff_report(old: &DefineEnv, new: &DefineEnv) -> String {
-    use std::fmt::Write;
-
-    let mut report = String::new();
-    for (name, old, new) in [
-        ("client", &old.client, &new.client),
-        ("edge", &old.edge, &new.edge),
-        ("nodejs", &old.nodejs, &new.nodejs),
-    ] {
-        let diff = env_diff_report(old, new);
-        if !diff.is_empty() {
-            if !report.is_empty() {
-                report.push_str(", ");
-            }
-            write!(report, "{name}: {{ {diff} }}").unwrap();
-        }
-    }
-    report
-}
-
 impl ProjectContainer {
     /// Set up filesystems, watchers, and construct the [`Project`] instance inside the container.
     ///
@@ -335,12 +253,6 @@ impl ProjectContainer {
         async move {
             let watch = options.watch.clone();
 
-            if let Some(old_options) = &*this.options_state.get_untracked() {
-                span.record(
-                    "env_diff",
-                    define_env_diff_report(&old_options.define_env, &options.define_env).as_str(),
-                );
-            }
             this.options_state.set(Some(options));
 
             #[turbo_tasks::function(operation)]
@@ -404,7 +316,6 @@ impl ProjectContainer {
                 project_path,
                 config,
                 process_env,
-                define_env,
                 watch,
                 build_id,
                 pack_path,
@@ -427,9 +338,7 @@ impl ProjectContainer {
             if let Some(process_env) = process_env {
                 new_options.process_env = process_env;
             }
-            if let Some(define_env) = define_env {
-                new_options.define_env = define_env;
-            }
+
             if let Some(watch) = watch {
                 new_options.watch = watch;
             }
@@ -455,13 +364,6 @@ impl ProjectContainer {
                 .read_strongly_consistent()
                 .await?;
 
-            if let Some(old_options) = &*this.options_state.get_untracked() {
-                span.record(
-                    "env_diff",
-                    define_env_diff_report(&old_options.define_env, &new_options.define_env)
-                        .as_str(),
-                );
-            }
             this.options_state.set(Some(new_options));
             let project = project_operation(self)
                 .resolve_strongly_consistent()
@@ -504,7 +406,6 @@ impl ProjectContainer {
     pub async fn project(&self) -> Result<Vc<Project>> {
         let env_map: Vc<EnvMap>;
         let config;
-        let define_env;
         let root_path;
         let project_path;
         let watch;
@@ -517,12 +418,6 @@ impl ProjectContainer {
                 .context("ProjectContainer need to be initialized with initialize()")?;
 
             env_map = Vc::cell(options.process_env.iter().cloned().collect());
-            define_env = ProjectDefineEnv {
-                client: ResolvedVc::cell(options.define_env.client.iter().cloned().collect()),
-                edge: ResolvedVc::cell(options.define_env.edge.iter().cloned().collect()),
-                nodejs: ResolvedVc::cell(options.define_env.nodejs.iter().cloned().collect()),
-            }
-            .cell();
             config = Config::from_string(Vc::cell(options.config.clone()));
             root_path = options.root_path.clone();
             project_path = options.project_path.clone();
@@ -537,7 +432,6 @@ impl ProjectContainer {
             watch,
             config: config.to_resolved().await?,
             process_env: ResolvedVc::upcast(env_map.to_resolved().await?),
-            define_env: define_env.to_resolved().await?,
             versioned_content_map: self.versioned_content_map,
             build_id,
             pack_path,
@@ -591,10 +485,6 @@ pub struct Project {
     /// A map of environment variables to use when compiling code.
     process_env: ResolvedVc<Box<dyn ProcessEnv>>,
 
-    /// A map of environment variables which should get injected at compile
-    /// time.
-    define_env: ResolvedVc<ProjectDefineEnv>,
-
     versioned_content_map: Option<ResolvedVc<VersionedContentMap>>,
 
     build_id: RcStr,
@@ -603,31 +493,8 @@ pub struct Project {
     pack_path: RcStr,
 }
 
-// TODO: This may be not needed.
-#[turbo_tasks::value]
-pub struct ProjectDefineEnv {
-    client: ResolvedVc<EnvMap>,
-    edge: ResolvedVc<EnvMap>,
-    nodejs: ResolvedVc<EnvMap>,
-}
-
-#[turbo_tasks::value_impl]
-impl ProjectDefineEnv {
-    #[turbo_tasks::function]
-    pub fn client(&self) -> Vc<EnvMap> {
-        *self.client
-    }
-
-    #[turbo_tasks::function]
-    pub fn edge(&self) -> Vc<EnvMap> {
-        *self.edge
-    }
-
-    #[turbo_tasks::function]
-    pub fn nodejs(&self) -> Vc<EnvMap> {
-        *self.nodejs
-    }
-}
+#[turbo_tasks::value(transparent)]
+pub struct ProjectDefineEnv(pub ResolvedVc<EnvMap>);
 
 #[turbo_tasks::value(shared)]
 struct ConflictIssue {
@@ -679,14 +546,20 @@ impl Project {
             .iter()
             .filter_map(|e| {
                 e.library.as_ref().map(|l| {
+                    let name = e.name.clone().unwrap_or(
+                        PathBuf::from(e.import.as_str())
+                            .file_stem()
+                            .unwrap()
+                            .to_string_lossy()
+                            .into(),
+                    );
+                    let name = if name.ends_with(".js") {
+                        name
+                    } else {
+                        format!("{name}.js").into()
+                    };
                     anyhow::Ok(LibraryEntrypoint {
-                        name: e.name.clone().unwrap_or(
-                            PathBuf::from(e.import.as_str())
-                                .file_stem()
-                                .unwrap()
-                                .to_string_lossy()
-                                .into(),
-                        ),
+                        name,
                         import: convert_to_project_relative(&e.import, &this.project_path)?,
                         runtime_root: l.name.clone(),
                         runtime_export: l.export.clone(),
@@ -716,16 +589,22 @@ impl Project {
             .filter_map(|e| {
                 e.library.as_ref().map_or_else(
                     || {
+                        let name = e.name.clone().unwrap_or(
+                            PathBuf::from(e.import.as_str())
+                                .file_stem()
+                                .unwrap()
+                                .to_string_lossy()
+                                .into(),
+                        );
+                        let name = if name.ends_with(".js") {
+                            name
+                        } else {
+                            format!("{name}.js").into()
+                        };
                         Some(async {
                             Ok(AppEntrypoint {
+                                name,
                                 project: self.to_resolved().await?,
-                                name: e.name.clone().unwrap_or(
-                                    PathBuf::from(e.import.as_str())
-                                        .file_stem()
-                                        .unwrap()
-                                        .to_string_lossy()
-                                        .into(),
-                                ),
                                 import: convert_to_project_relative(&e.import, &this.project_path)?,
                             })
                         })
@@ -958,6 +837,11 @@ impl Project {
     }
 
     #[turbo_tasks::function]
+    pub(super) fn platform(&self) -> Vc<Platform> {
+        self.config.platform()
+    }
+
+    #[turbo_tasks::function]
     pub(super) fn is_watch_enabled(&self) -> Result<Vc<bool>> {
         Ok(Vc::cell(self.watch.enable))
     }
@@ -1032,18 +916,6 @@ impl Project {
                 node_backend,
             ))
         }
-    }
-
-    #[turbo_tasks::function]
-    pub(super) async fn client_compile_time_info(&self) -> Result<Vc<CompileTimeInfo>> {
-        let mut define_env = (*self.config.define_env().await?).clone();
-        define_env.extend((*self.define_env.client().await?).clone());
-        Ok(get_client_compile_time_info(
-            (*self.config.target().await?).clone(),
-            Vc::cell(define_env),
-            self.config.mode(),
-            self.config.provider_config(),
-        ))
     }
 
     #[turbo_tasks::function]
@@ -1144,43 +1016,105 @@ impl Project {
     }
 
     #[turbo_tasks::function]
-    pub(super) async fn server_compile_time_info(self: Vc<Self>) -> Result<Vc<CompileTimeInfo>> {
-        todo!()
+    pub(super) async fn client_compile_time_info(&self) -> Result<Vc<CompileTimeInfo>> {
+        let define_env = (*self.config.define_env().await?).clone();
+        Ok(get_client_compile_time_info(
+            (*self.config.target().await?).clone(),
+            Vc::cell(define_env),
+            self.config.mode(),
+            self.config.provider_config(),
+        ))
     }
 
     #[turbo_tasks::function]
-    pub(super) async fn edge_compile_time_info(self: Vc<Self>) -> Result<Vc<CompileTimeInfo>> {
-        todo!()
+    pub(super) async fn server_compile_time_info(&self) -> Result<Vc<CompileTimeInfo>> {
+        let define_env = (*self.config.define_env().await?).clone();
+        Ok(get_server_compile_time_info(
+            (*self.config.target().await?).clone(),
+            Vc::cell(define_env),
+            self.config.provider_config(),
+        ))
     }
 
+    /// Returns the appropriate compile-time info for the given platform.
     #[turbo_tasks::function]
-    pub(super) fn edge_env(&self) -> Vc<EnvMap> {
-        todo!()
+    pub(super) async fn compile_time_info_for_platform(&self) -> Result<Vc<CompileTimeInfo>> {
+        let define_env = (*self.config.define_env().await?).clone();
+        let target = (*self.config.target().await?).clone();
+        let define_env_vc = Vc::cell(define_env);
+        match &*self.config.platform().await? {
+            Platform::Web => Ok(get_client_compile_time_info(
+                target,
+                define_env_vc,
+                self.config.mode(),
+                self.config.provider_config(),
+            )),
+            Platform::Node => Ok(get_server_compile_time_info(
+                target,
+                define_env_vc,
+                self.config.provider_config(),
+            )),
+        }
     }
 
     #[turbo_tasks::function]
     pub async fn client_chunking_context(self: Vc<Self>) -> Result<Vc<Box<dyn ChunkingContext>>> {
+        let mode = self.mode();
+        let config = self.config();
+        let source_maps = if *config.source_maps().await? {
+            SourceMapsType::Full
+        } else {
+            SourceMapsType::None
+        };
         Ok(get_client_chunking_context(ClientChunkingContextOptions {
-            mode: self.mode(),
+            mode,
             root_path: self.project_path().owned().await?,
             client_root: self.client_root().owned().await?,
             client_root_to_root_path: rcstr!("/ROOT"),
-            public_path: self.config().computed_public_path(),
+            public_path: config.computed_public_path(),
             environment: self.client_compile_time_info().environment(),
             module_id_strategy: self.module_ids(),
-            no_mangling: self.no_mangling(),
-            config: self.config(),
             export_usage: self.export_usage(),
             unused_references: self.unused_references(),
+            minify: config.minify(mode),
+            source_maps: source_maps.cell(),
+            no_mangling: self.no_mangling(),
+            scope_hoisting: config.concatenate_modules(mode),
+            nested_async_chunking: config.nested_async_chunking(mode),
+            debug_ids: Vc::cell(false),
+            should_use_absolute_url_references: Vc::cell(false),
+            config,
         }))
     }
 
     #[turbo_tasks::function]
-    pub(super) fn server_chunking_context(
+    pub(super) async fn server_chunking_context(
         self: Vc<Self>,
-        _client_assets: bool,
-    ) -> Vc<NodeJsChunkingContext> {
-        todo!()
+    ) -> Result<Vc<NodeJsChunkingContext>> {
+        let mode = self.mode();
+        let config = self.config();
+        let source_maps = if *config.source_maps().await? {
+            SourceMapsType::Full
+        } else {
+            SourceMapsType::None
+        };
+        let dist_root = self.dist_root().owned().await?;
+        Ok(get_server_chunking_context(ServerChunkingContextOptions {
+            mode,
+            root_path: dist_root.clone(),
+            node_root: dist_root,
+            node_root_to_root_path: rcstr!("/ROOT"),
+            environment: self.server_compile_time_info().environment(),
+            module_id_strategy: self.module_ids(),
+            export_usage: self.export_usage(),
+            unused_references: self.unused_references(),
+            minify: config.minify(mode),
+            source_maps: source_maps.cell(),
+            no_mangling: self.no_mangling(),
+            scope_hoisting: config.concatenate_modules(mode),
+            nested_async_chunking: config.nested_async_chunking(mode),
+            debug_ids: Vc::cell(false),
+        }))
     }
 
     #[turbo_tasks::function]
@@ -1199,7 +1133,7 @@ impl Project {
     ) -> Vc<Box<dyn ChunkingContext>> {
         match runtime {
             Runtime::Edge => self.edge_chunking_context(client_assets),
-            Runtime::NodeJs => Vc::upcast(self.server_chunking_context(client_assets)),
+            Runtime::NodeJs => Vc::upcast(self.server_chunking_context()),
         }
     }
 

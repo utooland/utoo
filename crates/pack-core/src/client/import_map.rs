@@ -1,0 +1,55 @@
+use anyhow::Result;
+use turbo_tasks::Vc;
+use turbo_tasks_fs::FileSystemPath;
+use turbopack_core::resolve::options::ImportMap;
+use turbopack_node::execution_context::ExecutionContext;
+
+use crate::{
+    config::Config,
+    import_map::{insert_alias_option, insert_shared_aliases},
+    node_polyfill::get_node_polyfill_import_map,
+};
+
+/// Computes the client fallback import map, which provides
+/// polyfills to Node.js externals.
+#[turbo_tasks::function]
+pub async fn get_client_fallback_import_map(node_polyfill: bool) -> Result<Vc<ImportMap>> {
+    let mut import_map = ImportMap::empty();
+
+    if node_polyfill {
+        import_map.extend_ref(&*get_node_polyfill_import_map().await?);
+    }
+
+    Ok(import_map.cell())
+}
+
+// Make sure to not add any external requests here.
+/// Computes the client import map.
+#[turbo_tasks::function]
+pub async fn get_client_import_map(
+    project_path: FileSystemPath,
+    config: Vc<Config>,
+    execution_context: Vc<ExecutionContext>,
+    pack_path: FileSystemPath,
+) -> Result<Vc<ImportMap>> {
+    let mut import_map = ImportMap::empty();
+
+    insert_shared_aliases(
+        &mut import_map,
+        &project_path,
+        execution_context,
+        config,
+        &pack_path,
+    )
+    .await?;
+
+    insert_alias_option(
+        &mut import_map,
+        &project_path,
+        config.resolve_alias_options(),
+        ["browser"],
+    )
+    .await?;
+
+    Ok(import_map.cell())
+}

@@ -1,0 +1,25 @@
+{
+  "name": "with-nodejs",
+  "version": "1.0.0",
+  "description": "Example: Hono HTTP server bundled with utoopack (target: node)",
+  "keywords": [],
+  "author": "xusd320",
+  "license": "MIT",
+  "scripts": {
+    "build": "up build",
+    "dev": "up dev",
+    "start": "npm run build && node ./dist/*.js"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.11",
+    "dayjs": "^1.11.13",
+    "hono": "^4.12.7",
+    "lodash-es": "^4.17.21"
+  },
+  "devDependencies": {
+    "@types/lodash-es": "^4.17.12",
+    "@types/node": "^22.19.15",
+    "@utoo/pack-cli": "*"
+  },
+  "repository": "git@github.com:utooland/utoo.git"
+}

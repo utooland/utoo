@@ -878,7 +878,7 @@ const chunksToRegister = __UTOOPACK__;
 __UTOOPACK__ = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
 function factory () {
-    const runtimeModuleIds = ["[project]/runtime/library_build_runtime/input/index.js [library] (ecmascript)"];
+    const runtimeModuleIds = ["[project]/runtime/library_build_runtime/input/index.js [library-client] (ecmascript)"];
     if (runtimeModuleIds.length > 0) {
         const module = moduleCache[runtimeModuleIds[0]];
         if (module.error) throw module.error;
@@ -899,12 +899,12 @@ if (typeof exports === 'object' && typeof module === 'object') {
 }
 })([["main.js", {
 
-"[project]/runtime/library_build_runtime/input/index.js [library] (ecmascript)": ((__turbopack_context__, module, exports) => {
+"[project]/runtime/library_build_runtime/input/index.js [library-client] (ecmascript)": ((__turbopack_context__, module, exports) => {
 
 console.log('Hello, world!');
 }),
 },
-{"otherChunks":[],"runtimeModuleIds":["[project]/runtime/library_build_runtime/input/index.js [library] (ecmascript)"]},
+{"otherChunks":[],"runtimeModuleIds":["[project]/runtime/library_build_runtime/input/index.js [library-client] (ecmascript)"]},
 ]]);
 
 

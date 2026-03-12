@@ -1,11 +1,9 @@
-use std::{collections::BTreeSet, str::FromStr};
+use std::collections::BTreeSet;
 
 use anyhow::Result;
 use bincode::{Decode, Encode};
 use turbo_rcstr::{RcStr, rcstr};
-use turbo_tasks::{
-    FxIndexMap, ResolvedVc, TaskInput, TryJoinIterExt, ValueToString, Vc, trace::TraceRawVcs,
-};
+use turbo_tasks::{ResolvedVc, TaskInput, TryJoinIterExt, ValueToString, Vc, trace::TraceRawVcs};
 use turbo_tasks_env::EnvMap;
 use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::{
@@ -18,13 +16,9 @@ use turbopack_core::{
         ChunkingConfig, ChunkingContext, MangleType, MinifyType, SourceMapSourceType,
         SourceMapsType, UnusedReferences, chunk_id_strategy::ModuleIdStrategy,
     },
-    compile_time_info::{
-        CompileTimeDefineValue, CompileTimeDefines, CompileTimeInfo, DefinableNameSegment,
-        FreeVarReference, FreeVarReferences,
-    },
+    compile_time_info::CompileTimeInfo,
     environment::{BrowserEnvironment, Environment, ExecutionEnvironment},
     file_source::FileSource,
-    free_var_references,
     module_graph::binding_usage_info::OptionBindingUsageInfo,
 };
 use turbopack_css::chunk::CssChunkType;
@@ -36,23 +30,24 @@ use turbopack_node::{
 use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 
 use crate::{
-    client::runtime_entry::RuntimeEntries,
+    client::{
+        import_map::{get_client_fallback_import_map, get_client_import_map},
+        runtime_entry::RuntimeEntries,
+    },
     config::{
-        Config, ProviderConfig, ProviderConfigValue, default_max_chunk_count_per_group,
-        default_max_merge_chunk_size, default_min_chunk_size,
+        Config, ProviderConfig, default_max_chunk_count_per_group, default_max_merge_chunk_size,
+        default_min_chunk_size,
     },
     embed_js::embed_file_path,
-    import_map::{
-        get_client_fallback_import_map, get_client_import_map, get_client_resolved_map,
-        get_postcss_package_mapping,
-    },
+    import_map::get_postcss_package_mapping,
     mode::Mode,
     shared::{
+        contexts::{defines, free_vars},
         resolve::externals_plugin::ExternalsPlugin,
         transforms::{
             css_modules::get_auto_css_modules_rule,
             default_export_namer::get_default_export_namer_rule,
-            remove_console::get_remove_console_transform_rule,
+            emotion::get_emotion_transform_rule, remove_console::get_remove_console_transform_rule,
             styled_components::get_styled_components_transform_rule,
             styled_jsx::get_styled_jsx_transform_rule,
             swc_ecma_transform_plugins::get_swc_ecma_transform_plugin_rule,
@@ -72,81 +67,6 @@ use super::{
     react_refresh::assert_can_resolve_react_refresh, runtime_entry::RuntimeEntry,
     transforms::get_client_transforms_rules,
 };
-
-fn defines(define_env: &FxIndexMap<RcStr, RcStr>) -> CompileTimeDefines {
-    let mut defines = FxIndexMap::default();
-
-    for (k, v) in define_env {
-        defines
-            .entry(
-                k.split('.')
-                    .map(|s| DefinableNameSegment::Name(s.into()))
-                    .collect::<Vec<_>>(),
-            )
-            .or_insert_with(|| {
-                let val = serde_json::Value::from_str(v);
-                match val {
-                    Ok(v) => v.into(),
-                    _ => CompileTimeDefineValue::Evaluate(v.clone()),
-                }
-            });
-    }
-
-    CompileTimeDefines(defines)
-}
-
-#[turbo_tasks::function]
-async fn client_defines(define_env: Vc<EnvMap>) -> Result<Vc<CompileTimeDefines>> {
-    Ok(defines(&*define_env.await?).cell())
-}
-
-#[turbo_tasks::function]
-async fn client_free_vars(
-    define_env: Vc<EnvMap>,
-    provider_config: Vc<ProviderConfig>,
-) -> Result<Vc<FreeVarReferences>> {
-    let mut free_vars = free_var_references!(..defines(&*define_env.await?).into_iter());
-
-    // Add provider configurations as FreeVarReference::EcmaScriptModule
-    // This implements webpack's ProvidePlugin behavior
-    let provider = provider_config.await?;
-    for (var_name, value) in provider.iter() {
-        let (request, export) = match value {
-            ProviderConfigValue::Module(module_name) => {
-                // Simple module import: { $: 'jquery' } -> import $ from 'jquery'
-                (module_name.clone(), Some(rcstr!("default")))
-            }
-            ProviderConfigValue::NamedExport(parts) => {
-                // Named export import: { Buffer: ['buffer', 'Buffer'] }
-                // -> import { Buffer } from 'buffer'
-                let request = if let Some(r) = parts.first() {
-                    r.clone()
-                } else {
-                    continue;
-                };
-                let export = parts.get(1).cloned().or(Some(rcstr!("default")));
-                (request, export)
-            }
-        };
-
-        // Support nested variable names like "process.env"
-        let name_segments: Vec<DefinableNameSegment> = var_name
-            .split('.')
-            .map(|s| DefinableNameSegment::Name(s.into()))
-            .collect();
-
-        free_vars.0.insert(
-            name_segments,
-            FreeVarReference::EcmaScriptModule {
-                request,
-                lookup_path: None,
-                export,
-            },
-        );
-    }
-
-    Ok(free_vars.cell())
-}
 
 #[turbo_tasks::function]
 pub async fn get_client_compile_time_info(
@@ -176,12 +96,8 @@ pub async fn get_client_compile_time_info(
             .to_resolved()
             .await?,
     )
-    .defines(client_defines(define_env).to_resolved().await?)
-    .free_var_references(
-        client_free_vars(define_env, provider_config)
-            .to_resolved()
-            .await?,
-    )
+    .defines(defines(define_env).to_resolved().await?)
+    .free_var_references(free_vars(define_env, provider_config).to_resolved().await?)
     .cell()
     .await
 }
@@ -318,7 +234,10 @@ pub async fn get_client_module_options_context(
     client_rules.push(ignore_dts_rule.clone());
     foreign_client_rules.push(ignore_dts_rule);
 
-    client_rules.push(get_auto_css_modules_rule());
+    let styles = config.styles().await?;
+    if styles.auto_css_modules.unwrap_or(true) {
+        client_rules.push(get_auto_css_modules_rule());
+    }
 
     if enable_react_refresh {
         // This transformer just to solve the react-refresh not work for no named jsx function component.
@@ -328,6 +247,7 @@ pub async fn get_client_module_options_context(
 
     let additional_rules: Vec<ModuleRule> = vec![
         get_swc_ecma_transform_plugin_rule(config, project_path.clone()).await?,
+        get_emotion_transform_rule(config).await?,
         get_styled_components_transform_rule(config).await?,
         get_styled_jsx_transform_rule(config, target_browsers).await?,
         get_remove_console_transform_rule(config).await?,
@@ -463,10 +383,6 @@ pub async fn get_client_resolve_options_context(
     let client_fallback_import_map = get_client_fallback_import_map(enable_node_polyfill)
         .to_resolved()
         .await?;
-    let client_resolved_map =
-        get_client_resolved_map(project_path.clone(), project_path.clone(), *mode.await?)
-            .to_resolved()
-            .await?;
 
     let external_config = *config.externals_config().to_resolved().await?;
 
@@ -484,7 +400,6 @@ pub async fn get_client_resolve_options_context(
         custom_conditions,
         import_map: Some(client_import_map),
         fallback_import_map: Some(client_fallback_import_map),
-        resolved_map: Some(client_resolved_map),
         browser: true,
         module: true,
         before_resolve_plugins: vec![ResolvedVc::upcast(externals_plugin)],
@@ -528,10 +443,16 @@ pub struct ClientChunkingContextOptions {
     pub public_path: Vc<RcStr>,
     pub environment: Vc<Environment>,
     pub module_id_strategy: Vc<ModuleIdStrategy>,
-    pub no_mangling: Vc<bool>,
-    pub config: Vc<Config>,
     pub export_usage: Vc<OptionBindingUsageInfo>,
     pub unused_references: Vc<UnusedReferences>,
+    pub minify: Vc<bool>,
+    pub source_maps: Vc<SourceMapsType>,
+    pub no_mangling: Vc<bool>,
+    pub scope_hoisting: Vc<bool>,
+    pub nested_async_chunking: Vc<bool>,
+    pub debug_ids: Vc<bool>,
+    pub should_use_absolute_url_references: Vc<bool>,
+    pub config: Vc<Config>,
 }
 
 #[turbo_tasks::function]
@@ -546,15 +467,18 @@ pub async fn get_client_chunking_context(
         public_path,
         environment,
         module_id_strategy,
-        no_mangling,
-        config,
         export_usage,
         unused_references,
+        minify,
+        source_maps,
+        no_mangling,
+        scope_hoisting,
+        nested_async_chunking,
+        debug_ids,
+        should_use_absolute_url_references,
+        config,
     } = options;
 
-    let minify = config.minify(mode);
-    let concatenate_modules = config.concatenate_modules(mode);
-    let nested_async_chunking = config.nested_async_chunking(mode);
     let mode = mode.await?;
     let public_path = public_path.owned().await?;
 
@@ -591,20 +515,21 @@ pub async fn get_client_chunking_context(
     } else {
         MinifyType::NoMinify
     })
-    .source_maps(if *config.source_maps().await? {
-        SourceMapsType::Full
-    } else {
-        SourceMapsType::None
-    })
+    .source_maps(*source_maps.await?)
     .chunk_base_path(Some(public_path.clone()))
     .asset_base_path(Some(public_path))
     .current_chunk_method(CurrentChunkMethod::DocumentCurrentScript)
     .module_id_strategy(module_id_strategy.to_resolved().await?)
     .export_usage(*export_usage.await?)
     .unused_references(unused_references.to_resolved().await?)
+    .debug_ids(*debug_ids.await?)
+    .should_use_absolute_url_references(*should_use_absolute_url_references.await?)
     .nested_async_availability(*nested_async_chunking.await?);
 
-    if let Some(chunk_loading_global) = &*config.chunk_loading_global(root_path.clone()).await? {
+    if let Some(chunk_loading_global) = &*config
+        .client_chunk_loading_global(root_path.clone())
+        .await?
+    {
         builder = builder.chunk_loading_global(chunk_loading_global.clone());
     }
 
@@ -670,7 +595,7 @@ pub async fn get_client_chunking_context(
                 Vc::<CssChunkType>::default().to_resolved().await?,
                 css_chunking_config,
             )
-            .module_merging(*concatenate_modules.await?);
+            .module_merging(*scope_hoisting.await?);
     }
 
     let chunking_context = builder.build();

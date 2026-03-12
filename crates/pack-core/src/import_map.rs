@@ -7,14 +7,11 @@ use turbo_tasks::{FxIndexMap, ResolvedVc, Vc};
 use turbo_tasks_fs::{FileSystem, FileSystemPath};
 use turbopack_core::resolve::{
     ExternalTraced, ExternalType, ResolveAliasMap, SubpathValue,
-    options::{ConditionValue, ImportMap, ImportMapping, ResolvedMap},
+    options::{ConditionValue, ImportMap, ImportMapping},
 };
 use turbopack_node::execution_context::ExecutionContext;
 
-use crate::{
-    config::Config, embed_js, mode::Mode, node_polyfill::get_node_polyfill_import_map,
-    util::convert_to_project_relative,
-};
+use crate::{config::Config, embed_js, util::convert_to_project_relative};
 
 pub const UTOO_STYLE_LOADER: &str = "@utoo/style-loader";
 
@@ -33,52 +30,8 @@ pub async fn get_postcss_package_mapping() -> Result<Vc<ImportMapping>> {
     .cell())
 }
 
-/// Computes the client fallback import map, which provides
-/// polyfills to Node.js externals.
-#[turbo_tasks::function]
-pub async fn get_client_fallback_import_map(node_polyfill: bool) -> Result<Vc<ImportMap>> {
-    let mut import_map = ImportMap::empty();
-
-    if node_polyfill {
-        import_map.extend_ref(&*get_node_polyfill_import_map().await?);
-    }
-
-    Ok(import_map.cell())
-}
-
 // Make sure to not add any external requests here.
-/// Computes the client import map.
-#[turbo_tasks::function]
-pub async fn get_client_import_map(
-    project_path: FileSystemPath,
-    config: Vc<Config>,
-    execution_context: Vc<ExecutionContext>,
-    pack_path: FileSystemPath,
-) -> Result<Vc<ImportMap>> {
-    let mut import_map = ImportMap::empty();
-
-    insert_shared_aliases(
-        &mut import_map,
-        &project_path,
-        execution_context,
-        config,
-        &pack_path,
-    )
-    .await?;
-
-    insert_alias_option(
-        &mut import_map,
-        &project_path,
-        config.resolve_alias_options(),
-        ["browser"],
-    )
-    .await?;
-
-    Ok(import_map.cell())
-}
-
-// Make sure to not add any external requests here.
-async fn insert_shared_aliases(
+pub async fn insert_shared_aliases(
     import_map: &mut ImportMap,
     project_path: &FileSystemPath,
     _execution_context: Vc<ExecutionContext>,
@@ -225,18 +178,6 @@ fn insert_package_alias(import_map: &mut ImportMap, prefix: RcStr, package_root:
         prefix,
         ImportMapping::PrimaryAlternative(rcstr!("./*"), Some(package_root)).resolved_cell(),
     );
-}
-
-pub fn get_client_resolved_map(
-    _context: FileSystemPath,
-    _root: FileSystemPath,
-    _mode: Mode,
-) -> Vc<ResolvedMap> {
-    let glob_mappings = vec![];
-    ResolvedMap {
-        by_glob: glob_mappings,
-    }
-    .cell()
 }
 
 /// Creates a direct import mapping to the result of resolving a request
