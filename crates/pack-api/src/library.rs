@@ -1,12 +1,15 @@
 use anyhow::{Result, bail};
-use pack_core::{
-    client::context::{
-        get_client_module_options_context, get_client_resolve_options_context,
-        get_client_runtime_entries,
-    },
-    library::contexts::{LibraryChunkingContextOptions, get_library_chunking_context},
-    util::convert_to_project_relative,
+use pack_core::client::context::{
+    get_client_module_options_context, get_client_resolve_options_context,
+    get_client_runtime_entries,
 };
+use pack_core::config::Platform;
+
+use pack_core::library::contexts::{LibraryChunkingContextOptions, get_library_chunking_context};
+use pack_core::server::contexts::{
+    get_server_module_options_context, get_server_resolve_options_context,
+};
+use pack_core::util::convert_to_project_relative;
 use tracing::{Instrument, trace_span};
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{Completion, JoinIterExt, ResolvedVc, ValueToString, Vc};
@@ -125,56 +128,96 @@ impl LibraryEndpoint {
 
     #[turbo_tasks::function]
     async fn library_module_context(self: Vc<Self>) -> Result<Vc<ModuleAssetContext>> {
+        let project = self.project();
+        let platform = &*project.platform().await?;
+
+        let layer = match platform {
+            Platform::Node => Layer::new_with_user_friendly_name(
+                rcstr!("library-server"),
+                rcstr!("Library (Node)"),
+            ),
+            Platform::Web => Layer::new_with_user_friendly_name(
+                rcstr!("library-client"),
+                rcstr!("Library (Web)"),
+            ),
+        };
+
         Ok(ModuleAssetContext::new(
             // FIXME:
             TransitionOptions {
                 ..Default::default()
             }
             .cell(),
-            self.project().client_compile_time_info(),
+            project.compile_time_info_for_platform(),
             self.library_module_options_context(),
             self.library_resolve_options_context(),
-            Layer::new_with_user_friendly_name(rcstr!("library"), rcstr!("Umd")),
+            layer,
         ))
     }
 
     #[turbo_tasks::function]
     async fn library_module_options_context(self: Vc<Self>) -> Result<Vc<ModuleOptionsContext>> {
-        Ok(get_client_module_options_context(
-            self.project().project_path().owned().await?,
-            self.project().execution_context(),
-            self.project().client_compile_time_info().environment(),
-            self.project().mode(),
-            self.project().config(),
-            Vc::cell(false),
-            self.project().pack_path().owned().await?,
-        ))
+        let project = self.project();
+        match &*project.platform().await? {
+            Platform::Node => Ok(get_server_module_options_context(
+                project.project_path().owned().await?,
+                project.execution_context(),
+                project.server_compile_time_info().environment(),
+                project.mode(),
+                project.config(),
+            )),
+            Platform::Web => Ok(get_client_module_options_context(
+                project.project_path().owned().await?,
+                project.execution_context(),
+                project.client_compile_time_info().environment(),
+                project.mode(),
+                project.config(),
+                Vc::cell(false),
+                project.pack_path().owned().await?,
+            )),
+        }
     }
 
     #[turbo_tasks::function]
     async fn library_resolve_options_context(self: Vc<Self>) -> Result<Vc<ResolveOptionsContext>> {
-        Ok(get_client_resolve_options_context(
-            self.project().project_path().owned().await?,
-            self.project().mode(),
-            self.project().config(),
-            self.project().execution_context(),
-            self.project().pack_path().owned().await?,
-        ))
+        let project = self.project();
+        match &*project.platform().await? {
+            Platform::Node => Ok(get_server_resolve_options_context(
+                project.project_path().owned().await?,
+                project.mode(),
+                project.config(),
+                project.execution_context(),
+                project.pack_path().owned().await?,
+            )),
+            Platform::Web => Ok(get_client_resolve_options_context(
+                project.project_path().owned().await?,
+                project.mode(),
+                project.config(),
+                project.execution_context(),
+                project.pack_path().owned().await?,
+            )),
+        }
     }
 
     #[turbo_tasks::function]
     async fn library_runtime_entries(self: Vc<Self>) -> Result<Vc<EvaluatableAssets>> {
-        Ok(get_client_runtime_entries(
-            self.project().project_path().owned().await?,
-            self.project().mode(),
-            self.project().config(),
-            self.project().execution_context(),
-            self.project().pack_path().owned().await?,
-            // Library project not support watch mode
-            Vc::cell(false),
-            Vc::cell(false),
-        )
-        .resolve_entries(Vc::upcast(self.library_module_context())))
+        let project = self.project();
+        match &*project.platform().await? {
+            Platform::Node => Ok(EvaluatableAssets::empty()),
+            Platform::Web => {
+                Ok(get_client_runtime_entries(
+                    project.project_path().owned().await?,
+                    project.mode(),
+                    project.config(),
+                    project.execution_context(),
+                    project.pack_path().owned().await?,
+                    // Library project not support watch mode
+                    Vc::cell(false),
+                    Vc::cell(false),
+                )
+                .resolve_entries(Vc::upcast(self.library_module_context())))
+            }
+        }
     }
 
     #[turbo_tasks::function]
@@ -257,6 +300,7 @@ impl LibraryEndpoint {
                 config: project.config(),
                 export_usage: project.export_usage(),
                 unused_references: project.unused_references(),
+                platform: project.platform(),
             },
         ))
     }

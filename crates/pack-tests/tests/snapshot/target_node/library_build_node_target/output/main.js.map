@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 12, "column": 0}, "map": {"version":3,"sources":["./../target_node/library_build_node_target/input/helper.js"],"sourcesContent":["const fs = require(\"fs\");\n\nfunction readFile(filePath) {\n  return fs.readFileSync(filePath, \"utf-8\");\n}\n\nmodule.exports = { readFile };\n"],"names":["fs","readFile","filePath","readFileSync","module","exports"],"mappings":"AAAA,MAAMA;AAEN,SAASC,SAASC,QAAQ;IACxB,OAAOF,GAAGG,YAAY,CAACD,UAAU;AACnC;AAEAE,OAAOC,OAAO,GAAG;IAAEJ;AAAS"}},
+    {"offset": {"line": 28, "column": 0}, "map": {"version":3,"sources":["./../target_node/library_build_node_target/input/index.js"],"sourcesContent":["const path = require(\"path\");\n\nfunction getFullPath(name) {\n  return path.join(__dirname, name);\n}\n\nasync function loadHelper() {\n  const helper = await import(\"./helper.js\");\n  return helper.readFile;\n}\n\nmodule.exports = { getFullPath, loadHelper };\n\n"],"names":["path","getFullPath","name","join","loadHelper","helper","readFile","module","exports"],"mappings":"AAAA,MAAMA;AAEN,SAASC,YAAYC,IAAI;IACvB,OAAOF,KAAKG,IAAI,wFAAYD;AAC9B;AAEA,eAAeE;IACb,MAAMC,SAAS;IACf,OAAOA,OAAOC,QAAQ;AACxB;AAEAC,OAAOC,OAAO,GAAG;IAAEP;IAAaG;AAAW"}}]
+}

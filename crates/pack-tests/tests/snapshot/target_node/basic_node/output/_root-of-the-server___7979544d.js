@@ -5,7 +5,7 @@ const mod = __turbopack_context__.x("node:path", () => require("node:path"));
 
 module.exports = mod;
 }),
-"[project]/basic/target_node/input/utils.ts [server] (ecmascript)", ((__turbopack_context__) => {
+"[project]/target_node/basic_node/input/utils.ts [server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 function greet(name) {
@@ -20,15 +20,15 @@ __turbopack_context__.s([
     greet
 ]);
 }),
-"[project]/basic/target_node/input/index.ts [server] (ecmascript)", ((__turbopack_context__) => {
+"[project]/target_node/basic_node/input/index.ts [server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 var __TURBOPACK__imported__module__$5b$externals$5d2f$node$3a$path__$5b$external$5d$__$28$node$3a$path$2c$__cjs$29$__ = __turbopack_context__.i("[externals]/node:path [external] (node:path, cjs)");
-var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$target_node$2f$input$2f$utils$2e$ts__$5b$server$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/target_node/input/utils.ts [server] (ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$target_node$2f$basic_node$2f$input$2f$utils$2e$ts__$5b$server$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/target_node/basic_node/input/utils.ts [server] (ecmascript)");
 ;
 ;
 const name = process.env.USER ?? "world";
-const message = (0, __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$target_node$2f$input$2f$utils$2e$ts__$5b$server$5d$__$28$ecmascript$29$__["greet"])(name);
+const message = (0, __TURBOPACK__imported__module__$5b$project$5d2f$target_node$2f$basic_node$2f$input$2f$utils$2e$ts__$5b$server$5d$__$28$ecmascript$29$__["greet"])(name);
 console.log(message);
 console.log("cwd:", process.cwd());
 console.log("dirname:", __TURBOPACK__imported__module__$5b$externals$5d2f$node$3a$path__$5b$external$5d$__$28$node$3a$path$2c$__cjs$29$__["default"].dirname("/foo/bar/baz.txt"));
@@ -38,4 +38,4 @@ __turbopack_context__.s([]);
 }),
 ];
 
-//# sourceMappingURL=_root-of-the-server___1e3d7703.js.map
+//# sourceMappingURL=_root-of-the-server___7979544d.js.map
