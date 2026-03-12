@@ -163,6 +163,11 @@ impl LibraryChunkingContextBuilder {
         self
     }
 
+    pub fn is_node_platform(mut self, is_node: bool) -> Self {
+        self.chunking_context.is_node_platform = is_node;
+        self
+    }
+
     pub fn build(self) -> Vc<LibraryChunkingContext> {
         LibraryChunkingContext::cell(self.chunking_context)
     }
@@ -220,6 +225,10 @@ pub struct LibraryChunkingContext {
     css_filename: Option<RcStr>,
     /// Asset module filename template
     asset_module_filename: Option<RcStr>,
+    /// Whether this library targets Node.js (affects runtime backend selection).
+    /// When true, uses a Node.js-compatible runtime backend without DOM APIs.
+    /// When false, uses the DOM-based runtime backend for browser environments.
+    is_node_platform: bool,
 }
 
 impl LibraryChunkingContext {
@@ -238,7 +247,7 @@ impl LibraryChunkingContext {
                 root_path,
                 output_root,
                 output_root_to_root_path,
-                source_map_source_type: SourceMapSourceType::TurbopackUri,
+                source_map_source_type: SourceMapSourceType::RelativeUri,
                 asset_base_path: None,
                 environment,
                 runtime_type,
@@ -256,6 +265,7 @@ impl LibraryChunkingContext {
                 manifest_chunks: false,
                 enable_nested_async_availability: false,
                 debug_ids: false,
+                is_node_platform: false,
             },
         }
     }
@@ -278,6 +288,11 @@ impl LibraryChunkingContext {
     /// Returns the minify type.
     pub fn minify_type(&self) -> MinifyType {
         self.minify_type
+    }
+
+    /// Returns whether this library targets Node.js.
+    pub fn is_node_platform(&self) -> bool {
+        self.is_node_platform
     }
 }
 

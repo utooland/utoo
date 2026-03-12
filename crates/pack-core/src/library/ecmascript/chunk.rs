@@ -148,6 +148,7 @@ impl EcmascriptLibraryEvaluateChunk {
                             .map(|id| id.to_string().into())
                             .collect(),
                     ),
+                    this.chunking_context.await?.is_node_platform(),
                 )
                 .await?;
 

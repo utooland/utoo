@@ -1036,6 +1036,27 @@ impl Project {
         ))
     }
 
+    /// Returns the appropriate compile-time info for the given platform.
+    #[turbo_tasks::function]
+    pub(super) async fn compile_time_info_for_platform(&self) -> Result<Vc<CompileTimeInfo>> {
+        let define_env = (*self.config.define_env().await?).clone();
+        let target = (*self.config.target().await?).clone();
+        let define_env_vc = Vc::cell(define_env);
+        match &*self.config.platform().await? {
+            Platform::Web => Ok(get_client_compile_time_info(
+                target,
+                define_env_vc,
+                self.config.mode(),
+                self.config.provider_config(),
+            )),
+            Platform::Node => Ok(get_server_compile_time_info(
+                target,
+                define_env_vc,
+                self.config.provider_config(),
+            )),
+        }
+    }
+
     #[turbo_tasks::function]
     pub async fn client_chunking_context(self: Vc<Self>) -> Result<Vc<Box<dyn ChunkingContext>>> {
         let mode = self.mode();
