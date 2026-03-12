@@ -9,6 +9,7 @@
 [![npm](https://img.shields.io/npm/v/utoo?style=flat-square)](https://www.npmjs.com/package/utoo)
 [![npm downloads](https://img.shields.io/npm/dm/utoo?style=flat-square)](https://www.npmjs.com/package/utoo)
 [![@utoo/pack downloads](https://img.shields.io/npm/dm/@utoo/pack?style=flat-square)](https://www.npmjs.com/package/@utoo/pack)
+[![@utoo/web downloads](https://img.shields.io/npm/dm/@utoo/web?style=flat-square)](https://www.npmjs.com/package/@utoo/web)
 [![PM CI](https://github.com/utooland/utoo/actions/workflows/pm-ci.yml/badge.svg)](https://github.com/utooland/utoo/actions/workflows/pm-ci.yml)
 [![Pack CI](https://github.com/utooland/utoo/actions/workflows/pack-ci.yml/badge.svg)](https://github.com/utooland/utoo/actions/workflows/pack-ci.yml)
 
