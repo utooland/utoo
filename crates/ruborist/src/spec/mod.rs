@@ -28,7 +28,7 @@
 
 use std::str::FromStr;
 
-use crate::model::util::PackageNameStr;
+use crate::model::util::{PackageNameStr, parse_package_spec};
 
 // ---------------------------------------------------------------------------
 // Protocol
@@ -193,7 +193,7 @@ impl From<&str> for PackageSpec {
     fn from(raw: &str) -> Self {
         match Protocol::strip_prefix(raw) {
             Some((Protocol::NpmAlias, rest)) => {
-                let (name, version_spec) = crate::model::util::parse_package_spec(rest);
+                let (name, version_spec) = parse_package_spec(rest);
                 Self::Registry {
                     name: name.to_owned(),
                     version_spec: version_spec.to_owned(),
@@ -255,7 +255,7 @@ impl From<&str> for PackageSpec {
                 }
 
                 // Default: registry spec
-                let (name, version_spec) = crate::model::util::parse_package_spec(raw);
+                let (name, version_spec) = parse_package_spec(raw);
                 Self::Registry {
                     name: name.to_owned(),
                     version_spec: version_spec.to_owned(),

@@ -247,4 +247,107 @@ echo -e "${GREEN}PASS: catalog update flow successful${NC}"
 mv .utoo.toml.bak .utoo.toml
 cd ../../..
 
+# Case 11: npm alias (npm: prefix) install
+echo -e "${YELLOW}Case 11: npm alias install${NC}"
+cd e2e/pm/npm-alias
+rm -rf node_modules package-lock.json
+utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for npm-alias${NC}"; exit 1; }
+
+# 11a: simple alias — "my-jquery": "npm:jquery@3"
+# node_modules/my-jquery should contain jquery's package.json
+if [ ! -d "node_modules/my-jquery" ]; then
+    echo -e "${RED}FAIL: my-jquery directory not created${NC}"
+    exit 1
+fi
+ACTUAL_NAME=$(node -e "console.log(require('./node_modules/my-jquery/package.json').name)")
+if [ "$ACTUAL_NAME" != "jquery" ]; then
+    echo -e "${RED}FAIL: my-jquery should be jquery, got $ACTUAL_NAME${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: simple alias my-jquery -> jquery${NC}"
+
+# 11b: scoped alias — "my-types": "npm:@types/node@^20"
+if [ ! -d "node_modules/my-types" ]; then
+    echo -e "${RED}FAIL: my-types directory not created${NC}"
+    exit 1
+fi
+ACTUAL_NAME=$(node -e "console.log(require('./node_modules/my-types/package.json').name)")
+if [ "$ACTUAL_NAME" != "@types/node" ]; then
+    echo -e "${RED}FAIL: my-types should be @types/node, got $ACTUAL_NAME${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: scoped alias my-types -> @types/node${NC}"
+
+# 11c: alias with transitive deps — "string-width-cjs": "npm:string-width@^4.2.0"
+if [ ! -d "node_modules/string-width-cjs" ]; then
+    echo -e "${RED}FAIL: string-width-cjs directory not created${NC}"
+    exit 1
+fi
+ACTUAL_NAME=$(node -e "console.log(require('./node_modules/string-width-cjs/package.json').name)")
+if [ "$ACTUAL_NAME" != "string-width" ]; then
+    echo -e "${RED}FAIL: string-width-cjs should be string-width, got $ACTUAL_NAME${NC}"
+    exit 1
+fi
+# string-width has transitive deps (strip-ansi, emoji-regex, is-fullwidth-code-point)
+# they should be installed at top level, not nested under the alias
+if [ ! -d "node_modules/strip-ansi" ]; then
+    echo -e "${RED}FAIL: strip-ansi (transitive dep of string-width) not hoisted${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: alias with transitive deps string-width-cjs -> string-width${NC}"
+
+# 11d: alias version mismatch — transitive dep nests when version doesn't match
+# "undici-types": "npm:lodash@^4" occupies the directory name,
+# but @types/node needs undici-types@~6.21.0. lodash 4.x doesn't satisfy ~6.21.0,
+# so the real undici-types must be nested under my-types/node_modules/.
+ACTUAL_NAME=$(node -e "console.log(require('./node_modules/undici-types/package.json').name)")
+if [ "$ACTUAL_NAME" != "lodash" ]; then
+    echo -e "${RED}FAIL: top-level undici-types should be lodash, got $ACTUAL_NAME${NC}"
+    exit 1
+fi
+if [ ! -d "node_modules/my-types/node_modules/undici-types" ]; then
+    echo -e "${RED}FAIL: real undici-types not nested under my-types (version mismatch should force nesting)${NC}"
+    exit 1
+fi
+NESTED_NAME=$(node -e "console.log(require('./node_modules/my-types/node_modules/undici-types/package.json').name)")
+if [ "$NESTED_NAME" != "undici-types" ]; then
+    echo -e "${RED}FAIL: nested undici-types should be the real package, got $NESTED_NAME${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: alias version mismatch — real undici-types nested under my-types${NC}"
+
+# 11e: alias version match — transitive dep reuses alias when version satisfies
+# "ms": "npm:raw-body@2.1.3" occupies the ms directory.
+# debug@4 depends on ms@^2.1.3. raw-body's version 2.1.3 satisfies ^2.1.3,
+# so debug reuses the top-level ms (which is actually raw-body).
+# This matches npm behavior: alias is pure directory-name occupation,
+# resolution is by semver only, not by real package name.
+ACTUAL_NAME=$(node -e "console.log(require('./node_modules/ms/package.json').name)")
+if [ "$ACTUAL_NAME" != "raw-body" ]; then
+    echo -e "${RED}FAIL: top-level ms should be raw-body, got $ACTUAL_NAME${NC}"
+    exit 1
+fi
+if [ -d "node_modules/debug/node_modules/ms" ]; then
+    echo -e "${RED}FAIL: debug should NOT have nested ms (version 2.1.3 satisfies ^2.1.3)${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: alias version match — debug reuses aliased ms (npm-compatible)${NC}"
+
+# 11f: scoped alias name — alias name itself has a scope
+# "@myorg/utils": "npm:lodash@^4" and "@myorg/types": "npm:@types/node@^20"
+ACTUAL_NAME=$(node -e "console.log(require('./node_modules/@myorg/utils/package.json').name)")
+if [ "$ACTUAL_NAME" != "lodash" ]; then
+    echo -e "${RED}FAIL: @myorg/utils should be lodash, got $ACTUAL_NAME${NC}"
+    exit 1
+fi
+ACTUAL_NAME=$(node -e "console.log(require('./node_modules/@myorg/types/package.json').name)")
+if [ "$ACTUAL_NAME" != "@types/node" ]; then
+    echo -e "${RED}FAIL: @myorg/types should be @types/node, got $ACTUAL_NAME${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: scoped alias names @myorg/utils -> lodash, @myorg/types -> @types/node${NC}"
+
+echo -e "${GREEN}PASS: npm alias install successful${NC}"
+cd ../../..
+
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"
