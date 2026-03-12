@@ -47,7 +47,7 @@ use crate::{
         transforms::{
             css_modules::get_auto_css_modules_rule,
             default_export_namer::get_default_export_namer_rule,
-            remove_console::get_remove_console_transform_rule,
+            emotion::get_emotion_transform_rule, remove_console::get_remove_console_transform_rule,
             styled_components::get_styled_components_transform_rule,
             styled_jsx::get_styled_jsx_transform_rule,
             swc_ecma_transform_plugins::get_swc_ecma_transform_plugin_rule,
@@ -244,6 +244,7 @@ pub async fn get_client_module_options_context(
 
     let additional_rules: Vec<ModuleRule> = vec![
         get_swc_ecma_transform_plugin_rule(config, project_path.clone()).await?,
+        get_emotion_transform_rule(config).await?,
         get_styled_components_transform_rule(config).await?,
         get_styled_jsx_transform_rule(config, target_browsers).await?,
         get_remove_console_transform_rule(config).await?,

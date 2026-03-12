@@ -1,0 +1,14 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.tsx",
+        "name": "main"
+      }
+    ],
+    "styles": {
+      "emotion": true
+    },
+    "sourceMaps": false
+  }
+}

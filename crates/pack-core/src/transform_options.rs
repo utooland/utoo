@@ -140,10 +140,19 @@ pub async fn get_jsx_transform_options(
     enable_react_refresh: bool,
 ) -> Result<Vc<JsxTransformOptions>> {
     let react_config = config.react().await?;
+    let emotion_enabled = config.styles().await?.emotion.unwrap_or(false);
+
+    let import_source = react_config.import_source.clone().or_else(|| {
+        if emotion_enabled {
+            Some("@emotion/react".into())
+        } else {
+            Some("react".into())
+        }
+    });
 
     let react_transform_options = JsxTransformOptions {
         development: mode.await?.is_react_development(),
-        import_source: react_config.import_source.clone().or(Some("react".into())),
+        import_source,
         runtime: react_config
             .runtime
             .as_ref()

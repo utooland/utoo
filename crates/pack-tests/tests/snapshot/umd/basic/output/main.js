@@ -37,6 +37,15 @@ __turbopack_context__.v(mod);
 function jsx() {
     return 'purposefully empty stub for @emotion/react/index.js';
 }
+function css() {
+    return 'purposefully empty stub for @emotion/react/index.js';
+}
+function Global() {
+    return 'purposefully empty stub for @emotion/react/index.js';
+}
+function keyframes() {
+    return 'purposefully empty stub for @emotion/react/index.js';
+}
 __turbopack_context__.s([]);
 }),
 132: ((__turbopack_context__) => {
