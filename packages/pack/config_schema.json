@@ -1221,6 +1221,20 @@
       "description": "Style configuration",
       "type": "object",
       "properties": {
+        "autoCssModules": {
+          "description": "Enable automatic CSS Modules transform",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "emotion": {
+          "description": "Enable @emotion/react transform support",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "inlineCss": {
           "description": "Inline CSS configuration"
         },

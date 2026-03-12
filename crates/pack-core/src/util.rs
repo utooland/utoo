@@ -154,7 +154,6 @@ pub fn convert_to_project_relative(project_inside_path: &str, project_path: &str
     }
 }
 
-// TODO: add a config to enable autoCssModules
 pub fn module_styles_rule_condition() -> RuleCondition {
     RuleCondition::any(vec![
         RuleCondition::ResourcePathEndsWith(".module.css".into()),

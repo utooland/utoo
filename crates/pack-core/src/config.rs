@@ -272,6 +272,7 @@ pub struct ReactConfig {
 pub struct StyleConfig {
     pub styled_components: Option<StyledComponentsTransformOptionsOrBoolean>,
     pub emotion: Option<bool>,
+    pub auto_css_modules: Option<bool>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     sass: Option<serde_json::Value>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
