@@ -234,7 +234,10 @@ pub async fn get_client_module_options_context(
     client_rules.push(ignore_dts_rule.clone());
     foreign_client_rules.push(ignore_dts_rule);
 
-    client_rules.push(get_auto_css_modules_rule());
+    let styles = config.styles().await?;
+    if styles.auto_css_modules.unwrap_or(true) {
+        client_rules.push(get_auto_css_modules_rule());
+    }
 
     if enable_react_refresh {
         // This transformer just to solve the react-refresh not work for no named jsx function component.

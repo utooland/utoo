@@ -205,6 +205,8 @@ export interface ConfigComplete {
     wasmAsAsset?: boolean;
   };
   styles?: {
+    autoCssModules?: boolean;
+    emotion?: boolean;
     less?: {
       implementation?: string;
       [key: string]: any;
