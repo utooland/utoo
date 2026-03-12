@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
-use pack_api::project::{DefineEnv, ProjectContainer, ProjectOptions, WatchOptions};
+use pack_api::project::{ProjectContainer, ProjectOptions, WatchOptions};
 use serde::Deserialize;
 use turbo_rcstr::RcStr;
 use turbo_tasks::{ResolvedVc, TurboTasks};
@@ -46,10 +46,6 @@ pub enum Mode {
 pub struct PartialProjectOptions {
     /// A map of environment variables to use when compiling code.
     pub process_env: Option<Vec<(RcStr, RcStr)>>,
-
-    /// A map of environment variables which should get injected at compile
-    /// time.
-    pub define_env: Option<DefineEnv>,
 
     /// Filesystem watcher options.
     pub watch: Option<WatchOptions>,
