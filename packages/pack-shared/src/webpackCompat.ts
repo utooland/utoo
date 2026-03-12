@@ -686,6 +686,7 @@ function compatOptimization(
   }
   const { moduleIds, minimize, concatenateModules, usedExports } =
     webpackOptimization;
+  const enableTreeShaking = usedExports !== false;
   return {
     moduleIds:
       moduleIds === "named"
@@ -696,9 +697,9 @@ function compatOptimization(
     noMangling: webpackOptimization.mangleExports === false,
     minify: minimize,
     concatenateModules,
-    treeShaking: !!usedExports,
-    removeUnusedExports: !!usedExports,
-    removeUnusedImports: !!usedExports,
+    treeShaking: enableTreeShaking,
+    removeUnusedExports: enableTreeShaking,
+    removeUnusedImports: enableTreeShaking,
   };
 }
 
