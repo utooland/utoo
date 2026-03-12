@@ -1,4 +1,4 @@
-import { ConfigComplete, DefineEnv, RustifiedEnv } from "./config";
+import { ConfigComplete, RustifiedEnv } from "./config";
 import { formatIssue, Issue } from "./issue";
 import { renderStyledStringToErrorAnsi } from "./styledString";
 
@@ -64,57 +64,6 @@ export function rustifyEnv(env: Record<string, string>): RustifiedEnv {
       name,
       value,
     }));
-}
-
-// TODO: extend in future, like SSR support.
-interface DefineEnvOptions {
-  config: ConfigComplete;
-  dev: boolean;
-  optionDefineEnv?: DefineEnv;
-  // isClient: boolean,
-  // isNodeServer: boolean
-}
-
-interface Envs {
-  [key: string]: string | string[] | boolean;
-}
-
-interface SerializedDefineEnv {
-  [key: string]: string;
-}
-
-export function createDefineEnv(options: DefineEnvOptions): DefineEnv {
-  let defineEnv: DefineEnv = options.optionDefineEnv ?? {
-    client: [],
-    edge: [],
-    nodejs: [],
-  };
-
-  function getDefineEnv(): SerializedDefineEnv {
-    const envs: Envs = {
-      "process.env.NODE_ENV": options.dev ? "development" : "production",
-    };
-    const userDefines = options.config.define ?? {};
-    for (const key in userDefines) {
-      envs[key] = userDefines[key];
-    }
-
-    // serialize
-    const defineEnvStringified: SerializedDefineEnv = {};
-    for (const key in defineEnv) {
-      const value = envs[key];
-      defineEnvStringified[key] = JSON.stringify(value);
-    }
-
-    return defineEnvStringified;
-  }
-
-  // TODO: future define envs need to extends for more compiler like server or edge.
-  for (const variant of Object.keys(defineEnv) as (keyof typeof defineEnv)[]) {
-    defineEnv[variant] = rustifyEnv(getDefineEnv());
-  }
-
-  return defineEnv;
 }
 
 type AnyFunc<T> = (this: T, ...args: any) => any;

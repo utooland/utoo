@@ -10,6 +10,7 @@ anyhow                       = { workspace = true }
 async-trait                  = { workspace = true }
 base64                       = "0.22.1"
 bincode                      = { workspace = true }
+browserslist-rs              = { workspace = true }
 dunce                        = { workspace = true }
 either                       = { workspace = true, features = ["serde"] }
 futures                      = { workspace = true }
@@ -54,6 +55,7 @@ turbo-tasks-fs               = { workspace = true }
 turbo-tasks-hash             = { workspace = true }
 turbopack                    = { workspace = true }
 turbopack-browser            = { workspace = true }
+turbopack-nodejs             = { workspace = true }
 turbopack-core               = { workspace = true }
 turbopack-css                = { workspace = true }
 turbopack-ecmascript         = { workspace = true }

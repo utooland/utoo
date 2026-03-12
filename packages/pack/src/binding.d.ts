@@ -9,22 +9,6 @@ export declare class ExternalObject<T> {
     [K: symbol]: T
   }
 }
-/** Arguments for `NapiTurbopackCallbacks::throw_turbopack_internal_error`. */
-export interface TurbopackInternalErrorOpts {
-  message: string
-  anonymizedLocation?: string
-}
-export interface NapiTurbopackCallbacksJsObject {
-  /**
-   * Called when we've encountered a bug in Turbopack and not in the user's code. Constructs and
-   * throws a `TurbopackInternalError` type. Logs to anonymized telemetry.
-   *
-   * As a result of the use of `ErrorStrategy::CalleeHandled`, the first argument is an error if
-   * there's a runtime conversion error. This should never happen, but if it does, the function
-   * can throw it instead.
-   */
-  throwTurbopackInternalError: (conversionError: Error | null, opts: TurbopackInternalErrorOpts) => never
-}
 export declare function registerWorkerScheduler(creator: (arg: NapiWorkerCreation) => any, terminator: (arg: NapiWorkerTermination) => any): void
 export declare function workerCreated(workerId: number): void
 export interface NapiWorkerCreation {
@@ -93,11 +77,6 @@ export interface NapiProjectOptions {
   config: string
   /** A map of environment variables to use when compiling code. */
   processEnv: Array<NapiEnvVar>
-  /**
-   * A map of environment variables which should get injected at compile
-   * time.
-   */
-  defineEnv: NapiDefineEnv
   /** The mode in which Next.js is running. */
   dev: boolean
   /** The build id. */
@@ -119,11 +98,6 @@ export interface NapiPartialProjectOptions {
   config?: string
   /** A map of environment variables to use when compiling code. */
   processEnv?: Array<NapiEnvVar>
-  /**
-   * A map of environment variables which should get injected at compile
-   * time.
-   */
-  defineEnv?: NapiDefineEnv
   /** The mode in which Next.js is running. */
   dev?: boolean
   /** The build id. */
@@ -135,11 +109,6 @@ export interface NapiPartialProjectOptions {
    */
   noMangling?: boolean
   packPath?: string
-}
-export interface NapiDefineEnv {
-  client: Array<NapiEnvVar>
-  edge: Array<NapiEnvVar>
-  nodejs: Array<NapiEnvVar>
 }
 export interface NapiTurboEngineOptions {
   /** Use the new backend with persistent caching enabled. */
@@ -214,6 +183,11 @@ export declare function projectTraceSource(project: { __napiType: "Project" }, f
 export declare function projectGetSourceForAsset(project: { __napiType: "Project" }, filePath: string): Promise<string | null>
 export declare function projectGetSourceMap(project: { __napiType: "Project" }, filePath: RcStr): Promise<string | null>
 export declare function projectGetSourceMapSync(project: { __napiType: "Project" }, filePath: RcStr): string | null
+/** Arguments for `NapiTurbopackCallbacks::throw_turbopack_internal_error`. */
+export interface TurbopackInternalErrorOpts {
+  message: string
+  anonymizedLocation?: string
+}
 /**
  * A version of [`NapiTurbopackCallbacks`] that can accepted as an argument to a napi function.
  *

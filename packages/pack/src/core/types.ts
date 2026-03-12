@@ -6,7 +6,7 @@ import {
   NapiWrittenEndpoint,
   StackFrame,
 } from "../binding";
-import { BundleOptions, ConfigComplete, DefineEnv } from "../config/types";
+import { BundleOptions } from "../config/types";
 
 declare global {
   export type TurbopackResult<T = {}> = T & {

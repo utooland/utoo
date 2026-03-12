@@ -1,7 +1,6 @@
 import path from "path";
 
 export {
-  createDefineEnv,
   debounce,
   isWellKnownError,
   ModuleBuildError,

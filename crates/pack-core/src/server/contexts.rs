@@ -3,50 +3,43 @@ use std::collections::BTreeSet;
 use anyhow::Result;
 use bincode::{Decode, Encode};
 use turbo_rcstr::{RcStr, rcstr};
-use turbo_tasks::{ResolvedVc, TaskInput, TryJoinIterExt, ValueToString, Vc, trace::TraceRawVcs};
+use turbo_tasks::{ResolvedVc, TaskInput, Vc, trace::TraceRawVcs};
 use turbo_tasks_env::EnvMap;
 use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::{
     CssOptionsContext, EcmascriptOptionsContext, JsxTransformOptions, ModuleOptionsContext,
     ModuleRule, TypescriptTransformOptions, side_effect_free_packages_glob,
 };
-use turbopack_browser::{BrowserChunkingContext, CurrentChunkMethod};
 use turbopack_core::{
     chunk::{
-        ChunkingConfig, ChunkingContext, MangleType, MinifyType, SourceMapSourceType,
-        SourceMapsType, UnusedReferences, chunk_id_strategy::ModuleIdStrategy,
+        ChunkingConfig, MangleType, MinifyType, SourceMapSourceType, SourceMapsType,
+        UnusedReferences, chunk_id_strategy::ModuleIdStrategy,
     },
     compile_time_info::CompileTimeInfo,
-    environment::{BrowserEnvironment, Environment, ExecutionEnvironment},
-    file_source::FileSource,
+    environment::{Environment, ExecutionEnvironment, NodeJsEnvironment, NodeJsVersion},
     module_graph::binding_usage_info::OptionBindingUsageInfo,
 };
 use turbopack_css::chunk::CssChunkType;
-use turbopack_ecmascript::{TypeofWindow, chunk::EcmascriptChunkType};
+use turbopack_ecmascript::chunk::EcmascriptChunkType;
 use turbopack_node::{
     execution_context::ExecutionContext,
     transforms::postcss::{PostCssConfigLocation, PostCssTransformOptions},
 };
+use turbopack_nodejs::NodeJsChunkingContext;
 use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 
 use crate::{
-    client::{
-        import_map::{get_client_fallback_import_map, get_client_import_map},
-        runtime_entry::RuntimeEntries,
-    },
-    config::{
-        Config, ProviderConfig, default_max_chunk_count_per_group, default_max_merge_chunk_size,
-        default_min_chunk_size,
-    },
-    embed_js::embed_file_path,
+    config::{Config, ProviderConfig},
     import_map::get_postcss_package_mapping,
     mode::Mode,
+    server::{
+        import_map::{get_server_fallback_import_map, get_server_import_map},
+        transforms::get_server_transforms_rules,
+    },
     shared::{
         contexts::{defines, free_vars},
         resolve::externals_plugin::ExternalsPlugin,
         transforms::{
-            css_modules::get_auto_css_modules_rule,
-            default_export_namer::get_default_export_namer_rule,
             remove_console::get_remove_console_transform_rule,
             styled_components::get_styled_components_transform_rule,
             styled_jsx::get_styled_jsx_transform_rule,
@@ -63,38 +56,44 @@ use crate::{
     },
 };
 
-use super::{
-    react_refresh::assert_can_resolve_react_refresh, runtime_entry::RuntimeEntry,
-    transforms::get_client_transforms_rules,
-};
-
 #[turbo_tasks::function]
-pub async fn get_client_compile_time_info(
+pub async fn get_server_compile_time_info(
     browserslist_query: RcStr,
     define_env: Vc<EnvMap>,
-    mode: Vc<Mode>,
     provider_config: Vc<ProviderConfig>,
 ) -> Result<Vc<CompileTimeInfo>> {
-    let mut define_env = (*define_env.await?).clone();
-    define_env.extend([(
-        "process.env.NODE_ENV".into(),
-        serde_json::to_string(mode.await?.node_env())
-            .unwrap()
-            .into(),
-    )]);
-    let define_env = Vc::cell(define_env);
-    let environment = BrowserEnvironment {
-        dom: true,
-        web_worker: true,
-        service_worker: true,
-        browserslist_query: browserslist_query.to_owned(),
-    }
-    .resolved_cell();
+    let distribs = browserslist::resolve(
+        browserslist_query.split(","),
+        &browserslist::Opts {
+            ignore_unknown_versions: true,
+            ..Default::default()
+        },
+    );
+
+    let node_version = match distribs {
+        Ok(distribs) => {
+            if let Some(distrib) = distribs.first()
+                && distrib.name() == "node"
+            {
+                NodeJsVersion::Static(ResolvedVc::cell(distrib.version().into()))
+            } else {
+                NodeJsVersion::default()
+            }
+        }
+        Err(_) => NodeJsVersion::default(),
+    };
+
+    let environment = NodeJsEnvironment {
+        node_version: node_version.resolved_cell(),
+        ..Default::default()
+    };
 
     CompileTimeInfo::builder(
-        Environment::new(ExecutionEnvironment::Browser(environment))
-            .to_resolved()
-            .await?,
+        Environment::new(ExecutionEnvironment::NodeJsLambda(
+            environment.resolved_cell(),
+        ))
+        .to_resolved()
+        .await?,
     )
     .defines(defines(define_env).to_resolved().await?)
     .free_var_references(free_vars(define_env, provider_config).to_resolved().await?)
@@ -103,98 +102,21 @@ pub async fn get_client_compile_time_info(
 }
 
 #[turbo_tasks::function]
-pub async fn get_client_runtime_entries(
-    project_root: FileSystemPath,
-    mode: Vc<Mode>,
-    config: Vc<Config>,
-    execution_context: Vc<ExecutionContext>,
-    pack_path: FileSystemPath,
-    watch: Vc<bool>,
-    hot: Vc<bool>,
-) -> Result<Vc<RuntimeEntries>> {
-    let mut runtime_entries = vec![];
-    let resolve_options_context = get_client_resolve_options_context(
-        project_root.clone(),
-        mode,
-        config,
-        execution_context,
-        pack_path,
-    );
-
-    let is_development = mode.await?.is_development();
-    let watch = *watch.await?;
-    let hot = *hot.await?;
-
-    if is_development && watch {
-        let enable_react_refresh =
-            assert_can_resolve_react_refresh(project_root.clone(), resolve_options_context)
-                .await?
-                .as_request();
-
-        // It's important that React Refresh come before the regular bootstrap file,
-        // because the bootstrap contains JSX which requires Refresh's global
-        // functions to be available.
-        if let Some(request) = enable_react_refresh {
-            runtime_entries.push(
-                RuntimeEntry::Request(request.to_resolved().await?, project_root.join("_")?)
-                    .resolved_cell(),
-            )
-        };
-    }
-
-    if is_development && watch && hot {
-        #[cfg(all(target_family = "wasm", target_os = "unknown"))]
-        let hmr_bootstrap_path = rcstr!("hmr/bootstrap-messageport.ts");
-        #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-        let hmr_bootstrap_path = rcstr!("hmr/bootstrap.ts");
-
-        runtime_entries.push(
-            RuntimeEntry::Source(ResolvedVc::upcast(
-                FileSource::new(embed_file_path(hmr_bootstrap_path).owned().await?)
-                    .to_resolved()
-                    .await?,
-            ))
-            .resolved_cell(),
-        );
-    }
-
-    Ok(Vc::cell(runtime_entries))
-}
-
-#[turbo_tasks::function]
-pub async fn get_client_module_options_context(
+pub async fn get_server_module_options_context(
     project_path: FileSystemPath,
     execution_context: ResolvedVc<ExecutionContext>,
     env: ResolvedVc<Environment>,
     mode: Vc<Mode>,
     config: Vc<Config>,
-    watch: Vc<bool>,
-    pack_path: FileSystemPath,
 ) -> Result<Vc<ModuleOptionsContext>> {
     let mode_ref = mode.await?;
-
-    // resolve context
-    let resolve_options_context = get_client_resolve_options_context(
-        project_path.clone(),
-        mode,
-        config,
-        *execution_context,
-        pack_path.clone(),
-    );
 
     let tsconfig = get_typescript_transform_options(project_path.clone())
         .to_resolved()
         .await?;
     let decorators_options = get_decorators_transform_options(project_path.clone());
-    let is_react_development = mode.await?.is_react_development();
-    let enable_react_refresh = if *watch.await? && is_react_development {
-        assert_can_resolve_react_refresh(project_path.clone(), resolve_options_context)
-            .await?
-            .is_found()
-    } else {
-        false
-    };
-    let jsx_transform_options = get_jsx_transform_options(mode, config, enable_react_refresh)
+
+    let jsx_transform_options = get_jsx_transform_options(mode, config, false)
         .to_resolved()
         .await?;
 
@@ -223,24 +145,16 @@ pub async fn get_client_module_options_context(
         .await?;
     let target_browsers = env.runtime_versions();
 
-    let mut client_rules = get_client_transforms_rules(config).await?;
-    let mut foreign_client_rules = get_client_transforms_rules(config).await?;
+    let mut server_rules = get_server_transforms_rules(config).await?;
+    let mut foreign_server_rules = get_server_transforms_rules(config).await?;
 
     // Ignore .d.ts files - they are TypeScript declaration files and should not be bundled
     let ignore_dts_rule = ModuleRule::new(
         turbopack::module_options::RuleCondition::ResourcePathEndsWith(".d.ts".to_string()),
         vec![turbopack::module_options::ModuleRuleEffect::Ignore],
     );
-    client_rules.push(ignore_dts_rule.clone());
-    foreign_client_rules.push(ignore_dts_rule);
-
-    client_rules.push(get_auto_css_modules_rule());
-
-    if enable_react_refresh {
-        // This transformer just to solve the react-refresh not work for no named jsx function component.
-        // Refer to: https://github.com/utooland/utoo/issues/2439
-        client_rules.push(get_default_export_namer_rule());
-    }
+    server_rules.push(ignore_dts_rule.clone());
+    foreign_server_rules.push(ignore_dts_rule);
 
     let additional_rules: Vec<ModuleRule> = vec![
         get_swc_ecma_transform_plugin_rule(config, project_path.clone()).await?,
@@ -252,7 +166,7 @@ pub async fn get_client_module_options_context(
     .flatten()
     .collect();
 
-    client_rules.extend(additional_rules);
+    server_rules.extend(additional_rules);
 
     let postcss_transform_options = Some(PostCssTransformOptions {
         postcss_package: Some(get_postcss_package_mapping().to_resolved().await?),
@@ -284,13 +198,12 @@ pub async fn get_client_module_options_context(
     };
     let module_options_context = ModuleOptionsContext {
         ecmascript: EcmascriptOptionsContext {
-            enable_typeof_window_inlining: Some(TypeofWindow::Object),
             source_maps,
             import_externals: *config.import_externals().await?,
             enable_typescript_transform: Some(
                 TypescriptTransformOptions::default().resolved_cell(),
             ),
-            ignore_dynamic_requests: true,
+            ignore_dynamic_requests: false,
             ..Default::default()
         },
         css: CssOptionsContext {
@@ -319,7 +232,7 @@ pub async fn get_client_module_options_context(
         },
         enable_webpack_loaders: foreign_enable_webpack_loaders,
         enable_postcss_transform: enable_foreign_postcss_transform,
-        module_rules: foreign_client_rules,
+        module_rules: foreign_server_rules,
         tree_shaking_mode: tree_shaking_mode_for_foreign_code,
         ..module_options_context.clone()
     };
@@ -355,7 +268,7 @@ pub async fn get_client_module_options_context(
                 internal_context.resolved_cell(),
             ),
         ],
-        module_rules: client_rules,
+        module_rules: server_rules,
         ..module_options_context
     }
     .cell();
@@ -364,21 +277,18 @@ pub async fn get_client_module_options_context(
 }
 
 #[turbo_tasks::function]
-pub async fn get_client_resolve_options_context(
+pub async fn get_server_resolve_options_context(
     project_path: FileSystemPath,
     mode: Vc<Mode>,
     config: Vc<Config>,
     execution_context: Vc<ExecutionContext>,
     pack_path: FileSystemPath,
 ) -> Result<Vc<ResolveOptionsContext>> {
-    let client_import_map =
-        get_client_import_map(project_path.clone(), config, execution_context, pack_path)
+    let server_import_map =
+        get_server_import_map(project_path.clone(), config, execution_context, pack_path)
             .to_resolved()
             .await?;
-    let enable_node_polyfill = *config.node_polyfill().await?;
-    let client_fallback_import_map = get_client_fallback_import_map(enable_node_polyfill)
-        .to_resolved()
-        .await?;
+    let server_fallback_import_map = get_server_fallback_import_map().to_resolved().await?;
 
     let external_config = *config.externals_config().to_resolved().await?;
 
@@ -393,9 +303,12 @@ pub async fn get_client_resolve_options_context(
     let custom_conditions = vec![mode.await?.condition().into()];
     let resolve_options_context = ResolveOptionsContext {
         enable_node_modules: Some(project_path.root().owned().await?),
+        enable_node_externals: true,
+        enable_mjs_extension: true,
+        enable_node_native_modules: true,
         custom_conditions,
-        import_map: Some(client_import_map),
-        fallback_import_map: Some(client_fallback_import_map),
+        import_map: Some(server_import_map),
+        fallback_import_map: Some(server_fallback_import_map),
         browser: true,
         module: true,
         before_resolve_plugins: vec![ResolvedVc::upcast(externals_plugin)],
@@ -431,12 +344,11 @@ pub async fn get_client_resolve_options_context(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, TaskInput, TraceRawVcs, Encode, Decode)]
-pub struct ClientChunkingContextOptions {
+pub struct ServerChunkingContextOptions {
     pub mode: Vc<Mode>,
     pub root_path: FileSystemPath,
-    pub client_root: FileSystemPath,
-    pub client_root_to_root_path: RcStr,
-    pub public_path: Vc<RcStr>,
+    pub node_root: FileSystemPath,
+    pub node_root_to_root_path: RcStr,
     pub environment: Vc<Environment>,
     pub module_id_strategy: Vc<ModuleIdStrategy>,
     pub export_usage: Vc<OptionBindingUsageInfo>,
@@ -447,20 +359,18 @@ pub struct ClientChunkingContextOptions {
     pub scope_hoisting: Vc<bool>,
     pub nested_async_chunking: Vc<bool>,
     pub debug_ids: Vc<bool>,
-    pub should_use_absolute_url_references: Vc<bool>,
-    pub config: Vc<Config>,
 }
 
+// By default, assets are server assets, but the StructuredImageModuleType ones are on the server
 #[turbo_tasks::function]
-pub async fn get_client_chunking_context(
-    options: ClientChunkingContextOptions,
-) -> Result<Vc<Box<dyn ChunkingContext>>> {
-    let ClientChunkingContextOptions {
+pub async fn get_server_chunking_context(
+    options: ServerChunkingContextOptions,
+) -> Result<Vc<NodeJsChunkingContext>> {
+    let ServerChunkingContextOptions {
         mode,
         root_path,
-        client_root,
-        client_root_to_root_path,
-        public_path,
+        node_root,
+        node_root_to_root_path,
         environment,
         module_id_strategy,
         export_usage,
@@ -471,40 +381,19 @@ pub async fn get_client_chunking_context(
         scope_hoisting,
         nested_async_chunking,
         debug_ids,
-        should_use_absolute_url_references,
-        config,
     } = options;
-
     let mode = mode.await?;
-    let public_path = public_path.owned().await?;
-
-    let runtime_type = {
-        #[cfg(feature = "test")]
-        {
-            use turbopack_ecmascript_runtime::RuntimeType;
-            match config.runtime_type_str().await?.as_deref() {
-                Some(rt) if rt.eq_ignore_ascii_case("Development") => RuntimeType::Development,
-                Some(rt) if rt.eq_ignore_ascii_case("Production") => RuntimeType::Production,
-                _ => RuntimeType::Dummy,
-            }
-        }
-        #[cfg(not(feature = "test"))]
-        {
-            mode.runtime_type()
-        }
-    };
-
-    let mut builder = BrowserChunkingContext::builder(
-        root_path.clone(),
-        client_root.clone(),
-        client_root_to_root_path,
-        client_root.clone(),
-        client_root.clone(),
-        client_root.clone(),
+    let mut builder = NodeJsChunkingContext::builder(
+        root_path,
+        node_root.clone(),
+        node_root_to_root_path,
+        node_root.clone(),
+        node_root.clone(),
+        node_root.clone(),
         environment.to_resolved().await?,
-        runtime_type,
+        mode.runtime_type(),
     )
-    .minify_type(if mode.is_production() && *minify.await? {
+    .minify_type(if *minify.await? {
         MinifyType::Minify {
             mangle: (!*no_mangling.await?).then_some(MangleType::OptimalSize),
         }
@@ -512,102 +401,36 @@ pub async fn get_client_chunking_context(
         MinifyType::NoMinify
     })
     .source_maps(*source_maps.await?)
-    .chunk_base_path(Some(public_path.clone()))
-    .asset_base_path(Some(public_path))
-    .current_chunk_method(CurrentChunkMethod::DocumentCurrentScript)
     .module_id_strategy(module_id_strategy.to_resolved().await?)
     .export_usage(*export_usage.await?)
     .unused_references(unused_references.to_resolved().await?)
+    .file_tracing(mode.is_production())
     .debug_ids(*debug_ids.await?)
-    .should_use_absolute_url_references(*should_use_absolute_url_references.await?)
     .nested_async_availability(*nested_async_chunking.await?);
 
-    if let Some(chunk_loading_global) = &*config
-        .client_chunk_loading_global(root_path.clone())
-        .await?
-    {
-        builder = builder.chunk_loading_global(chunk_loading_global.clone());
-    }
-
-    // Read entry_root_export from config
-    if let Some(entry_root_export) = &*config.entry_root_export().await? {
-        builder = builder.entry_root_export(Some(entry_root_export.clone()));
-    }
-
     if mode.is_development() {
-        builder = builder
-            .hot_module_replacement()
-            .source_map_source_type(SourceMapSourceType::AbsoluteFileUri)
-            .dynamic_chunk_content_loading(true);
+        builder = builder.source_map_source_type(SourceMapSourceType::AbsoluteFileUri);
     } else {
-        let output = config.output().await?;
-        let split_chunks = &config.optimization().await?.split_chunks;
-
-        let (ecmascript_chunking_config, css_chunking_config) = (
-            split_chunks.as_ref().and_then(|sc| sc.get("js")).map_or(
+        builder = builder
+            .source_map_source_type(SourceMapSourceType::RelativeUri)
+            .chunking_config(
+                Vc::<EcmascriptChunkType>::default().to_resolved().await?,
                 ChunkingConfig {
-                    min_chunk_size: default_min_chunk_size(),
-                    max_chunk_count_per_group: default_max_chunk_count_per_group(),
-                    max_merge_chunk_size: default_max_merge_chunk_size(),
+                    min_chunk_size: 20_000,
+                    max_chunk_count_per_group: 100,
+                    max_merge_chunk_size: 100_000,
                     ..Default::default()
                 },
-                Into::into,
-            ),
-            split_chunks.as_ref().and_then(|sc| sc.get("css")).map_or(
+            )
+            .chunking_config(
+                Vc::<CssChunkType>::default().to_resolved().await?,
                 ChunkingConfig {
                     max_merge_chunk_size: 100_000,
                     ..Default::default()
                 },
-                Into::into,
-            ),
-        );
-
-        if let Some(filename) = &output.filename {
-            builder = builder.filename(filename.clone());
-        }
-
-        if let Some(chunk_filename) = &output.chunk_filename {
-            builder = builder.chunk_filename(chunk_filename.clone());
-        }
-
-        if let Some(css_filename) = &output.css_filename {
-            builder = builder.css_filename(css_filename.clone());
-        }
-
-        if let Some(css_chunk_filename) = &output.css_chunk_filename {
-            builder = builder.css_chunk_filename(css_chunk_filename.clone());
-        }
-
-        if let Some(asset_module_filename) = &output.asset_module_filename {
-            builder = builder.asset_module_filename(asset_module_filename.clone());
-        }
-
-        builder = builder
-            .chunking_config(
-                Vc::<EcmascriptChunkType>::default().to_resolved().await?,
-                ecmascript_chunking_config,
-            )
-            .chunking_config(
-                Vc::<CssChunkType>::default().to_resolved().await?,
-                css_chunking_config,
             )
             .module_merging(*scope_hoisting.await?);
     }
 
-    let chunking_context = builder.build();
-
-    // TODO: split chunks not worked as we expect now, check the implementation in
-    // turbopack_browser
-    tracing::debug!(
-        "client chunking config {:?}\n",
-        chunking_context
-            .chunking_configs()
-            .await?
-            .iter()
-            .map(|(ty, config)| async { Ok((ty.to_string().await?, config.clone())) })
-            .try_join()
-            .await?,
-    );
-
-    Ok(Vc::upcast(chunking_context))
+    Ok(builder.build())
 }

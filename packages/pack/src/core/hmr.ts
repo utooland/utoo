@@ -1,6 +1,4 @@
 import {
-  type BuildingAction,
-  type BuiltAction,
   type CompilationError,
   type EntryOptions,
   type HMR_ACTION_TYPES,
@@ -14,15 +12,10 @@ import { nanoid } from "nanoid";
 import type { Socket } from "net";
 import path from "path";
 import { Duplex } from "stream";
-import { WebSocket, WebSocketServer } from "ws";
+import { WebSocketServer } from "ws";
 import { BundleOptions } from "../config/types";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
-import {
-  createDefineEnv,
-  debounce,
-  getPackPath,
-  processIssues,
-} from "../utils/common";
+import { debounce, getPackPath, processIssues } from "../utils/common";
 import { getInitialAssetsFromStats } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
 import { normalizePath } from "../utils/normalize-path";
@@ -123,11 +116,6 @@ export async function createHotReloader(
   const project = await createProject(
     {
       processEnv: bundleOptions.processEnv ?? {},
-      defineEnv: createDefineEnv({
-        config: bundleOptions.config,
-        dev: true,
-        optionDefineEnv: bundleOptions.defineEnv,
-      }),
       watch: {
         enable: true,
       },

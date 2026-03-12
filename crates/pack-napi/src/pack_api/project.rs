@@ -28,7 +28,7 @@ use pack_api::{
         hmr_update_with_issues_operation,
     },
     operation::EntrypointsOperation,
-    project::{DefineEnv, PartialProjectOptions, ProjectContainer, ProjectOptions, WatchOptions},
+    project::{PartialProjectOptions, ProjectContainer, ProjectOptions, WatchOptions},
     source_map::get_source_map_rope,
 };
 use pack_core::tracing_presets::{
@@ -110,10 +110,6 @@ pub struct NapiProjectOptions {
     /// A map of environment variables to use when compiling code.
     pub process_env: Vec<NapiEnvVar>,
 
-    /// A map of environment variables which should get injected at compile
-    /// time.
-    pub define_env: NapiDefineEnv,
-
     /// The mode in which Next.js is running.
     pub dev: bool,
 
@@ -142,10 +138,6 @@ pub struct NapiPartialProjectOptions {
     /// A map of environment variables to use when compiling code.
     pub process_env: Option<Vec<NapiEnvVar>>,
 
-    /// A map of environment variables which should get injected at compile
-    /// time.
-    pub define_env: Option<NapiDefineEnv>,
-
     /// The mode in which Next.js is running.
     pub dev: Option<bool>,
 
@@ -158,14 +150,6 @@ pub struct NapiPartialProjectOptions {
     pub no_mangling: Option<bool>,
 
     pub pack_path: Option<String>,
-}
-
-#[napi(object)]
-#[derive(Clone, Debug)]
-pub struct NapiDefineEnv {
-    pub client: Vec<NapiEnvVar>,
-    pub edge: Vec<NapiEnvVar>,
-    pub nodejs: Vec<NapiEnvVar>,
 }
 
 #[napi(object)]
@@ -206,7 +190,6 @@ impl From<NapiProjectOptions> for ProjectOptions {
                 .into_iter()
                 .map(|var| (var.name.into(), var.value.into()))
                 .collect(),
-            define_env: val.define_env.into(),
             dev: val.dev,
             build_id: val.build_id.into(),
             pack_path: val.pack_path.into(),
@@ -226,31 +209,8 @@ impl From<NapiPartialProjectOptions> for PartialProjectOptions {
                     .map(|var| (var.name.into(), var.value.into()))
                     .collect()
             }),
-            define_env: val.define_env.map(|env| env.into()),
             build_id: val.build_id.map(From::from),
             pack_path: val.pack_path.map(From::from),
-        }
-    }
-}
-
-impl From<NapiDefineEnv> for DefineEnv {
-    fn from(val: NapiDefineEnv) -> Self {
-        DefineEnv {
-            client: val
-                .client
-                .into_iter()
-                .map(|var| (var.name.into(), var.value.into()))
-                .collect(),
-            edge: val
-                .edge
-                .into_iter()
-                .map(|var| (var.name.into(), var.value.into()))
-                .collect(),
-            nodejs: val
-                .nodejs
-                .into_iter()
-                .map(|var| (var.name.into(), var.value.into()))
-                .collect(),
         }
     }
 }
