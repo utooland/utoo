@@ -4,6 +4,7 @@ use pack_core::client::context::{
     get_client_runtime_entries,
 };
 use pack_core::config::Platform;
+
 use pack_core::server::contexts::{
     get_server_module_options_context, get_server_resolve_options_context,
 };
@@ -265,17 +266,16 @@ impl AppEntrypoint {
         asset_context: Vc<Box<dyn AssetContext>>,
         runtime_entries: Vc<EvaluatableAssets>,
     ) -> Result<Vc<OutputAssets>> {
-        let platform = &*self.project().platform().await?;
-        let chunk_group_assets = match platform {
-            Platform::Web => {
-                *self
-                    .client_chunk_group(asset_context, runtime_entries)
-                    .await?
-                    .assets
-            }
+        let chunk_group_assets = match &*self.project().platform().await? {
             Platform::Node => {
                 *self
                     .server_chunk_group(asset_context, runtime_entries)
+                    .await?
+                    .assets
+            }
+            Platform::Web => {
+                *self
+                    .client_chunk_group(asset_context, runtime_entries)
                     .await?
                     .assets
             }
@@ -299,48 +299,36 @@ impl AppEndpoint {
 
     #[turbo_tasks::function]
     pub async fn app_runtime_entries(self: Vc<Self>) -> Result<Vc<EvaluatableAssets>> {
-        match &*self.project().platform().await? {
+        let project = self.project();
+        match &*project.platform().await? {
+            Platform::Node => Ok(EvaluatableAssets::empty()),
             Platform::Web => {
-                let watch = self.project().await?.watch.enable;
+                let watch = project.await?.watch.enable;
                 Ok(get_client_runtime_entries(
-                    self.project().project_path().owned().await?,
-                    self.project().mode(),
-                    self.project().config(),
-                    self.project().execution_context(),
-                    self.project().pack_path().owned().await?,
+                    project.project_path().owned().await?,
+                    project.mode(),
+                    project.config(),
+                    project.execution_context(),
+                    project.pack_path().owned().await?,
                     Vc::cell(watch),
-                    Vc::cell(
-                        watch
-                            && self
-                                .project()
-                                .config()
-                                .dev_server()
-                                .await?
-                                .hot
-                                .unwrap_or_default(),
-                    ),
+                    Vc::cell(watch && project.config().dev_server().await?.hot.unwrap_or_default()),
                 )
                 .resolve_entries(Vc::upcast(self.app_module_context())))
             }
-            Platform::Node => Ok(EvaluatableAssets::empty()),
         }
     }
 
     #[turbo_tasks::function]
     pub async fn app_module_context(self: Vc<Self>) -> Result<Vc<ModuleAssetContext>> {
-        let platform = &*self.project().platform().await?;
-
-        let compile_time_info = match platform {
-            Platform::Web => self.project().client_compile_time_info(),
-            Platform::Node => self.project().server_compile_time_info(),
-        };
+        let project = self.project();
+        let platform = &*project.platform().await?;
 
         let layer = match platform {
-            Platform::Web => {
-                Layer::new_with_user_friendly_name(rcstr!("client"), rcstr!("Browser"))
-            }
             Platform::Node => {
                 Layer::new_with_user_friendly_name(rcstr!("server"), rcstr!("Nodejs"))
+            }
+            Platform::Web => {
+                Layer::new_with_user_friendly_name(rcstr!("client"), rcstr!("Browser"))
             }
         };
 
@@ -350,7 +338,7 @@ impl AppEndpoint {
                 ..Default::default()
             }
             .cell(),
-            compile_time_info,
+            project.compile_time_info_for_platform(),
             self.app_module_options_context(),
             self.app_resolve_options_context(),
             layer,
@@ -359,42 +347,44 @@ impl AppEndpoint {
 
     #[turbo_tasks::function]
     async fn app_module_options_context(self: Vc<Self>) -> Result<Vc<ModuleOptionsContext>> {
-        match &*self.project().platform().await? {
-            Platform::Web => Ok(get_client_module_options_context(
-                self.project().project_path().owned().await?,
-                self.project().execution_context(),
-                self.project().client_compile_time_info().environment(),
-                self.project().mode(),
-                self.project().config(),
-                Vc::cell(self.project().await?.watch.enable),
-                self.project().pack_path().owned().await?,
-            )),
+        let project = self.project();
+        match &*project.platform().await? {
             Platform::Node => Ok(get_server_module_options_context(
-                self.project().project_path().owned().await?,
-                self.project().execution_context(),
-                self.project().server_compile_time_info().environment(),
-                self.project().mode(),
-                self.project().config(),
+                project.project_path().owned().await?,
+                project.execution_context(),
+                project.server_compile_time_info().environment(),
+                project.mode(),
+                project.config(),
+            )),
+            Platform::Web => Ok(get_client_module_options_context(
+                project.project_path().owned().await?,
+                project.execution_context(),
+                project.client_compile_time_info().environment(),
+                project.mode(),
+                project.config(),
+                Vc::cell(project.await?.watch.enable),
+                project.pack_path().owned().await?,
             )),
         }
     }
 
     #[turbo_tasks::function]
     async fn app_resolve_options_context(self: Vc<Self>) -> Result<Vc<ResolveOptionsContext>> {
-        match &*self.project().platform().await? {
-            Platform::Web => Ok(get_client_resolve_options_context(
-                self.project().project_path().owned().await?,
-                self.project().mode(),
-                self.project().config(),
-                self.project().execution_context(),
-                self.project().pack_path().owned().await?,
-            )),
+        let project = self.project();
+        match &*project.platform().await? {
             Platform::Node => Ok(get_server_resolve_options_context(
-                self.project().project_path().owned().await?,
-                self.project().mode(),
-                self.project().config(),
-                self.project().execution_context(),
-                self.project().pack_path().owned().await?,
+                project.project_path().owned().await?,
+                project.mode(),
+                project.config(),
+                project.execution_context(),
+                project.pack_path().owned().await?,
+            )),
+            Platform::Web => Ok(get_client_resolve_options_context(
+                project.project_path().owned().await?,
+                project.mode(),
+                project.config(),
+                project.execution_context(),
+                project.pack_path().owned().await?,
             )),
         }
     }

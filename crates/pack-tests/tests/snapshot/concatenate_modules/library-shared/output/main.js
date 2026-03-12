@@ -2,46 +2,25 @@
 // Dummy runtime
 })([["main.js", {
 
-12: ((__turbopack_context__) => {
+77: ((__turbopack_context__) => {
 "use strict";
 
-var __TURBOPACK__imported__module__794__ = __turbopack_context__.i(794);
+// MERGED MODULE: [project]/concatenate_modules/library-shared/input/y/middle.js [library-client] (ecmascript)
 ;
-console.log('x', __TURBOPACK__imported__module__794__["default"]);
-__turbopack_context__.s([]);
+// MERGED MODULE: [project]/concatenate_modules/library-shared/input/y/inner.js [library-client] (ecmascript)
+;
+var __TURBOPACK__imported__module__148__ = __turbopack_context__.i(148);
+;
+console.log('y', __TURBOPACK__imported__module__148__["default"]);
+;
+__turbopack_context__.s([], 77);
 }),
-503: ((__turbopack_context__, module, exports) => {
-
-setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.i(742)), 1000);
-}),
-109: ((__turbopack_context__) => {
+148: ((__turbopack_context__) => {
 "use strict";
 
-var __TURBOPACK__imported__module__828__ = __turbopack_context__.i(828);
-var __TURBOPACK__imported__module__503__ = __turbopack_context__.i(503);
+// MERGED MODULE: [project]/concatenate_modules/library-shared/input/big/index.js [library-client] (ecmascript)
 ;
-;
-__turbopack_context__.s([]);
-}),
-742: ((__turbopack_context__) => {
-"use strict";
-
-// MERGED MODULE: [project]/concatenate_modules/library-shared/input/y/middle.js [library] (ecmascript)
-;
-// MERGED MODULE: [project]/concatenate_modules/library-shared/input/y/inner.js [library] (ecmascript)
-;
-var __TURBOPACK__imported__module__794__ = __turbopack_context__.i(794);
-;
-console.log('y', __TURBOPACK__imported__module__794__["default"]);
-;
-__turbopack_context__.s([], 742);
-}),
-794: ((__turbopack_context__) => {
-"use strict";
-
-// MERGED MODULE: [project]/concatenate_modules/library-shared/input/big/index.js [library] (ecmascript)
-;
-// MERGED MODULE: [project]/concatenate_modules/library-shared/input/big/other.js [library] (ecmascript)
+// MERGED MODULE: [project]/concatenate_modules/library-shared/input/big/other.js [library-client] (ecmascript)
 ;
 var __TURBOPACK__default__export__ = `
 v8XyDjNBXwWR6pNaTwYLp5bfUJ1P8nN4Yigyk9c9S9Xt5JHt28veqF0SRPGEmShfRPTn2LnHWZbPWw5FDmaTfLPdX4NfEzJYzehn
@@ -103,14 +82,35 @@ __turbopack_context__.s([
     "default",
     0,
     __TURBOPACK__default__export__1
-], 794);
+], 148);
 }),
-828: ((__turbopack_context__, module, exports) => {
+554: ((__turbopack_context__, module, exports) => {
 
-setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.i(12)), 500);
+setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.i(77)), 1000);
+}),
+498: ((__turbopack_context__) => {
+"use strict";
+
+var __TURBOPACK__imported__module__855__ = __turbopack_context__.i(855);
+var __TURBOPACK__imported__module__554__ = __turbopack_context__.i(554);
+;
+;
+__turbopack_context__.s([]);
+}),
+855: ((__turbopack_context__, module, exports) => {
+
+setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.i(888)), 500);
+}),
+888: ((__turbopack_context__) => {
+"use strict";
+
+var __TURBOPACK__imported__module__148__ = __turbopack_context__.i(148);
+;
+console.log('x', __TURBOPACK__imported__module__148__["default"]);
+__turbopack_context__.s([]);
 }),
 },
-{"otherChunks":[],"runtimeModuleIds":[109]},
+{"otherChunks":[],"runtimeModuleIds":[498]},
 ]]);
 
 
