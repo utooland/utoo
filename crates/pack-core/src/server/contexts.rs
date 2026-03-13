@@ -203,7 +203,7 @@ pub async fn get_server_module_options_context(
             enable_typescript_transform: Some(
                 TypescriptTransformOptions::default().resolved_cell(),
             ),
-            ignore_dynamic_requests: false,
+            ignore_dynamic_requests: true,
             ..Default::default()
         },
         css: CssOptionsContext {

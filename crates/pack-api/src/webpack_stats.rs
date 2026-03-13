@@ -446,8 +446,8 @@ pub struct WebpackStatsEntrypoint {
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct WebpackStats {
-    pub assets: Vec<WebpackStatsAsset>,
     pub entrypoints: FxIndexMap<RcStr, WebpackStatsEntrypoint>,
     pub chunks: Vec<WebpackStatsChunk>,
+    pub assets: Vec<WebpackStatsAsset>,
     pub modules: Vec<WebpackStatsModule>,
 }

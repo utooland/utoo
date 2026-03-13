@@ -237,10 +237,15 @@ impl AppEntrypoint {
 
             let module_graph = self.module_graph_for_entry(asset_context, runtime_entries);
 
+            let name = if this.name.ends_with(".js") {
+                this.name.as_str()
+            } else {
+                &format!("{}.js", this.name)
+            };
             let app_chunk_group = project
                 .server_chunking_context()
                 .entry_chunk_group(
-                    project.dist_root().owned().await?.join(&this.name)?,
+                    project.dist_root().owned().await?.join(name)?,
                     self.entry_evaluatable_assets(asset_context, runtime_entries),
                     module_graph,
                     OutputAssets::empty(),
@@ -456,7 +461,7 @@ impl Endpoint for AppEndpoint {
                 let webpack_stats = generate_webpack_stats(output_assets, this.project.dist_root());
                 let webpack_stats_read = webpack_stats.await?;
                 let dist_root_owned = this.project.dist_root().owned().await?;
-                let stats_json = simd_json::serde::to_string(&*webpack_stats_read)?;
+                let stats_json = serde_json::to_string_pretty(&*webpack_stats_read)?;
                 let stats_output = VirtualOutputAsset::new(
                     dist_root_owned.join("stats.json")?,
                     AssetContent::file(FileContent::from(File::from(stats_json)).cell()),
