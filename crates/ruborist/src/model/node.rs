@@ -13,6 +13,31 @@ pub enum EdgeType {
     Optional,
 }
 
+/// Controls whether peer dependencies are included during edge iteration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeerDeps {
+    /// Include peer dependencies (modern default).
+    Include,
+    /// Skip peer dependencies (legacy npm behaviour, `--legacy-peer-deps`).
+    Skip,
+}
+
+impl From<bool> for PeerDeps {
+    /// `true` (legacy_peer_deps) → `Skip`, `false` → `Include`.
+    fn from(legacy: bool) -> Self {
+        if legacy { Self::Skip } else { Self::Include }
+    }
+}
+
+/// Controls whether dev dependencies are included during edge iteration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DevDeps {
+    /// Include dev dependencies (root packages).
+    Include,
+    /// Exclude dev dependencies (transitive packages).
+    Exclude,
+}
+
 /// Node type representing the kind of package in the graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeType {

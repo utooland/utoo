@@ -67,9 +67,9 @@ type GitCloneCache = tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::OnceCel
 
 // Re-export edge types
 pub use super::edges::{
-    DependencyEdgeInfo, DependencySource, DevDeps, EdgeContext, PeerDeps, add_edges_from,
-    collect_unresolved_edges,
+    DependencyEdgeInfo, DependencySource, EdgeContext, add_edges_from, collect_unresolved_edges,
 };
+pub use crate::model::node::{DevDeps, PeerDeps};
 
 /// Configuration for dependency resolution.
 #[derive(Debug, Clone)]

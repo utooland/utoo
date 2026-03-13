@@ -65,9 +65,8 @@ pub mod semver {
 
 /// Dependency resolution builder.
 pub mod builder {
-    pub use crate::resolver::edges::{
-        DependencySource, DevDeps, EdgeContext, PeerDeps, add_edges_from,
-    };
+    pub use crate::model::node::{DevDeps, PeerDeps};
+    pub use crate::resolver::edges::{DependencySource, EdgeContext, add_edges_from};
 }
 
 /// Progress events for build process.

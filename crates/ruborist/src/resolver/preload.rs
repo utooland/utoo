@@ -9,7 +9,7 @@ use std::sync::Arc;
 use futures::stream::{FuturesUnordered, StreamExt};
 
 use crate::model::manifest::CoreVersionManifest;
-use crate::resolver::edges::PeerDeps;
+use crate::model::node::PeerDeps;
 use crate::resolver::registry::resolve_package;
 use crate::traits::progress::{BuildEvent, EventReceiver};
 use crate::traits::registry::RegistryClient;
