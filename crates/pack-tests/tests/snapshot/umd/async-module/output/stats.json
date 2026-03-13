@@ -1,1 +1,65 @@
-{"assets":[{"type":"asset","name":"main.js","info":{},"size":0,"emitted":false,"comparedForEmit":false,"cached":false,"chunks":["main.js"]},{"type":"asset","name":"main.js.map","info":{},"size":0,"emitted":false,"comparedForEmit":false,"cached":false,"chunks":["main.js.map"]}],"entrypoints":{"./main":{"name":"./main","chunks":["./main.js"],"assets":[{"name":"./main.js"}]}},"chunks":[{"rendered":false,"initial":false,"entry":false,"recorded":false,"id":"./main.js","size":0,"hash":"","files":["./main.js"]}],"modules":[{"name":"umd/async-module/input/index.js","id":"umd/async-module/input/index.js","chunks":["./main.js"],"size":82}]}
+{
+  "assets": [
+    {
+      "type": "asset",
+      "name": "main.js",
+      "info": {},
+      "size": 0,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "main.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "main.js.map",
+      "info": {},
+      "size": 0,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "main.js.map"
+      ]
+    }
+  ],
+  "entrypoints": {
+    "./main": {
+      "name": "./main",
+      "chunks": [
+        "./main.js"
+      ],
+      "assets": [
+        {
+          "name": "./main.js"
+        }
+      ]
+    }
+  },
+  "chunks": [
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "./main.js",
+      "size": 0,
+      "hash": "",
+      "files": [
+        "./main.js"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "name": "umd/async-module/input/index.js",
+      "id": "umd/async-module/input/index.js",
+      "chunks": [
+        "./main.js"
+      ],
+      "size": 82
+    }
+  ]
+}

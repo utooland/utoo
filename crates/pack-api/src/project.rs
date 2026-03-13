@@ -596,11 +596,6 @@ impl Project {
                                 .to_string_lossy()
                                 .into(),
                         );
-                        let name = if name.ends_with(".js") {
-                            name
-                        } else {
-                            format!("{name}.js").into()
-                        };
                         Some(async {
                             Ok(AppEntrypoint {
                                 name,
