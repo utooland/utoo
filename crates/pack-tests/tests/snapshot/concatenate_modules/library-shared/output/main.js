@@ -1,8 +1,9 @@
 ((__UTOOPACK__) => {
 // Dummy runtime
-})([["main.js", {
+})([
+["main.js",
 
-77: ((__turbopack_context__) => {
+77, ((__turbopack_context__) => {
 "use strict";
 
 // MERGED MODULE: [project]/concatenate_modules/library-shared/input/y/middle.js [library-client] (ecmascript)
@@ -15,7 +16,7 @@ console.log('y', __TURBOPACK__imported__module__148__["default"]);
 ;
 __turbopack_context__.s([], 77);
 }),
-148: ((__turbopack_context__) => {
+148, ((__turbopack_context__) => {
 "use strict";
 
 // MERGED MODULE: [project]/concatenate_modules/library-shared/input/big/index.js [library-client] (ecmascript)
@@ -84,11 +85,11 @@ __turbopack_context__.s([
     __TURBOPACK__default__export__1
 ], 148);
 }),
-554: ((__turbopack_context__, module, exports) => {
+554, ((__turbopack_context__, module, exports) => {
 
 setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.i(77)), 1000);
 }),
-498: ((__turbopack_context__) => {
+498, ((__turbopack_context__) => {
 "use strict";
 
 var __TURBOPACK__imported__module__855__ = __turbopack_context__.i(855);
@@ -97,11 +98,11 @@ var __TURBOPACK__imported__module__554__ = __turbopack_context__.i(554);
 ;
 __turbopack_context__.s([]);
 }),
-855: ((__turbopack_context__, module, exports) => {
+855, ((__turbopack_context__, module, exports) => {
 
 setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.i(888)), 500);
 }),
-888: ((__turbopack_context__) => {
+888, ((__turbopack_context__) => {
 "use strict";
 
 var __TURBOPACK__imported__module__148__ = __turbopack_context__.i(148);
@@ -109,9 +110,9 @@ var __TURBOPACK__imported__module__148__ = __turbopack_context__.i(148);
 console.log('x', __TURBOPACK__imported__module__148__["default"]);
 __turbopack_context__.s([]);
 }),
-},
-{"otherChunks":[],"runtimeModuleIds":[498]},
-]]);
+],
+["main.js", {"otherChunks":[],"runtimeModuleIds":[498]}],
+]);
 
 
 //# sourceMappingURL=main.js.map
