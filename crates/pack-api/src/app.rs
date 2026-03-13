@@ -237,10 +237,15 @@ impl AppEntrypoint {
 
             let module_graph = self.module_graph_for_entry(asset_context, runtime_entries);
 
+            let name = if this.name.ends_with(".js") {
+                this.name.as_str()
+            } else {
+                &format!("{}.js", this.name)
+            };
             let app_chunk_group = project
                 .server_chunking_context()
                 .entry_chunk_group(
-                    project.dist_root().owned().await?.join(&this.name)?,
+                    project.dist_root().owned().await?.join(name)?,
                     self.entry_evaluatable_assets(asset_context, runtime_entries),
                     module_graph,
                     OutputAssets::empty(),
