@@ -116,8 +116,8 @@ def _load_events(trace_path):
                 return events
         except ImportError:
             pass
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"   [Warning] Streaming parser failed: {e}. Falling back to standard parser.")
     with open(trace_path, "r") as f:
         data = json.load(f)
     return data if isinstance(data, list) else data.get("traceEvents", [])
