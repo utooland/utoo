@@ -58,10 +58,9 @@ const chunkResolvers: Map<ChunkUrl, ChunkResolver> = new Map();
      */
     loadChunkCached(
       sourceType: SourceType,
-      sourceData: SourceData,
       chunkUrl: ChunkUrl,
     ) {
-      return doLoadChunk(sourceType, sourceData, chunkUrl);
+      return doLoadChunk(sourceType, chunkUrl);
     },
   };
   function getOrCreateResolver(chunkUrl: ChunkUrl): ChunkResolver {
@@ -94,7 +93,6 @@ const chunkResolvers: Map<ChunkUrl, ChunkResolver> = new Map();
    */
   function doLoadChunk(
     sourceType: SourceType,
-    _sourceData: SourceData,
     chunkUrl: ChunkUrl,
   ) {
     const resolver = getOrCreateResolver(chunkUrl);

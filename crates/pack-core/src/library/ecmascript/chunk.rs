@@ -160,11 +160,14 @@ impl EcmascriptLibraryEvaluateChunk {
                 code.push_code(&runtime_code);
             }
         }
-
+        // Emit two registrations matching upstream Turbopack's ChunkRegistration format:
+        // 1. Module factories: [chunkPath, id, factory, ...] (length > 2)
+        // 2. Bootstrap: [chunkPath, {otherChunks, runtimeModuleIds}] (length === 2)
         writedoc!(
             code,
             r#"
-                }})([[{chunk_path}, {{
+                }})([
+                [{chunk_path},
             "#,
             chunk_path = StringifyJs(chunk_public_path)
         )?;
@@ -173,7 +176,7 @@ impl EcmascriptLibraryEvaluateChunk {
         let chunk_items = content.chunk_item_code_and_ids().await?;
         for item in chunk_items {
             for (id, item_code) in item {
-                write!(code, "\n{}: ", StringifyJs(&id))?;
+                write!(code, "\n{}, ", StringifyJs(&id))?;
                 code.push_code(item_code);
                 write!(code, ",")?;
             }
@@ -184,9 +187,14 @@ impl EcmascriptLibraryEvaluateChunk {
             runtime_module_ids,
         };
 
-        write!(code, "\n}},")?;
-        write!(code, "\n{},", StringifyJs(&params))?;
-        writeln!(code, "\n]]);")?;
+        write!(code, "\n],")?;
+        writeln!(
+            code,
+            "\n[{}, {}],",
+            StringifyJs(chunk_public_path),
+            StringifyJs(&params)
+        )?;
+        writeln!(code, "]);")?;
 
         let mut code = code.build();
 

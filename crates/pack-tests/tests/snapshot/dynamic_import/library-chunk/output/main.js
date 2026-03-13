@@ -1,8 +1,9 @@
 ((__UTOOPACK__) => {
 // Dummy runtime
-})([["main.js", {
+})([
+["main.js",
 
-"[project]/dynamic_import/library-chunk/input/a.ts [library-client] (ecmascript)": ((__turbopack_context__) => {
+"[project]/dynamic_import/library-chunk/input/a.ts [library-client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 const a = "a";
@@ -12,7 +13,7 @@ __turbopack_context__.s([
     a
 ]);
 }),
-"[project]/dynamic_import/library-chunk/input/index.ts [library-client] (ecmascript)": ((__turbopack_context__) => {
+"[project]/dynamic_import/library-chunk/input/index.ts [library-client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 async function Test() {
@@ -25,9 +26,9 @@ __turbopack_context__.s([
     Test
 ]);
 }),
-},
-{"otherChunks":[],"runtimeModuleIds":["[project]/dynamic_import/library-chunk/input/index.ts [library-client] (ecmascript)"]},
-]]);
+],
+["main.js", {"otherChunks":[],"runtimeModuleIds":["[project]/dynamic_import/library-chunk/input/index.ts [library-client] (ecmascript)"]}],
+]);
 
 
 //# sourceMappingURL=main.js.map

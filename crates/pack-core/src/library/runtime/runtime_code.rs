@@ -8,8 +8,8 @@ use turbopack_core::{
     code_builder::{Code, CodeBuilder},
     environment::Environment,
 };
-use turbopack_ecmascript::utils::StringifyJs;
-use turbopack_ecmascript_runtime::RuntimeType;
+use turbopack_ecmascript::{StaticEcmascriptCode, utils::StringifyJs};
+use turbopack_ecmascript_runtime::{RuntimeType, embed_file_path};
 
 use super::{asset_context::get_runtime_asset_context, embed_js::embed_static_code};
 
@@ -29,13 +29,25 @@ pub async fn get_library_runtime_code(
 ) -> Result<Vc<Code>> {
     let asset_context = get_runtime_asset_context(*environment).resolve().await?;
 
-    let shared_runtime_utils_code = embed_static_code(
+    let shared_runtime_utils_code = StaticEcmascriptCode::new(
         asset_context,
-        "umd/runtime-utils.ts".into(),
+        embed_file_path("shared/runtime/runtime-utils.ts".into())
+            .owned()
+            .await?,
         generate_source_map,
-    );
+    )
+    .code();
 
-    let runtime_base_code = vec!["umd/runtime-base.ts", "umd/build-base.ts"];
+    let build_base_code = StaticEcmascriptCode::new(
+        asset_context,
+        embed_file_path("browser/runtime/base/build-base.ts".into())
+            .owned()
+            .await?,
+        generate_source_map,
+    )
+    .code();
+
+    let runtime_base_code = vec!["umd/runtime-base.ts"];
 
     let mut code: CodeBuilder = CodeBuilder::default();
     let relative_root_path = output_root_to_root_path.await?;
@@ -70,6 +82,7 @@ pub async fn get_library_runtime_code(
             &*embed_static_code(asset_context, runtime_code.into(), generate_source_map).await?,
         );
     }
+    code.push_code(&*build_base_code.await?);
 
     code.push_code(
         &*embed_static_code(
