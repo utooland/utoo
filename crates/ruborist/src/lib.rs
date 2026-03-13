@@ -16,7 +16,7 @@
 //!     registry_url: "https://registry.npmmirror.com".to_string(),
 //!     cache_dir: None,
 //!     concurrency: 20,
-//!     legacy_peer_deps: false,
+//!     peer_deps: PeerDeps::Include,
 //!     fs: NoopFileSystem,
 //!     receiver: NoopReceiver,
 //! }).await?;
@@ -65,7 +65,9 @@ pub mod semver {
 
 /// Dependency resolution builder.
 pub mod builder {
-    pub use crate::resolver::edges::{DependencySource, add_edges_from};
+    pub use crate::resolver::edges::{
+        DependencySource, DevDeps, EdgeContext, PeerDeps, add_edges_from,
+    };
 }
 
 /// Progress events for build process.

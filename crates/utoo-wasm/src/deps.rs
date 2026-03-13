@@ -5,6 +5,7 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
+use utoo_ruborist::builder::PeerDeps;
 use utoo_ruborist::lock::PackageLock;
 use utoo_ruborist::progress::NoopReceiver;
 use utoo_ruborist::service::{build_deps, BuildDepsOptions};
@@ -38,7 +39,7 @@ pub async fn build_deps_from_file(
         registry_url: registry_url.unwrap_or(DEFAULT_REGISTRY).to_string(),
         cache_dir: None,
         concurrency: concurrency.unwrap_or(DEFAULT_CONCURRENCY),
-        legacy_peer_deps: true,
+        peer_deps: PeerDeps::Skip,
         glob: OpfsGlob,
         receiver: NoopReceiver,
         supports_semver: None,

@@ -29,7 +29,7 @@ use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
 use crate::resolver::preload::{PreloadConfig, preload_manifests};
 use crate::resolver::registry::{ResolveError, resolve_registry_dep};
-use crate::spec::{Catalogs, PackageSpec, Protocol, resolve_catalog_spec};
+use crate::spec::{Catalogs, PackageSpec, Protocol};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
 use crate::traits::registry::{RegistryClient, ResolvedPackage};
 
@@ -67,14 +67,15 @@ type GitCloneCache = tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::OnceCel
 
 // Re-export edge types
 pub use super::edges::{
-    DependencyEdgeInfo, DependencySource, add_edges_from, collect_unresolved_edges,
+    DependencyEdgeInfo, DependencySource, DevDeps, EdgeContext, PeerDeps, add_edges_from,
+    collect_unresolved_edges,
 };
 
 /// Configuration for dependency resolution.
 #[derive(Debug, Clone)]
 pub struct BuildDepsConfig {
-    /// Whether to skip peer dependencies (legacy mode)
-    pub legacy_peer_deps: bool,
+    /// How to handle peer dependencies.
+    pub peer_deps: PeerDeps,
     /// Maximum number of concurrent manifest fetches during preload
     pub concurrency: usize,
     /// Whether to skip preload phase (useful when cache is already warm)
@@ -91,7 +92,7 @@ pub struct BuildDepsConfig {
 impl Default for BuildDepsConfig {
     fn default() -> Self {
         Self {
-            legacy_peer_deps: true,
+            peer_deps: PeerDeps::Skip,
             concurrency: crate::resolver::preload::DEFAULT_CONCURRENCY,
             skip_preload: false,
             cache_dir: dirs::home_dir().map(|d| d.join(".cache/nm")),
@@ -102,9 +103,9 @@ impl Default for BuildDepsConfig {
 }
 
 impl BuildDepsConfig {
-    /// Create config with legacy peer deps mode
-    pub fn with_legacy_peer_deps(mut self, legacy: bool) -> Self {
-        self.legacy_peer_deps = legacy;
+    /// Set how to handle peer dependencies.
+    pub fn with_peer_deps(mut self, peer_deps: PeerDeps) -> Self {
+        self.peer_deps = peer_deps;
         self
     }
 
@@ -144,37 +145,37 @@ struct NodeFlags {
 }
 
 /// Gather all unresolved deps from root and workspace nodes for preloading.
-fn gather_preload_deps(graph: &DependencyGraph, legacy_peer_deps: bool) -> Vec<(String, String)> {
+///
+/// Only registry specs (e.g. `^4.17.0`) are collected. `catalog:` specs are
+/// resolved at edge creation time, so by the time this runs they are already
+/// concrete registry specs.
+fn gather_preload_deps(graph: &DependencyGraph, peer_deps: PeerDeps) -> Vec<(String, String)> {
     use crate::spec::SpecStr;
     use std::collections::HashSet;
 
     let mut deps = HashSet::new();
 
-    // Collect from root node
-    for (_, edge) in graph.get_dependency_edges(graph.root_index) {
-        if !edge.valid && edge.spec.is_registry_spec() {
-            // Skip peer deps in legacy mode
-            if legacy_peer_deps && edge.edge_type == EdgeType::Peer {
+    let collect = |node_index: NodeIndex, deps: &mut HashSet<(String, String)>| {
+        for (_, edge) in graph.get_dependency_edges(node_index) {
+            if edge.valid {
                 continue;
             }
-            deps.insert((edge.name.clone(), edge.spec.clone()));
+            if peer_deps == PeerDeps::Skip && edge.edge_type == EdgeType::Peer {
+                continue;
+            }
+            if edge.spec.is_registry_spec() {
+                deps.insert((edge.name.clone(), edge.spec.clone()));
+            }
         }
-    }
+    };
 
-    // Collect from workspace nodes
+    collect(graph.root_index, &mut deps);
+
     for node_index in graph.graph.node_indices() {
         if let Some(node) = graph.get_node(node_index)
             && node.is_workspace()
         {
-            for (_, edge) in graph.get_dependency_edges(node_index) {
-                if !edge.valid && edge.spec.is_registry_spec() {
-                    // Skip peer deps in legacy mode
-                    if legacy_peer_deps && edge.edge_type == EdgeType::Peer {
-                        continue;
-                    }
-                    deps.insert((edge.name.clone(), edge.spec.clone()));
-                }
-            }
+            collect(node_index, &mut deps);
         }
     }
 
@@ -327,7 +328,7 @@ pub enum ProcessResult {
 /// * `registry` - Registry client for fetching packages
 /// * `node_index` - The node that has this dependency
 /// * `edge_info` - Information about the dependency edge
-/// * `config` - Build configuration (legacy_peer_deps, cache_dir, etc.)
+/// * `config` - Build configuration (peer_deps, cache_dir, etc.)
 ///
 /// # Returns
 /// The result of processing (reused, created, or skipped)
@@ -422,38 +423,6 @@ pub async fn process_dependency<R: RegistryClient>(
                     );
                     return Ok(ProcessResult::Skipped);
                 }
-                PackageSpec::Local {
-                    protocol: Protocol::Catalog,
-                    ..
-                } => {
-                    let resolved_spec =
-                        resolve_catalog_spec(&edge_info.name, &edge_info.spec, &config.catalogs)
-                            .ok_or_else(|| ResolveError::Unsupported {
-                                spec: edge_info.spec.clone(),
-                                reason: "catalog entry not found",
-                            })?;
-                    // Update the edge spec so the lockfile writes the resolved
-                    // version range instead of the raw `catalog:` reference.
-                    graph.update_dependency_spec(edge_info.edge_id, resolved_spec.to_string());
-                    match resolve_registry_dep(
-                        registry,
-                        &edge_info.name,
-                        resolved_spec,
-                        &edge_info.edge_type,
-                    )
-                    .await?
-                    {
-                        Some(resolved) => resolved,
-                        None => {
-                            tracing::debug!(
-                                "Skipped optional catalog dependency {}@{}",
-                                edge_info.name,
-                                edge_info.spec
-                            );
-                            return Ok(ProcessResult::Skipped);
-                        }
-                    }
-                }
                 PackageSpec::Local { .. } => {
                     return Err(ResolveError::Unsupported {
                         spec: edge_info.spec.clone(),
@@ -540,8 +509,7 @@ pub async fn process_dependency<R: RegistryClient>(
                 graph,
                 new_index,
                 &*resolved.manifest,
-                config.legacy_peer_deps,
-                false,
+                &EdgeContext::new(config.peer_deps, DevDeps::Exclude),
             );
 
             Ok(ProcessResult::Created(new_index))
@@ -557,20 +525,20 @@ pub async fn process_dependency<R: RegistryClient>(
 /// # Arguments
 /// * `graph` - The dependency graph (should have root node and initial edges)
 /// * `registry` - Registry client for fetching packages
-/// * `legacy_peer_deps` - If true, skip peer dependencies
+/// * `peer_deps` - How to handle peer dependencies
 ///
 /// # Example
 /// ```ignore
 /// let mut graph = DependencyGraph::new(path, package_json);
 /// // Add initial dependency edges to root...
-/// build_deps(&mut graph, &registry, false).await?;
+/// build_deps(&mut graph, &registry, PeerDeps::Include).await?;
 /// ```
 pub async fn build_deps<R: RegistryClient>(
     graph: &mut DependencyGraph,
     registry: &R,
-    legacy_peer_deps: bool,
+    peer_deps: PeerDeps,
 ) -> Result<(), ResolveError<R::Error>> {
-    let config = BuildDepsConfig::default().with_legacy_peer_deps(legacy_peer_deps);
+    let config = BuildDepsConfig::default().with_peer_deps(peer_deps);
     build_deps_with_config(graph, registry, config, &NoopReceiver).await
 }
 
@@ -585,15 +553,15 @@ pub async fn build_deps<R: RegistryClient>(
 /// # Arguments
 /// * `graph` - The dependency graph (should have root node and initial edges)
 /// * `registry` - Registry client for fetching packages
-/// * `legacy_peer_deps` - If true, skip peer dependencies
+/// * `peer_deps` - How to handle peer dependencies
 /// * `receiver` - Event receiver for handling build events
 pub async fn build_deps_with_receiver<R: RegistryClient, E: EventReceiver>(
     graph: &mut DependencyGraph,
     registry: &R,
-    legacy_peer_deps: bool,
+    peer_deps: PeerDeps,
     receiver: &E,
 ) -> Result<(), ResolveError<R::Error>> {
-    let config = BuildDepsConfig::default().with_legacy_peer_deps(legacy_peer_deps);
+    let config = BuildDepsConfig::default().with_peer_deps(peer_deps);
     build_deps_with_config(graph, registry, config, receiver).await
 }
 
@@ -606,7 +574,7 @@ pub async fn build_deps_with_receiver<R: RegistryClient, E: EventReceiver>(
 /// # Arguments
 /// * `graph` - The dependency graph (should have root node and initial edges)
 /// * `registry` - Registry client for fetching packages
-/// * `config` - Build configuration (concurrency, legacy_peer_deps, skip_preload)
+/// * `config` - Build configuration (concurrency, peer_deps, skip_preload)
 /// * `receiver` - Event receiver for handling build events
 ///
 /// # Example
@@ -624,8 +592,8 @@ pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
     receiver: &E,
 ) -> Result<(), ResolveError<R::Error>> {
     tracing::debug!(
-        "Starting dependency tree build, legacy_peer_deps: {}, concurrency: {}, skip_preload: {}",
-        config.legacy_peer_deps,
+        "Starting dependency tree build, peer_deps: {:?}, concurrency: {}, skip_preload: {}",
+        config.peer_deps,
         config.concurrency,
         config.skip_preload
     );
@@ -656,7 +624,7 @@ async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
 
     let start = tokio::time::Instant::now();
 
-    let initial_deps = gather_preload_deps(graph, config.legacy_peer_deps);
+    let initial_deps = gather_preload_deps(graph, config.peer_deps);
     if initial_deps.is_empty() {
         return;
     }
@@ -667,7 +635,7 @@ async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
     });
 
     let preload_config = PreloadConfig {
-        legacy_peer_deps: config.legacy_peer_deps,
+        peer_deps: config.peer_deps,
         concurrency: config.concurrency,
     };
 
@@ -813,7 +781,7 @@ pub async fn resolve<R: RegistryClient>(
     pkg: &PackageJson,
     registry: &R,
 ) -> Result<PackageLock, ResolveError<R::Error>> {
-    resolve_with_options(pkg, registry, false, &NoopReceiver).await
+    resolve_with_options(pkg, registry, PeerDeps::Include, &NoopReceiver).await
 }
 
 /// Build package-lock.json with options.
@@ -821,12 +789,12 @@ pub async fn resolve<R: RegistryClient>(
 /// # Arguments
 /// * `pkg` - The root package.json
 /// * `registry` - Registry client for fetching packages
-/// * `legacy_peer_deps` - If true, skip peer dependencies
+/// * `peer_deps` - How to handle peer dependencies
 /// * `receiver` - Event receiver for progress tracking
 pub async fn resolve_with_options<R: RegistryClient, E: EventReceiver>(
     pkg: &PackageJson,
     registry: &R,
-    legacy_peer_deps: bool,
+    peer_deps: PeerDeps,
     receiver: &E,
 ) -> Result<PackageLock, ResolveError<R::Error>> {
     // Create graph with root node
@@ -834,10 +802,15 @@ pub async fn resolve_with_options<R: RegistryClient, E: EventReceiver>(
 
     // Add root dependency edges
     let root_index = graph.root_index;
-    add_edges_from(&mut graph, root_index, pkg, legacy_peer_deps, true);
+    add_edges_from(
+        &mut graph,
+        root_index,
+        pkg,
+        &EdgeContext::new(peer_deps, DevDeps::Include),
+    );
 
     // Build dependency tree
-    build_deps_with_receiver(&mut graph, registry, legacy_peer_deps, receiver).await?;
+    build_deps_with_receiver(&mut graph, registry, peer_deps, receiver).await?;
 
     // Convert to PackageLock
     Ok(graph_to_package_lock(&graph, pkg, Path::new(".")))
@@ -909,10 +882,17 @@ mod tests {
 
         // Add initial edges
         let root_index = graph.root_index;
-        add_edges_from(&mut graph, root_index, &root_pkg, false, true);
+        add_edges_from(
+            &mut graph,
+            root_index,
+            &root_pkg,
+            &EdgeContext::new(PeerDeps::Include, DevDeps::Include),
+        );
 
         // Build deps
-        build_deps(&mut graph, &registry, false).await.unwrap();
+        build_deps(&mut graph, &registry, PeerDeps::Include)
+            .await
+            .unwrap();
 
         // Verify
         assert_eq!(graph.graph.node_count(), 2); // root + lodash
@@ -945,9 +925,16 @@ mod tests {
 
         let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg.clone());
         let root_index = graph.root_index;
-        add_edges_from(&mut graph, root_index, &root_pkg, false, true);
+        add_edges_from(
+            &mut graph,
+            root_index,
+            &root_pkg,
+            &EdgeContext::new(PeerDeps::Include, DevDeps::Include),
+        );
 
-        build_deps(&mut graph, &registry, false).await.unwrap();
+        build_deps(&mut graph, &registry, PeerDeps::Include)
+            .await
+            .unwrap();
 
         // Should have root + express + debug
         assert_eq!(graph.graph.node_count(), 3);
@@ -1090,5 +1077,84 @@ mod tests {
             target.is_optional,
             "should be optional (inherited from devOptional source)"
         );
+    }
+
+    #[test]
+    fn test_edge_context_resolves_catalog_at_creation() {
+        // catalog: specs should be resolved to concrete versions at edge creation
+        let root_pkg = PackageJson::new("root", "1.0.0");
+        let root_pkg = PackageJson {
+            dependencies: Some(HashMap::from([
+                ("lodash".to_string(), "^4.17.0".to_string()),
+                ("react".to_string(), "catalog:".to_string()),
+                ("tslib".to_string(), "catalog:legacy".to_string()),
+            ])),
+            ..root_pkg
+        };
+
+        let catalogs: Catalogs = HashMap::from([
+            (
+                "".to_string(),
+                HashMap::from([("react".to_string(), "^18.0.0".to_string())]),
+            ),
+            (
+                "legacy".to_string(),
+                HashMap::from([("tslib".to_string(), "^2.0.0".to_string())]),
+            ),
+        ]);
+
+        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg.clone());
+        let root_index = graph.root_index;
+        let ctx = EdgeContext::new(PeerDeps::Skip, DevDeps::Include).with_catalogs(&catalogs);
+        add_edges_from(&mut graph, root_index, &root_pkg, &ctx);
+
+        // Edges should have resolved specs, not raw catalog: references
+        let edges: HashMap<String, String> = graph
+            .get_dependency_edges(root_index)
+            .into_iter()
+            .map(|(_, e)| (e.name.clone(), e.spec.clone()))
+            .collect();
+
+        assert_eq!(edges.get("lodash"), Some(&"^4.17.0".to_string()));
+        assert_eq!(edges.get("react"), Some(&"^18.0.0".to_string()));
+        assert_eq!(edges.get("tslib"), Some(&"^2.0.0".to_string()));
+
+        // Since edges are now resolved, gather_preload_deps should find them
+        let deps = gather_preload_deps(&graph, PeerDeps::Skip);
+        let deps_map: HashMap<String, String> = deps.into_iter().collect();
+        assert_eq!(deps_map.get("lodash"), Some(&"^4.17.0".to_string()));
+        assert_eq!(deps_map.get("react"), Some(&"^18.0.0".to_string()));
+        assert_eq!(deps_map.get("tslib"), Some(&"^2.0.0".to_string()));
+    }
+
+    #[test]
+    fn test_edge_context_missing_catalog_keeps_raw_spec() {
+        // Missing catalog entry → spec stays as raw "catalog:" (will fail at resolve time)
+        let root_pkg = PackageJson::new("root", "1.0.0");
+        let root_pkg = PackageJson {
+            dependencies: Some(HashMap::from([(
+                "missing-pkg".to_string(),
+                "catalog:".to_string(),
+            )])),
+            ..root_pkg
+        };
+
+        let empty_catalogs: Catalogs = HashMap::new();
+        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg.clone());
+        let root_index = graph.root_index;
+        let ctx = EdgeContext::new(PeerDeps::Skip, DevDeps::Include).with_catalogs(&empty_catalogs);
+        add_edges_from(&mut graph, root_index, &root_pkg, &ctx);
+
+        // Edge keeps raw spec since catalog entry is missing
+        let edges: HashMap<String, String> = graph
+            .get_dependency_edges(root_index)
+            .into_iter()
+            .map(|(_, e)| (e.name.clone(), e.spec.clone()))
+            .collect();
+        assert_eq!(edges.get("missing-pkg"), Some(&"catalog:".to_string()));
+
+        // gather_preload_deps should NOT include it (not a registry spec)
+        let deps = gather_preload_deps(&graph, PeerDeps::Skip);
+        assert!(deps.is_empty());
     }
 }

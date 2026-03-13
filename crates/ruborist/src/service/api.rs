@@ -14,7 +14,7 @@
 //!     registry_url: "https://registry.npmmirror.com".to_string(),
 //!     cache_dir: None,
 //!     concurrency: 20,
-//!     legacy_peer_deps: false,
+//!     peer_deps: PeerDeps::Include,
 //!     fs: NoopFileSystem,
 //!     receiver: NoopReceiver,
 //! }).await?;
@@ -37,7 +37,9 @@ use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
 use crate::model::package_lock::PackageLock;
 use crate::model::util::parse_package_spec;
-use crate::resolver::builder::{BuildDepsConfig, add_edges_from, build_deps_with_config};
+use crate::resolver::builder::{
+    BuildDepsConfig, DevDeps, EdgeContext, PeerDeps, add_edges_from, build_deps_with_config,
+};
 use crate::resolver::runtime::install_runtime_from_map;
 use crate::resolver::workspace::WorkspaceDiscovery;
 use crate::spec::Catalogs;
@@ -54,8 +56,8 @@ pub struct BuildDepsOptions<G, R> {
     pub cache_dir: Option<PathBuf>,
     /// Maximum concurrent network requests
     pub concurrency: usize,
-    /// Whether to skip peer dependencies (legacy mode)
-    pub legacy_peer_deps: bool,
+    /// How to handle peer dependencies.
+    pub peer_deps: PeerDeps,
     /// Glob implementation for workspace discovery
     pub glob: G,
     /// Progress event receiver
@@ -79,7 +81,7 @@ impl<G, R> BuildDepsOptions<G, R> {
             registry_url: "https://registry.npmmirror.com".to_string(),
             cache_dir: None,
             concurrency: 20,
-            legacy_peer_deps: true,
+            peer_deps: PeerDeps::Skip,
             glob,
             receiver,
             supports_semver: None,
@@ -111,7 +113,7 @@ impl<G, R> BuildDepsOptions<G, R> {
 ///     registry_url: "https://registry.npmmirror.com".to_string(),
 ///     cache_dir: Some(PathBuf::from("~/.cache/nm")),
 ///     concurrency: 20,
-///     legacy_peer_deps: false,
+///     peer_deps: PeerDeps::Include,
 ///     glob: TokioGlob,
 ///     receiver: MyProgressReceiver,
 /// }).await?;
@@ -126,7 +128,7 @@ where
         registry_url,
         cache_dir,
         concurrency,
-        legacy_peer_deps,
+        peer_deps,
         glob,
         receiver,
         supports_semver,
@@ -160,9 +162,10 @@ where
     // 4. Initialize dependency graph
     let mut graph = DependencyGraph::from_package_json(root_path.clone(), pkg.clone());
 
-    // 5. Add root dependency edges (catalog: specs stay as-is; resolved in process_dependency)
+    // 5. Add root dependency edges (catalog: specs resolved at edge creation)
     let root_index = graph.root_index;
-    add_edges_from(&mut graph, root_index, &pkg, legacy_peer_deps, true);
+    let edge_ctx = EdgeContext::new(peer_deps, DevDeps::Include).with_catalogs(&catalogs);
+    add_edges_from(&mut graph, root_index, &pkg, &edge_ctx);
 
     // 6. Discover and add workspace packages
     let workspaces = discovery.find_workspaces_from_pkg(&root_path, &pkg).await?;
@@ -198,8 +201,8 @@ where
             workspace.path
         );
 
-        // Add workspace dependencies (catalog: specs stay as-is; resolved in process_dependency)
-        add_edges_from(&mut graph, workspace_index, &ws_pkg, legacy_peer_deps, true);
+        // Add workspace dependencies (catalog: specs resolved at edge creation)
+        add_edges_from(&mut graph, workspace_index, &ws_pkg, &edge_ctx);
     }
 
     // 7. Create package cache (with optional disk cache)
@@ -272,7 +275,7 @@ where
     // Skip preload if project cache exists (cache is already warm)
     let skip_preload = cache_count > 0;
     let mut config = BuildDepsConfig::default()
-        .with_legacy_peer_deps(legacy_peer_deps)
+        .with_peer_deps(peer_deps)
         .with_concurrency(concurrency)
         .with_skip_preload(skip_preload)
         .with_catalogs(catalogs);
@@ -332,7 +335,7 @@ mod tests {
             registry_url: "https://registry.npmmirror.com".to_string(),
             cache_dir: None,
             concurrency: 20,
-            legacy_peer_deps: true,
+            peer_deps: PeerDeps::Skip,
             glob: NoopGlob,
             receiver: NoopReceiver,
             supports_semver: None,
@@ -340,7 +343,7 @@ mod tests {
         };
 
         assert_eq!(options.concurrency, 20);
-        assert!(options.legacy_peer_deps);
+        assert_eq!(options.peer_deps, PeerDeps::Skip);
         assert!(options.supports_semver.is_none());
     }
 

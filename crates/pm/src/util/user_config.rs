@@ -83,8 +83,8 @@ pub fn set_legacy_peer_deps(value: Option<bool>) {
     LEGACY_PEER_DEPS.set(value);
 }
 
-pub async fn get_legacy_peer_deps() -> bool {
-    LEGACY_PEER_DEPS.get().await
+pub async fn get_peer_deps() -> utoo_ruborist::builder::PeerDeps {
+    LEGACY_PEER_DEPS.get().await.into()
 }
 
 static OMIT: OnceLock<HashSet<OmitType>> = OnceLock::new();
