@@ -78,86 +78,110 @@ Chrome Trace instrumentation adds ~`2µs` per span. Tasks with total recorded du
 
 ---
 
-## 🔍 Step 2: Universal Diagnostic Matrix (Tiers P0–P4)
+## 🔍 Step 2: Diagnostic Matrix (Tiers P0–P4)
 
-Follow this tiered hierarchy. Solve P0 before descending — high-level scheduler noise often masks lower-level bottlenecks.
+> **Architecture context**: turbo-tasks scheduling is already efficient. Thread utilization (~50%) is constrained by the inherent `resolve → read → parse → analyze` dependency chain depth, not by scheduling, I/O, or lock contention. The tiers below are ordered by **actionability** — what an agent can realistically diagnose and improve.
 
-### 🔴 Tier 1: Scheduling & Resolution (P0)
-*Focus: Task scheduling efficiency, resolution hotspots, self-time vs inclusive time.*
+### 🔴 P0: Regression Detection
+*Focus: Compare against baseline to catch performance regressions early.*
 
-- **💥 A. Critical Path Serialization**
-  - **Signal**: "Staircase" patterns in trace (sequential waits) vs "Wall" patterns (parallelism). Check the Critical Path Analysis section in the report.
-  - **Key spans**: `module`, `process module`, `resolving`, `internal resolving`
-  - **Action**: Identify long `await` chains. Convert sequential loops to `try_join` or parallel iterators.
+Always start here. Use `--compare` mode in `analyze_trace.py` to diff against a known-good baseline.
 
-- **📉 B. Scheduling Overhead (Micro-Task Explosion)**
-  - **Signal**: Millions of `turbo_tasks::function` spans with minuscule self-times.
-  - **Key metric**: Compare **self-time** to **inclusive time** in the report. If self-time ≪ inclusive, the task is mostly waiting on children — not itself a bottleneck.
-  - **Action**: Bypass `#[turbo_tasks::function]` only for extremely frequent, low-cost operations where **aggregate self-time** > 500ms.
+- **A. Wall Time Regression**
+  - **Signal**: Wall time increased >10% vs baseline.
+  - **Action**: Check if new spans appeared in the Top 20 list. Look for increased invocation counts (new modules/dependencies added) or increased avg self-time (code regression).
 
-- **🗺 C. Resolution Hotspots**
-  - **Signal**: Slow `resolving`, `internal resolving`, or `read directory` spans.
-  - **Key spans**: `resolving` (~425ms in baseline), `internal resolving` (~606ms), `read directory` (~148ms)
-  - **Action**: Check for non-cached regex in resolution plugins. Verify `read directory` metadata is cached.
+- **B. Thread Utilization Drop**
+  - **Signal**: Utilization dropped >5pp vs baseline.
+  - **Action**: A new serialization point was introduced. Check Critical Path Analysis for longer chains. Look for new `await` calls in hot paths (e.g., `process module`, `resolving`).
 
----
+- **C. New Heavy Spans**
+  - **Signal**: A span not in the baseline's Top 20 now appears with significant self-time.
+  - **Action**: Trace the span to its Rust source. It may be a new feature, a new plugin, or a newly-added dependency.
 
-### 🟠 Tier 2: Physical & Resource Barriers (P1)
-*Focus: I/O concurrency, hardware utilization.*
+**Baseline reference** (examples/with-antd, ~2,170 modules):
 
-- **📁 D. I/O Chokepoints**
-  - **Signal**: Serialized `read file` or `read directory` calls on one thread while others idle.
-  - **Key spans**: `read file` (~1,050ms in baseline, 91% called by `parse ecmascript`)
-  - **Action**: Batch file reads via `FileSystemPath::read_dir` metadata caching. Use concurrent `Vc` joins.
-
-- **🧵 E. Core Under-utilization**
-  - **Signal**: Thread Utilization < 60% in the report. High total CPU time but narrow execution bands.
-  - **Action**: Identify choke-points where one task serializes thousands of sub-tasks.
-
-- **🐘 F. Heavy Monoliths (Latency Spikes)**
-  - **Signal**: Single events exceeding 100ms (P95/Max columns in report). Often barrel files.
-  - **Key spans**: `parse ecmascript` (~1,281ms total, P95 ~1ms), `analyze ecmascript module`
-  - **Action**: Isolate into separate chunks, use `externals`, or break up barrel files.
+| Metric | Value |
+|--------|-------|
+| Wall Time | ~2,100–2,170ms |
+| Parallelism | ~6.3–6.5x |
+| Thread Utilization | ~48–50% |
+| Working Threads | 13 |
 
 ---
 
-### 🟡 Tier 3: Architecture & Engine Health (P2)
-*Focus: Global state, concurrent safety, persistent caching.*
+### 🟠 P1: Project-Level Optimization
+*Focus: Levers that users and integrators can pull without modifying the engine.*
 
-- **⏳ G. Scheduler Gaps (Lock Contention)**
-  - **Signal**: Empty timeline regions across all threads simultaneously.
-  - **Action**: Trace back to `parking_lot` mutexes or global counters contested during high-concurrency phases.
+These are the **most impactful** optimizations available today.
 
-- **🧠 H. Memory Gravity & Metadata Bloat**
-  - **Signal**: Task execution time increases linearly over build duration.
-  - **Action**: Investigate if task input/output types are too large (passing full ASTs instead of `Vc<Ast>`).
+- **D. Externals for Large Dependencies**
+  - **Signal**: High `module` scheduling overhead (~1,924ms self-time for 82K invocations). Large packages like `antd`, `@ant-design/icons` contribute thousands of modules.
+  - **Action**: Configure `externals` for heavy packages to skip resolution/parsing entirely. This directly reduces module count and the depth of dependency chains.
 
-- **💾 I. Persistent Caching Analysis**
-  - **Signal**: `persistent_caching` is enabled in `NapiTurboEngineOptions` but cache hit rates are low.
+- **E. Barrel File Splitting**
+  - **Signal**: Single `parse ecmascript` or `analyze ecmascript module` spans with P95/Max self-time >10ms.
+  - **Action**: Break up barrel files (`index.ts` re-exporting hundreds of modules) into direct imports. Each barrel file creates a serialization bottleneck where one module depends on all its re-exports.
+
+- **F. Tree Shaking Effectiveness**
+  - **Signal**: High module count relative to expected usage. Many `module` spans for code paths never used.
+  - **Action**: Ensure tree shaking is enabled. Check for side-effect annotations in `package.json`. Use `TURBOPACK_TASK_STATISTICS` to verify modules are being skipped on rebuild.
+
+---
+
+### 🟡 P2: Pipeline Hot Spots
+*Focus: When a specific build phase has disproportionate self-time, investigate the specific files/modules causing it.*
+
+Use the **Build Phase Timeline** section to identify which phase dominates, then drill into the Top 20 list.
+
+- **G. Resolve Phase** (~694ms self-time, ~877ms wall)
+  - **Key spans**: `resolving` (~258ms), `internal resolving` (~331ms), `read directory` (~105ms)
+  - **Action**: Check for non-cached regex in resolution plugins. Verify `read directory` metadata is cached. Heavy `internal resolving` may indicate complex `package.json` exports conditions.
+
+- **H. Parse Phase** (~1,265ms self-time, ~2,099ms wall)
+  - **Key spans**: `read file` (~1,017ms, 91% from `process module`), `parse ecmascript` (~248ms)
+  - **Note**: `read file` I/O is concurrency-limited by `read_semaphore` (default 64, tunable via `TURBO_ENGINE_READ_CONCURRENCY`). Pre-reading during resolution has minimal impact (~1.4pp) due to turbo-tasks' demand-driven scheduling.
+
+- **I. Analyze Phase** (~4,284ms self-time, ~1,875ms wall)
+  - **Key spans**: `analyze ecmascript module` (~809ms, 79% from `process module`), `compute async module info` (~1,149ms)
+  - **Note**: Both are already well-parallelized. `analyze ecmascript module` is parallelized via turbo-tasks. `compute async module info` is a **graph-level** operation (not per-module), computing `is_self_async()` per node then propagating via reverse DFS.
+
+- **J. Chunk & Codegen Phase** (~2,821ms self-time, ~743ms wall)
+  - **Key spans**: `chunking` (~1,195ms), `code generation` (~502ms), `precompute code generation` (~552ms), `compute async chunks` (~468ms)
+  - **Action**: High parallelism in this phase (wall << self-time). Look for outlier spans with high P95/Max.
+
+---
+
+### 🟢 P3: Engine Tuning
+*Focus: turbo-tasks configuration and cache efficiency. Generally already well-optimized.*
+
+- **K. Persistent Caching**
+  - **Signal**: Rebuild times not improving despite persistent caching being enabled.
   - **Action**: Use `TURBOPACK_TASK_STATISTICS` to examine cache hit/miss rates. Low hit rates indicate excessive task invalidation.
 
----
+- **L. Scheduling Overhead**
+  - **Signal**: `module` self-time increases disproportionately vs module count.
+  - **Current state**: ~23µs avg self-time per `module` invocation (82K invocations = ~1,924ms). This is inherent per-task scheduling cost in turbo-tasks.
+  - **Action**: Only actionable if avg self-time increases significantly from baseline. Bypass `#[turbo_tasks::function]` only for extremely frequent, low-cost operations where aggregate self-time > 500ms.
 
-### 🟢 Tier 4: The Asset Processing Pipeline (P3)
-*Focus: Heavy-lifting transformation logic.*
-
-- **⚛️ J. Pipeline Lifecycle**
-  - **J1. Parsing**: `parse ecmascript` — SWC lexing/parsing complexity
-  - **J2. Analysis**: `analyze ecmascript module`, `compute binding usage info` — dependency tracking depth
-  - **J3. Chunking**: `chunking`, `compute async chunks`, `make production chunks`, `collect mergeable modules`
-  - **J4. Code Generation**: `code generation`, `precompute code generation`, `generate source map`
-  - **J5. Emission**: `apply effects`, `write file`
-
-Use the **Build Phase Timeline** section of the report to see which phase dominates. Compare self-time vs inclusive to understand if the phase is compute-bound or waiting on sub-phases.
+- **M. Memory & Metadata Bloat**
+  - **Signal**: Task execution time increases linearly over build duration.
+  - **Action**: Investigate if task input/output types are too large. Use heap profiling (`dhat` feature in `pack-napi`).
 
 ---
 
-### ⚪ Tier 5: Runtime Boundaries (P4)
-*Focus: Cross-language serialization.*
+### ⚪ P4: Known Architectural Constraints
+*Focus: Document known limitations. These are NOT actionable without fundamental engine redesign.*
 
-- **🌉 K. Bridge & Serialization**
-  - **Signal**: Large gaps in `napi` spans between Rust and JS.
-  - **Action**: Minimize chatty APIs. Prefer batched operations over individual property access.
+- **N. Dependency Chain Depth**
+  - Thread utilization (~50%) is limited by the serial `resolve → read file → parse → analyze` chain per module. Each step requires the previous step's output. turbo-tasks schedules work as soon as dependencies are ready ("neither eager nor lazy"), but cannot parallelize steps within a single module's chain.
+  - **Implication**: Doubling CPU cores will NOT double build speed. The effective lever is reducing module count (P1) or the chain depth per module.
+
+- **O. Bridge Overhead**
+  - NAPI bridge between Rust and JS contributes <0.1% of total work. NOT a bottleneck.
+
+- **P. File I/O Floor**
+  - `read file` (~1,017ms for ~2,170 files) represents physical disk access time. On first build, this is cold filesystem access. On rebuild, OS page cache and turbo-tasks memoization handle this. Pre-reading during resolution has been benchmarked at ~1.4pp utilization improvement — not worth the complexity.
 
 ---
 

@@ -56,10 +56,12 @@ TIER_CATEGORIES = {
     "P0: Scheduling & Resolution": [
         "resolving", "internal resolving", "module",
         "process module", "compute async module info",
+        "write all entrypoints to disk", "async reference",
     ],
     "P1: I/O & Heavy Tasks": [
         "read file", "read directory", "stat",
         "write file", "apply effects",
+        "start filesystem watching", "create root directory",
     ],
     "P2: Architecture (Locks/Memory)": [
         "invalidate", "state value changed",
