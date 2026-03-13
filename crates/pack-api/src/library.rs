@@ -382,7 +382,7 @@ impl Endpoint for LibraryEndpoint {
                 let webpack_stats = generate_webpack_stats(output_assets, this.project.dist_root());
                 let webpack_stats_read = webpack_stats.await?;
                 let dist_root_owned = this.project.dist_root().owned().await?;
-                let stats_json = simd_json::serde::to_string(&*webpack_stats_read)?;
+                let stats_json = serde_json::to_string_pretty(&*webpack_stats_read)?;
                 let stats_output = VirtualOutputAsset::new(
                     dist_root_owned.join("stats.json")?,
                     AssetContent::file(FileContent::from(File::from(stats_json)).cell()),
