@@ -14,3 +14,8 @@ trace-*.json.gz
 .trace/
 *.tsbuildinfo
 .claude/settings.local.json
+/packages/pack-e2e/fixtures.umi/*/.umi
+/packages/pack-e2e/fixtures.umi/*/.umi-production
+/packages/pack-e2e/**/*/dist
+/packages/pack-e2e/**/*/node_modules/.cache
+/packages/*/node_modules
