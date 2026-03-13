@@ -37,7 +37,6 @@ let BACKEND: RuntimeBackend;
      */
     loadChunkCached(
       _sourceType: SourceType,
-      _sourceData: SourceData,
       _chunkUrl: ChunkUrl,
     ) {
       return Promise.resolve();

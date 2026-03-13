@@ -18,6 +18,7 @@
       "!packages/utoo-web/src/webpackLoaders/loaders/**",
       "!packages/utoo-web/src/utoo/**",
       "crates/pack-core/js/**/*.ts",
+      "!crates/pack-core/js/src/umd/**",
       "!**/examples/multi-entries-heavy/*",
       "!**/packages/**/binding.*",
       "!next.js/**",
