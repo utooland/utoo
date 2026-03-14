@@ -7,8 +7,7 @@ use crate::service::pipeline::{PipelineChannels, PipelineReceiver};
 use crate::util::cache::get_cache_dir;
 use crate::util::logger::ProgressReceiver;
 use crate::util::user_config::{
-    get_catalogs, get_legacy_peer_deps, get_manifests_concurrency_limit, get_registry,
-    get_supports_semver,
+    get_catalogs, get_manifests_concurrency_limit, get_peer_deps, get_registry, get_supports_semver,
 };
 
 /// Tokio-based glob implementation.
@@ -47,7 +46,7 @@ impl Context {
             registry_url: get_registry(),
             cache_dir: Some(get_cache_dir()),
             concurrency: get_manifests_concurrency_limit().await,
-            legacy_peer_deps: get_legacy_peer_deps().await,
+            peer_deps: get_peer_deps().await,
             glob: TokioGlob,
             receiver,
             supports_semver: get_supports_semver(),

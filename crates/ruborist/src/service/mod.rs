@@ -36,7 +36,7 @@
 //!     registry_url: "https://registry.npmmirror.com".to_string(),
 //!     cache_dir: None,
 //!     concurrency: 20,
-//!     legacy_peer_deps: false,
+//!     peer_deps: PeerDeps::Include,
 //!     glob: my_glob,
 //!     receiver: my_receiver,
 //! }).await?;

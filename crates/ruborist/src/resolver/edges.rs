@@ -6,8 +6,9 @@ use petgraph::graph::{EdgeIndex, NodeIndex};
 
 use crate::model::graph::DependencyGraph;
 use crate::model::manifest::CoreVersionManifest;
-use crate::model::node::EdgeType;
+use crate::model::node::{DevDeps, EdgeType, PeerDeps};
 use crate::model::package_json::PackageJson;
+use crate::spec::{Catalogs, resolve_catalog_spec};
 
 /// Represents an unresolved dependency edge extracted from the graph.
 #[derive(Debug, Clone)]
@@ -50,21 +51,21 @@ where
 
 /// Trait for types that can provide dependency information.
 pub trait DependencySource {
-    fn for_each_dep<F>(&self, legacy_peer_deps: bool, include_dev: bool, callback: F)
+    fn for_each_dep<F>(&self, peer_deps: PeerDeps, dev_deps: DevDeps, callback: F)
     where
         F: FnMut(EdgeType, &str, &str);
 }
 
 impl DependencySource for PackageJson {
-    fn for_each_dep<F>(&self, legacy_peer_deps: bool, include_dev: bool, mut f: F)
+    fn for_each_dep<F>(&self, peer_deps: PeerDeps, dev_deps: DevDeps, mut f: F)
     where
         F: FnMut(EdgeType, &str, &str),
     {
         iter_deps(self.dependencies.as_ref(), EdgeType::Prod, &mut f);
-        if include_dev {
+        if dev_deps == DevDeps::Include {
             iter_deps(self.dev_dependencies.as_ref(), EdgeType::Dev, &mut f);
         }
-        if !legacy_peer_deps {
+        if peer_deps == PeerDeps::Include {
             iter_deps(self.peer_dependencies.as_ref(), EdgeType::Peer, &mut f);
         }
         iter_deps(
@@ -76,7 +77,7 @@ impl DependencySource for PackageJson {
 }
 
 impl DependencySource for CoreVersionManifest {
-    fn for_each_dep<F>(&self, legacy_peer_deps: bool, include_dev: bool, mut f: F)
+    fn for_each_dep<F>(&self, peer_deps: PeerDeps, dev_deps: DevDeps, mut f: F)
     where
         F: FnMut(EdgeType, &str, &str),
     {
@@ -88,28 +89,54 @@ impl DependencySource for CoreVersionManifest {
                 f(EdgeType::Prod, name, spec);
             }
         }
-        if include_dev {
+        if dev_deps == DevDeps::Include {
             iter_deps(self.dev_dependencies.as_ref(), EdgeType::Dev, &mut f);
         }
-        if !legacy_peer_deps {
+        if peer_deps == PeerDeps::Include {
             iter_deps(self.peer_dependencies.as_ref(), EdgeType::Peer, &mut f);
         }
         iter_deps(optional_deps, EdgeType::Optional, &mut f);
     }
 }
 
+/// Context for creating dependency edges.
+pub struct EdgeContext<'a> {
+    pub peer_deps: PeerDeps,
+    pub dev_deps: DevDeps,
+    pub catalogs: Option<&'a Catalogs>,
+}
+
+impl<'a> EdgeContext<'a> {
+    pub fn new(peer_deps: PeerDeps, dev_deps: DevDeps) -> Self {
+        Self {
+            peer_deps,
+            dev_deps,
+            catalogs: None,
+        }
+    }
+
+    pub fn with_catalogs(mut self, catalogs: &'a Catalogs) -> Self {
+        self.catalogs = Some(catalogs);
+        self
+    }
+}
+
 /// Add dependency edges from any source that implements `DependencySource`.
 ///
-/// Specs are added to the graph as-is. Protocol-prefixed specs like `catalog:`
-/// are resolved later in `process_dependency`.
+/// `catalog:` specs are resolved to their concrete version range at edge
+/// creation time (like `workspace:` specs), so downstream code sees only
+/// registry-compatible specs.
 pub fn add_edges_from<S: DependencySource>(
     graph: &mut DependencyGraph,
     node_index: NodeIndex,
     source: &S,
-    legacy_peer_deps: bool,
-    include_dev: bool,
+    ctx: &EdgeContext<'_>,
 ) {
-    source.for_each_dep(legacy_peer_deps, include_dev, |edge_type, name, spec| {
-        graph.add_dependency_edge(node_index, name, spec, edge_type);
+    source.for_each_dep(ctx.peer_deps, ctx.dev_deps, |edge_type, name, spec| {
+        let resolved = ctx
+            .catalogs
+            .and_then(|c| resolve_catalog_spec(name, spec, c))
+            .unwrap_or(spec);
+        graph.add_dependency_edge(node_index, name, resolved, edge_type);
     });
 }

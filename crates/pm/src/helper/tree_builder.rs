@@ -7,13 +7,13 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use serde_json::{Value, json};
-use utoo_ruborist::builder::add_edges_from;
+use utoo_ruborist::builder::{DevDeps, EdgeContext, add_edges_from};
 use utoo_ruborist::graph::{DependencyGraph, EdgeType, PackageNode};
 
 use crate::helper::install_runtime::install_runtime;
 use crate::helper::workspace::find_workspaces;
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
-use crate::util::user_config::{get_legacy_peer_deps, get_or_load_package_json};
+use crate::util::user_config::{get_or_load_package_json, get_peer_deps};
 
 /// TreeBuilder - builds workspace dependency graph.
 ///
@@ -62,9 +62,14 @@ impl TreeBuilder {
         self.init_workspaces(&mut graph).await?;
 
         // Add root dependencies using ruborist's shared logic
-        let legacy_peer_deps = get_legacy_peer_deps().await;
+        let peer_deps = get_peer_deps().await;
         let root_index = graph.root_index;
-        add_edges_from(&mut graph, root_index, &pkg, legacy_peer_deps, true);
+        add_edges_from(
+            &mut graph,
+            root_index,
+            &pkg,
+            &EdgeContext::new(peer_deps, DevDeps::Include),
+        );
 
         Ok(graph)
     }
@@ -79,7 +84,7 @@ impl TreeBuilder {
             anyhow::anyhow!(err_msg)
         })?;
 
-        let legacy_peer_deps = get_legacy_peer_deps().await;
+        let peer_deps = get_peer_deps().await;
 
         // Process each workspace member
         for (name, path, pkg) in workspaces {
@@ -110,7 +115,12 @@ impl TreeBuilder {
             tracing::debug!("Added workspace: {} {:?}", name, path);
 
             // Add workspace dependencies using ruborist's shared logic
-            add_edges_from(graph, workspace_index, &pkg, legacy_peer_deps, true);
+            add_edges_from(
+                graph,
+                workspace_index,
+                &pkg,
+                &EdgeContext::new(peer_deps, DevDeps::Include),
+            );
         }
 
         Ok(())

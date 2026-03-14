@@ -9,6 +9,7 @@ use std::sync::Arc;
 use futures::stream::{FuturesUnordered, StreamExt};
 
 use crate::model::manifest::CoreVersionManifest;
+use crate::model::node::PeerDeps;
 use crate::resolver::registry::resolve_package;
 use crate::traits::progress::{BuildEvent, EventReceiver};
 use crate::traits::registry::RegistryClient;
@@ -22,8 +23,8 @@ pub type Dep = (String, String);
 /// Configuration for preload behavior
 #[derive(Debug, Clone)]
 pub struct PreloadConfig {
-    /// Whether to skip peer dependencies (legacy mode)
-    pub legacy_peer_deps: bool,
+    /// How to handle peer dependencies.
+    pub peer_deps: PeerDeps,
     /// Maximum number of concurrent manifest fetches
     pub concurrency: usize,
 }
@@ -31,7 +32,7 @@ pub struct PreloadConfig {
 impl Default for PreloadConfig {
     fn default() -> Self {
         Self {
-            legacy_peer_deps: true,
+            peer_deps: PeerDeps::Skip,
             concurrency: DEFAULT_CONCURRENCY,
         }
     }
@@ -58,42 +59,12 @@ fn collect_deps(map: Option<&std::collections::HashMap<String, String>>) -> Vec<
         .collect()
 }
 
-/// Collect initial dependencies from PackageJson for preloading.
-pub fn collect_initial_deps(
-    pkg: &crate::model::package_json::PackageJson,
-    legacy_peer_deps: bool,
-) -> Vec<Dep> {
-    let mut deps = Vec::new();
-    deps.extend(collect_deps(pkg.dependencies.as_ref()));
-    deps.extend(collect_deps(pkg.dev_dependencies.as_ref()));
-    if !legacy_peer_deps {
-        deps.extend(collect_deps(pkg.peer_dependencies.as_ref()));
-    }
-    deps.extend(collect_deps(pkg.optional_dependencies.as_ref()));
-    deps
-}
-
-/// Collect dependencies from NodeManifest for preloading.
-pub fn collect_manifest_deps(
-    manifest: &crate::model::manifest::NodeManifest,
-    legacy_peer_deps: bool,
-) -> Vec<Dep> {
-    let mut deps = Vec::new();
-    deps.extend(collect_deps(manifest.dependencies()));
-    deps.extend(collect_deps(manifest.dev_dependencies()));
-    if !legacy_peer_deps {
-        deps.extend(collect_deps(manifest.peer_dependencies()));
-    }
-    deps.extend(collect_deps(manifest.optional_dependencies()));
-    deps
-}
-
 /// Extract transitive dependencies from a resolved manifest.
 /// Note: devDependencies are NOT included (only root packages install devDeps).
 fn extract_transitive_deps(manifest: &CoreVersionManifest, config: &PreloadConfig) -> Vec<Dep> {
     let mut deps = Vec::new();
     deps.extend(collect_deps(manifest.dependencies.as_ref()));
-    if !config.legacy_peer_deps {
+    if config.peer_deps == PeerDeps::Include {
         deps.extend(collect_deps(manifest.peer_dependencies.as_ref()));
     }
     deps.extend(collect_deps(manifest.optional_dependencies.as_ref()));

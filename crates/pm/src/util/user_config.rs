@@ -4,6 +4,7 @@ use std::sync::{LazyLock, OnceLock};
 
 use anyhow::Result;
 use dashmap::DashMap;
+use utoo_ruborist::builder::PeerDeps;
 use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::spec::Catalogs;
 
@@ -83,8 +84,11 @@ pub fn set_legacy_peer_deps(value: Option<bool>) {
     LEGACY_PEER_DEPS.set(value);
 }
 
-pub async fn get_legacy_peer_deps() -> bool {
-    LEGACY_PEER_DEPS.get().await
+pub async fn get_peer_deps() -> PeerDeps {
+    match LEGACY_PEER_DEPS.get().await {
+        true => PeerDeps::Skip,
+        false => PeerDeps::Include,
+    }
 }
 
 static OMIT: OnceLock<HashSet<OmitType>> = OnceLock::new();

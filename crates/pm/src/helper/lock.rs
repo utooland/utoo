@@ -19,7 +19,9 @@ use crate::util::git_resolver::{resolve_git_spec, resolve_github_spec};
 use crate::util::json::{load_package_json, load_package_lock_json_from_path, read_json_file};
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
 use crate::util::save_type::{PackageAction, SaveType};
-use crate::util::user_config::{get_catalogs, get_legacy_peer_deps, set_package_json};
+use utoo_ruborist::builder::PeerDeps;
+
+use crate::util::user_config::{get_catalogs, get_peer_deps, set_package_json};
 
 // Platform-specific line endings
 #[cfg(target_os = "windows")]
@@ -383,7 +385,7 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
         pkgs_to_check.push((target_path, ws_deps));
     }
 
-    let legacy_peer_deps = get_legacy_peer_deps().await;
+    let peer_deps = get_peer_deps().await;
 
     for (path, pkg) in &pkgs_to_check {
         let lock = match packages.get(path.as_str()) {
@@ -416,7 +418,8 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
             return Ok(true);
         }
 
-        if !legacy_peer_deps && !deps_match(&pkg.peer_dependencies, lock.peer_dependencies.as_ref())
+        if peer_deps == PeerDeps::Include
+            && !deps_match(&pkg.peer_dependencies, lock.peer_dependencies.as_ref())
         {
             tracing::warn!("package-lock.json is outdated, {name} peerDependencies changed");
             return Ok(true);
