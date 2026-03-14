@@ -22,13 +22,6 @@ pub enum PeerDeps {
     Skip,
 }
 
-impl From<bool> for PeerDeps {
-    /// `true` (legacy_peer_deps) → `Skip`, `false` → `Include`.
-    fn from(legacy: bool) -> Self {
-        if legacy { Self::Skip } else { Self::Include }
-    }
-}
-
 /// Controls whether dev dependencies are included during edge iteration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DevDeps {
