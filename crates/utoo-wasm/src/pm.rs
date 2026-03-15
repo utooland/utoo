@@ -7,16 +7,17 @@
 //! - Package installation
 
 use anyhow::{anyhow, Result};
-use opfs_project::pack::PackFile;
+use opfs_project::archive::PackFile;
 use std::path::Path;
 use wasm_bindgen::JsCast;
 
+use crate::project::{with_project, OPFS_PROJECT};
 use crate::tokio_runtime::{runtime, TOKIO_RUNTIME};
 
 /// Calculate MD5 hash of byte content
 pub async fn sig_md5(content: Vec<u8>) -> Result<String> {
     let result = runtime()
-        .spawn_blocking(move || opfs_project::pack::sig_md5(&content))
+        .spawn_blocking(move || opfs_project::archive::sig_md5(&content))
         .await?;
     Ok(result)
 }
@@ -24,7 +25,7 @@ pub async fn sig_md5(content: Vec<u8>) -> Result<String> {
 /// Create a tar.gz archive from a list of files (internal)
 async fn gzip_files(pack_files: Vec<PackFile>) -> Result<Vec<u8>> {
     let bytes = runtime()
-        .spawn_blocking(move || opfs_project::pack::gzip(&pack_files))
+        .spawn_blocking(move || opfs_project::archive::gzip(&pack_files))
         .await??;
 
     Ok(bytes)
@@ -57,17 +58,36 @@ pub async fn gzip(files: wasm_bindgen::JsValue) -> Result<Vec<u8>> {
 
 /// Generate package-lock.json by resolving dependencies
 pub async fn deps(registry: Option<&str>, concurrency: Option<usize>) -> Result<String> {
-    let cwd = opfs_project::get_cwd();
+    let cwd = with_project(|p| p.cwd().to_path_buf());
     let package_lock =
         crate::deps::build_deps_from_file(Path::new(&cwd), registry, concurrency).await?;
 
-    // Serialize to JSON string
     serde_json::to_string_pretty(&package_lock)
         .map_err(|e| anyhow!("Failed to serialize package lock: {}", e))
 }
 
 /// Install dependencies - downloads tgz files only, extracts on-demand when files are read
-pub async fn install(package_lock: &str, concurrency: usize) -> Result<()> {
-    opfs_project::package_manager::install_deps(package_lock, concurrency).await?;
+pub async fn install(
+    package_lock_json: &str,
+    max_concurrent_downloads: Option<usize>,
+) -> Result<()> {
+    let lock = opfs_project::package_lock::PackageLock::from_json(package_lock_json)
+        .map_err(|e| anyhow!("Failed to parse package-lock.json: {}", e))?;
+
+    let opts = opfs_project::InstallOptions {
+        max_concurrent_downloads,
+        omit: vec![],
+    };
+
+    let guard = OPFS_PROJECT.read();
+    let project = guard
+        .as_ref()
+        .ok_or_else(|| anyhow!("OpfsProject not initialised"))?;
+
+    project
+        .install(&lock, &opts)
+        .await
+        .map_err(|e| anyhow!("{}", e))?;
+
     Ok(())
 }

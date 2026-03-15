@@ -17,6 +17,29 @@ use crate::pack::{self, RootTask};
 
 static GLOBAL_THREAD_URL: RwLock<Option<String>> = RwLock::new(None);
 
+/// Global OpfsProject instance, initialised the first time `Project::init` is called.
+pub(crate) static OPFS_PROJECT: RwLock<Option<opfs_project::OpfsProject>> = RwLock::new(None);
+
+/// Get a reference to the global OpfsProject for reading.
+///
+/// Panics if the project has not been initialised via `Project::init`.
+pub(crate) fn with_project<R>(f: impl FnOnce(&opfs_project::OpfsProject) -> R) -> R {
+    let guard = OPFS_PROJECT.read();
+    let project = guard
+        .as_ref()
+        .expect("OpfsProject not initialised — call Project.init() first");
+    f(project)
+}
+
+/// Get a mutable reference to the global OpfsProject.
+pub(crate) fn with_project_mut<R>(f: impl FnOnce(&mut opfs_project::OpfsProject) -> R) -> R {
+    let mut guard = OPFS_PROJECT.write();
+    let project = guard
+        .as_mut()
+        .expect("OpfsProject not initialised — call Project.init() first");
+    f(project)
+}
+
 #[wasm_bindgen]
 pub struct Project;
 
@@ -34,16 +57,22 @@ impl Project {
         if !final_url.is_empty() {
             init_tokio_runtime(final_url);
         }
+
+        // Initialise the global OpfsProject if not already done
+        let mut guard = OPFS_PROJECT.write();
+        if guard.is_none() {
+            *guard = Some(opfs_project::OpfsProject::default());
+        }
     }
 
     #[wasm_bindgen(js_name = setCwd)]
     pub fn set_cwd(path: String) {
-        opfs_project::set_cwd(path);
+        with_project(|p| p.set_cwd(path));
     }
 
     #[wasm_bindgen(getter)]
     pub fn cwd() -> String {
-        opfs_project::get_cwd().to_string_lossy().to_string()
+        with_project(|p| p.cwd().to_string_lossy().to_string())
     }
 
     /// Calculate MD5 hash of byte content (async for better thread scheduling)
@@ -76,8 +105,7 @@ impl Project {
         package_lock: String,
         max_concurrent_downloads: Option<usize>,
     ) -> Result<(), JsError> {
-        let concurrency = max_concurrent_downloads.unwrap_or(20);
-        pm::install(&package_lock, concurrency)
+        pm::install(&package_lock, max_concurrent_downloads)
             .await
             .map_err(to_js_error)
     }

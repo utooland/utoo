@@ -1,6 +1,6 @@
 //! OPFS filesystem API and Glob implementation.
 //!
-//! Provides filesystem operations and implements ruborist's `Glob` trait using `opfs_project` bindings.
+//! Fuse-aware reads go through `OpfsProject`. All other ops use `tokio_fs_ext` directly.
 
 use std::path::{Path, PathBuf};
 use std::str;
@@ -11,6 +11,7 @@ use utoo_ruborist::service::Glob;
 use wasm_bindgen::prelude::*;
 
 use crate::errors::to_js_error;
+use crate::project::OPFS_PROJECT;
 use crate::tokio_runtime::runtime;
 
 /// OPFS-backed glob implementation.
@@ -27,10 +28,7 @@ impl Glob for OpfsGlob {
 
 /// Check if a path exists in OPFS.
 async fn exists(path: &Path) -> Result<bool, anyhow::Error> {
-    let path_str = path.to_string_lossy();
-
-    // Try to get metadata - if it fails, the path doesn't exist
-    match opfs_project::metadata(path_str.as_ref()).await {
+    match tokio_fs_ext::metadata(path).await {
         Ok(_) => Ok(true),
         Err(_) => Ok(false),
     }
@@ -60,12 +58,22 @@ async fn glob_match(_glob: &OpfsGlob, pattern: &Path) -> Result<Vec<PathBuf>, an
         if component == "*" {
             // Wildcard: list directory and match all entries
             let dir_path = if current_path.as_os_str().is_empty() {
-                ".".to_string()
+                PathBuf::from(".")
             } else {
-                current_path.to_string_lossy().to_string()
+                current_path.clone()
             };
 
-            match opfs_project::read_dir(&dir_path).await {
+            let guard = OPFS_PROJECT.read();
+            let read_result = if let Some(project) = guard.as_ref() {
+                project.read_dir(&dir_path).await
+            } else {
+                tokio_fs_ext::read_dir(&dir_path)
+                    .await
+                    .and_then(|rd| rd.collect())
+            };
+            drop(guard);
+
+            match read_result {
                 Ok(entries) => {
                     for entry in entries {
                         if let Ok(name) = entry.file_name().into_string() {
@@ -99,7 +107,12 @@ pub struct Fs;
 impl Fs {
     #[wasm_bindgen]
     pub async fn read(path: &str) -> Result<js_sys::Uint8Array, JsError> {
-        let bytes = opfs_project::read(path)
+        let guard = OPFS_PROJECT.read();
+        let project = guard
+            .as_ref()
+            .ok_or_else(|| JsError::new("not initialised"))?;
+        let bytes = project
+            .read(path)
             .await
             .with_context(|| format!("Failed to read file: {}", path))
             .map_err(to_js_error)?;
@@ -108,7 +121,12 @@ impl Fs {
 
     #[wasm_bindgen(js_name = readToString)]
     pub async fn read_to_string(path: &str) -> Result<String, JsError> {
-        let buf = opfs_project::read(path)
+        let guard = OPFS_PROJECT.read();
+        let project = guard
+            .as_ref()
+            .ok_or_else(|| JsError::new("not initialised"))?;
+        let buf = project
+            .read(path)
             .await
             .with_context(|| format!("Failed to read file: {}", path))
             .map_err(to_js_error)?;
@@ -118,7 +136,7 @@ impl Fs {
     #[wasm_bindgen]
     pub async fn write(path: &str, content: js_sys::Uint8Array) -> Result<(), JsError> {
         let content = content.to_vec();
-        opfs_project::write(path, &content)
+        tokio_fs_ext::write(path, &content)
             .await
             .with_context(|| format!("Failed to write file: {}", path))
             .map_err(to_js_error)?;
@@ -127,7 +145,7 @@ impl Fs {
 
     #[wasm_bindgen(js_name = "writeString")]
     pub async fn write_string(path: &str, content: &str) -> Result<(), JsError> {
-        opfs_project::write(path, content)
+        tokio_fs_ext::write(path, content)
             .await
             .with_context(|| format!("Failed to write file: {}", path))
             .map_err(to_js_error)?;
@@ -136,7 +154,12 @@ impl Fs {
 
     #[wasm_bindgen(js_name = readDir)]
     pub async fn read_dir(path: &str) -> Result<Vec<DirEntry>, JsError> {
-        let read_dir = opfs_project::read_dir(path)
+        let guard = OPFS_PROJECT.read();
+        let project = guard
+            .as_ref()
+            .ok_or_else(|| JsError::new("not initialised"))?;
+        let read_dir = project
+            .read_dir(path)
             .await
             .with_context(|| format!("Failed to read directory: {}", path))
             .map_err(to_js_error)?;
@@ -153,7 +176,7 @@ impl Fs {
 
     #[wasm_bindgen(js_name = createDir)]
     pub async fn create_dir(path: &str) -> Result<(), JsError> {
-        opfs_project::create_dir(path)
+        tokio_fs_ext::create_dir(path)
             .await
             .with_context(|| format!("Failed to create directory: {}", path))
             .map_err(to_js_error)?;
@@ -162,7 +185,7 @@ impl Fs {
 
     #[wasm_bindgen(js_name = createDirAll)]
     pub async fn create_dir_all(path: &str) -> Result<(), JsError> {
-        opfs_project::create_dir_all(path)
+        tokio_fs_ext::create_dir_all(path)
             .await
             .with_context(|| format!("Failed to create directory recursively: {}", path))
             .map_err(to_js_error)?;
@@ -171,7 +194,7 @@ impl Fs {
 
     #[wasm_bindgen(js_name = copyFile)]
     pub async fn copy_file(src: &str, dst: &str) -> Result<(), JsError> {
-        opfs_project::copy(src, dst)
+        tokio_fs_ext::copy(src, dst)
             .await
             .with_context(|| format!("Failed to copy file from {} to {}", src, dst))
             .map_err(to_js_error)?;
@@ -180,7 +203,7 @@ impl Fs {
 
     #[wasm_bindgen(js_name = removeFile)]
     pub async fn remove_file(path: &str) -> Result<(), JsError> {
-        opfs_project::remove_file(path)
+        tokio_fs_ext::remove_file(path)
             .await
             .with_context(|| format!("Failed to remove file: {}", path))
             .map_err(to_js_error)?;
@@ -190,12 +213,12 @@ impl Fs {
     #[wasm_bindgen(js_name = removeDir)]
     pub async fn remove_dir(path: &str, recursive: bool) -> Result<(), JsError> {
         if recursive {
-            opfs_project::remove_dir_all(path)
+            tokio_fs_ext::remove_dir_all(path)
                 .await
                 .with_context(|| format!("Failed to remove directory recursively: {}", path))
                 .map_err(to_js_error)?;
         } else {
-            opfs_project::remove_dir(path)
+            tokio_fs_ext::remove_dir(path)
                 .await
                 .with_context(|| format!("Failed to remove directory: {}", path))
                 .map_err(to_js_error)?;
@@ -206,7 +229,7 @@ impl Fs {
 
     #[wasm_bindgen(js_name = metadata)]
     pub async fn metadata(path: &str) -> Result<Metadata, JsError> {
-        opfs_project::metadata(path)
+        tokio_fs_ext::metadata(path)
             .await
             .and_then(Metadata::try_from)
             .with_context(|| format!("Failed to get metadata: {}", path))

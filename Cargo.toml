@@ -58,6 +58,7 @@ simd-json                         = "0.17.0"
 tempfile                          = "3"
 thiserror                         = "1.0"
 tokio                             = { version = "1.47.1" }
+opfs-project                      = "0.2.4"
 tokio-fs-ext                      = "0.7.7"
 toml                              = "0.8"
 tracing                           = "0.1.41"
@@ -132,8 +133,10 @@ include_dir      = { git = "https://github.com/vercel-labs/include_dir", branch 
 lightningcss     = { git = "https://github.com/utooland/lightningcss", branch = "support-css-module-global" }
 mdxjs            = { git = "https://github.com/vercel-labs/mdxjs-rs-turbopack.git", branch = "turbopack" }
 mimalloc         = { git = "https://github.com/utooland/mimalloc_rust.git" }
+opfs-project     = { path = "../opfs-project" }
 parcel_selectors = { git = "https://github.com/utooland/lightningcss", branch = "support-css-module-global" }
 tokio            = { package = "tokio", git = "https://github.com/utooland/tokio.git" }
+tokio-fs-ext     = { path = "../tokio-fs-ext" }
 tokio-util       = { package = "tokio-util", git = "https://github.com/utooland/tokio.git" }
 virtue           = { git = "https://github.com/bgw/virtue.git", branch = "bgw/fix-generic-default-parsing" }
 
