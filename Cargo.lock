@@ -5139,6 +5139,8 @@ dependencies = [
 [[package]]
 name = "opfs-project"
 version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd7c14dad266438ed0d0dfc20d5dde2d57923ba28828aca834f328b9b4038265"
 dependencies = [
  "anyhow",
  "bytes",
@@ -5158,7 +5160,6 @@ dependencies = [
  "tracing",
  "tracing-web",
  "wasmtimer",
- "web-time",
 ]
 
 [[package]]
@@ -9089,6 +9090,8 @@ dependencies = [
 [[package]]
 name = "tokio-fs-ext"
 version = "0.7.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "912f3435ecb4330fed82d1b3a8cddf6354ea6472d40fadfb9063a3e9da1c6dec"
 dependencies = [
  "bitflags 2.9.4",
  "cfg-if",
