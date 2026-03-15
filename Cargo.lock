@@ -5138,11 +5138,12 @@ dependencies = [
 
 [[package]]
 name = "opfs-project"
-version = "0.1.17"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f35543fccfd944a4453681910258be1353044f3216c7bf5e2ec6b0f988110125"
+checksum = "dd7c14dad266438ed0d0dfc20d5dde2d57923ba28828aca834f328b9b4038265"
 dependencies = [
  "anyhow",
+ "bytes",
  "console_error_panic_hook",
  "data-encoding",
  "flate2",
@@ -5158,7 +5159,7 @@ dependencies = [
  "tokio-fs-ext",
  "tracing",
  "tracing-web",
- "web-time",
+ "wasmtimer",
 ]
 
 [[package]]

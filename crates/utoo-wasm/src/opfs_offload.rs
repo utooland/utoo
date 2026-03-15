@@ -1,47 +1,57 @@
 use std::{io, path::Path};
 use tokio_fs_ext::{offload, watch, Metadata, ReadDir};
 
+use crate::project::{with_project, OPFS_PROJECT};
+
 pub struct OpfsOffload;
 
 impl offload::FsOffload for OpfsOffload {
     async fn read(&self, path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
-        opfs_project::read(path).await.map(|arc| (*arc).to_vec())
+        let guard = OPFS_PROJECT.read();
+        let project = guard
+            .as_ref()
+            .ok_or_else(|| io::Error::other("OpfsProject not initialised"))?;
+        project.read(path).await.map(|b| b.to_vec())
     }
 
     async fn write(&self, path: impl AsRef<Path>, content: impl AsRef<[u8]>) -> io::Result<()> {
-        opfs_project::write(path, content).await
+        tokio_fs_ext::write(path, content).await
     }
 
     async fn copy(&self, from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<u64> {
-        opfs_project::copy(from, to).await
+        tokio_fs_ext::copy(from, to).await
     }
 
     async fn read_dir(&self, path: impl AsRef<Path>) -> io::Result<ReadDir> {
-        opfs_project::read_dir(path).await.map(ReadDir::from_iter)
+        let guard = OPFS_PROJECT.read();
+        let project = guard
+            .as_ref()
+            .ok_or_else(|| io::Error::other("OpfsProject not initialised"))?;
+        project.read_dir(path).await.map(ReadDir::from_iter)
     }
 
     async fn create_dir(&self, path: impl AsRef<Path>) -> io::Result<()> {
-        opfs_project::create_dir(path).await
+        tokio_fs_ext::create_dir(path).await
     }
 
     async fn create_dir_all(&self, path: impl AsRef<Path>) -> io::Result<()> {
-        opfs_project::create_dir_all(path).await
+        tokio_fs_ext::create_dir_all(path).await
     }
 
     async fn remove_file(&self, path: impl AsRef<Path>) -> io::Result<()> {
-        opfs_project::remove_file(path).await
+        tokio_fs_ext::remove_file(path).await
     }
 
     async fn remove_dir(&self, path: impl AsRef<Path>) -> io::Result<()> {
-        opfs_project::remove_dir(path).await
+        tokio_fs_ext::remove_dir(path).await
     }
 
     async fn remove_dir_all(&self, path: impl AsRef<Path>) -> io::Result<()> {
-        opfs_project::remove_dir_all(path).await
+        tokio_fs_ext::remove_dir_all(path).await
     }
 
     async fn metadata(&self, path: impl AsRef<Path>) -> io::Result<Metadata> {
-        opfs_project::metadata(path).await
+        tokio_fs_ext::metadata(path).await
     }
 
     async fn watch_dir(
