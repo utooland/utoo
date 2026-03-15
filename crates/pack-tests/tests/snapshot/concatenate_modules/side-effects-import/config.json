@@ -12,7 +12,8 @@
     ],
     "optimization": {
       "concatenateModules": true,
-      "minify": false
+      "minify": false,
+      "moduleIds": "named"
     }
   }
 }
