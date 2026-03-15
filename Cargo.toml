@@ -58,7 +58,6 @@ simd-json                         = "0.17.0"
 tempfile                          = "3"
 thiserror                         = "1.0"
 tokio                             = { version = "1.47.1" }
-opfs-project                      = "0.2.4"
 tokio-fs-ext                      = "0.7.7"
 toml                              = "0.8"
 tracing                           = "0.1.41"
