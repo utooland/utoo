@@ -8,7 +8,9 @@ pub struct OpfsOffload;
 impl offload::FsOffload for OpfsOffload {
     async fn read(&self, path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
         let guard = OPFS_PROJECT.read();
-        let project = guard.as_ref().expect("OpfsProject not initialised");
+        let project = guard
+            .as_ref()
+            .ok_or_else(|| io::Error::other("OpfsProject not initialised"))?;
         project.read(path).await.map(|b| b.to_vec())
     }
 
@@ -22,7 +24,9 @@ impl offload::FsOffload for OpfsOffload {
 
     async fn read_dir(&self, path: impl AsRef<Path>) -> io::Result<ReadDir> {
         let guard = OPFS_PROJECT.read();
-        let project = guard.as_ref().expect("OpfsProject not initialised");
+        let project = guard
+            .as_ref()
+            .ok_or_else(|| io::Error::other("OpfsProject not initialised"))?;
         project.read_dir(path).await.map(ReadDir::from_iter)
     }
 
