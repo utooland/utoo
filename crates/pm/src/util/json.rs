@@ -1,23 +1,51 @@
+use std::path::Path;
+
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
-use std::path::Path;
 
 /// Read and parse a JSON file into the specified type
 pub async fn read_json_file<T: DeserializeOwned>(path: &Path) -> Result<T> {
     let content = crate::fs::read_to_string(path)
         .await
-        .with_context(|| format!("Failed to read file {}", path.display()))?;
+        .with_context(|| format!("Failed to read file {path:?}"))?;
 
-    serde_json::from_str(&content)
-        .with_context(|| format!("Failed to parse JSON from {}", path.display()))
+    serde_json::from_str(&content).with_context(|| format!("Failed to parse JSON from {path:?}"))
 }
 
 /// Load package.json from a directory path and deserialize into the caller's
 /// chosen view type `T`. Use a full `PackageJson` for root projects, or a
 /// minimal view (e.g. `ScriptsView`) for node_modules to avoid parsing
 /// unnecessary / non-standard fields.
+///
+/// Some published npm packages ship package.json with duplicate keys
+/// (e.g. `mime@1.3.4` has two `scripts` entries). serde's derived
+/// `Deserialize` for structs rejects duplicate fields, but
+/// `serde_json::Value` (backed by a Map) silently keeps the last value.
+/// So when direct struct deserialization fails while the JSON itself is
+/// valid, we retry through a Value intermediary to collapse duplicates.
+/// The normal (no-duplicate) path has zero extra overhead.
 pub async fn load_package_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
-    read_json_file(&path.join("package.json")).await
+    let pkg_path = path.join("package.json");
+    let content = crate::fs::read_to_string(&pkg_path)
+        .await
+        .with_context(|| format!("Failed to read file {pkg_path:?}"))?;
+
+    match serde_json::from_str(&content) {
+        Ok(v) => Ok(v),
+        Err(original_err) => match serde_json::from_str::<serde_json::Value>(&content) {
+            Ok(value) => {
+                tracing::warn!(
+                    "package.json has non-standard structure (e.g. duplicate keys), \
+                     retrying with lenient parser: {pkg_path:?}"
+                );
+                serde_json::from_value(value)
+                    .with_context(|| format!("Failed to deserialize {pkg_path:?}"))
+            }
+            Err(_) => {
+                Err(original_err).with_context(|| format!("Failed to parse JSON from {pkg_path:?}"))
+            }
+        },
+    }
 }
 
 pub async fn load_package_lock_json_from_path(
@@ -82,6 +110,29 @@ mod tests {
         let pkg: PackageJson = load_package_json(dir.path()).await.unwrap();
         assert_eq!(pkg.name, "test-package");
         assert_eq!(pkg.version, "1.0.0");
+    }
+
+    /// Regression test: mime@1.3.4 has two "scripts" keys in its package.json.
+    /// We must tolerate this and keep the last value (matching JSON.parse).
+    #[tokio::test]
+    async fn test_load_package_json_duplicate_fields() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("package.json"),
+            r#"{
+                "name": "mime",
+                "version": "1.3.4",
+                "scripts": { "test": "node test.js" },
+                "scripts": { "prepublish": "node build.js", "test": "node build/test.js" }
+            }"#,
+        )
+        .unwrap();
+
+        use utoo_ruborist::manifest::ScriptsView;
+        let view: ScriptsView = load_package_json(dir.path()).await.unwrap();
+        // Last value wins, matching JSON.parse semantics
+        assert_eq!(view.scripts.get("prepublish").unwrap(), "node build.js");
+        assert_eq!(view.scripts.get("test").unwrap(), "node build/test.js");
     }
 
     #[tokio::test]
