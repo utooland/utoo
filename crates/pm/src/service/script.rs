@@ -301,7 +301,7 @@ impl ScriptService {
     }
 
     fn build_path_env(bin_paths: &[PathBuf]) -> String {
-        let path_separator = ":";
+        let path_separator = if cfg!(windows) { ";" } else { ":" };
         let original_path = env::var("PATH").unwrap_or_default();
         let additional_paths = bin_paths
             .iter()
