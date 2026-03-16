@@ -28,9 +28,8 @@ cat "$ENTRY_DIR/package.json" | \
         print;
     }' > "$ENTRY_DIR/package.json.tmp" && mv "$ENTRY_DIR/package.json.tmp" "$ENTRY_DIR/package.json"
 
-# do copy postinstall.sh
-cp ../templates/postinstall.utoo.sh.template "$ENTRY_DIR/postinstall.sh"
-chmod +x "$ENTRY_DIR/postinstall.sh"
+# copy postinstall script (Node.js for cross-platform compatibility)
+cp ../templates/postinstall.js.template "$ENTRY_DIR/postinstall.js"
 
 # copy README.md from repository root
 cp ../../README.md "$ENTRY_DIR/README.md"
@@ -38,10 +37,10 @@ cp ../../README.md "$ENTRY_DIR/README.md"
 # create placeholder binaries
 mkdir -p "$ENTRY_DIR/bin"
 for binary in utoo ut; do
-    # Unix version
+    # Unix version (use /bin/sh for portability)
     cat > "$ENTRY_DIR/bin/$binary" << 'EOF'
-#!/bin/bash
-echo "This is a placeholder binary for $binary. The actual binary will be installed via postinstall script."
+#!/bin/sh
+echo "This is a placeholder binary. The actual binary will be installed via postinstall script."
 exit 1
 EOF
     chmod +x "$ENTRY_DIR/bin/$binary"
@@ -56,7 +55,7 @@ done
 
 # create utx shell script that executes utoo x
 cat > "$ENTRY_DIR/bin/utx" << 'EOF'
-#!/bin/bash
+#!/bin/sh
 utoo x "$@"
 EOF
 chmod +x "$ENTRY_DIR/bin/utx"
