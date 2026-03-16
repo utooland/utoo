@@ -381,8 +381,8 @@ elif [ "$OS_NAME" = "linux" ]; then
     BINDING="@rolldown/binding-linux-x64-gnu"
 fi
 
-if [ ! -d "node_modules/$BINDING" ]; then
-    echo -e "${RED}FAIL: Optional dependency $BINDING was NOT installed${NC}"
+if [ -z "$BINDING" ] || [ ! -d "node_modules/$BINDING" ]; then
+    echo -e "${RED}FAIL: Optional dependency check failed. Binding: '$BINDING' for $OS_NAME $ARCH_NAME${NC}"
     exit 1
 fi
 

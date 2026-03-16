@@ -208,9 +208,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "utoo install failed for rolldown test" }
 
     # Verify the Windows-specific binding was installed
-    $bindingPath = "node_modules/@rolldown/binding-win32-x64-msvc"
+    $nodeArch = (node -p "process.arch").Trim()
+    $bindingPath = "node_modules/@rolldown/binding-win32-$($nodeArch)-msvc"
     if (-not (Test-Path $bindingPath)) {
-        throw "Optional dependency @rolldown/binding-win32-x64-msvc was NOT installed"
+        throw "Optional dependency @rolldown/binding-win32-$($nodeArch)-msvc was NOT installed"
     }
 
     # Verify the binding actually works
