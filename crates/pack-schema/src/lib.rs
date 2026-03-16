@@ -6,7 +6,7 @@ use std::collections::HashMap;
 /// This represents the JSON config file structure, aligned with pack-core's `Config` struct.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ProjectOptions {
+pub struct CompleteConfig {
     /// Build mode (development, production)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Build mode")]
@@ -720,6 +720,8 @@ pub enum SchemaConfigConditionItem {
         )]
         content_type: Option<SchemaConfigConditionContentType>,
     },
+    /// Built-in condition (e.g., "server", "client", "edge")
+    Builtin(String),
 }
 
 /// Configuration condition path
@@ -907,9 +909,9 @@ pub struct SchemaExperimentalConfig {
 // Schema generation
 // ---------------------------------------------------------------------------
 
-/// Generate JSON Schema for ProjectOptions
+/// Generate JSON Schema for CompleteConfig
 pub fn generate_schema() -> serde_json::Value {
-    let schema = schema_for!(ProjectOptions);
+    let schema = schema_for!(CompleteConfig);
     serde_json::to_value(schema).unwrap()
 }
 
@@ -1036,7 +1038,7 @@ mod tests {
         }
         "#;
 
-        let config: ProjectOptions = serde_json::from_str(json).unwrap();
+        let config: CompleteConfig = serde_json::from_str(json).unwrap();
         assert!(config.entry.is_some());
         assert!(config.output.is_some());
         assert!(config.optimization.is_some());
@@ -1082,7 +1084,7 @@ mod tests {
           }
         }
         "#;
-        let config: ProjectOptions = serde_json::from_str(json_true).unwrap();
+        let config: CompleteConfig = serde_json::from_str(json_true).unwrap();
         let optimization = config.optimization.as_ref().unwrap();
         assert_eq!(optimization.concatenate_modules, Some(true));
 
@@ -1094,7 +1096,7 @@ mod tests {
           }
         }
         "#;
-        let config: ProjectOptions = serde_json::from_str(json_false).unwrap();
+        let config: CompleteConfig = serde_json::from_str(json_false).unwrap();
         let optimization = config.optimization.as_ref().unwrap();
         assert_eq!(optimization.concatenate_modules, Some(false));
 
@@ -1106,7 +1108,7 @@ mod tests {
           }
         }
         "#;
-        let config: ProjectOptions = serde_json::from_str(json_none).unwrap();
+        let config: CompleteConfig = serde_json::from_str(json_none).unwrap();
         let optimization = config.optimization.as_ref().unwrap();
         assert_eq!(optimization.concatenate_modules, None);
     }
@@ -1126,7 +1128,7 @@ mod tests {
           }
         }
         "#;
-        let config: ProjectOptions = serde_json::from_str(json).unwrap();
+        let config: CompleteConfig = serde_json::from_str(json).unwrap();
         let rules = config.module.as_ref().unwrap().rules.as_ref().unwrap();
 
         // Check full rule
@@ -1151,14 +1153,14 @@ mod tests {
     #[test]
     fn test_output_type_kebab_case() {
         let json = r#"{ "output": { "type": "standalone" } }"#;
-        let config: ProjectOptions = serde_json::from_str(json).unwrap();
+        let config: CompleteConfig = serde_json::from_str(json).unwrap();
         assert!(matches!(
             config.output.as_ref().unwrap().output_type,
             Some(SchemaOutputType::Standalone)
         ));
 
         let json = r#"{ "output": { "type": "export" } }"#;
-        let config: ProjectOptions = serde_json::from_str(json).unwrap();
+        let config: CompleteConfig = serde_json::from_str(json).unwrap();
         assert!(matches!(
             config.output.as_ref().unwrap().output_type,
             Some(SchemaOutputType::Export)
@@ -1176,7 +1178,7 @@ mod tests {
           }
         }
         "#;
-        let config: ProjectOptions = serde_json::from_str(json).unwrap();
+        let config: CompleteConfig = serde_json::from_str(json).unwrap();
         let plugins = config
             .experimental
             .as_ref()

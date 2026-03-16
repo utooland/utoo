@@ -158,8 +158,8 @@
         },
         {
           "featureLevel2": "`node`",
-          "featureStatus": "🟠",
-          "featureDetails": "",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `target` string](https://webpack.js.org/configuration/target/#string)",
           "remarks": ""
         }
       ]
@@ -424,17 +424,6 @@
       ]
     },
     {
-      "featureLevel1": "Lazy Compiling",
-      "children": [
-        {
-          "featureLevel2": "",
-          "featureStatus": "🟠",
-          "featureDetails": "",
-          "remarks": ""
-        }
-      ]
-    },
-    {
       "featureLevel1": "Webpack partially compatible mode",
       "children": [
         {
@@ -518,8 +507,8 @@
       "children": [
         {
           "featureLevel2": "",
-          "featureStatus": "🟠",
-          "featureDetails": "",
+          "featureStatus": "✅",
+          "featureDetails": "Enabled on dev",
           "remarks": ""
         }
       ]
