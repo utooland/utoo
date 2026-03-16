@@ -9,36 +9,13 @@ use parking_lot::RwLock;
 use wasm_bindgen::prelude::*;
 
 use crate::errors::to_js_error;
-use crate::pm;
+use crate::pm::{self, with_project, OPFS_PROJECT};
 use crate::tokio_runtime::init_tokio_runtime;
 
 #[cfg(feature = "utoopack")]
 use crate::pack::{self, RootTask};
 
 static GLOBAL_THREAD_URL: RwLock<Option<String>> = RwLock::new(None);
-
-/// Global OpfsProject instance, initialised the first time `Project::init` is called.
-pub(crate) static OPFS_PROJECT: RwLock<Option<opfs_project::OpfsProject>> = RwLock::new(None);
-
-/// Get a reference to the global OpfsProject for reading.
-///
-/// Panics if the project has not been initialised via `Project::init`.
-pub(crate) fn with_project<R>(f: impl FnOnce(&opfs_project::OpfsProject) -> R) -> R {
-    let guard = OPFS_PROJECT.read();
-    let project = guard
-        .as_ref()
-        .expect("OpfsProject not initialised — call Project.init() first");
-    f(project)
-}
-
-/// Get a mutable reference to the global OpfsProject.
-pub(crate) fn with_project_mut<R>(f: impl FnOnce(&mut opfs_project::OpfsProject) -> R) -> R {
-    let mut guard = OPFS_PROJECT.write();
-    let project = guard
-        .as_mut()
-        .expect("OpfsProject not initialised — call Project.init() first");
-    f(project)
-}
 
 #[wasm_bindgen]
 pub struct Project;

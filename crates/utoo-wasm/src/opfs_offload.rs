@@ -1,7 +1,7 @@
 use std::{io, path::Path};
 use tokio_fs_ext::{offload, watch, Metadata, ReadDir};
 
-use crate::project::{with_project, OPFS_PROJECT};
+use crate::pm::{with_project, OPFS_PROJECT};
 
 pub struct OpfsOffload;
 
@@ -51,7 +51,11 @@ impl offload::FsOffload for OpfsOffload {
     }
 
     async fn metadata(&self, path: impl AsRef<Path>) -> io::Result<Metadata> {
-        tokio_fs_ext::metadata(path).await
+        let guard = OPFS_PROJECT.read();
+        let project = guard
+            .as_ref()
+            .ok_or_else(|| io::Error::other("OpfsProject not initialised"))?;
+        project.metadata(path).await
     }
 
     async fn watch_dir(

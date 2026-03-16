@@ -9090,6 +9090,8 @@ dependencies = [
 [[package]]
 name = "tokio-fs-ext"
 version = "0.7.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db902ff0804cc7965a81fec91151b9c27ed3a489c217a5dc7a885064fb0c1571"
 dependencies = [
  "bitflags 2.9.4",
  "cfg-if",
@@ -12213,7 +12215,3 @@ checksum = "29ce2c8a9384ad323cf564b67da86e21d3cfdff87908bc1223ed5c99bc792713"
 dependencies = [
  "zune-core",
 ]
-
-[[patch.unused]]
-name = "opfs-project"
-version = "0.2.4"
