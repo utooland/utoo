@@ -10,7 +10,8 @@
       "alias": {
         "hello-a": "./input/a.ts",
         "@@/": "./input/",
-        "@/*": "./input/*"
+        "@/*": "./input/*",
+        "smallfish:runtime": "./input/runtime.ts"
       }
     },
     "optimization": {

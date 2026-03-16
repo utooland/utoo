@@ -5,14 +5,38 @@
 //! - Gzip archive creation
 //! - Dependency resolution
 //! - Package installation
+//! - Global OpfsProject instance management
 
 use anyhow::{anyhow, Result};
 use opfs_project::archive::PackFile;
+use parking_lot::RwLock;
 use std::path::Path;
 use wasm_bindgen::JsCast;
 
-use crate::project::{with_project, OPFS_PROJECT};
 use crate::tokio_runtime::{runtime, TOKIO_RUNTIME};
+
+/// Global OpfsProject instance, initialised the first time `Project::init` is called.
+pub(crate) static OPFS_PROJECT: RwLock<Option<opfs_project::OpfsProject>> = RwLock::new(None);
+
+/// Get a reference to the global OpfsProject for reading.
+///
+/// Panics if the project has not been initialised via `Project::init`.
+pub(crate) fn with_project<R>(f: impl FnOnce(&opfs_project::OpfsProject) -> R) -> R {
+    let guard = OPFS_PROJECT.read();
+    let project = guard
+        .as_ref()
+        .expect("OpfsProject not initialised — call Project.init() first");
+    f(project)
+}
+
+/// Get a mutable reference to the global OpfsProject.
+pub(crate) fn with_project_mut<R>(f: impl FnOnce(&mut opfs_project::OpfsProject) -> R) -> R {
+    let mut guard = OPFS_PROJECT.write();
+    let project = guard
+        .as_mut()
+        .expect("OpfsProject not initialised — call Project.init() first");
+    f(project)
+}
 
 /// Calculate MD5 hash of byte content
 pub async fn sig_md5(content: Vec<u8>) -> Result<String> {
@@ -59,6 +83,7 @@ pub async fn gzip(files: wasm_bindgen::JsValue) -> Result<Vec<u8>> {
 /// Generate package-lock.json by resolving dependencies
 pub async fn deps(registry: Option<&str>, concurrency: Option<usize>) -> Result<String> {
     let cwd = with_project(|p| p.cwd().to_path_buf());
+
     let package_lock =
         crate::deps::build_deps_from_file(Path::new(&cwd), registry, concurrency).await?;
 
