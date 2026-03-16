@@ -392,4 +392,58 @@ echo -e "${GREEN}PASS: optional dependencies with platform bindings work correct
 popd
 rm -rf "$OPTDEPS_DIR"
 
+# Case: Verify npm pack + npm install -g works (simulates setup-utoo flow)
+echo -e "${YELLOW}Case: npm pack and install -g utoo${NC}"
+PACK_DIR=$(mktemp -d)
+INSTALL_PREFIX=$(mktemp -d)
+REPO_ROOT=$(cd "$(dirname "$0")/.."; pwd)
+
+pushd "$PACK_DIR"
+
+# Build a utoo npm package using the vendor templates
+mkdir -p pkg/bin
+# Use the actual built binary from the e2e environment
+UTOO_BIN=$(which utoo)
+cp "$UTOO_BIN" pkg/bin/utoo
+chmod +x pkg/bin/utoo
+
+# Create package.json
+cat > pkg/package.json << 'PKGJSON'
+{
+  "name": "utoo",
+  "version": "0.0.0-e2e-test",
+  "bin": { "utoo": "bin/utoo", "ut": "bin/utoo" },
+  "scripts": { "postinstall": "echo postinstall-ok" }
+}
+PKGJSON
+
+# Pack it
+cd pkg
+npm pack 2>&1
+TARBALL=$(ls utoo-*.tgz)
+echo "Packed: $TARBALL"
+
+# Install globally to a temp prefix
+npm install -g "$TARBALL" --prefix="$INSTALL_PREFIX" 2>&1
+echo "Installed to: $INSTALL_PREFIX"
+
+# Verify the binary works
+INSTALLED_UTOO="$INSTALL_PREFIX/bin/utoo"
+if [ ! -f "$INSTALLED_UTOO" ]; then
+    # Try lib path on some systems
+    INSTALLED_UTOO="$INSTALL_PREFIX/lib/node_modules/utoo/bin/utoo"
+fi
+
+if [ ! -f "$INSTALLED_UTOO" ]; then
+    echo -e "${RED}FAIL: utoo binary not found after npm install -g${NC}"
+    ls -R "$INSTALL_PREFIX" 2>/dev/null | head -20
+    exit 1
+fi
+
+"$INSTALLED_UTOO" --version
+echo -e "${GREEN}PASS: npm pack + install -g works correctly${NC}"
+
+popd
+rm -rf "$PACK_DIR" "$INSTALL_PREFIX"
+
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"

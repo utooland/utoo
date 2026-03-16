@@ -224,4 +224,54 @@ finally {
     Remove-Item -Recurse -Force $optDepsDir -ErrorAction SilentlyContinue
 }
 
+# Case: Verify npm pack + npm install -g works (simulates setup-utoo flow)
+Write-Yellow "Case: npm pack and install -g utoo"
+$packDir = Join-Path $env:TEMP "utoo-e2e-pack-$(Get-Random)"
+$installPrefix = Join-Path $env:TEMP "utoo-e2e-prefix-$(Get-Random)"
+try {
+    New-Item -ItemType Directory -Path "$packDir\pkg\bin" -Force | Out-Null
+    New-Item -ItemType Directory -Path $installPrefix -Force | Out-Null
+
+    # Copy the actual built binary
+    $utooBin = (Get-Command utoo).Source
+    Copy-Item $utooBin "$packDir\pkg\bin\utoo.exe"
+
+    # Create package.json
+    @{
+        name = "utoo"
+        version = "0.0.0-e2e-test"
+        bin = @{ utoo = "bin/utoo"; ut = "bin/utoo" }
+        scripts = @{ postinstall = "echo postinstall-ok" }
+    } | ConvertTo-Json | Set-Content "$packDir\pkg\package.json"
+
+    # Pack
+    Push-Location "$packDir\pkg"
+    npm pack 2>&1
+    $tarball = Get-ChildItem "utoo-*.tgz" | Select-Object -First 1
+    Write-Host "Packed: $($tarball.Name)"
+
+    # Install globally to temp prefix
+    npm install -g $tarball.FullName "--prefix=$installPrefix" 2>&1
+    Write-Host "Installed to: $installPrefix"
+
+    # Verify the binary works
+    $installedUtoo = Join-Path $installPrefix "node_modules\utoo\bin\utoo.exe"
+    if (-not (Test-Path $installedUtoo)) {
+        $installedUtoo = Join-Path $installPrefix "utoo.exe"
+    }
+    if (-not (Test-Path $installedUtoo)) {
+        throw "utoo binary not found after npm install -g"
+    }
+
+    & $installedUtoo --version
+    if ($LASTEXITCODE -ne 0) { throw "utoo --version failed" }
+
+    Write-Green "PASS: npm pack + install -g works correctly"
+}
+finally {
+    Pop-Location
+    Remove-Item -Recurse -Force $packDir -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force $installPrefix -ErrorAction SilentlyContinue
+}
+
 Write-Green "All e2e tests passed successfully!"
