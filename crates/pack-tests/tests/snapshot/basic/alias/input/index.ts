@@ -6,6 +6,12 @@ import { a as browserslistA } from 'browserslist';
 import style from '@/index.less';
 import { a } from '@/a?query';
 import { output } from '../../../output';
+import { runtime } from 'smallfish:runtime';
+import { notFound } from './x';
+
+notFound;
+
+runtime;
 
 output;
 
