@@ -242,7 +242,7 @@ pub async fn init_pack_project(dev: bool) -> Result<()> {
     // Drop the old project
     GLOBAL_PACK_PROJECT.write().take();
 
-    let cwd = crate::project::with_project(|p| p.cwd().to_string_lossy().to_string());
+    let cwd = crate::pm::with_project(|p| p.cwd().to_string_lossy().to_string());
     let project_root = if cwd.starts_with('/') {
         cwd
     } else {
@@ -276,6 +276,7 @@ pub async fn init_pack_project(dev: bool) -> Result<()> {
         build_id: project_path.clone(),
         watch: WatchOptions {
             enable: true,
+            ignored: vec![],
             ..Default::default()
         },
         dev,

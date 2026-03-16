@@ -11,7 +11,7 @@ use utoo_ruborist::service::Glob;
 use wasm_bindgen::prelude::*;
 
 use crate::errors::to_js_error;
-use crate::project::OPFS_PROJECT;
+use crate::pm::OPFS_PROJECT;
 use crate::tokio_runtime::runtime;
 
 /// OPFS-backed glob implementation.
