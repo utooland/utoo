@@ -8,6 +8,7 @@ use std::env::consts::{ARCH, OS};
 fn normalize_os(os: &str) -> String {
     match os.to_lowercase().as_str() {
         "darwin" | "macos" => "macos".to_string(),
+        "win32" | "windows" => "win32".to_string(),
         other => other.to_string(),
     }
 }

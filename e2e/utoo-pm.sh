@@ -350,4 +350,106 @@ echo -e "${GREEN}PASS: scoped alias names @myorg/utils -> lodash, @myorg/types -
 echo -e "${GREEN}PASS: npm alias install successful${NC}"
 cd ../../..
 
+# Case: Verify optional dependencies with platform-specific binaries (rolldown)
+echo -e "${YELLOW}Case: Verify optional dependencies (rolldown binding)${NC}"
+OPTDEPS_DIR=$(mktemp -d)
+pushd "$OPTDEPS_DIR"
+
+cat > package.json << 'PKGJSON'
+{
+  "name": "test-optional-deps",
+  "version": "1.0.0",
+  "dependencies": {
+    "rolldown": "1.0.0-beta.57"
+  }
+}
+PKGJSON
+
+echo "Installing rolldown (has platform-specific optional binding)..."
+utoo install --registry=https://registry.npmjs.org
+
+# Verify the platform-specific binding was installed
+OS_NAME=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH_NAME=$(uname -m)
+if [ "$OS_NAME" = "darwin" ]; then
+    if [ "$ARCH_NAME" = "arm64" ] || [ "$ARCH_NAME" = "aarch64" ]; then
+        BINDING="@rolldown/binding-darwin-arm64"
+    else
+        BINDING="@rolldown/binding-darwin-x64"
+    fi
+elif [ "$OS_NAME" = "linux" ]; then
+    BINDING="@rolldown/binding-linux-x64-gnu"
+fi
+
+if [ -z "$BINDING" ] || [ ! -d "node_modules/$BINDING" ]; then
+    echo -e "${RED}FAIL: Optional dependency check failed. Binding: '$BINDING' for $OS_NAME $ARCH_NAME${NC}"
+    exit 1
+fi
+
+node -e "require('rolldown'); console.log('rolldown loaded successfully')"
+echo -e "${GREEN}PASS: optional dependencies with platform bindings work correctly${NC}"
+
+popd
+rm -rf "$OPTDEPS_DIR"
+
+# Case: Verify npm pack + npm install -g works (simulates setup-utoo flow)
+echo -e "${YELLOW}Case: npm pack and install -g utoo${NC}"
+PACK_DIR=$(mktemp -d)
+INSTALL_PREFIX=$(mktemp -d)
+REPO_ROOT=$(cd "$(dirname "$0")/.."; pwd)
+
+pushd "$PACK_DIR"
+
+# Build a utoo npm package using the vendor templates
+mkdir -p pkg/bin
+# Use the actual built binary from the e2e environment
+UTOO_BIN=$(which utoo)
+cp "$UTOO_BIN" pkg/bin/utoo
+chmod +x pkg/bin/utoo
+
+# Create package.json
+cat > pkg/package.json << 'PKGJSON'
+{
+  "name": "utoo",
+  "version": "0.0.0-e2e-test",
+  "bin": { "utoo": "bin/utoo", "ut": "bin/utoo" },
+  "scripts": { "postinstall": "echo postinstall-ok" }
+}
+PKGJSON
+
+# Pack it
+cd pkg
+npm pack 2>&1
+TARBALL=$(ls utoo-*.tgz)
+echo "Packed: $TARBALL"
+
+# Install globally to a temp prefix
+npm install -g "$TARBALL" --prefix="$INSTALL_PREFIX" 2>&1
+echo "Installed to: $INSTALL_PREFIX"
+
+# Verify the binary works
+INSTALLED_UTOO="$INSTALL_PREFIX/bin/utoo"
+if [ ! -f "$INSTALLED_UTOO" ]; then
+    # Try lib path on some systems
+    INSTALLED_UTOO="$INSTALL_PREFIX/lib/node_modules/utoo/bin/utoo"
+fi
+
+if [ ! -f "$INSTALLED_UTOO" ]; then
+    echo -e "${RED}FAIL: utoo binary not found after npm install -g${NC}"
+    ls -R "$INSTALL_PREFIX" 2>/dev/null | head -20
+    exit 1
+fi
+
+# Verify it's not a placeholder
+if head -1 "$INSTALLED_UTOO" | grep -q "placeholder"; then
+    echo -e "${RED}FAIL: installed binary is still a placeholder${NC}"
+    exit 1
+fi
+
+"$INSTALLED_UTOO" --version
+echo -e "${GREEN}PASS: npm pack + install -g works correctly${NC}"
+
+popd
+rm -rf "$PACK_DIR" "$INSTALL_PREFIX"
+
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"

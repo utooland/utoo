@@ -187,4 +187,107 @@ finally {
     Pop-Location
 }
 
+# Case: Verify optional dependencies with platform-specific binaries (rolldown)
+Write-Yellow "Case: Verify optional dependencies (rolldown binding)"
+$optDepsDir = Join-Path $env:TEMP "utoo-e2e-optdeps-$(Get-Random)"
+try {
+    New-Item -ItemType Directory -Path $optDepsDir -Force | Out-Null
+    Push-Location $optDepsDir
+
+    # Create a minimal project that depends on rolldown
+    @{
+        name = "test-optional-deps"
+        version = "1.0.0"
+        dependencies = @{
+            rolldown = "1.0.0-beta.57"
+        }
+    } | ConvertTo-Json | Set-Content "package.json"
+
+    Write-Host "Installing rolldown (has win32-x64 optional binding)..."
+    utoo install --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "utoo install failed for rolldown test" }
+
+    # Verify the Windows-specific binding was installed
+    $nodeArch = (node -p "process.arch").Trim()
+    $bindingPath = "node_modules/@rolldown/binding-win32-$($nodeArch)-msvc"
+    if (-not (Test-Path $bindingPath)) {
+        throw "Optional dependency @rolldown/binding-win32-$($nodeArch)-msvc was NOT installed"
+    }
+
+    # Verify the binding actually works
+    node -e "require('rolldown'); console.log('rolldown loaded successfully')"
+    if ($LASTEXITCODE -ne 0) { throw "rolldown failed to load (binding may be broken)" }
+
+    Write-Green "PASS: optional dependencies with platform bindings work correctly"
+}
+finally {
+    Pop-Location
+    Remove-Item -Recurse -Force $optDepsDir -ErrorAction SilentlyContinue
+}
+
+# Case: Verify npm pack + npm install -g works (simulates setup-utoo flow)
+Write-Yellow "Case: npm pack and install -g utoo"
+$packDir = Join-Path $env:TEMP "utoo-e2e-pack-$(Get-Random)"
+$installPrefix = Join-Path $env:TEMP "utoo-e2e-prefix-$(Get-Random)"
+try {
+    New-Item -ItemType Directory -Path "$packDir\pkg\bin" -Force | Out-Null
+    New-Item -ItemType Directory -Path $installPrefix -Force | Out-Null
+
+    # Copy the actual built binary
+    $utooBin = (Get-Command utoo).Source
+    Copy-Item $utooBin "$packDir\pkg\bin\utoo.exe"
+
+    # Create package.json
+    @{
+        name = "utoo"
+        version = "0.0.0-e2e-test"
+        bin = @{ utoo = "bin/utoo"; ut = "bin/utoo" }
+        scripts = @{ postinstall = "echo postinstall-ok" }
+    } | ConvertTo-Json | Set-Content "$packDir\pkg\package.json"
+
+    # Pack
+    Push-Location "$packDir\pkg"
+    npm pack 2>&1
+    $tarball = Get-ChildItem "utoo-*.tgz" | Select-Object -First 1
+    Write-Host "Packed: $($tarball.Name)"
+
+    # Install globally to temp prefix
+    npm install -g $tarball.FullName "--prefix=$installPrefix" 2>&1
+    Write-Host "Installed to: $installPrefix"
+
+    # Verify the binary exists in the package dir (not the npm shim)
+    $candidatePaths = @(
+        (Join-Path $installPrefix "node_modules\utoo\bin\utoo.exe"),
+        (Join-Path $installPrefix "node_modules\utoo\bin\utoo")
+    )
+    $installedUtoo = $null
+    foreach ($p in $candidatePaths) {
+        if (Test-Path $p) { $installedUtoo = $p; break }
+    }
+    if (-not $installedUtoo) {
+        Write-Host "Contents of install prefix:"
+        Get-ChildItem -Recurse $installPrefix | Select-Object FullName | Format-Table
+        throw "utoo binary not found after npm install -g"
+    }
+
+    Write-Host "Found binary at: $installedUtoo"
+
+    # Verify it's not a placeholder (read first bytes, not text)
+    $bytes = [System.IO.File]::ReadAllBytes($installedUtoo)
+    $header = [System.Text.Encoding]::ASCII.GetString($bytes, 0, [Math]::Min(100, $bytes.Length))
+    if ($header.Contains("placeholder")) {
+        throw "installed binary is still a placeholder"
+    }
+
+    & $installedUtoo --version
+    if ($LASTEXITCODE -ne 0) { throw "utoo --version failed" }
+
+    Write-Green "PASS: npm pack + install -g works correctly"
+}
+finally {
+    Pop-Location
+    Remove-Item -Recurse -Force $packDir -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force $installPrefix -ErrorAction SilentlyContinue
+}
+
 Write-Green "All e2e tests passed successfully!"
