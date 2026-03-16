@@ -2,43 +2,11 @@ use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Top-level project options configuration
-/// This represents the root structure of utoopack.json
+/// Top-level configuration for utoopack.json
+/// This represents the JSON config file structure, aligned with pack-core's `Config` struct.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectOptions {
-    /// A root path from which all files must be nested under.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub root_path: Option<String>,
-
-    /// A path inside the root_path which contains the app directories.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub project_path: Option<String>,
-
-    /// A map of environment variables to use when compiling code.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub process_env: Option<HashMap<String, String>>,
-
-    /// Whether to run in development mode
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dev: Option<bool>,
-
-    /// The build id.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub build_id: Option<String>,
-
-    /// Absolute path for @utoo/pack
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pack_path: Option<String>,
-
-    /// Filesystem watcher options.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub watch: Option<SchemaWatchOptions>,
-
-    /// A map of environment variables which should get injected at compile time.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub define_env: Option<SchemaDefineEnv>,
-
     /// Build mode (development, production)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Build mode")]
@@ -69,7 +37,7 @@ pub struct ProjectOptions {
     #[schemars(description = "Output configuration")]
     pub output: Option<SchemaOutputConfig>,
 
-    /// Target environment (e.g., \"web\", \"node\")
+    /// Target environment (e.g., "web", "node", or a browserslist query)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Target environment")]
     pub target: Option<String>,
@@ -84,6 +52,12 @@ pub struct ProjectOptions {
     #[schemars(description = "Define variables for build-time replacement")]
     pub define: Option<HashMap<String, serde_json::Value>>,
 
+    /// Provider (ProvidePlugin-style) configuration.
+    /// Maps free variable names to module specifiers or [module, export] pairs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Provider (ProvidePlugin) configuration")]
+    pub provider: Option<HashMap<String, SchemaProviderConfigValue>>,
+
     /// Image processing configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Image processing configuration")]
@@ -94,15 +68,20 @@ pub struct ProjectOptions {
     #[schemars(description = "Style processing configuration")]
     pub styles: Option<SchemaStyleConfig>,
 
+    /// React configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "React configuration")]
+    pub react: Option<SchemaReactConfig>,
+
     /// Build optimization settings
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Build optimization settings")]
     pub optimization: Option<SchemaOptimizationConfig>,
 
-    /// Experimental features
+    /// Enable build statistics
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Experimental features")]
-    pub experimental: Option<SchemaExperimentalConfig>,
+    #[schemars(description = "Enable build statistics")]
+    pub stats: Option<bool>,
 
     /// Enable persistent caching
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -119,57 +98,54 @@ pub struct ProjectOptions {
     #[schemars(description = "Enable Node.js polyfills for browser builds")]
     pub node_polyfill: Option<bool>,
 
-    /// Enable build statistics
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Enable build statistics")]
-    pub stats: Option<bool>,
-
     /// Development server configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Development server configuration")]
     pub dev_server: Option<SchemaDevServer>,
+
+    /// Experimental features
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Experimental features")]
+    pub experimental: Option<SchemaExperimentalConfig>,
 }
 
-/// Filesystem watcher options
+// ---------------------------------------------------------------------------
+// Provider
+// ---------------------------------------------------------------------------
+
+/// Provider configuration value.
+/// Can be a simple module name string or a [module, export] tuple.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SchemaProviderConfigValue {
+    /// Simple module import, e.g. "jquery"
+    Module(String),
+    /// Named export import, e.g. ["buffer", "Buffer"]
+    NamedExport(Vec<String>),
+}
+
+// ---------------------------------------------------------------------------
+// React
+// ---------------------------------------------------------------------------
+
+/// React configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct SchemaWatchOptions {
-    /// Whether to watch the filesystem for file changes.
-    pub enable: bool,
-
-    /// Enable polling at a certain interval if the native file watching doesn't work (e.g. docker).
+pub struct SchemaReactConfig {
+    /// JSX runtime to use ("automatic" or "classic")
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub poll_interval: Option<u64>,
+    #[schemars(description = "JSX runtime to use (automatic or classic)")]
+    pub runtime: Option<String>,
 
-    /// Paths to ignore when watching for file changes.
-    /// By default, ignores: node_modules
+    /// Custom JSX import source (e.g. "@emotion/react")
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ignored: Option<Vec<String>>,
+    #[schemars(description = "Custom JSX import source")]
+    pub import_source: Option<String>,
 }
 
-/// Environment variables for build-time injection
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SchemaDefineEnv {
-    /// Client-side environment variables
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub client: Option<Vec<SchemaEnvVar>>,
-    /// Edge-side environment variables
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub edge: Option<Vec<SchemaEnvVar>>,
-    /// Node.js environment variables
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nodejs: Option<Vec<SchemaEnvVar>>,
-}
-
-/// Environment variable pair
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct SchemaEnvVar {
-    /// Variable name
-    pub name: String,
-    /// Variable value
-    pub value: String,
-}
+// ---------------------------------------------------------------------------
+// Development server
+// ---------------------------------------------------------------------------
 
 /// Development server configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -179,6 +155,10 @@ pub struct SchemaDevServer {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hot: Option<bool>,
 }
+
+// ---------------------------------------------------------------------------
+// Entry
+// ---------------------------------------------------------------------------
 
 /// Entry point configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -252,6 +232,10 @@ pub struct SchemaLibraryOptions {
     pub export: Option<Vec<String>>,
 }
 
+// ---------------------------------------------------------------------------
+// Output
+// ---------------------------------------------------------------------------
+
 /// Copy item configuration
 /// Can be either a string (source path) or an object with from and optional to
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -283,15 +267,30 @@ pub struct SchemaOutputConfig {
     #[schemars(description = "Output directory path")]
     pub path: Option<String>,
 
-    /// Filename pattern for main files
+    /// Filename pattern for main JS files
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Filename pattern for main files")]
+    #[schemars(description = "Filename pattern for main JS files")]
     pub filename: Option<String>,
 
-    /// Filename pattern for chunk files
+    /// Filename pattern for JS chunk files
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Filename pattern for chunk files")]
+    #[schemars(description = "Filename pattern for JS chunk files")]
     pub chunk_filename: Option<String>,
+
+    /// Filename pattern for main CSS files
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Filename pattern for main CSS files")]
+    pub css_filename: Option<String>,
+
+    /// Filename pattern for CSS chunk files
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Filename pattern for CSS chunk files")]
+    pub css_chunk_filename: Option<String>,
+
+    /// Filename pattern for asset modules (images, fonts, etc.)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Filename pattern for asset modules (images, fonts, etc.)")]
+    pub asset_module_filename: Option<String>,
 
     /// Output type
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
@@ -307,6 +306,14 @@ pub struct SchemaOutputConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Copy files configuration")]
     pub copy: Option<Vec<SchemaCopyItem>>,
+
+    /// URL prefix prepended to all chunk and asset URLs when loading them.
+    /// Examples: "/", "/assets/", "https://cdn.example.com/", "runtime"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "URL prefix prepended to all chunk and asset URLs. Use 'runtime' for runtime-resolved public path."
+    )]
+    pub public_path: Option<String>,
 
     /// The global variable name used by the runtime for loading chunks.
     /// This is similar to webpack's `output.chunkLoadingGlobal`.
@@ -327,12 +334,15 @@ pub struct SchemaOutputConfig {
 
 /// Output type
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
 pub enum SchemaOutputType {
-    #[serde(rename = "standalone")]
     Standalone,
-    #[serde(rename = "export")]
     Export,
 }
+
+// ---------------------------------------------------------------------------
+// Optimization
+// ---------------------------------------------------------------------------
 
 /// Optimization configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -363,6 +373,11 @@ pub struct SchemaOptimizationConfig {
     #[schemars(description = "Packages to optimize imports for")]
     pub package_imports: Option<Vec<String>>,
 
+    /// Modularize imports configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Modularize imports configuration")]
+    pub modularize_imports: Option<HashMap<String, SchemaModularizeImportPackageConfig>>,
+
     /// Packages to transpile
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Packages to transpile")]
@@ -378,11 +393,6 @@ pub struct SchemaOptimizationConfig {
     #[schemars(description = "Split chunks configuration")]
     pub split_chunks: Option<HashMap<String, SchemaSplitChunkConfig>>,
 
-    /// Modularize imports configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Modularize imports configuration")]
-    pub modularize_imports: Option<HashMap<String, SchemaModularizeImportPackageConfig>>,
-
     /// Whether to concatenate modules when possible to reduce the number of chunks
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
@@ -390,23 +400,31 @@ pub struct SchemaOptimizationConfig {
     )]
     pub concatenate_modules: Option<bool>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(
-        description = "Whether to bunle wasm as asset. Defaults to false. When false, WASM files will be output as static assets."
-    )]
-    pub wasm_as_asset: Option<bool>,
-
     /// Whether to remove unused exports
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Whether to remove unused exports. Defaults to false in development, true in production."
+    )]
     pub remove_unused_exports: Option<bool>,
 
     /// Whether to remove unused imports
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Whether to remove unused imports. Defaults to false in development, true in production."
+    )]
     pub remove_unused_imports: Option<bool>,
 
     /// Whether to enable nested async chunking
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Whether to enable nested async chunking")]
     pub nested_async_chunking: Option<bool>,
+
+    /// Whether to bundle WASM as asset
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Whether to bundle WASM as asset. Defaults to false. When false, WASM files will be output as static assets."
+    )]
+    pub wasm_as_asset: Option<bool>,
 }
 
 /// Module ID generation strategy
@@ -501,11 +519,15 @@ pub use pack_core::config::{
     default_max_chunk_count_per_group, default_max_merge_chunk_size, default_min_chunk_size,
 };
 
+// ---------------------------------------------------------------------------
+// Externals
+// ---------------------------------------------------------------------------
+
 /// External dependency configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum SchemaExternalConfig {
-    /// Simple string external (e.g., \"react\" -> \"React\")
+    /// Simple string external (e.g., "react" -> "React")
     Basic(String),
     /// UMD external configuration
     Umd(SchemaExternalUmd),
@@ -605,18 +627,17 @@ pub struct SchemaExternalUmd {
     pub commonjs: Option<String>,
 }
 
+// ---------------------------------------------------------------------------
+// Module / Loaders
+// ---------------------------------------------------------------------------
+
 /// Module configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SchemaModuleConfig {
-    /// Module rules configuration
+    /// Module rules configuration — keyed by glob pattern (e.g. "*.svg")
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Module rules configuration")]
     pub rules: Option<HashMap<String, SchemaModuleRule>>,
-
-    /// Module conditions configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Module conditions configuration")]
-    pub conditions: Option<HashMap<String, SchemaConfigConditionItem>>,
 }
 
 /// Module rule configuration
@@ -626,7 +647,7 @@ pub enum SchemaModuleRule {
     /// Shorthand for a single loader
     Shorthand(String),
     /// Full rule configuration
-    Full(SchemaRuleConfigItem),
+    Full(Box<SchemaRuleConfigItem>),
     /// Multiple rule configurations
     Array(Vec<SchemaModuleRuleItem>),
 }
@@ -638,7 +659,7 @@ pub enum SchemaModuleRuleItem {
     /// Shorthand for a single loader
     Shorthand(String),
     /// Full rule configuration
-    Full(SchemaRuleConfigItem),
+    Full(Box<SchemaRuleConfigItem>),
 }
 
 /// Full module rule configuration
@@ -665,13 +686,40 @@ pub enum SchemaLoaderItem {
     LoaderOptions(serde_json::Value),
 }
 
-/// Configuration condition item
+// ---------------------------------------------------------------------------
+// Conditions
+// ---------------------------------------------------------------------------
+
+/// Configuration condition item — supports compound conditions (all/any/not)
+/// and base conditions with path, content, query, and contentType matchers.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SchemaConfigConditionItem {
-    /// Condition path configuration
-    #[schemars(description = "Condition path configuration")]
-    pub path: SchemaConfigConditionPath,
+#[serde(untagged)]
+pub enum SchemaConfigConditionItem {
+    /// All conditions must match
+    All { all: Vec<SchemaConfigConditionItem> },
+    /// Any condition must match
+    Any { any: Vec<SchemaConfigConditionItem> },
+    /// Negate a condition
+    Not { not: Box<SchemaConfigConditionItem> },
+    /// Base condition with path/content/query/contentType matchers
+    Base {
+        /// Path condition
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<SchemaConfigConditionPath>,
+        /// Content regex
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        content: Option<SchemaRegexComponents>,
+        /// Query condition
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        query: Option<SchemaConfigConditionQuery>,
+        /// Content type condition
+        #[serde(
+            default,
+            rename = "contentType",
+            skip_serializing_if = "Option::is_none"
+        )]
+        content_type: Option<SchemaConfigConditionContentType>,
+    },
 }
 
 /// Configuration condition path
@@ -686,6 +734,30 @@ pub enum SchemaConfigConditionPath {
     Regex(SchemaRegexComponents),
 }
 
+/// Configuration condition for query strings
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", content = "value", rename_all = "camelCase")]
+pub enum SchemaConfigConditionQuery {
+    /// Constant string match
+    #[schemars(description = "Constant string match for query")]
+    Constant(String),
+    /// Regex match
+    #[schemars(description = "Regex match for query")]
+    Regex(SchemaRegexComponents),
+}
+
+/// Configuration condition for content type
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", content = "value", rename_all = "camelCase")]
+pub enum SchemaConfigConditionContentType {
+    /// Glob pattern
+    #[schemars(description = "Glob pattern for content type matching")]
+    Glob(String),
+    /// Regex match
+    #[schemars(description = "Regex match for content type")]
+    Regex(SchemaRegexComponents),
+}
+
 /// Regular expression components
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -697,6 +769,10 @@ pub struct SchemaRegexComponents {
     #[schemars(description = "Regular expression flags")]
     pub flags: String,
 }
+
+// ---------------------------------------------------------------------------
+// Resolve
+// ---------------------------------------------------------------------------
 
 /// Resolve configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -715,6 +791,10 @@ pub struct SchemaResolveConfig {
     pub resolve_extensions: Option<Vec<String>>,
 }
 
+// ---------------------------------------------------------------------------
+// Image
+// ---------------------------------------------------------------------------
+
 /// Image configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -724,6 +804,10 @@ pub struct SchemaImageConfig {
     #[schemars(description = "Inline limit for images in bytes")]
     pub inline_limit: Option<u64>,
 }
+
+// ---------------------------------------------------------------------------
+// Style
+// ---------------------------------------------------------------------------
 
 /// Style configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -760,19 +844,18 @@ pub struct SchemaStyleConfig {
     pub inline_css: Option<serde_json::Value>,
 }
 
+// ---------------------------------------------------------------------------
+// Experimental
+// ---------------------------------------------------------------------------
+
 /// Experimental features configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SchemaExperimentalConfig {
-    /// SWC plugins
+    /// SWC plugins — each element is a [plugin_path, plugin_options] tuple
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "SWC plugins")]
-    pub swc_plugins: Option<Vec<serde_json::Value>>,
-
-    /// MDX-RS options
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "MDX-RS options")]
-    pub mdx_rs: Option<serde_json::Value>,
+    #[schemars(description = "SWC plugins as [path, options] tuples")]
+    pub swc_plugins: Option<Vec<(String, serde_json::Value)>>,
 
     /// Dynamic IO
     #[serde(rename = "dynamicIO", skip_serializing_if = "Option::is_none")]
@@ -820,6 +903,10 @@ pub struct SchemaExperimentalConfig {
     pub server_actions: Option<serde_json::Value>,
 }
 
+// ---------------------------------------------------------------------------
+// Schema generation
+// ---------------------------------------------------------------------------
+
 /// Generate JSON Schema for ProjectOptions
 pub fn generate_schema() -> serde_json::Value {
     let schema = schema_for!(ProjectOptions);
@@ -853,15 +940,16 @@ mod tests {
         let schema_str = serde_json::to_string(&schema).unwrap();
 
         // Check for key configuration fields
-        assert!(schema_str.contains("rootPath"));
-        assert!(schema_str.contains("projectPath"));
         assert!(schema_str.contains("entry"));
         assert!(schema_str.contains("externals"));
         assert!(schema_str.contains("optimization"));
         assert!(schema_str.contains("concatenateModules"));
-        assert!(schema_str.contains("watch"));
-        assert!(schema_str.contains("defineEnv"));
         assert!(schema_str.contains("html"));
+        assert!(schema_str.contains("react"));
+        assert!(schema_str.contains("provider"));
+        assert!(schema_str.contains("publicPath"));
+        assert!(schema_str.contains("cssFilename"));
+        assert!(schema_str.contains("assetModuleFilename"));
     }
 
     #[test]
@@ -914,20 +1002,20 @@ mod tests {
 
     #[test]
     fn test_deserialize_complete_example() {
-        // Test the complete project options configuration
+        // Test the complete project options configuration (config-level fields only)
         let json = r#"
         {
-          "rootPath": "../../",
-          "projectPath": "./",
           "entry": [
             {
-              "import": "./index.js"       
+              "import": "./index.js"
             }
           ],
           "output": {
             "path": "./dist",
             "filename": "[name].[contenthash:6].js",
             "chunkFilename": "[name].[contenthash:8].js",
+            "cssFilename": "[name].[contenthash:6].css",
+            "publicPath": "/assets/",
             "clean": true
           },
           "optimization": {
@@ -937,21 +1025,51 @@ mod tests {
           },
           "externals": {
             "foo": "bar"
+          },
+          "react": {
+            "runtime": "automatic"
+          },
+          "provider": {
+            "$": "jquery",
+            "Buffer": ["buffer", "Buffer"]
           }
         }
         "#;
 
         let config: ProjectOptions = serde_json::from_str(json).unwrap();
-        assert_eq!(config.root_path, Some("../../".to_string()));
-        assert_eq!(config.project_path, Some("./".to_string()));
         assert!(config.entry.is_some());
         assert!(config.output.is_some());
         assert!(config.optimization.is_some());
         assert!(config.externals.is_some());
+        assert!(config.react.is_some());
+        assert!(config.provider.is_some());
+
+        // Test output fields
+        let output = config.output.as_ref().unwrap();
+        assert_eq!(
+            output.css_filename,
+            Some("[name].[contenthash:6].css".to_string())
+        );
+        assert_eq!(output.public_path, Some("/assets/".to_string()));
 
         // Test concatenateModules configuration
         let optimization = config.optimization.as_ref().unwrap();
         assert_eq!(optimization.concatenate_modules, Some(true));
+
+        // Test react config
+        let react = config.react.as_ref().unwrap();
+        assert_eq!(react.runtime, Some("automatic".to_string()));
+
+        // Test provider config
+        let provider = config.provider.as_ref().unwrap();
+        assert!(matches!(
+            provider.get("$"),
+            Some(SchemaProviderConfigValue::Module(m)) if m == "jquery"
+        ));
+        assert!(matches!(
+            provider.get("Buffer"),
+            Some(SchemaProviderConfigValue::NamedExport(v)) if v == &["buffer", "Buffer"]
+        ));
     }
 
     #[test]
@@ -1014,6 +1132,7 @@ mod tests {
         // Check full rule
         let txt_rule = rules.get("*.txt").unwrap();
         if let SchemaModuleRule::Full(full) = txt_rule {
+            let full = full.as_ref();
             assert_eq!(full.rename_as, Some("*.js".to_string()));
             assert_eq!(full.loaders.len(), 1);
         } else {
@@ -1027,5 +1146,45 @@ mod tests {
         } else {
             panic!("Expected Shorthand rule for *.svg");
         }
+    }
+
+    #[test]
+    fn test_output_type_kebab_case() {
+        let json = r#"{ "output": { "type": "standalone" } }"#;
+        let config: ProjectOptions = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            config.output.as_ref().unwrap().output_type,
+            Some(SchemaOutputType::Standalone)
+        ));
+
+        let json = r#"{ "output": { "type": "export" } }"#;
+        let config: ProjectOptions = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            config.output.as_ref().unwrap().output_type,
+            Some(SchemaOutputType::Export)
+        ));
+    }
+
+    #[test]
+    fn test_swc_plugins_tuple_format() {
+        let json = r#"
+        {
+          "experimental": {
+            "swcPlugins": [
+              ["@swc/plugin-emotion", {}]
+            ]
+          }
+        }
+        "#;
+        let config: ProjectOptions = serde_json::from_str(json).unwrap();
+        let plugins = config
+            .experimental
+            .as_ref()
+            .unwrap()
+            .swc_plugins
+            .as_ref()
+            .unwrap();
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].0, "@swc/plugin-emotion");
     }
 }
