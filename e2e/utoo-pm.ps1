@@ -187,4 +187,41 @@ finally {
     Pop-Location
 }
 
+# Case: Verify optional dependencies with platform-specific binaries (rolldown)
+Write-Yellow "Case: Verify optional dependencies (rolldown binding)"
+$optDepsDir = Join-Path $env:TEMP "utoo-e2e-optdeps-$(Get-Random)"
+try {
+    New-Item -ItemType Directory -Path $optDepsDir -Force | Out-Null
+    Push-Location $optDepsDir
+
+    # Create a minimal project that depends on rolldown
+    @{
+        name = "test-optional-deps"
+        version = "1.0.0"
+        dependencies = @{
+            rolldown = "1.0.0-beta.57"
+        }
+    } | ConvertTo-Json | Set-Content "package.json"
+
+    Write-Host "Installing rolldown (has win32-x64 optional binding)..."
+    utoo install --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "utoo install failed for rolldown test" }
+
+    # Verify the Windows-specific binding was installed
+    $bindingPath = "node_modules/@rolldown/binding-win32-x64-msvc"
+    if (-not (Test-Path $bindingPath)) {
+        throw "Optional dependency @rolldown/binding-win32-x64-msvc was NOT installed"
+    }
+
+    # Verify the binding actually works
+    node -e "require('rolldown'); console.log('rolldown loaded successfully')"
+    if ($LASTEXITCODE -ne 0) { throw "rolldown failed to load (binding may be broken)" }
+
+    Write-Green "PASS: optional dependencies with platform bindings work correctly"
+}
+finally {
+    Pop-Location
+    Remove-Item -Recurse -Force $optDepsDir -ErrorAction SilentlyContinue
+}
+
 Write-Green "All e2e tests passed successfully!"

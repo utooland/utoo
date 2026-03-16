@@ -350,4 +350,46 @@ echo -e "${GREEN}PASS: scoped alias names @myorg/utils -> lodash, @myorg/types -
 echo -e "${GREEN}PASS: npm alias install successful${NC}"
 cd ../../..
 
+# Case: Verify optional dependencies with platform-specific binaries (rolldown)
+echo -e "${YELLOW}Case: Verify optional dependencies (rolldown binding)${NC}"
+OPTDEPS_DIR=$(mktemp -d)
+pushd "$OPTDEPS_DIR"
+
+cat > package.json << 'PKGJSON'
+{
+  "name": "test-optional-deps",
+  "version": "1.0.0",
+  "dependencies": {
+    "rolldown": "1.0.0-beta.57"
+  }
+}
+PKGJSON
+
+echo "Installing rolldown (has platform-specific optional binding)..."
+utoo install --registry=https://registry.npmjs.org
+
+# Verify the platform-specific binding was installed
+OS_NAME=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH_NAME=$(uname -m)
+if [ "$OS_NAME" = "darwin" ]; then
+    if [ "$ARCH_NAME" = "arm64" ] || [ "$ARCH_NAME" = "aarch64" ]; then
+        BINDING="@rolldown/binding-darwin-arm64"
+    else
+        BINDING="@rolldown/binding-darwin-x64"
+    fi
+elif [ "$OS_NAME" = "linux" ]; then
+    BINDING="@rolldown/binding-linux-x64-gnu"
+fi
+
+if [ ! -d "node_modules/$BINDING" ]; then
+    echo -e "${RED}FAIL: Optional dependency $BINDING was NOT installed${NC}"
+    exit 1
+fi
+
+node -e "require('rolldown'); console.log('rolldown loaded successfully')"
+echo -e "${GREEN}PASS: optional dependencies with platform bindings work correctly${NC}"
+
+popd
+rm -rf "$OPTDEPS_DIR"
+
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"
