@@ -40,8 +40,8 @@ mkdir -p "$ENTRY_DIR/bin"
 for binary in utoo ut; do
     # Unix version
     cat > "$ENTRY_DIR/bin/$binary" << 'EOF'
-#!/bin/bash
-echo "This is a placeholder binary for $binary. The actual binary will be installed via postinstall script."
+#!/bin/sh
+echo "This is a placeholder binary. The actual binary will be installed via postinstall script."
 exit 1
 EOF
     chmod +x "$ENTRY_DIR/bin/$binary"
@@ -56,7 +56,7 @@ done
 
 # create utx shell script that executes utoo x
 cat > "$ENTRY_DIR/bin/utx" << 'EOF'
-#!/bin/bash
+#!/bin/sh
 utoo x "$@"
 EOF
 chmod +x "$ENTRY_DIR/bin/utx"

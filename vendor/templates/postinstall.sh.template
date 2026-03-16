@@ -1,16 +1,16 @@
-#!/bin/bash
+#!/bin/sh
 
 # get cpu & os info
-if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]]; then  
-    OS="win32"  
+if [ "$OSTYPE" = "msys" ] || [ "$OSTYPE" = "win32" ]; then
+    OS="win32"
     # Use PROCESSOR_ARCHITECTURE on Windows
-    if [[ "$PROCESSOR_ARCHITECTURE" == "AMD64" ]] || [[ "$PROCESSOR_ARCHITECTURE" == "x86_64" ]]; then  
-        ARCH="x64"  
-    elif [[ "$PROCESSOR_ARCHITECTURE" == "ARM64" ]]; then  
-        ARCH="arm64"  
-    else  
-        ARCH="x64"  
-    fi  
+    if [ "$PROCESSOR_ARCHITECTURE" = "AMD64" ] || [ "$PROCESSOR_ARCHITECTURE" = "x86_64" ]; then
+        ARCH="x64"
+    elif [ "$PROCESSOR_ARCHITECTURE" = "ARM64" ]; then
+        ARCH="arm64"
+    else
+        ARCH="x64"
+    fi
 else  
     OS=$(uname -s | tr '[:upper:]' '[:lower:]')  
     ARCH=$(uname -m)  
