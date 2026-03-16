@@ -1,0 +1,24 @@
+warning - [bindings] /basic/alias/input/index.ts:10:0  Export notFound doesn't exist in target module
+  
+       6 | import style from '@/index.less';
+       7 | import { a } from '@/a?query';
+       8 | import { output } from '../../../output';
+       9 | import { runtime } from 'smallfish:runtime';
+         + v-----------------------------v
+      10 + import { notFound } from './x';
+         + ^-----------------------------^
+      11 | 
+      12 | notFound;
+      13 | 
+      14 | runtime;
+  
+  The export notFound was not found in module [project]/basic/alias/input/x.ts [client] (ecmascript).
+  
+  Did you mean to import x?
+  
+  All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+  
+  
+  | These are the exports of the module:
+  | x
+  |
