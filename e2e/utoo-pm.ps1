@@ -254,18 +254,27 @@ try {
     npm install -g $tarball.FullName "--prefix=$installPrefix" 2>&1
     Write-Host "Installed to: $installPrefix"
 
-    # Verify the binary works
-    $installedUtoo = Join-Path $installPrefix "node_modules\utoo\bin\utoo.exe"
-    if (-not (Test-Path $installedUtoo)) {
-        $installedUtoo = Join-Path $installPrefix "utoo.exe"
+    # Verify the binary exists in the package dir (not the npm shim)
+    $candidatePaths = @(
+        (Join-Path $installPrefix "node_modules\utoo\bin\utoo.exe"),
+        (Join-Path $installPrefix "node_modules\utoo\bin\utoo")
+    )
+    $installedUtoo = $null
+    foreach ($p in $candidatePaths) {
+        if (Test-Path $p) { $installedUtoo = $p; break }
     }
-    if (-not (Test-Path $installedUtoo)) {
+    if (-not $installedUtoo) {
+        Write-Host "Contents of install prefix:"
+        Get-ChildItem -Recurse $installPrefix | Select-Object FullName | Format-Table
         throw "utoo binary not found after npm install -g"
     }
 
-    # Verify it's not a placeholder
-    $content = Get-Content $installedUtoo -Raw -ErrorAction SilentlyContinue
-    if ($content -and $content.Contains("placeholder")) {
+    Write-Host "Found binary at: $installedUtoo"
+
+    # Verify it's not a placeholder (read first bytes, not text)
+    $bytes = [System.IO.File]::ReadAllBytes($installedUtoo)
+    $header = [System.Text.Encoding]::ASCII.GetString($bytes, 0, [Math]::Min(100, $bytes.Length))
+    if ($header.Contains("placeholder")) {
         throw "installed binary is still a placeholder"
     }
 
