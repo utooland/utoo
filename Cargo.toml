@@ -58,7 +58,7 @@ simd-json                         = "0.17.0"
 tempfile                          = "3"
 thiserror                         = "1.0"
 tokio                             = { version = "1.47.1" }
-tokio-fs-ext                      = "0.7.7"
+tokio-fs-ext                      = "0.7.8"
 toml                              = "0.8"
 tracing                           = "0.1.41"
 tracing-subscriber                = { version = "0.3.19", features = ["env-filter", "fmt"] }
@@ -135,6 +135,8 @@ mimalloc         = { git = "https://github.com/utooland/mimalloc_rust.git" }
 parcel_selectors = { git = "https://github.com/utooland/lightningcss", branch = "support-css-module-global" }
 tokio            = { package = "tokio", git = "https://github.com/utooland/tokio.git" }
 tokio-util       = { package = "tokio-util", git = "https://github.com/utooland/tokio.git" }
+opfs-project     = { path = "../opfs-project" }
+tokio-fs-ext     = { path = "../tokio-fs-ext" }
 virtue           = { git = "https://github.com/bgw/virtue.git", branch = "bgw/fix-generic-default-parsing" }
 
 [profile.release]
