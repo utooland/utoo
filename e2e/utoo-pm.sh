@@ -440,6 +440,12 @@ if [ ! -f "$INSTALLED_UTOO" ]; then
     exit 1
 fi
 
+# Verify it's not a placeholder
+if head -1 "$INSTALLED_UTOO" | grep -q "placeholder"; then
+    echo -e "${RED}FAIL: installed binary is still a placeholder${NC}"
+    exit 1
+fi
+
 "$INSTALLED_UTOO" --version
 echo -e "${GREEN}PASS: npm pack + install -g works correctly${NC}"
 

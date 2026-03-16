@@ -263,6 +263,12 @@ try {
         throw "utoo binary not found after npm install -g"
     }
 
+    # Verify it's not a placeholder
+    $content = Get-Content $installedUtoo -Raw -ErrorAction SilentlyContinue
+    if ($content -and $content.Contains("placeholder")) {
+        throw "installed binary is still a placeholder"
+    }
+
     & $installedUtoo --version
     if ($LASTEXITCODE -ne 0) { throw "utoo --version failed" }
 
