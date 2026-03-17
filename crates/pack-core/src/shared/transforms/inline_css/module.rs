@@ -72,11 +72,13 @@ impl InlineCssModuleType {
         insert: RcStr,
         inject_type: InjectType,
     ) -> Vc<Box<dyn Module>> {
+        let asset_context = ResolvedVc::upcast(module_asset_context);
         module_asset_context
             .process(
                 Vc::upcast(
                     InlineCssFileSource {
                         css: source,
+                        asset_context,
                         insert,
                         inject_type,
                     }

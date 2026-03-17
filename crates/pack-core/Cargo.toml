@@ -15,6 +15,7 @@ dunce                        = { workspace = true }
 either                       = { workspace = true, features = ["serde"] }
 futures                      = { workspace = true }
 indoc                        = { workspace = true }
+lightningcss                 = { workspace = true }
 mime_guess                   = "2.0.4"
 pathdiff                     = { workspace = true }
 qstring                      = "0.7.2"

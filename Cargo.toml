@@ -89,6 +89,7 @@ sha1                              = "0.10"
 sha2                              = "0.10"
 url                               = "2.2.2"
 urlencoding                       = "2.1.2"
+lightningcss                      = "1.0.0-alpha.70"
 # Dependencies from nextjs, should keep the same rev!
 ## Dependencies for common cache and task. See https://github.com/utooland/next.js/blob/canary/turbopack/crates/turbopack/architecture.md
 turbo-bincode                     = { path = "./next.js/turbopack/crates/turbo-bincode" }
