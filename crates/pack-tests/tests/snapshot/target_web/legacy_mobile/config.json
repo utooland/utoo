@@ -1,0 +1,15 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "target": "Android 4, iOS 8",
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    }
+  }
+}

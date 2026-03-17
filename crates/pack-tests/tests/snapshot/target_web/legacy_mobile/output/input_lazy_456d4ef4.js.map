@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/target_web/legacy_mobile/input/lazy.js"],"sourcesContent":["export const defaults = {\n  platform: \"mobile\",\n};\n\nexport const extraTags = [\"legacy\"];\n"],"names":["defaults","platform","extraTags"],"mappings":"AAAO,IAAMA,WAAW;IACtBC,UAAU;AACZ;AAEO,IAAMC,YAAY;IAAC;CAAS"}}]
+}
