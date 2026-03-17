@@ -1,3 +1,4 @@
+import { type ConfigComplete } from "@utoo/pack-shared";
 import * as comlink from "comlink";
 import {
   DepsOptions,
@@ -29,12 +30,15 @@ export class ForkedProject implements ProjectEndpoint {
     });
   }
 
-  public async build() {
-    return await this.endpoint.build();
+  public async build(options?: { config?: ConfigComplete; cleanup?: boolean }) {
+    return await this.endpoint.build(options);
   }
 
-  public dev(onUpdate?: (result: any) => void): void {
-    this.endpoint.dev(onUpdate ? comlink.proxy(onUpdate) : undefined);
+  public dev(options?: {
+    config?: ConfigComplete;
+    onUpdate?: (result: any) => void;
+  }): void {
+    this.endpoint.dev(options);
   }
 
   public async hmrSubscribe(

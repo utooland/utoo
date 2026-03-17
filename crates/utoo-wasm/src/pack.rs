@@ -68,6 +68,53 @@ pub struct PackProject {
     pub dev: bool,
 }
 
+/// Options for the build operation, exposed to JS with auto-generated typings.
+#[wasm_bindgen]
+pub struct BuildOptions {
+    /// When true, drops the existing global project and creates a fresh instance.
+    #[wasm_bindgen]
+    pub cleanup: bool,
+    /// Optional bundler config (the content of `utoopack.json`).
+    /// When provided, the config file is not read from disk.
+    config: Option<JsValue>,
+}
+
+#[wasm_bindgen]
+impl BuildOptions {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            cleanup: false,
+            config: None,
+        }
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn config(&self) -> JsValue {
+        self.config.clone().unwrap_or(JsValue::UNDEFINED)
+    }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_config(&mut self, val: JsValue) {
+        if val.is_undefined() || val.is_null() {
+            self.config = None;
+        } else {
+            self.config = Some(val);
+        }
+    }
+}
+
+impl BuildOptions {
+    /// Extract the config as a JSON string for the internal API.
+    pub(crate) fn config_string(&self) -> Option<String> {
+        self.config.as_ref().and_then(|val| {
+            js_sys::JSON::stringify(val)
+                .ok()
+                .and_then(|s| s.as_string())
+        })
+    }
+}
+
 pub fn create_turbo_tasks() -> Result<BundlerTurboTasks> {
     Ok(BundlerTurboTasks::Memory(TurboTasks::new(
         turbo_tasks_backend::TurboTasksBackend::new(
@@ -230,8 +277,12 @@ pub fn worker_created(worker_id: u32) {
 }
 
 /// Initialize or reinitialize the pack project with the given dev mode.
-/// This will clean up any previous turbo-tasks before creating a new project.
-pub async fn init_pack_project(dev: bool) -> Result<()> {
+///
+/// If `config` is `Some`, it is used directly as the bundler configuration
+/// (the JSON content that would normally come from `utoopack.json`).
+/// If `None`, the function reads `utoopack.json` from the project root,
+/// falling back to an empty `{}` when the file does not exist.
+pub async fn init_pack_project(dev: bool, config: Option<String>) -> Result<()> {
     // Only reinitialize if the mode (build vs dev) has changed
     if let Some(project) = &*GLOBAL_PACK_PROJECT.read() {
         if project.dev == dev {
@@ -252,12 +303,20 @@ pub async fn init_pack_project(dev: bool) -> Result<()> {
             .to_string()
     };
 
-    let config_path = PathBuf::from(&project_root).join("utoopack.json");
-    let config_str = Fs::read_to_string(&config_path.to_string_lossy())
-        .await
-        .ok()
-        .unwrap_or_default();
-    let mut config: Value = serde_json::from_str(&config_str).unwrap_or(json!({}));
+    let mut config: Value = if let Some(cfg) = config {
+        serde_json::from_str(&cfg).unwrap_or(json!({}))
+    } else {
+        let config_path = PathBuf::from(&project_root).join("utoopack.json");
+        if tokio_fs_ext::metadata(&config_path).await.is_ok() {
+            let config_str = Fs::read_to_string(&config_path.to_string_lossy())
+                .await
+                .ok()
+                .unwrap_or_default();
+            serde_json::from_str(&config_str).unwrap_or(json!({}))
+        } else {
+            json!({})
+        }
+    };
 
     // Inject mode and HMR settings
     config["mode"] = json!(if dev { "development" } else { "production" });
@@ -314,10 +373,15 @@ pub async fn init_pack_project(dev: bool) -> Result<()> {
 }
 
 /// Build operation.
-pub async fn build() -> std::result::Result<JsValue, wasm_bindgen::JsError> {
+pub async fn build(options: BuildOptions) -> std::result::Result<JsValue, wasm_bindgen::JsError> {
     use wasm_bindgen::JsError;
 
-    init_pack_project(false)
+    if options.cleanup {
+        tracing::info!("cleanup: dropping existing pack project");
+        GLOBAL_PACK_PROJECT.write().take();
+    }
+
+    init_pack_project(false, options.config_string())
         .await
         .map_err(|e| JsError::new(&PrettyPrintError(&e).to_string()))?;
 
@@ -377,12 +441,13 @@ pub async fn build() -> std::result::Result<JsValue, wasm_bindgen::JsError> {
 /// Should be used for dev mode instead of manually calling build after file saves.
 /// Returns a RootTask that must be held by JS to keep the subscription active.
 pub async fn project_entrypoints_subscribe(
+    config: Option<String>,
     callback: js_sys::Function,
 ) -> Result<RootTask, wasm_bindgen::JsError> {
     use wasm_bindgen::JsError;
 
     // First initialize the project in dev mode
-    init_pack_project(true)
+    init_pack_project(true, config)
         .await
         .map_err(|e| JsError::new(&PrettyPrintError(&e).to_string()))?;
 

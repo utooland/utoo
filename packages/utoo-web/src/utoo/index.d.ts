@@ -3,6 +3,20 @@
 
 type DirEntryType = "file" | "directory";
 
+/**
+ * Options for the build operation, exposed to JS with auto-generated typings.
+ */
+export class BuildOptions {
+    free(): void;
+    [Symbol.dispose](): void;
+    constructor();
+    config: any;
+    /**
+     * When true, drops the existing global project and creates a fresh instance.
+     */
+    cleanup: boolean;
+}
+
 export class CreateSyncAccessHandleOptions {
     private constructor();
     free(): void;
@@ -87,7 +101,7 @@ export class Project {
     private constructor();
     free(): void;
     [Symbol.dispose](): void;
-    static build(): Promise<any>;
+    static build(options: BuildOptions): Promise<any>;
     /**
      * Generate package-lock.json by resolving dependencies.
      */
@@ -97,7 +111,7 @@ export class Project {
      * This will watch for file changes and automatically rebuild.
      * Returns a RootTask that must be held by JS to keep the subscription active.
      */
-    static entrypointsSubscribe(callback: Function): Promise<RootTask>;
+    static entrypointsSubscribe(config: any, callback: Function): Promise<RootTask>;
     /**
      * Create a tar.gz archive and return bytes (no file I/O)
      */
@@ -198,14 +212,20 @@ export interface InitOutput {
     readonly init_pack: () => void;
     readonly getWasmMemory: () => any;
     readonly getWasmModule: () => any;
+    readonly __wbg_buildoptions_free: (a: number, b: number) => void;
+    readonly __wbg_get_buildoptions_cleanup: (a: number) => number;
     readonly __wbg_roottask_free: (a: number, b: number) => void;
+    readonly __wbg_set_buildoptions_cleanup: (a: number, b: number) => void;
+    readonly buildoptions_config: (a: number) => any;
+    readonly buildoptions_new: () => number;
+    readonly buildoptions_set_config: (a: number, b: any) => void;
     readonly registerWorkerScheduler: (a: any, b: any) => void;
     readonly workerCreated: (a: number) => void;
     readonly __wbg_project_free: (a: number, b: number) => void;
-    readonly project_build: () => any;
+    readonly project_build: (a: number) => any;
     readonly project_cwd: () => [number, number];
     readonly project_deps: (a: number, b: number, c: number) => any;
-    readonly project_entrypointsSubscribe: (a: any) => any;
+    readonly project_entrypointsSubscribe: (a: any, b: any) => any;
     readonly project_gzip: (a: any) => any;
     readonly project_hmrEvents: (a: number, b: number, c: any) => any;
     readonly project_init: (a: number, b: number) => void;

@@ -1,4 +1,4 @@
-import { Issue, type UpdateMessage } from "@utoo/pack-shared";
+import { ConfigComplete, Issue, type UpdateMessage } from "@utoo/pack-shared";
 import initWasm, { DirEntryType } from "./utoo";
 
 export { type UpdateMessage } from "@utoo/pack-shared";
@@ -120,9 +120,15 @@ export interface InstallOptions {
 export interface ProjectEndpoint {
   deps: (options?: DepsOptions) => Promise<string>;
   install: (packageLock: string, options?: InstallOptions) => Promise<void>;
-  build: () => Promise<BuildOutput>;
+  build: (options?: {
+    config?: ConfigComplete;
+    cleanup?: boolean;
+  }) => Promise<BuildOutput>;
   /** Start dev mode with file watching. onUpdate is called on each rebuild. */
-  dev: (onUpdate?: (result: BuildOutput) => void) => void;
+  dev: (options?: {
+    config?: ConfigComplete;
+    onUpdate?: (result: BuildOutput) => void;
+  }) => void;
   /**
    * Subscribe to HMR events for a specific identifier.
    * Returns a Promise that resolves when the subscription is set up.
