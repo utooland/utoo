@@ -81,7 +81,7 @@ export const useDev = (
       setIsBuilding(true);
 
       project.dev({
-        config: utoopackConfig as any,
+        config: utoopackConfig,
         onUpdate: (result) => {
           console.log(
             `%cDev:%c Build completed`,

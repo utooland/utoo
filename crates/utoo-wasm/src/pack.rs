@@ -71,22 +71,28 @@ pub struct PackProject {
 /// Options for the build operation, exposed to JS with auto-generated typings.
 #[wasm_bindgen]
 pub struct BuildOptions {
-    /// When true, drops the existing global project and creates a fresh instance.
-    #[wasm_bindgen]
-    pub cleanup: bool,
     /// Optional bundler config (the content of `utoopack.json`).
     /// When provided, the config file is not read from disk.
     config: Option<JsValue>,
+    /// When true, drops the existing global project and creates a fresh instance.
+    #[wasm_bindgen]
+    pub cleanup: bool,
+}
+
+impl Default for BuildOptions {
+    fn default() -> Self {
+        Self {
+            config: None,
+            cleanup: false,
+        }
+    }
 }
 
 #[wasm_bindgen]
 impl BuildOptions {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        Self {
-            cleanup: false,
-            config: None,
-        }
+        Self::default()
     }
 
     #[wasm_bindgen(getter)]
@@ -110,7 +116,7 @@ impl BuildOptions {
         self.config.as_ref().and_then(|val| {
             js_sys::JSON::stringify(val)
                 .ok()
-                .and_then(|s| s.as_string())
+                .and_then(|s| s.as_string().filter(|s_str| !s_str.is_empty()))
         })
     }
 }
@@ -304,7 +310,7 @@ pub async fn init_pack_project(dev: bool, config: Option<String>) -> Result<()> 
     };
 
     let mut config: Value = if let Some(cfg) = config {
-        serde_json::from_str(&cfg).unwrap_or(json!({}))
+        serde_json::from_str(&cfg).context("Invalid JSON configuration provided")?
     } else {
         let config_path = PathBuf::from(&project_root).join("utoopack.json");
         if tokio_fs_ext::metadata(&config_path).await.is_ok() {
