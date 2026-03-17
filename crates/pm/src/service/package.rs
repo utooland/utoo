@@ -331,21 +331,6 @@ impl PackageService {
                             target_path.display(),
                             link_path.display()
                         ))?;
-
-                    // On Windows, create .cmd shim so cmd.exe can find the command
-                    #[cfg(windows)]
-                    {
-                        let cmd_path = bin_dir.join(format!("{bin_name}.cmd"));
-                        let target_abs = crate::fs::canonicalize(&target_path)
-                            .await
-                            .unwrap_or_else(|_| target_path.clone());
-                        let shim = format!(
-                            "@IF EXIST \"%~dp0\\node.exe\" (\r\n  \"%~dp0\\node.exe\" \"{}\" %*\r\n) ELSE (\r\n  node \"{}\" %*\r\n)\r\n",
-                            target_abs.display(),
-                            target_abs.display()
-                        );
-                        let _ = crate::fs::write(&cmd_path, shim.as_bytes()).await;
-                    }
                 }
                 tracing::debug!("Linking binary files for {} successfully", package.name);
             }

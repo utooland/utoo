@@ -207,24 +207,6 @@ impl PackageInfo {
             link(&target_path, &link_path)
                 .await
                 .context("Failed to create symbolic link")?;
-
-            // On Windows, create .cmd shim so cmd.exe can find the command.
-            // symlinks alone don't work because cmd.exe doesn't resolve them
-            // for scripts without .cmd/.exe extension.
-            #[cfg(windows)]
-            {
-                use crate::fs as async_fs;
-                let cmd_path = target_bin_dir.join(format!("{bin_name}.cmd"));
-                let target_abs = crate::fs::canonicalize(&target_path)
-                    .await
-                    .unwrap_or_else(|_| target_path.clone());
-                let shim = format!(
-                    "@IF EXIST \"%~dp0\\node.exe\" (\r\n  \"%~dp0\\node.exe\" \"{}\" %*\r\n) ELSE (\r\n  node \"{}\" %*\r\n)\r\n",
-                    target_abs.display(),
-                    target_abs.display()
-                );
-                let _ = async_fs::write(&cmd_path, shim.as_bytes()).await;
-            }
         }
 
         Ok(())
