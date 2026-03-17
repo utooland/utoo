@@ -226,7 +226,7 @@ module.exports = function(list, options) {
 
 var __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$inline_css$2f$injectStylesIntoStyleTag$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[@utoo/pack-runtime]/inline_css/injectStylesIntoStyleTag.js [client] (ecmascript)");
 ;
-var content = ".container {\n  color: red;\n  font-size: 14px;\n}\n";
+var content = ".container {\n  color: red;\n  font-size: 14px;\n}\n\n.container .child {\n  color: #00f;\n}\n\n.container:hover {\n  color: green;\n}\n";
 var options = {};
 options.insert = "head";
 options.singleton = false;

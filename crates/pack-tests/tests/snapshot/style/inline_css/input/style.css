@@ -1,4 +1,13 @@
 .container {
   color: red;
   font-size: 14px;
+
+  /* CSS nesting — should be lowered by lightningcss */
+  & .child {
+    color: blue;
+  }
+
+  &:hover {
+    color: green;
+  }
 }

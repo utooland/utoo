@@ -69,7 +69,11 @@ pub async fn get_wasm_rule() -> Result<ModuleRule> {
 
 /// Returns a module rule for CSS files that outputs them as JS modules
 /// injecting styles into the DOM at runtime.
-pub async fn get_inline_css_rule(insert: RcStr, inject_type: InjectType) -> Result<ModuleRule> {
+pub async fn get_inline_css_rule(
+    insert: RcStr,
+    inject_type: InjectType,
+    minify: bool,
+) -> Result<ModuleRule> {
     Ok(ModuleRule::new(
         RuleCondition::All(vec![
             RuleCondition::not(RuleCondition::ReferenceType(ReferenceType::Url(
@@ -79,7 +83,7 @@ pub async fn get_inline_css_rule(insert: RcStr, inject_type: InjectType) -> Resu
         ]),
         vec![ModuleRuleEffect::ModuleType(ModuleType::Custom(
             ResolvedVc::upcast(
-                InlineCssModuleType::new(insert, inject_type)
+                InlineCssModuleType::new(insert, inject_type, minify)
                     .to_resolved()
                     .await?,
             ),

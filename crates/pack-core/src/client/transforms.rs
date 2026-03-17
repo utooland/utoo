@@ -4,13 +4,17 @@ use turbopack::module_options::ModuleRule;
 
 use crate::{
     config::Config,
+    mode::Mode,
     shared::transforms::{
         get_image_rule, get_inline_css_rule, get_wasm_rule, inline_css::module::InjectType,
         modularize_imports::get_modularize_imports_rule,
     },
 };
 
-pub async fn get_client_transforms_rules(config: Vc<Config>) -> Result<Vec<ModuleRule>> {
+pub async fn get_client_transforms_rules(
+    config: Vc<Config>,
+    mode: Vc<Mode>,
+) -> Result<Vec<ModuleRule>> {
     let mut rules = vec![];
 
     let optimization_config = config.optimization().await?;
@@ -44,7 +48,8 @@ pub async fn get_client_transforms_rules(config: Vc<Config>) -> Result<Vec<Modul
             .map(InjectType::from_str)
             .unwrap_or(InjectType::Style);
 
-        rules.push(get_inline_css_rule(insert.into(), inject_type).await?);
+        let minify = *config.minify(mode).await?;
+        rules.push(get_inline_css_rule(insert.into(), inject_type, minify).await?);
     }
 
     Ok(rules)

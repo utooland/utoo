@@ -25,6 +25,7 @@ pub struct InlineCssFileSource {
     pub asset_context: ResolvedVc<Box<dyn AssetContext>>,
     pub insert: RcStr,
     pub inject_type: InjectType,
+    pub minify: bool,
 }
 
 #[turbo_tasks::value_impl]
@@ -85,7 +86,7 @@ impl Asset for InlineCssFileSource {
                         ..Default::default()
                     });
                     ss.to_css(PrinterOptions {
-                        minify: false,
+                        minify: self.minify,
                         targets,
                         ..Default::default()
                     })?

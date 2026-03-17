@@ -52,15 +52,17 @@ impl InjectType {
 pub struct InlineCssModuleType {
     pub insert: RcStr,
     pub inject_type: InjectType,
+    pub minify: bool,
 }
 
 #[turbo_tasks::value_impl]
 impl InlineCssModuleType {
     #[turbo_tasks::function]
-    pub fn new(insert: RcStr, inject_type: InjectType) -> Vc<Self> {
+    pub fn new(insert: RcStr, inject_type: InjectType, minify: bool) -> Vc<Self> {
         InlineCssModuleType {
             insert,
             inject_type,
+            minify,
         }
         .cell()
     }
@@ -71,6 +73,7 @@ impl InlineCssModuleType {
         module_asset_context: ResolvedVc<ModuleAssetContext>,
         insert: RcStr,
         inject_type: InjectType,
+        minify: bool,
     ) -> Vc<Box<dyn Module>> {
         let asset_context = ResolvedVc::upcast(module_asset_context);
         module_asset_context
@@ -81,6 +84,7 @@ impl InlineCssModuleType {
                         asset_context,
                         insert,
                         inject_type,
+                        minify,
                     }
                     .cell(),
                 ),
@@ -104,6 +108,7 @@ impl CustomModuleType for InlineCssModuleType {
             module_asset_context,
             self.insert.clone(),
             self.inject_type,
+            self.minify,
         )
     }
 
