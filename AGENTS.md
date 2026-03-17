@@ -34,7 +34,6 @@ The `next.js/` directory is a **git submodule** (`utooland/next.js`) providing T
 | `@utoo/pack-cli` | CLI for bundler (`up`/`utoopack` commands) |
 | `@utoo/pack-shared` | Shared types and utilities |
 | `@utoo/web` | Browser-compatible toolchain via WASM |
-| `@utoo/style-loader` | Style loading support |
 
 ### Key Data Flow
 
