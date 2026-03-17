@@ -92,10 +92,16 @@ impl ScriptService {
             let bin_paths = Self::collect_bin_paths(package).await?;
             let env_path = Self::build_path_env(&bin_paths);
 
-            let mut cmd = Command::new("sh");
-            cmd.arg("-c")
-                .arg(script)
-                .current_dir(&package.path)
+            let mut cmd = if cfg!(windows) {
+                let mut c = Command::new("cmd");
+                c.args(["/d", "/s", "/c", script]);
+                c
+            } else {
+                let mut c = Command::new("sh");
+                c.args(["-c", script]);
+                c
+            };
+            cmd.current_dir(&package.path)
                 .env("PATH", env_path)
                 .env("npm_lifecycle_event", script_type)
                 .env(
@@ -349,10 +355,16 @@ impl ScriptService {
             false => &format!("{} {}", script_content, script_args.join(" ")),
         };
 
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c")
-            .arg(cmd_content)
-            .current_dir(&package.path)
+        let mut cmd = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.args(["/d", "/s", "/c", cmd_content]);
+            c
+        } else {
+            let mut c = Command::new("sh");
+            c.args(["-c", cmd_content]);
+            c
+        };
+        cmd.current_dir(&package.path)
             .env("PATH", env_path)
             .env("npm_lifecycle_event", script_name)
             .env(
