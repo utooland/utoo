@@ -288,7 +288,7 @@ pub fn worker_created(worker_id: u32) {
 /// (the JSON content that would normally come from `utoopack.json`).
 /// If `None`, the function reads `utoopack.json` from the project root,
 /// falling back to an empty `{}` when the file does not exist.
-pub async fn init_pack_project(dev: bool, config: Option<String>) -> Result<()> {
+pub async fn init_pack_project(config: Option<String>, dev: bool) -> Result<()> {
     // Only reinitialize if the mode (build vs dev) has changed
     if let Some(project) = &*GLOBAL_PACK_PROJECT.read() {
         if project.dev == dev {
@@ -387,7 +387,7 @@ pub async fn build(options: BuildOptions) -> std::result::Result<JsValue, wasm_b
         GLOBAL_PACK_PROJECT.write().take();
     }
 
-    init_pack_project(false, options.config_string())
+    init_pack_project(options.config_string(), false)
         .await
         .map_err(|e| JsError::new(&PrettyPrintError(&e).to_string()))?;
 
@@ -453,7 +453,7 @@ pub async fn project_entrypoints_subscribe(
     use wasm_bindgen::JsError;
 
     // First initialize the project in dev mode
-    init_pack_project(true, config)
+    init_pack_project(config, true)
         .await
         .map_err(|e| JsError::new(&PrettyPrintError(&e).to_string()))?;
 
