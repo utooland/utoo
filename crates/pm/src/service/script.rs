@@ -355,10 +355,6 @@ impl ScriptService {
             let mut c = Command::new("sh");
             c.args(["-c", cmd_content]);
             c
-        } else {
-            let mut c = Command::new("sh");
-            c.args(["-c", cmd_content]);
-            c
         };
         cmd.current_dir(&package.path)
             .env("PATH", env_path)
