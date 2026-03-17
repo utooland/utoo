@@ -101,4 +101,4 @@ jobs:
 
       - name: Run tests (shard 1/3)
         working-directory: D:/a/egg/egg
-        run: utoo ci --shard=1/3
+        run: utoo test --shard=1/3
