@@ -93,8 +93,8 @@ impl ScriptService {
             let env_path = Self::build_path_env(&bin_paths);
 
             let mut cmd = if cfg!(windows) {
-                let mut c = Command::new("cmd");
-                c.args(["/d", "/s", "/c", script]);
+                let mut c = Command::new("pwsh");
+                c.args(["-NonInteractive", "-Command", script]);
                 c
             } else {
                 let mut c = Command::new("sh");
@@ -356,8 +356,8 @@ impl ScriptService {
         };
 
         let mut cmd = if cfg!(windows) {
-            let mut c = Command::new("cmd");
-            c.args(["/d", "/s", "/c", cmd_content]);
+            let mut c = Command::new("pwsh");
+            c.args(["-NonInteractive", "-Command", cmd_content]);
             c
         } else {
             let mut c = Command::new("sh");
