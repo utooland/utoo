@@ -8,25 +8,8 @@ permissions:
   contents: read
 
 jobs:
-  build-and-pack:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            platform_os: linux
-            platform_cpu: x64
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            platform_os: darwin
-            platform_cpu: arm64
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            platform_os: win32
-            platform_cpu: x64
-
-    runs-on: ${{ matrix.os }}
+  egg-windows-e2e:
+    runs-on: windows-latest
     defaults:
       run:
         shell: bash
@@ -37,6 +20,10 @@ jobs:
       - name: Init git submodules
         run: git submodule update --init --recursive --depth 1
 
+      - name: Disable Windows Defender
+        shell: powershell
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
       - name: Setup node
         uses: actions/setup-node@v4
         with:
@@ -46,82 +33,67 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: nightly-2026-02-18
-          targets: ${{ matrix.target }}
+          targets: x86_64-pc-windows-msvc
 
       - name: Build utoo-pm
-        run: cargo build --release --target ${{ matrix.target }} --bin utoo -p utoo-pm
+        run: cargo build --release --target x86_64-pc-windows-msvc --bin utoo -p utoo-pm
 
-      - name: Pack npm tgz
+      - name: Setup utoo in PATH
+        shell: bash
         run: |
-          VERSION="0.0.0-pack-test-$(git rev-parse --short HEAD)"
-          WORK_DIR=$(mktemp -d)
+          BIN_DIR="$GITHUB_WORKSPACE/target/x86_64-pc-windows-msvc/release"
+          # Create utoo.exe and ut.exe
+          cp "$BIN_DIR/utoo.exe" "$BIN_DIR/ut.exe"
+          echo "$BIN_DIR" >> $GITHUB_PATH
+          echo "utoo binary: $(ls -la $BIN_DIR/utoo.exe)"
 
-          # Build platform-specific binary package
-          mkdir -p "$WORK_DIR/binary/bin"
-          if [ "${{ matrix.platform_os }}" = "win32" ]; then
-            cp "target/${{ matrix.target }}/release/utoo.exe" "$WORK_DIR/binary/bin/utoo"
-          else
-            cp "target/${{ matrix.target }}/release/utoo" "$WORK_DIR/binary/bin/utoo"
-            chmod +x "$WORK_DIR/binary/bin/utoo"
-          fi
+      - name: Verify utoo
+        run: |
+          utoo --version
+          ut --version
 
-          cat > "$WORK_DIR/binary/package.json" << BPKG
-          {
-            "name": "@utoo/utoo-${{ matrix.platform_os }}-${{ matrix.platform_cpu }}",
-            "version": "$VERSION",
-            "os": ["${{ matrix.platform_os }}"],
-            "cpu": ["${{ matrix.platform_cpu }}"],
-            "bin": { "utoo": "bin/utoo" }
+      - name: Start Redis (Windows via Memurai)
+        shell: pwsh
+        run: |
+          choco install -y memurai-developer.install
+          $svc = Get-Service -Name Memurai -ErrorAction SilentlyContinue
+          if ($svc -and $svc.Status -ne 'Running') {
+            Start-Service -Name Memurai -ErrorAction Stop
+            $svc.WaitForStatus('Running', '00:00:20')
           }
-          BPKG
 
-          cd "$WORK_DIR/binary"
-          npm pack
-          cp *.tgz "$GITHUB_WORKSPACE/utoo-binary-${{ matrix.platform_os }}-${{ matrix.platform_cpu }}.tgz"
+      - name: Start MySQL (Windows)
+        shell: pwsh
+        run: |
+          choco install -y mysql
+          refreshenv
+          & mysql -uroot -e "CREATE DATABASE IF NOT EXISTS test;"
 
-          # Build main utoo package
-          cd "$GITHUB_WORKSPACE"
-          mkdir -p "$WORK_DIR/main/bin"
+      - name: Clone eggjs
+        run: |
+          git clone --branch chore-ut-ci --single-branch --depth 1 https://github.com/eggjs/egg.git /tmp/egg
 
-          # Render template
-          cat vendor/templates/utoo.package.json.template | sed "s/{{version}}/$VERSION/g" > "$WORK_DIR/main/package.json"
-          cp vendor/templates/postinstall.utoo.sh.template "$WORK_DIR/main/postinstall.sh"
-          chmod +x "$WORK_DIR/main/postinstall.sh"
-          cp README.md "$WORK_DIR/main/README.md"
+      - name: Install egg dependencies
+        run: |
+          cd /tmp/egg
+          utoo install
 
-          # Placeholder binaries
-          for binary in utoo ut; do
-            cat > "$WORK_DIR/main/bin/$binary" << 'PLACEHOLDER'
-          #!/bin/sh
-          echo "This is a placeholder binary. The actual binary will be installed via postinstall script."
-          exit 1
-          PLACEHOLDER
-            chmod +x "$WORK_DIR/main/bin/$binary"
-            cat > "$WORK_DIR/main/bin/$binary.cmd" << 'CMDPLACEHOLDER'
-          @echo off
-          echo This is a placeholder binary for %~n0. The actual binary will be installed via postinstall script.
-          exit /b 1
-          CMDPLACEHOLDER
-          done
+      - name: Check node_modules/.bin
+        run: |
+          cd /tmp/egg
+          echo "=== node_modules/.bin ==="
+          ls node_modules/.bin/ | head -20
+          echo "=== @rolldown ==="
+          ls node_modules/@rolldown/ 2>/dev/null || echo "no @rolldown"
+          echo "=== vitest ==="
+          ls node_modules/.bin/vitest* 2>/dev/null || echo "no vitest bin"
 
-          # utx
-          echo '#!/bin/sh
-          utoo x "$@"' > "$WORK_DIR/main/bin/utx"
-          chmod +x "$WORK_DIR/main/bin/utx"
-          echo '@echo off
-          utoo x %*' > "$WORK_DIR/main/bin/utx.cmd"
+      - name: Build
+        run: |
+          cd /tmp/egg
+          utoo build
 
-          cd "$WORK_DIR/main"
-          npm pack
-          cp *.tgz "$GITHUB_WORKSPACE/utoo-main.tgz"
-
-          echo "Packed binary: utoo-binary-${{ matrix.platform_os }}-${{ matrix.platform_cpu }}.tgz"
-          echo "Packed main: utoo-main.tgz"
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: utoo-tgz-${{ matrix.platform_os }}-${{ matrix.platform_cpu }}
-          path: |
-            utoo-binary-*.tgz
-            utoo-main.tgz
+      - name: Run tests (shard 1/3)
+        run: |
+          cd /tmp/egg
+          utoo ci --shard=1/3
