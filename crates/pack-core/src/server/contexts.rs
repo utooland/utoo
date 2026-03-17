@@ -199,7 +199,7 @@ pub async fn get_server_module_options_context(
     let module_options_context = ModuleOptionsContext {
         ecmascript: EcmascriptOptionsContext {
             source_maps,
-            import_externals: *config.import_externals().await?,
+            import_externals: true,
             enable_typescript_transform: Some(
                 TypescriptTransformOptions::default().resolved_cell(),
             ),

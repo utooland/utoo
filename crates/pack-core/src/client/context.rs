@@ -290,7 +290,7 @@ pub async fn get_client_module_options_context(
         ecmascript: EcmascriptOptionsContext {
             enable_typeof_window_inlining: Some(TypeofWindow::Object),
             source_maps,
-            import_externals: *config.import_externals().await?,
+            import_externals: true,
             enable_typescript_transform: Some(
                 TypescriptTransformOptions::default().resolved_cell(),
             ),

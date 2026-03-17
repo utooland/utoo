@@ -1,10 +1,9 @@
 use std::sync::LazyLock;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use bincode::{Decode, Encode};
 use either::Either;
 use regex::Regex;
-use rustc_hash::FxHashSet;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value as JsonValue;
 use turbo_esregex::EsRegex;
@@ -36,22 +35,6 @@ use crate::{
 pub struct ModularizeImports(
     #[bincode(with = "turbo_bincode::indexmap")] FxIndexMap<String, ModularizeImportPackageConfig>,
 );
-
-#[turbo_tasks::value(transparent)]
-#[derive(Clone, Debug)]
-pub struct CacheKinds(FxHashSet<RcStr>);
-
-impl CacheKinds {
-    pub fn extend<I: IntoIterator<Item = RcStr>>(&mut self, iter: I) {
-        self.0.extend(iter);
-    }
-}
-
-impl Default for CacheKinds {
-    fn default() -> Self {
-        CacheKinds(["default", "remote"].iter().map(|&s| s.into()).collect())
-    }
-}
 
 #[turbo_tasks::value(transparent)]
 pub struct OptionalJsonValue(
@@ -711,92 +694,8 @@ impl TryFrom<RegexComponents> for EsRegex {
 pub struct ExperimentalConfig {
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     swc_plugins: Option<Vec<(RcStr, serde_json::Value)>>,
-    #[serde(rename = "dynamicIO")]
-    dynamic_io: Option<bool>,
-    use_cache: Option<bool>,
-    #[bincode(with = "turbo_bincode::serde_self_describing")]
-    cache_handlers: Option<FxIndexMap<RcStr, RcStr>>,
-    esm_externals: Option<EsmExternals>,
-    /// Using this feature will enable the `react@experimental` for the `app`
-    /// directory.
-    ppr: Option<ExperimentalPartialPrerendering>,
-    taint: Option<bool>,
     react_compiler: Option<ReactCompilerOptionsOrBoolean>,
-    view_transition: Option<bool>,
-    server_actions: Option<ServerActionsOrLegacyBool>,
 }
-
-#[turbo_tasks::value]
-#[derive(Clone, Debug, Deserialize, OperationValue)]
-#[serde(rename_all = "lowercase")]
-pub enum ExperimentalPartialPrerenderingIncrementalValue {
-    Incremental,
-}
-
-#[turbo_tasks::value]
-#[derive(Clone, Debug, Deserialize, OperationValue)]
-#[serde(untagged)]
-pub enum ExperimentalPartialPrerendering {
-    Boolean(bool),
-    Incremental(ExperimentalPartialPrerenderingIncrementalValue),
-}
-
-#[turbo_tasks::value]
-#[derive(Clone, Debug, Deserialize, OperationValue)]
-#[serde(untagged)]
-pub enum ServerActionsOrLegacyBool {
-    /// The current way to configure server actions sub behaviors.
-    ServerActionsConfig(ServerActions),
-
-    /// The legacy way to disable server actions. This is no longer used, server
-    /// actions is always enabled.
-    LegacyBool(bool),
-}
-
-#[turbo_tasks::value]
-#[derive(Clone, Debug, Deserialize, OperationValue)]
-#[serde(rename_all = "kebab-case")]
-pub enum EsmExternalsValue {
-    Loose,
-}
-
-#[turbo_tasks::value]
-#[derive(Clone, Debug, Deserialize, OperationValue)]
-#[serde(untagged)]
-pub enum EsmExternals {
-    Loose(EsmExternalsValue),
-    Bool(bool),
-}
-
-#[turbo_tasks::value]
-#[derive(Clone, Debug, Default, Deserialize, OperationValue)]
-#[serde(rename_all = "camelCase")]
-pub struct ServerActions {
-    /// Allows adjusting body parser size limit for server actions.
-    pub body_size_limit: Option<SizeLimit>,
-}
-
-#[turbo_tasks::value(eq = "manual")]
-#[derive(Clone, Debug, Deserialize, OperationValue)]
-#[serde(untagged)]
-pub enum SizeLimit {
-    Number(f64),
-    WithUnit(String),
-}
-
-// Manual implementation of PartialEq and Eq for SizeLimit because f64 doesn't
-// implement Eq.
-impl PartialEq for SizeLimit {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (SizeLimit::Number(a), SizeLimit::Number(b)) => a.to_bits() == b.to_bits(),
-            (SizeLimit::WithUnit(a), SizeLimit::WithUnit(b)) => a == b,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for SizeLimit {}
 
 #[turbo_tasks::value]
 #[derive(Clone, Debug, Deserialize, OperationValue)]
@@ -907,9 +806,6 @@ pub struct SwcPlugins(
 
 #[turbo_tasks::value(transparent)]
 pub struct OptionalMdxTransformOptions(Option<ResolvedVc<MdxTransformOptions>>);
-
-#[turbo_tasks::value(transparent)]
-pub struct OptionServerActions(Option<ServerActions>);
 
 #[turbo_tasks::value(transparent)]
 pub struct ExternalsConfig(
@@ -1360,15 +1256,6 @@ impl Config {
     }
 
     #[turbo_tasks::function]
-    pub async fn import_externals(&self) -> Result<Vc<bool>> {
-        Ok(Vc::cell(match self.experimental.esm_externals {
-            Some(EsmExternals::Bool(b)) => b,
-            Some(EsmExternals::Loose(_)) => bail!("esmExternals = \"loose\" is not supported"),
-            None => true,
-        }))
-    }
-
-    #[turbo_tasks::function]
     pub fn image_config(&self) -> Vc<OptionImageConfig> {
         Vc::cell(self.images.clone())
     }
@@ -1386,17 +1273,6 @@ impl Config {
     #[turbo_tasks::function]
     pub fn experimental_swc_plugins(&self) -> Vc<SwcPlugins> {
         Vc::cell(self.experimental.swc_plugins.clone().unwrap_or_default())
-    }
-
-    #[turbo_tasks::function]
-    pub fn experimental_server_actions(&self) -> Vc<OptionServerActions> {
-        Vc::cell(match self.experimental.server_actions.as_ref() {
-            Some(ServerActionsOrLegacyBool::ServerActionsConfig(server_actions)) => {
-                Some(server_actions.clone())
-            }
-            Some(ServerActionsOrLegacyBool::LegacyBool(true)) => Some(ServerActions::default()),
-            _ => None,
-        })
     }
 
     #[turbo_tasks::function]
@@ -1455,60 +1331,6 @@ impl Config {
     #[turbo_tasks::function]
     pub fn inline_css(&self) -> Vc<OptionalJsonValue> {
         Vc::cell(self.styles.as_ref().and_then(|op| op.inline_css.clone()))
-    }
-
-    #[turbo_tasks::function]
-    pub fn enable_ppr(&self) -> Vc<bool> {
-        Vc::cell(
-            self.experimental
-                .ppr
-                .as_ref()
-                .map(|ppr| match ppr {
-                    ExperimentalPartialPrerendering::Incremental(
-                        ExperimentalPartialPrerenderingIncrementalValue::Incremental,
-                    ) => true,
-                    ExperimentalPartialPrerendering::Boolean(b) => *b,
-                })
-                .unwrap_or(false),
-        )
-    }
-
-    #[turbo_tasks::function]
-    pub fn enable_taint(&self) -> Vc<bool> {
-        Vc::cell(self.experimental.taint.unwrap_or(false))
-    }
-
-    #[turbo_tasks::function]
-    pub fn enable_view_transition(&self) -> Vc<bool> {
-        Vc::cell(self.experimental.view_transition.unwrap_or(false))
-    }
-
-    #[turbo_tasks::function]
-    pub fn enable_dynamic_io(&self) -> Vc<bool> {
-        Vc::cell(self.experimental.dynamic_io.unwrap_or(false))
-    }
-
-    #[turbo_tasks::function]
-    pub fn enable_use_cache(&self) -> Vc<bool> {
-        Vc::cell(
-            self.experimental
-                .use_cache
-                // "use cache" was originally implicitly enabled with the
-                // dynamicIO flag, so we transfer the value for dynamicIO to the
-                // explicit useCache flag to ensure backwards compatibility.
-                .unwrap_or(self.experimental.dynamic_io.unwrap_or(false)),
-        )
-    }
-
-    #[turbo_tasks::function]
-    pub fn cache_kinds(&self) -> Vc<CacheKinds> {
-        let mut cache_kinds = CacheKinds::default();
-
-        if let Some(handlers) = self.experimental.cache_handlers.as_ref() {
-            cache_kinds.extend(handlers.keys().cloned());
-        }
-
-        cache_kinds.cell()
     }
 
     #[turbo_tasks::function]
@@ -1688,24 +1510,6 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_esm_externals_deserialization() {
-        let json = serde_json::json!({
-            "esmExternals": true
-        });
-        let config: ExperimentalConfig = serde_json::from_value(json).unwrap();
-        assert_eq!(config.esm_externals, Some(EsmExternals::Bool(true)));
-
-        let json = serde_json::json!({
-            "esmExternals": "loose"
-        });
-        let config: ExperimentalConfig = serde_json::from_value(json).unwrap();
-        assert_eq!(
-            config.esm_externals,
-            Some(EsmExternals::Loose(EsmExternalsValue::Loose))
-        );
-    }
 
     #[test]
     fn test_externals_deserialization() {

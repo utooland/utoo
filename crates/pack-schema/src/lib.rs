@@ -859,50 +859,10 @@ pub struct SchemaExperimentalConfig {
     #[schemars(description = "SWC plugins as [path, options] tuples")]
     pub swc_plugins: Option<Vec<(String, serde_json::Value)>>,
 
-    /// Dynamic IO
-    #[serde(rename = "dynamicIO", skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Dynamic IO")]
-    pub dynamic_io: Option<bool>,
-
-    /// Use cache
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Use cache")]
-    pub use_cache: Option<bool>,
-
-    /// Cache handlers
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Cache handlers")]
-    pub cache_handlers: Option<HashMap<String, String>>,
-
-    /// ESM externals
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "ESM externals")]
-    pub esm_externals: Option<serde_json::Value>,
-
-    /// Partial prerendering
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Partial prerendering")]
-    pub ppr: Option<serde_json::Value>,
-
-    /// Taint
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Taint")]
-    pub taint: Option<bool>,
-
     /// React compiler
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "React compiler")]
     pub react_compiler: Option<serde_json::Value>,
-
-    /// View transition
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "View transition")]
-    pub view_transition: Option<bool>,
-
-    /// Server actions
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Server actions")]
-    pub server_actions: Option<serde_json::Value>,
 }
 
 // ---------------------------------------------------------------------------
