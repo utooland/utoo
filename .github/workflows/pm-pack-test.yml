@@ -71,16 +71,15 @@ jobs:
 
       - name: Clone eggjs
         run: |
-          git clone --branch chore-ut-ci --single-branch --depth 1 https://github.com/eggjs/egg.git /tmp/egg
+          git clone --branch chore-ut-ci --single-branch --depth 1 https://github.com/eggjs/egg.git D:/egg
 
       - name: Install egg dependencies
-        run: |
-          cd /tmp/egg
-          utoo install --ignore-scripts
+        working-directory: D:/egg
+        run: utoo install --ignore-scripts
 
       - name: Check node_modules/.bin
+        working-directory: D:/egg
         run: |
-          cd /tmp/egg
           echo "=== node_modules/.bin ==="
           ls node_modules/.bin/ | head -20
           echo "=== @rolldown ==="
@@ -89,11 +88,9 @@ jobs:
           ls node_modules/.bin/vitest* 2>/dev/null || echo "no vitest bin"
 
       - name: Build
-        run: |
-          cd /tmp/egg
-          utoo build
+        working-directory: D:/egg
+        run: utoo build
 
       - name: Run tests (shard 1/3)
-        run: |
-          cd /tmp/egg
-          utoo ci --shard=1/3
+        working-directory: D:/egg
+        run: utoo ci --shard=1/3
