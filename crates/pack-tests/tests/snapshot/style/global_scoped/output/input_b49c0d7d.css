@@ -68,7 +68,7 @@
   color: red;
 }
 
-.style-module-less-module__VPl8sq__message.left .style-module-less-module__VPl8sq__message-main, .style-module-less-module__VPl8sq__message.left .style-module-less-module__VPl8sq__message-context {
+:is(.style-module-less-module__VPl8sq__message.left .style-module-less-module__VPl8sq__message-main, .style-module-less-module__VPl8sq__message.left .style-module-less-module__VPl8sq__message-context) {
   font-size: 15px;
 }
 

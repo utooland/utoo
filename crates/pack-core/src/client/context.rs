@@ -302,6 +302,7 @@ pub async fn get_client_module_options_context(
             module_css_condition: Some(module_styles_rule_condition()),
             ..Default::default()
         },
+        environment: Some(env),
         execution_context: Some(execution_context),
         tree_shaking_mode: tree_shaking_mode_for_user_code,
         enable_postcss_transform,
