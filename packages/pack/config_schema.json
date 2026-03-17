@@ -1,16 +1,9 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "ProjectOptions",
-  "description": "Top-level project options configuration This represents the root structure of utoopack.json",
+  "title": "CompleteConfig",
+  "description": "Top-level configuration for utoopack.json This represents the JSON config file structure, aligned with pack-core's `Config` struct.",
   "type": "object",
   "properties": {
-    "buildId": {
-      "description": "The build id.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "cacheHandler": {
       "description": "Cache handler configuration",
       "type": [
@@ -25,24 +18,6 @@
         "null"
       ],
       "additionalProperties": true
-    },
-    "defineEnv": {
-      "description": "A map of environment variables which should get injected at compile time.",
-      "anyOf": [
-        {
-          "$ref": "#/definitions/SchemaDefineEnv"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "dev": {
-      "description": "Whether to run in development mode",
-      "type": [
-        "boolean",
-        "null"
-      ]
     },
     "devServer": {
       "description": "Development server configuration",
@@ -144,13 +119,6 @@
         }
       ]
     },
-    "packPath": {
-      "description": "Absolute path for @utoo/pack",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "persistentCaching": {
       "description": "Enable persistent caching",
       "type": [
@@ -158,21 +126,25 @@
         "null"
       ]
     },
-    "processEnv": {
-      "description": "A map of environment variables to use when compiling code.",
+    "provider": {
+      "description": "Provider (ProvidePlugin) configuration",
       "type": [
         "object",
         "null"
       ],
       "additionalProperties": {
-        "type": "string"
+        "$ref": "#/definitions/SchemaProviderConfigValue"
       }
     },
-    "projectPath": {
-      "description": "A path inside the root_path which contains the app directories.",
-      "type": [
-        "string",
-        "null"
+    "react": {
+      "description": "React configuration",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SchemaReactConfig"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "resolve": {
@@ -184,13 +156,6 @@
         {
           "type": "null"
         }
-      ]
-    },
-    "rootPath": {
-      "description": "A root path from which all files must be nested under.",
-      "type": [
-        "string",
-        "null"
       ]
     },
     "sourceMaps": {
@@ -224,36 +189,152 @@
         "string",
         "null"
       ]
-    },
-    "watch": {
-      "description": "Filesystem watcher options.",
-      "anyOf": [
-        {
-          "$ref": "#/definitions/SchemaWatchOptions"
-        },
-        {
-          "type": "null"
-        }
-      ]
     }
   },
   "definitions": {
-    "SchemaConfigConditionItem": {
-      "description": "Configuration condition item",
-      "type": "object",
-      "required": [
-        "path"
-      ],
-      "properties": {
-        "path": {
-          "description": "Condition path configuration",
-          "allOf": [
-            {
-              "$ref": "#/definitions/SchemaConfigConditionPath"
+    "SchemaConfigConditionContentType": {
+      "description": "Configuration condition for content type",
+      "oneOf": [
+        {
+          "description": "Glob pattern for content type matching",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "glob"
+              ]
+            },
+            "value": {
+              "type": "string"
             }
-          ]
+          }
+        },
+        {
+          "description": "Regex match for content type",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "regex"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/SchemaRegexComponents"
+            }
+          }
         }
-      }
+      ]
+    },
+    "SchemaConfigConditionItem": {
+      "description": "Configuration condition item — supports compound conditions (all/any/not) and base conditions with path, content, query, and contentType matchers.",
+      "anyOf": [
+        {
+          "description": "All conditions must match",
+          "type": "object",
+          "required": [
+            "all"
+          ],
+          "properties": {
+            "all": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/SchemaConfigConditionItem"
+              }
+            }
+          }
+        },
+        {
+          "description": "Any condition must match",
+          "type": "object",
+          "required": [
+            "any"
+          ],
+          "properties": {
+            "any": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/SchemaConfigConditionItem"
+              }
+            }
+          }
+        },
+        {
+          "description": "Negate a condition",
+          "type": "object",
+          "required": [
+            "not"
+          ],
+          "properties": {
+            "not": {
+              "$ref": "#/definitions/SchemaConfigConditionItem"
+            }
+          }
+        },
+        {
+          "description": "Base condition with path/content/query/contentType matchers",
+          "type": "object",
+          "properties": {
+            "content": {
+              "description": "Content regex",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SchemaRegexComponents"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "contentType": {
+              "description": "Content type condition",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SchemaConfigConditionContentType"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "path": {
+              "description": "Path condition",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SchemaConfigConditionPath"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "query": {
+              "description": "Query condition",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SchemaConfigConditionQuery"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "description": "Built-in condition (e.g., \"server\", \"client\", \"edge\")",
+          "type": "string"
+        }
+      ]
     },
     "SchemaConfigConditionPath": {
       "description": "Configuration condition path",
@@ -279,6 +360,49 @@
         },
         {
           "description": "Regular expression for path matching",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "regex"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/SchemaRegexComponents"
+            }
+          }
+        }
+      ]
+    },
+    "SchemaConfigConditionQuery": {
+      "description": "Configuration condition for query strings",
+      "oneOf": [
+        {
+          "description": "Constant string match for query",
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "constant"
+              ]
+            },
+            "value": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "description": "Regex match for query",
           "type": "object",
           "required": [
             "type",
@@ -326,42 +450,6 @@
           }
         }
       ]
-    },
-    "SchemaDefineEnv": {
-      "description": "Environment variables for build-time injection",
-      "type": "object",
-      "properties": {
-        "client": {
-          "description": "Client-side environment variables",
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "$ref": "#/definitions/SchemaEnvVar"
-          }
-        },
-        "edge": {
-          "description": "Edge-side environment variables",
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "$ref": "#/definitions/SchemaEnvVar"
-          }
-        },
-        "nodejs": {
-          "description": "Node.js environment variables",
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "$ref": "#/definitions/SchemaEnvVar"
-          }
-        }
-      }
     },
     "SchemaDevServer": {
       "description": "Development server configuration",
@@ -418,88 +506,30 @@
         }
       }
     },
-    "SchemaEnvVar": {
-      "description": "Environment variable pair",
-      "type": "object",
-      "required": [
-        "name",
-        "value"
-      ],
-      "properties": {
-        "name": {
-          "description": "Variable name",
-          "type": "string"
-        },
-        "value": {
-          "description": "Variable value",
-          "type": "string"
-        }
-      }
-    },
     "SchemaExperimentalConfig": {
       "description": "Experimental features configuration",
       "type": "object",
       "properties": {
-        "cacheHandlers": {
-          "description": "Cache handlers",
-          "type": [
-            "object",
-            "null"
-          ],
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "dynamicIO": {
-          "description": "Dynamic IO",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "esmExternals": {
-          "description": "ESM externals"
-        },
-        "mdxRs": {
-          "description": "MDX-RS options"
-        },
-        "ppr": {
-          "description": "Partial prerendering"
-        },
         "reactCompiler": {
           "description": "React compiler"
         },
-        "serverActions": {
-          "description": "Server actions"
-        },
         "swcPlugins": {
-          "description": "SWC plugins",
+          "description": "SWC plugins as [path, options] tuples",
           "type": [
             "array",
             "null"
           ],
-          "items": true
-        },
-        "taint": {
-          "description": "Taint",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "useCache": {
-          "description": "Use cache",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "viewTransition": {
-          "description": "View transition",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "items": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string"
+              },
+              true
+            ],
+            "maxItems": 2,
+            "minItems": 2
+          }
         }
       }
     },
@@ -549,7 +579,7 @@
       "description": "External dependency configuration",
       "anyOf": [
         {
-          "description": "Simple string external (e.g., \\\"react\\\" -> \\\"React\\\")",
+          "description": "Simple string external (e.g., \"react\" -> \"React\")",
           "type": "string"
         },
         {
@@ -815,16 +845,6 @@
       "description": "Module configuration",
       "type": "object",
       "properties": {
-        "conditions": {
-          "description": "Module conditions configuration",
-          "type": [
-            "object",
-            "null"
-          ],
-          "additionalProperties": {
-            "$ref": "#/definitions/SchemaConfigConditionItem"
-          }
-        },
         "rules": {
           "description": "Module rules configuration",
           "type": [
@@ -961,14 +981,14 @@
           ]
         },
         "removeUnusedExports": {
-          "description": "Whether to remove unused exports",
+          "description": "Whether to remove unused exports. Defaults to false in development, true in production.",
           "type": [
             "boolean",
             "null"
           ]
         },
         "removeUnusedImports": {
-          "description": "Whether to remove unused imports",
+          "description": "Whether to remove unused imports. Defaults to false in development, true in production.",
           "type": [
             "boolean",
             "null"
@@ -1002,7 +1022,7 @@
           ]
         },
         "wasmAsAsset": {
-          "description": "Whether to bunle wasm as asset. Defaults to false. When false, WASM files will be output as static assets.",
+          "description": "Whether to bundle WASM as asset. Defaults to false. When false, WASM files will be output as static assets.",
           "type": [
             "boolean",
             "null"
@@ -1014,8 +1034,15 @@
       "description": "Output configuration",
       "type": "object",
       "properties": {
+        "assetModuleFilename": {
+          "description": "Filename pattern for asset modules (images, fonts, etc.)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "chunkFilename": {
-          "description": "Filename pattern for chunk files",
+          "description": "Filename pattern for JS chunk files",
           "type": [
             "string",
             "null"
@@ -1045,6 +1072,20 @@
             "$ref": "#/definitions/SchemaCopyItem"
           }
         },
+        "cssChunkFilename": {
+          "description": "Filename pattern for CSS chunk files",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cssFilename": {
+          "description": "Filename pattern for main CSS files",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "entryRootExport": {
           "description": "Expose entry module exports to global scope with the specified name. When set, all named exports from the entry module will be available on window/globalThis under the specified name. If set to empty string, will use package.json name. Default: None (no exposure)",
           "type": [
@@ -1053,7 +1094,7 @@
           ]
         },
         "filename": {
-          "description": "Filename pattern for main files",
+          "description": "Filename pattern for main JS files",
           "type": [
             "string",
             "null"
@@ -1061,6 +1102,13 @@
         },
         "path": {
           "description": "Output directory path",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "publicPath": {
+          "description": "URL prefix prepended to all chunk and asset URLs. Use 'runtime' for runtime-resolved public path.",
           "type": [
             "string",
             "null"
@@ -1086,6 +1134,42 @@
         "standalone",
         "export"
       ]
+    },
+    "SchemaProviderConfigValue": {
+      "description": "Provider configuration value. Can be a simple module name string or a [module, export] tuple.",
+      "anyOf": [
+        {
+          "description": "Simple module import, e.g. \"jquery\"",
+          "type": "string"
+        },
+        {
+          "description": "Named export import, e.g. [\"buffer\", \"Buffer\"]",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "SchemaReactConfig": {
+      "description": "React configuration",
+      "type": "object",
+      "properties": {
+        "importSource": {
+          "description": "Custom JSX import source",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtime": {
+          "description": "JSX runtime to use (automatic or classic)",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
     },
     "SchemaRegexComponents": {
       "description": "Regular expression components",
@@ -1274,38 +1358,6 @@
           }
         }
       ]
-    },
-    "SchemaWatchOptions": {
-      "description": "Filesystem watcher options",
-      "type": "object",
-      "required": [
-        "enable"
-      ],
-      "properties": {
-        "enable": {
-          "description": "Whether to watch the filesystem for file changes.",
-          "type": "boolean"
-        },
-        "ignored": {
-          "description": "Paths to ignore when watching for file changes. By default, ignores: node_modules",
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "type": "string"
-          }
-        },
-        "pollInterval": {
-          "description": "Enable polling at a certain interval if the native file watching doesn't work (e.g. docker).",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0.0
-        }
-      }
     }
   }
 }

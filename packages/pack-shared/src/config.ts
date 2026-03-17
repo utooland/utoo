@@ -20,15 +20,7 @@ export type RustifiedEnv = { name: string; value: string }[];
 
 export interface ExperimentalConfig {
   swcPlugins?: [string, any][];
-  dynamicIO?: boolean;
-  useCache?: boolean;
-  cacheHandlers?: Record<string, string>;
-  esmExternals?: boolean | "loose";
-  ppr?: boolean | "incremental";
-  taint?: boolean;
   reactCompiler?: boolean | any;
-  viewTransition?: boolean;
-  serverActions?: boolean | any;
 }
 
 export type JSONValue =
