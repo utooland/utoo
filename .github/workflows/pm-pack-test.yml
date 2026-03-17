@@ -71,14 +71,14 @@ jobs:
 
       - name: Clone eggjs
         run: |
-          git clone --branch chore-ut-ci --single-branch --depth 1 https://github.com/eggjs/egg.git D:/egg
+          git clone --branch chore-ut-ci --single-branch --depth 1 https://github.com/eggjs/egg.git D:/a/egg/egg
 
       - name: Install egg dependencies
-        working-directory: D:/egg
+        working-directory: D:/a/egg/egg
         run: utoo install --ignore-scripts
 
       - name: Check node_modules/.bin
-        working-directory: D:/egg
+        working-directory: D:/a/egg/egg
         run: |
           echo "=== node_modules/.bin ==="
           ls node_modules/.bin/ | head -20
@@ -88,7 +88,7 @@ jobs:
           ls node_modules/.bin/vitest* 2>/dev/null || echo "no vitest bin"
 
       - name: Check .cmd shims
-        working-directory: D:/egg
+        working-directory: D:/a/egg/egg
         run: |
           echo "=== .cmd files in node_modules/.bin ==="
           ls node_modules/.bin/*.cmd 2>/dev/null | head -10 || echo "no .cmd files"
@@ -96,15 +96,15 @@ jobs:
           ls -la node_modules/.bin/tsdown* 2>/dev/null || echo "no tsdown"
 
       - name: Build
-        working-directory: D:/egg
+        working-directory: D:/a/egg/egg
         shell: cmd
         run: |
-          set PATH=D:\egg\node_modules\.bin;%PATH%
+          set PATH=D:\a\egg\egg\node_modules\.bin;%PATH%
           utoo build
 
       - name: Run tests (shard 1/3)
-        working-directory: D:/egg
+        working-directory: D:/a/egg/egg
         shell: cmd
         run: |
-          set PATH=D:\egg\node_modules\.bin;%PATH%
+          set PATH=D:\a\egg\egg\node_modules\.bin;%PATH%
           utoo ci --shard=1/3
