@@ -3,7 +3,7 @@
 })([
 ["main.js",
 
-861, ((__turbopack_context__) => {
+861, (function(__turbopack_context__) {
 "use strict";
 
 function jsx() {
@@ -18,21 +18,21 @@ __turbopack_context__.s([
     jsx
 ]);
 }),
-571, ((__turbopack_context__) => {
+571, (function(__turbopack_context__) {
 "use strict";
 
 let mod; if (typeof exports === 'object' && typeof module === 'object') { mod = __turbopack_context__.x("react", () => require("react")); } else { mod = globalThis["React"] }
 
 __turbopack_context__.v(mod);
 }),
-611, ((__turbopack_context__) => {
+611, (function(__turbopack_context__) {
 "use strict";
 
 let mod; if (typeof exports === 'object' && typeof module === 'object') { mod = __turbopack_context__.x("react-dom", () => require("react-dom")); } else { mod = globalThis["ReactDOM"] }
 
 __turbopack_context__.v(mod);
 }),
-486, ((__turbopack_context__) => {
+486, (function(__turbopack_context__) {
 "use strict";
 
 function jsx() {
@@ -49,14 +49,14 @@ function keyframes() {
 }
 __turbopack_context__.s([]);
 }),
-132, ((__turbopack_context__) => {
+132, (function(__turbopack_context__) {
 "use strict";
 
 let mod; if (typeof exports === 'object' && typeof module === 'object') { mod = __turbopack_context__.x("emotion-styled", () => require("emotion-styled")); } else { mod = globalThis["EmotionStyled"] }
 
 __turbopack_context__.v(mod);
 }),
-782, ((__turbopack_context__) => {
+782, (function(__turbopack_context__) {
 "use strict";
 
 const a = "aaa";
@@ -66,7 +66,7 @@ __turbopack_context__.s([
     a
 ]);
 }),
-39, ((__turbopack_context__) => {
+39, (function(__turbopack_context__) {
 "use strict";
 
 var __TURBOPACK__imported__module__861__ = __turbopack_context__.i(861);

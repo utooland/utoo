@@ -1,5 +1,5 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[project]/circular_dependency/input/a.ts [client] (ecmascript)", ((__turbopack_context__) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+"[project]/circular_dependency/input/a.ts [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 __turbopack_context__.s([
@@ -12,7 +12,7 @@ __TURBOPACK__imported__module__$5b$project$5d2f$circular_dependency$2f$input$2f$
 const c = 1;
 var __TURBOPACK__default__export__ = c;
 }),
-"[project]/circular_dependency/input/index.ts [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/circular_dependency/input/index.ts [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 __turbopack_context__.s([

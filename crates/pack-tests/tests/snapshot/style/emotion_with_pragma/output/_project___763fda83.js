@@ -1,5 +1,5 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[project]/node_modules/@emotion/react/jsx-runtime.js [client] (ecmascript)", ((__turbopack_context__) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+"[project]/node_modules/@emotion/react/jsx-runtime.js [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 function jsx() {
@@ -14,7 +14,7 @@ __turbopack_context__.s([
     jsx
 ]);
 }),
-"[project]/node_modules/@emotion/react/index.js [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/node_modules/@emotion/react/index.js [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 function jsx() {
@@ -35,7 +35,7 @@ __turbopack_context__.s([
     css
 ]);
 }),
-"[project]/style/emotion_with_pragma/input/index.tsx [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/style/emotion_with_pragma/input/index.tsx [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$emotion$2f$react$2f$jsx$2d$runtime$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/@emotion/react/jsx-runtime.js [client] (ecmascript)");

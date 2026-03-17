@@ -1,61 +1,61 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[project]/style/css_modules/input/auto_css_modules/style1.css?modules [client] (css module)", ((__turbopack_context__) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+"[project]/style/css_modules/input/auto_css_modules/style1.css?modules [client] (css module)", (function(__turbopack_context__) {
 
 __turbopack_context__.v({
   "container": "style1__rkQtTq__container",
   "title": "style1__rkQtTq__title",
 });
 }),
-"[project]/style/css_modules/input/auto_css_modules/style.less?modules [client] (css module)", ((__turbopack_context__) => {
+"[project]/style/css_modules/input/auto_css_modules/style.less?modules [client] (css module)", (function(__turbopack_context__) {
 
 __turbopack_context__.v({
   "button": "style-less__AKDVIa__button",
 });
 }),
-"[project]/style/css_modules/input/auto_css_modules/style.sass?modules [client] (css module)", ((__turbopack_context__) => {
+"[project]/style/css_modules/input/auto_css_modules/style.sass?modules [client] (css module)", (function(__turbopack_context__) {
 
 __turbopack_context__.v({
   "card": "style-sass__X8Ic7G__card",
 });
 }),
-"[project]/style/css_modules/input/auto_css_modules/style.scss?modules [client] (css module)", ((__turbopack_context__) => {
+"[project]/style/css_modules/input/auto_css_modules/style.scss?modules [client] (css module)", (function(__turbopack_context__) {
 
 __turbopack_context__.v({
   "header": "style-scss__cmKNAa__header",
 });
 }),
-"[project]/style/css_modules/input/auto_css_modules/style2.css?modules [client] (css module)", ((__turbopack_context__) => {
+"[project]/style/css_modules/input/auto_css_modules/style2.css?modules [client] (css module)", (function(__turbopack_context__) {
 
 __turbopack_context__.v({
   "existing": "style2__c_G5cG__existing",
 });
 }),
-"[project]/style/css_modules/input/normal_css_modules/style.module.css [client] (css module)", ((__turbopack_context__) => {
+"[project]/style/css_modules/input/normal_css_modules/style.module.css [client] (css module)", (function(__turbopack_context__) {
 
 __turbopack_context__.v({
   "container": "style-module__VXAErG__container",
   "title": "style-module__VXAErG__title",
 });
 }),
-"[project]/style/css_modules/input/normal_css_modules/style.module.less [client] (css module)", ((__turbopack_context__) => {
+"[project]/style/css_modules/input/normal_css_modules/style.module.less [client] (css module)", (function(__turbopack_context__) {
 
 __turbopack_context__.v({
   "button": "style-module-less-module__774aKG__button",
 });
 }),
-"[project]/style/css_modules/input/normal_css_modules/style.module.sass [client] (css module)", ((__turbopack_context__) => {
+"[project]/style/css_modules/input/normal_css_modules/style.module.sass [client] (css module)", (function(__turbopack_context__) {
 
 __turbopack_context__.v({
   "card": "style-module-sass-module__Kl-Kua__card",
 });
 }),
-"[project]/style/css_modules/input/normal_css_modules/style.module.scss [client] (css module)", ((__turbopack_context__) => {
+"[project]/style/css_modules/input/normal_css_modules/style.module.scss [client] (css module)", (function(__turbopack_context__) {
 
 __turbopack_context__.v({
   "header": "style-module-scss-module__xnTRRG__header",
 });
 }),
-"[project]/style/css_modules/input/index.ts [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/style/css_modules/input/index.ts [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 // auto css modules

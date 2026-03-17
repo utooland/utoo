@@ -1,5 +1,5 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[@utoo/pack-runtime]/node-polyfills/assert/assert.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+"[@utoo/pack-runtime]/node-polyfills/assert/assert.js [client] (ecmascript)", (function(__turbopack_context__, module, exports) {
 
 (function() {
     var e = {
@@ -3890,7 +3890,7 @@
     module.exports = r;
 })();
 }),
-"[@utoo/pack-runtime]/node-polyfills/buffer/index.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+"[@utoo/pack-runtime]/node-polyfills/buffer/index.js [client] (ecmascript)", (function(__turbopack_context__, module, exports) {
 
 (function() {
     var e = {
@@ -5415,7 +5415,7 @@
     module.exports = t;
 })();
 }),
-"[@utoo/pack-runtime]/node-polyfills/process/browser.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+"[@utoo/pack-runtime]/node-polyfills/process/browser.js [client] (ecmascript)", (function(__turbopack_context__, module, exports) {
 
 (function() {
     var e = {
@@ -5600,7 +5600,7 @@
     module.exports = r;
 })();
 }),
-"[project]/node_modules/browser-polyfill/index.js [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/node_modules/browser-polyfill/index.js [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 const process = __turbopack_context__.r("[@utoo/pack-runtime]/node-polyfills/process/browser.js [client] (ecmascript)");
@@ -5611,7 +5611,7 @@ __turbopack_context__.s([
     process
 ]);
 }),
-"[@utoo/pack-runtime]/node-polyfills/querystring-es3/index.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+"[@utoo/pack-runtime]/node-polyfills/querystring-es3/index.js [client] (ecmascript)", (function(__turbopack_context__, module, exports) {
 
 (function() {
     "use strict";
@@ -5747,7 +5747,7 @@ __turbopack_context__.s([
     module.exports = n;
 })();
 }),
-"[@utoo/pack-runtime]/node-polyfills/native-url/index.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+"[@utoo/pack-runtime]/node-polyfills/native-url/index.js [client] (ecmascript)", (function(__turbopack_context__, module, exports) {
 
 (function() {
     var e = {
@@ -5860,7 +5860,7 @@ __turbopack_context__.s([
     module.exports = o;
 })();
 }),
-"[@utoo/pack-runtime]/node-polyfills/setimmediate/setImmediate.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+"[@utoo/pack-runtime]/node-polyfills/setimmediate/setImmediate.js [client] (ecmascript)", (function(__turbopack_context__, module, exports) {
 
 (function() {
     var e = {
@@ -6018,7 +6018,7 @@ __turbopack_context__.s([
     module.exports = t;
 })();
 }),
-"[@utoo/pack-runtime]/node-polyfills/timers-browserify/main.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+"[@utoo/pack-runtime]/node-polyfills/timers-browserify/main.js [client] (ecmascript)", (function(__turbopack_context__, module, exports) {
 
 (function() {
     var e = {
@@ -6093,7 +6093,7 @@ __turbopack_context__.s([
     module.exports = i;
 })();
 }),
-"[@utoo/pack-runtime]/node-polyfills/events/events.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+"[@utoo/pack-runtime]/node-polyfills/events/events.js [client] (ecmascript)", (function(__turbopack_context__, module, exports) {
 
 (function() {
     "use strict";
@@ -6478,7 +6478,7 @@ __turbopack_context__.s([
     module.exports = n;
 })();
 }),
-"[@utoo/pack-runtime]/node-polyfills/util/util.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+"[@utoo/pack-runtime]/node-polyfills/util/util.js [client] (ecmascript)", (function(__turbopack_context__, module, exports) {
 
 (function() {
     var r = {
@@ -8358,7 +8358,7 @@ __turbopack_context__.s([
     module.exports = t;
 })();
 }),
-"[@utoo/pack-runtime]/node-polyfills/stream-browserify/index.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+"[@utoo/pack-runtime]/node-polyfills/stream-browserify/index.js [client] (ecmascript)", (function(__turbopack_context__, module, exports) {
 
 (function() {
     var e = {
@@ -11083,11 +11083,11 @@ __turbopack_context__.s([
     module.exports = r;
 })();
 }),
-"[@utoo/pack-runtime]/node-polyfills/empty/empty.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+"[@utoo/pack-runtime]/node-polyfills/empty/empty.js [client] (ecmascript)", (function(__turbopack_context__, module, exports) {
 
 module.exports = {};
 }),
-"[project]/node_polyfill/input/index.ts [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/node_polyfill/input/index.ts [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 var __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$node$2d$polyfills$2f$assert$2f$assert$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[@utoo/pack-runtime]/node-polyfills/assert/assert.js [client] (ecmascript)");

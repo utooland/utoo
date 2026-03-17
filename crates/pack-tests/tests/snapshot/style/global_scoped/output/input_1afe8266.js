@@ -1,5 +1,5 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[project]/style/global_scoped/input/style.module.less [client] (css module)", ((__turbopack_context__) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+"[project]/style/global_scoped/input/style.module.less [client] (css module)", (function(__turbopack_context__) {
 
 __turbopack_context__.v({
   "img": "style-module-less-module__VPl8sq__img",
@@ -9,7 +9,7 @@ __turbopack_context__.v({
   "message-main": "style-module-less-module__VPl8sq__message-main",
 });
 }),
-"[project]/style/global_scoped/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/style/global_scoped/input/index.js [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 // import global css file 

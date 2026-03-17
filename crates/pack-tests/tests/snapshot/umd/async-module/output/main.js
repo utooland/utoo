@@ -3,7 +3,7 @@
 })([
 ["main.js",
 
-85, ((__turbopack_context__) => {
+85, (function(__turbopack_context__) {
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
@@ -13,7 +13,7 @@ await Promise.resolve().then(()=>__turbopack_context__.i(676));
 result.default;
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, true);}),
-176, ((__turbopack_context__) => {
+176, (function(__turbopack_context__) {
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
@@ -32,7 +32,7 @@ __turbopack_context__.s([
 ]);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, false);}),
-330, ((__turbopack_context__) => {
+330, (function(__turbopack_context__) {
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
@@ -54,7 +54,7 @@ __turbopack_context__.s([
 ]);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, false);}),
-676, ((__turbopack_context__) => {
+676, (function(__turbopack_context__) {
 "use strict";
 
 // This is the async chunk
@@ -69,7 +69,7 @@ __turbopack_context__.s([
     nested
 ]);
 }),
-917, ((__turbopack_context__) => {
+917, (function(__turbopack_context__) {
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
@@ -88,7 +88,7 @@ __turbopack_context__.s([
 ]);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, false);}),
-985, ((__turbopack_context__) => {
+985, (function(__turbopack_context__) {
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {

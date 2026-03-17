@@ -1,4 +1,4 @@
-(globalThis["utooChunk_export_entry_exports"] || (globalThis["utooChunk_export_entry_exports"] = [])).push([
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["utooChunk_export_entry_exports"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["utooChunk_export_entry_exports"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
     {"otherChunks":["input_index_ts_6bcb050d.js"],"runtimeModuleIds":["[project]/runtime/export_entry_exports/input/index.ts [client] (ecmascript)"]}
 ]);
@@ -11,18 +11,20 @@
         root["export-entry-exports"] = factory();
 }(typeof self !== 'undefined' ? self : this, function() {
 
-const __chunk__ = (() => {
-if (!Array.isArray(globalThis["utooChunk_export_entry_exports"])) {
+var __chunk__ = (function() {
+var __turbopack_global__ = typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {})));
+var globalThis = __turbopack_global__;
+if (!Array.isArray(__turbopack_global__["utooChunk_export_entry_exports"])) {
     return;
 }
 
-let __entryExports__ = undefined;
+var __entryExports__ = undefined;
 
-const CHUNK_BASE_PATH = "/";
-const RELATIVE_ROOT_PATH = "/ROOT";
-const RUNTIME_PUBLIC_PATH = "/";
-const ASSET_SUFFIX = "";
-const WORKER_FORWARDED_GLOBALS = [];
+var CHUNK_BASE_PATH = "/";
+var RELATIVE_ROOT_PATH = "/ROOT";
+var RUNTIME_PUBLIC_PATH = "/";
+var ASSET_SUFFIX = "";
+var WORKER_FORWARDED_GLOBALS = [];
 /**
  * This file contains runtime types and functions that are shared between all
  * TurboPack ECMAScript runtimes.
@@ -1128,21 +1130,22 @@ let BACKEND;
         return fetch(getChunkRelativeUrl(wasmChunkPath));
     }
 })();
-const chunksToRegister = globalThis["utooChunk_export_entry_exports"];
-globalThis["utooChunk_export_entry_exports"] = { push: registerChunk };
+var chunksToRegister = __turbopack_global__["utooChunk_export_entry_exports"] || [];
+__turbopack_global__["utooChunk_export_entry_exports"] = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
 
 try {
-for (const registration of chunksToRegister) {
-    const runtimeParams = registration.length === 2 ? registration[1] : null;
+for (var i = 0; i < chunksToRegister.length; i++) {
+    var registration = chunksToRegister[i];
+    var runtimeParams = registration.length === 2 ? registration[1] : null;
     if (runtimeParams && runtimeParams.runtimeModuleIds && runtimeParams.runtimeModuleIds.length > 0) {
-        const entryModuleId = runtimeParams.runtimeModuleIds[runtimeParams.runtimeModuleIds.length - 1];
-        const chunkPath = getPathFromScript(registration[0]);
+        var entryModuleId = runtimeParams.runtimeModuleIds[runtimeParams.runtimeModuleIds.length - 1];
+        var chunkPath = getPathFromScript(registration[0]);
 
-        const entryModule = getOrInstantiateRuntimeModule(chunkPath, entryModuleId);
+        var entryModule = getOrInstantiateRuntimeModule(chunkPath, entryModuleId);
 
         if (entryModule && entryModule.exports) {
-            const moduleExports = entryModule.namespaceObject || entryModule.exports;
+            var moduleExports = entryModule.namespaceObject || entryModule.exports;
 
             // Save for return value (will be handled by UMD wrapper)
             __entryExports__ = moduleExports;

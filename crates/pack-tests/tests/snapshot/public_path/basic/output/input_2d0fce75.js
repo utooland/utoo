@@ -1,5 +1,5 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-4, ((__turbopack_context__) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+4, (function(__turbopack_context__) {
 "use strict";
 
 var __TURBOPACK__imported__module__19__ = __turbopack_context__.i(19);
@@ -25,15 +25,15 @@ __turbopack_context__.s([
     loadLazyModule
 ]);
 }),
-19, ((__turbopack_context__) => {
+19, (function(__turbopack_context__) {
 
 __turbopack_context__.q("https://cdn.example.com/assets/asset.99aa06d3.jpg");}),
-78, ((__turbopack_context__) => {
+78, (function(__turbopack_context__) {
 
-__turbopack_context__.v((parentImport) => {
+__turbopack_context__.v(function(parentImport) {
     return Promise.all([
   "input_lazy_be895acc.js"
-].map((chunk) => __turbopack_context__.l(chunk))).then(() => {
+].map(function(chunk) { return __turbopack_context__.l(chunk); })).then(function() {
         return parentImport(73);
     });
 });

@@ -1,5 +1,5 @@
-(globalThis["utooChunk_async_chunk_test"] || (globalThis["utooChunk_async_chunk_test"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-476, ((__turbopack_context__) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["utooChunk_async_chunk_test"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["utooChunk_async_chunk_test"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+476, (function(__turbopack_context__) {
 "use strict";
 
 var __TURBOPACK__imported__module__976__ = __turbopack_context__.i(976);
@@ -12,7 +12,7 @@ var __TURBOPACK__imported__module__743__ = __turbopack_context__.i(743);
 (0, __TURBOPACK__imported__module__402__["bar"])(true);
 __turbopack_context__.s([]);
 }),
-976, ((__turbopack_context__) => {
+976, (function(__turbopack_context__) {
 "use strict";
 
 function foo(value) {

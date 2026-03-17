@@ -1,11 +1,11 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[project]/typescript/interface_export/input/item-interface.ts [client] (ecmascript)", ((__turbopack_context__) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+"[project]/typescript/interface_export/input/item-interface.ts [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 ;
 __turbopack_context__.s([]);
 }),
-"[project]/typescript/interface_export/input/index.ts [client] (ecmascript) <locals>", ((__turbopack_context__) => {
+"[project]/typescript/interface_export/input/index.ts [client] (ecmascript) <locals>", (function(__turbopack_context__) {
 "use strict";
 
 var __TURBOPACK__imported__module__$5b$project$5d2f$typescript$2f$interface_export$2f$input$2f$item$2d$interface$2e$ts__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/typescript/interface_export/input/item-interface.ts [client] (ecmascript)");
@@ -13,7 +13,7 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$typescript$2f$interface_expo
 ;
 __turbopack_context__.s([]);
 }),
-"[project]/typescript/interface_export/input/index.ts [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/typescript/interface_export/input/index.ts [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 var __TURBOPACK__imported__module__$5b$project$5d2f$typescript$2f$interface_export$2f$input$2f$index$2e$ts__$5b$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__ = __turbopack_context__.i("[project]/typescript/interface_export/input/index.ts [client] (ecmascript) <locals>");

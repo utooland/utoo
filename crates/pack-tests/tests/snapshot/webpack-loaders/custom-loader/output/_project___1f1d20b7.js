@@ -1,5 +1,5 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[project]/node_modules/react/jsx-runtime.js [client] (ecmascript)", ((__turbopack_context__) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+"[project]/node_modules/react/jsx-runtime.js [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 function jsx() {
@@ -17,11 +17,11 @@ __turbopack_context__.s([
     jsxs
 ]);
 }),
-"[project]/webpack-loaders/custom-loader/input/data.txt.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+"[project]/webpack-loaders/custom-loader/input/data.txt.js [client] (ecmascript)", (function(__turbopack_context__, module, exports) {
 
 module.exports = "Got a buffer of 11 bytes";
 }),
-"[project]/webpack-loaders/custom-loader/input/test.mdx.js?reverse [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/webpack-loaders/custom-loader/input/test.mdx.js?reverse [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 var __TURBOPACK__default__export__ = "\ndlroW olleH ##";
@@ -31,7 +31,7 @@ __turbopack_context__.s([
     __TURBOPACK__default__export__
 ]);
 }),
-"[project]/webpack-loaders/custom-loader/input/index.tsx [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/webpack-loaders/custom-loader/input/index.tsx [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$react$2f$jsx$2d$runtime$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/react/jsx-runtime.js [client] (ecmascript)");

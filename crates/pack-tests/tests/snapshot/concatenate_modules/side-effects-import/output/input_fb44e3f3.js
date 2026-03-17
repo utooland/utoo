@@ -1,5 +1,5 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[project]/concatenate_modules/side-effects-import/input/a.js [client] (ecmascript)", ((__turbopack_context__) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+"[project]/concatenate_modules/side-effects-import/input/a.js [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 // MERGED MODULE: [project]/concatenate_modules/side-effects-import/input/a.js [client] (ecmascript)
@@ -18,11 +18,11 @@ console.log("a2");
 ;
 __turbopack_context__.s([], "[project]/concatenate_modules/side-effects-import/input/a.js [client] (ecmascript)");
 }),
-"[project]/concatenate_modules/side-effects-import/input/shared1.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+"[project]/concatenate_modules/side-effects-import/input/shared1.js [client] (ecmascript)", (function(__turbopack_context__, module, exports) {
 
 console.log("shared1");
 }),
-"[project]/concatenate_modules/side-effects-import/input/shared2.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+"[project]/concatenate_modules/side-effects-import/input/shared2.js [client] (ecmascript)", (function(__turbopack_context__, module, exports) {
 
 console.log("shared2");
 }),
