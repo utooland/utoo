@@ -76,7 +76,7 @@ jobs:
       - name: Install egg dependencies
         run: |
           cd /tmp/egg
-          utoo install
+          utoo install --ignore-scripts
 
       - name: Check node_modules/.bin
         run: |
