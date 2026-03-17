@@ -26,7 +26,7 @@
 |  | `copy` | ✅ | [Mako `config.copy`](https://makojs.dev/docs/config#copy) |  |
 |  | `standalone` | ❓ |  |  |
 | Target | `browserslist` | ✅ | [Webpack `target` string](https://webpack.js.org/configuration/target/#string) |  |
-|  | `node` | 🟠 |  |  |
+|  | `node` | ✅ | [Webpack `target` string](https://webpack.js.org/configuration/target/#string) |  |
 | Sourcemap |  | ✅ | [Webpack `devtool` configuration](https://webpack.js.org/configuration/devtool/) |  |
 | Define |  | ✅ | [Webpack `DefinePlugin`](https://webpack.js.org/plugins/define-plugin/) |  |
 | Providers |  | ✅ | [Webpack `ProvidePlugin`](https://webpack.js.org/plugins/provide-plugin/#root) |  |
@@ -58,7 +58,6 @@
 | Module Federation |  | ❓ |  |  |
 | HMR |  | ✅ |  |  |
 | Dev Server |  | ✅ |  |  |
-| Lazy Compiling |  | 🟠 |  |  |
 | Webpack partially compatible mode |  | ✅ | [Webpack compat example](https://github.com/utooland/utoo/tree/next/examples/webpack-compat) | Made it easy to migrate from webpack-based projects |
 | Node Polyfill |  | ✅ | [Webpack Node Polyfill Plugin](https://github.com/Richienb/node-polyfill-webpack-plugin) | Automatically polyfills Node.js built-in modules for browser builds |
 | CSR |  | ✅ |  |  |
@@ -66,7 +65,7 @@
 | RSC |  | ❓ |  |  |
 | Server Action |  | ❓ |  |  |
 | Edge Runtime |  | ❓ |  |  |
-| Persistent Caching |  | 🟠 |  |  |
+| Persistent Caching |  | ✅ | Enabled on dev |  |
 | Bundler Tracing Log | `log file` | ✅ |  |  |
 |  | `log viewer` | 🟠 |  |  |
 
