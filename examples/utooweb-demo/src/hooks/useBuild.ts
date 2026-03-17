@@ -2,6 +2,7 @@ import { Project as UtooProject } from "@utoo/web";
 import { useCallback, useState } from "react";
 import { FileTreeNode } from "../types";
 import { generateHtml } from "../utils/htmlGenerator";
+import { utoopackConfig } from "../utoopackConfig";
 
 // HMR server interface for type safety (will be available after utoo-web is rebuilt)
 interface HmrServerLike {
@@ -32,7 +33,7 @@ export const useBuild = (
 
     try {
       const start = performance.now();
-      await project.build();
+      await project.build({ config: utoopackConfig, cleanup: true });
       console.log(
         `%cPack Project:%c Finished to build in ${Math.round(performance.now() - start)} ms.`,
         "color: blue;",

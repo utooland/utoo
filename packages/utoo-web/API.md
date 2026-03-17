@@ -123,37 +123,41 @@ for (const filePath in demoFiles) {
 
 ### 5. Create Build Configuration
 
-Before you can build the project, you need to provide a build configuration file named `utoopack.json` in the project's root directory. This file tells `@utoo/web` how to bundle your application, specifying entry points and other build options.
+You can provide the build configuration in two ways:
 
-A typical configuration looks like this:
+#### Option A: Pass config directly (Recommended)
 
-```json
-{
-  "entry": [
+Pass a `ConfigComplete` object directly to `build()` or `dev()`. This skips reading any config file from disk.
+
+```typescript
+const config = {
+  entry: [
     {
-      "import": "./src/index.tsx",
-      "name": "main" 
-    }
+      import: "./src/index.tsx",
+      name: "main",
+    },
   ],
-  "output": {
-    "path": "dist"
+  output: {
+    path: "dist",
   },
-  "module": {
-    "rules": {
-      "*.tsx": [ "xyzLoader" ]
-    }
-  },
-  "stats": true
-}
+  stats: true,
+};
+
+await project.build({ config });
+// or for dev mode:
+project.dev({ config, onUpdate: (result) => console.log(result) });
+```
+
+#### Option B: Write a `utoopack.json` file
+
+Alternatively, write a `utoopack.json` to the project root. When no `config` is passed, the bundler reads this file automatically.
+
+```typescript
+await project.writeFile('utoopack.json', JSON.stringify(config, null, 2));
+await project.build();
 ```
 
 To use loaders, you must add them to the `devDependencies` in your `package.json` and install them, just as you would in a standard Webpack project. Additionally, you must install `loader-runner`, as `@utoo/web` relies on the `loader-runner` mechanism and context to execute loaders.
-
-You would write this file to the real file system just like any other source file:
-
-```typescript
-await project.writeFile('utoopack.json', JSON.stringify(utoopackConfig, null, 2));
-```
 
 After these steps, your project is fully initialized and ready for interaction.
 
@@ -265,27 +269,65 @@ Populates the `node_modules` directory based on a lock file string.
 
 Registers and activates the service worker defined in the constructor. This is essential for the preview functionality.
 
-#### `project.build()`
+#### `project.build(options?)`
 
-Triggers the build process in the thread worker. It reads the build configuration from `utoopack.json` in the project's root and runs the bundler based on that configuration.
+Triggers the build process in the thread worker.
 
-* Returns: `Promise<void>` - The promise resolves when the build is complete. It will reject if the build fails.
+**Options:**
+
+* `config` (`ConfigComplete`, optional): The bundler configuration object. When provided, the `utoopack.json` file is not read from disk. See `@utoo/pack-shared` for the full type definition.
+* `cleanup` (boolean, optional): When `true`, drops the existing global project and creates a fresh instance, discarding all cached turbo-tasks state. Defaults to `false`.
+
+* Returns: `Promise<BuildOutput>` - The promise resolves with the build output including issues and diagnostics.
+
+**Example:**
+
+```typescript
+// Build using utoopack.json on disk
+await project.build();
+
+// Build with inline config
+await project.build({
+  config: {
+    entry: [{ import: "./src/index.tsx", name: "main" }],
+    output: { path: "dist" },
+  },
+});
+
+// Force re-create project instance
+await project.build({ cleanup: true });
+```
 
 ### Development Mode & HMR
 
-#### `project.dev(onUpdate?)`
+#### `project.dev(options?)`
 
 Starts development mode with file watching and Hot Module Replacement (HMR). Unlike `build()`, `dev()` continuously watches for file changes and automatically triggers incremental builds.
 
-**Arguments:**
+**Options:**
 
+* `config` (`ConfigComplete`, optional): The bundler configuration object. When provided, the `utoopack.json` file is not read from disk.
 * `onUpdate` (function, optional): Callback when a build completes, receives the build result (including issues and diagnostics).
 
 **Example:**
 
 ```typescript
-project.dev((result) => {
-  console.log('Build completed', result.issues);
+// Dev mode with callback
+project.dev({
+  onUpdate: (result) => {
+    console.log('Build completed', result.issues);
+  },
+});
+
+// Dev mode with inline config
+project.dev({
+  config: {
+    entry: [{ import: "./src/index.tsx", name: "main" }],
+    output: { path: "dist" },
+  },
+  onUpdate: (result) => {
+    console.log('Build completed', result.issues);
+  },
 });
 ```
 

@@ -1,4 +1,4 @@
-import { type UpdateMessage } from "@utoo/pack-shared";
+import { type ConfigComplete, type UpdateMessage } from "@utoo/pack-shared";
 import {
   DepsOptions,
   InstallOptions,
@@ -10,6 +10,7 @@ import {
   Stats,
 } from "../types";
 import initWasm, {
+  BuildOptions,
   DirEntryType,
   Fs,
   initLogFilter,
@@ -63,7 +64,7 @@ class InternalEndpoint implements ProjectEndpoint {
     return;
   }
 
-  async build() {
+  async build(options?: { config?: ConfigComplete; cleanup?: boolean }) {
     await this.wasmInit!;
 
     if (this.options?.loaderWorkerUrl && !this.loaderWorkerPoolInitialized) {
@@ -75,10 +76,18 @@ class InternalEndpoint implements ProjectEndpoint {
       this.loaderWorkerPoolInitialized = true;
     }
 
-    return await ProjectInternal.build();
+    const buildOptions = new BuildOptions();
+    buildOptions.cleanup = options?.cleanup ?? false;
+    if (options?.config) {
+      buildOptions.config = options.config;
+    }
+    return await ProjectInternal.build(buildOptions);
   }
 
-  async dev(onUpdate?: (result: any) => void) {
+  async dev(options?: {
+    config?: ConfigComplete;
+    onUpdate?: (result: any) => void;
+  }) {
     if (this.options?.loaderWorkerUrl && !this.loaderWorkerPoolInitialized) {
       runLoaderWorkerPool(
         this.options.cwd,
@@ -89,8 +98,9 @@ class InternalEndpoint implements ProjectEndpoint {
     }
 
     this.rootTask = await ProjectInternal.entrypointsSubscribe(
+      options?.config,
       (result: any) => {
-        onUpdate?.(result);
+        options?.onUpdate?.(result);
       },
     );
   }

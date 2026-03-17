@@ -1,4 +1,8 @@
-import { handleIssues, type UpdateMessage } from "@utoo/pack-shared";
+import {
+  type ConfigComplete,
+  handleIssues,
+  type UpdateMessage,
+} from "@utoo/pack-shared";
 import * as comlink from "comlink";
 import { HmrClient, HmrServer } from "../hmr";
 import { WorkerMessageType } from "../message";
@@ -113,14 +117,20 @@ export class Project implements ProjectEndpoint {
     return await this.remote.install(packageLock, options);
   }
 
-  public async build(): Promise<BuildOutput> {
+  public async build(options?: {
+    config?: ConfigComplete;
+    cleanup?: boolean;
+  }): Promise<BuildOutput> {
     await this.#mount;
-    const res = await this.remote.build();
+    const res = await this.remote.build(options);
     handleIssues(res.issues, false, false);
     return res;
   }
 
-  public dev(onUpdate?: (result: BuildOutput) => void): void {
+  public dev(options?: {
+    config?: ConfigComplete;
+    onUpdate?: (result: BuildOutput) => void;
+  }): void {
     // Create HmrServer lazily on first dev() call
     if (!this.hmrServer) {
       this.hmrServer = new HmrServer({
@@ -132,14 +142,15 @@ export class Project implements ProjectEndpoint {
       });
     }
 
-    this.remote.dev(
-      onUpdate
+    this.remote.dev({
+      onUpdate: options?.onUpdate
         ? comlink.proxy((result: BuildOutput) => {
             handleIssues(result.issues, false, false);
-            onUpdate(result);
+            options.onUpdate!(result);
           })
         : undefined,
-    );
+      config: options?.config,
+    });
   }
 
   public async hmrSubscribe(

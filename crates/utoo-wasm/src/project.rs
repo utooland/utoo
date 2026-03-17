@@ -89,13 +89,14 @@ impl Project {
 
     #[cfg(feature = "utoopack")]
     #[wasm_bindgen]
-    pub async fn build() -> Result<JsValue, JsError> {
-        pack::build().await
+    pub async fn build(options: pack::BuildOptions) -> Result<JsValue, JsError> {
+        pack::build(options).await
     }
 
     #[cfg(not(feature = "utoopack"))]
     #[wasm_bindgen]
-    pub async fn build() -> Result<(), JsValue> {
+    pub async fn build(options: JsValue) -> Result<(), JsValue> {
+        let _ = options;
         unimplemented!()
     }
 
@@ -104,8 +105,18 @@ impl Project {
     /// Returns a RootTask that must be held by JS to keep the subscription active.
     #[cfg(feature = "utoopack")]
     #[wasm_bindgen(js_name = entrypointsSubscribe)]
-    pub async fn entrypoints_subscribe(callback: js_sys::Function) -> Result<RootTask, JsError> {
-        pack::project_entrypoints_subscribe(callback).await
+    pub async fn entrypoints_subscribe(
+        config: JsValue,
+        callback: js_sys::Function,
+    ) -> Result<RootTask, JsError> {
+        let config_str = if config.is_undefined() || config.is_null() {
+            None
+        } else {
+            let json_str = js_sys::JSON::stringify(&config)
+                .map_err(|e| JsError::new(&format!("invalid config: {e:?}")))?;
+            Some(json_str.as_string().unwrap_or_default())
+        };
+        pack::project_entrypoints_subscribe(config_str, callback).await
     }
 
     /// Subscribe to HMR events for a specific identifier.

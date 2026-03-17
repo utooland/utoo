@@ -123,37 +123,41 @@ for (const filePath in demoFiles) {
 
 ### 5. 创建构建配置
 
-在构建项目之前，您需要在项目的根目录中提供一个名为 `utoopack.json` 的构建配置文件。该文件告诉 `@utoo/web` 如何打包您的应用程序，指定入口点和其他构建选项。
+您可以通过两种方式提供构建配置：
 
-一个典型的配置如下所示：
+#### 方式 A：直接传递配置（推荐）
 
-```json
-{
-  "entry": [
+将 `ConfigComplete` 对象直接传递给 `build()` 或 `dev()`。这会跳过从磁盘读取配置文件。
+
+```typescript
+const config = {
+  entry: [
     {
-      "import": "./src/index.tsx",
-      "name": "main" 
-    }
+      import: "./src/index.tsx",
+      name: "main",
+    },
   ],
-  "output": {
-    "path": "dist"
+  output: {
+    path: "dist",
   },
-  "module": {
-    "rules": {
-      "*.tsx": [ "xyzLoader" ]
-    }
-  }, 
-  "stats": true
-}
+  stats: true,
+};
+
+await project.build({ config });
+// 或者用于开发模式：
+project.dev({ config, onUpdate: (result) => console.log(result) });
+```
+
+#### 方式 B：写入 `utoopack.json` 文件
+
+或者，将 `utoopack.json` 写入项目根目录。当未传递 `config` 时，打包器会自动读取此文件。
+
+```typescript
+await project.writeFile('utoopack.json', JSON.stringify(config, null, 2));
+await project.build();
 ```
 
 若要使用 loader，请将其添加至 `package.json` 的 `devDependencies` 中并安装，这与标准 webpack 项目的依赖管理方式一致。此外，由于 `@utoo/web` 遵循 `loader-runner` 的机制与上下文来执行 loader，您还需要同时安装 `loader-runner`。
-
-您可以像写入其他源文件一样，将此文件写入真实文件系统：
-
-```typescript
-await project.writeFile('utoopack.json', JSON.stringify(utoopackConfig, null, 2));
-```
 
 完成这些步骤后，您的项目就完全初始化并准备好进行交互了。
 
@@ -265,27 +269,65 @@ const lockFile = await project.deps({
 
 注册并激活构造函数中定义的 Service Worker。这对于预览功能至关重要。
 
-#### `project.build()`
+#### `project.build(options?)`
 
-在线程 Worker 中触发构建过程。它会从项目根目录读取 `utoopack.json` 的构建配置，并根据该配置运行打包器。
+在线程 Worker 中触发构建过程。
 
-* 返回: `Promise<void>` - 当构建完成时，Promise 会解决。如果构建失败，则会拒绝。
+**选项:**
+
+* `config` (`ConfigComplete`, 可选): 打包器配置对象。当提供此参数时，不会从磁盘读取 `utoopack.json` 文件。完整类型定义参见 `@utoo/pack-shared`。
+* `cleanup` (boolean, 可选): 当为 `true` 时，会销毁现有的全局项目实例并创建新实例，丢弃所有缓存的 turbo-tasks 状态。默认为 `false`。
+
+* 返回: `Promise<BuildOutput>` - Promise 会在构建完成时解析，返回包含 issues 和 diagnostics 的构建输出。
+
+**示例:**
+
+```typescript
+// 使用磁盘上的 utoopack.json 构建
+await project.build();
+
+// 使用内联配置构建
+await project.build({
+  config: {
+    entry: [{ import: "./src/index.tsx", name: "main" }],
+    output: { path: "dist" },
+  },
+});
+
+// 强制重新创建项目实例
+await project.build({ cleanup: true });
+```
 
 ### 开发模式与 HMR
 
-#### `project.dev(onUpdate?)`
+#### `project.dev(options?)`
 
 启动开发模式，支持文件监听和热模块替换（HMR）。与 `build()` 不同，`dev()` 会持续监听文件变化并自动触发增量构建。
 
-**参数:**
+**选项:**
 
+* `config` (`ConfigComplete`, 可选): 打包器配置对象。当提供此参数时，不会从磁盘读取 `utoopack.json` 文件。
 * `onUpdate` (function, 可选): 当构建完成时的回调函数，接收构建结果（包含 issues 和 diagnostics）。
 
 **示例:**
 
 ```typescript
-project.dev((result) => {
-  console.log('构建完成', result.issues);
+// 带回调的开发模式
+project.dev({
+  onUpdate: (result) => {
+    console.log('构建完成', result.issues);
+  },
+});
+
+// 带内联配置的开发模式
+project.dev({
+  config: {
+    entry: [{ import: "./src/index.tsx", name: "main" }],
+    output: { path: "dist" },
+  },
+  onUpdate: (result) => {
+    console.log('构建完成', result.issues);
+  },
 });
 ```
 

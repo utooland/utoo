@@ -2,6 +2,7 @@ import { Project as UtooProject } from "@utoo/web";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileTreeNode } from "../types";
 import { generateHtml } from "../utils/htmlGenerator";
+import { utoopackConfig } from "../utoopackConfig";
 
 export interface UseDevOptions {
   /** Auto start dev mode when project is ready */
@@ -79,27 +80,34 @@ export const useDev = (
 
       setIsBuilding(true);
 
-      project.dev((result) => {
-        console.log(`%cDev:%c Build completed`, "color: blue;", "color: green");
-
-        setIsBuilding(false);
-        setBuildCount((c) => c + 1);
-
-        // Process build output
-        processBuildOutput();
-
-        // Mark dev mode as active after first build
-        if (!isDevMode) {
-          setIsDevMode(true);
+      project.dev({
+        config: utoopackConfig,
+        onUpdate: (result) => {
           console.log(
-            "%cDev:%c Dev mode started. Watching for file changes...",
+            `%cDev:%c Build completed`,
             "color: blue;",
             "color: green",
           );
-        }
 
-        // Signal next build is starting
-        setIsBuilding(true);
+          setIsBuilding(false);
+          setBuildCount((c) => c + 1);
+
+          // Process build output
+          processBuildOutput();
+
+          // Mark dev mode as active after first build
+          if (!isDevMode) {
+            setIsDevMode(true);
+            console.log(
+              "%cDev:%c Dev mode started. Watching for file changes...",
+              "color: blue;",
+              "color: green",
+            );
+          }
+
+          // Signal next build is starting
+          setIsBuilding(true);
+        },
       });
     } catch (e: any) {
       console.error("Failed to start dev mode:", e);
