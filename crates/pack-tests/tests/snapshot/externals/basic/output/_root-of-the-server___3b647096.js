@@ -1,24 +1,24 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[externals]/bar [external] (bar, global)", ((__turbopack_context__) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+"[externals]/bar [external] (bar, global)", (function(__turbopack_context__) {
 "use strict";
 
 const mod = globalThis["bar"];
 
 __turbopack_context__.v(mod);
 }),
-"[externals]/bar [external] (bar, cjs)", ((__turbopack_context__, module, exports) => {
+"[externals]/bar [external] (bar, cjs)", (function(__turbopack_context__, module, exports) {
 
 const mod = __turbopack_context__.x("bar", () => require("bar"));
 
 module.exports = mod;
 }),
-"[externals]/bar_require2 [external] (bar_require2, cjs)", ((__turbopack_context__, module, exports) => {
+"[externals]/bar_require2 [external] (bar_require2, cjs)", (function(__turbopack_context__, module, exports) {
 
 const mod = __turbopack_context__.x("bar_require2", () => require("bar_require2"));
 
 module.exports = mod;
 }),
-"[externals]/bar [external] (bar, esm_import)", ((__turbopack_context__) => {
+"[externals]/bar [external] (bar, esm_import)", (function(__turbopack_context__) {
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
@@ -28,7 +28,7 @@ const mod = await __turbopack_context__.y("bar");
 __turbopack_context__.n(mod);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, true);}),
-"[externals]/bar_import2 [external] (bar_import2, esm_import)", ((__turbopack_context__) => {
+"[externals]/bar_import2 [external] (bar_import2, esm_import)", (function(__turbopack_context__) {
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
@@ -38,7 +38,7 @@ const mod = await __turbopack_context__.y("bar_import2");
 __turbopack_context__.n(mod);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, true);}),
-"[externals]/bar_script1 [external] (bar_script1@https://example.com/lib/script.js, script)", ((__turbopack_context__) => {
+"[externals]/bar_script1 [external] (bar_script1@https://example.com/lib/script.js, script)", (function(__turbopack_context__) {
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
@@ -61,7 +61,7 @@ const mod = await (async () => {
 __turbopack_context__.v(mod);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, true);}),
-"[externals]/bar_script2 [external] (bar_script2@https://example.com/lib/script2.js, script)", ((__turbopack_context__) => {
+"[externals]/bar_script2 [external] (bar_script2@https://example.com/lib/script2.js, script)", (function(__turbopack_context__) {
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
@@ -84,7 +84,7 @@ const mod = await (async () => {
 __turbopack_context__.v(mod);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, true);}),
-"[project]/externals/basic/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/externals/basic/input/index.js [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {

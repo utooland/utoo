@@ -1,5 +1,5 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[project]/node_modules/@swc/helpers/_/_async_to_generator.js [client] (ecmascript)", ((__turbopack_context__) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+"[project]/node_modules/@swc/helpers/_/_async_to_generator.js [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 function _(fn) {
@@ -13,7 +13,7 @@ __turbopack_context__.s([
     _
 ]);
 }),
-"[project]/node_modules/@swc/helpers/_/_class_call_check.js [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/node_modules/@swc/helpers/_/_class_call_check.js [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 function _() {
@@ -25,7 +25,7 @@ __turbopack_context__.s([
     _
 ]);
 }),
-"[project]/node_modules/@swc/helpers/_/_create_class.js [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/node_modules/@swc/helpers/_/_create_class.js [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 function _(Ctor, protoProps) {
@@ -61,7 +61,7 @@ __turbopack_context__.s([
     _
 ]);
 }),
-"[project]/node_modules/@swc/helpers/_/_object_spread.js [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/node_modules/@swc/helpers/_/_object_spread.js [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 function _(target, source) {
@@ -73,7 +73,7 @@ __turbopack_context__.s([
     _
 ]);
 }),
-"[project]/node_modules/@swc/helpers/_/_object_spread_props.js [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/node_modules/@swc/helpers/_/_object_spread_props.js [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 function _(target, props) {
@@ -85,7 +85,7 @@ __turbopack_context__.s([
     _
 ]);
 }),
-"[project]/node_modules/@swc/helpers/_/_to_consumable_array.js [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/node_modules/@swc/helpers/_/_to_consumable_array.js [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 function _(value) {
@@ -100,7 +100,7 @@ __turbopack_context__.s([
     _
 ]);
 }),
-"[project]/node_modules/@swc/helpers/_/_ts_generator.js [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/node_modules/@swc/helpers/_/_ts_generator.js [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 function _(thisArg, body) {
@@ -109,7 +109,7 @@ function _(thisArg, body) {
         sent: function sent() {
             return undefined;
         },
-        trys: [],
+        tries: [],
         ops: []
     });
 }
@@ -119,7 +119,7 @@ __turbopack_context__.s([
     _
 ]);
 }),
-"[project]/target_web/legacy_mobile/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/target_web/legacy_mobile/input/index.js [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$swc$2f$helpers$2f$_$2f$_async_to_generator$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/@swc/helpers/_/_async_to_generator.js [client] (ecmascript)");
@@ -197,12 +197,12 @@ __turbopack_context__.s([
     loadProfile
 ]);
 }),
-"[project]/target_web/legacy_mobile/input/lazy.js [client] (ecmascript, async loader)", ((__turbopack_context__) => {
+"[project]/target_web/legacy_mobile/input/lazy.js [client] (ecmascript, async loader)", (function(__turbopack_context__) {
 
-__turbopack_context__.v((parentImport) => {
+__turbopack_context__.v(function(parentImport) {
     return Promise.all([
   "input_lazy_456d4ef4.js"
-].map((chunk) => __turbopack_context__.l(chunk))).then(() => {
+].map(function(chunk) { return __turbopack_context__.l(chunk); })).then(function() {
         return parentImport("[project]/target_web/legacy_mobile/input/lazy.js [client] (ecmascript)");
     });
 });

@@ -3,7 +3,7 @@
 })([
 ["main.js",
 
-"[project]/dynamic_import/library-chunk/input/a.ts [library-client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/dynamic_import/library-chunk/input/a.ts [library-client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 const a = "a";
@@ -13,7 +13,7 @@ __turbopack_context__.s([
     a
 ]);
 }),
-"[project]/dynamic_import/library-chunk/input/index.ts [library-client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/dynamic_import/library-chunk/input/index.ts [library-client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 async function Test() {

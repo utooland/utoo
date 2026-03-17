@@ -1,5 +1,5 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[project]/typescript/verbatim_module_syntax/input/index.tsx [client] (ecmascript)", ((__turbopack_context__) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+"[project]/typescript/verbatim_module_syntax/input/index.tsx [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 // This is the opposite of basic/foreign_jsx_transform test case.

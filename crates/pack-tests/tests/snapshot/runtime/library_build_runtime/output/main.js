@@ -989,7 +989,7 @@ if (typeof exports === 'object' && typeof module === 'object') {
 })([
 ["main.js",
 
-"[project]/runtime/library_build_runtime/input/index.js [library-client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+"[project]/runtime/library_build_runtime/input/index.js [library-client] (ecmascript)", (function(__turbopack_context__, module, exports) {
 
 console.log('Hello, world!');
 }),

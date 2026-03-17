@@ -1,5 +1,5 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[project]/node_modules/jquery/index.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+"[project]/node_modules/jquery/index.js [client] (ecmascript)", (function(__turbopack_context__, module, exports) {
 
 module.exports = function $(selector) {
     return {
@@ -7,7 +7,7 @@ module.exports = function $(selector) {
     };
 };
 }),
-"[project]/node_modules/buffer-dep/index.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+"[project]/node_modules/buffer-dep/index.js [client] (ecmascript)", (function(__turbopack_context__, module, exports) {
 
 exports.Buffer = {
     from: function(str) {
@@ -17,7 +17,7 @@ exports.Buffer = {
     }
 };
 }),
-"[project]/provider/basic/input/index.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+"[project]/provider/basic/input/index.js [client] (ecmascript)", (function(__turbopack_context__, module, exports) {
 
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$jquery$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = /*#__PURE__*/ __turbopack_context__.i("[project]/node_modules/jquery/index.js [client] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$buffer$2d$dep$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = /*#__PURE__*/ __turbopack_context__.i("[project]/node_modules/buffer-dep/index.js [client] (ecmascript)");

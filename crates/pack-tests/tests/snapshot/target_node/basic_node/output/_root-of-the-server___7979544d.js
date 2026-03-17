@@ -1,11 +1,11 @@
 module.exports = [
-"[externals]/node:path [external] (node:path, cjs)", ((__turbopack_context__, module, exports) => {
+"[externals]/node:path [external] (node:path, cjs)", (function(__turbopack_context__, module, exports) {
 
 const mod = __turbopack_context__.x("node:path", () => require("node:path"));
 
 module.exports = mod;
 }),
-"[project]/target_node/basic_node/input/utils.ts [server] (ecmascript)", ((__turbopack_context__) => {
+"[project]/target_node/basic_node/input/utils.ts [server] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 function greet(name) {
@@ -20,7 +20,7 @@ __turbopack_context__.s([
     greet
 ]);
 }),
-"[project]/target_node/basic_node/input/index.ts [server] (ecmascript)", ((__turbopack_context__) => {
+"[project]/target_node/basic_node/input/index.ts [server] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 var __TURBOPACK__imported__module__$5b$externals$5d2f$node$3a$path__$5b$external$5d$__$28$node$3a$path$2c$__cjs$29$__ = __turbopack_context__.i("[externals]/node:path [external] (node:path, cjs)");

@@ -1,15 +1,15 @@
-(globalThis["utooChunk_async_chunk_test"] || (globalThis["utooChunk_async_chunk_test"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-192, ((__turbopack_context__) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["utooChunk_async_chunk_test"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["utooChunk_async_chunk_test"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+192, (function(__turbopack_context__) {
 
-__turbopack_context__.v((parentImport) => {
+__turbopack_context__.v(function(parentImport) {
     return Promise.all([
   "input_97190704.js"
-].map((chunk) => __turbopack_context__.l(chunk))).then(() => {
+].map(function(chunk) { return __turbopack_context__.l(chunk); })).then(function() {
         return parentImport(476);
     });
 });
 }),
-402, ((__turbopack_context__) => {
+402, (function(__turbopack_context__) {
 "use strict";
 
 function bar(value) {
@@ -21,7 +21,7 @@ __turbopack_context__.s([
     bar
 ]);
 }),
-545, ((__turbopack_context__) => {
+545, (function(__turbopack_context__) {
 "use strict";
 
 var __TURBOPACK__imported__module__402__ = __turbopack_context__.i(402);
@@ -34,7 +34,7 @@ __turbopack_context__.A(192).then(({ foo })=>{
 });
 __turbopack_context__.s([]);
 }),
-743, ((__turbopack_context__, module, exports) => {
+743, (function(__turbopack_context__, module, exports) {
 
 // shared package
 }),

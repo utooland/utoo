@@ -1,17 +1,19 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
     {"otherChunks":["input_index_54f01207.js"],"runtimeModuleIds":[47]}
 ]);
 (() => {
-if (!Array.isArray(globalThis["TURBOPACK"])) {
+var __turbopack_global__ = typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {})));
+var globalThis = __turbopack_global__;
+if (!Array.isArray(__turbopack_global__["TURBOPACK"])) {
     return;
 }
 
-const CHUNK_BASE_PATH = "/";
-const RELATIVE_ROOT_PATH = "/ROOT";
-const RUNTIME_PUBLIC_PATH = "/";
-const ASSET_SUFFIX = "";
-const WORKER_FORWARDED_GLOBALS = [];
+var CHUNK_BASE_PATH = "/";
+var RELATIVE_ROOT_PATH = "/ROOT";
+var RUNTIME_PUBLIC_PATH = "/";
+var ASSET_SUFFIX = "";
+var WORKER_FORWARDED_GLOBALS = [];
 /**
  * This file contains runtime types and functions that are shared between all
  * TurboPack ECMAScript runtimes.
@@ -1117,8 +1119,8 @@ let BACKEND;
         return fetch(getChunkRelativeUrl(wasmChunkPath));
     }
 })();
-const chunksToRegister = globalThis["TURBOPACK"];
-globalThis["TURBOPACK"] = { push: registerChunk };
+var chunksToRegister = __turbopack_global__["TURBOPACK"] || [];
+__turbopack_global__["TURBOPACK"] = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
 })();
 

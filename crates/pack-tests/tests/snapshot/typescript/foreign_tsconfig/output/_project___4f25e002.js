@@ -1,5 +1,5 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-65, ((__turbopack_context__) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+65, (function(__turbopack_context__) {
 "use strict";
 
 const foo = 'bar';
@@ -9,7 +9,7 @@ __turbopack_context__.s([
     foo
 ]);
 }),
-82, ((__turbopack_context__) => {
+82, (function(__turbopack_context__) {
 "use strict";
 
 const prop = "prop";
@@ -19,7 +19,7 @@ __turbopack_context__.s([
     prop
 ]);
 }),
-27, ((__turbopack_context__) => {
+27, (function(__turbopack_context__) {
 "use strict";
 
 var __TURBOPACK__imported__module__65__ = __turbopack_context__.i(65);

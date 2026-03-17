@@ -1,17 +1,19 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
     {"otherChunks":["input_index_fe72225c.js"],"runtimeModuleIds":[41]}
 ]);
 (() => {
-if (!Array.isArray(globalThis["TURBOPACK"])) {
+var __turbopack_global__ = typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {})));
+var globalThis = __turbopack_global__;
+if (!Array.isArray(__turbopack_global__["TURBOPACK"])) {
     return;
 }
 
-const CHUNK_BASE_PATH = "/";
-const RELATIVE_ROOT_PATH = "/ROOT";
-const RUNTIME_PUBLIC_PATH = "/";
-const ASSET_SUFFIX = "";
-const WORKER_FORWARDED_GLOBALS = [];
+var CHUNK_BASE_PATH = "/";
+var RELATIVE_ROOT_PATH = "/ROOT";
+var RUNTIME_PUBLIC_PATH = "/";
+var ASSET_SUFFIX = "";
+var WORKER_FORWARDED_GLOBALS = [];
 /**
  * This file contains runtime types and functions that are shared between all
  * TurboPack ECMAScript runtimes.
@@ -2127,11 +2129,11 @@ function _eval({ code, url, map }) {
     // eslint-disable-next-line no-eval
     return eval(code);
 }
-const chunksToRegister = globalThis["TURBOPACK"];
-globalThis["TURBOPACK"] = { push: registerChunk };
+var chunksToRegister = __turbopack_global__["TURBOPACK"] || [];
+__turbopack_global__["TURBOPACK"] = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
-const chunkListsToRegister = globalThis["TURBOPACK_CHUNK_LISTS"] || [];
-globalThis["TURBOPACK_CHUNK_LISTS"] = { push: registerChunkList };
+var chunkListsToRegister = __turbopack_global__["TURBOPACK_CHUNK_LISTS"] || [];
+__turbopack_global__["TURBOPACK_CHUNK_LISTS"] = { push: registerChunkList };
 chunkListsToRegister.forEach(registerChunkList);
 })();
 

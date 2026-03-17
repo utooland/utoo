@@ -1,5 +1,5 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[project]/node_modules/react/jsx-runtime.js [client] (ecmascript)", ((__turbopack_context__) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+"[project]/node_modules/react/jsx-runtime.js [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 function jsx() {
@@ -14,7 +14,7 @@ __turbopack_context__.s([
     jsx
 ]);
 }),
-"[project]/basic/no_named_export_default/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/basic/no_named_export_default/input/index.js [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$react$2f$jsx$2d$runtime$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/react/jsx-runtime.js [client] (ecmascript)");

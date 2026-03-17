@@ -1,5 +1,5 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[project]/static-assets/json/input/Regular Expressions (JavaScript).tmLanguage.json.[json].cjs [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+"[project]/static-assets/json/input/Regular Expressions (JavaScript).tmLanguage.json.[json].cjs [client] (ecmascript)", (function(__turbopack_context__, module, exports) {
 
 module.exports = {
     "fileTypes": [],

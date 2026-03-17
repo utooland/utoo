@@ -1,8 +1,8 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-42, ((__turbopack_context__) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+42, (function(__turbopack_context__) {
 
 __turbopack_context__.q("/onig.06d92f9f.wasm");}),
-37, ((__turbopack_context__) => {
+37, (function(__turbopack_context__) {
 "use strict";
 
 var __TURBOPACK__imported__module__42__ = __turbopack_context__.i(42);
@@ -14,7 +14,7 @@ __turbopack_context__.s([
     __TURBOPACK__default__export__
 ]);
 }),
-90, ((__turbopack_context__) => {
+90, (function(__turbopack_context__) {
 "use strict";
 
 var __TURBOPACK__imported__module__37__ = __turbopack_context__.i(37);

@@ -23,7 +23,7 @@
       "entry": false,
       "recorded": false,
       "id": "input_86dfc83f.js",
-      "size": 1045,
+      "size": 1428,
       "hash": "",
       "files": [
         "input_86dfc83f.js"
@@ -47,7 +47,7 @@
       "entry": false,
       "recorded": false,
       "id": "input_97190704.js",
-      "size": 795,
+      "size": 1141,
       "hash": "",
       "files": [
         "input_97190704.js"
@@ -59,7 +59,7 @@
       "type": "asset",
       "name": "input_86dfc83f.js",
       "info": {},
-      "size": 1045,
+      "size": 1428,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -83,7 +83,7 @@
       "type": "asset",
       "name": "input_97190704.js",
       "info": {},
-      "size": 795,
+      "size": 1141,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,

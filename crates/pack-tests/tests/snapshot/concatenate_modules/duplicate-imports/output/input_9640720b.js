@@ -1,9 +1,9 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[project]/concatenate_modules/duplicate-imports/input/shared.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+"[project]/concatenate_modules/duplicate-imports/input/shared.js [client] (ecmascript)", (function(__turbopack_context__, module, exports) {
 
 module.exports = 'shared';
 }),
-"[project]/concatenate_modules/duplicate-imports/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/concatenate_modules/duplicate-imports/input/index.js [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 // MERGED MODULE: [project]/concatenate_modules/duplicate-imports/input/index.js [client] (ecmascript)

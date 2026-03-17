@@ -1,5 +1,5 @@
-(globalThis["utooChunk_export_entry_exports"] || (globalThis["utooChunk_export_entry_exports"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[project]/runtime/export_entry_exports/input/index.ts [client] (ecmascript)", ((__turbopack_context__) => {
+((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["utooChunk_export_entry_exports"] || ((typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : {}))))["utooChunk_export_entry_exports"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+"[project]/runtime/export_entry_exports/input/index.ts [client] (ecmascript)", (function(__turbopack_context__) {
 "use strict";
 
 function setTernContainer(container) {
