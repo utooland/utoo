@@ -47,7 +47,13 @@ pub fn get_global_package_dir(prefix: Option<&str>) -> Result<PathBuf> {
             .to_path_buf(),
     };
 
-    Ok(base_path.join("lib/node_modules"))
+    // On Windows, npm global packages are in <prefix>/node_modules
+    // On Unix, they are in <prefix>/lib/node_modules
+    if cfg!(windows) {
+        Ok(base_path.join("node_modules"))
+    } else {
+        Ok(base_path.join("lib/node_modules"))
+    }
 }
 
 #[cfg(test)]
