@@ -147,9 +147,10 @@ pub fn get_cache_dir() -> PathBuf {
     // use a cache dir on the project's drive instead.
     #[cfg(windows)]
     if let Ok(cwd) = std::env::current_dir() {
-        let cache_drive = cache.components().next().map(|c| c.as_os_str().to_ascii_uppercase());
-        let cwd_drive = cwd.components().next().map(|c| c.as_os_str().to_ascii_uppercase());
-        if cache_drive != cwd_drive {
+        fn drive_prefix(p: &Path) -> Option<std::ffi::OsString> {
+            p.components().next().map(|c| c.as_os_str().to_ascii_uppercase())
+        }
+        if drive_prefix(&cache) != drive_prefix(&cwd) {
             if let Some(drive) = cwd.components().next() {
                 return PathBuf::from(drive.as_os_str()).join(".cache").join("nm");
             }

@@ -1,6 +1,6 @@
 use crate::fs;
 use crate::model::package::PackageInfo;
-use PATH_SEPARATOR;
+use crate::util::platform_const::PATH_SEPARATOR;
 use anyhow::{Context, Result};
 use std::env;
 use std::path::{Path, PathBuf};
