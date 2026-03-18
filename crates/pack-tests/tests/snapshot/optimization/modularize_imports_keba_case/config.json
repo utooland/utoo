@@ -2,7 +2,7 @@
   "config": {
     "entry": [
       {
-        "import": "input/index.ts",
+        "import": "input/index.tsx",
         "name": "main"
       }
     ],
