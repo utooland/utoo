@@ -830,6 +830,11 @@ pub struct SchemaStyleConfig {
     #[schemars(description = "Enable automatic CSS Modules transform")]
     pub auto_css_modules: Option<bool>,
 
+    /// Inline PostCSS configuration passed directly to the PostCSS transform
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Inline PostCSS configuration")]
+    pub postcss: Option<serde_json::Value>,
+
     /// Sass configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Sass configuration")]
@@ -909,6 +914,7 @@ mod tests {
         assert!(schema_str.contains("html"));
         assert!(schema_str.contains("react"));
         assert!(schema_str.contains("provider"));
+        assert!(schema_str.contains("postcss"));
         assert!(schema_str.contains("publicPath"));
         assert!(schema_str.contains("cssFilename"));
         assert!(schema_str.contains("assetModuleFilename"));

@@ -1,0 +1,20 @@
+{
+  "name": "with-postcss",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "up dev",
+    "build": "up build"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@utoo/pack-cli": "*",
+    "postcss": "^8.4.31",
+    "postcss-plugin-px2rem": "^0.8.1"
+  }
+}

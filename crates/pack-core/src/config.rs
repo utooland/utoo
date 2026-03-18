@@ -257,6 +257,8 @@ pub struct StyleConfig {
     pub emotion: Option<bool>,
     pub auto_css_modules: Option<bool>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
+    pub postcss: Option<serde_json::Value>,
+    #[bincode(with = "turbo_bincode::serde_self_describing")]
     sass: Option<serde_json::Value>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     less: Option<serde_json::Value>,
@@ -964,6 +966,19 @@ impl Config {
     #[turbo_tasks::function]
     pub fn styles(&self) -> Vc<StyleConfig> {
         self.styles.clone().unwrap_or_default().cell()
+    }
+
+    #[turbo_tasks::function]
+    pub fn postcss_config_content(&self) -> Result<Vc<Option<RcStr>>> {
+        let postcss_config_content = self
+            .styles
+            .as_ref()
+            .and_then(|styles| styles.postcss.as_ref())
+            .map(serde_json::to_string)
+            .transpose()?
+            .map(RcStr::from);
+
+        Ok(Vc::cell(postcss_config_content))
     }
 
     #[turbo_tasks::function]

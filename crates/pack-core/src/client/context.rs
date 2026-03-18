@@ -258,9 +258,12 @@ pub async fn get_client_module_options_context(
 
     client_rules.extend(additional_rules);
 
+    let postcss_config_content = (*config.postcss_config_content().await?).clone();
+
     let postcss_transform_options = Some(PostCssTransformOptions {
         postcss_package: Some(get_postcss_package_mapping().to_resolved().await?),
         config_location: PostCssConfigLocation::ProjectPathOrLocalPath,
+        config_content: postcss_config_content,
         ..Default::default()
     });
 

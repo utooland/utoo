@@ -1325,6 +1325,9 @@
         "less": {
           "description": "Less configuration"
         },
+        "postcss": {
+          "description": "Inline PostCSS configuration"
+        },
         "sass": {
           "description": "Sass configuration"
         },
