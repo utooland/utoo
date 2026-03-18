@@ -122,10 +122,12 @@ impl ModularizeImportsTransformer {
 }
 
 fn is_typescript_like_file(file_name: &str) -> bool {
-    file_name.ends_with(".ts")
-        || file_name.ends_with(".tsx")
-        || file_name.ends_with(".mts")
-        || file_name.ends_with(".cts")
+    matches!(
+        std::path::Path::new(file_name)
+            .extension()
+            .and_then(|s| s.to_str()),
+        Some("ts" | "tsx" | "mts" | "cts")
+    )
 }
 
 #[async_trait]
