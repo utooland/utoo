@@ -1,0 +1,23 @@
+{
+  "$schema": "../../packages/pack/config_schema.json",
+  "entry": [
+    {
+      "import": "./src/index.ts",
+      "library": {
+        "name": "inline-css"
+      }
+    }
+  ],
+  "output": {
+    "path": "./dist"
+  },
+  "html": {
+    "title": "inline-css-demo"
+  },
+  "styles": {
+    "inlineCss": {}
+  },
+  "optimization": {
+    "minify": false
+  }
+}
