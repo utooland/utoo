@@ -107,6 +107,8 @@ pub struct Config {
     react: Option<ReactConfig>,
     optimization: Option<OptimizationConfig>,
     stats: Option<bool>,
+    #[bincode(with = "turbo_bincode::serde_self_describing")]
+    swc_plugins: Option<Vec<(RcStr, serde_json::Value)>>,
     #[cfg(any(feature = "process_pool", feature = "worker_pool"))]
     plugin_runtime_strategy: Option<PluginRuntimeStrategy>,
     persistent_caching: Option<bool>,
@@ -694,8 +696,6 @@ impl TryFrom<RegexComponents> for EsRegex {
 #[derive(Clone, Debug, Default, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
 pub struct ExperimentalConfig {
-    #[bincode(with = "turbo_bincode::serde_self_describing")]
-    swc_plugins: Option<Vec<(RcStr, serde_json::Value)>>,
     react_compiler: Option<ReactCompilerOptionsOrBoolean>,
 }
 
@@ -1286,8 +1286,8 @@ impl Config {
     }
 
     #[turbo_tasks::function]
-    pub fn experimental_swc_plugins(&self) -> Vc<SwcPlugins> {
-        Vc::cell(self.experimental.swc_plugins.clone().unwrap_or_default())
+    pub fn swc_plugins(&self) -> Vc<SwcPlugins> {
+        Vc::cell(self.swc_plugins.clone().unwrap_or_default())
     }
 
     #[turbo_tasks::function]
