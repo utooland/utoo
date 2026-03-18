@@ -1,0 +1,19 @@
+{
+  "name": "with-swc-plugin",
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "up dev",
+    "build": "up build"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "autoprefixer": "10.4.10",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "swc-plugin-coverage-instrument": "^0.0.32",
+    "@utoo/pack-cli": "*"
+  }
+}

@@ -13,7 +13,7 @@ pub async fn get_swc_ecma_transform_plugin_rule(
     config: Vc<Config>,
     project_path: FileSystemPath,
 ) -> Result<Option<ModuleRule>> {
-    let plugin_configs = config.experimental_swc_plugins().await?;
+    let plugin_configs = config.swc_plugins().await?;
     if !plugin_configs.is_empty() {
         #[cfg(feature = "plugin")]
         {

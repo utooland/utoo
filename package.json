@@ -46,7 +46,8 @@
     "examples/expose-entry-exports",
     "examples/pack-esm-api",
     "examples/inline-css",
-    "examples/with-postcss"
+    "examples/with-postcss",
+    "examples/with-swc-plugin"
   ],
   "repository": "https://github.com/utooland/utoo"
 }
