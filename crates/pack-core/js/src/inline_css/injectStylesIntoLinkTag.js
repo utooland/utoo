@@ -1,3 +1,9 @@
+/**
+ * Injects styles into the DOM using <link> tags.
+ * This is a Rust-native reimplementation of webpack's style-loader.
+ * @see https://webpack.js.org/loaders/style-loader/
+ */
+
 const getTarget = (() => {
   const memo = {};
 

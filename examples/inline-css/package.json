@@ -1,5 +1,5 @@
 {
-  "name": "with-style-loader",
+  "name": "inline-css",
   "version": "1.0.0",
   "description": "",
   "keywords": [],
@@ -13,6 +13,9 @@
   "dependencies": {},
   "devDependencies": {
     "@utoo/pack-cli": "*",
+    "resolve-url-loader": "^5.0.0",
+    "sass": "^1.72.0",
+    "sass-loader": "^13.2.0",
     "serve": "^14.2.4"
   },
   "repository": "git@github.com:utooland/utoo.git"

@@ -1,0 +1,55 @@
+$accent: #e67e22
+$success: #27ae60
+$danger: #e74c3c
+
+.btn
+  display: inline-block
+  padding: 10px 20px
+  border: none
+  border-radius: 6px
+  font-size: 14px
+  font-weight: 600
+  cursor: pointer
+  transition: background-color 0.2s ease, transform 0.1s ease
+
+  &:hover
+    transform: translateY(-1px)
+
+  &:active
+    transform: translateY(0)
+
+  &--primary
+    background-color: $accent
+    color: white
+
+    &:hover
+      background-color: darken($accent, 10%)
+
+  &--success
+    background-color: $success
+    color: white
+
+    &:hover
+      background-color: darken($success, 10%)
+
+  &--danger
+    background-color: $danger
+    color: white
+
+    &:hover
+      background-color: darken($danger, 10%)
+
+.badge
+  display: inline-block
+  padding: 4px 10px
+  border-radius: 12px
+  font-size: 12px
+  font-weight: 700
+
+  &--info
+    background-color: lighten($accent, 30%)
+    color: darken($accent, 20%)
+
+  &--success
+    background-color: lighten($success, 40%)
+    color: darken($success, 20%)

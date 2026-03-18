@@ -4,12 +4,17 @@ use turbopack::module_options::ModuleRule;
 
 use crate::{
     config::Config,
+    mode::Mode,
     shared::transforms::{
-        get_image_rule, get_wasm_rule, modularize_imports::get_modularize_imports_rule,
+        get_image_rule, get_inline_css_rule, get_wasm_rule, inline_css::module::InjectType,
+        modularize_imports::get_modularize_imports_rule,
     },
 };
 
-pub async fn get_client_transforms_rules(config: Vc<Config>) -> Result<Vec<ModuleRule>> {
+pub async fn get_client_transforms_rules(
+    config: Vc<Config>,
+    mode: Vc<Mode>,
+) -> Result<Vec<ModuleRule>> {
     let mut rules = vec![];
 
     let optimization_config = config.optimization().await?;
@@ -31,6 +36,20 @@ pub async fn get_client_transforms_rules(config: Vc<Config>) -> Result<Vec<Modul
 
     if wasm_as_asset {
         rules.push(get_wasm_rule().await?);
+    }
+
+    if let Some(inline_css_options) = &*config.inline_css().await?
+        && let Some(obj) = inline_css_options.as_object()
+    {
+        let insert = obj.get("insert").and_then(|v| v.as_str()).unwrap_or("head");
+        let inject_type = obj
+            .get("injectType")
+            .and_then(|v| v.as_str())
+            .map(InjectType::from_str)
+            .unwrap_or(InjectType::Style);
+
+        let minify = *config.minify(mode).await?;
+        rules.push(get_inline_css_rule(insert.into(), inject_type, minify).await?);
     }
 
     Ok(rules)
