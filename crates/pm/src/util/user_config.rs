@@ -140,7 +140,23 @@ pub async fn set_cache_dir(cache_dir: Option<String>) {
 }
 
 pub fn get_cache_dir() -> PathBuf {
-    PathBuf::from(CACHE_DIR.get_sync())
+    let cache = PathBuf::from(CACHE_DIR.get_sync());
+
+    // On Windows, hardlinks cannot cross drive boundaries.
+    // If cache (e.g. C:\.cache\nm) is on a different drive than cwd (e.g. D:\project),
+    // use a cache dir on the project's drive instead.
+    #[cfg(windows)]
+    if let Ok(cwd) = std::env::current_dir() {
+        let cache_drive = cache.components().next().map(|c| c.as_os_str().to_ascii_uppercase());
+        let cwd_drive = cwd.components().next().map(|c| c.as_os_str().to_ascii_uppercase());
+        if cache_drive != cwd_drive {
+            if let Some(drive) = cwd.components().next() {
+                return PathBuf::from(drive.as_os_str()).join(".cache").join("nm");
+            }
+        }
+    }
+
+    cache
 }
 
 // Package.json cache — keyed by directory path, covers root + workspace members.
