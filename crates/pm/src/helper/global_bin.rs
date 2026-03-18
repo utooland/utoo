@@ -1,3 +1,4 @@
+use crate::util::platform_const::GLOBAL_NODE_MODULES;
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
@@ -47,13 +48,7 @@ pub fn get_global_package_dir(prefix: Option<&str>) -> Result<PathBuf> {
             .to_path_buf(),
     };
 
-    // On Windows, npm global packages are in <prefix>/node_modules
-    // On Unix, they are in <prefix>/lib/node_modules
-    if cfg!(windows) {
-        Ok(base_path.join("node_modules"))
-    } else {
-        Ok(base_path.join("lib/node_modules"))
-    }
+    Ok(base_path.join(GLOBAL_NODE_MODULES))
 }
 
 #[cfg(test)]
