@@ -199,6 +199,7 @@ export interface ConfigComplete {
   styles?: {
     autoCssModules?: boolean;
     emotion?: boolean;
+    postcss?: JSONValue;
     less?: {
       implementation?: string;
       [key: string]: any;

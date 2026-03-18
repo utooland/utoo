@@ -510,34 +510,8 @@
       "description": "Experimental features configuration",
       "type": "object",
       "properties": {
-        "cacheHandlers": {
-          "description": "Cache handlers",
-          "type": [
-            "object",
-            "null"
-          ],
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "dynamicIO": {
-          "description": "Dynamic IO",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "esmExternals": {
-          "description": "ESM externals"
-        },
-        "ppr": {
-          "description": "Partial prerendering"
-        },
         "reactCompiler": {
           "description": "React compiler"
-        },
-        "serverActions": {
-          "description": "Server actions"
         },
         "swcPlugins": {
           "description": "SWC plugins as [path, options] tuples",
@@ -556,27 +530,6 @@
             "maxItems": 2,
             "minItems": 2
           }
-        },
-        "taint": {
-          "description": "Taint",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "useCache": {
-          "description": "Use cache",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "viewTransition": {
-          "description": "View transition",
-          "type": [
-            "boolean",
-            "null"
-          ]
         }
       }
     },
@@ -1371,6 +1324,9 @@
         },
         "less": {
           "description": "Less configuration"
+        },
+        "postcss": {
+          "description": "Inline PostCSS configuration"
         },
         "sass": {
           "description": "Sass configuration"

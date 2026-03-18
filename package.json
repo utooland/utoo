@@ -45,7 +45,8 @@
     "examples/utooweb-demo",
     "examples/expose-entry-exports",
     "examples/pack-esm-api",
-    "examples/inline-css"
+    "examples/inline-css",
+    "examples/with-postcss"
   ],
   "repository": "https://github.com/utooland/utoo"
 }
