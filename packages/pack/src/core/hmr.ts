@@ -19,6 +19,7 @@ import { debounce, getPackPath, processIssues } from "../utils/common";
 import { getInitialAssetsFromStats } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
 import { normalizePath } from "../utils/normalize-path";
+import { useWorkerThreads } from "../utils/runtimePluginStratety";
 import { validateEntryPaths } from "../utils/validateEntry";
 import { projectFactory } from "./project";
 import { Project, Update as TurbopackUpdate } from "./types";
@@ -133,6 +134,9 @@ export async function createHotReloader(
           minify: false,
           moduleIds: "named",
         },
+        pluginRuntimeStrategy:
+          bundleOptions?.config?.pluginRuntimeStrategy ??
+          (useWorkerThreads() ? "workerThreads" : "childProcesses"),
       },
       projectPath: normalizePath(resolvedProjectPath),
       rootPath: rootPath || projectPath || process.cwd(),

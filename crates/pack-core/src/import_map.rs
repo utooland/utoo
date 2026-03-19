@@ -37,7 +37,6 @@ pub async fn insert_shared_aliases(
     pack_path: &FileSystemPath,
 ) -> Result<()> {
     import_map.insert_singleton_alias("@swc/helpers", pack_path.join("node_modules/@swc/helpers")?);
-    // import_map.insert_singleton_alias("styled-jsx", pack_package.clone());
     import_map.insert_singleton_alias("react", project_path.clone());
     import_map.insert_singleton_alias("react-dom", project_path.clone());
 

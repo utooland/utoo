@@ -18,11 +18,6 @@ export interface LibraryOptions {
 
 export type RustifiedEnv = { name: string; value: string }[];
 
-export interface ExperimentalConfig {
-  swcPlugins?: [string, any][];
-  reactCompiler?: boolean | any;
-}
-
 export type JSONValue =
   | string
   | number
@@ -228,12 +223,11 @@ export interface ConfigComplete {
     importSource?: string;
   };
   stats?: boolean;
+  swcPlugins?: [string, any][];
   pluginRuntimeStrategy?: "workerThreads" | "childProcesses";
   persistentCaching?: boolean;
   nodePolyfill?: boolean;
   devServer?: DevServerConfig;
-  cacheHandler?: string;
-  experimental?: ExperimentalConfig;
 }
 
 export interface HtmlConfig {
