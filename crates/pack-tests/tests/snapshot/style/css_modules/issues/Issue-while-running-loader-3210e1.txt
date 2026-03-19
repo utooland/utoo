@@ -1,0 +1,20 @@
+warning - [transform] /style/css_modules/input/normal_css_modules/style.module.scss  Issue while running loader
+  
+  SassWarning: Deprecation Warning on line 6, column 22 of file://WORKSPACE_ROOT/crates/pack-tests/tests/snapshot/style/css_modules/input/normal_css_modules/style.module.scss:6:22:
+  darken() is deprecated. Suggestions:
+  
+  color.scale($color, $lightness: -24.6376811594%)
+  color.adjust($color, $lightness: -10%)
+  
+  More info: https://sass-lang.com/d/color-functions
+  
+  6 |     background-color: darken($primary-color, 10%);
+  
+  
+  input/normal_css_modules/style.module.scss 7:23  root stylesheet
+  
+  
+  Import trace:
+    Browser:
+      ./style/css_modules/input/normal_css_modules/style.module.scss
+      ./style/css_modules/input/index.ts
