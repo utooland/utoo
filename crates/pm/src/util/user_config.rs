@@ -148,7 +148,9 @@ pub fn get_cache_dir() -> PathBuf {
     #[cfg(windows)]
     if let Ok(cwd) = std::env::current_dir() {
         fn drive_prefix(p: &Path) -> Option<std::ffi::OsString> {
-            p.components().next().map(|c| c.as_os_str().to_ascii_uppercase())
+            p.components()
+                .next()
+                .map(|c| c.as_os_str().to_ascii_uppercase())
         }
         if drive_prefix(&cache) != drive_prefix(&cwd) {
             if let Some(drive) = cwd.components().next() {
