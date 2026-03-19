@@ -1,0 +1,18 @@
+warning - [transform] /style/css_modules/input/normal_css_modules/style.module.scss  Issue while running loader
+  
+  SassWarning: Deprecation Warning on line 6, column 22 of file://WORKSPACE_ROOT/crates/pack-tests/tests/snapshot/style/css_modules/input/normal_css_modules/style.module.scss:6:22:
+  Global built-in functions are deprecated and will be removed in Dart Sass 3.0.0.
+  Use color.adjust instead.
+  
+  More info and automated migrator: https://sass-lang.com/d/import
+  
+  6 |     background-color: darken($primary-color, 10%);
+  
+  
+  input/normal_css_modules/style.module.scss 7:23  root stylesheet
+  
+  
+  Import trace:
+    Browser:
+      ./style/css_modules/input/normal_css_modules/style.module.scss
+      ./style/css_modules/input/index.ts

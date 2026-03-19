@@ -313,7 +313,6 @@ pub async fn get_server_resolve_options_context(
         custom_conditions,
         import_map: Some(server_import_map),
         fallback_import_map: Some(server_fallback_import_map),
-        browser: true,
         module: true,
         before_resolve_plugins: vec![ResolvedVc::upcast(externals_plugin)],
         after_resolve_plugins: vec![ResolvedVc::upcast(externals_plugin)],
