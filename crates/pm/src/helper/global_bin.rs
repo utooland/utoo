@@ -84,6 +84,6 @@ mod tests {
     fn test_get_global_package_dir_with_empty_prefix() {
         let prefix: Option<&str> = Some("");
         let result = get_global_package_dir(prefix).unwrap();
-        assert_eq!(result, PathBuf::from("lib/node_modules"));
+        assert_eq!(result, PathBuf::from(GLOBAL_NODE_MODULES));
     }
 }
