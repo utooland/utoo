@@ -102,6 +102,7 @@ pub async fn link_global_to_local(
 #[allow(unused_imports)]
 mod tests {
     use super::*;
+    use crate::util::platform_const::GLOBAL_NODE_MODULES;
     use std::fs;
     use tempfile::TempDir;
 
@@ -140,9 +141,7 @@ mod tests {
 
         // create fake global package dir with package.json
         let pkg_name = "lib-a";
-        let global_pkg_dir = global
-            .join(crate::util::platform_const::GLOBAL_NODE_MODULES)
-            .join(pkg_name);
+        let global_pkg_dir = global.join(GLOBAL_NODE_MODULES).join(pkg_name);
         fs::create_dir_all(&global_pkg_dir).unwrap();
         let pkg_json = format!(
             r#"{{

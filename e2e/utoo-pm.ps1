@@ -27,13 +27,13 @@ try {
         Write-Host "Installing dependencies for ant-design-x (next)..."
         utoo deps
         if ($LASTEXITCODE -ne 0) { throw "utoo deps failed for ant-design-x (next)" }
-        
+
         utoo install --ignore-scripts
         if ($LASTEXITCODE -ne 0) { throw "utoo install failed for ant-design-x (next)" }
-        
+
         utoo rebuild
         if ($LASTEXITCODE -ne 0) { throw "utoo rebuild failed for ant-design-x (next)" }
-        
+
         Write-Green "PASS: ant-design-x (next) cloned and installed"
     }
     finally {
@@ -177,10 +177,9 @@ try {
     git clean -dfx
     
     Write-Host "Installing dependencies for ant-design by npmjs.org..."
-    # Use --ignore-scripts to skip prepare hook that causes @swc/core native binding issues on Windows
     utoo install --registry=https://registry.npmjs.org --ignore-scripts
     if ($LASTEXITCODE -ne 0) { throw "utoo install failed for ant-design (npmjs.org)" }
-    
+
     Write-Green "PASS: ant-design cloned and installed"
 }
 finally {
@@ -288,6 +287,23 @@ finally {
     Pop-Location
     Remove-Item -Recurse -Force $packDir -ErrorAction SilentlyContinue
     Remove-Item -Recurse -Force $installPrefix -ErrorAction SilentlyContinue
+}
+
+# Case: Verify ant-design-x install + build on Windows
+Write-Yellow "Case: ant-design-x install and build"
+$antdxDir = Join-Path $env:TEMP "utoo-e2e-antdx-$(Get-Random)"
+try {
+    git clone --branch next --single-branch --depth 1 https://github.com/ant-design/x.git $antdxDir
+    Push-Location $antdxDir
+
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "utoo install failed for ant-design-x" }
+
+    Write-Green "PASS: ant-design-x install successful"
+}
+finally {
+    Pop-Location
+    Remove-Item -Recurse -Force $antdxDir -ErrorAction SilentlyContinue
 }
 
 Write-Green "All e2e tests passed successfully!"

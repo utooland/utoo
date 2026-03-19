@@ -1,9 +1,6 @@
 use std::collections::HashSet;
-use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, OnceLock};
-
-use super::platform_const::drive_root;
 
 use anyhow::Result;
 use dashmap::DashMap;
@@ -148,8 +145,8 @@ pub fn get_cache_dir() -> PathBuf {
     // On Windows, hardlinks cannot cross drive boundaries (e.g. cache on C:, project on D:).
     // Fall back to a cache dir on the project's drive.
     #[cfg(windows)]
-    if let Ok(cwd) = env::current_dir()
-        && drive_root(&cache) != drive_root(&cwd)
+    if let Ok(cwd) = std::env::current_dir()
+        && super::platform_const::drive_root(&cache) != super::platform_const::drive_root(&cwd)
     {
         return cwd.ancestors().last().unwrap_or(&cwd).join(".cache/nm");
     }

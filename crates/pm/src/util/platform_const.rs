@@ -1,8 +1,5 @@
 //! Platform-specific constants for cross-platform compatibility.
 
-use std::ffi::OsString;
-use std::path::Path;
-
 /// PATH environment variable separator.
 /// Windows uses `;`, Unix uses `:`.
 pub const PATH_SEPARATOR: &str = if cfg!(windows) { ";" } else { ":" };
@@ -17,8 +14,8 @@ pub const GLOBAL_NODE_MODULES: &str = if cfg!(windows) {
 };
 
 /// Extract the drive root component (e.g. `C:`) from a path, uppercased for comparison.
-/// Returns `None` on Unix or if the path has no components.
-pub fn drive_root(p: &Path) -> Option<OsString> {
+#[cfg(windows)]
+pub fn drive_root(p: &std::path::Path) -> Option<std::ffi::OsString> {
     p.components()
         .next()
         .map(|c| c.as_os_str().to_ascii_uppercase())
