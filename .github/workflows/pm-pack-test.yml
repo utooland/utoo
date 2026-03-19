@@ -99,6 +99,32 @@ jobs:
         working-directory: D:/a/egg/egg
         run: utoo build -- --workspace ./tools/egg-bin
 
-      - name: Run tests (shard 1/3)
+      - name: Run egg tests (shard 1/3)
         working-directory: D:/a/egg/egg
         run: utoo test --shard=1/3
+
+      # ant-design-x: install + build
+      - name: Clone ant-design-x
+        run: git clone --branch next --single-branch --depth 1 https://github.com/ant-design/x.git D:/a/antd-x
+
+      - name: Install ant-design-x
+        working-directory: D:/a/antd-x
+        run: utoo install --ignore-scripts
+
+      - name: Build ant-design-x
+        working-directory: D:/a/antd-x
+        run: utoo run build
+        continue-on-error: true
+
+      # ant-design: install + build
+      - name: Clone ant-design
+        run: git clone --branch master --single-branch --depth 1 https://github.com/ant-design/ant-design.git D:/a/antd
+
+      - name: Install ant-design
+        working-directory: D:/a/antd
+        run: utoo install --ignore-scripts
+
+      - name: Build ant-design
+        working-directory: D:/a/antd
+        run: utoo run build
+        continue-on-error: true
