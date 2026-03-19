@@ -1,6 +1,9 @@
 use std::collections::HashSet;
+use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, OnceLock};
+
+use super::platform_const::drive_root;
 
 use anyhow::Result;
 use dashmap::DashMap;
@@ -142,21 +145,13 @@ pub async fn set_cache_dir(cache_dir: Option<String>) {
 pub fn get_cache_dir() -> PathBuf {
     let cache = PathBuf::from(CACHE_DIR.get_sync());
 
-    // On Windows, hardlinks cannot cross drive boundaries.
-    // If cache (e.g. C:\.cache\nm) is on a different drive than cwd (e.g. D:\project),
-    // use a cache dir on the project's drive instead.
+    // On Windows, hardlinks cannot cross drive boundaries (e.g. cache on C:, project on D:).
+    // Fall back to a cache dir on the project's drive.
     #[cfg(windows)]
-    if let Ok(cwd) = std::env::current_dir() {
-        fn drive_prefix(p: &Path) -> Option<std::ffi::OsString> {
-            p.components()
-                .next()
-                .map(|c| c.as_os_str().to_ascii_uppercase())
-        }
-        if drive_prefix(&cache) != drive_prefix(&cwd) {
-            if let Some(drive) = cwd.components().next() {
-                return PathBuf::from(drive.as_os_str()).join(".cache").join("nm");
-            }
-        }
+    if let Ok(cwd) = env::current_dir()
+        && drive_root(&cache) != drive_root(&cwd)
+    {
+        return cwd.ancestors().last().unwrap_or(&cwd).join(".cache/nm");
     }
 
     cache
