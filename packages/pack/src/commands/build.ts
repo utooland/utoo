@@ -12,6 +12,7 @@ import { findRootDir } from "../utils/findRoot";
 import { getInitialAssetsFromStats } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
 import { normalizePath } from "../utils/normalize-path";
+import { useWorkerThreads } from "../utils/runtimePluginStratety";
 import { validateEntryPaths } from "../utils/validateEntry";
 import { xcodeProfilingReady } from "../utils/xcodeProfile";
 
@@ -59,6 +60,9 @@ async function buildInternal(
           Boolean(process.env.ANALYZE) ||
           bundleOptions.config.stats ||
           bundleOptions.config.entry.some((e: EntryOptions) => !!e.html),
+        pluginRuntimeStrategy:
+          bundleOptions?.config?.pluginRuntimeStrategy ??
+          (useWorkerThreads() ? "workerThreads" : "childProcesses"),
       },
       projectPath: normalizePath(resolvedProjectPath),
       rootPath: rootPath || projectPath || process.cwd(),

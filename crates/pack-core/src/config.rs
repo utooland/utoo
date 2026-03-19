@@ -112,11 +112,8 @@ pub struct Config {
     #[cfg(any(feature = "process_pool", feature = "worker_pool"))]
     plugin_runtime_strategy: Option<PluginRuntimeStrategy>,
     persistent_caching: Option<bool>,
-    cache_handler: Option<RcStr>,
     node_polyfill: Option<bool>,
     dev_server: Option<DevServer>,
-    #[serde(default)]
-    experimental: ExperimentalConfig,
     #[cfg(feature = "test")]
     #[serde(rename = "runtimeType")]
     runtime_type: Option<RcStr>,
@@ -693,13 +690,6 @@ impl TryFrom<RegexComponents> for EsRegex {
 }
 
 #[turbo_tasks::value]
-#[derive(Clone, Debug, Default, Deserialize, OperationValue)]
-#[serde(rename_all = "camelCase")]
-pub struct ExperimentalConfig {
-    react_compiler: Option<ReactCompilerOptionsOrBoolean>,
-}
-
-#[turbo_tasks::value]
 #[derive(Clone, Debug, Deserialize, OperationValue)]
 #[serde(untagged)]
 pub enum StyledComponentsTransformOptionsOrBoolean {
@@ -944,11 +934,6 @@ impl Config {
                 .as_ref()
                 .is_some_and(|o| o.r#type == Some(OutputType::Standalone)),
         )
-    }
-
-    #[turbo_tasks::function]
-    pub fn cache_handler(&self) -> Vc<Option<RcStr>> {
-        Vc::cell(self.cache_handler.clone())
     }
 
     #[turbo_tasks::function]
@@ -1288,29 +1273,6 @@ impl Config {
     #[turbo_tasks::function]
     pub fn swc_plugins(&self) -> Vc<SwcPlugins> {
         Vc::cell(self.swc_plugins.clone().unwrap_or_default())
-    }
-
-    #[turbo_tasks::function]
-    pub fn react_compiler(&self) -> Vc<OptionalReactCompilerOptions> {
-        let options = &self.experimental.react_compiler;
-
-        let options = match options {
-            Some(ReactCompilerOptionsOrBoolean::Boolean(true)) => {
-                OptionalReactCompilerOptions(Some(
-                    ReactCompilerOptions {
-                        compilation_mode: None,
-                        panic_threshold: None,
-                    }
-                    .resolved_cell(),
-                ))
-            }
-            Some(ReactCompilerOptionsOrBoolean::Option(options)) => OptionalReactCompilerOptions(
-                Some(ReactCompilerOptions { ..options.clone() }.resolved_cell()),
-            ),
-            _ => OptionalReactCompilerOptions(None),
-        };
-
-        options.cell()
     }
 
     #[turbo_tasks::function]

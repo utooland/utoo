@@ -49,7 +49,8 @@
     "nanoid": "^3.3.11",
     "picocolors": "^1.1.1",
     "send": "0.17.1",
-    "ws": "^8.18.1"
+    "ws": "^8.18.1",
+    "semver": "^7.7.1"
   },
   "peerDependencies": {
     "less": "^4.0.0",
@@ -57,7 +58,8 @@
     "postcss": "8.4.31",
     "resolve-url-loader": "^5.0.0",
     "sass": "1.54.0",
-    "sass-loader": "^13.2.0"
+    "sass-loader": "^13.2.0",
+    "styled-jsx": "^5.1.6"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0",
@@ -67,7 +69,7 @@
     "@types/node": "^20.3.0",
     "@types/send": "0.14.4",
     "@types/ws": "^8.18.1",
-    "styled-jsx": "^5.1.6",
+    "@types/semver": "^7.7.1",
     "typescript": "^5.8.3"
   },
   "engines": {
