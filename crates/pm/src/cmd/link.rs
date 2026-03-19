@@ -140,7 +140,9 @@ mod tests {
 
         // create fake global package dir with package.json
         let pkg_name = "lib-a";
-        let global_pkg_dir = global.join("lib/node_modules").join(pkg_name);
+        let global_pkg_dir = global
+            .join(crate::util::platform_const::GLOBAL_NODE_MODULES)
+            .join(pkg_name);
         fs::create_dir_all(&global_pkg_dir).unwrap();
         let pkg_json = format!(
             r#"{{
