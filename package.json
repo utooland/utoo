@@ -39,13 +39,15 @@
     "examples/with-library",
     "examples/with-nodejs",
     "examples/with-sass",
-    "examples/with-style-loader",
     "examples/with-tailwind",
     "examples/resolve",
     "examples/with-react",
     "examples/utooweb-demo",
     "examples/expose-entry-exports",
-    "examples/pack-esm-api"
+    "examples/pack-esm-api",
+    "examples/inline-css",
+    "examples/with-postcss",
+    "examples/with-swc-plugin"
   ],
   "repository": "https://github.com/utooland/utoo"
 }

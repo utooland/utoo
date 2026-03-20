@@ -1,0 +1,40 @@
+@primary-color: #4a90d9;
+@border-radius: 8px;
+@font-stack: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: @font-stack;
+  background-color: #f5f5f5;
+  color: #333;
+}
+
+.container {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 20px;
+
+  .header {
+    background: @primary-color;
+    color: white;
+    padding: 16px 24px;
+    border-radius: @border-radius @border-radius 0 0;
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+    }
+  }
+
+  .content {
+    background: white;
+    padding: 24px;
+    border-radius: 0 0 @border-radius @border-radius;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+
+    p {
+      line-height: 1.6;
+    }
+  }
+}

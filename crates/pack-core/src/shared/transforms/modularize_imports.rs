@@ -6,6 +6,7 @@ use bincode::{Decode, Encode};
 use modularize_imports::{Config, PackageConfig, modularize_imports};
 use serde::{Deserialize, Serialize};
 use swc_core::ecma::ast::Program;
+use swc_core::ecma::transforms::typescript::{Config as TypescriptConfig, typescript};
 use turbo_tasks::{FxIndexMap, NonLocalValue, OperationValue, ResolvedVc, trace::TraceRawVcs};
 use turbopack::module_options::{ModuleRule, ModuleRuleEffect};
 use turbopack_ecmascript::{CustomTransformer, EcmascriptInputTransform, TransformContext};
@@ -120,10 +121,29 @@ impl ModularizeImportsTransformer {
     }
 }
 
+fn is_typescript_like_file(file_name: &str) -> bool {
+    matches!(
+        std::path::Path::new(file_name)
+            .extension()
+            .and_then(|s| s.to_str()),
+        Some("ts" | "tsx" | "mts" | "cts")
+    )
+}
+
 #[async_trait]
 impl CustomTransformer for ModularizeImportsTransformer {
     #[tracing::instrument(level = "trace", name = "modularize_imports", skip_all)]
-    async fn transform(&self, program: &mut Program, _ctx: &TransformContext<'_>) -> Result<()> {
+    async fn transform(&self, program: &mut Program, ctx: &TransformContext<'_>) -> Result<()> {
+        if is_typescript_like_file(ctx.file_name_str) {
+            // Keep this localized to modularize-imports path: strip type-only usages
+            // before import path rewriting.
+            let config = TypescriptConfig {
+                verbatim_module_syntax: false,
+                ..Default::default()
+            };
+            program.mutate(typescript(config, ctx.unresolved_mark, ctx.top_level_mark));
+        }
+
         program.mutate(modularize_imports(&self.config));
 
         Ok(())

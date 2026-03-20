@@ -1,0 +1,89 @@
+/**
+ * This file contains the runtime code specific to the Turbopack
+ * ECMAScript Node.js runtime for library builds.
+ *
+ * It will be appended to the base runtime code in place of
+ * runtime-backend-dom.ts when the target platform is Node.js.
+ *
+ * Since library builds produce a single, self-contained chunk,
+ * no dynamic chunk loading is needed. The BACKEND simply registers
+ * modules and instantiates runtime entries.
+ */
+
+/* eslint-disable @typescript-eslint/no-unused-vars */
+
+/// <reference path="./runtime-base.ts" />
+
+async function externalImport(id: DependencySpecifier) {
+  let raw;
+  try {
+    raw = await import(id);
+  } catch (err) {
+    // TODO(alexkirsz) This can happen when a client-side module tries to load
+    // an external module we don't provide a shim for (e.g. querystring, url).
+    // For now, we fail semi-silently, but in the future this should be a
+    // compilation error.
+    throw new Error(`Failed to load external module ${id}: ${err}`);
+  }
+
+  if (raw && raw.__esModule && raw.default && "default" in raw.default) {
+    return interopEsm(raw.default, createNS(raw), true);
+  }
+
+  return raw;
+}
+contextPrototype.y = externalImport;
+
+function externalRequire(
+  id: ModuleId,
+  thunk: () => any,
+  esm: boolean = false,
+): Exports | EsmNamespaceObject {
+  let raw;
+  try {
+    raw = thunk();
+  } catch (err) {
+    // TODO(alexkirsz) This can happen when a client-side module tries to load
+    // an external module we don't provide a shim for (e.g. querystring, url).
+    // For now, we fail semi-silently, but in the future this should be a
+    // compilation error.
+    throw new Error(`Failed to load external module ${id}: ${err}`);
+  }
+
+  if (!esm || raw.__esModule) {
+    return raw;
+  }
+
+  return interopEsm(raw, createNS(raw), true);
+}
+
+externalRequire.resolve = (
+  id: string,
+  options?: {
+    paths?: string[];
+  },
+) => {
+  return require.resolve(id, options);
+};
+contextPrototype.x = externalRequire;
+
+(() => {
+  BACKEND = {
+    registerChunk(chunk, params) {
+      const chunkPath =
+        typeof chunk === "string"
+          ? chunk
+          : (chunk.src! as unknown as ChunkPath);
+
+      if (params == null) {
+        return;
+      }
+
+      if (params.runtimeModuleIds.length > 0) {
+        for (const moduleId of params.runtimeModuleIds) {
+          getOrInstantiateRuntimeModule(chunkPath, moduleId);
+        }
+      }
+    },
+  };
+})();

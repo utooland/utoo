@@ -107,14 +107,13 @@ pub struct Config {
     react: Option<ReactConfig>,
     optimization: Option<OptimizationConfig>,
     stats: Option<bool>,
+    #[bincode(with = "turbo_bincode::serde_self_describing")]
+    swc_plugins: Option<Vec<(RcStr, serde_json::Value)>>,
     #[cfg(any(feature = "process_pool", feature = "worker_pool"))]
     plugin_runtime_strategy: Option<PluginRuntimeStrategy>,
     persistent_caching: Option<bool>,
-    cache_handler: Option<RcStr>,
     node_polyfill: Option<bool>,
     dev_server: Option<DevServer>,
-    #[serde(default)]
-    experimental: ExperimentalConfig,
     #[cfg(feature = "test")]
     #[serde(rename = "runtimeType")]
     runtime_type: Option<RcStr>,
@@ -256,6 +255,8 @@ pub struct StyleConfig {
     pub styled_components: Option<StyledComponentsTransformOptionsOrBoolean>,
     pub emotion: Option<bool>,
     pub auto_css_modules: Option<bool>,
+    #[bincode(with = "turbo_bincode::serde_self_describing")]
+    pub postcss: Option<serde_json::Value>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     sass: Option<serde_json::Value>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
@@ -689,15 +690,6 @@ impl TryFrom<RegexComponents> for EsRegex {
 }
 
 #[turbo_tasks::value]
-#[derive(Clone, Debug, Default, Deserialize, OperationValue)]
-#[serde(rename_all = "camelCase")]
-pub struct ExperimentalConfig {
-    #[bincode(with = "turbo_bincode::serde_self_describing")]
-    swc_plugins: Option<Vec<(RcStr, serde_json::Value)>>,
-    react_compiler: Option<ReactCompilerOptionsOrBoolean>,
-}
-
-#[turbo_tasks::value]
 #[derive(Clone, Debug, Deserialize, OperationValue)]
 #[serde(untagged)]
 pub enum StyledComponentsTransformOptionsOrBoolean {
@@ -945,11 +937,6 @@ impl Config {
     }
 
     #[turbo_tasks::function]
-    pub fn cache_handler(&self) -> Vc<Option<RcStr>> {
-        Vc::cell(self.cache_handler.clone())
-    }
-
-    #[turbo_tasks::function]
     pub fn externals_config(&self) -> Vc<ExternalsConfig> {
         let externals = self.externals.clone().unwrap_or_default();
 
@@ -964,6 +951,19 @@ impl Config {
     #[turbo_tasks::function]
     pub fn styles(&self) -> Vc<StyleConfig> {
         self.styles.clone().unwrap_or_default().cell()
+    }
+
+    #[turbo_tasks::function]
+    pub fn postcss_config_content(&self) -> Result<Vc<Option<RcStr>>> {
+        let postcss_config_content = self
+            .styles
+            .as_ref()
+            .and_then(|styles| styles.postcss.as_ref())
+            .map(serde_json::to_string)
+            .transpose()?
+            .map(RcStr::from);
+
+        Ok(Vc::cell(postcss_config_content))
     }
 
     #[turbo_tasks::function]
@@ -1271,31 +1271,8 @@ impl Config {
     }
 
     #[turbo_tasks::function]
-    pub fn experimental_swc_plugins(&self) -> Vc<SwcPlugins> {
-        Vc::cell(self.experimental.swc_plugins.clone().unwrap_or_default())
-    }
-
-    #[turbo_tasks::function]
-    pub fn react_compiler(&self) -> Vc<OptionalReactCompilerOptions> {
-        let options = &self.experimental.react_compiler;
-
-        let options = match options {
-            Some(ReactCompilerOptionsOrBoolean::Boolean(true)) => {
-                OptionalReactCompilerOptions(Some(
-                    ReactCompilerOptions {
-                        compilation_mode: None,
-                        panic_threshold: None,
-                    }
-                    .resolved_cell(),
-                ))
-            }
-            Some(ReactCompilerOptionsOrBoolean::Option(options)) => OptionalReactCompilerOptions(
-                Some(ReactCompilerOptions { ..options.clone() }.resolved_cell()),
-            ),
-            _ => OptionalReactCompilerOptions(None),
-        };
-
-        options.cell()
+    pub fn swc_plugins(&self) -> Vc<SwcPlugins> {
+        Vc::cell(self.swc_plugins.clone().unwrap_or_default())
     }
 
     #[turbo_tasks::function]

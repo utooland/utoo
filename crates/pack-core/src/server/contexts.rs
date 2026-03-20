@@ -168,9 +168,12 @@ pub async fn get_server_module_options_context(
 
     server_rules.extend(additional_rules);
 
+    let postcss_config_content = (*config.postcss_config_content().await?).clone();
+
     let postcss_transform_options = Some(PostCssTransformOptions {
         postcss_package: Some(get_postcss_package_mapping().to_resolved().await?),
         config_location: PostCssConfigLocation::ProjectPathOrLocalPath,
+        config_content: postcss_config_content,
         ..Default::default()
     });
 
@@ -310,7 +313,6 @@ pub async fn get_server_resolve_options_context(
         custom_conditions,
         import_map: Some(server_import_map),
         fallback_import_map: Some(server_fallback_import_map),
-        browser: true,
         module: true,
         before_resolve_plugins: vec![ResolvedVc::upcast(externals_plugin)],
         after_resolve_plugins: vec![ResolvedVc::upcast(externals_plugin)],

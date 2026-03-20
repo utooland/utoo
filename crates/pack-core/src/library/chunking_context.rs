@@ -33,7 +33,7 @@ use turbopack_core::{
     },
     output::{OutputAsset, OutputAssets},
 };
-use turbopack_css::chunk::{CssChunk, source_map::CssChunkSourceMapAsset};
+use turbopack_css::chunk::{CssChunk, CssChunkType, source_map::CssChunkSourceMapAsset};
 use turbopack_ecmascript::{
     async_chunk::module::AsyncLoaderModule,
     chunk::{EcmascriptChunk, EcmascriptChunkType},
@@ -580,6 +580,15 @@ impl ChunkingContext for LibraryChunkingContext {
         let mut map = FxHashMap::default();
         map.insert(
             ResolvedVc::upcast(Vc::<EcmascriptChunkType>::default().to_resolved().await?),
+            ChunkingConfig {
+                min_chunk_size: usize::MAX,
+                max_chunk_count_per_group: 1,
+                max_merge_chunk_size: usize::MAX,
+                ..Default::default()
+            },
+        );
+        map.insert(
+            ResolvedVc::upcast(Vc::<CssChunkType>::default().to_resolved().await?),
             ChunkingConfig {
                 min_chunk_size: usize::MAX,
                 max_chunk_count_per_group: 1,

@@ -1,0 +1,24 @@
+{
+  "$schema": "../../packages/pack/config_schema.json",
+  "entry": [
+    {
+      "name": "index",
+      "import": "./src/index.jsx",
+      "html": {
+        "template": "./index.html"
+      }
+    }
+  ],
+  "output": {
+    "clean": true
+  },
+  "optimization": {
+    "minify": false
+  },
+  "swcPlugins": [
+    [
+      "swc-plugin-coverage-instrument",
+      {}
+    ]
+  ]
+}

@@ -47,7 +47,7 @@ pub async fn get_library_runtime_code(
     )
     .code();
 
-    let runtime_base_code = vec!["umd/runtime-base.ts"];
+    let runtime_base_code = vec!["library/runtime-base.ts"];
 
     let mut code: CodeBuilder = CodeBuilder::default();
     let relative_root_path = output_root_to_root_path.await?;
@@ -84,22 +84,13 @@ pub async fn get_library_runtime_code(
     }
     code.push_code(&*build_base_code.await?);
 
-    code.push_code(
-        &*embed_static_code(
-            asset_context,
-            "umd/base-externals-utils.ts".into(),
-            generate_source_map,
-        )
-        .await?,
-    );
-
     // Select the appropriate runtime backend based on target platform.
-    // - Node.js: minimal backend without DOM APIs (no document.createElement, etc.)
-    // - Browser: full DOM-based backend for chunk loading via <script> tags
+    // - Node.js: minimal backend without DOM APIs, includes externals utils
+    // - Browser: minimal DOM-based backend with loadScript for script externals
     let runtime_backend = if is_node_platform {
-        "umd/runtime-backend-node.ts"
+        "library/runtime-backend-node.ts"
     } else {
-        "umd/runtime-backend-dom.ts"
+        "library/runtime-backend-dom.ts"
     };
 
     code.push_code(

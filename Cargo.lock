@@ -5264,6 +5264,7 @@ dependencies = [
  "futures",
  "getrandom 0.3.3",
  "indoc",
+ "lightningcss",
  "mime_guess",
  "modularize_imports",
  "pathdiff",

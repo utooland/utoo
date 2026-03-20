@@ -23,6 +23,7 @@ import { blockStdout, getPackPath } from "../utils/common";
 import { findRootDir } from "../utils/findRoot";
 import { createSelfSignedCertificate } from "../utils/mkcert";
 import { printServerInfo } from "../utils/printServerInfo";
+import { useWorkerThreads } from "../utils/runtimePluginStratety";
 import { xcodeProfilingReady } from "../utils/xcodeProfile";
 
 // --- Path helpers (same logic as dev.ts, not exported) ---

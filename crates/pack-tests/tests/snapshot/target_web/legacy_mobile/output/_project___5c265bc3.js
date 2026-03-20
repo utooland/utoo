@@ -109,7 +109,7 @@ function _(thisArg, body) {
         sent: function sent() {
             return undefined;
         },
-        trys: [],
+        tries: [],
         ops: []
     });
 }
