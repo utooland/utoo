@@ -1,8 +1,18 @@
+/**
+ * This file contains the runtime code specific to the Turbopack
+ * ECMAScript Node.js runtime for library builds.
+ *
+ * It will be appended to the base runtime code in place of
+ * runtime-backend-dom.ts when the target platform is Node.js.
+ *
+ * Since library builds produce a single, self-contained chunk,
+ * no dynamic chunk loading is needed. The BACKEND simply registers
+ * modules and instantiates runtime entries.
+ */
+
 /* eslint-disable @typescript-eslint/no-unused-vars */
 
-/// A 'base' utilities to support runtime can have externals.
-/// Currently this is for node.js / edge runtime both.
-/// If a fn requires node.js specific behavior, it should be placed in `node-external-utils` instead.
+/// <reference path="./runtime-base.ts" />
 
 async function externalImport(id: DependencySpecifier) {
   let raw;
@@ -56,3 +66,24 @@ externalRequire.resolve = (
   return require.resolve(id, options);
 };
 contextPrototype.x = externalRequire;
+
+(() => {
+  BACKEND = {
+    registerChunk(chunk, params) {
+      const chunkPath =
+        typeof chunk === "string"
+          ? chunk
+          : (chunk.src! as unknown as ChunkPath);
+
+      if (params == null) {
+        return;
+      }
+
+      if (params.runtimeModuleIds.length > 0) {
+        for (const moduleId of params.runtimeModuleIds) {
+          getOrInstantiateRuntimeModule(chunkPath, moduleId);
+        }
+      }
+    },
+  };
+})();

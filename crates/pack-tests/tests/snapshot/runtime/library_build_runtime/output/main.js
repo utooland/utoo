@@ -603,28 +603,23 @@ function applyModuleFactoryName(factory) {
  * shared runtime utils.
  */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="../../../../../next.js/turbopack/crates/turbopack-ecmascript-runtime/js/src/shared/runtime/runtime-utils.ts" />
 /// <reference path="../../../../../next.js/turbopack/crates/turbopack-ecmascript-runtime/js/src/shared/runtime/runtime-types.d.ts" />
-const browserContextPrototype = Context.prototype;
+// Provided by build
 let BACKEND;
 const moduleFactories = new Map();
 contextPrototype.M = moduleFactories;
 /**
- * Returns an absolute url to an asset.
- */ function resolvePathFromModule(moduleId) {
-    const exported = this.r(moduleId);
-    return exported?.default ?? exported;
-}
-browserContextPrototype.R = resolvePathFromModule;
-/**
- * no-op for browser
- * @param modulePath
- */ function resolveAbsolutePath(modulePath) {
-    return `/ROOT/${modulePath ?? ""}`;
-}
-browserContextPrototype.P = resolveAbsolutePath;
-/**
- * Instantiates a runtime module.
- */ function instantiateRuntimeModule(moduleId, chunkPath) {
-    return instantiateModule(moduleId, SourceType.Runtime, chunkPath);
+ * Determine the chunk to register from a registration entry.
+ * In library builds, chunks are always string paths or script objects.
+ */ function getChunkFromRegistration(chunk) {
+    if (typeof chunk === "string") {
+        return chunk;
+    } else if (chunk) {
+        return {
+            src: chunk.getAttribute("src")
+        };
+    } else {
+        throw new Error("chunk path is empty");
+    }
 }
 /// <reference path="./runtime-base.ts" />
 /// <reference path="./dummy.ts" />
@@ -697,46 +692,6 @@ function registerChunk(registration) {
     }
     return BACKEND.registerChunk(chunk, runtimeParams);
 }
-/* eslint-disable @typescript-eslint/no-unused-vars */ /// A 'base' utilities to support runtime can have externals.
-/// Currently this is for node.js / edge runtime both.
-/// If a fn requires node.js specific behavior, it should be placed in `node-external-utils` instead.
-async function externalImport(id) {
-    let raw;
-    try {
-        raw = await import(id);
-    } catch (err) {
-        // TODO(alexkirsz) This can happen when a client-side module tries to load
-        // an external module we don't provide a shim for (e.g. querystring, url).
-        // For now, we fail semi-silently, but in the future this should be a
-        // compilation error.
-        throw new Error(`Failed to load external module ${id}: ${err}`);
-    }
-    if (raw && raw.__esModule && raw.default && "default" in raw.default) {
-        return interopEsm(raw.default, createNS(raw), true);
-    }
-    return raw;
-}
-contextPrototype.y = externalImport;
-function externalRequire(id, thunk, esm = false) {
-    let raw;
-    try {
-        raw = thunk();
-    } catch (err) {
-        // TODO(alexkirsz) This can happen when a client-side module tries to load
-        // an external module we don't provide a shim for (e.g. querystring, url).
-        // For now, we fail semi-silently, but in the future this should be a
-        // compilation error.
-        throw new Error(`Failed to load external module ${id}: ${err}`);
-    }
-    if (!esm || raw.__esModule) {
-        return raw;
-    }
-    return interopEsm(raw, createNS(raw), true);
-}
-externalRequire.resolve = (id, options)=>{
-    return require.resolve(id, options);
-};
-contextPrototype.x = externalRequire;
 /**
  * This file contains the runtime code specific to the Turbopack
  * ECMAScript DOM runtime for library builds.
@@ -771,7 +726,7 @@ const loadedScripts = new Map();
     loadedScripts.set(scriptUrl, promise);
     return promise;
 }
-browserContextPrototype.S = loadScript;
+contextPrototype.S = loadScript;
 (()=>{
     BACKEND = {
         registerChunk (chunk, params) {
@@ -783,12 +738,6 @@ browserContextPrototype.S = loadScript;
                     getOrInstantiateRuntimeModule(chunk, moduleId);
                 }
             }
-        },
-        /**
-     * In a single-chunk browser library build, all modules are already
-     * bundled into the same file. This function should never be called.
-     */ loadChunkCached (_sourceType, _chunkUrl) {
-            return Promise.resolve();
         }
     };
 })();

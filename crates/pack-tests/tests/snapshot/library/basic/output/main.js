@@ -56,7 +56,7 @@ let mod; if (typeof exports === 'object' && typeof module === 'object') { mod = 
 
 __turbopack_context__.v(mod);
 }),
-782, ((__turbopack_context__) => {
+481, ((__turbopack_context__) => {
 "use strict";
 
 const a = "aaa";
@@ -66,7 +66,7 @@ __turbopack_context__.s([
     a
 ]);
 }),
-39, ((__turbopack_context__) => {
+620, ((__turbopack_context__) => {
 "use strict";
 
 var __TURBOPACK__imported__module__861__ = __turbopack_context__.i(861);
@@ -76,7 +76,7 @@ var __TURBOPACK__imported__module__571__ = __turbopack_context__.i(571);
 var __TURBOPACK__imported__module__611__ = __turbopack_context__.i(611);
 /** @jsxImportSource @emotion/react */ var __TURBOPACK__imported__module__486__ = __turbopack_context__.i(486);
 var __TURBOPACK__imported__module__132__ = __turbopack_context__.i(132);
-var __TURBOPACK__imported__module__782__ = __turbopack_context__.i(782);
+var __TURBOPACK__imported__module__481__ = __turbopack_context__.i(481);
 ;
 console.log('hello here');
 ;
@@ -85,7 +85,7 @@ console.log('hello here');
 ;
 console.log(__TURBOPACK__imported__module__132__["styled"]);
 ;
-console.log(__TURBOPACK__imported__module__782__["a"]);
+console.log(__TURBOPACK__imported__module__481__["a"]);
 function App({ content }) {
     // @ts-ignore
     return /*#__PURE__*/ (0, __TURBOPACK__imported__module__861__["jsx"])("div", {
@@ -100,7 +100,7 @@ root.render(/*#__PURE__*/ (0, __TURBOPACK__imported__module__861__["jsx"])(App, 
 __turbopack_context__.s([]);
 }),
 ],
-["main.js", {"otherChunks":[],"runtimeModuleIds":[39]}],
+["main.js", {"otherChunks":[],"runtimeModuleIds":[620]}],
 ]);
 
 
