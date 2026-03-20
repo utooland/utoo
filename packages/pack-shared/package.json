@@ -22,6 +22,7 @@
     "build:cjs": "rm -rf cjs && tsc -p ./tsconfig.json  --module commonjs --outDir cjs",
     "build:esm": "rm -rf esm && tsc -p ./tsconfig.json  --module esnext --outDir esm && node ../../scripts/add-esm-extensions.cjs",
     "build": "npm run build:cjs && npm run build:esm",
+    "test": "vitest run",
     "clean": "rm -rf cjs esm",
     "prepublishOnly": "turbo run build --filter=@utoo/pack-shared"
   },
