@@ -51,8 +51,26 @@ pub async fn execute_package(command: &str, args: Vec<String>) -> Result<()> {
 
 /// Execute the binary with given arguments
 async fn execute_binary(binary_path: &Path, args: Vec<String>) -> Result<()> {
-    let mut cmd = Command::new(binary_path);
+    // On Windows, prefer .cmd shim if it exists, otherwise use sh to execute Unix shim
+    let mut cmd = {
+        #[cfg(windows)]
+        {
+            let cmd_path = binary_path.with_extension("cmd");
+            if cmd_path.exists() {
+                Command::new(&cmd_path)
+            } else {
+                let mut c = Command::new("sh");
+                c.arg(binary_path);
+                c
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            Command::new(binary_path)
+        }
+    };
     cmd.args(&args);
+
     cmd.stdin(Stdio::inherit());
     cmd.stdout(Stdio::inherit());
     cmd.stderr(Stdio::inherit());

@@ -27,7 +27,6 @@ cd ant-design-x
 rm -rf node_modules package-lock.json
 rm -rf ~/.cache/nm
 time utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for ant-design-x${NC}"; exit 1; }
-
 utoo rebuild || { echo -e "${RED}FAIL: utoo rebuild failed for ant-design-x (next)${NC}"; exit 1; }
 echo -e "${GREEN}PASS: ant-design-x (next) cloned and installed${NC}"
 cd ../../
@@ -451,5 +450,18 @@ echo -e "${GREEN}PASS: npm pack + install -g works correctly${NC}"
 
 popd
 rm -rf "$PACK_DIR" "$INSTALL_PREFIX"
+
+# Case: Verify ant-design-x install + build
+echo -e "${YELLOW}Case: ant-design-x install and build${NC}"
+ANTDX_DIR=$(mktemp -d)
+git clone --branch next --single-branch --depth 1 https://github.com/ant-design/x.git "$ANTDX_DIR"
+pushd "$ANTDX_DIR"
+
+utoo install --ignore-scripts --registry=https://registry.npmjs.org || { echo -e "${RED}FAIL: utoo install failed for ant-design-x${NC}"; exit 1; }
+
+echo -e "${GREEN}PASS: ant-design-x install successful${NC}"
+
+popd
+rm -rf "$ANTDX_DIR"
 
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"

@@ -1,5 +1,6 @@
 use crate::fs;
 use crate::model::package::PackageInfo;
+use crate::util::platform_const::PATH_SEPARATOR;
 use anyhow::{Context, Result};
 use std::env;
 use std::path::{Path, PathBuf};
@@ -16,7 +17,7 @@ pub struct ScriptService;
 impl ScriptService {
     /// Check if node-gyp exists in PATH by searching directories
     fn has_node_gyp_in_path() -> bool {
-        let path_separator = if cfg!(windows) { ';' } else { ':' };
+        let path_separator = PATH_SEPARATOR;
         env::var("PATH").is_ok_and(|paths| {
             paths
                 .split(path_separator)
@@ -301,7 +302,7 @@ impl ScriptService {
     }
 
     fn build_path_env(bin_paths: &[PathBuf]) -> String {
-        let path_separator = ":";
+        let path_separator = PATH_SEPARATOR;
         let original_path = env::var("PATH").unwrap_or_default();
         let additional_paths = bin_paths
             .iter()

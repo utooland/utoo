@@ -1,3 +1,4 @@
+use crate::util::platform_const::GLOBAL_NODE_MODULES;
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
@@ -47,7 +48,7 @@ pub fn get_global_package_dir(prefix: Option<&str>) -> Result<PathBuf> {
             .to_path_buf(),
     };
 
-    Ok(base_path.join("lib/node_modules"))
+    Ok(base_path.join(GLOBAL_NODE_MODULES))
 }
 
 #[cfg(test)]
@@ -83,6 +84,6 @@ mod tests {
     fn test_get_global_package_dir_with_empty_prefix() {
         let prefix: Option<&str> = Some("");
         let result = get_global_package_dir(prefix).unwrap();
-        assert_eq!(result, PathBuf::from("lib/node_modules"));
+        assert_eq!(result, PathBuf::from(GLOBAL_NODE_MODULES));
     }
 }
