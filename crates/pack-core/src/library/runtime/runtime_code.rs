@@ -84,27 +84,36 @@ pub async fn get_library_runtime_code(
     }
     code.push_code(&*build_base_code.await?);
 
-    code.push_code(
-        &*embed_static_code(
-            asset_context,
-            "umd/base-externals-utils.ts".into(),
-            generate_source_map,
-        )
-        .await?,
-    );
-
     // Select the appropriate runtime backend based on target platform.
-    // - Node.js: minimal backend without DOM APIs (no document.createElement, etc.)
-    // - Browser: full DOM-based backend for chunk loading via <script> tags
-    let runtime_backend = if is_node_platform {
-        "umd/runtime-backend-node.ts"
+    // - Node.js: minimal backend without DOM APIs, plus externals utils
+    // - Browser: minimal DOM-based backend with loadScript for script externals
+    if is_node_platform {
+        code.push_code(
+            &*embed_static_code(
+                asset_context,
+                "umd/base-externals-utils.ts".into(),
+                generate_source_map,
+            )
+            .await?,
+        );
+        code.push_code(
+            &*embed_static_code(
+                asset_context,
+                "umd/runtime-backend-node.ts".into(),
+                generate_source_map,
+            )
+            .await?,
+        );
     } else {
-        "umd/runtime-backend-dom.ts"
-    };
-
-    code.push_code(
-        &*embed_static_code(asset_context, runtime_backend.into(), generate_source_map).await?,
-    );
+        code.push_code(
+            &*embed_static_code(
+                asset_context,
+                "umd/runtime-backend-dom.ts".into(),
+                generate_source_map,
+            )
+            .await?,
+        );
+    }
 
     // Registering chunks and chunk lists depends on the BACKEND variable, which is set by the
     // specific runtime code, hence it must be appended after it.

@@ -44,13 +44,3 @@
     },
   };
 })();
-
-// Node.js-specific: require.resolve is not available in browser environments
-(externalRequire as any).resolve = (
-  id: string,
-  options?: {
-    paths?: string[];
-  },
-) => {
-  return require.resolve(id, options);
-};
