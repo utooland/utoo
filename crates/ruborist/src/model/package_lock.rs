@@ -303,8 +303,6 @@ fn create_root_lock_package(graph: &DependencyGraph, node_index: NodeIndex) -> L
         ..LockPackage::default()
     };
 
-    // Read deps from graph edges (not manifest) so that resolved `catalog:` specs
-    // are written to the lockfile instead of the raw protocol references.
     collect_edge_deps(graph, node_index, &mut pkg);
 
     pkg
@@ -370,8 +368,13 @@ fn create_non_root_lock_package(
 }
 
 /// Populate dependency fields on LockPackage from graph edges.
+/// For root nodes, edges resolved to workspace nodes are excluded.
 fn collect_edge_deps(graph: &DependencyGraph, node_index: NodeIndex, pkg: &mut LockPackage) {
+    let is_root = graph.get_node(node_index).is_some_and(|n| n.is_root());
     for (_, dep_edge) in graph.get_dependency_edges(node_index) {
+        if is_root && graph.is_workspace_target(dep_edge) {
+            continue;
+        }
         let map = match dep_edge.edge_type {
             EdgeType::Prod => &mut pkg.dependencies,
             EdgeType::Dev => &mut pkg.dev_dependencies,
@@ -527,5 +530,144 @@ mod tests {
         assert_eq!(pkg.peer, Some(true));
         assert!(pkg.dev.is_none());
         assert!(pkg.optional.is_none());
+    }
+
+    /// Helper: build a workspace graph and return the serialized packages map.
+    ///
+    /// Graph layout (mirrors npm behaviour):
+    ///   root (has dep: lodash ^4.0.0, workspaces: ["packages/*"])
+    ///     ├── workspace-a (workspace child — NOT in root dependencies)
+    ///     └── lodash (regular child)
+    ///
+    /// The resolver also creates graph edges for both lodash and workspace-a,
+    /// but the root lockfile entry should only contain lodash.
+    fn build_workspace_graph() -> HashMap<String, LockPackage> {
+        use super::super::graph::DependencyGraph;
+
+        let mut root_pkg = PackageJson::new("my-project", "1.0.0");
+        // Only regular deps in manifest — workspace packages are NOT listed
+        // in dependencies; they're discovered from the workspaces field.
+        root_pkg.dependencies = Some(HashMap::from([(
+            "lodash".to_string(),
+            "^4.0.0".to_string(),
+        )]));
+        root_pkg.workspaces =
+            Some(serde_json::from_value(serde_json::json!(["packages/*"])).unwrap());
+
+        let root_path = PathBuf::from("/project");
+        let mut graph = DependencyGraph::from_package_json(root_path.clone(), root_pkg);
+
+        // Add workspace child
+        let ws_pkg = PackageJson::new("workspace-a", "1.0.0");
+        let ws_node = PackageNode::workspace_from_package_json(
+            PathBuf::from("/project/packages/workspace-a"),
+            ws_pkg,
+        );
+        let ws_idx = graph.add_node(ws_node);
+        graph.add_physical_edge(graph.root_index, ws_idx);
+
+        // Add regular child
+        let lodash_pkg = PackageJson::new("lodash", "4.17.21");
+        let lodash_node = PackageNode::from_package_json(
+            "lodash".to_string(),
+            PathBuf::from("/project/node_modules/lodash"),
+            lodash_pkg,
+        );
+        let lodash_idx = graph.add_node(lodash_node);
+        graph.add_physical_edge(graph.root_index, lodash_idx);
+
+        // The resolver creates edges for ALL deps including workspace packages,
+        // and marks them resolved. The lockfile root entry should exclude workspace ones.
+        graph.add_dependency_edge(graph.root_index, "lodash", "^4.0.0", EdgeType::Prod);
+        let ws_edge =
+            graph.add_dependency_edge(graph.root_index, "workspace-a", "^1.0.0", EdgeType::Prod);
+        graph.mark_dependency_resolved(ws_edge, ws_idx);
+
+        let (packages, _) = serialize_to_packages(&graph, &root_path);
+        packages
+    }
+
+    #[test]
+    fn test_root_excludes_workspace_deps() {
+        let packages = build_workspace_graph();
+        let root = packages.get("").expect("root entry must exist");
+
+        let deps = root.dependencies.as_ref().expect("root should have deps");
+        assert_eq!(deps.get("lodash").unwrap(), "^4.0.0");
+        assert!(
+            !deps.contains_key("workspace-a"),
+            "workspace package must not appear in root dependencies"
+        );
+    }
+
+    #[test]
+    fn test_root_has_workspaces_field() {
+        let packages = build_workspace_graph();
+        let root = packages.get("").expect("root entry must exist");
+
+        let workspaces = root
+            .workspaces
+            .as_ref()
+            .expect("root should have workspaces");
+        assert_eq!(workspaces, &vec!["packages/*".to_string()]);
+    }
+
+    #[test]
+    fn test_workspace_child_is_serialized() {
+        let packages = build_workspace_graph();
+
+        let ws = packages
+            .get("packages/workspace-a")
+            .expect("workspace entry must exist");
+        assert_eq!(ws.name.as_deref(), Some("workspace-a"));
+        assert_eq!(ws.version.as_deref(), Some("1.0.0"));
+        assert!(ws.link.is_none(), "workspace node is not a link");
+    }
+
+    #[test]
+    fn test_root_no_extra_metadata() {
+        let packages = build_workspace_graph();
+        let root = packages.get("").expect("root entry must exist");
+
+        // npm root entry does not include bin, license, scripts, os, cpu
+        assert!(root.bin.is_none());
+        assert!(root.license.is_none());
+        assert!(root.scripts.is_none());
+        assert!(root.os.is_none());
+        assert!(root.cpu.is_none());
+        assert!(root.has_install_script.is_none());
+    }
+
+    #[test]
+    fn test_root_resolves_catalog_specs() {
+        use super::super::graph::DependencyGraph;
+
+        let mut root_pkg = PackageJson::new("catalog-project", "1.0.0");
+        root_pkg.dependencies = Some(HashMap::from([
+            ("react".to_string(), "catalog:default".to_string()),
+            ("lodash".to_string(), "^4.0.0".to_string()),
+        ]));
+
+        let root_path = PathBuf::from("/project");
+        let mut graph = DependencyGraph::from_package_json(root_path.clone(), root_pkg);
+
+        // Edge for react has resolved spec (as the resolver would do)
+        graph.add_dependency_edge(graph.root_index, "react", "^18.2.0", EdgeType::Prod);
+        graph.add_dependency_edge(graph.root_index, "lodash", "^4.0.0", EdgeType::Prod);
+
+        let (packages, _) = serialize_to_packages(&graph, &root_path);
+        let root = packages.get("").expect("root entry must exist");
+        let deps = root.dependencies.as_ref().unwrap();
+
+        assert_eq!(
+            deps.get("react").unwrap(),
+            "^18.2.0",
+            "catalog: spec should be resolved"
+        );
+        assert_eq!(
+            deps.get("lodash").unwrap(),
+            "^4.0.0",
+            "non-catalog spec stays unchanged"
+        );
     }
 }
