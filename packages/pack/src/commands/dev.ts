@@ -19,6 +19,7 @@ import {
 } from "../config/webpackCompat";
 import type { HotReloaderInterface } from "../core/hmr";
 import { createHotReloader } from "../core/hmr";
+import { createHttpProxyMiddleware } from "../core/proxy-hono";
 import { blockStdout, getPackPath } from "../utils/common";
 import { findRootDir } from "../utils/findRoot";
 import { createSelfSignedCertificate } from "../utils/mkcert";
@@ -285,6 +286,11 @@ async function runDev(
       },
     })),
   );
+
+  const proxyRules = bundleOptions.config?.devServer?.proxy;
+  if (proxyRules && proxyRules.length > 0) {
+    app.use("*", createHttpProxyMiddleware(proxyRules));
+  }
 
   // GET handles HEAD automatically in Hono; serveStatic serves both
   app.get(

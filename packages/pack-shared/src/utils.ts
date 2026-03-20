@@ -1,4 +1,9 @@
-import { ConfigComplete, RustifiedEnv } from "./config";
+import {
+  DevServerProxy,
+  ProxyOptions,
+  ProxyRule,
+  RustifiedEnv,
+} from "./config";
 import { formatIssue, Issue } from "./issue";
 import { renderStyledStringToErrorAnsi } from "./styledString";
 
@@ -64,6 +69,44 @@ export function rustifyEnv(env: Record<string, string>): RustifiedEnv {
       name,
       value,
     }));
+}
+
+/**
+ * Convert object-style proxy config into DevServerProxy array.
+ * Object keys become context; string value → target + default changeOrigin; object value merged into ProxyRule.
+ *
+ * @example
+ * proxy: [
+ *   ...proxyFromObject({
+ *     "/api": "http://localhost:3000",
+ *     "/auth": { target: "http://localhost:5000", changeOrigin: true },
+ *   }),
+ * ];
+ */
+export function proxyFromObject(
+  obj: Record<string, string | ProxyOptions>,
+): DevServerProxy {
+  const rules: ProxyRule[] = [];
+
+  for (const [context, value] of Object.entries(obj)) {
+    if (!value) continue;
+
+    if (typeof value === "string") {
+      rules.push({
+        context,
+        target: value,
+        changeOrigin: true,
+      });
+    } else {
+      rules.push({
+        context,
+        changeOrigin: true,
+        ...value,
+      });
+    }
+  }
+
+  return rules;
 }
 
 type AnyFunc<T> = (this: T, ...args: any) => any;

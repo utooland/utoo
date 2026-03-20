@@ -84,6 +84,7 @@
     "artifacts": "napi artifacts --dir ./src --dist npm",
     "build:binding": "napi build src --platform --release -p pack-napi --cargo-cwd ../../ --cargo-name pack_napi --features plugin --js binding.js --dts binding.d.ts",
     "build:binding:local": "napi build src --platform --profile release-local -p pack-napi --cargo-cwd ../../ --cargo-name pack_napi --features plugin --js binding.js --dts binding.d.ts",
+    "test": "vitest run",
     "clean": "rm -rf cjs esm",
     "prepublishOnly": "npm run build:js && napi prepublish -t npm --skip-gh-release",
     "version": "napi version",

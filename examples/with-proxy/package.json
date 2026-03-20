@@ -1,0 +1,17 @@
+{
+  "name": "with-proxy",
+  "version": "0.0.1",
+  "scripts": {
+    "build": "up build",
+    "dev": "up dev"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@utoo/pack-cli": "*",
+    "@types/react": "^18.0.25",
+    "@types/react-dom": "^18.0.9"
+  }
+}
