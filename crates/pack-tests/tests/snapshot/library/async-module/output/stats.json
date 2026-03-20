@@ -54,8 +54,8 @@
   ],
   "modules": [
     {
-      "name": "umd/async-module/input/index.js",
-      "id": "umd/async-module/input/index.js",
+      "name": "library/async-module/input/index.js",
+      "id": "library/async-module/input/index.js",
       "chunks": [
         "./main.js"
       ],

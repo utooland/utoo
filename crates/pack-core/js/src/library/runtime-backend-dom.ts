@@ -24,7 +24,7 @@ const loadedScripts = new Map<string, Promise<void>>();
  * This is used for script externals that need to be loaded from CDN or other external sources.
  */
 function loadScript(
-  this: TurbopackBrowserBaseContext<Module>,
+  this: TurbopackBaseContext<Module>,
   scriptUrl: string,
 ): Promise<void> {
   // Return cached promise if script is already loading or loaded
@@ -45,7 +45,7 @@ function loadScript(
   loadedScripts.set(scriptUrl, promise);
   return promise;
 }
-browserContextPrototype.S = loadScript;
+contextPrototype.S = loadScript;
 
 (() => {
   BACKEND = {
@@ -59,17 +59,6 @@ browserContextPrototype.S = loadScript;
           getOrInstantiateRuntimeModule(chunk as ChunkPath, moduleId);
         }
       }
-    },
-
-    /**
-     * In a single-chunk browser library build, all modules are already
-     * bundled into the same file. This function should never be called.
-     */
-    loadChunkCached(
-      _sourceType: SourceType,
-      _chunkUrl: ChunkUrl,
-    ) {
-      return Promise.resolve();
     },
   };
 })();

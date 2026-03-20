@@ -54,8 +54,8 @@
   ],
   "modules": [
     {
-      "name": "umd/basic/input/index.tsx",
-      "id": "umd/basic/input/index.tsx",
+      "name": "library/basic/input/index.tsx",
+      "id": "library/basic/input/index.tsx",
       "chunks": [
         "./main.js"
       ],
