@@ -227,11 +227,10 @@ export function readFile(path: string, options: any, cb: Function) {
     ? fs.readToString(resolvedPath)
     : fs.read(resolvedPath);
 
-  promise
-    .then((data: any) => {
-      cb(null, encoding ? data : Buffer.from(data));
-    })
-    .catch((e: any) => cb(translateError(e, path, "open")));
+  promise.then(
+    (data: any) => cb(null, encoding ? data : Buffer.from(data)),
+    (e: any) => cb(translateError(e, path, "open")),
+  );
 }
 
 export function readdir(path: string, options: any, cb: Function) {
@@ -241,22 +240,24 @@ export function readdir(path: string, options: any, cb: Function) {
   }
   getFs()
     .readDir(resolvePath(path))
-    .then((entries: any[]) => {
-      const result = entries.map((e: any) => {
-        const json = e.toJSON() as any;
-        if (options?.withFileTypes) {
-          return {
-            name: json.name,
-            isFile: () => json.type === "file",
-            isDirectory: () => json.type === "directory",
-            isSymbolicLink: () => false,
-          };
-        }
-        return json.name;
-      });
-      cb(null, result);
-    })
-    .catch((e: any) => cb(translateError(e, path, "scandir")));
+    .then(
+      (entries: any[]) => {
+        const result = entries.map((e: any) => {
+          const json = e.toJSON() as any;
+          if (options?.withFileTypes) {
+            return {
+              name: json.name,
+              isFile: () => json.type === "file",
+              isDirectory: () => json.type === "directory",
+              isSymbolicLink: () => false,
+            };
+          }
+          return json.name;
+        });
+        cb(null, result);
+      },
+      (e: any) => cb(translateError(e, path, "scandir")),
+    );
 }
 
 export function writeFile(
@@ -277,9 +278,10 @@ export function writeFile(
       ? fs.writeString(resolvedPath, data)
       : fs.write(resolvedPath, data);
 
-  promise
-    .then(() => cb(null))
-    .catch((e: any) => cb(translateError(e, path, "open")));
+  promise.then(
+    () => cb(null),
+    (e: any) => cb(translateError(e, path, "open")),
+  );
 }
 
 export function mkdir(path: string, options: any, cb: Function) {
@@ -293,9 +295,10 @@ export function mkdir(path: string, options: any, cb: Function) {
     ? fs.createDirAll(resolvedPath)
     : fs.createDir(resolvedPath);
 
-  promise
-    .then(() => cb(null))
-    .catch((e: any) => cb(translateError(e, path, "mkdir")));
+  promise.then(
+    () => cb(null),
+    (e: any) => cb(translateError(e, path, "mkdir")),
+  );
 }
 
 export function rm(path: string, options: any, cb: Function) {
@@ -315,8 +318,10 @@ export function rm(path: string, options: any, cb: Function) {
         return fs.removeDir(resolvedPath, !!options?.recursive);
       }
     })
-    .then(() => cb(null))
-    .catch((e: any) => cb(translateError(e, path, "rm")));
+    .then(
+      () => cb(null),
+      (e: any) => cb(translateError(e, path, "rm")),
+    );
 }
 
 export function rmdir(path: string, options: any, cb: Function) {
@@ -326,47 +331,55 @@ export function rmdir(path: string, options: any, cb: Function) {
   }
   getFs()
     .removeDir(resolvePath(path), !!options?.recursive)
-    .then(() => cb(null))
-    .catch((e: any) => cb(translateError(e, path, "rmdir")));
+    .then(
+      () => cb(null),
+      (e: any) => cb(translateError(e, path, "rmdir")),
+    );
 }
 
 export function copyFile(src: string, dst: string, cb: Function) {
   getFs()
     .copyFile(resolvePath(src), resolvePath(dst))
-    .then(() => cb(null))
-    .catch((e: any) => cb(translateError(e, src, "copyfile")));
+    .then(
+      () => cb(null),
+      (e: any) => cb(translateError(e, src, "copyfile")),
+    );
 }
 
 export function stat(p: string, cb: Function) {
   getFs()
     .metadata(resolvePath(p))
-    .then((metadata: any) => {
-      const json = metadata.toJSON() as any;
-      cb(
-        null,
-        new Stats({
-          type: json.type,
-          size: Number(json.file_size || 0),
-        }),
-      );
-    })
-    .catch((e: any) => cb(translateError(e, p, "stat")));
+    .then(
+      (metadata: any) => {
+        const json = metadata.toJSON() as any;
+        cb(
+          null,
+          new Stats({
+            type: json.type,
+            size: Number(json.file_size || 0),
+          }),
+        );
+      },
+      (e: any) => cb(translateError(e, p, "stat")),
+    );
 }
 
 export function lstat(p: string, cb: Function) {
   getFs()
     .metadata(resolvePath(p))
-    .then((metadata: any) => {
-      const json = metadata.toJSON() as any;
-      cb(
-        null,
-        new Stats({
-          type: json.type,
-          size: Number(json.file_size || 0),
-        }),
-      );
-    })
-    .catch((e: any) => cb(translateError(e, p, "lstat")));
+    .then(
+      (metadata: any) => {
+        const json = metadata.toJSON() as any;
+        cb(
+          null,
+          new Stats({
+            type: json.type,
+            size: Number(json.file_size || 0),
+          }),
+        );
+      },
+      (e: any) => cb(translateError(e, p, "lstat")),
+    );
 }
 
 export function realpath(p: string, cb: Function) {
@@ -380,12 +393,14 @@ export function access(p: string, mode: number | Function, cb?: Function) {
   }
   getFs()
     .metadata(resolvePath(p))
-    .then(() => {
-      if (cb) cb(null);
-    })
-    .catch((e: any) => {
-      if (cb) cb(translateError(e, p, "access"));
-    });
+    .then(
+      () => {
+        if (cb) cb(null);
+      },
+      (e: any) => {
+        if (cb) cb(translateError(e, p, "access"));
+      },
+    );
 }
 
 export const constants = {
