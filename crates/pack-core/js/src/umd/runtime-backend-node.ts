@@ -13,13 +13,14 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 
 /// <reference path="./runtime-base.ts" />
-/// <reference path="./runtime-types.d.ts" />
-
-let BACKEND: RuntimeBackend;
 
 (() => {
   BACKEND = {
-    registerChunk(chunkPath, params) {
+    registerChunk(chunk, params) {
+      const chunkPath = typeof chunk === "string"
+        ? chunk
+        : chunk.src! as unknown as ChunkPath;
+
       if (params == null) {
         return;
       }

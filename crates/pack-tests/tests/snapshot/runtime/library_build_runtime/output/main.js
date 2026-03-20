@@ -597,80 +597,16 @@ function applyModuleFactoryName(factory) {
 }
 /**
  * This file contains runtime types and functions that are shared between all
- * Turbopack *development* ECMAScript runtimes.
+ * Turbopack UMD library runtimes (DOM and Node.js).
  *
  * It will be appended to the runtime code of each runtime right after the
  * shared runtime utils.
- */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="./globals.d.ts" />
-/// <reference path="../../../../../next.js/turbopack/crates/turbopack-ecmascript-runtime/js/src/shared/runtime/runtime-utils.ts" />
-// Used in WebWorkers to tell the runtime about the chunk base path
+ */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="../../../../../next.js/turbopack/crates/turbopack-ecmascript-runtime/js/src/shared/runtime/runtime-utils.ts" />
+/// <reference path="../../../../../next.js/turbopack/crates/turbopack-ecmascript-runtime/js/src/shared/runtime/runtime-types.d.ts" />
 const browserContextPrototype = Context.prototype;
+let BACKEND;
 const moduleFactories = new Map();
 contextPrototype.M = moduleFactories;
-const availableModules = new Map();
-const availableModuleChunks = new Map();
-const loadedChunk = Promise.resolve(undefined);
-const instrumentedBackendLoadChunks = new WeakMap();
-// Do not make this async. React relies on referential equality of the returned Promise.
-function loadChunkByUrl(chunkUrl) {
-    return loadChunkByUrlInternal(SourceType.Parent, this.m.id, chunkUrl);
-}
-browserContextPrototype.L = loadChunkByUrl;
-const loadedScripts = new Map();
-/**
- * Load an external script by creating a <script> tag.
- * This is used for script externals that need to be loaded from CDN or other external sources.
- */ function loadScript(scriptUrl) {
-    // Return cached promise if script is already loading or loaded
-    let promise = loadedScripts.get(scriptUrl);
-    if (promise) {
-        return promise;
-    }
-    promise = new Promise((resolve, reject)=>{
-        const script = document.createElement("script");
-        script.src = scriptUrl;
-        script.onload = ()=>resolve();
-        script.onerror = ()=>reject(new Error(`Failed to load script: ${scriptUrl}`));
-        document.head.appendChild(script);
-    });
-    loadedScripts.set(scriptUrl, promise);
-    return promise;
-}
-browserContextPrototype.S = loadScript;
-// Do not make this async. React relies on referential equality of the returned Promise.
-function loadChunkByUrlInternal(sourceType, sourceData, chunkUrl) {
-    const thenable = BACKEND.loadChunkCached(sourceType, chunkUrl);
-    let entry = instrumentedBackendLoadChunks.get(thenable);
-    if (entry === undefined) {
-        const resolve = instrumentedBackendLoadChunks.set.bind(instrumentedBackendLoadChunks, thenable, loadedChunk);
-        entry = thenable.then(resolve).catch((error)=>{
-            let loadReason;
-            switch(sourceType){
-                case SourceType.Runtime:
-                    loadReason = `as a runtime dependency of chunk ${sourceData}`;
-                    break;
-                case SourceType.Parent:
-                    loadReason = `from module ${sourceData}`;
-                    break;
-                case SourceType.Update:
-                    loadReason = "from an HMR update";
-                    break;
-                default:
-                    invariant(sourceType, (sourceType)=>`Unknown source type: ${sourceType}`);
-            }
-            throw new Error(`Failed to load chunk ${chunkUrl} ${loadReason}${error ? `: ${error}` : ""}`, error ? {
-                cause: error
-            } : undefined);
-        });
-        instrumentedBackendLoadChunks.set(thenable, entry);
-    }
-    return entry;
-}
-// Do not make this async. React relies on referential equality of the returned Promise.
-function loadChunkPath(sourceType, sourceData, chunkPath) {
-    const url = getChunkRelativeUrl(chunkPath);
-    return loadChunkByUrlInternal(sourceType, sourceData, url);
-}
 /**
  * Returns an absolute url to an asset.
  */ function resolvePathFromModule(moduleId) {
@@ -689,48 +625,6 @@ browserContextPrototype.P = resolveAbsolutePath;
  * Instantiates a runtime module.
  */ function instantiateRuntimeModule(moduleId, chunkPath) {
     return instantiateModule(moduleId, SourceType.Runtime, chunkPath);
-}
-/**
- * Returns the URL relative to the origin where a chunk can be fetched from.
- */ function getChunkRelativeUrl(chunkPath) {
-    return `${CHUNK_BASE_PATH}${chunkPath.split("/").map((p)=>encodeURIComponent(p)).join("/")}${CHUNK_SUFFIX_PATH}`;
-}
-function getPathFromScript(chunkScript) {
-    if (typeof chunkScript === "string") {
-        return chunkScript;
-    }
-    const chunkUrl = typeof TURBOPACK_NEXT_CHUNK_URLS !== "undefined" ? TURBOPACK_NEXT_CHUNK_URLS.pop() : chunkScript.src;
-    const src = decodeURIComponent(chunkUrl.replace(/[?#].*$/, ""));
-    let path = src.startsWith(CHUNK_BASE_PATH) ? src.slice(CHUNK_BASE_PATH.length) : src;
-    if (path.startsWith("/")) {
-        path = path.slice(1);
-    }
-    return path;
-}
-const regexJsUrl = /\.js(?:\?[^#]*)?(?:#.*)?$/;
-/**
- * Checks if a given path/URL ends with .js, optionally followed by ?query or #fragment.
- */ function isJs(chunkUrlOrPath) {
-    return regexJsUrl.test(chunkUrlOrPath);
-}
-/**
- * Determine the chunk to register. Note that this function has side-effects!
- */ function getChunkFromRegistration(chunk) {
-    if (typeof chunk === "string") {
-        return chunk;
-    } else if (!chunk) {
-        if (typeof TURBOPACK_NEXT_CHUNK_URLS !== "undefined") {
-            return {
-                src: TURBOPACK_NEXT_CHUNK_URLS.pop()
-            };
-        } else {
-            throw new Error("chunk path empty but not in a worker");
-        }
-    } else {
-        return {
-            src: chunk.getAttribute("src")
-        };
-    }
 }
 /// <reference path="./runtime-base.ts" />
 /// <reference path="./dummy.ts" />
@@ -844,124 +738,59 @@ externalRequire.resolve = (id, options)=>{
 };
 contextPrototype.x = externalRequire;
 /**
- * This file contains the runtime code specific to the Turbopack development
- * ECMAScript DOM runtime.
+ * This file contains the runtime code specific to the Turbopack
+ * ECMAScript DOM runtime for library builds.
  *
- * It will be appended to the base development runtime code.
+ * It will be appended to the base runtime code in place of
+ * runtime-backend-node.ts when the target platform is browser/web.
+ *
+ * Since library builds produce a single, self-contained chunk,
+ * no dynamic chunk loading is needed. The BACKEND simply registers
+ * modules and instantiates runtime entries.
+ *
+ * The only DOM-specific addition is `loadScript` for script externals
+ * that need to be loaded from CDN or other external sources.
  */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="./runtime-base.ts" />
-/// <reference path="./runtime-types.d.ts" />
-let BACKEND;
+const loadedScripts = new Map();
 /**
- * Maps chunk paths to the corresponding resolver.
- */ const chunkResolvers = new Map();
+ * Load an external script by creating a <script> tag.
+ * This is used for script externals that need to be loaded from CDN or other external sources.
+ */ function loadScript(scriptUrl) {
+    // Return cached promise if script is already loading or loaded
+    let promise = loadedScripts.get(scriptUrl);
+    if (promise) {
+        return promise;
+    }
+    promise = new Promise((resolve, reject)=>{
+        const script = document.createElement("script");
+        script.src = scriptUrl;
+        script.onload = ()=>resolve();
+        script.onerror = ()=>reject(new Error(`Failed to load script: ${scriptUrl}`));
+        document.head.appendChild(script);
+    });
+    loadedScripts.set(scriptUrl, promise);
+    return promise;
+}
+browserContextPrototype.S = loadScript;
 (()=>{
     BACKEND = {
-        registerChunk (chunkPath, params) {
-            const chunkUrl = getChunkRelativeUrl(chunkPath);
-            const resolver = getOrCreateResolver(chunkUrl);
-            resolver.resolve();
+        registerChunk (chunk, params) {
             if (params == null) {
                 return;
             }
-            for (const otherChunkData of params.otherChunks){
-                const otherChunkPath = getChunkPath(otherChunkData);
-                const otherChunkUrl = getChunkRelativeUrl(otherChunkPath);
-                // Chunk might have started loading, so we want to avoid triggering another load.
-                getOrCreateResolver(otherChunkUrl);
-            }
             if (params.runtimeModuleIds.length > 0) {
                 for (const moduleId of params.runtimeModuleIds){
-                    getOrInstantiateRuntimeModule(chunkPath, moduleId);
+                    getOrInstantiateRuntimeModule(chunk, moduleId);
                 }
             }
         },
         /**
-     * Loads the given chunk, and returns a promise that resolves once the chunk
-     * has been loaded.
-     */ loadChunkCached (sourceType, chunkUrl) {
-            return doLoadChunk(sourceType, chunkUrl);
+     * In a single-chunk browser library build, all modules are already
+     * bundled into the same file. This function should never be called.
+     */ loadChunkCached (_sourceType, _chunkUrl) {
+            return Promise.resolve();
         }
     };
-    function getOrCreateResolver(chunkUrl) {
-        let resolver = chunkResolvers.get(chunkUrl);
-        if (!resolver) {
-            let resolve;
-            let reject;
-            const promise = new Promise((innerResolve, innerReject)=>{
-                resolve = innerResolve;
-                reject = innerReject;
-            });
-            resolver = {
-                resolved: false,
-                loadingStarted: false,
-                promise,
-                resolve: ()=>{
-                    resolver.resolved = true;
-                    resolve();
-                },
-                reject: reject
-            };
-            chunkResolvers.set(chunkUrl, resolver);
-        }
-        return resolver;
-    }
-    /**
-   * Loads the given chunk, and returns a promise that resolves once the chunk
-   * has been loaded.
-   */ function doLoadChunk(sourceType, chunkUrl) {
-        const resolver = getOrCreateResolver(chunkUrl);
-        if (resolver.loadingStarted) {
-            return resolver.promise;
-        }
-        if (sourceType === SourceType.Runtime) {
-            // We don't need to load chunks references from runtime code, as they're already
-            // present in the DOM.
-            resolver.loadingStarted = true;
-            // We need to wait for JS chunks to register themselves within `registerChunk`
-            // before we can start instantiating runtime modules, hence the absence of
-            // `resolver.resolve()` in this branch.
-            return resolver.promise;
-        }
-        if (typeof importScripts === "function") {
-            // We're in a web worker
-            if (isJs(chunkUrl)) {
-                self.TURBOPACK_NEXT_CHUNK_URLS.push(chunkUrl);
-                importScripts(TURBOPACK_WORKER_LOCATION + chunkUrl);
-            } else {
-                throw new Error(`can't infer type of chunk from URL ${chunkUrl} in worker`);
-            }
-        } else {
-            // TODO(PACK-2140): remove this once all filenames are guaranteed to be escaped.
-            const decodedChunkUrl = decodeURI(chunkUrl);
-            if (isJs(chunkUrl)) {
-                const previousScripts = document.querySelectorAll(`script[src="${chunkUrl}"],script[src^="${chunkUrl}?"],script[src="${decodedChunkUrl}"],script[src^="${decodedChunkUrl}?"]`);
-                if (previousScripts.length > 0) {
-                    // There is this edge where the script already failed loading, but we
-                    // can't detect that. The Promise will never resolve in this case.
-                    for (const script of Array.from(previousScripts)){
-                        script.addEventListener("error", ()=>{
-                            resolver.reject();
-                        });
-                    }
-                } else {
-                    const script = document.createElement("script");
-                    script.src = chunkUrl;
-                    // We'll only mark the chunk as loaded once the script has been executed,
-                    // which happens in `registerChunk`. Hence the absence of `resolve()` in
-                    // this branch.
-                    script.onerror = ()=>{
-                        resolver.reject();
-                    };
-                    // Append to the `head` for webpack compatibility.
-                    document.head.appendChild(script);
-                }
-            } else {
-                throw new Error(`can't infer type of chunk from URL ${chunkUrl}`);
-            }
-        }
-        resolver.loadingStarted = true;
-        return resolver.promise;
-    }
 })();
 const chunksToRegister = __UTOOPACK__;
 __UTOOPACK__ = { push: registerChunk };
