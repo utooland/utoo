@@ -13,13 +13,14 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 
 /// <reference path="./runtime-base.ts" />
-/// <reference path="./runtime-types.d.ts" />
-
-let BACKEND: RuntimeBackend;
 
 (() => {
   BACKEND = {
-    registerChunk(chunkPath, params) {
+    registerChunk(chunk, params) {
+      const chunkPath = typeof chunk === "string"
+        ? chunk
+        : chunk.src! as unknown as ChunkPath;
+
       if (params == null) {
         return;
       }
@@ -43,3 +44,13 @@ let BACKEND: RuntimeBackend;
     },
   };
 })();
+
+// Node.js-specific: require.resolve is not available in browser environments
+(externalRequire as any).resolve = (
+  id: string,
+  options?: {
+    paths?: string[];
+  },
+) => {
+  return require.resolve(id, options);
+};

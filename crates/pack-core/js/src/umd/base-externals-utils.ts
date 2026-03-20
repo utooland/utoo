@@ -46,13 +46,4 @@ function externalRequire(
 
   return interopEsm(raw, createNS(raw), true);
 }
-
-externalRequire.resolve = (
-  id: string,
-  options?: {
-    paths?: string[];
-  },
-) => {
-  return require.resolve(id, options);
-};
 contextPrototype.x = externalRequire;
