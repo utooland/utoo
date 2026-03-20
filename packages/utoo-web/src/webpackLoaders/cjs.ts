@@ -61,7 +61,11 @@ const executeModule = (
   moduleRequire.resolve = (request: string) => request;
 
   const module = { exports: finalExports, require: moduleRequire };
-  if (moduleId.includes("node_modules")) {
+  if (
+    moduleId.includes("node_modules") ||
+    id in importMaps ||
+    moduleId in importMaps
+  ) {
     installedModules[moduleId] = module;
   }
 
@@ -129,6 +133,17 @@ const loadModule = (
   if (resolutionCache[cacheKey]) {
     const cachedId = resolutionCache[cacheKey];
     if (installedModules[cachedId]) return installedModules[cachedId].exports;
+
+    const sysCached =
+      System.get(cachedId) || (id !== cachedId && System.get(id));
+    if (sysCached) return sysCached.default;
+
+    // importMaps takes priority over cached FS path
+    const importMapCode = importMaps[cachedId] || importMaps[id];
+    if (importMapCode) {
+      const mid = importMaps[cachedId] ? cachedId : id;
+      return executeModule(importMapCode, mid, id, importMaps, entrypoint);
+    }
 
     const code = tryReadFile(cachedId);
     if (code !== null) {
