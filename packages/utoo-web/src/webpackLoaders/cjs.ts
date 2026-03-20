@@ -139,18 +139,9 @@ const loadModule = (
   // 1. Resolve
   let resolvedId = id.startsWith(".") ? path.join(context, id) : id;
 
-  // 2. Check Cache (SystemJS)
-  const sysDef =
-    System.get(resolvedId) || (id !== resolvedId && System.get(id));
-  if (sysDef) return sysDef.default;
-
-  // 3. Check Node Polyfills
-  if (id in nodePolyFills) return (nodePolyFills as any)[id];
-  if (resolvedId in nodePolyFills) return (nodePolyFills as any)[resolvedId];
-
-  // 4. Check importMaps & FS
-  let moduleCode = importMaps[resolvedId] || importMaps[id];
-  let moduleId = importMaps[resolvedId] ? resolvedId : id;
+  // 2. Check importMaps (highest priority)
+  let moduleCode = importMaps[id];
+  let moduleId = id;
 
   if (!moduleCode) {
     let longestMatch: { key: string; sanitized: string } | null = null;
@@ -178,6 +169,20 @@ const loadModule = (
           : resolvedId;
     }
   }
+
+  if (moduleCode) {
+    resolutionCache[`${context}:${id}`] = moduleId;
+    return executeModule(moduleCode, moduleId, id, importMaps, entrypoint);
+  }
+
+  // 3. Check Cache (SystemJS)
+  const sysDef =
+    System.get(resolvedId) || (id !== resolvedId && System.get(id));
+  if (sysDef) return sysDef.default;
+
+  // 4. Check Node Polyfills
+  if (id in nodePolyFills) return (nodePolyFills as any)[id];
+  if (resolvedId in nodePolyFills) return (nodePolyFills as any)[resolvedId];
 
   // Fallback: Try resolving from node_modules
   if (!moduleCode && !id.startsWith(".") && !id.startsWith("/")) {
