@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use utoo_ruborist::graph::EdgeType;
 
 /// Workspace node information
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,7 +47,6 @@ impl WorkspaceService {
         // Get all workspace nodes (excluding links)
         let workspace_nodes = graph.get_workspace_nodes();
 
-        // Collect workspace nodes
         for node_idx in &workspace_nodes {
             let node = graph
                 .get_node(*node_idx)
@@ -66,25 +66,34 @@ impl WorkspaceService {
         }
 
         // Collect dependency edges between workspaces
-        for node_idx in &workspace_nodes {
-            let node = graph
-                .get_node(*node_idx)
-                .expect("workspace node index must be valid");
-            let resolved_deps = graph.get_resolved_dependencies(*node_idx);
+        let mut omit_dev_edges = Vec::new();
+        for (i, node_idx) in workspace_nodes.iter().enumerate() {
+            let node_name = &nodes[i].name;
 
-            for (_dep_name, target_idx) in resolved_deps {
+            for (_, dep) in graph.get_dependency_edges(*node_idx) {
+                if !dep.valid {
+                    continue;
+                }
+                let Some(target_idx) = dep.to else {
+                    continue;
+                };
                 let target_node = graph
                     .get_node(target_idx)
                     .expect("target node index must be valid");
-                // Only include workspace-to-workspace dependencies
                 if workspace_names.contains(&target_node.name) {
-                    // Edge: [to, from] meaning "to depends on from"
-                    edges.push(Edge::new(target_node.name.clone(), node.name.clone()));
+                    let edge = Edge::new(target_node.name.clone(), node_name.clone());
+                    if dep.edge_type != EdgeType::Dev {
+                        omit_dev_edges.push(edge.clone());
+                    }
+                    edges.push(edge);
                 }
             }
         }
 
-        let topology = compute_topological_layers(&node_list, &edges)?;
+        // Try with all edges first; if a cycle is detected, fall back to
+        // excluding devDependencies (which commonly cause cycles in monorepos).
+        let topology = compute_topological_layers(&node_list, &edges)
+            .or_else(|_| compute_topological_layers(&node_list, &omit_dev_edges))?;
 
         Ok(WorkspaceTopology {
             edges,
@@ -124,14 +133,12 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
-    // Helper to create a mock workspace structure with root package.json
-    fn create_mock_workspace(dir: &Path) {
-        // Create workspace A and B, B depends on A
+    /// Create a two-workspace (A, B) mock structure with custom package.json content.
+    fn create_mock_workspace_with(dir: &Path, a_json: &str, b_json: &str) {
         let a_dir = dir.join("A");
         let b_dir = dir.join("B");
         fs::create_dir_all(&a_dir).unwrap();
         fs::create_dir_all(&b_dir).unwrap();
-        // Write root package.json with workspaces field
         fs::write(
             dir.join("package.json"),
             r#"{
@@ -141,14 +148,69 @@ mod tests {
             }"#,
         )
         .unwrap();
-        // Write package.json for A
-        fs::write(a_dir.join("package.json"), r#"{"name":"A"}"#).unwrap();
-        // Write package.json for B, depends on A
-        fs::write(
-            b_dir.join("package.json"),
+        fs::write(a_dir.join("package.json"), a_json).unwrap();
+        fs::write(b_dir.join("package.json"), b_json).unwrap();
+    }
+
+    fn create_mock_workspace(dir: &Path) {
+        create_mock_workspace_with(
+            dir,
+            r#"{"name":"A"}"#,
             r#"{"name":"B","dependencies":{"A":"*"}}"#,
-        )
-        .unwrap();
+        );
+    }
+
+    #[tokio::test]
+    async fn test_dev_deps_cycle_falls_back() {
+        // A devDepends on B, B devDepends on A — cycle via devDeps only.
+        // Should fall back to omitting dev edges instead of erroring.
+        let temp = tempdir().unwrap();
+        create_mock_workspace_with(
+            temp.path(),
+            r#"{"name":"A","devDependencies":{"B":"*"}}"#,
+            r#"{"name":"B","devDependencies":{"A":"*"}}"#,
+        );
+        let result = WorkspaceService::build_workspace_topology(temp.path()).await;
+        assert!(result.is_ok(), "devDeps cycle should fall back, not error");
+        let topo = result.unwrap();
+        assert_eq!(topo.edges.len(), 2);
+        // Fallback: no prod edges → no ordering constraints → single layer
+        assert_eq!(topo.topology.len(), 1);
+        assert_eq!(topo.topology[0].len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_dev_deps_affect_ordering_when_no_cycle() {
+        // A devDepends on B (no cycle) — devDep should still affect ordering
+        let temp = tempdir().unwrap();
+        create_mock_workspace_with(
+            temp.path(),
+            r#"{"name":"A","devDependencies":{"B":"*"}}"#,
+            r#"{"name":"B"}"#,
+        );
+        let result = WorkspaceService::build_workspace_topology(temp.path()).await;
+        assert!(result.is_ok());
+        let topo = result.unwrap();
+        // B first, then A (A devDepends on B → B should be built first)
+        assert_eq!(topo.topology, vec![vec!["B"], vec!["A"]]);
+    }
+
+    #[tokio::test]
+    async fn test_mixed_prod_and_dev_deps_cycle_falls_back() {
+        // A prod→B, B dev→A — forms a cycle with all edges,
+        // falls back to prod-only where only A→B remains
+        let temp = tempdir().unwrap();
+        create_mock_workspace_with(
+            temp.path(),
+            r#"{"name":"A","dependencies":{"B":"*"}}"#,
+            r#"{"name":"B","devDependencies":{"A":"*"}}"#,
+        );
+        let result = WorkspaceService::build_workspace_topology(temp.path()).await;
+        assert!(result.is_ok(), "mixed prod+dev cycle should fall back");
+        let topo = result.unwrap();
+        assert_eq!(topo.edges.len(), 2);
+        // Fallback ordering: only prod edge (A depends on B) → B first
+        assert_eq!(topo.topology.len(), 2);
     }
 
     #[tokio::test]
