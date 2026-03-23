@@ -11,10 +11,10 @@
   ],
   "output": {
     "path": "./dist",
-    "filename": "with-react.[contenthash:8].js",
-    "chunkFilename": "with-react.[contenthash:8].js",
-    "cssFilename": "with-react.[contenthash:8].css",
-    "assetModuleFilename": "with-react.[contenthash:8].css",
+    "filename": "[name].[contenthash:8].js",
+    "chunkFilename": "[name].[contenthash:8].js",
+    "cssFilename": "[name].[contenthash:8].css",
+    "assetModuleFilename": "[name].[contenthash:8].css",
     "clean": true
   },
   "optimization": {

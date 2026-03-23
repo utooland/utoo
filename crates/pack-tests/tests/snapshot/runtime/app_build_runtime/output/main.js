@@ -1036,18 +1036,11 @@ let BACKEND;
         if (resolver.loadingStarted) {
             return resolver.promise;
         }
-        if (sourceType === SourceType.Runtime) {
-            // We don't need to load chunks references from runtime code, as they're already
-            // present in the DOM.
+        if (sourceType === SourceType.Runtime && isCss(chunkUrl)) {
+            // CSS chunks do not register themselves, and as such must be marked as
+            // loaded instantly.
             resolver.loadingStarted = true;
-            if (isCss(chunkUrl)) {
-                // CSS chunks do not register themselves, and as such must be marked as
-                // loaded instantly.
-                resolver.resolve();
-            }
-            // We need to wait for JS chunks to register themselves within `registerChunk`
-            // before we can start instantiating runtime modules, hence the absence of
-            // `resolver.resolve()` in this branch.
+            resolver.resolve();
             return resolver.promise;
         }
         if (typeof importScripts === 'function') {
