@@ -66,7 +66,6 @@ impl WorkspaceService {
         }
 
         // Collect dependency edges between workspaces
-        let mut omit_dev_edges = Vec::new();
         for (i, node_idx) in workspace_nodes.iter().enumerate() {
             let node_name = &nodes[i].name;
 
@@ -81,19 +80,21 @@ impl WorkspaceService {
                     .get_node(target_idx)
                     .expect("target node index must be valid");
                 if workspace_names.contains(&target_node.name) {
-                    let edge = Edge::new(target_node.name.clone(), node_name.clone());
-                    if dep.edge_type != EdgeType::Dev {
-                        omit_dev_edges.push(edge.clone());
-                    }
-                    edges.push(edge);
+                    edges.push(Edge::new(&target_node.name, node_name, dep.edge_type));
                 }
             }
         }
 
-        // Try with all edges first; if a cycle is detected, fall back to
-        // excluding devDependencies (which commonly cause cycles in monorepos).
-        let topology = compute_topological_layers(&node_list, &edges)
-            .or_else(|_| compute_topological_layers(&node_list, &omit_dev_edges))?;
+        // Try with all edges first; if a cycle is detected (commonly caused
+        // by devDependencies), fall back to excluding dev edges.
+        let topology = compute_topological_layers(&node_list, &edges).or_else(|_| {
+            let non_dev: Vec<_> = edges
+                .iter()
+                .filter(|e| e.edge_type != EdgeType::Dev)
+                .cloned()
+                .collect();
+            compute_topological_layers(&node_list, &non_dev)
+        })?;
 
         Ok(WorkspaceTopology {
             edges,

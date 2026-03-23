@@ -2,6 +2,7 @@ use petgraph::Graph;
 use petgraph::algo::{is_cyclic_directed, toposort};
 use petgraph::prelude::*;
 use std::collections::HashMap;
+use utoo_ruborist::graph::EdgeType;
 
 use anyhow::{Result, anyhow};
 
@@ -22,13 +23,15 @@ impl Node {
 pub struct Edge {
     pub from: String, // dependency (should be executed first)
     pub to: String,   // dependent (depends on from)
+    pub edge_type: EdgeType,
 }
 
 impl Edge {
-    pub fn new(from: impl Into<String>, to: impl Into<String>) -> Self {
+    pub fn new(from: impl Into<String>, to: impl Into<String>, edge_type: EdgeType) -> Self {
         Self {
             from: from.into(),
             to: to.into(),
+            edge_type,
         }
     }
 }
@@ -162,7 +165,7 @@ mod tests {
     fn test_compute_topological_layers_simple() {
         let node_list = vec![Node::new("A"), Node::new("B")]; // Nodes will be inferred from edges
         let edges = vec![
-            Edge::new("A", "B"), // B depends on A
+            Edge::new("A", "B", EdgeType::Prod), // B depends on A
         ];
 
         let result = compute_topological_layers(&node_list, &edges).unwrap();
@@ -173,8 +176,8 @@ mod tests {
     fn test_compute_topological_layers_chain() {
         let node_list = vec![Node::new("A"), Node::new("B"), Node::new("C")]; // Nodes will be inferred from edges
         let edges = vec![
-            Edge::new("A", "B"), // B depends on A
-            Edge::new("B", "C"), // C depends on B
+            Edge::new("A", "B", EdgeType::Prod), // B depends on A
+            Edge::new("B", "C", EdgeType::Prod), // C depends on B
         ];
 
         let result = compute_topological_layers(&node_list, &edges).unwrap();
@@ -190,8 +193,8 @@ mod tests {
             Node::new("D"),
         ]; // Nodes will be inferred from edges
         let edges = vec![
-            Edge::new("A", "B"), // B depends on A
-            Edge::new("C", "D"), // D depends on C
+            Edge::new("A", "B", EdgeType::Prod), // B depends on A
+            Edge::new("C", "D", EdgeType::Prod), // D depends on C
         ];
 
         let result = compute_topological_layers(&node_list, &edges).unwrap();
@@ -211,7 +214,10 @@ mod tests {
     #[test]
     fn test_no_cycle() {
         let node_list = vec![Node::new("A"), Node::new("B"), Node::new("C")];
-        let edges = vec![Edge::new("A", "B"), Edge::new("B", "C")];
+        let edges = vec![
+            Edge::new("A", "B", EdgeType::Prod),
+            Edge::new("B", "C", EdgeType::Prod),
+        ];
 
         let result = compute_topological_layers(&node_list, &edges).unwrap();
         // Should successfully compute layers if no cycle
@@ -222,9 +228,9 @@ mod tests {
     fn test_with_cycle() {
         let node_list = vec![Node::new("A"), Node::new("B"), Node::new("C")];
         let edges = vec![
-            Edge::new("A", "B"),
-            Edge::new("B", "C"),
-            Edge::new("C", "A"), // Creates cycle A -> B -> C -> A
+            Edge::new("A", "B", EdgeType::Prod),
+            Edge::new("B", "C", EdgeType::Prod),
+            Edge::new("C", "A", EdgeType::Prod), // Creates cycle A -> B -> C -> A
         ];
 
         let result = compute_topological_layers(&node_list, &edges);
@@ -244,12 +250,12 @@ mod tests {
             Node::new("F"),
         ]; // Nodes will be inferred from edges
         let edges = vec![
-            Edge::new("A", "B"), // B depends on A
-            Edge::new("A", "C"), // C depends on A
-            Edge::new("B", "D"), // D depends on B
-            Edge::new("C", "D"), // D depends on C
-            Edge::new("D", "E"), // E depends on D
-            Edge::new("C", "F"), // F depends on C
+            Edge::new("A", "B", EdgeType::Prod), // B depends on A
+            Edge::new("A", "C", EdgeType::Prod), // C depends on A
+            Edge::new("B", "D", EdgeType::Prod), // D depends on B
+            Edge::new("C", "D", EdgeType::Prod), // D depends on C
+            Edge::new("D", "E", EdgeType::Prod), // E depends on D
+            Edge::new("C", "F", EdgeType::Prod), // F depends on C
         ];
 
         let result = compute_topological_layers(&node_list, &edges).unwrap();
@@ -284,7 +290,7 @@ mod tests {
         // Test self-dependency (should be handled gracefully)
         let node_list = vec![Node::new("A")]; // Nodes will be inferred from edges
         let edges = vec![
-            Edge::new("A", "A"), // A depends on itself
+            Edge::new("A", "A", EdgeType::Prod), // A depends on itself
         ];
 
         let result = compute_topological_layers(&node_list, &edges);
@@ -297,9 +303,9 @@ mod tests {
         // Test duplicate edges (should be handled correctly)
         let node_list = vec![Node::new("A"), Node::new("B"), Node::new("C")]; // Nodes will be inferred from edges
         let edges = vec![
-            Edge::new("A", "B"),
-            Edge::new("A", "B"), // Duplicate edge
-            Edge::new("B", "C"),
+            Edge::new("A", "B", EdgeType::Prod),
+            Edge::new("A", "B", EdgeType::Prod), // Duplicate edge
+            Edge::new("B", "C", EdgeType::Prod),
         ];
 
         let result = compute_topological_layers(&node_list, &edges).unwrap();
@@ -316,9 +322,9 @@ mod tests {
             Node::new("D"), // D is isolated (no dependencies, no dependents)
         ];
         let edges = vec![
-            Edge::new("A", "B"), // B depends on A
-            Edge::new("A", "C"), // C depends on A
-                                 // D has no edges
+            Edge::new("A", "B", EdgeType::Prod), // B depends on A
+            Edge::new("A", "C", EdgeType::Prod), // C depends on A
+                                                 // D has no edges
         ];
 
         let result = compute_topological_layers(&node_list, &edges).unwrap();
@@ -339,8 +345,8 @@ mod tests {
         // Test explicit node list with dependencies
         let node_list = vec![Node::new("A"), Node::new("B"), Node::new("C")];
         let edges = vec![
-            Edge::new("A", "B"), // B depends on A
-            Edge::new("B", "C"), // C depends on B
+            Edge::new("A", "B", EdgeType::Prod), // B depends on A
+            Edge::new("B", "C", EdgeType::Prod), // C depends on B
         ];
 
         let result = compute_topological_layers(&node_list, &edges).unwrap();
@@ -352,9 +358,9 @@ mod tests {
         // Create a simple cycle: A -> B -> C -> A
         let node_list = vec![Node::new("A"), Node::new("B"), Node::new("C")];
         let edges = vec![
-            Edge::new("A", "B"),
-            Edge::new("B", "C"),
-            Edge::new("C", "A"),
+            Edge::new("A", "B", EdgeType::Prod),
+            Edge::new("B", "C", EdgeType::Prod),
+            Edge::new("C", "A", EdgeType::Prod),
         ];
 
         let result = compute_topological_layers(&node_list, &edges);
@@ -375,12 +381,12 @@ mod tests {
             Node::new("F"), // F is acyclic
         ];
         let edges = vec![
-            Edge::new("A", "B"),
-            Edge::new("B", "C"),
-            Edge::new("C", "A"), // Cycle 1: A -> B -> C -> A
-            Edge::new("D", "E"),
-            Edge::new("E", "D"), // Cycle 2: D <-> E
-            Edge::new("F", "C"), // F is not in any cycle
+            Edge::new("A", "B", EdgeType::Prod),
+            Edge::new("B", "C", EdgeType::Prod),
+            Edge::new("C", "A", EdgeType::Prod), // Cycle 1: A -> B -> C -> A
+            Edge::new("D", "E", EdgeType::Prod),
+            Edge::new("E", "D", EdgeType::Prod), // Cycle 2: D <-> E
+            Edge::new("F", "C", EdgeType::Prod), // F is not in any cycle
         ];
 
         let result = compute_topological_layers(&node_list, &edges);
