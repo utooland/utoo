@@ -298,6 +298,12 @@ impl DependencyGraph {
             .collect()
     }
 
+    /// Check if a dependency edge resolves to a workspace node.
+    pub fn is_workspace_target(&self, edge: &DependencyEdge) -> bool {
+        edge.to
+            .is_some_and(|t| self.get_node(t).is_some_and(|n| n.is_workspace()))
+    }
+
     /// Mark a dependency edge as resolved.
     pub fn mark_dependency_resolved(&mut self, edge_id: EdgeIndex, target: NodeIndex) {
         if let Some(GraphEdge::Dependency(dep)) = self.graph.edge_weight_mut(edge_id) {
