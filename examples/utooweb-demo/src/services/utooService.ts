@@ -164,7 +164,7 @@ export const installDependencies = async (
   const concurrency = config?.maxConcurrentDownloads ?? 20;
 
   console.log(
-    "%cOPFS Project:%c Start to install dependencies (lazy mode).",
+    "%cOPFS Project:%c Start to install dependencies.",
     "color: blue;",
     "color: green",
   );
