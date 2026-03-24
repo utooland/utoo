@@ -24,12 +24,14 @@ fn build_graph(node_list: &[String], edges: &[(&str, &str)]) -> Graph<String, ()
     graph
 }
 
-/// Return groups of node names that form cycles (strongly connected components).
+/// Return groups of node names that form cycles.
 ///
-/// Each returned `Vec<String>` is one SCC with size > 1, or a single self-loop node.
-/// Returns an empty vec when the graph is acyclic.
+/// Each returned `Vec<String>` is one cycle group. Returns empty when acyclic.
 pub fn find_cycle_groups(node_list: &[String], edges: &[(&str, &str)]) -> Vec<Vec<String>> {
     let graph = build_graph(node_list, edges);
+    // kosaraju_scc returns all strongly connected components (SCCs) — maximal
+    // sets of nodes where every node is reachable from every other. An SCC
+    // with >1 node (or a single self-loop) is a cycle.
     kosaraju_scc(&graph)
         .into_iter()
         .filter(|scc| {
@@ -52,7 +54,6 @@ pub fn compute_topological_layers(
     edges: &[(&str, &str)],
 ) -> Result<Vec<Vec<String>>> {
     let graph = build_graph(node_list, edges);
-
     let cycles: Vec<Vec<String>> = kosaraju_scc(&graph)
         .into_iter()
         .filter(|scc| {
@@ -287,14 +288,14 @@ mod tests {
     }
 
     #[test]
-    fn test_find_cycle_groups_no_cycle() {
+    fn test_find_cycles_no_cycle() {
         let n = nodes(&["A", "B", "C"]);
         let edges = vec![("A", "B"), ("B", "C")];
         assert!(find_cycle_groups(&n, &edges).is_empty());
     }
 
     #[test]
-    fn test_find_cycle_groups_one_cycle() {
+    fn test_find_cycles_one_cycle() {
         let n = nodes(&["A", "B", "C"]);
         let edges = vec![("A", "B"), ("B", "C"), ("C", "A")];
         let groups = find_cycle_groups(&n, &edges);
@@ -305,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn test_find_cycle_groups_two_cycles() {
+    fn test_find_cycles_two_cycles() {
         let n = nodes(&["A", "B", "C", "D", "E"]);
         let edges = vec![("A", "B"), ("B", "A"), ("C", "D"), ("D", "E"), ("E", "C")];
         let mut groups = find_cycle_groups(&n, &edges);
