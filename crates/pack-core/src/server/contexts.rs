@@ -145,8 +145,8 @@ pub async fn get_server_module_options_context(
         .await?;
     let target_browsers = env.runtime_versions();
 
-    let mut server_rules = get_server_transforms_rules(config).await?;
-    let mut foreign_server_rules = get_server_transforms_rules(config).await?;
+    let mut server_rules = get_server_transforms_rules(config, false).await?;
+    let mut foreign_server_rules = get_server_transforms_rules(config, true).await?;
 
     // Ignore .d.ts files - they are TypeScript declaration files and should not be bundled
     let ignore_dts_rule = ModuleRule::new(

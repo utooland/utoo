@@ -223,8 +223,8 @@ pub async fn get_client_module_options_context(
         .await?;
     let target_browsers = env.runtime_versions();
 
-    let mut client_rules = get_client_transforms_rules(config, mode).await?;
-    let mut foreign_client_rules = get_client_transforms_rules(config, mode).await?;
+    let mut client_rules = get_client_transforms_rules(config, mode, false).await?;
+    let mut foreign_client_rules = get_client_transforms_rules(config, mode, true).await?;
 
     // Ignore .d.ts files - they are TypeScript declaration files and should not be bundled
     let ignore_dts_rule = ModuleRule::new(

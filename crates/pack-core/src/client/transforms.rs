@@ -14,6 +14,7 @@ use crate::{
 pub async fn get_client_transforms_rules(
     config: Vc<Config>,
     mode: Vc<Mode>,
+    foreign_code: bool,
 ) -> Result<Vec<ModuleRule>> {
     let mut rules = vec![];
 
@@ -26,7 +27,7 @@ pub async fn get_client_transforms_rules(
 
     let image_config = config.image_config().await?;
 
-    if !modularize_imports_config.is_empty() {
+    if !foreign_code && !modularize_imports_config.is_empty() {
         rules.push(get_modularize_imports_rule(modularize_imports_config));
     }
 
