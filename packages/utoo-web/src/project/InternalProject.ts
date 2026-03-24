@@ -84,10 +84,8 @@ class InternalEndpoint implements ProjectEndpoint {
     return await ProjectInternal.build(buildOptions);
   }
 
-  async dev(options?: {
-    config?: ConfigComplete;
-    onUpdate?: (result: any) => void;
-  }) {
+  // @ts-expect-error - Comlink delivers (config, onUpdate) as separate args, not as options object
+  async dev(config?: ConfigComplete, onUpdate?: (result: any) => void) {
     if (this.options?.loaderWorkerUrl && !this.loaderWorkerPoolInitialized) {
       runLoaderWorkerPool(
         this.options.cwd,
@@ -98,9 +96,9 @@ class InternalEndpoint implements ProjectEndpoint {
     }
 
     this.rootTask = await ProjectInternal.entrypointsSubscribe(
-      options?.config,
+      config,
       (result: any) => {
-        options?.onUpdate?.(result);
+        onUpdate?.(result);
       },
     );
   }
