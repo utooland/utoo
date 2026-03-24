@@ -55,8 +55,11 @@ jobs:
       #     cache-directories: |
       #       target/release-local
 
+      - name: Setup Utoo
+        uses: utooland/setup-utoo@v1
+
       - name: Install dependencies
-        run: npm install
+        run: utoo install
 
       - name: Build Bundler
         run: |

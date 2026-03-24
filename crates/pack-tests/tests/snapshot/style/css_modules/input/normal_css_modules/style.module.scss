@@ -1,9 +1,11 @@
+@use "sass:color";
+
 $primary-color: #28a745;
 
 .header {
   background-color: $primary-color;
-  
+
   &:hover {
-    background-color: darken($primary-color, 10%);
+    background-color: color.adjust($primary-color, $lightness: -10%);
   }
 }
