@@ -1,11 +1,19 @@
-use crate::helper::deps::{Edge, Node, compute_topological_layers};
+use crate::helper::deps::{compute_topological_layers, find_cycle_groups};
 use crate::helper::tree_builder::TreeBuilder;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use utoo_ruborist::graph::EdgeType;
+
+/// Workspace dependency edge
+#[derive(Debug, Clone)]
+pub struct WorkspaceEdge {
+    pub from: String,
+    pub to: String,
+    pub edge_type: EdgeType,
+}
 
 /// Workspace node information
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,7 +25,7 @@ pub struct WorkspaceNode {
 /// Workspace topology information
 #[derive(Debug, Clone)]
 pub struct WorkspaceTopology {
-    pub edges: Vec<Edge>,
+    pub edges: Vec<WorkspaceEdge>,
     pub topology: Vec<Vec<String>>,
     pub nodes: Vec<WorkspaceNode>,
 }
@@ -54,7 +62,7 @@ impl WorkspaceService {
             let name = node.name.clone();
 
             workspace_names.insert(name.clone());
-            node_list.push(Node::new(name.clone()));
+            node_list.push(name.clone());
             nodes.push(WorkspaceNode {
                 name,
                 path: node
@@ -80,20 +88,39 @@ impl WorkspaceService {
                     .get_node(target_idx)
                     .expect("target node index must be valid");
                 if workspace_names.contains(&target_node.name) {
-                    edges.push(Edge::new(&target_node.name, node_name, dep.edge_type));
+                    edges.push(WorkspaceEdge {
+                        from: target_node.name.clone(),
+                        to: node_name.clone(),
+                        edge_type: dep.edge_type,
+                    });
                 }
             }
         }
 
-        // Try with all edges first; if a cycle is detected (commonly caused
-        // by devDependencies), fall back to excluding dev edges.
-        let topology = compute_topological_layers(&node_list, &edges).or_else(|_| {
-            let non_dev: Vec<_> = edges
+        // Try with all edges first; if a cycle is detected, drop only
+        // the dev edges that sit inside the same SCC (cycle group).
+        let all_pairs: Vec<_> = edges
+            .iter()
+            .map(|e| (e.from.as_str(), e.to.as_str()))
+            .collect();
+        let topology = compute_topological_layers(&node_list, &all_pairs).or_else(|_| {
+            let groups = find_cycle_groups(&node_list, &all_pairs);
+            let mut node_to_group = HashMap::new();
+            for (i, group) in groups.iter().enumerate() {
+                for name in group {
+                    node_to_group.insert(name.as_str(), i);
+                }
+            }
+            let filtered: Vec<_> = edges
                 .iter()
-                .filter(|e| e.edge_type != EdgeType::Dev)
-                .cloned()
+                .filter(|e| {
+                    !(e.edge_type == EdgeType::Dev
+                        && node_to_group.contains_key(e.from.as_str())
+                        && node_to_group.get(e.from.as_str()) == node_to_group.get(e.to.as_str()))
+                })
+                .map(|e| (e.from.as_str(), e.to.as_str()))
                 .collect();
-            compute_topological_layers(&node_list, &non_dev)
+            compute_topological_layers(&node_list, &filtered)
         })?;
 
         Ok(WorkspaceTopology {
