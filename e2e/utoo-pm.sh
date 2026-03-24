@@ -464,4 +464,34 @@ echo -e "${GREEN}PASS: ant-design-x install successful${NC}"
 popd
 rm -rf "$ANTDX_DIR"
 
+# Case: workspace with devDependency cycle
+echo -e "${YELLOW}Case: workspace devDep cycle topology${NC}"
+cd e2e/pm/workspace-cycle
+rm -rf node_modules app/node_modules lib-a/node_modules lib-b/node_modules workspace.json
+
+# deps --workspace-only should succeed despite lib-a <-> lib-b dev cycle
+ut deps --workspace-only || { echo -e "${RED}FAIL: ut deps failed on workspace with devDep cycle${NC}"; exit 1; }
+
+if [ ! -f "workspace.json" ]; then
+    echo -e "${RED}FAIL: workspace.json not created${NC}"
+    exit 1
+fi
+
+# Verify topology has multiple layers (not all in one layer)
+LAYER_COUNT=$(node -e "const t=require('./workspace.json').topology; console.log(t.length)")
+if [ "$LAYER_COUNT" -lt 2 ]; then
+    echo -e "${RED}FAIL: expected at least 2 topology layers, got $LAYER_COUNT${NC}"
+    exit 1
+fi
+
+# lib-b should appear before lib-a (lib-a prod-depends on lib-b)
+FIRST_LAYER=$(node -e "console.log(JSON.stringify(require('./workspace.json').topology[0]))")
+if ! echo "$FIRST_LAYER" | grep -q '"lib-b"'; then
+    echo -e "${RED}FAIL: lib-b should be in first layer, got $FIRST_LAYER${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}PASS: workspace devDep cycle handled correctly${NC}"
+cd ../../..
+
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"
