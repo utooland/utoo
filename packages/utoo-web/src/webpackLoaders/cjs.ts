@@ -6,7 +6,6 @@ const fs = nodePolyFills.fs;
 const path = nodePolyFills.path;
 const installedModules: Record<string, { exports: any }> = {};
 
-const statCache: Record<string, any> = {};
 const pkgJsonCache: Record<string, any> = {};
 const resolutionCache: Record<string, string> = {};
 const searchPathsCache: Record<string, string[]> = {};
@@ -43,9 +42,8 @@ const resolveWithExtensions = (
 };
 
 const executeModule = (
-  moduleCode: string,
   moduleId: string,
-  id: string,
+  moduleCode: string,
   importMaps: Record<string, string>,
   entrypoint: string,
 ) => {
@@ -61,11 +59,7 @@ const executeModule = (
   moduleRequire.resolve = (request: string) => request;
 
   const module = { exports: finalExports, require: moduleRequire };
-  if (
-    moduleId.includes("node_modules") ||
-    id in importMaps ||
-    moduleId in importMaps
-  ) {
+  if (moduleId.includes("node_modules") || moduleId in importMaps) {
     installedModules[moduleId] = module;
   }
 
@@ -105,20 +99,10 @@ const executeModule = (
     throw new Error(`Failed to load dependency ${moduleId}: ${e.message}`);
   }
 
-  const originalWarn = console.warn;
-  console.warn = (...args: any[]) => {
-    const msg = args[0]?.toString() || "";
-    if (!msg.includes("(SystemJS Error#W3")) {
-      originalWarn.apply(console, args);
-    }
-  };
-
   try {
     System.set(moduleId, { default: finalExports });
   } catch {
     // ignore
-  } finally {
-    console.warn = originalWarn;
   }
   return finalExports;
 };
@@ -133,22 +117,6 @@ const loadModule = (
   if (resolutionCache[cacheKey]) {
     const cachedId = resolutionCache[cacheKey];
     if (installedModules[cachedId]) return installedModules[cachedId].exports;
-
-    const sysCached =
-      System.get(cachedId) || (id !== cachedId && System.get(id));
-    if (sysCached) return sysCached.default;
-
-    // importMaps takes priority over cached FS path
-    const importMapCode = importMaps[cachedId] || importMaps[id];
-    if (importMapCode) {
-      const mid = importMaps[cachedId] ? cachedId : id;
-      return executeModule(importMapCode, mid, id, importMaps, entrypoint);
-    }
-
-    const code = tryReadFile(cachedId);
-    if (code !== null) {
-      return executeModule(code, cachedId, id, importMaps, entrypoint);
-    }
   }
 
   // 1. Resolve
@@ -163,36 +131,9 @@ const loadModule = (
   if (id in nodePolyFills) return (nodePolyFills as any)[id];
   if (resolvedId in nodePolyFills) return (nodePolyFills as any)[resolvedId];
 
-  // 4. Check importMaps & FS
-  let moduleCode = importMaps[resolvedId] || importMaps[id];
-  let moduleId = importMaps[resolvedId] ? resolvedId : id;
-
-  if (!moduleCode) {
-    let longestMatch: { key: string; sanitized: string } | null = null;
-    for (const key in importMaps) {
-      const sanitized = key.replace(/^\.?\//, "");
-      if (!sanitized) continue;
-
-      const isMatch = [id, resolvedId].some(
-        (p) =>
-          p.startsWith("/") &&
-          p.endsWith(sanitized) &&
-          p[p.length - sanitized.length - 1] === "/",
-      );
-
-      if (isMatch && (!longestMatch || key.length > longestMatch.key.length)) {
-        longestMatch = { key, sanitized };
-      }
-    }
-
-    if (longestMatch) {
-      moduleCode = importMaps[longestMatch.key];
-      moduleId =
-        id.startsWith("/") && id.endsWith(longestMatch.sanitized)
-          ? id
-          : resolvedId;
-    }
-  }
+  // 4. Check importMaps
+  let moduleCode = importMaps[id];
+  let moduleId = moduleCode ? id : resolvedId;
 
   // Fallback: Try resolving from node_modules
   if (!moduleCode && !id.startsWith(".") && !id.startsWith("/")) {
@@ -233,7 +174,7 @@ const loadModule = (
         const res = resolveWithExtensions(pkgMain);
         if (res) {
           moduleCode = res.code;
-          moduleId = resolvedId = res.id;
+          moduleId = res.id;
           break;
         }
       }
@@ -242,7 +183,7 @@ const loadModule = (
       const res = resolveWithExtensions(nodeModulesPath);
       if (res) {
         moduleCode = res.code;
-        moduleId = resolvedId = res.id;
+        moduleId = res.id;
         break;
       }
     }
@@ -253,17 +194,17 @@ const loadModule = (
     const res = resolveWithExtensions(resolvedId, id.endsWith(".js"));
     if (res) {
       moduleCode = res.code;
-      moduleId = resolvedId = res.id;
+      moduleId = res.id;
     }
   }
 
   if (moduleCode) {
     resolutionCache[`${context}:${id}`] = moduleId;
-    return executeModule(moduleCode, moduleId, id, importMaps, entrypoint);
+    return executeModule(moduleId, moduleCode, importMaps, entrypoint);
   }
 
   const error = new Error(
-    `Worker: Dependency ${id} (resolved: ${resolvedId}) not found. Context: ${context}. ` +
+    `Worker: Dependency ${id} (resolved: ${moduleId}) not found. Context: ${context}. ` +
       `ImportMaps count: ${Object.keys(importMaps).length}. ` +
       `CWD: ${nodePolyFills.process.cwd()}. ` +
       `Sample ImportMaps keys: ${Object.keys(importMaps).slice(0, 5).join(", ")}`,
@@ -276,7 +217,7 @@ export async function cjs(
   entrypoint: string,
   importMaps: Record<string, string>,
 ) {
-  [statCache, pkgJsonCache, resolutionCache, searchPathsCache].forEach((c) => {
+  [pkgJsonCache, resolutionCache, searchPathsCache].forEach((c) => {
     for (const key in c) delete c[key];
   });
 
@@ -298,6 +239,15 @@ export async function cjs(
       }
     }),
   );
+
+  // Suppress SystemJS W3 warnings during module loading
+  const originalWarn = console.warn;
+  console.warn = (...args: any[]) => {
+    const msg = args[0]?.toString() || "";
+    if (!msg.includes("(SystemJS Error#W3")) {
+      originalWarn.apply(console, args);
+    }
+  };
 
   // @ts-ignore
   self.__systemjs_require__ = (id: string) =>

@@ -48,12 +48,12 @@ use crate::{
 use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 
 #[turbo_tasks::value(transparent)]
-pub struct AppEntripoints(pub Vec<AppEntrypoint>);
+pub struct AppEntrypoints(pub Vec<AppEntrypoint>);
 
 #[turbo_tasks::value]
 pub struct AppProject {
     pub project: ResolvedVc<Project>,
-    pub apps: ResolvedVc<AppEntripoints>,
+    pub apps: ResolvedVc<AppEntrypoints>,
 }
 
 #[turbo_tasks::value(transparent)]
@@ -62,12 +62,12 @@ pub struct OptionAppProject(Option<ResolvedVc<AppProject>>);
 #[turbo_tasks::value_impl]
 impl AppProject {
     #[turbo_tasks::function]
-    pub fn new(project: ResolvedVc<Project>, apps: ResolvedVc<AppEntripoints>) -> Vc<Self> {
+    pub fn new(project: ResolvedVc<Project>, apps: ResolvedVc<AppEntrypoints>) -> Vc<Self> {
         Self { project, apps }.cell()
     }
 
     #[turbo_tasks::function]
-    pub fn apps(&self) -> Vc<AppEntripoints> {
+    pub fn apps(&self) -> Vc<AppEntrypoints> {
         *self.apps
     }
 

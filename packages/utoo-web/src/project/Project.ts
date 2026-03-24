@@ -127,10 +127,12 @@ export class Project implements ProjectEndpoint {
     return res;
   }
 
-  public dev(options?: {
+  public async dev(options?: {
     config?: ConfigComplete;
     onUpdate?: (result: BuildOutput) => void;
-  }): void {
+  }): Promise<void> {
+    await this.#mount;
+
     // Create HmrServer lazily on first dev() call
     if (!this.hmrServer) {
       this.hmrServer = new HmrServer({
@@ -142,15 +144,16 @@ export class Project implements ProjectEndpoint {
       });
     }
 
-    this.remote.dev({
-      onUpdate: options?.onUpdate
+    // Pass config and onUpdate as separate top-level args for Comlink serialization
+    (this.remote.dev as any)(
+      options?.config,
+      options?.onUpdate
         ? comlink.proxy((result: BuildOutput) => {
             handleIssues(result.issues, false, false);
             options.onUpdate!(result);
           })
         : undefined,
-      config: options?.config,
-    });
+    );
   }
 
   public async hmrSubscribe(
