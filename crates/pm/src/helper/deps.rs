@@ -53,7 +53,18 @@ pub fn compute_topological_layers(
 ) -> Result<Vec<Vec<String>>> {
     let graph = build_graph(node_list, edges);
 
-    let cycles = find_cycle_groups(node_list, edges);
+    let cycles: Vec<Vec<String>> = kosaraju_scc(&graph)
+        .into_iter()
+        .filter(|scc| {
+            scc.len() > 1 || (scc.len() == 1 && graph.find_edge(scc[0], scc[0]).is_some())
+        })
+        .map(|scc| {
+            scc.into_iter()
+                .filter_map(|idx| graph.node_weight(idx).cloned())
+                .collect()
+        })
+        .collect();
+
     if !cycles.is_empty() {
         let msgs: Vec<_> = cycles
             .into_iter()

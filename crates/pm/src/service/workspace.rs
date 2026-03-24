@@ -97,16 +97,18 @@ impl WorkspaceService {
             }
         }
 
-        // Try with all edges first; if a cycle is detected, drop only
-        // the dev edges that sit inside the same SCC (cycle group).
+        // Detect cycles once; if any exist, drop dev edges inside the
+        // same SCC before running the topological sort.
         let all_pairs: Vec<_> = edges
             .iter()
             .map(|e| (e.from.as_str(), e.to.as_str()))
             .collect();
-        let topology = compute_topological_layers(&node_list, &all_pairs).or_else(|_| {
-            let groups = find_cycle_groups(&node_list, &all_pairs);
+        let cycles = find_cycle_groups(&node_list, &all_pairs);
+        let topology = if cycles.is_empty() {
+            compute_topological_layers(&node_list, &all_pairs)?
+        } else {
             let mut node_to_group = HashMap::new();
-            for (i, group) in groups.iter().enumerate() {
+            for (i, group) in cycles.iter().enumerate() {
                 for name in group {
                     node_to_group.insert(name.as_str(), i);
                 }
@@ -120,8 +122,8 @@ impl WorkspaceService {
                 })
                 .map(|e| (e.from.as_str(), e.to.as_str()))
                 .collect();
-            compute_topological_layers(&node_list, &filtered)
-        })?;
+            compute_topological_layers(&node_list, &filtered)?
+        };
 
         Ok(WorkspaceTopology {
             edges,
