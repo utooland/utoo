@@ -134,6 +134,7 @@ export async function createHotReloader(
           minify: false,
           moduleIds: "named",
         },
+        persistentCaching: bundleOptions?.config?.persistentCaching ?? true,
         pluginRuntimeStrategy:
           bundleOptions?.config?.pluginRuntimeStrategy ??
           (useWorkerThreads() ? "workerThreads" : "childProcesses"),
