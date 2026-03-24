@@ -35,9 +35,12 @@ jobs:
       #   uses: Swatinem/rust-cache@v2
       #   with:
       #     shared-key: utooweb-ci
+      - name: Setup Utoo
+        uses: utooland/setup-utoo@v1
+
       - name: Install dependencies
         run: |
-          npm install
+          utoo install
           npm install binaryen@123.0.0 --global
       - name: Install wasm-bindgen-cli
         uses: jetli/wasm-bindgen-action@v0.2.0

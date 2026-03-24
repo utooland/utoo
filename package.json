@@ -51,5 +51,8 @@
     "examples/with-postcss",
     "examples/with-swc-plugin"
   ],
-  "repository": "https://github.com/utooland/utoo"
+  "repository": "https://github.com/utooland/utoo",
+  "engines": {
+    "install-node": "20"
+  }
 }

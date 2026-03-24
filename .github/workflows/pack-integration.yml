@@ -44,8 +44,11 @@ jobs:
         with:
           node-version: 20
 
+      - name: Setup Utoo
+        uses: utooland/setup-utoo@v1
+
       - name: Install dependencies
-        run: npm install
+        run: utoo install
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@master

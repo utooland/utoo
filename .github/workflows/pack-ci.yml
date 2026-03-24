@@ -128,8 +128,11 @@ jobs:
         run: ${{ matrix.settings.setup }}
         if: ${{ matrix.settings.setup }}
         shell: bash
+      - name: Setup Utoo
+        uses: utooland/setup-utoo@v1
+
       - name: Install dependencies
-        run: npm install
+        run: utoo install
       - name: Setup node x86
         uses: actions/setup-node@v4
       - name: Test in docker
