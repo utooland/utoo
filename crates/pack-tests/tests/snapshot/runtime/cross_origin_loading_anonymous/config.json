@@ -1,0 +1,17 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "output": {
+      "crossOriginLoading": "anonymous"
+    },
+    "optimization": {
+      "minify": false
+    }
+  },
+  "runtimeType": "Production"
+}

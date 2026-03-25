@@ -500,6 +500,25 @@
         }
       ]
     },
+    "SchemaCrossOriginLoading": {
+      "description": "Webpack-compatible `output.crossOriginLoading`. Supports `false`, `\"anonymous\"`, and `\"use-credentials\"`.",
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/SchemaCrossOriginLoadingMode"
+        }
+      ]
+    },
+    "SchemaCrossOriginLoadingMode": {
+      "description": "Cross-origin loading mode for dynamic chunks.",
+      "type": "string",
+      "enum": [
+        "anonymous",
+        "use-credentials"
+      ]
+    },
     "SchemaDevServer": {
       "description": "Development server configuration",
       "type": "object",
@@ -1131,6 +1150,17 @@
           "items": {
             "$ref": "#/definitions/SchemaCopyItem"
           }
+        },
+        "crossOriginLoading": {
+          "description": "Controls crossorigin for dynamically loaded chunks. Supports false, 'anonymous', or 'use-credentials'.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaCrossOriginLoading"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "cssChunkFilename": {
           "description": "Filename pattern for CSS chunk files",

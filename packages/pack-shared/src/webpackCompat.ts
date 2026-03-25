@@ -47,6 +47,7 @@ export interface WebpackResolve {
 export interface WebpackOutput {
   path?: string;
   publicPath?: string | ((...args: any[]) => string);
+  crossOriginLoading?: false | "anonymous" | "use-credentials";
   filename?: string | ((...args: any[]) => string);
   chunkFilename?: string | ((...args: any[]) => string);
   cssFilename?: string | ((...args: any[]) => string);
@@ -658,6 +659,7 @@ function compatOutput(
     ),
     clean: !!webpackOutput?.clean,
     publicPath: webpackOutput?.publicPath as string | undefined,
+    crossOriginLoading: webpackOutput?.crossOriginLoading,
     chunkLoadingGlobal: webpackOutput?.chunkLoadingGlobal,
   };
 }

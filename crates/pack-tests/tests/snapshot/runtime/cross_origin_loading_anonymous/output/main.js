@@ -1,6 +1,6 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["input_index_54f01207.js"],"runtimeModuleIds":[47]}
+    {"otherChunks":["input_index_abb60b70.js"],"runtimeModuleIds":[59]}
 ]);
 (() => {
 if (!Array.isArray(globalThis["TURBOPACK"])) {
@@ -11,7 +11,7 @@ const CHUNK_BASE_PATH = "/";
 const RELATIVE_ROOT_PATH = "/ROOT";
 const RUNTIME_PUBLIC_PATH = "/";
 const ASSET_SUFFIX = "";
-const CROSS_ORIGIN_LOADING = "";
+const CROSS_ORIGIN_LOADING = "anonymous";
 const WORKER_FORWARDED_GLOBALS = [];
 /**
  * This file contains runtime types and functions that are shared between all
