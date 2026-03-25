@@ -21,6 +21,7 @@ use crate::util::logger::{finish_progress_bar, start_progress_bar};
 use crate::util::save_type::{PackageAction, SaveType};
 use utoo_ruborist::builder::PeerDeps;
 
+use crate::util::platform_const::GLOBAL_NODE_MODULES;
 use crate::util::user_config::{get_catalogs, get_peer_deps, set_package_json};
 
 // Platform-specific line endings
@@ -233,7 +234,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
     // Parse package name and version
     let (name, _version, version_spec) = resolve_package_spec(npm_spec).await?;
     let lib_path = match prefix {
-        Some(prefix) => PathBuf::from(prefix).join("lib/node_modules"),
+        Some(prefix) => PathBuf::from(prefix).join(GLOBAL_NODE_MODULES),
         None => {
             // Get current executable path
             let current_exe = std::env::current_exe()?;
@@ -242,7 +243,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
                 .expect("executable must have parent directory")
                 .parent()
                 .expect("executable parent must have parent directory")
-                .join("lib/node_modules")
+                .join(GLOBAL_NODE_MODULES)
         }
     };
 
