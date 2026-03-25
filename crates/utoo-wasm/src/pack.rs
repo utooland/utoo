@@ -7,7 +7,7 @@ use pack_api::{
     },
     hmr::{hmr_update_with_issues_operation, HmrUpdateWithIssues},
     project::{ProjectContainer, ProjectOptions, WatchOptions},
-    tasks::BundlerTurboTasks,
+    turbo_tasks::UtooTurboTasks,
     utils::StyledStringSerialize,
 };
 use parking_lot::RwLock;
@@ -50,7 +50,7 @@ static GLOBAL_PACK_PROJECT: RwLock<Option<Arc<PackProject>>> = RwLock::new(None)
 #[wasm_bindgen]
 pub struct RootTask {
     #[allow(dead_code)]
-    turbo_tasks: BundlerTurboTasks,
+    turbo_tasks: UtooTurboTasks,
     #[allow(dead_code)]
     task_id: TaskId,
 }
@@ -63,7 +63,7 @@ impl Drop for RootTask {
 }
 
 pub struct PackProject {
-    pub turbo_tasks: BundlerTurboTasks,
+    pub turbo_tasks: UtooTurboTasks,
     pub container: ResolvedVc<ProjectContainer>,
     pub dev: bool,
 }
@@ -121,8 +121,8 @@ impl BuildOptions {
     }
 }
 
-pub fn create_turbo_tasks() -> Result<BundlerTurboTasks> {
-    Ok(BundlerTurboTasks::Memory(TurboTasks::new(
+pub fn create_turbo_tasks() -> Result<UtooTurboTasks> {
+    Ok(TurboTasks::new(
         turbo_tasks_backend::TurboTasksBackend::new(
             turbo_tasks_backend::BackendOptions {
                 storage_mode: None,
@@ -131,7 +131,7 @@ pub fn create_turbo_tasks() -> Result<BundlerTurboTasks> {
             },
             noop_backing_storage(),
         ),
-    )))
+    ))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -355,13 +355,12 @@ pub async fn init_pack_project(config: Option<String>, dev: bool) -> Result<()> 
         .spawn(async move {
             let turbo_tasks = create_turbo_tasks()?;
             let container = turbo_tasks
-                .run_once(async move {
+                .run(async move {
                     let container_op =
                         ProjectContainer::new_operation("utoopack-web".into(), options.dev);
                     ProjectContainer::initialize(container_op, options).await?;
-                    let container: ResolvedVc<ProjectContainer> =
-                        container_op.connect().to_resolved().await?;
-                    Ok(container)
+
+                    Ok(container_op.resolve_strongly_consistent().await?)
                 })
                 .await?;
 
@@ -403,7 +402,7 @@ pub async fn build(options: BuildOptions) -> std::result::Result<JsValue, wasm_b
             let turbo_tasks = pack_project.turbo_tasks.clone();
             let container = pack_project.container;
             let (entrypoints, issues, diags) = turbo_tasks
-                .run_once(async move {
+                .run(async move {
                     let entrypoints_with_issues_op =
                         get_all_written_entrypoints_with_issues_operation(container);
 
@@ -546,7 +545,7 @@ pub fn project_write_all_to_disk(callback: js_sys::Function) {
         let result = runtime()
             .spawn(async move {
                 turbo_tasks
-                    .run_once(async move {
+                    .run(async move {
                         // Use get_all_written_entrypoints_with_issues_operation to write output to disk
                         let entrypoints_with_issues_op =
                             get_all_written_entrypoints_with_issues_operation(container);
