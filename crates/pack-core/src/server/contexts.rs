@@ -29,7 +29,7 @@ use turbopack_nodejs::NodeJsChunkingContext;
 use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 
 use crate::{
-    config::{Config, ProviderConfig},
+    config::{Config, OptionCompressType, ProviderConfig},
     import_map::get_postcss_package_mapping,
     mode::Mode,
     server::{
@@ -357,6 +357,7 @@ pub struct ServerChunkingContextOptions {
     pub export_usage: Vc<OptionBindingUsageInfo>,
     pub unused_references: Vc<UnusedReferences>,
     pub minify: Vc<bool>,
+    pub compress: Vc<OptionCompressType>,
     pub source_maps: Vc<SourceMapsType>,
     pub no_mangling: Vc<bool>,
     pub scope_hoisting: Vc<bool>,
@@ -379,6 +380,7 @@ pub async fn get_server_chunking_context(
         export_usage,
         unused_references,
         minify,
+        compress,
         source_maps,
         no_mangling,
         scope_hoisting,
@@ -399,6 +401,7 @@ pub async fn get_server_chunking_context(
     .minify_type(if *minify.await? {
         MinifyType::Minify {
             mangle: (!*no_mangling.await?).then_some(MangleType::OptimalSize),
+            compress: *compress.await?,
         }
     } else {
         MinifyType::NoMinify

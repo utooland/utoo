@@ -16,7 +16,7 @@ use turbopack::module_options::{
     WebpackRules, module_options_context::MdxTransformOptions,
 };
 use turbopack_core::{
-    chunk::ChunkingConfig,
+    chunk::{ChunkingConfig, CompressOptions as MinifyCompressOptions, CompressType},
     issue::{Issue, IssueExt, IssueStage, OptionStyledString, StyledString},
     resolve::ResolveAliasMap,
 };
@@ -296,6 +296,9 @@ pub struct OptimizationConfig {
     /// local names for variables, functions etc., which can be useful for
     /// debugging/profiling purposes.
     pub no_mangling: Option<bool>,
+    /// Whether to enable compression when minifying.
+    #[bincode(with = "turbo_bincode::serde_self_describing")]
+    pub compress: Option<JsonValue>,
     pub minify: Option<bool>,
     pub tree_shaking: Option<bool>,
     pub package_imports: Option<Vec<RcStr>>,
@@ -592,6 +595,9 @@ pub enum ModuleIds {
 
 #[turbo_tasks::value(transparent)]
 pub struct OptionModuleIds(pub Option<ModuleIds>);
+
+#[turbo_tasks::value(transparent)]
+pub struct OptionCompressType(pub Option<CompressType>);
 
 // PluginRuntimeStrategy only makes sense when at least one pool backend is enabled.
 // On WASM targets (no pool features), skip this type entirely to avoid empty-enum
@@ -1403,6 +1409,34 @@ impl Config {
                 .map(|op| op.no_mangling.is_some_and(|no_mangling| no_mangling))
                 .unwrap_or(false),
         )
+    }
+
+    #[turbo_tasks::function]
+    pub fn compress(&self) -> Vc<OptionCompressType> {
+        let compress = match self
+            .optimization
+            .as_ref()
+            .and_then(|op| op.compress.as_ref())
+        {
+            Some(JsonValue::Bool(false)) => None,
+            Some(JsonValue::Bool(true)) | None => Some(CompressType::Default),
+            Some(JsonValue::Object(options)) => {
+                let parse_u8 = |key: &str| {
+                    options
+                        .get(key)
+                        .and_then(|v| v.as_u64())
+                        .and_then(|v| u8::try_from(v).ok())
+                };
+                Some(CompressType::Options(MinifyCompressOptions {
+                    passes: parse_u8("passes"),
+                    sequences: parse_u8("sequences"),
+                    keep_classnames: options.get("keepClassnames").and_then(|v| v.as_bool()),
+                    keep_fnames: options.get("keepFnames").and_then(|v| v.as_bool()),
+                }))
+            }
+            Some(_) => Some(CompressType::Default),
+        };
+        Vc::cell(compress)
     }
 
     #[turbo_tasks::function]
