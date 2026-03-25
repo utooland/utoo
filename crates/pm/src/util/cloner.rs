@@ -119,21 +119,25 @@ mod hardlink_clone {
         files: &mut Vec<CloneEntry>,
         dirs: &mut Vec<PathBuf>,
     ) -> io::Result<()> {
-        dirs.push(dst.to_path_buf());
+        // Iterative traversal to avoid stack overflow on deeply nested packages.
+        let mut stack = vec![(src.to_path_buf(), dst.to_path_buf())];
 
-        for entry in fs::read_dir(src)? {
-            let entry = entry?;
-            let entry_path = entry.path();
-            let file_name = entry.file_name();
-            let target_path = dst.join(&file_name);
+        while let Some((src_dir, dst_dir)) = stack.pop() {
+            dirs.push(dst_dir.clone());
 
-            if entry.file_type()?.is_dir() {
-                collect_entries(&entry_path, &target_path, files, dirs)?;
-            } else {
-                files.push(CloneEntry {
-                    src: entry_path,
-                    dst: target_path,
-                });
+            for entry in fs::read_dir(&src_dir)? {
+                let entry = entry?;
+                let file_name = entry.file_name();
+                let target_path = dst_dir.join(&file_name);
+
+                if entry.file_type()?.is_dir() {
+                    stack.push((entry.path(), target_path));
+                } else {
+                    files.push(CloneEntry {
+                        src: entry.path(),
+                        dst: target_path,
+                    });
+                }
             }
         }
 
