@@ -90,7 +90,6 @@ mod hardlink_clone {
     use std::{fs, io};
 
     use anyhow::{Context, Result};
-    use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
     struct CloneEntry {
         src: PathBuf,
@@ -168,29 +167,49 @@ mod hardlink_clone {
             }
         }
 
-        // Phase 3: Clone files in parallel (hardlink first, fallback to copy)
-        files.par_iter().try_for_each(|entry| -> io::Result<()> {
-            if !use_copy && fs::hard_link(&entry.src, &entry.dst).is_ok() {
-                return Ok(());
+        // Phase 3: Clone files in parallel using OS threads (avoids rayon
+        // stack-depth issues when extractor tasks run concurrently).
+        let num_threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
+        let chunk_size = (files.len() / num_threads).max(1);
+
+        std::thread::scope(|s| {
+            let errors: Vec<_> = files
+                .chunks(chunk_size)
+                .map(|chunk| {
+                    s.spawn(move || -> io::Result<()> {
+                        for entry in chunk {
+                            if !use_copy && fs::hard_link(&entry.src, &entry.dst).is_ok() {
+                                continue;
+                            }
+                            copy_file_sync(&entry.src, &entry.dst)?;
+                        }
+                        Ok(())
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .filter_map(|h| h.join().ok()?.err())
+                .collect();
+
+            if let Some(e) = errors.into_iter().next() {
+                return Err(e);
             }
-            copy_file_sync(&entry.src, &entry.dst)
+            Ok(())
         })?;
         Ok(())
     }
 
-    /// Clone directory using rayon thread pool for parallel I/O.
+    /// Clone directory using parallel file I/O.
     /// Uses hardlink when possible, falls back to copy.
     pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
         let err_msg = format!("Failed to clone {} to {}", src.display(), dst.display());
         let src = src.to_path_buf();
         let dst = dst.to_path_buf();
 
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        rayon::spawn(move || {
-            let _ = tx.send(clone_dir_sync(&src, &dst));
-        });
-        rx.await
-            .map_err(|_| anyhow::anyhow!("Clone task was cancelled"))?
+        tokio::task::spawn_blocking(move || clone_dir_sync(&src, &dst))
+            .await?
             .with_context(|| err_msg)
     }
 }
