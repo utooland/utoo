@@ -3,9 +3,10 @@ pub fn init() {
     #[cfg(unix)]
     raise_fd_limit();
 
-    // Windows default thread stack is 1MB, insufficient for libdeflater + tar
-    // + rayon work-stealing.
-    #[cfg(target_os = "windows")]
+    // Ensure rayon threads have sufficient stack for libdeflater + tar +
+    // deep recursive directory walks (e.g. ant-design-x node_modules) +
+    // rayon work-stealing.  Windows defaults to 1 MB; Linux CI runners may
+    // also have small defaults.
     rayon::ThreadPoolBuilder::new()
         .stack_size(8 * 1024 * 1024)
         .build_global()

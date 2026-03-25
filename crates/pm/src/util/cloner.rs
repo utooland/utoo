@@ -157,10 +157,10 @@ mod hardlink_clone {
 
         // Phase 2: Create all directories
         for dir in &dirs {
-            if let Err(e) = fs::create_dir_all(dir) {
-                if e.kind() != io::ErrorKind::AlreadyExists {
-                    return Err(e);
-                }
+            if let Err(e) = fs::create_dir_all(dir)
+                && e.kind() != io::ErrorKind::AlreadyExists
+            {
+                return Err(e);
             }
         }
 
