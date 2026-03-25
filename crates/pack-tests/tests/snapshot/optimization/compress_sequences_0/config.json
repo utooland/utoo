@@ -1,0 +1,18 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "optimization": {
+      "moduleIds": "named",
+      "minify": true,
+      "noMangling": true,
+      "compress": {
+        "sequences": 0
+      }
+    }
+  }
+}

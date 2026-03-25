@@ -202,6 +202,14 @@ export interface ConfigComplete {
   optimization?: {
     moduleIds?: "named" | "deterministic";
     noMangling?: boolean;
+    compress?:
+      | boolean
+      | {
+          passes?: number;
+          sequences?: number;
+          keepClassnames?: boolean;
+          keepFnames?: boolean;
+        };
     minify?: boolean;
     treeShaking?: boolean;
     splitChunks?: Record<

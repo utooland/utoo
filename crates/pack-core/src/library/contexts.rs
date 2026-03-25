@@ -13,7 +13,7 @@ use turbopack_core::{
 };
 
 use crate::{
-    config::{Config, Platform},
+    config::{Config, OptionCompressType, Platform},
     mode::Mode,
 };
 
@@ -34,6 +34,7 @@ pub struct LibraryChunkingContextOptions {
     pub environment: Vc<Environment>,
     pub module_id_strategy: Vc<ModuleIdStrategy>,
     pub no_mangling: Vc<bool>,
+    pub compress: Vc<OptionCompressType>,
     pub runtime_root: Vc<Option<RcStr>>,
     pub runtime_export: Vc<Vec<RcStr>>,
     pub config: Vc<Config>,
@@ -59,6 +60,7 @@ pub async fn get_library_chunking_context(
         environment: _provided_environment,
         module_id_strategy,
         no_mangling,
+        compress,
         runtime_root,
         runtime_export,
         config,
@@ -113,6 +115,7 @@ pub async fn get_library_chunking_context(
     .minify_type(if mode.is_production() && *minify.await? {
         MinifyType::Minify {
             mangle: (!*no_mangling.await?).then_some(MangleType::OptimalSize),
+            compress: *compress.await?,
         }
     } else {
         MinifyType::NoMinify

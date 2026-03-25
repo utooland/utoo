@@ -6,7 +6,7 @@ use pack_core::{
     client::context::{
         ClientChunkingContextOptions, get_client_chunking_context, get_client_compile_time_info,
     },
-    config::{Config, ModuleIds as ModuleIdStrategyConfig, Platform},
+    config::{Config, ModuleIds as ModuleIdStrategyConfig, OptionCompressType, Platform},
     emit_assets,
     mode::Mode,
     server::contexts::{
@@ -845,6 +845,11 @@ impl Project {
     }
 
     #[turbo_tasks::function]
+    pub(super) fn compress(&self) -> Vc<OptionCompressType> {
+        self.config.compress()
+    }
+
+    #[turbo_tasks::function]
     pub fn should_create_webpack_stats(&self) -> Vc<bool> {
         self.config.stats()
     }
@@ -1065,6 +1070,7 @@ impl Project {
             export_usage: self.export_usage(),
             unused_references: self.unused_references(),
             minify: config.minify(mode),
+            compress: self.compress(),
             source_maps: source_maps.cell(),
             no_mangling: self.no_mangling(),
             scope_hoisting: config.concatenate_modules(mode),
@@ -1097,6 +1103,7 @@ impl Project {
             export_usage: self.export_usage(),
             unused_references: self.unused_references(),
             minify: config.minify(mode),
+            compress: self.compress(),
             source_maps: source_maps.cell(),
             no_mangling: self.no_mangling(),
             scope_hoisting: config.concatenate_modules(mode),
