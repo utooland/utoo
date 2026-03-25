@@ -73,7 +73,32 @@ install_binary() {
     # Copy file
     cp -f "${NODE_MODULES_DIR}/${package_name}/bin/${name}" "bin/${name}"
     chmod +x "bin/${name}"
+
+    # Windows: copy as .exe to npm prefix and remove shims
+    # npm generates .ps1/.cmd shims that call /bin/sh which doesn't exist on Windows.
+    # Placing the PE binary as .exe makes it directly executable by pwsh/cmd/bash.
+    if [ "$OS" = "win32" ]; then
+        PREFIX_DIR=$(cd "../.." 2>/dev/null && pwd)
+        if [ -n "$PREFIX_DIR" ]; then
+            cp -f "bin/${name}" "${PREFIX_DIR}/${name}.exe"
+            rm -f "${PREFIX_DIR}/${name}.ps1" "${PREFIX_DIR}/${name}.cmd" "${PREFIX_DIR}/${name}"
+        fi
+    fi
 }
 
-# Install both binaries
+# Install binary
 install_binary "utoo"
+
+# Windows: create ut.exe alias and utx.cmd wrapper
+if [ "$OS" = "win32" ]; then
+    PREFIX_DIR=$(cd "../.." 2>/dev/null && pwd)
+    if [ -n "$PREFIX_DIR" ] && [ -f "${PREFIX_DIR}/utoo.exe" ]; then
+        # ut is a direct alias for utoo
+        cp -f "${PREFIX_DIR}/utoo.exe" "${PREFIX_DIR}/ut.exe"
+        rm -f "${PREFIX_DIR}/ut.ps1" "${PREFIX_DIR}/ut.cmd" "${PREFIX_DIR}/ut"
+
+        # utx delegates to "utoo x" (execute subcommand)
+        printf '@utoo.exe x %%*\r\n' > "${PREFIX_DIR}/utx.cmd"
+        rm -f "${PREFIX_DIR}/utx.ps1" "${PREFIX_DIR}/utx"
+    fi
+fi
