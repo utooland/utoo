@@ -119,7 +119,7 @@ async fn run(resource: PathBuf) -> Result<()> {
         },
         noop_backing_storage(),
     ));
-    tt.run_once(async move {
+    tt.run(async move {
         #[turbo_tasks::function(operation)]
         async fn snapshot_issues_operation(out_op: OperationVc<FileSystemPath>) -> Result<Vc<()>> {
             let out_path = out_op.resolve_strongly_consistent().await?.owned().await?;

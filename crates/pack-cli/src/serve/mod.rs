@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use owo_colors::OwoColorize;
 use pack_api::project::ProjectOptions;
 use turbo_tasks::{
@@ -38,7 +38,7 @@ pub async fn run(options: ProjectOptions) -> Result<()> {
 
     turbo_tasks
         .clone()
-        .run_once(async move {
+        .run(async move {
             let project = project_container.project().to_resolved().await?;
 
             let web_source = create_web_entry_source(*project).to_resolved().await?;
@@ -124,7 +124,7 @@ pub async fn run(options: ProjectOptions) -> Result<()> {
 
             Ok(())
         })
-        .await
+        .await.context("failed to build with watching")
 }
 
 async fn dev_server_builder() -> Result<DevServerBuilder> {

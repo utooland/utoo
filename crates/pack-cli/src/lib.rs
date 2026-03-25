@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use pack_api::project::{ProjectContainer, ProjectOptions, WatchOptions};
 use serde::Deserialize;
@@ -80,11 +80,12 @@ pub async fn initialize_project_container(
     ));
     let project_container = turbo_tasks
         .run(async move {
-            let project_container_op = ProjectContainer::new_operation("utoopack-cli".into(), dev);
-            ProjectContainer::initialize(project_container_op, options).await?;
-            let project_container: ResolvedVc<ProjectContainer> =
-                project_container_op.connect().to_resolved().await?;
-            Ok(project_container)
+            let container_op = ProjectContainer::new_operation("utoopack-cli".into(), dev);
+            ProjectContainer::initialize(container_op, options).await?;
+            container_op
+                .resolve_strongly_consistent()
+                .await
+                .context("failed to create project container")
         })
         .await?;
 

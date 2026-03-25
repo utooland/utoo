@@ -14,7 +14,7 @@ pub mod operation;
 pub mod paths;
 pub mod project;
 pub mod source_map;
-pub mod tasks;
+pub mod turbo_tasks;
 pub mod utils;
 pub mod versioned_content_map;
 pub mod webpack_stats;

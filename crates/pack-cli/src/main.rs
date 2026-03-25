@@ -41,7 +41,103 @@ fn main() {
         static LAST_SWC_ATOM_GC_TIME: RefCell<Option<Instant>> = const { RefCell::new(None) };
     }
 
-    tokio::runtime::Builder::new_multi_thread()
+    #[cfg(feature = "dial9")]
+    let dial9_trace_path = PathBuf::from(&project_path).join("./.trace/dial9_trace.bin");
+
+    let future = async move {
+        let trace = std::env::var("TURBOPACK_TRACING").ok();
+
+        let _guard = if let Some(mut trace) = trace.filter(|v| !v.is_empty()) {
+            // Trace presets
+            match trace.as_str() {
+                "overview" | "1" => {
+                    trace = TRACING_OVERVIEW_TARGETS.join(",");
+                }
+                "pack" => {
+                    trace = TRACING_TARGETS.join(",");
+                }
+                "turbopack" => {
+                    trace = TRACING_TURBOPACK_TARGETS.join(",");
+                }
+                "turbo-tasks" => {
+                    trace = TRACING_TURBO_TASKS_TARGETS.join(",");
+                }
+                _ => {}
+            }
+
+            let subscriber = Registry::default();
+
+            let subscriber = subscriber.with(FilterLayer::try_new(&trace).unwrap());
+            let trace_file = PathBuf::from(&project_path).join("trace.log");
+            let trace_writer = File::create(trace_file).unwrap();
+            let (trace_writer, guard) = TraceWriter::new(trace_writer);
+            let subscriber = subscriber.with(RawTraceLayer::new(trace_writer));
+
+            let guard = ExitGuard::new(guard).unwrap();
+
+            subscriber.init();
+
+            Some(guard)
+        } else {
+            tracing_subscriber::fmt()
+                .with_env_filter(
+                    EnvFilter::try_from_default_env()
+                        .unwrap_or_else(|_| EnvFilter::new("pack_cli=info,pack_api=info")),
+                )
+                .with_target(false)
+                .with_span_events(tracing_subscriber::fmt::format::FmtSpan::NONE)
+                .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
+                    "%Y-%m-%d %H:%M:%S.%3f".to_string(),
+                ))
+                .init();
+
+            None
+        };
+
+        let project_options_path = PathBuf::from(&project_path).join("utoopack.json");
+        let mut project_options_file = File::open(&project_options_path)
+            .unwrap_or_else(|_| panic!("failed to load {}", project_options_path.display()));
+
+        let mut partial_project_options: PartialProjectOptions =
+            serde_json::from_reader(&mut project_options_file).unwrap();
+        let mode = if dev { "development" } else { "production" };
+
+        if let Value::Object(map) = &mut partial_project_options.config {
+            map.insert("mode".to_string(), mode.into());
+        }
+
+        let project_options = ProjectOptions {
+            root_path: root_path
+                .as_ref()
+                .map(|r| {
+                    canonicalize(PathBuf::from(r.as_str()))
+                        .unwrap()
+                        .to_string_lossy()
+                        .into()
+                })
+                .unwrap_or_else(|| project_path.clone()),
+            project_path,
+            config: partial_project_options.config.to_string().into(),
+            process_env: partial_project_options.process_env.unwrap_or_default(),
+
+            watch: WatchOptions {
+                enable: watch,
+                ..Default::default()
+            },
+            build_id: partial_project_options.build_id.unwrap_or_default(),
+            dev,
+            pack_path: partial_project_options.pack_path.unwrap_or_default(),
+        };
+
+        if watch {
+            serve::run(project_options).await
+        } else {
+            build::run(project_options).await
+        }
+    };
+
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    builder
         .enable_all()
         .on_thread_stop(|| {
             TurboMalloc::thread_stop();
@@ -56,99 +152,25 @@ fn main() {
                 }
             });
         })
-        .disable_lifo_slot()
-        .build()
-        .unwrap()
-        .block_on(async move {
-            let trace = std::env::var("TURBOPACK_TRACING").ok();
+        .disable_lifo_slot();
 
-            let _guard = if let Some(mut trace) = trace.filter(|v| !v.is_empty()) {
-                // Trace presets
-                match trace.as_str() {
-                    "overview" | "1" => {
-                        trace = TRACING_OVERVIEW_TARGETS.join(",");
-                    }
-                    "pack" => {
-                        trace = TRACING_TARGETS.join(",");
-                    }
-                    "turbopack" => {
-                        trace = TRACING_TURBOPACK_TARGETS.join(",");
-                    }
-                    "turbo-tasks" => {
-                        trace = TRACING_TURBO_TASKS_TARGETS.join(",");
-                    }
-                    _ => {}
-                }
+    #[cfg(not(feature = "dial9"))]
+    {
+        let runtime = builder.build().unwrap();
+        runtime.block_on(future).unwrap();
+    }
 
-                let subscriber = Registry::default();
+    #[cfg(feature = "dial9")]
+    {
+        use dial9_tokio_telemetry::telemetry::{RotatingWriter, TracedRuntime};
+        let writer = RotatingWriter::builder()
+            .base_path(dial9_trace_path)
+            .max_file_size(1024 * 1024)
+            .max_total_size(5 * 1024 * 1024)
+            .build()
+            .unwrap();
 
-                let subscriber = subscriber.with(FilterLayer::try_new(&trace).unwrap());
-                let trace_file = PathBuf::from(&project_path).join("trace.log");
-                let trace_writer = File::create(trace_file).unwrap();
-                let (trace_writer, guard) = TraceWriter::new(trace_writer);
-                let subscriber = subscriber.with(RawTraceLayer::new(trace_writer));
-
-                let guard = ExitGuard::new(guard).unwrap();
-
-                subscriber.init();
-
-                Some(guard)
-            } else {
-                tracing_subscriber::fmt()
-                    .with_env_filter(
-                        EnvFilter::try_from_default_env()
-                            .unwrap_or_else(|_| EnvFilter::new("pack_cli=info,pack_api=info")),
-                    )
-                    .with_target(false)
-                    .with_span_events(tracing_subscriber::fmt::format::FmtSpan::NONE)
-                    .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
-                        "%Y-%m-%d %H:%M:%S.%3f".to_string(),
-                    ))
-                    .init();
-
-                None
-            };
-
-            let project_options_path = PathBuf::from(&project_path).join("utoopack.json");
-            let mut project_options_file = File::open(&project_options_path)
-                .unwrap_or_else(|_| panic!("failed to load {}", project_options_path.display()));
-
-            let mut partial_project_options: PartialProjectOptions =
-                serde_json::from_reader(&mut project_options_file).unwrap();
-            let mode = if dev { "development" } else { "production" };
-
-            if let Value::Object(map) = &mut partial_project_options.config {
-                map.insert("mode".to_string(), mode.into());
-            }
-
-            let project_options = ProjectOptions {
-                root_path: root_path
-                    .as_ref()
-                    .map(|r| {
-                        canonicalize(PathBuf::from(r.as_str()))
-                            .unwrap()
-                            .to_string_lossy()
-                            .into()
-                    })
-                    .unwrap_or_else(|| project_path.clone()),
-                project_path,
-                config: partial_project_options.config.to_string().into(),
-                process_env: partial_project_options.process_env.unwrap_or_default(),
-
-                watch: WatchOptions {
-                    enable: watch,
-                    ..Default::default()
-                },
-                build_id: partial_project_options.build_id.unwrap_or_default(),
-                dev,
-                pack_path: partial_project_options.pack_path.unwrap_or_default(),
-            };
-
-            if watch {
-                serve::run(project_options).await
-            } else {
-                build::run(project_options).await
-            }
-        })
-        .unwrap();
+        let (runtime, _guard) = TracedRuntime::build_and_start(builder, writer).unwrap();
+        runtime.block_on(future).unwrap();
+    }
 }
