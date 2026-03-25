@@ -10863,6 +10863,7 @@ dependencies = [
  "open",
  "openssl",
  "owo-colors",
+ "pathdiff",
  "petgraph 0.6.5",
  "rayon",
  "regex",
