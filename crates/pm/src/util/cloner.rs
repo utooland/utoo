@@ -86,11 +86,11 @@ use libc::clonefile;
 
 #[cfg(not(target_os = "macos"))]
 mod hardlink_clone {
-    use std::collections::HashSet;
     use std::path::{Path, PathBuf};
     use std::{fs, io};
 
     use anyhow::{Context, Result};
+    use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
     struct CloneEntry {
         src: PathBuf,
@@ -140,50 +140,54 @@ mod hardlink_clone {
         Ok(())
     }
 
-    /// Clone directory using spawn_blocking for sync I/O.
+    fn clone_dir_sync(src: &Path, dst: &Path) -> io::Result<()> {
+        if !fs::metadata(src)?.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotADirectory,
+                "Source is not a directory",
+            ));
+        }
+
+        let use_copy = has_install_script_sync(src);
+
+        // Phase 1: Collect all files and directories
+        let mut files = Vec::new();
+        let mut dirs = Vec::new();
+        collect_entries(src, dst, &mut files, &mut dirs)?;
+
+        // Phase 2: Create all directories
+        for dir in &dirs {
+            if let Err(e) = fs::create_dir_all(dir) {
+                if e.kind() != io::ErrorKind::AlreadyExists {
+                    return Err(e);
+                }
+            }
+        }
+
+        // Phase 3: Clone files in parallel (hardlink first, fallback to copy)
+        files.par_iter().try_for_each(|entry| -> io::Result<()> {
+            if !use_copy && fs::hard_link(&entry.src, &entry.dst).is_ok() {
+                return Ok(());
+            }
+            copy_file_sync(&entry.src, &entry.dst)
+        })?;
+        Ok(())
+    }
+
+    /// Clone directory using rayon thread pool for parallel I/O.
     /// Uses hardlink when possible, falls back to copy.
     pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
         let err_msg = format!("Failed to clone {} to {}", src.display(), dst.display());
         let src = src.to_path_buf();
         let dst = dst.to_path_buf();
 
-        tokio::task::spawn_blocking(move || {
-            if !fs::metadata(&src)?.is_dir() {
-                return Err(io::Error::new(
-                    io::ErrorKind::NotADirectory,
-                    "Source is not a directory",
-                ));
-            }
-
-            let use_copy = has_install_script_sync(&src);
-
-            // Phase 1: Collect all files and directories
-            let mut files = Vec::new();
-            let mut dirs = Vec::new();
-            collect_entries(&src, &dst, &mut files, &mut dirs)?;
-
-            // Phase 2: Create all directories
-            let mut created_dirs = HashSet::new();
-            for dir in &dirs {
-                if created_dirs.insert(dir.clone())
-                    && let Err(e) = fs::create_dir_all(dir)
-                    && e.kind() != io::ErrorKind::AlreadyExists
-                {
-                    return Err(e);
-                }
-            }
-
-            // Phase 3: Clone files (hardlink first, fallback to copy)
-            for entry in &files {
-                if !use_copy && fs::hard_link(&entry.src, &entry.dst).is_ok() {
-                    continue;
-                }
-                copy_file_sync(&entry.src, &entry.dst)?;
-            }
-            Ok(())
-        })
-        .await?
-        .with_context(|| err_msg)
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        rayon::spawn(move || {
+            let _ = tx.send(clone_dir_sync(&src, &dst));
+        });
+        rx.await
+            .map_err(|_| anyhow::anyhow!("Clone task was cancelled"))?
+            .with_context(|| err_msg)
     }
 }
 
