@@ -167,37 +167,50 @@ mod hardlink_clone {
             }
         }
 
-        // Phase 3: Clone files in parallel using OS threads (avoids rayon
-        // stack-depth issues when extractor tasks run concurrently).
-        let num_threads = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4);
-        let chunk_size = (files.len() / num_threads).max(1);
+        // Phase 3: Clone files (hardlink first, fallback to copy).
+        // On Unix, parallelize across OS threads for throughput.
+        // On Windows, run sequentially to avoid handle contention.
+        #[cfg(unix)]
+        {
+            let num_threads = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4);
+            let chunk_size = (files.len() / num_threads).max(1);
 
-        std::thread::scope(|s| {
-            let errors: Vec<_> = files
-                .chunks(chunk_size)
-                .map(|chunk| {
-                    s.spawn(move || -> io::Result<()> {
-                        for entry in chunk {
-                            if !use_copy && fs::hard_link(&entry.src, &entry.dst).is_ok() {
-                                continue;
+            std::thread::scope(|s| {
+                let errors: Vec<_> = files
+                    .chunks(chunk_size)
+                    .map(|chunk| {
+                        s.spawn(move || -> io::Result<()> {
+                            for entry in chunk {
+                                if !use_copy && fs::hard_link(&entry.src, &entry.dst).is_ok() {
+                                    continue;
+                                }
+                                copy_file_sync(&entry.src, &entry.dst)?;
                             }
-                            copy_file_sync(&entry.src, &entry.dst)?;
-                        }
-                        Ok(())
+                            Ok(())
+                        })
                     })
-                })
-                .collect::<Vec<_>>()
-                .into_iter()
-                .filter_map(|h| h.join().ok()?.err())
-                .collect();
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .filter_map(|h| h.join().ok()?.err())
+                    .collect();
 
-            if let Some(e) = errors.into_iter().next() {
-                return Err(e);
+                if let Some(e) = errors.into_iter().next() {
+                    return Err(e);
+                }
+                Ok(())
+            })?;
+        }
+        #[cfg(not(unix))]
+        {
+            for entry in &files {
+                if !use_copy && fs::hard_link(&entry.src, &entry.dst).is_ok() {
+                    continue;
+                }
+                copy_file_sync(&entry.src, &entry.dst)?;
             }
-            Ok(())
-        })?;
+        }
         Ok(())
     }
 
