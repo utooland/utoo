@@ -358,6 +358,11 @@ pub struct SchemaOptimizationConfig {
     #[schemars(description = "Whether to disable name mangling")]
     pub no_mangling: Option<bool>,
 
+    /// Whether to enable compression when minifying
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Whether to enable compression when minifying")]
+    pub compress: Option<SchemaCompressConfig>,
+
     /// Whether to minify the output
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Whether to minify the output")]
@@ -433,6 +438,39 @@ pub struct SchemaOptimizationConfig {
 pub enum SchemaModuleIds {
     Named,
     Deterministic,
+}
+
+/// Compress configuration (boolean or options object)
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SchemaCompressConfig {
+    Boolean(bool),
+    Options(SchemaCompressOptions),
+}
+
+/// Compress options for minification
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaCompressOptions {
+    /// Number of compress passes
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Number of compress passes")]
+    pub passes: Option<u8>,
+
+    /// Sequence optimization level
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Sequence optimization level")]
+    pub sequences: Option<u8>,
+
+    /// Keep class names during compression
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Keep class names during compression")]
+    pub keep_classnames: Option<bool>,
+
+    /// Keep function names during compression
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Keep function names during compression")]
+    pub keep_fnames: Option<bool>,
 }
 
 /// Transform configuration for modularize imports

@@ -35,8 +35,8 @@ use crate::{
         runtime_entry::RuntimeEntries,
     },
     config::{
-        Config, ProviderConfig, default_max_chunk_count_per_group, default_max_merge_chunk_size,
-        default_min_chunk_size,
+        Config, OptionCompressType, ProviderConfig, default_max_chunk_count_per_group,
+        default_max_merge_chunk_size, default_min_chunk_size,
     },
     embed_js::embed_file_path,
     import_map::get_postcss_package_mapping,
@@ -450,6 +450,7 @@ pub struct ClientChunkingContextOptions {
     pub export_usage: Vc<OptionBindingUsageInfo>,
     pub unused_references: Vc<UnusedReferences>,
     pub minify: Vc<bool>,
+    pub compress: Vc<OptionCompressType>,
     pub source_maps: Vc<SourceMapsType>,
     pub no_mangling: Vc<bool>,
     pub scope_hoisting: Vc<bool>,
@@ -474,6 +475,7 @@ pub async fn get_client_chunking_context(
         export_usage,
         unused_references,
         minify,
+        compress,
         source_maps,
         no_mangling,
         scope_hoisting,
@@ -515,6 +517,7 @@ pub async fn get_client_chunking_context(
     .minify_type(if mode.is_production() && *minify.await? {
         MinifyType::Minify {
             mangle: (!*no_mangling.await?).then_some(MangleType::OptimalSize),
+            compress: *compress.await?,
         }
     } else {
         MinifyType::NoMinify

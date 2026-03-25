@@ -20,7 +20,7 @@ use turbopack_core::{
 };
 use turbopack_ecmascript::{
     chunk::{EcmascriptChunk, EcmascriptChunkData, EcmascriptChunkPlaceable},
-    minify::minify,
+    minify::{get_compress_options, minify},
     utils::StringifyJs,
 };
 use turbopack_ecmascript_runtime::RuntimeType;
@@ -198,8 +198,14 @@ impl EcmascriptLibraryEvaluateChunk {
 
         let mut code = code.build();
 
-        if let MinifyType::Minify { mangle } = this.chunking_context.await?.minify_type() {
-            code = minify(code, source_maps, mangle)?;
+        if let MinifyType::Minify { mangle, compress } = this.chunking_context.await?.minify_type()
+        {
+            code = minify(
+                code,
+                source_maps,
+                mangle,
+                get_compress_options(compress, mangle),
+            )?;
         }
 
         Ok(code.cell())

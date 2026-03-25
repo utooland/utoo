@@ -192,6 +192,55 @@
     }
   },
   "definitions": {
+    "SchemaCompressConfig": {
+      "description": "Compress configuration (boolean or options object)",
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/SchemaCompressOptions"
+        }
+      ]
+    },
+    "SchemaCompressOptions": {
+      "description": "Compress options for minification",
+      "type": "object",
+      "properties": {
+        "keepClassnames": {
+          "description": "Keep class names during compression",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "keepFnames": {
+          "description": "Keep function names during compression",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "passes": {
+          "description": "Number of compress passes",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "sequences": {
+          "description": "Sequence optimization level",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint8",
+          "minimum": 0.0
+        }
+      }
+    },
     "SchemaConfigConditionContentType": {
       "description": "Configuration condition for content type",
       "oneOf": [
@@ -910,6 +959,17 @@
       "description": "Optimization configuration",
       "type": "object",
       "properties": {
+        "compress": {
+          "description": "Whether to enable compression when minifying",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaCompressConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "concatenateModules": {
           "description": "Whether to concatenate modules when possible to reduce the number of chunks. This can improve performance by reducing the number of requests and improving caching.",
           "type": [

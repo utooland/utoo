@@ -295,6 +295,7 @@ impl LibraryEndpoint {
                 environment: project.client_compile_time_info().environment(),
                 module_id_strategy: project.module_ids(),
                 no_mangling: project.no_mangling(),
+                compress: project.compress(),
                 runtime_root,
                 runtime_export,
                 config: project.config(),
