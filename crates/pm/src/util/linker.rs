@@ -12,17 +12,16 @@ fn to_absolute(path: &Path) -> Result<PathBuf> {
     }
 }
 
-pub async fn link(src: &Path, dst: &Path) -> Result<()> {
-    // Convert to absolute paths
+/// Resolve src/dst to absolute paths, ensure parent dir exists, clean up stale destination.
+/// Returns `None` if the link is already up-to-date, `Some((src, dst))` if work is needed.
+async fn prepare_link(src: &Path, dst: &Path) -> Result<Option<(PathBuf, PathBuf)>> {
     let abs_src = to_absolute(src)?;
     let abs_dst = to_absolute(dst)?;
 
-    // Check if source exists
     if !fs::try_exists(&abs_src).await? {
         anyhow::bail!("Source file does not exist: {}", abs_src.display());
     }
 
-    // Ensure the destination directory exists
     if let Some(parent) = abs_dst.parent() {
         fs::create_dir_all(parent).await.context(format!(
             "Failed to create parent directory: {}",
@@ -30,17 +29,15 @@ pub async fn link(src: &Path, dst: &Path) -> Result<()> {
         ))?;
     }
 
-    // Check if destination already exists
     if let Ok(metadata) = fs::symlink_metadata(&abs_dst).await {
-        // If it's already a symlink pointing to the correct source, nothing to do
+        // Already a symlink pointing to the correct source — nothing to do
         if metadata.is_symlink()
             && let Ok(target) = fs::read_link(&abs_dst).await
             && target == abs_src
         {
-            return Ok(());
+            return Ok(None);
         }
 
-        // Remove existing file/symlink/directory (like ln -sf)
         if metadata.is_dir() {
             fs::remove_dir_all(&abs_dst).await
         } else {
@@ -52,15 +49,40 @@ pub async fn link(src: &Path, dst: &Path) -> Result<()> {
         ))?;
     }
 
-    // Create symlink based on platform
-    create_symlink(&abs_src, &abs_dst).await?;
+    Ok(Some((abs_src, abs_dst)))
+}
+
+/// Create a symlink. Used for workspace links, `utoo link`, etc.
+pub async fn link(src: &Path, dst: &Path) -> Result<()> {
+    if let Some((abs_src, abs_dst)) = prepare_link(src, dst).await? {
+        symlink(&abs_src, &abs_dst).await?;
+    }
+    Ok(())
+}
+
+/// Link a binary into node_modules/.bin.
+///
+/// - Unix: symlink (same as `link`)
+/// - Windows: hardlink/copy + .cmd shim, following npm's cmd-shim convention.
+///   Symlinks are avoided because they require admin privileges on Windows.
+pub async fn link_bin(src: &Path, dst: &Path) -> Result<()> {
+    let Some((abs_src, abs_dst)) = prepare_link(src, dst).await? else {
+        return Ok(());
+    };
+
+    #[cfg(unix)]
+    symlink(&abs_src, &abs_dst).await?;
+
+    #[cfg(windows)]
+    win_bin_shims(&abs_src, &abs_dst).await?;
 
     Ok(())
 }
 
-/// Create a symlink (cross-platform)
+// ── Platform symlink ────────────────────────────────────────────────
+
 #[cfg(unix)]
-async fn create_symlink(src: &Path, dst: &Path) -> Result<()> {
+async fn symlink(src: &Path, dst: &Path) -> Result<()> {
     fs::symlink(src, dst).await.context(format!(
         "Failed to create symbolic link from {} to {}",
         src.display(),
@@ -69,8 +91,7 @@ async fn create_symlink(src: &Path, dst: &Path) -> Result<()> {
 }
 
 #[cfg(windows)]
-async fn create_symlink(src: &Path, dst: &Path) -> Result<()> {
-    // On Windows, we need to distinguish between file and directory symlinks
+async fn symlink(src: &Path, dst: &Path) -> Result<()> {
     if fs::metadata(src).await?.is_dir() {
         fs::symlink_dir(src, dst).await
     } else {
@@ -82,6 +103,86 @@ async fn create_symlink(src: &Path, dst: &Path) -> Result<()> {
         dst.display()
     ))
 }
+
+// ── Windows bin shims ───────────────────────────────────────────────
+
+/// Create Windows bin shims following npm's cmd-shim convention.
+///
+/// For each bin entry we create:
+///   Native (.exe):  bare hardlink + .exe hardlink + .cmd shim
+///   Script:         bare sh shim  + .cmd shim (with `node` prefix)
+#[cfg(windows)]
+async fn win_bin_shims(src: &Path, dst: &Path) -> Result<()> {
+    let bin_dir = dst.parent().context("bin link has no parent dir")?;
+    let bin_name = dst
+        .file_name()
+        .context("bin link has no file name")?
+        .to_string_lossy();
+
+    let rel =
+        pathdiff::diff_paths(src, bin_dir).context("Failed to compute relative path for shim")?;
+    let rel_str = rel.to_string_lossy();
+    let rel_win = rel_str.replace('/', "\\");
+
+    let is_native = src
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"));
+
+    if is_native {
+        win_link_native(src, dst).await?;
+    } else {
+        win_link_script(dst, &rel_str.replace('\\', "/")).await?;
+    }
+
+    // .cmd shim — always created
+    let cmd_content = if is_native {
+        format!("@\"%~dp0\\{rel_win}\" %*\r\n")
+    } else {
+        format!("@node \"%~dp0\\{rel_win}\" %*\r\n")
+    };
+    fs::write(
+        bin_dir.join(format!("{bin_name}.cmd")),
+        cmd_content.as_bytes(),
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// Hardlink a native PE binary as both bare name and .exe alias.
+///
+/// The bare name lets Git Bash execute it; the .exe alias is required
+/// because Node.js `execFileSync` on Windows calls `CreateProcessW`
+/// which only resolves `.exe` extensions.
+#[cfg(windows)]
+async fn win_link_native(src: &Path, dst: &Path) -> Result<()> {
+    // bare name
+    if fs::hard_link(src, dst).await.is_err() {
+        fs::copy(src, dst).await.context(format!(
+            "Failed to copy binary from {} to {}",
+            src.display(),
+            dst.display()
+        ))?;
+    }
+    // .exe alias — link to bare name (already on disk) to avoid copying large binaries twice
+    let exe_dst = dst.with_extension("exe");
+    if fs::hard_link(dst, &exe_dst).await.is_err() && fs::copy(dst, &exe_dst).await.is_err() {
+        tracing::warn!("Failed to create .exe alias at {}", exe_dst.display());
+    }
+    Ok(())
+}
+
+/// Write a shell shim for a script (e.g. `#!/usr/bin/env node`).
+#[cfg(windows)]
+async fn win_link_script(dst: &Path, rel_unix: &str) -> Result<()> {
+    let sh = format!(
+        "#!/bin/sh\nbasedir=$(dirname \"$(echo \"$0\" | sed -e 's,\\\\,/,g')\")\n\"$basedir/{rel_unix}\" \"$@\"\n"
+    );
+    fs::write(dst, sh.as_bytes()).await?;
+    Ok(())
+}
+
+// ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

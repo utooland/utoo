@@ -306,4 +306,41 @@ finally {
     Remove-Item -Recurse -Force $antdxDir -ErrorAction SilentlyContinue
 }
 
+# Case: install-node + esbuild postinstall
+Write-Yellow "Case: install-node + esbuild"
+$esbuildDir = Join-Path $env:TEMP "utoo-e2e-esbuild-$(Get-Random)"
+try {
+    New-Item -ItemType Directory -Path $esbuildDir -Force | Out-Null
+    Push-Location $esbuildDir
+
+    @'
+{
+  "name": "install-node-esbuild-test",
+  "dependencies": {
+    "esbuild": "0.27.0"
+  },
+  "engines": {
+    "install-node": "20"
+  }
+}
+'@ | Set-Content -Path "package.json"
+
+    utoo install --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "utoo install failed for install-node + esbuild" }
+
+    # Verify local node is available
+    & "node_modules/.bin/node" -v
+    if ($LASTEXITCODE -ne 0) { throw "local node not executable" }
+
+    # Verify esbuild postinstall ran and binary works
+    & "node_modules/.bin/esbuild" --version
+    if ($LASTEXITCODE -ne 0) { throw "esbuild not executable" }
+
+    Write-Green "PASS: install-node + esbuild"
+}
+finally {
+    Pop-Location
+    Remove-Item -Recurse -Force $esbuildDir -ErrorAction SilentlyContinue
+}
+
 Write-Green "All e2e tests passed successfully!"

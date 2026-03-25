@@ -494,4 +494,33 @@ fi
 echo -e "${GREEN}PASS: workspace devDep cycle handled correctly${NC}"
 cd ../../..
 
+# Case: install-node + esbuild postinstall
+echo -e "${YELLOW}Case: install-node + esbuild${NC}"
+ESBUILD_DIR=$(mktemp -d)
+cat > "$ESBUILD_DIR/package.json" << 'EOF'
+{
+  "name": "install-node-esbuild-test",
+  "dependencies": {
+    "esbuild": "0.27.0"
+  },
+  "engines": {
+    "install-node": "20"
+  }
+}
+EOF
+pushd "$ESBUILD_DIR"
+
+utoo install --registry=https://registry.npmjs.org || { echo -e "${RED}FAIL: utoo install failed for install-node + esbuild${NC}"; exit 1; }
+
+# Verify local node is available
+node_modules/.bin/node -v || { echo -e "${RED}FAIL: local node not executable${NC}"; exit 1; }
+
+# Verify esbuild postinstall ran and binary works
+node_modules/.bin/esbuild --version || { echo -e "${RED}FAIL: esbuild not executable${NC}"; exit 1; }
+
+echo -e "${GREEN}PASS: install-node + esbuild${NC}"
+
+popd
+rm -rf "$ESBUILD_DIR"
+
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"

@@ -323,10 +323,10 @@ impl PackageService {
                             )
                         })?;
 
-                    crate::util::linker::link(&target_path, &link_path)
+                    crate::util::linker::link_bin(&target_path, &link_path)
                         .await
                         .context(format!(
-                            "Failed to create symbolic link for {} (from: {} to: {})",
+                            "Failed to link binary for {} (from: {} to: {})",
                             package.name,
                             target_path.display(),
                             link_path.display()
