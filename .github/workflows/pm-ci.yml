@@ -108,7 +108,8 @@ jobs:
         uses: utooland/setup-utoo@v1
 
       - name: Install dependencies
-        run: utoo install || true
+        run: utoo install
+        continue-on-error: true
       
       - name: Setup node x86
         uses: actions/setup-node@v4
