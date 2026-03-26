@@ -97,6 +97,12 @@
           "remarks": ""
         },
         {
+          "featureLevel2": "`crossOriginLoading`",
+          "featureStatus": "✅",
+          "featureDetails": "[Webpack `output.crossOriginLoading`](https://webpack.js.org/configuration/output/#outputcrossoriginloading)",
+          "remarks": ""
+        },
+        {
           "featureLevel2": "`clean`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `output.clean`](https://webpack.js.org/configuration/output/#outputclean)",

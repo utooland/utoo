@@ -349,6 +349,7 @@ pub async fn get_server_resolve_options_context(
 #[derive(Clone, Debug, PartialEq, Eq, Hash, TaskInput, TraceRawVcs, Encode, Decode)]
 pub struct ServerChunkingContextOptions {
     pub mode: Vc<Mode>,
+    pub config: Vc<Config>,
     pub root_path: FileSystemPath,
     pub node_root: FileSystemPath,
     pub node_root_to_root_path: RcStr,
@@ -372,6 +373,7 @@ pub async fn get_server_chunking_context(
 ) -> Result<Vc<NodeJsChunkingContext>> {
     let ServerChunkingContextOptions {
         mode,
+        config,
         root_path,
         node_root,
         node_root_to_root_path,
@@ -388,6 +390,21 @@ pub async fn get_server_chunking_context(
         debug_ids,
     } = options;
     let mode = mode.await?;
+    let runtime_type = {
+        #[cfg(feature = "test")]
+        {
+            use turbopack_ecmascript_runtime::RuntimeType;
+            match config.runtime_type_str().await?.as_deref() {
+                Some(rt) if rt.eq_ignore_ascii_case("Development") => RuntimeType::Development,
+                Some(rt) if rt.eq_ignore_ascii_case("Production") => RuntimeType::Production,
+                _ => RuntimeType::Dummy,
+            }
+        }
+        #[cfg(not(feature = "test"))]
+        {
+            mode.runtime_type()
+        }
+    };
     let mut builder = NodeJsChunkingContext::builder(
         root_path,
         node_root.clone(),
@@ -396,7 +413,7 @@ pub async fn get_server_chunking_context(
         node_root.clone(),
         node_root.clone(),
         environment.to_resolved().await?,
-        mode.runtime_type(),
+        runtime_type,
     )
     .minify_type(if *minify.await? {
         MinifyType::Minify {

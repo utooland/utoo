@@ -4,7 +4,7 @@ use std::{future::Future, sync::Arc};
 
 use napi::{Env, JsFunction, threadsafe_function::ThreadsafeFunction};
 use napi_derive::napi;
-use pack_api::tasks::UtooTurboTasks;
+use pack_api::turbo_tasks::UtooTurboTasks;
 use turbo_tasks::{PrettyPrintError, TaskId, backend::TurboTasksExecutionError};
 
 /// A value often wrapped in [`napi::bindgen_prelude::External`] that retains the [TurboTasks]

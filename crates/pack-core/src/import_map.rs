@@ -13,10 +13,6 @@ use turbopack_node::execution_context::ExecutionContext;
 
 use crate::{config::Config, embed_js, util::convert_to_project_relative};
 
-pub fn mdx_import_source_file() -> RcStr {
-    unreachable!()
-}
-
 #[turbo_tasks::function]
 #[allow(unused_variables)]
 pub async fn get_postcss_package_mapping() -> Result<Vc<ImportMapping>> {

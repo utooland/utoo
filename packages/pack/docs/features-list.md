@@ -17,6 +17,7 @@
 | Externals |  | ✅ | [Webpack `externals` configuration](https://webpack.js.org/configuration/externals/#root) |  |
 | Output | `path` | ✅ | [Webpack `output.path`](https://webpack.js.org/configuration/output/#outputpath) |  |
 |  | `publicPath` | ✅ | [Webpack `output.publicPath`](https://webpack.js.org/configuration/output/#outputpublicpath) |  |
+|  | `crossOriginLoading` | ✅ | [Webpack `output.crossOriginLoading`](https://webpack.js.org/configuration/output/#outputcrossoriginloading) |  |
 |  | `clean` | ✅ | [Webpack `output.clean`](https://webpack.js.org/configuration/output/#outputclean) |  |
 |  | `filename` | ✅ | [Webpack `output.filename`](https://webpack.js.org/configuration/output/#outputfilename) |  |
 |  | `chunkFilename` | ✅ | [Webpack `output.chunkFilename`](https://webpack.js.org/configuration/output/#outputchunkfilename) |  |
@@ -68,4 +69,3 @@
 | Persistent Caching |  | ✅ | Enabled on dev |  |
 | Bundler Tracing Log | `log file` | ✅ |  |  |
 |  | `log viewer` | 🟠 |  |  |
-

@@ -192,6 +192,7 @@ export interface ConfigComplete {
       | string
     >;
     publicPath?: string;
+    crossOriginLoading?: false | "anonymous" | "use-credentials";
     chunkLoadingGlobal?: string;
     entryRootExport?: string;
   };

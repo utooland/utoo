@@ -373,6 +373,9 @@ pub struct OutputConfig {
     /// Note: This path will not appear in chunk paths or chunk data on disk,
     /// it only affects the URLs used by the browser to fetch resources.
     pub public_path: Option<RcStr>,
+    /// Controls the `crossorigin` attribute for dynamically loaded JS chunks.
+    /// Webpack-compatible values: false, "anonymous", "use-credentials".
+    pub cross_origin_loading: Option<CrossOriginLoading>,
     /// The global variable name used by the runtime for loading chunks.
     /// This is similar to webpack's `output.chunkLoadingGlobal`.
     /// Default: "TURBOPACK"
@@ -390,6 +393,22 @@ pub struct OutputConfig {
 pub enum OutputType {
     Standalone,
     Export,
+}
+
+#[turbo_tasks::value]
+#[derive(Clone, Debug, Deserialize, OperationValue)]
+#[serde(rename_all = "kebab-case")]
+pub enum CrossOriginLoadingMode {
+    Anonymous,
+    UseCredentials,
+}
+
+#[turbo_tasks::value]
+#[derive(Clone, Debug, Deserialize, OperationValue)]
+#[serde(untagged)]
+pub enum CrossOriginLoading {
+    Boolean(bool),
+    Mode(CrossOriginLoadingMode),
 }
 
 #[derive(
@@ -1019,6 +1038,29 @@ impl Config {
 
         // 4. No name found, return None to let the runtime use its default
         Ok(Vc::cell(None))
+    }
+
+    #[turbo_tasks::function]
+    pub async fn client_cross_origin_loading(&self) -> Result<Vc<Option<RcStr>>> {
+        let cross_origin_loading = self
+            .output
+            .as_ref()
+            .and_then(|o| o.cross_origin_loading.as_ref());
+
+        let value = match cross_origin_loading {
+            Some(CrossOriginLoading::Mode(CrossOriginLoadingMode::Anonymous)) => {
+                Some(rcstr!("anonymous"))
+            }
+            Some(CrossOriginLoading::Mode(CrossOriginLoadingMode::UseCredentials)) => {
+                Some(rcstr!("use-credentials"))
+            }
+            // Webpack-compatible: false disables crossorigin attribute.
+            Some(CrossOriginLoading::Boolean(false)) | None => None,
+            // Treat true as anonymous for compatibility with legacy configs.
+            Some(CrossOriginLoading::Boolean(true)) => Some(rcstr!("anonymous")),
+        };
+
+        Ok(Vc::cell(value))
     }
 
     #[turbo_tasks::function]

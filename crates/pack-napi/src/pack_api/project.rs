@@ -936,7 +936,7 @@ pub async fn project_trace_source(
     let turbo_tasks = project.turbopack_ctx.turbo_tasks().clone();
     let container = project.container;
     let traced_frame = turbo_tasks
-        .run_once(async move {
+        .run(async move {
             project_trace_source_operation(
                 container,
                 frame,
@@ -946,7 +946,7 @@ pub async fn project_trace_source(
             .await
         })
         .await
-        .map_err(|e| napi::Error::from_reason(PrettyPrintError(&e).to_string()))?;
+        .map_err(|e| napi::Error::from_reason(PrettyPrintError(&e.into()).to_string()))?;
     Ok(ReadRef::into_owned(traced_frame))
 }
 
@@ -957,7 +957,7 @@ pub async fn project_get_source_for_asset(
 ) -> napi::Result<Option<String>> {
     let turbo_tasks = project.turbopack_ctx.turbo_tasks().clone();
     let source = turbo_tasks
-        .run_once(async move {
+        .run(async move {
             let source_content = &*project
                 .container
                 .project()
@@ -977,7 +977,7 @@ pub async fn project_get_source_for_asset(
             Ok(Some(source_content.content().to_str()?.into_owned()))
         })
         .await
-        .map_err(|e| napi::Error::from_reason(PrettyPrintError(&e).to_string()))?;
+        .map_err(|e| napi::Error::from_reason(PrettyPrintError(&e.into()).to_string()))?;
 
     Ok(source)
 }
@@ -991,7 +991,7 @@ pub async fn project_get_source_map(
     let container = project.container;
 
     let source_map = turbo_tasks
-        .run_once(async move {
+        .run(async move {
             let source_map = get_source_map_rope_operation(container, file_path)
                 .read_strongly_consistent()
                 .await?;
@@ -1001,7 +1001,7 @@ pub async fn project_get_source_map(
             Ok(Some(map.content().to_str()?.to_string()))
         })
         .await
-        .map_err(|e| napi::Error::from_reason(PrettyPrintError(&e).to_string()))?;
+        .map_err(|e| napi::Error::from_reason(PrettyPrintError(&e.into()).to_string()))?;
 
     Ok(source_map)
 }

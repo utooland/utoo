@@ -1,5 +1,5 @@
 use futures_util::TryFutureExt;
-use std::{future::Future, ops::Deref, path::PathBuf, sync::Arc};
+use std::{future::Future, path::PathBuf, sync::Arc};
 
 use crate::pack_api::turbopack_ctx::{RootTask, TurbopackContext};
 use anyhow::{Result, anyhow};
@@ -9,14 +9,11 @@ use napi::{
     bindgen_prelude::{External, ToNapiValue},
     threadsafe_function::{ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
-use pack_api::{
-    tasks::{BundlerTurboTasks, UtooTurboTasks},
-    utils::StyledStringSerialize,
-};
+use pack_api::{turbo_tasks::UtooTurboTasks, utils::StyledStringSerialize};
 use rustc_hash::FxHashMap;
 use serde::Serialize;
 use turbo_tasks::{
-    OperationVc, TurboTasks, TurboTasksCallApi, Vc,
+    TurboTasks, TurboTasksCallApi, Vc,
     message_queue::{CompilationEvent, Severity},
 };
 use turbo_tasks_backend::{
@@ -113,33 +110,6 @@ impl CompilationEvent for StartupCacheInvalidationEvent {
 
     fn to_json(&self) -> String {
         serde_json::to_string(self).unwrap()
-    }
-}
-
-/// A helper type to hold both a Vc operation and the TurboTasks root process.
-/// Without this, we'd need to pass both individually all over the place
-#[derive(Clone)]
-pub struct VcArc<T> {
-    turbo_tasks: BundlerTurboTasks,
-    /// The Vc. Must be unresolved, otherwise you are referencing an inactive operation.
-    vc: OperationVc<T>,
-}
-
-impl<T> VcArc<T> {
-    pub fn new(turbo_tasks: BundlerTurboTasks, vc: OperationVc<T>) -> Self {
-        Self { turbo_tasks, vc }
-    }
-
-    pub fn turbo_tasks(&self) -> &BundlerTurboTasks {
-        &self.turbo_tasks
-    }
-}
-
-impl<T> Deref for VcArc<T> {
-    type Target = OperationVc<T>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.vc
     }
 }
 
