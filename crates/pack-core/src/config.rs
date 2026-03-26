@@ -412,6 +412,21 @@ pub enum OutputCrossOriginLoading {
     Mode(OutputCrossOriginLoadingMode),
 }
 
+impl OutputCrossOriginLoading {
+    fn to_runtime(&self) -> RuntimeCrossOriginLoading {
+        match self {
+            Self::Mode(OutputCrossOriginLoadingMode::Anonymous) | Self::Boolean(true) => {
+                RuntimeCrossOriginLoading::Anonymous
+            }
+            Self::Mode(OutputCrossOriginLoadingMode::UseCredentials) => {
+                RuntimeCrossOriginLoading::UseCredentials
+            }
+            // Webpack-compatible: false disables crossorigin attribute.
+            Self::Boolean(false) => RuntimeCrossOriginLoading::None,
+        }
+    }
+}
+
 #[derive(
     Clone,
     PartialEq,
@@ -1060,22 +1075,11 @@ impl Config {
         let cross_origin_loading = self
             .output
             .as_ref()
-            .and_then(|o| o.cross_origin_loading.as_ref());
-
-        let cross_origin_loading = match cross_origin_loading {
-            Some(OutputCrossOriginLoading::Mode(OutputCrossOriginLoadingMode::Anonymous)) => {
-                RuntimeCrossOriginLoading::Anonymous
-            }
-            Some(OutputCrossOriginLoading::Mode(OutputCrossOriginLoadingMode::UseCredentials)) => {
-                RuntimeCrossOriginLoading::UseCredentials
-            }
-            // Webpack-compatible: false disables crossorigin attribute.
-            Some(OutputCrossOriginLoading::Boolean(false)) | None => {
-                RuntimeCrossOriginLoading::None
-            }
-            // Treat true as anonymous for compatibility with legacy configs.
-            Some(OutputCrossOriginLoading::Boolean(true)) => RuntimeCrossOriginLoading::Anonymous,
-        };
+            .and_then(|o| o.cross_origin_loading.as_ref())
+            .map_or(
+                RuntimeCrossOriginLoading::None,
+                OutputCrossOriginLoading::to_runtime,
+            );
 
         Ok(cross_origin_loading.cell())
     }
