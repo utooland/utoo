@@ -1,0 +1,13 @@
+{
+    "config": {
+        "entry": [
+            {
+                "import": "input/index.js",
+                "name": "main"
+            }
+        ],
+        "output": {
+            "filename": "[name].[contenthash:8].js"
+        }
+    }
+}
