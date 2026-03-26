@@ -10,7 +10,7 @@ use turbopack::module_options::{
     CssOptionsContext, EcmascriptOptionsContext, JsxTransformOptions, ModuleOptionsContext,
     ModuleRule, TypescriptTransformOptions, side_effect_free_packages_glob,
 };
-use turbopack_browser::{BrowserChunkingContext, CurrentChunkMethod};
+use turbopack_browser::{BrowserChunkingContext, ContentHashing, CurrentChunkMethod};
 use turbopack_core::{
     chunk::{
         ChunkingConfig, ChunkingContext, MangleType, MinifyType, SourceMapSourceType,
@@ -606,6 +606,7 @@ pub async fn get_client_chunking_context(
                 Vc::<CssChunkType>::default().to_resolved().await?,
                 css_chunking_config,
             )
+            .use_content_hashing(ContentHashing::Direct { length: 16 })
             .module_merging(*scope_hoisting.await?);
     }
 

@@ -349,7 +349,6 @@ pub async fn get_server_resolve_options_context(
 #[derive(Clone, Debug, PartialEq, Eq, Hash, TaskInput, TraceRawVcs, Encode, Decode)]
 pub struct ServerChunkingContextOptions {
     pub mode: Vc<Mode>,
-    pub config: Vc<Config>,
     pub root_path: FileSystemPath,
     pub node_root: FileSystemPath,
     pub node_root_to_root_path: RcStr,
@@ -373,7 +372,6 @@ pub async fn get_server_chunking_context(
 ) -> Result<Vc<NodeJsChunkingContext>> {
     let ServerChunkingContextOptions {
         mode,
-        config,
         root_path,
         node_root,
         node_root_to_root_path,

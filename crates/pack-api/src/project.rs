@@ -1095,7 +1095,6 @@ impl Project {
         let dist_root = self.dist_root().owned().await?;
         Ok(get_server_chunking_context(ServerChunkingContextOptions {
             mode,
-            config,
             root_path: dist_root.clone(),
             node_root: dist_root,
             node_root_to_root_path: rcstr!("/ROOT"),
