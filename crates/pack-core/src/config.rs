@@ -22,6 +22,7 @@ use turbopack_core::{
 };
 use turbopack_ecmascript::{OptionTreeShaking, TreeShakingMode};
 use turbopack_ecmascript_plugins::transform::styled_components::StyledComponentsTransformConfig;
+use turbopack_ecmascript_runtime::CrossOriginLoading as RuntimeCrossOriginLoading;
 use turbopack_node::transforms::webpack::{WebpackLoaderItem, WebpackLoaderItems};
 
 use crate::{
@@ -375,7 +376,7 @@ pub struct OutputConfig {
     pub public_path: Option<RcStr>,
     /// Controls the `crossorigin` attribute for dynamically loaded JS chunks.
     /// Webpack-compatible values: false, "anonymous", "use-credentials".
-    pub cross_origin_loading: Option<CrossOriginLoading>,
+    pub cross_origin_loading: Option<OutputCrossOriginLoading>,
     /// The global variable name used by the runtime for loading chunks.
     /// This is similar to webpack's `output.chunkLoadingGlobal`.
     /// Default: "TURBOPACK"
@@ -398,7 +399,7 @@ pub enum OutputType {
 #[turbo_tasks::value]
 #[derive(Clone, Debug, Deserialize, OperationValue)]
 #[serde(rename_all = "kebab-case")]
-pub enum CrossOriginLoadingMode {
+pub enum OutputCrossOriginLoadingMode {
     Anonymous,
     UseCredentials,
 }
@@ -406,9 +407,24 @@ pub enum CrossOriginLoadingMode {
 #[turbo_tasks::value]
 #[derive(Clone, Debug, Deserialize, OperationValue)]
 #[serde(untagged)]
-pub enum CrossOriginLoading {
+pub enum OutputCrossOriginLoading {
     Boolean(bool),
-    Mode(CrossOriginLoadingMode),
+    Mode(OutputCrossOriginLoadingMode),
+}
+
+impl OutputCrossOriginLoading {
+    fn to_runtime(&self) -> RuntimeCrossOriginLoading {
+        match self {
+            Self::Mode(OutputCrossOriginLoadingMode::Anonymous) | Self::Boolean(true) => {
+                RuntimeCrossOriginLoading::Anonymous
+            }
+            Self::Mode(OutputCrossOriginLoadingMode::UseCredentials) => {
+                RuntimeCrossOriginLoading::UseCredentials
+            }
+            // Webpack-compatible: false disables crossorigin attribute.
+            Self::Boolean(false) => RuntimeCrossOriginLoading::None,
+        }
+    }
 }
 
 #[derive(
@@ -1041,29 +1057,6 @@ impl Config {
     }
 
     #[turbo_tasks::function]
-    pub async fn client_cross_origin_loading(&self) -> Result<Vc<Option<RcStr>>> {
-        let cross_origin_loading = self
-            .output
-            .as_ref()
-            .and_then(|o| o.cross_origin_loading.as_ref());
-
-        let value = match cross_origin_loading {
-            Some(CrossOriginLoading::Mode(CrossOriginLoadingMode::Anonymous)) => {
-                Some(rcstr!("anonymous"))
-            }
-            Some(CrossOriginLoading::Mode(CrossOriginLoadingMode::UseCredentials)) => {
-                Some(rcstr!("use-credentials"))
-            }
-            // Webpack-compatible: false disables crossorigin attribute.
-            Some(CrossOriginLoading::Boolean(false)) | None => None,
-            // Treat true as anonymous for compatibility with legacy configs.
-            Some(CrossOriginLoading::Boolean(true)) => Some(rcstr!("anonymous")),
-        };
-
-        Ok(Vc::cell(value))
-    }
-
-    #[turbo_tasks::function]
     pub async fn entry_root_export(&self) -> Result<Vc<Option<RcStr>>> {
         // Check if entry_root_export is configured
         let entry_root_export = self
@@ -1075,6 +1068,20 @@ impl Config {
             Some(name) if !name.is_empty() => Ok(Vc::cell(Some(name.clone()))),
             _ => Ok(Vc::cell(None)),
         }
+    }
+
+    #[turbo_tasks::function]
+    pub async fn cross_origin_loading(&self) -> Result<Vc<RuntimeCrossOriginLoading>> {
+        let cross_origin_loading = self
+            .output
+            .as_ref()
+            .and_then(|o| o.cross_origin_loading.as_ref())
+            .map_or(
+                RuntimeCrossOriginLoading::None,
+                OutputCrossOriginLoading::to_runtime,
+            );
+
+        Ok(cross_origin_loading.cell())
     }
 
     #[turbo_tasks::function]

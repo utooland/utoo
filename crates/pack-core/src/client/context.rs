@@ -540,9 +540,7 @@ pub async fn get_client_chunking_context(
         builder = builder.chunk_loading_global(chunk_loading_global.clone());
     }
 
-    if let Some(cross_origin_loading) = &*config.client_cross_origin_loading().await? {
-        builder = builder.cross_origin_loading(cross_origin_loading.clone());
-    }
+    builder = builder.cross_origin_loading(*config.cross_origin_loading().await?);
 
     // Read entry_root_export from config
     if let Some(entry_root_export) = &*config.entry_root_export().await? {
