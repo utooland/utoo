@@ -119,11 +119,9 @@ jobs:
         run: ${{ matrix.settings.setup }}
         if: ${{ matrix.settings.setup }}
         shell: bash
-      - name: Setup Utoo
-        uses: utooland/setup-utoo@v1
 
       - name: Install dependencies
-        run: utoo install
+        run: npm install
       - name: Setup node x86
         uses: actions/setup-node@v4
       - name: Build in docker
@@ -163,11 +161,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Setup Utoo
-        uses: utooland/setup-utoo@v1
 
       - name: Install dependencies
-        run: utoo install
+        run: npm install
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
