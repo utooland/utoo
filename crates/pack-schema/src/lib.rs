@@ -315,6 +315,14 @@ pub struct SchemaOutputConfig {
     )]
     pub public_path: Option<String>,
 
+    /// Controls the `crossorigin` attribute for dynamically loaded chunks.
+    /// Webpack-compatible values: false, "anonymous", "use-credentials".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Controls crossorigin for dynamically loaded chunks. Supports false, 'anonymous', or 'use-credentials'."
+    )]
+    pub cross_origin_loading: Option<SchemaCrossOriginLoading>,
+
     /// The global variable name used by the runtime for loading chunks.
     /// This is similar to webpack's `output.chunkLoadingGlobal`.
     /// Default: "TURBOPACK"
@@ -330,6 +338,23 @@ pub struct SchemaOutputConfig {
         description = "Expose entry module exports to global scope with the specified name. When set, all named exports from the entry module will be available on window/globalThis under the specified name. If set to empty string, will use package.json name. Default: None (no exposure)"
     )]
     pub entry_root_export: Option<String>,
+}
+
+/// Cross-origin loading mode for dynamic chunks.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum SchemaCrossOriginLoadingMode {
+    Anonymous,
+    UseCredentials,
+}
+
+/// Webpack-compatible `output.crossOriginLoading`.
+/// Supports `false`, `"anonymous"`, and `"use-credentials"`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SchemaCrossOriginLoading {
+    Boolean(bool),
+    Mode(SchemaCrossOriginLoadingMode),
 }
 
 /// Output type
@@ -954,6 +979,7 @@ mod tests {
         assert!(schema_str.contains("provider"));
         assert!(schema_str.contains("postcss"));
         assert!(schema_str.contains("publicPath"));
+        assert!(schema_str.contains("crossOriginLoading"));
         assert!(schema_str.contains("cssFilename"));
         assert!(schema_str.contains("assetModuleFilename"));
     }
@@ -1022,6 +1048,7 @@ mod tests {
             "chunkFilename": "[name].[contenthash:8].js",
             "cssFilename": "[name].[contenthash:6].css",
             "publicPath": "/assets/",
+            "crossOriginLoading": "anonymous",
             "clean": true
           },
           "optimization": {
@@ -1057,6 +1084,12 @@ mod tests {
             Some("[name].[contenthash:6].css".to_string())
         );
         assert_eq!(output.public_path, Some("/assets/".to_string()));
+        assert!(matches!(
+            output.cross_origin_loading,
+            Some(SchemaCrossOriginLoading::Mode(
+                SchemaCrossOriginLoadingMode::Anonymous
+            ))
+        ));
 
         // Test concatenateModules configuration
         let optimization = config.optimization.as_ref().unwrap();
