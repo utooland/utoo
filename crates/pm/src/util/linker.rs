@@ -54,13 +54,18 @@ async fn prepare_link(src: &Path, dst: &Path) -> Result<Option<(PathBuf, PathBuf
     Ok(Some((abs_src, abs_dst)))
 }
 
+/// Create a relative symlink: compute the path to `src` relative to `dst`'s
+/// parent directory, then create the symlink.
+async fn relative_symlink(src: &Path, dst: &Path) -> Result<()> {
+    let parent = dst.parent().context("link destination has no parent")?;
+    let rel = pathdiff::diff_paths(src, parent).context("Failed to compute relative path")?;
+    symlink(&rel, dst).await
+}
+
 /// Create a relative symlink. Used for workspace links, `utoo link`, etc.
 pub async fn link(src: &Path, dst: &Path) -> Result<()> {
     if let Some((abs_src, abs_dst)) = prepare_link(src, dst).await? {
-        let parent = abs_dst.parent().context("link destination has no parent")?;
-        let rel_src =
-            pathdiff::diff_paths(&abs_src, parent).context("Failed to compute relative path")?;
-        symlink(&rel_src, &abs_dst).await?;
+        relative_symlink(&abs_src, &abs_dst).await?;
     }
     Ok(())
 }
@@ -77,12 +82,7 @@ pub async fn link_bin(src: &Path, dst: &Path) -> Result<()> {
     };
 
     #[cfg(unix)]
-    {
-        let bin_dir = abs_dst.parent().context("bin link has no parent dir")?;
-        let rel_src = pathdiff::diff_paths(&abs_src, bin_dir)
-            .context("Failed to compute relative path for bin link")?;
-        symlink(&rel_src, &abs_dst).await?;
-    }
+    relative_symlink(&abs_src, &abs_dst).await?;
 
     #[cfg(windows)]
     win_bin_shims(&abs_src, &abs_dst).await?;
