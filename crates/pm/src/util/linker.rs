@@ -1,15 +1,16 @@
 use crate::fs;
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::{self, Path, PathBuf};
 
-/// Convert a path to absolute path
-fn to_absolute(path: &Path) -> Result<PathBuf> {
-    if path.is_absolute() {
-        Ok(path.to_path_buf())
+/// Convert a path to absolute. Treats empty paths as `"."` because lockfiles
+/// use `resolved: ""` for the root workspace linking itself.
+fn to_absolute(p: &Path) -> Result<PathBuf> {
+    let p = if p.as_os_str().is_empty() {
+        Path::new(".")
     } else {
-        let cwd = std::env::current_dir().context("Failed to get current working directory")?;
-        Ok(cwd.join(path))
-    }
+        p
+    };
+    path::absolute(p).context("Failed to resolve absolute path")
 }
 
 /// Resolve src/dst to absolute paths, ensure parent dir exists, clean up stale destination.
@@ -30,10 +31,12 @@ async fn prepare_link(src: &Path, dst: &Path) -> Result<Option<(PathBuf, PathBuf
     }
 
     if let Ok(metadata) = fs::symlink_metadata(&abs_dst).await {
-        // Already a symlink pointing to the correct source — nothing to do
+        // Already a symlink pointing to the correct source — nothing to do.
+        // Compare relative-to-relative to avoid `..` mismatch between lexicographic forms.
         if metadata.is_symlink()
             && let Ok(target) = fs::read_link(&abs_dst).await
-            && target == abs_src
+            && let Some(parent) = abs_dst.parent()
+            && pathdiff::diff_paths(&abs_src, parent).as_deref() == Some(&*target)
         {
             return Ok(None);
         }
@@ -52,17 +55,26 @@ async fn prepare_link(src: &Path, dst: &Path) -> Result<Option<(PathBuf, PathBuf
     Ok(Some((abs_src, abs_dst)))
 }
 
-/// Create a symlink. Used for workspace links, `utoo link`, etc.
+/// Create a relative symlink: compute the path to `src` relative to `dst`'s
+/// parent directory, then create the symlink.
+async fn relative_symlink(src: &Path, dst: &Path) -> Result<()> {
+    let parent = dst.parent().context("link destination has no parent")?;
+    let rel = pathdiff::diff_paths(src, parent).context("Failed to compute relative path")?;
+    symlink(&rel, dst).await
+}
+
+/// Create a relative symlink. Used for workspace links, `utoo link`, etc.
 pub async fn link(src: &Path, dst: &Path) -> Result<()> {
     if let Some((abs_src, abs_dst)) = prepare_link(src, dst).await? {
-        symlink(&abs_src, &abs_dst).await?;
+        relative_symlink(&abs_src, &abs_dst).await?;
     }
     Ok(())
 }
 
 /// Link a binary into node_modules/.bin.
 ///
-/// - Unix: symlink (same as `link`)
+/// - Unix: relative symlink so the link stays valid when the tree is mounted
+///   at a different prefix (e.g. inside a Docker container).
 /// - Windows: hardlink/copy + .cmd shim, following npm's cmd-shim convention.
 ///   Symlinks are avoided because they require admin privileges on Windows.
 pub async fn link_bin(src: &Path, dst: &Path) -> Result<()> {
@@ -71,7 +83,7 @@ pub async fn link_bin(src: &Path, dst: &Path) -> Result<()> {
     };
 
     #[cfg(unix)]
-    symlink(&abs_src, &abs_dst).await?;
+    relative_symlink(&abs_src, &abs_dst).await?;
 
     #[cfg(windows)]
     win_bin_shims(&abs_src, &abs_dst).await?;
@@ -92,7 +104,16 @@ async fn symlink(src: &Path, dst: &Path) -> Result<()> {
 
 #[cfg(windows)]
 async fn symlink(src: &Path, dst: &Path) -> Result<()> {
-    if fs::metadata(src).await?.is_dir() {
+    // `src` may be relative (e.g. `../foo`). Resolve against `dst`'s parent
+    // so we can query metadata on the actual target.
+    let resolved = if src.is_relative() {
+        dst.parent()
+            .map(|p| p.join(src))
+            .unwrap_or(src.to_path_buf())
+    } else {
+        src.to_path_buf()
+    };
+    if fs::metadata(&resolved).await?.is_dir() {
         fs::symlink_dir(src, dst).await
     } else {
         fs::symlink_file(src, dst).await
@@ -262,6 +283,39 @@ mod tests {
         let result = link(&src2_path, &dst_path);
         assert!(result.await.is_ok());
         assert_eq!(fs::read_to_string(&dst_path).unwrap(), "test2");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_link_bin_creates_relative_symlink() {
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path();
+
+        // Simulate node_modules/@napi-rs/cli/scripts/index.js
+        let pkg_dir = temp_path.join("node_modules/@napi-rs/cli/scripts");
+        fs::create_dir_all(&pkg_dir).unwrap();
+        let src_path = pkg_dir.join("index.js");
+        fs::write(&src_path, "#!/usr/bin/env node").unwrap();
+
+        let dst_path = temp_path.join("node_modules/.bin/napi");
+
+        link_bin(&src_path, &dst_path).await.unwrap();
+
+        assert!(dst_path.is_symlink());
+        // Symlink target must be relative, not absolute
+        let raw_target = fs::read_link(&dst_path).unwrap();
+        assert!(
+            raw_target.is_relative(),
+            "expected relative symlink, got: {}",
+            raw_target.display()
+        );
+        assert_eq!(
+            fs::read_to_string(&dst_path).unwrap(),
+            "#!/usr/bin/env node"
+        );
+
+        // Calling link_bin again should be a no-op (idempotent)
+        link_bin(&src_path, &dst_path).await.unwrap();
     }
 
     #[tokio::test]
