@@ -366,3 +366,4 @@ Scan through this list during every review for high-frequency Rust anti-patterns
 | A15 | String Gymnastics | Multi-layer `starts_with` / `split` chains | Parse once into structured typed `enum` |
 | A16 | Broad Re-export Leak | `pub use module::*` leaking internal helpers | Export precise types explicitly |
 | A17 | Large Enum Variant Size | A single large variant inflating the enum footprint | Heap-allocate the large variant via `Box<T>` |
+| A18 | Trivial Wrapper Function | One-line fn that just forwards to another fn with identical signature | Call the underlying function directly |
