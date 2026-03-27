@@ -1,8 +1,35 @@
-use colored::Colorize;
+use std::fmt;
 use std::io;
+use std::io::Write;
+
+use colored::Colorize;
 use term_size;
 
+use crate::helper::migrate::MigrateResult;
 use crate::service::pm_pack::PackResult;
+
+impl fmt::Display for MigrateResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let parts: Vec<String> = self
+            .fields
+            .iter()
+            .filter(|(_, count)| *count > 0)
+            .map(|(label, count)| format!("{count} {label}"))
+            .collect();
+
+        write!(
+            f,
+            "{} pnpm {} {}",
+            "✓".green(),
+            "→".dimmed(),
+            parts.join(", ")
+        )
+    }
+}
+
+pub fn print_migrate_result(result: &MigrateResult) -> io::Result<()> {
+    writeln!(io::stdout(), "{result}")
+}
 
 /// Write pack file listing and summary metadata to the given writer.
 ///

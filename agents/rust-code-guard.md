@@ -367,3 +367,4 @@ Scan through this list during every review for high-frequency Rust anti-patterns
 | A16 | Broad Re-export Leak | `pub use module::*` leaking internal helpers | Export precise types explicitly |
 | A17 | Large Enum Variant Size | A single large variant inflating the enum footprint | Heap-allocate the large variant via `Box<T>` |
 | A18 | Trivial Wrapper Function | One-line fn that just forwards to another fn with identical signature | Call the underlying function directly |
+| A19 | Repetitive Conditional Push | Repeated `if x > 0 { vec.push(format!(...)) }` blocks with same structure | Data-drive with `[(value, label)].filter().map().collect()` |

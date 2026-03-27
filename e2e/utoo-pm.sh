@@ -494,6 +494,44 @@ fi
 echo -e "${GREEN}PASS: workspace devDep cycle handled correctly${NC}"
 cd ../../..
 
+# Case: pnpm migration (eggjs/egg)
+echo -e "${YELLOW}Case: pnpm migration (eggjs/egg)${NC}"
+EGG_DIR=$(mktemp -d)
+git clone --branch next --single-branch --depth 1 https://github.com/eggjs/egg.git "$EGG_DIR"
+pushd "$EGG_DIR"
+
+utoo install --from pnpm --ignore-scripts --registry=https://registry.npmjs.org || { echo -e "${RED}FAIL: utoo install --from pnpm failed for eggjs/egg${NC}"; exit 1; }
+
+# Verify workspaces field was added to package.json
+node -e "
+  const pkg = require('./package.json');
+  const ws = pkg.workspaces;
+  if (!ws || !Array.isArray(ws)) throw new Error('workspaces not set');
+  if (!ws.includes('packages/*')) throw new Error('missing packages/*');
+  console.log('  workspaces:', ws.length, 'patterns');
+"
+
+# Verify overrides were added
+node -e "
+  const pkg = require('./package.json');
+  if (!pkg.overrides) throw new Error('overrides not set');
+  if (!pkg.overrides.vite) throw new Error('vite override missing');
+  console.log('  overrides:', Object.keys(pkg.overrides).length, 'entries');
+"
+
+# Verify .utoo.toml was created with catalogs
+[ -f ".utoo.toml" ] || { echo -e "${RED}FAIL: .utoo.toml not created${NC}"; exit 1; }
+grep -q 'lodash' .utoo.toml || { echo -e "${RED}FAIL: catalog missing lodash${NC}"; exit 1; }
+grep -q 'path-to-regexp' .utoo.toml || { echo -e "${RED}FAIL: named catalog missing${NC}"; exit 1; }
+
+# Verify node_modules was created (install ran successfully)
+[ -d "node_modules" ] || { echo -e "${RED}FAIL: node_modules not created${NC}"; exit 1; }
+
+echo -e "${GREEN}PASS: pnpm migration (eggjs/egg)${NC}"
+
+popd
+rm -rf "$EGG_DIR"
+
 # Case: install-node + esbuild postinstall
 echo -e "${YELLOW}Case: install-node + esbuild${NC}"
 ESBUILD_DIR=$(mktemp -d)

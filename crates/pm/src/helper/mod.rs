@@ -5,6 +5,7 @@ pub mod git;
 pub mod global_bin;
 pub mod install_runtime;
 pub mod lock;
+pub mod migrate;
 pub mod ruborist_context;
 pub mod tree_builder;
 pub mod workspace;
