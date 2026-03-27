@@ -189,7 +189,7 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
     .await
     .map_err(|e| match e {
         FetchError::Retryable(e) | FetchError::Permanent(e) => {
-            anyhow!("Failed to fetch {}: {}", opts.name, e)
+            anyhow!("Failed to fetch {}: {:#}", opts.name, e)
         }
     })
 }
@@ -279,7 +279,7 @@ pub async fn fetch_version_manifest(
     .await
     .map_err(|e| match e {
         FetchError::Retryable(e) | FetchError::Permanent(e) => {
-            anyhow!("Failed to fetch {}@{}: {}", opts.name, opts.spec, e)
+            anyhow!("Failed to fetch {}@{}: {:#}", opts.name, opts.spec, e)
         }
     })
 }

@@ -1,0 +1,30 @@
+name: utoopm-artifact-linux-x64
+
+on:
+  push:
+    branches: ["fix/tls-native-roots"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-02-18
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Build
+        run: cargo build --release --bin utoo --target x86_64-unknown-linux-gnu
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: utoo-linux-x64
+          path: target/x86_64-unknown-linux-gnu/release/utoo
+          retention-days: 3
