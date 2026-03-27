@@ -1,22 +1,12 @@
 use crate::fs;
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
-
-/// Convert a path to absolute path
-fn to_absolute(path: &Path) -> Result<PathBuf> {
-    if path.is_absolute() {
-        Ok(path.to_path_buf())
-    } else {
-        let cwd = std::env::current_dir().context("Failed to get current working directory")?;
-        Ok(cwd.join(path))
-    }
-}
+use std::path::{self, Path, PathBuf};
 
 /// Resolve src/dst to absolute paths, ensure parent dir exists, clean up stale destination.
 /// Returns `None` if the link is already up-to-date, `Some((src, dst))` if work is needed.
 async fn prepare_link(src: &Path, dst: &Path) -> Result<Option<(PathBuf, PathBuf)>> {
-    let abs_src = to_absolute(src)?;
-    let abs_dst = to_absolute(dst)?;
+    let abs_src = path::absolute(src).context("Failed to resolve absolute path")?;
+    let abs_dst = path::absolute(dst).context("Failed to resolve absolute path")?;
 
     if !fs::try_exists(&abs_src).await? {
         anyhow::bail!("Source file does not exist: {}", abs_src.display());
@@ -103,7 +93,16 @@ async fn symlink(src: &Path, dst: &Path) -> Result<()> {
 
 #[cfg(windows)]
 async fn symlink(src: &Path, dst: &Path) -> Result<()> {
-    if fs::metadata(src).await?.is_dir() {
+    // `src` may be relative (e.g. `../foo`). Resolve against `dst`'s parent
+    // so we can query metadata on the actual target.
+    let resolved = if src.is_relative() {
+        dst.parent()
+            .map(|p| p.join(src))
+            .unwrap_or(src.to_path_buf())
+    } else {
+        src.to_path_buf()
+    };
+    if fs::metadata(&resolved).await?.is_dir() {
         fs::symlink_dir(src, dst).await
     } else {
         fs::symlink_file(src, dst).await
