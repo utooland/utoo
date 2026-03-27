@@ -10870,6 +10870,7 @@ dependencies = [
  "reqwest 0.12.24",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sha1",
  "sha2",
  "tar",

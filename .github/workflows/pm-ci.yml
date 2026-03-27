@@ -109,7 +109,6 @@ jobs:
 
       - name: Install dependencies
         run: utoo install
-        continue-on-error: true
       
       - name: Setup node x86
         uses: actions/setup-node@v4

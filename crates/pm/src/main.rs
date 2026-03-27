@@ -44,6 +44,8 @@ use crate::constants::cmd::{
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
 use crate::helper::workspace::init_project_root;
 
+use crate::helper::migrate::{FromPm, migrate_from_pnpm};
+
 fn detect_shell_from_env() -> Option<clap_complete::Shell> {
     // Most common on Unix-like systems.
     let shell_path = std::env::var("SHELL").ok()?;
@@ -176,6 +178,10 @@ enum Commands {
         /// Dependency types to omit
         #[arg(long, value_delimiter = ',')]
         omit: Vec<OmitType>,
+
+        /// Migrate from another package manager before installing
+        #[arg(long)]
+        from: Option<FromPm>,
     },
     /// Uninstall dependencies
     #[command(name = UNINSTALL_NAME, alias = UNINSTALL_ALIAS, about = UNINSTALL_ABOUT)]
@@ -399,6 +405,17 @@ async fn async_main() -> Result<()> {
         "Logger initialized"
     );
 
+    // Run --from migration early, before config is cached by init_registry
+    if let Some(Commands::Install {
+        from: Some(FromPm::Pnpm),
+        ..
+    }) = &cli.command
+    {
+        let cwd = std::env::current_dir()?;
+        let root_path = init_project_root(&cwd).await?;
+        migrate_from_pnpm(&root_path).await?;
+    }
+
     // global registry
     init_registry(cli.registry).await;
 
@@ -437,6 +454,7 @@ async fn async_main() -> Result<()> {
             prefix,
             production,
             omit,
+            from: _,
         }) => {
             // Build omit config: production = omit dev + optional
             let mut omit_set: std::collections::HashSet<OmitType> = omit.into_iter().collect();
