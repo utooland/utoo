@@ -113,8 +113,18 @@ jobs:
     needs: [build-linux-x64]
     name: utoopm-e2e-ubuntu-24.04-x86_64-unknown-linux-gnu
     runs-on: ubuntu-latest
+    container:
+      image: ubuntu:24.04
     steps:
+      - name: Install git
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: apt-get update && apt-get install -y git
+
       - uses: actions/checkout@v4
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory /__w/utoo/utoo
 
       - name: Setup node
         uses: actions/setup-node@v4
@@ -129,8 +139,8 @@ jobs:
 
       - name: Update PATH
         run: |
-          chmod +x dist/utoo
-          echo "${{ github.workspace }}/dist" >> $GITHUB_PATH
+          chmod +x $GITHUB_WORKSPACE/dist/utoo
+          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
 
       - name: Create ut symlink
         run: ln -sf utoo $(dirname $(which utoo))/ut
