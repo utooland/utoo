@@ -19,6 +19,7 @@ import {
   TurbopackRuleConfigItem,
 } from "../config/types";
 import { getPackPath, rustifyEnv } from "../utils/common";
+import { normalizePath } from "../utils/normalize-path";
 import { runLoaderWorkerPool } from "./loaderWorkerPool";
 import {
   Endpoint,
@@ -248,6 +249,9 @@ async function rustifyPartialProjectOptions(
 ): Promise<NapiPartialProjectOptions> {
   return {
     ...options,
+    rootPath: normalizePathOption(options.rootPath),
+    projectPath: normalizePathOption(options.projectPath),
+    packPath: normalizePathOption(options.packPath),
     config: options.config && (await serializeConfig(options.config)),
     processEnv: options.processEnv && rustifyEnv(options.processEnv),
   };
@@ -257,11 +261,19 @@ type NativeFunction<T> = (
   callback: (err: Error, value: T) => void,
 ) => Promise<{ __napiType: "RootTask" }>;
 
+function normalizePathOption(pathLike: string | undefined): string | undefined {
+  if (pathLike === undefined) return undefined;
+  return normalizePath(pathLike);
+}
+
 async function rustifyProjectOptions(
   options: Required<ProjectOptions>,
 ): Promise<NapiProjectOptions> {
   return {
     ...options,
+    rootPath: normalizePath(options.rootPath),
+    projectPath: normalizePath(options.projectPath),
+    packPath: normalizePath(options.packPath),
     config: await serializeConfig(options.config),
     processEnv: rustifyEnv(options.processEnv ?? {}),
   };
