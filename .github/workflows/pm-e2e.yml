@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         env:
           DEBIAN_FRONTEND: noninteractive
-        run: apt-get update && apt-get install -y build-essential curl pkg-config libssl-dev git
+        run: apt-get update && apt-get install -y build-essential curl pkg-config git
 
       - uses: actions/checkout@v4
 
