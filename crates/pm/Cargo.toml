@@ -67,7 +67,3 @@ mockito = "1.7.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["full"] }
-
-# Linux: use vendored OpenSSL for better compatibility with older glibc
-[target.'cfg(target_os = "linux")'.dependencies]
-openssl = { version = "0.10", features = ["vendored"] }
