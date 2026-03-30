@@ -22,6 +22,7 @@ jobs:
             libc6-dev \
             curl \
             pkg-config \
+            libssl-dev \
             git
 
       - uses: actions/checkout@v4
