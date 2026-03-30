@@ -14,6 +14,85 @@ permissions:
   contents: read
 
 jobs:
+  build-linux-x64:
+    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) || (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-02-18
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Build utoo-pm
+        run: cargo build --release --target x86_64-unknown-linux-gnu --bin utoo -p utoo-pm
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: utoo-linux-x64
+          path: target/x86_64-unknown-linux-gnu/release/utoo
+          retention-days: 1
+
+  e2e-linux:
+    needs: [build-linux-x64]
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [ubuntu-20.04, ubuntu-24.04]
+    name: utoopm-e2e-${{ matrix.host }}-x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.host }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-linux-x64
+          path: ${{ github.workspace }}/dist
+
+      - name: Update PATH
+        run: |
+          chmod +x ${{ github.workspace }}/dist/utoo
+          echo "${{ github.workspace }}/dist" >> $GITHUB_PATH
+
+      - name: Create ut symlink
+        run: ln -sf utoo $(dirname $(which utoo))/ut
+
+      - name: Verify tools
+        run: |
+          echo "utoo: $(which utoo)"
+          echo "ut: $(which ut)"
+          utoo --version
+          ut --version
+
+      - name: Make scripts executable
+        run: chmod +x e2e/utoo-pm.sh e2e/pm-arborist.sh
+
+      - name: Run e2e tests
+        run: bash e2e/utoo-pm.sh
+
+      - name: Run arborist e2e tests
+        run: bash e2e/pm-arborist.sh
+
+      - name: Upload e2e artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-${{ matrix.host }}-x86_64-unknown-linux-gnu
+          path: /tmp/utoo-*
+          if-no-files-found: ignore
+
   e2e:
     if: (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) || (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
     strategy:
@@ -24,12 +103,10 @@ jobs:
             target: aarch64-apple-darwin
           - host: macos-latest
             target: x86_64-apple-darwin
-          - host: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
           - host: windows-latest
             target: x86_64-pc-windows-msvc
 
-    name: utoopm-e2e-${{ matrix.settings.target }}
+    name: utoopm-e2e-${{ matrix.settings.host }}-${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
@@ -72,20 +149,19 @@ jobs:
           toolchain: nightly-2026-02-18
           targets: ${{ matrix.settings.target }}
 
-      # - name: Cache cargo
-      #   uses: Swatinem/rust-cache@v2
-      #   with:
-      #     shared-key: pm-e2e-${{ matrix.settings.target }}
+      - name: Add cross-compilation target
+        if: matrix.settings.target == 'x86_64-apple-darwin'
+        run: rustup target add x86_64-apple-darwin
 
       - name: Build utoo-pm
         run: cargo build --release --target ${{ matrix.settings.target }} --bin utoo -p utoo-pm
 
       - name: Update PATH (Unix)
-        if: matrix.settings.host != 'windows-latest'
+        if: runner.os != 'Windows'
         run: echo "${{ github.workspace }}/target/${{ matrix.settings.target }}/release" >> $GITHUB_PATH
 
       - name: Update PATH (Windows)
-        if: matrix.settings.host == 'windows-latest'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $binPath = "${{ github.workspace }}\target\${{ matrix.settings.target }}\release"
@@ -93,17 +169,17 @@ jobs:
           Write-Host "Added to PATH: $binPath"
 
       - name: Create ut symlink for utoo (Unix)
-        if: matrix.settings.host != 'windows-latest'
+        if: runner.os != 'Windows'
         run: ln -sf utoo $(dirname $(which utoo))/ut
 
       - name: Create ut copy for utoo (Windows)
-        if: matrix.settings.host == 'windows-latest'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $binPath = "${{ github.workspace }}\target\${{ matrix.settings.target }}\release"
           $utooPath = Join-Path $binPath "utoo.exe"
           $utPath = Join-Path $binPath "ut.exe"
-          
+
           if (Test-Path $utooPath) {
             Copy-Item $utooPath $utPath -Force
             Write-Host "Created ut.exe at: $utPath"
@@ -113,7 +189,7 @@ jobs:
           }
 
       - name: Verify tools (Unix)
-        if: matrix.settings.host != 'windows-latest'
+        if: runner.os != 'Windows'
         run: |
           echo "utoo: $(which utoo)"
           echo "ut: $(which ut)"
@@ -121,29 +197,27 @@ jobs:
           ut --version
 
       - name: Verify tools (Windows)
-        if: matrix.settings.host == 'windows-latest'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $binPath = "${{ github.workspace }}\target\${{ matrix.settings.target }}\release"
           Write-Host "Binary path: $binPath"
           Write-Host "utoo.exe: $(Test-Path "$binPath\utoo.exe")"
           Write-Host "ut.exe: $(Test-Path "$binPath\ut.exe")"
-          
-          # Add to current session PATH
+
           $env:PATH = "$binPath;$env:PATH"
-          
-          # Verify commands
+
           Get-Command utoo | Select-Object -ExpandProperty Source
           Get-Command ut | Select-Object -ExpandProperty Source
           utoo --version
           ut --version
 
       - name: Make scripts executable
-        if: matrix.settings.host != 'windows-latest'
+        if: runner.os != 'Windows'
         run: chmod +x e2e/utoo-pm.sh e2e/pm-arborist.sh
 
       - name: Run e2e tests (Unix)
-        if: matrix.settings.host != 'windows-latest'
+        if: runner.os != 'Windows'
         run: |
           if [ "${{ matrix.settings.target }}" = "x86_64-apple-darwin" ]; then
             arch -x86_64 bash -c '
@@ -158,7 +232,7 @@ jobs:
         shell: bash
 
       - name: Run arborist e2e tests (Unix)
-        if: matrix.settings.host != 'windows-latest'
+        if: runner.os != 'Windows'
         run: |
           if [ "${{ matrix.settings.target }}" = "x86_64-apple-darwin" ]; then
             arch -x86_64 bash -c '
@@ -173,12 +247,11 @@ jobs:
         shell: bash
 
       - name: Run e2e tests (Windows)
-        if: matrix.settings.host == 'windows-latest'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           git config --system core.longpaths true
 
-          # Ensure binaries are in PATH
           $binPath = "${{ github.workspace }}\target\${{ matrix.settings.target }}\release"
           $env:PATH = "$binPath;$env:PATH"
 
@@ -188,18 +261,18 @@ jobs:
           pwsh -File e2e/utoo-pm.ps1 --verbose
 
       - name: Upload e2e artifacts on failure (Unix)
-        if: failure() && matrix.settings.host != 'windows-latest'
+        if: failure() && runner.os != 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-artifacts-${{ matrix.settings.target }}
+          name: e2e-artifacts-${{ matrix.settings.host }}-${{ matrix.settings.target }}
           path: /tmp/utoo-*
           if-no-files-found: ignore
 
       - name: Upload e2e artifacts on failure (Windows)
-        if: failure() && matrix.settings.host == 'windows-latest'
+        if: failure() && runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-artifacts-${{ matrix.settings.target }}
+          name: e2e-artifacts-${{ matrix.settings.host }}-${{ matrix.settings.target }}
           path: ${{ runner.temp }}/utoo-*
           if-no-files-found: ignore
 
@@ -208,13 +281,16 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     needs:
+      - build-linux-x64
+      - e2e-linux
       - e2e
     steps:
       - name: Check success
         run: |
-          if [ "${{ needs.e2e.result }}" == "failure" ] || [ "${{ needs.e2e.result }}" == "cancelled" ]; then
-            echo "Tests failed or were cancelled"
-            exit 1
-          else
-            echo "Tests passed or were skipped"
-          fi
+          for result in "${{ needs.build-linux-x64.result }}" "${{ needs.e2e-linux.result }}" "${{ needs.e2e.result }}"; do
+            if [ "$result" == "failure" ] || [ "$result" == "cancelled" ]; then
+              echo "Tests failed or were cancelled"
+              exit 1
+            fi
+          done
+          echo "Tests passed or were skipped"
