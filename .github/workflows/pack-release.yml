@@ -122,6 +122,16 @@ jobs:
       - name: Setup Utoo
         uses: utooland/setup-utoo@v1
 
+      - name: Clear install-node for musl builds
+        if: ${{ contains(matrix.settings.target, 'musl') }}
+        run: |
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json'));
+            delete pkg.engines['install-node'];
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
       - name: Install dependencies
         run: utoo install
       - name: Setup node x86
