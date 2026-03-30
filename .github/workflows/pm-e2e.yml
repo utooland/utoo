@@ -49,20 +49,12 @@ jobs:
           path: target/x86_64-unknown-linux-gnu/release/utoo
           retention-days: 1
 
-  e2e-linux:
+  e2e-linux-compat:
     needs: [build-linux-x64]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os_label: ubuntu-20.04
-            container: ubuntu:20.04
-          - os_label: ubuntu-24.04
-            container: ubuntu:24.04
-    name: utoopm-e2e-${{ matrix.os_label }}-x86_64-unknown-linux-gnu
+    name: utoopm-e2e-ubuntu-20.04-x86_64-unknown-linux-gnu
     runs-on: ubuntu-latest
     container:
-      image: ${{ matrix.container }}
+      image: ubuntu:20.04
     steps:
       - name: Install git
         env:
@@ -113,7 +105,57 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-artifacts-${{ matrix.os_label }}-x86_64-unknown-linux-gnu
+          name: e2e-artifacts-ubuntu-20.04-x86_64-unknown-linux-gnu
+          path: /tmp/utoo-*
+          if-no-files-found: ignore
+
+  e2e-linux:
+    needs: [build-linux-x64]
+    name: utoopm-e2e-ubuntu-24.04-x86_64-unknown-linux-gnu
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-linux-x64
+          path: dist
+
+      - name: Update PATH
+        run: |
+          chmod +x dist/utoo
+          echo "${{ github.workspace }}/dist" >> $GITHUB_PATH
+
+      - name: Create ut symlink
+        run: ln -sf utoo $(dirname $(which utoo))/ut
+
+      - name: Verify tools
+        run: |
+          echo "utoo: $(which utoo)"
+          echo "ut: $(which ut)"
+          utoo --version
+          ut --version
+
+      - name: Make scripts executable
+        run: chmod +x e2e/utoo-pm.sh e2e/pm-arborist.sh
+
+      - name: Run e2e tests
+        run: bash e2e/utoo-pm.sh
+
+      - name: Run arborist e2e tests
+        run: bash e2e/pm-arborist.sh
+
+      - name: Upload e2e artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-ubuntu-24.04-x86_64-unknown-linux-gnu
           path: /tmp/utoo-*
           if-no-files-found: ignore
 
@@ -306,12 +348,13 @@ jobs:
     if: always()
     needs:
       - build-linux-x64
+      - e2e-linux-compat
       - e2e-linux
       - e2e
     steps:
       - name: Check success
         run: |
-          for result in "${{ needs.build-linux-x64.result }}" "${{ needs.e2e-linux.result }}" "${{ needs.e2e.result }}"; do
+          for result in "${{ needs.build-linux-x64.result }}" "${{ needs.e2e-linux-compat.result }}" "${{ needs.e2e-linux.result }}" "${{ needs.e2e.result }}"; do
             if [ "$result" == "failure" ] || [ "$result" == "cancelled" ]; then
               echo "Tests failed or were cancelled"
               exit 1
