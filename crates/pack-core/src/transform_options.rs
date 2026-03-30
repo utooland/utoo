@@ -39,7 +39,9 @@ pub async fn get_typescript_transform_options(
 
     let use_define_for_class_fields = if let Some(ref tsconfig) = tsconfig {
         read_from_tsconfigs(tsconfig, |json, _| {
-            json["compilerOptions"]["useDefineForClassFields"].as_bool()
+            json.get("compilerOptions")
+                .and_then(|opts| opts.get("useDefineForClassFields"))
+                .and_then(|v| v.as_bool())
         })
         .await?
         .unwrap_or(true)
@@ -48,7 +50,9 @@ pub async fn get_typescript_transform_options(
     };
     let verbatim_module_syntax = if let Some(ref tsconfig) = tsconfig {
         read_from_tsconfigs(tsconfig, |json, _| {
-            json["compilerOptions"]["verbatimModuleSyntax"].as_bool()
+            json.get("compilerOptions")
+                .and_then(|opts| opts.get("verbatimModuleSyntax"))
+                .and_then(|v| v.as_bool())
         })
         .await?
         .unwrap_or(true)
@@ -74,7 +78,9 @@ pub async fn get_decorators_transform_options(
 
     let experimental_decorators = if let Some(ref tsconfig) = tsconfig {
         read_from_tsconfigs(tsconfig, |json, _| {
-            json["compilerOptions"]["experimentalDecorators"].as_bool()
+            json.get("compilerOptions")
+                .and_then(|opts| opts.get("experimentalDecorators"))
+                .and_then(|v| v.as_bool())
         })
         .await?
         .unwrap_or(false)
@@ -95,7 +101,9 @@ pub async fn get_decorators_transform_options(
 
     let emit_decorators_metadata = if let Some(ref tsconfig) = tsconfig {
         read_from_tsconfigs(tsconfig, |json, _| {
-            json["compilerOptions"]["emitDecoratorMetadata"].as_bool()
+            json.get("compilerOptions")
+                .and_then(|opts| opts.get("emitDecoratorMetadata"))
+                .and_then(|v| v.as_bool())
         })
         .await?
         .unwrap_or(false)
@@ -105,7 +113,9 @@ pub async fn get_decorators_transform_options(
 
     let use_define_for_class_fields = if let Some(ref tsconfig) = tsconfig {
         read_from_tsconfigs(tsconfig, |json, _| {
-            json["compilerOptions"]["useDefineForClassFields"].as_bool()
+            json.get("compilerOptions")
+                .and_then(|opts| opts.get("useDefineForClassFields"))
+                .and_then(|v| v.as_bool())
         })
         .await?
         .unwrap_or(true)
