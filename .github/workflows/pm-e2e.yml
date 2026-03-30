@@ -54,11 +54,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        host: [ubuntu-20.04, ubuntu-24.04]
-    name: utoopm-e2e-${{ matrix.host }}-x86_64-unknown-linux-gnu
-    runs-on: ${{ matrix.host }}
+        include:
+          - os_label: ubuntu-20.04
+            container: ubuntu:20.04
+          - os_label: ubuntu-24.04
+            container: ubuntu:24.04
+    name: utoopm-e2e-${{ matrix.os_label }}-x86_64-unknown-linux-gnu
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.container }}
     steps:
+      - name: Install git
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: apt-get update && apt-get install -y git
+
       - uses: actions/checkout@v4
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory /__w/utoo/utoo
 
       - name: Setup node
         uses: actions/setup-node@v4
@@ -99,7 +113,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-artifacts-${{ matrix.host }}-x86_64-unknown-linux-gnu
+          name: e2e-artifacts-${{ matrix.os_label }}-x86_64-unknown-linux-gnu
           path: /tmp/utoo-*
           if-no-files-found: ignore
 
