@@ -17,7 +17,7 @@ use pack_core::{
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    path::{MAIN_SEPARATOR, Path, PathBuf},
+    path::{Path, PathBuf},
     time::Duration,
 };
 use tracing::{Instrument, field::Empty};
@@ -116,6 +116,65 @@ pub struct WatchOptions {
 
 pub fn default_ignored_paths() -> Vec<RcStr> {
     vec!["node_modules".into()]
+}
+
+fn trim_leading_path_separators(path: &str) -> &str {
+    path.trim_start_matches(['/', '\\'])
+}
+
+fn normalize_path_for_prefix_match(path: &str) -> String {
+    let mut normalized = path.replace('\\', "/");
+    while normalized.ends_with('/')
+        && normalized.len() > 1
+        && !(normalized.len() == 3
+            && normalized.as_bytes()[1] == b':'
+            && normalized.as_bytes()[2] == b'/')
+    {
+        normalized.pop();
+    }
+    normalized
+}
+
+fn path_prefix_len(path: &str, root: &str) -> Option<usize> {
+    #[cfg(target_family = "windows")]
+    {
+        let path_cmp = path.to_ascii_lowercase();
+        let root_cmp = root.to_ascii_lowercase();
+        if !path_cmp.starts_with(&root_cmp) {
+            return None;
+        }
+    }
+    #[cfg(not(target_family = "windows"))]
+    if !path.starts_with(root) {
+        return None;
+    }
+
+    if path.len() == root.len()
+        || root.ends_with('/')
+        || path.as_bytes().get(root.len()) == Some(&b'/')
+    {
+        Some(root.len())
+    } else {
+        None
+    }
+}
+
+fn strip_root_prefix(path: &str, root: &str) -> Option<String> {
+    let path_normalized = normalize_path_for_prefix_match(path);
+    let root_normalized = normalize_path_for_prefix_match(root);
+
+    if let Some(prefix_len) = path_prefix_len(&path_normalized, &root_normalized) {
+        let remainder = &path_normalized[prefix_len..];
+        let remainder = remainder.strip_prefix('/').unwrap_or(remainder);
+        return Some(unix_to_sys(remainder).into_owned());
+    }
+
+    let path_sys = unix_to_sys(path);
+    let root_sys = unix_to_sys(root);
+    Path::new(path_sys.as_ref())
+        .strip_prefix(root_sys.as_ref())
+        .ok()
+        .map(|relative| trim_leading_path_separators(&relative.to_string_lossy()).to_owned())
 }
 
 #[derive(
@@ -616,16 +675,9 @@ impl Project {
     #[turbo_tasks::function]
     pub async fn project_fs(&self, denied_path: Vc<RcStr>) -> Result<Vc<DiskFileSystem>> {
         let mut denied_paths = Vec::new();
-        let unix_relative_project: String = if self.project_path.starts_with(&*self.root_path) {
-            let relative = self
-                .project_path
-                .strip_prefix(&*self.root_path)
-                .unwrap()
-                .trim_start_matches(MAIN_SEPARATOR);
-            sys_to_unix(relative).into_owned()
-        } else {
-            String::new()
-        };
+        let unix_relative_project = strip_root_prefix(&self.project_path, &self.root_path)
+            .map(|relative| sys_to_unix(&relative).into_owned())
+            .unwrap_or_default();
 
         let denied_path = denied_path.await?;
         if !denied_path.is_empty() {
@@ -637,10 +689,8 @@ impl Project {
             }
         }
 
-        if self.pack_path.starts_with(&*self.root_path) {
-            let relative_pack_path = self.pack_path.strip_prefix(&*self.root_path).unwrap();
-            let relative_pack_path = relative_pack_path.trim_start_matches(MAIN_SEPARATOR);
-            let turbopack_path = Path::new(relative_pack_path).join(".turbopack");
+        if let Some(relative_pack_path) = strip_root_prefix(&self.pack_path, &self.root_path) {
+            let turbopack_path = Path::new(&relative_pack_path).join(".turbopack");
             if let Some(path_str) = turbopack_path.to_str() {
                 let turbopack_path_normalized =
                     normalize_path(path_str).map_or_else(|| path_str.into(), RcStr::from);
@@ -727,16 +777,11 @@ impl Project {
     #[turbo_tasks::function]
     pub async fn node_root(self: Vc<Self>) -> Result<Vc<FileSystemPath>> {
         let this = self.await?;
-        let pack_relative = if this.pack_path.starts_with(&*this.root_path) {
-            this.pack_path.strip_prefix(&*this.root_path).unwrap()
-        } else {
-            "./"
+        let pack_relative = match strip_root_prefix(&this.pack_path, &this.root_path) {
+            Some(relative) if !relative.is_empty() => relative,
+            _ => ".".to_string(),
         };
-        let pack_relative = unix_to_sys(
-            pack_relative
-                .strip_prefix(MAIN_SEPARATOR)
-                .unwrap_or(pack_relative),
-        );
+        let pack_relative = unix_to_sys(trim_leading_path_separators(&pack_relative));
 
         Ok(self
             .output_fs()
@@ -752,12 +797,14 @@ impl Project {
         let this = self.await?;
         let dist_dir = self.dist_dir().await?;
 
-        let project_relative = this.project_path.strip_prefix(&*this.root_path).unwrap();
-        let project_relative = unix_to_sys(
-            project_relative
-                .strip_prefix(MAIN_SEPARATOR)
-                .unwrap_or(project_relative),
-        );
+        let project_relative = strip_root_prefix(&this.project_path, &this.root_path)
+            .with_context(|| {
+                format!(
+                    "project_path `{}` is not inside root_path `{}`",
+                    this.project_path, this.root_path
+                )
+            })?;
+        let project_relative = unix_to_sys(trim_leading_path_separators(&project_relative));
 
         Ok(self
             .output_fs()
@@ -787,12 +834,14 @@ impl Project {
     pub async fn project_path(self: Vc<Self>) -> Result<Vc<FileSystemPath>> {
         let this = self.await?;
         let root = self.project_root().await?;
-        let project_relative = this.project_path.strip_prefix(&*this.root_path).unwrap();
-        let project_relative = unix_to_sys(
-            project_relative
-                .strip_prefix(MAIN_SEPARATOR)
-                .unwrap_or(project_relative),
-        );
+        let project_relative = strip_root_prefix(&this.project_path, &this.root_path)
+            .with_context(|| {
+                format!(
+                    "project_path `{}` is not inside root_path `{}`",
+                    this.project_path, this.root_path
+                )
+            })?;
+        let project_relative = unix_to_sys(trim_leading_path_separators(&project_relative));
         Ok(root.join(&project_relative)?.cell())
     }
 
@@ -801,12 +850,9 @@ impl Project {
         let this = self.await?;
         let root = self.project_root().await?;
 
-        let project_relative = if this.pack_path.starts_with(&*this.root_path) {
-            this.pack_path.strip_prefix(&*this.root_path).unwrap()
-        } else {
-            this.pack_path.as_str()
-        };
-        Ok(root.join(project_relative)?.cell())
+        let project_relative = strip_root_prefix(&this.pack_path, &this.root_path)
+            .unwrap_or_else(|| this.pack_path.to_string());
+        Ok(root.join(&project_relative)?.cell())
     }
 
     #[turbo_tasks::function]
@@ -1641,4 +1687,40 @@ fn clean_directory(dist_path: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_root_prefix;
+    use turbo_unix_path::unix_to_sys;
+
+    #[test]
+    fn strip_root_prefix_handles_separator_differences() {
+        assert_eq!(
+            strip_root_prefix("C:/repo/app", r"C:\repo").as_deref(),
+            Some(unix_to_sys("app").as_ref())
+        );
+    }
+
+    #[test]
+    fn strip_root_prefix_rejects_non_boundary_prefixes() {
+        assert_eq!(strip_root_prefix("/repo-app", "/repo"), None);
+    }
+
+    #[test]
+    fn strip_root_prefix_supports_trailing_root_separator() {
+        assert_eq!(
+            strip_root_prefix("/repo/app", "/repo/").as_deref(),
+            Some("app")
+        );
+    }
+
+    #[cfg(target_family = "windows")]
+    #[test]
+    fn strip_root_prefix_is_case_insensitive_on_windows() {
+        assert_eq!(
+            strip_root_prefix("C:/Repo/App", "c:/repo").as_deref(),
+            Some("App")
+        );
+    }
 }

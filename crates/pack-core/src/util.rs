@@ -103,6 +103,8 @@ pub async fn internal_assets_conditions() -> Result<ContextCondition> {
 }
 
 pub fn convert_to_project_relative(project_inside_path: &str, project_path: &str) -> Result<RcStr> {
+    let to_request_path = |path: &str| -> RcStr { path.replace('\\', "/").into() };
+
     if is_absolute_path(project_inside_path) {
         pathdiff::diff_paths(
             simplified(Path::new(project_inside_path)),
@@ -146,11 +148,11 @@ pub fn convert_to_project_relative(project_inside_path: &str, project_path: &str
                     _ => p.to_string_lossy().to_string(),
                 };
 
-                Ok(path_with_prefix.into())
+                Ok(to_request_path(&path_with_prefix))
             },
         )
     } else {
-        Ok(project_inside_path.into())
+        Ok(to_request_path(project_inside_path))
     }
 }
 
@@ -181,4 +183,21 @@ pub fn module_styles_rule_condition() -> RuleCondition {
         RuleCondition::ContentTypeStartsWith("text/scss+module".into()),
         RuleCondition::ContentTypeStartsWith("text/less+module".into()),
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{convert_to_project_relative, is_absolute_path};
+
+    #[test]
+    fn windows_style_path_is_recognized_as_absolute() {
+        assert!(is_absolute_path(r"C:\Users\demo\src\index.ts"));
+        assert!(is_absolute_path(r"\\server\share\index.ts"));
+    }
+
+    #[test]
+    fn relative_windows_style_path_is_normalized_for_requests() {
+        let relative = convert_to_project_relative(r".\src\.umi-production\umi.ts", ".").unwrap();
+        assert_eq!(relative.to_string(), "./src/.umi-production/umi.ts");
+    }
 }
