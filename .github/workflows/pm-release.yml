@@ -116,7 +116,7 @@ jobs:
         run: git submodule update --init --recursive --depth 1
 
       - name: Build
-        run: cargo build --release --bin utoo --target ${{ matrix.target }}
+        run: cargo build --release --bin utoo --target ${{ matrix.target }} -p utoo-pm
 
       - name: Package Binaries
         run: |
