@@ -83,12 +83,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: utoo-linux-x64
-          path: ${{ github.workspace }}/dist
+          path: dist
 
       - name: Update PATH
         run: |
-          chmod +x ${{ github.workspace }}/dist/utoo
-          echo "${{ github.workspace }}/dist" >> $GITHUB_PATH
+          chmod +x $GITHUB_WORKSPACE/dist/utoo
+          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
 
       - name: Create ut symlink
         run: ln -sf utoo $(dirname $(which utoo))/ut
