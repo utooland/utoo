@@ -81,15 +81,13 @@ jobs:
           shared-key: pm-bench-linux
 
       - name: Build current branch utoo
-        run: |
-          cargo build --release --bin utoo -p utoo-pm
-          cp target/release/utoo /tmp/utoo-current
+        run: cargo build --release --bin utoo -p utoo-pm
 
       - name: Upload current binary
         uses: actions/upload-artifact@v4
         with:
           name: utoo-linux-bench-current
-          path: /tmp/utoo-current
+          path: target/release/utoo
           retention-days: 1
 
       - name: Build next branch utoo
@@ -99,14 +97,13 @@ jobs:
           git checkout origin/next
           git submodule update --init --recursive --depth 1
           cargo build --release --bin utoo -p utoo-pm
-          cp target/release/utoo /tmp/utoo-next
 
       - name: Upload next binary
         if: github.event.inputs.build_next == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: utoo-linux-bench-next
-          path: /tmp/utoo-next
+          path: target/release/utoo
           retention-days: 1
 
   benchmark-linux:
