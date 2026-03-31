@@ -49,16 +49,164 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  benchmark:
-    # Run on manual trigger or when PR is labeled with 'benchmark'
+  build-linux:
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && github.event.label.name == 'benchmark')
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:20.04
+    steps:
+      - name: Install dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: apt-get update && apt-get install -y build-essential curl pkg-config libssl-dev git
+
+      - uses: actions/checkout@v4
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory /__w/utoo/utoo
+
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-02-18
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pm-bench-linux
+
+      - name: Build current branch utoo
+        run: cargo build --release --bin utoo -p utoo-pm
+
+      - name: Upload current binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: utoo-linux-bench-current
+          path: target/release/utoo
+          retention-days: 1
+
+      - name: Build next branch utoo
+        if: github.event.inputs.build_next == 'true'
+        run: |
+          git fetch origin next --depth=1
+          git checkout origin/next
+          git submodule update --init --recursive --depth 1
+          cargo build --release --bin utoo -p utoo-pm
+
+      - name: Upload next binary
+        if: github.event.inputs.build_next == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: utoo-linux-bench-next
+          path: target/release/utoo
+          retention-days: 1
+
+  benchmark-linux:
+    needs: [build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download current binary
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-linux-bench-current
+          path: dist
+
+      - name: Setup current binary
+        run: |
+          chmod +x dist/utoo
+          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+
+      - name: Create ut symlink
+        run: ln -sf utoo $(dirname $(which utoo))/ut
+
+      - name: Install baseline utoo from npm
+        if: github.event.inputs.baseline != 'false'
+        run: |
+          npm install -g utoo
+          BASELINE_PATH=$(which utoo)
+          cp "$BASELINE_PATH" /tmp/utoo-npm
+          chmod +x /tmp/utoo-npm
+          echo "Baseline utoo (npm) version: $(/tmp/utoo-npm --version)"
+          echo "UTOO_NPM_BIN=/tmp/utoo-npm" >> $GITHUB_ENV
+
+      - name: Setup next binary
+        if: github.event.inputs.build_next == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-linux-bench-next
+          path: dist-next
+
+      - name: Install next binary
+        if: github.event.inputs.build_next == 'true'
+        run: |
+          chmod +x dist-next/utoo
+          cp dist-next/utoo /tmp/utoo-next
+          echo "Baseline utoo (next) version: $(/tmp/utoo-next --version)"
+          echo "UTOO_NEXT_BIN=/tmp/utoo-next" >> $GITHUB_ENV
+
+      - name: Resolve pm_list
+        id: pm
+        run: |
+          PM_LIST="${{ github.event.inputs.pm_list || 'utoo,bun' }}"
+          if [ "$PM_LIST" = "all" ]; then
+            PM_LIST="utoo,pnpm,yarn,bun"
+          fi
+          echo "list=$PM_LIST" >> $GITHUB_OUTPUT
+
+      - name: Install pnpm
+        if: contains(steps.pm.outputs.list, 'pnpm')
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Install yarn
+        if: contains(steps.pm.outputs.list, 'yarn')
+        run: npm install -g yarn
+
+      - name: Install bun
+        if: contains(steps.pm.outputs.list, 'bun')
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install hyperfine and GNU time
+        run: sudo apt-get update && sudo apt-get install -y hyperfine time
+
+      - name: Verify tools
+        run: |
+          echo "hyperfine: $(hyperfine --version)"
+          IFS=',' read -ra PMS <<< "${{ steps.pm.outputs.list }}"
+          for pm in "${PMS[@]}"; do
+            echo "$pm: $($pm --version 2>&1 || echo 'not installed')"
+          done
+
+      - name: Run benchmark
+        run: |
+          chmod +x e2e/pm-bench.sh
+          BENCH_COLD_RUNS=${{ github.event.inputs.cold_runs || '3' }} \
+          BENCH_WARM_RUNS=${{ github.event.inputs.warm_runs || '3' }} \
+          bash e2e/pm-bench.sh ${{ github.event.inputs.registry || 'both' }} ${{ steps.pm.outputs.list }}
+
+  benchmark:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'benchmark')
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -78,7 +226,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: pm-bench-${{ matrix.os }}
+          shared-key: pm-bench-macos-latest
 
       - name: Install baseline utoo from npm
         if: github.event.inputs.baseline != 'false'
@@ -139,13 +287,8 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install hyperfine and GNU time
-        run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            sudo apt-get update && sudo apt-get install -y hyperfine time
-          elif [ "$RUNNER_OS" = "macOS" ]; then
-            brew install hyperfine
-          fi
+      - name: Install hyperfine
+        run: brew install hyperfine
 
       - name: Verify tools
         run: |
