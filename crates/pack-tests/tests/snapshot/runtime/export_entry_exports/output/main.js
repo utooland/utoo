@@ -1051,12 +1051,29 @@ let BACKEND;
         if (resolver.loadingStarted) {
             return resolver.promise;
         }
-        if (sourceType === SourceType.Runtime && isCss(chunkUrl)) {
+        if (sourceType === SourceType.Runtime) {
             // CSS chunks do not register themselves, and as such must be marked as
             // loaded instantly.
             resolver.loadingStarted = true;
-            resolver.resolve();
-            return resolver.promise;
+            if (isCss(chunkUrl)) {
+                resolver.resolve();
+                return resolver.promise;
+            }
+            // Runtime JS chunks are expected to be present in the DOM already.
+            // Load it first
+            if (typeof importScripts !== 'function') {
+                const decodedChunkUrl = decodeURI(chunkUrl);
+                const previousScripts = document.querySelectorAll(`script[src="${chunkUrl}"],script[src^="${chunkUrl}?"],script[src="${decodedChunkUrl}"],script[src^="${decodedChunkUrl}?"]`);
+                if (previousScripts.length > 0) {
+                    for (const script of Array.from(previousScripts)){
+                        script.addEventListener('error', ()=>{
+                            resolver.reject();
+                        });
+                    }
+                    return resolver.promise;
+                }
+            }
+        // If it wasn't present in the DOM, fallback to loading logic.
         }
         if (typeof importScripts === 'function') {
             // We're in a web worker
