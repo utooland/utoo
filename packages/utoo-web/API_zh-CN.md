@@ -69,95 +69,41 @@ await project.installServiceWorker();
 
 ### 3. 解析和安装依赖
 
-`@utoo/web` 提供两种依赖管理方式：
-
-#### 方式 A：从 package.json 生成 lock 文件（推荐）
-
-使用 `deps()` 方法直接从 `package.json` 解析依赖。这会生成一个与 `package-lock.json` 兼容的 lock 文件，无需预先准备 lock 文件。
+从 `package.json` 解析依赖并安装。也可以将已有的 `package-lock.json` 字符串直接传递给 `install()`。详见 [`project.deps()`](#projectdepsoptions) 和 [`project.install()`](#projectinstallpackagelockjsonstring-maxconcurrentdownloads)。
 
 ```typescript
-// 从 package.json 解析依赖
-const packageLock = await project.deps({
-    registry: "https://registry.npmmirror.com", // 可选：自定义 registry
-    concurrency: 20, // 可选：并发请求数（默认：20）
-});
-
-// 安装解析后的依赖
+const packageLock = await project.deps();
 await project.install(packageLock);
-```
-
-#### 方式 B：使用已有的 package-lock.json
-
-如果你已经有 `package-lock.json`，可以直接使用：
-
-项目 `node_modules` 中的依赖包实际上是指向全局共享存储的逻辑链接。这意味着在同一浏览器域名下的不同 project 之间，可以共享同名且同版本的依赖，无需重复下载。这种机制类似于 `pnpm` 的存储策略。
-
-这种设计具有以下优势：
-1. **节省存储空间**：相同版本的依赖包在 OPFS 中仅存储一份，避免了冗余占用。
-2. **加速项目初始化**：创建新项目或切换项目时，若依赖包已存在于全局存储中，可直接复用，实现秒级安装。
-3. **减少网络流量**：常用依赖包只需下载一次，后续项目即可直接使用，大幅降低网络开销。
-4. **跨标签页复用**：即使开启新的浏览器标签页，只要处于同一域名下，依赖均可以直接复用。
-
-```typescript
-// 将您的 package-lock.json 作为 JSON 对象导入。
-import { packageLock } from "../packageLock";
-
-await project.install(JSON.stringify(packageLock));
 ```
 
 ### 4. 写入项目文件
 
-环境设置好后，您现在可以将源文件写入真实文件系统。
+将源文件写入文件系统。详见[文件系统方法](#文件系统方法)。
 
 ```typescript
-// 一个包含文件路径及其内容的对象。
 import { demoFiles } from "../demoFiles";
 
 await project.mkdir("src");
-
 for (const filePath in demoFiles) {
-    const content = demoFiles[filePath];
-    await project.writeFile(filePath, content);
+    await project.writeFile(filePath, demoFiles[filePath]);
 }
 ```
 
-### 5. 创建构建配置
+### 5. 构建
 
-您可以通过两种方式提供构建配置：
-
-#### 方式 A：直接传递配置（推荐）
-
-将 `ConfigComplete` 对象直接传递给 `build()` 或 `dev()`。这会跳过从磁盘读取配置文件。
+直接传递配置对象，或将 `utoopack.json` 写入项目根目录。详见 [`project.build()`](#projectbuildoptions) 和 [`project.dev()`](#projectdevoptions)。
 
 ```typescript
-const config = {
-  entry: [
-    {
-      import: "./src/index.tsx",
-      name: "main",
-    },
-  ],
-  output: {
-    path: "dist",
+await project.build({
+  config: {
+    entry: [{ import: "./src/index.tsx", name: "main" }],
+    output: { path: "dist" },
+    stats: true,
   },
-  stats: true,
-};
-
-await project.build({ config });
-// 或者用于开发模式：
-project.dev({ config, onUpdate: (result) => console.log(result) });
+});
 ```
 
-#### 方式 B：写入 `utoopack.json` 文件
-
-或者，将 `utoopack.json` 写入项目根目录。当未传递 `config` 时，打包器会自动读取此文件。
-
-```typescript
-await project.writeFile('utoopack.json', JSON.stringify(config, null, 2));
-await project.build();
-```
-
-若要使用 loader，请将其添加至 `package.json` 的 `devDependencies` 中并安装，这与标准 webpack 项目的依赖管理方式一致。此外，由于 `@utoo/web` 遵循 `loader-runner` 的机制与上下文来执行 loader，您还需要同时安装 `loader-runner`。
+若要使用 loader，请将其与 `loader-runner` 一起添加至 `package.json` 的 `devDependencies` 中并安装。另可通过 [`loadersImportMap`](#new-utooprojectoptions) 配置预构建的 loader 以避免文件系统 I/O 开销。
 
 完成这些步骤后，您的项目就完全初始化并准备好进行交互了。
 
@@ -226,6 +172,14 @@ await project.build();
 * `path` (string): 要删除的目录的路径。
 
 ### 依赖管理
+
+已安装的依赖包以逻辑链接的形式指向 OPFS 中的全局共享存储。这意味着同一浏览器域名下的不同项目可以共享同名且同版本的依赖，无需重复下载——机制类似于 `pnpm` 的存储策略。
+
+这种设计具有以下优势：
+1. **节省存储空间**：相同版本的依赖包在 OPFS 中仅存储一份。
+2. **加速项目初始化**：已存在的依赖包可直接复用，实现秒级安装。
+3. **减少网络流量**：常用依赖包只需下载一次。
+4. **跨标签页复用**：同一域名下的浏览器标签页可直接共享依赖。
 
 #### `project.deps(options?)`
 
