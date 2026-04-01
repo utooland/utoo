@@ -80,7 +80,6 @@ __turbopack_context__.s([]);
 "[project]/basic/alias/input/index.less?modules [client] (css module)", ((__turbopack_context__) => {
 
 __turbopack_context__.v({
-  "nav": "index-less__qOlY2a__nav",
 });
 }),
 "[project]/basic/alias/input/a.ts?query [client] (ecmascript)", ((__turbopack_context__) => {

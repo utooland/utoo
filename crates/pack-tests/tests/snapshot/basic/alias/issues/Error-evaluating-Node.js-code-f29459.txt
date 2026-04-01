@@ -1,0 +1,21 @@
+error - [transform] /basic/alias/input/index.less  Error evaluating Node.js code
+  
+  Error: Cannot find module 'less-loader'
+  Require stack:
+  - WORKSPACE_ROOT/crates/pack-tests/tests/snapshot/.turbopack/_turbopack__runtime.js
+  - WORKSPACE_ROOT/crates/pack-tests/tests/snapshot/.turbopack/webpack-loaders.js
+      [at Function._resolveFilename (node:internal/modules/cjs/loader:1383:15)]
+      [at Function.resolve (node:internal/modules/helpers:157:19)]
+      at resolve (turbopack:///[turbopack]/shared-node/base-externals-utils.ts:56:18) [WORKSPACE_ROOT/crates/pack-tests/tests/snapshot/.turbopack/_turbopack__runtime.js:630:20]
+      at resolve (turbopack:///[turbopack-node]/transforms/webpack-loaders.ts:466:50) [WORKSPACE_ROOT/crates/pack-tests/tests/snapshot/.turbopack/_root-of-the-server___7675ba93.js:888:86]
+      [at <anonymous>]
+      at map (turbopack:///[turbopack-node]/transforms/webpack-loaders.ts:465:37) [WORKSPACE_ROOT/crates/pack-tests/tests/snapshot/.turbopack/_root-of-the-server___7675ba93.js:887:41]
+      [at <anonymous>]
+      at transform (turbopack:///[turbopack-node]/transforms/webpack-loaders.ts:158:10) [WORKSPACE_ROOT/crates/pack-tests/tests/snapshot/.turbopack/_root-of-the-server___7675ba93.js:636:12]
+      at getValue (turbopack:///[turbopack-node]/child_process/evaluate.ts:89:29) [WORKSPACE_ROOT/crates/pack-tests/tests/snapshot/.turbopack/_root-of-the-server___c2828a04.js:73:37]
+      at run (turbopack:///[turbopack-node]/child_process/evaluate.ts:112:11) [WORKSPACE_ROOT/crates/pack-tests/tests/snapshot/.turbopack/_root-of-the-server___c2828a04.js:94:25]
+  
+  Import trace:
+    Browser:
+      ./basic/alias/input/index.less
+      ./basic/alias/input/index.ts

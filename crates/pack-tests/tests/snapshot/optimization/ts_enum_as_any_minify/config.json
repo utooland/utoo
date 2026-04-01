@@ -1,0 +1,15 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.ts",
+        "name": "main"
+      }
+    ],
+    "optimization": {
+      "minify": true,
+      "moduleIds": "named"
+    }
+  },
+  "runtimeType": "dummy"
+}

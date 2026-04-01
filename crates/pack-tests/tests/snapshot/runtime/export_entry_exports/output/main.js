@@ -1057,22 +1057,24 @@ let BACKEND;
             resolver.loadingStarted = true;
             if (isCss(chunkUrl)) {
                 resolver.resolve();
-                return resolver.promise;
             }
-            // Runtime JS chunks are expected to be present in the DOM already.
-            // Load it first
-            if (typeof importScripts !== 'function') {
-                const decodedChunkUrl = decodeURI(chunkUrl);
-                const previousScripts = document.querySelectorAll(`script[src="${chunkUrl}"],script[src^="${chunkUrl}?"],script[src="${decodedChunkUrl}"],script[src^="${decodedChunkUrl}?"]`);
-                if (previousScripts.length > 0) {
-                    for (const script of Array.from(previousScripts)){
-                        script.addEventListener('error', ()=>{
-                            resolver.reject();
-                        });
-                    }
-                    return resolver.promise;
-                }
-            }
+            return resolver.promise;
+        // Runtime JS chunks are expected to be present in the DOM already.
+        // Load it first
+        // if (typeof importScripts !== 'function') {
+        //   const decodedChunkUrl = decodeURI(chunkUrl)
+        //   const previousScripts = document.querySelectorAll(
+        //     `script[src="${chunkUrl}"],script[src^="${chunkUrl}?"],script[src="${decodedChunkUrl}"],script[src^="${decodedChunkUrl}?"]`
+        //   )
+        //   if (previousScripts.length > 0) {
+        //     for (const script of Array.from(previousScripts)) {
+        //       script.addEventListener('error', () => {
+        //         resolver.reject()
+        //       })
+        //     }
+        //     return resolver.promise
+        //   }
+        // }
         // If it wasn't present in the DOM, fallback to loading logic.
         }
         if (typeof importScripts === 'function') {

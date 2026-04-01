@@ -1,6 +1,5 @@
 {
   "version": 3,
   "sources": [],
-  "sections": [
-    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["turbopack:///turbopack:///[project]/basic/alias/input/index.less"],"sourcesContent":["\n.nav {\n    background-color: red;\n}"],"names":[],"mappings":"AACA"}}]
+  "sections": []
 }
