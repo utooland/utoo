@@ -433,10 +433,8 @@ async fn async_main() -> Result<()> {
         set_manifests_concurrency_limit(cli.manifests_concurrency_limit);
     }
 
-    // Initialize auto update with immediate check and background monitoring
-    if let Err(_e) = init_auto_update().await {
-        tracing::debug!("Auto update cancelled");
-    }
+    // Auto update: check cache → update or refresh in background
+    init_auto_update().await;
 
     match cli.command {
         Some(Commands::Clean { pattern }) => {
