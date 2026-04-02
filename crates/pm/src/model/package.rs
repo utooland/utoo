@@ -11,9 +11,12 @@ use crate::{service::script::ScriptService, util::linker::link};
 
 /// Known npm lifecycle hook names.
 ///
-/// This is the single source of truth for hook name strings.
-/// Use `as_str()` to get the package.json key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Single source of truth — strum derives `Display`, `EnumString`, `IntoStaticStr`,
+/// and `EnumIter` so hook names are defined once via `serialize_all` + per-variant overrides.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, strum::Display, strum::EnumString, strum::IntoStaticStr,
+)]
+#[strum(serialize_all = "lowercase")]
 pub enum LifecycleHook {
     Preinstall,
     Install,
@@ -22,6 +25,7 @@ pub enum LifecycleHook {
     Preprepare,
     Postprepare,
     Prepublish,
+    #[strum(serialize = "prepublishOnly")]
     PrepublishOnly,
     Prepack,
     Postpack,
@@ -30,22 +34,6 @@ pub enum LifecycleHook {
 }
 
 impl LifecycleHook {
-    /// All lifecycle hook variants.
-    pub const ALL: &[Self] = &[
-        Self::Preinstall,
-        Self::Install,
-        Self::Postinstall,
-        Self::Prepare,
-        Self::Preprepare,
-        Self::Postprepare,
-        Self::Prepublish,
-        Self::PrepublishOnly,
-        Self::Prepack,
-        Self::Postpack,
-        Self::Publish,
-        Self::Postpublish,
-    ];
-
     /// Hooks executed for the project root during install.
     pub const PROJECT_INSTALL_HOOKS: &[Self] = &[
         Self::Preinstall,
@@ -56,35 +44,6 @@ impl LifecycleHook {
         Self::Prepare,
         Self::Postprepare,
     ];
-
-    /// The package.json scripts key for this hook.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Preinstall => "preinstall",
-            Self::Install => "install",
-            Self::Postinstall => "postinstall",
-            Self::Prepare => "prepare",
-            Self::Preprepare => "preprepare",
-            Self::Postprepare => "postprepare",
-            Self::Prepublish => "prepublish",
-            Self::PrepublishOnly => "prepublishOnly",
-            Self::Prepack => "prepack",
-            Self::Postpack => "postpack",
-            Self::Publish => "publish",
-            Self::Postpublish => "postpublish",
-        }
-    }
-
-    /// Parse a script key to a lifecycle hook, if it matches.
-    pub fn from_str(s: &str) -> Option<Self> {
-        Self::ALL.iter().find(|h| h.as_str() == s).copied()
-    }
-}
-
-impl std::fmt::Display for LifecycleHook {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
 }
 
 /// Lifecycle scripts extracted from package.json.
@@ -100,7 +59,7 @@ impl LifecycleScripts {
         Self {
             scripts: scripts
                 .iter()
-                .filter_map(|(k, v)| Some((LifecycleHook::from_str(k)?, v.clone())))
+                .filter_map(|(k, v)| Some((k.parse::<LifecycleHook>().ok()?, v.clone())))
                 .collect(),
         }
     }

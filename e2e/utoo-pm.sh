@@ -565,10 +565,18 @@ rm -rf "$ESBUILD_DIR"
 echo -e "${YELLOW}Case: broken pipe handling${NC}"
 SIGPIPE_DIR=$(mktemp -d)
 pushd "$SIGPIPE_DIR"
-echo '{"name":"sigpipe-test","version":"1.0.0"}' > package.json
-# Pipe utoo output to head — closes the pipe early. Should exit cleanly, not panic.
-utoo list 2>/dev/null | head -1 > /dev/null
-EXIT_CODE=$?
+cat > package.json <<'PKGJSON'
+{
+  "name": "sigpipe-test",
+  "version": "1.0.0",
+  "scripts": {
+    "prepare": "echo line1 && echo line2 && echo line3"
+  }
+}
+PKGJSON
+# Pipe script output to head — closes the pipe early. utoo should not panic.
+EXIT_CODE=0
+ut run prepare 2>/dev/null | head -1 > /dev/null || EXIT_CODE=$?
 if [ $EXIT_CODE -ne 0 ] && [ $EXIT_CODE -ne 141 ]; then
     echo -e "${RED}FAIL: broken pipe caused exit code $EXIT_CODE (expected 0 or 141)${NC}"
     popd; rm -rf "$SIGPIPE_DIR"; exit 1
