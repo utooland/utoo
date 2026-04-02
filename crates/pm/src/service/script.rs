@@ -29,7 +29,7 @@ async fn build_script_command(
         .env(
             "INIT_CWD",
             env::current_dir()
-                .unwrap_or_default()
+                .expect("failed to get current working directory")
                 .to_string_lossy()
                 .to_string(),
         )
@@ -135,11 +135,10 @@ impl ScriptService {
                 Self::ensure_node_gyp().await?;
             }
 
-            let mut cmd = build_script_command(package, hook.as_str(), script).await?;
+            let mut cmd = build_script_command(package, hook.into(), script).await?;
             tracing::debug!("Executing command: {cmd:?}");
 
             if show_output {
-                // Use inherit for stdio to preserve colors when showing output
                 cmd.stdin(std::process::Stdio::inherit())
                     .stdout(std::process::Stdio::inherit())
                     .stderr(std::process::Stdio::inherit());
@@ -151,21 +150,18 @@ impl ScriptService {
 
                 if !status.success() {
                     anyhow::bail!(
-                        "Script execution failed for {} in {}: exit code {}",
-                        hook.as_str(),
+                        "Script execution failed for {hook} in {}: exit code {}",
                         package.path.display(),
                         status.code().unwrap_or(-1)
                     );
                 }
             } else {
-                // Use piped stdio to capture output for error messages
                 let output = tokio::process::Command::from(cmd)
                     .output()
                     .await
                     .context("Failed to execute script")?;
 
                 if !output.status.success() {
-                    // Print captured output when script fails
                     if !output.stdout.is_empty() {
                         println!("{}", String::from_utf8_lossy(&output.stdout));
                     }
@@ -173,13 +169,11 @@ impl ScriptService {
                         eprintln!("{}", String::from_utf8_lossy(&output.stderr));
                     }
 
-                    let exit_code = output.status.code().unwrap_or(-1);
                     anyhow::bail!(
-                        "Script execution failed for {} in {}:\nCommand: {}\nExit code: {}",
-                        hook.as_str(),
+                        "Script execution failed for {hook} in {}:\nCommand: {}\nExit code: {}",
                         package.path.display(),
                         script,
-                        exit_code
+                        output.status.code().unwrap_or(-1)
                     );
                 }
             }
