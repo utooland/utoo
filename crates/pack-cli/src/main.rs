@@ -12,11 +12,8 @@ use pack_core::tracing_presets::{
     TRACING_OVERVIEW_TARGETS, TRACING_TARGETS, TRACING_TURBO_TASKS_TARGETS,
     TRACING_TURBOPACK_TARGETS,
 };
-use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::EnvFilter;
 use turbo_tasks_malloc::TurboMalloc;
-use turbopack_trace_utils::{
-    exit::ExitGuard, filter_layer::FilterLayer, raw_trace::RawTraceLayer, trace_writer::TraceWriter,
-};
 
 use pack_cli::{Command, Mode, PartialProjectOptions, build, serve};
 
@@ -47,7 +44,7 @@ fn main() {
     let future = async move {
         let trace = std::env::var("TURBOPACK_TRACING").ok();
 
-        let _guard = if let Some(mut trace) = trace.filter(|v| !v.is_empty()) {
+        if let Some(mut trace) = trace.filter(|v| !v.is_empty()) {
             // Trace presets
             match trace.as_str() {
                 "overview" | "1" => {
@@ -65,19 +62,9 @@ fn main() {
                 _ => {}
             }
 
-            let subscriber = Registry::default();
-
-            let subscriber = subscriber.with(FilterLayer::try_new(&trace).unwrap());
-            let trace_file = PathBuf::from(&project_path).join("trace.log");
-            let trace_writer = File::create(trace_file).unwrap();
-            let (trace_writer, guard) = TraceWriter::new(trace_writer);
-            let subscriber = subscriber.with(RawTraceLayer::new(trace_writer));
-
-            let guard = ExitGuard::new(guard).unwrap();
-
-            subscriber.init();
-
-            Some(guard)
+            tracing_subscriber::fmt()
+                .with_env_filter(EnvFilter::try_new(&trace).unwrap())
+                .init();
         } else {
             tracing_subscriber::fmt()
                 .with_env_filter(
@@ -90,8 +77,6 @@ fn main() {
                     "%Y-%m-%d %H:%M:%S.%3f".to_string(),
                 ))
                 .init();
-
-            None
         };
 
         let project_options_path = PathBuf::from(&project_path).join("utoopack.json");
@@ -165,8 +150,8 @@ fn main() {
         use dial9_tokio_telemetry::telemetry::{RotatingWriter, TracedRuntime};
         let writer = RotatingWriter::builder()
             .base_path(dial9_trace_path)
-            .max_file_size(1024 * 1024)
-            .max_total_size(5 * 1024 * 1024)
+            .max_file_size(100 * 1024 * 1024)
+            .max_total_size(500 * 1024 * 1024)
             .build()
             .unwrap();
 
