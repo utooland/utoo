@@ -9,7 +9,7 @@ use utoo_ruborist::lock::PackageLock;
 use utoo_ruborist::manifest::ScriptsView;
 use utoo_ruborist::model::package_json::parse_bin_field;
 
-use super::script::ScriptService;
+use super::script::{ScriptOutput, ScriptService};
 
 /// Execution queues for package scripts and binary linking
 /// Each entry is (PackageInfo, is_optional) where is_optional indicates if the package
@@ -29,7 +29,7 @@ impl PackageService {
         let package_info = PackageInfo::load(root_path).await?;
 
         for &hook in LifecycleHook::PROJECT_INSTALL_HOOKS {
-            ScriptService::execute_script(&package_info, hook, true)
+            ScriptService::execute_script(&package_info, hook, ScriptOutput::Verbose)
                 .await
                 .with_context(|| format!("Failed to execute project hook {hook}"))?;
         }
@@ -228,14 +228,15 @@ impl PackageService {
                     async move {
                         log_progress(&format!("{} {}", package.name, hook));
                         let start = std::time::Instant::now();
-                        let result = ScriptService::execute_script(&package, hook, false)
-                            .await
-                            .with_context(|| {
-                                format!(
-                                    "Failed to execute {} script for {} (command: {})",
-                                    hook, package.name, script
-                                )
-                            });
+                        let result =
+                            ScriptService::execute_script(&package, hook, ScriptOutput::Silent)
+                                .await
+                                .with_context(|| {
+                                    format!(
+                                        "Failed to execute {} script for {} (command: {})",
+                                        hook, package.name, script
+                                    )
+                                });
                         let elapsed = start.elapsed();
                         tracing::debug!(
                             "[{:.2}s] {} {} completed (path: {}, script: {})",

@@ -11,6 +11,15 @@ use super::binary::get_envs;
 
 use crate::util::user_config::get_install_scope;
 
+/// How script output is handled.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ScriptOutput {
+    /// Stream to terminal in real time (user-facing scripts).
+    Verbose,
+    /// Capture and only print on failure (dependency lifecycle scripts).
+    Silent,
+}
+
 /// Build a `Command` with the standard npm env vars for script execution.
 async fn build_script_command(
     package: &PackageInfo,
@@ -114,7 +123,7 @@ impl ScriptService {
     pub async fn execute_script(
         package: &PackageInfo,
         hook: crate::model::package::LifecycleHook,
-        show_output: bool,
+        output: ScriptOutput,
     ) -> Result<()> {
         let script = package.lifecycle_scripts.get_script(hook);
 
@@ -125,8 +134,7 @@ impl ScriptService {
                 script
             );
 
-            // Print command if show_output is true (for project hooks)
-            if show_output {
+            if output == ScriptOutput::Verbose {
                 println!("> {script}");
                 println!();
             }
@@ -138,7 +146,7 @@ impl ScriptService {
             let mut cmd = build_script_command(package, hook.into(), script).await?;
             tracing::debug!("Executing command: {cmd:?}");
 
-            if show_output {
+            if output == ScriptOutput::Verbose {
                 cmd.stdin(std::process::Stdio::inherit())
                     .stdout(std::process::Stdio::inherit())
                     .stderr(std::process::Stdio::inherit());
