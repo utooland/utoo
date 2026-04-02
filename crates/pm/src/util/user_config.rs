@@ -104,6 +104,33 @@ pub fn get_omit() -> HashSet<OmitType> {
     OMIT.get().cloned().unwrap_or_default()
 }
 
+/// Whether the current install is global (`-g`) or local.
+#[derive(Default, Clone, Copy)]
+pub enum InstallScope {
+    #[default]
+    Local,
+    Global,
+}
+
+impl InstallScope {
+    pub fn as_env_value(self) -> &'static str {
+        match self {
+            Self::Global => "true",
+            Self::Local => "",
+        }
+    }
+}
+
+static INSTALL_SCOPE: OnceLock<InstallScope> = OnceLock::new();
+
+pub fn set_install_scope(scope: InstallScope) {
+    let _ = INSTALL_SCOPE.set(scope);
+}
+
+pub fn get_install_scope() -> InstallScope {
+    INSTALL_SCOPE.get().copied().unwrap_or_default()
+}
+
 // Manifest fetch concurrency configuration
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
     LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 64));

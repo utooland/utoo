@@ -9,51 +9,63 @@ use crate::util::json::load_package_json;
 use crate::util::user_config::get_or_load_package_json;
 use crate::{service::script::ScriptService, util::linker::link};
 
-/// Typed struct for npm lifecycle hooks only.
-/// For arbitrary user scripts (build, test, dev, etc.), use `PackageInfo.scripts` HashMap.
-#[derive(Debug, Default, Clone, serde::Deserialize)]
-#[serde(default)]
+/// Known npm lifecycle hook names.
+///
+/// Single source of truth — strum derives `Display`, `EnumString`, `IntoStaticStr`,
+/// and `EnumIter` so hook names are defined once via `serialize_all` + per-variant overrides.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, strum::Display, strum::EnumString, strum::IntoStaticStr,
+)]
+#[strum(serialize_all = "lowercase")]
+pub enum LifecycleHook {
+    Preinstall,
+    Install,
+    Postinstall,
+    Prepare,
+    Preprepare,
+    Postprepare,
+    Prepublish,
+    #[strum(serialize = "prepublishOnly")]
+    PrepublishOnly,
+    Prepack,
+    Postpack,
+    Publish,
+    Postpublish,
+}
+
+impl LifecycleHook {
+    /// Hooks executed for the project root during install.
+    pub const PROJECT_INSTALL_HOOKS: &[Self] = &[
+        Self::Preinstall,
+        Self::Install,
+        Self::Postinstall,
+        Self::Prepublish,
+        Self::Preprepare,
+        Self::Prepare,
+        Self::Postprepare,
+    ];
+}
+
+/// Lifecycle scripts extracted from package.json.
+/// Only contains known npm lifecycle hooks; arbitrary user scripts are in `PackageInfo.scripts`.
+#[derive(Debug, Default, Clone)]
 pub struct LifecycleScripts {
-    pub preinstall: Option<String>,
-    pub install: Option<String>,
-    pub postinstall: Option<String>,
-    pub prepare: Option<String>,
-    pub preprepare: Option<String>,
-    pub postprepare: Option<String>,
-    pub prepublish: Option<String>,
-    #[serde(rename = "prepublishOnly")]
-    pub prepublish_only: Option<String>,
-    pub prepack: Option<String>,
-    pub postpack: Option<String>,
-    pub publish: Option<String>,
-    pub postpublish: Option<String>,
+    scripts: HashMap<LifecycleHook, String>,
 }
 
 impl LifecycleScripts {
-    /// Roundtrip through serde to extract only the known lifecycle hook fields
-    /// from a full scripts map, ignoring arbitrary user scripts (build, test, etc.).
+    /// Extract lifecycle hooks from a scripts map, filtering out non-lifecycle entries.
     pub fn from_scripts(scripts: &HashMap<String, String>) -> Self {
-        serde_json::to_value(scripts)
-            .and_then(serde_json::from_value)
-            .unwrap_or_default()
+        Self {
+            scripts: scripts
+                .iter()
+                .filter_map(|(k, v)| Some((k.parse::<LifecycleHook>().ok()?, v.clone())))
+                .collect(),
+        }
     }
 
-    pub fn get_script(&self, script_type: &str) -> Option<&String> {
-        match script_type {
-            "preinstall" => self.preinstall.as_ref(),
-            "install" => self.install.as_ref(),
-            "postinstall" => self.postinstall.as_ref(),
-            "prepare" => self.prepare.as_ref(),
-            "preprepare" => self.preprepare.as_ref(),
-            "postprepare" => self.postprepare.as_ref(),
-            "prepublish" => self.prepublish.as_ref(),
-            "prepublishOnly" => self.prepublish_only.as_ref(),
-            "prepack" => self.prepack.as_ref(),
-            "postpack" => self.postpack.as_ref(),
-            "publish" => self.publish.as_ref(),
-            "postpublish" => self.postpublish.as_ref(),
-            _ => None,
-        }
+    pub fn get_script(&self, hook: LifecycleHook) -> Option<&String> {
+        self.scripts.get(&hook)
     }
 }
 
@@ -273,9 +285,24 @@ mod tests {
         assert_eq!(package_info.bin_files.len(), 1);
         assert_eq!(package_info.bin_files[0].0, "test-cli");
         assert_eq!(package_info.bin_files[0].1, "./bin/cli.js");
-        assert!(package_info.lifecycle_scripts.preinstall.is_some());
-        assert!(package_info.lifecycle_scripts.install.is_some());
-        assert!(package_info.lifecycle_scripts.postinstall.is_some());
+        assert!(
+            package_info
+                .lifecycle_scripts
+                .get_script(LifecycleHook::Preinstall)
+                .is_some()
+        );
+        assert!(
+            package_info
+                .lifecycle_scripts
+                .get_script(LifecycleHook::Install)
+                .is_some()
+        );
+        assert!(
+            package_info
+                .lifecycle_scripts
+                .get_script(LifecycleHook::Postinstall)
+                .is_some()
+        );
     }
 
     #[tokio::test]

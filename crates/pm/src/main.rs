@@ -18,7 +18,8 @@ use helper::auto_update::init_auto_update;
 use util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
 use util::save_type::{OmitType, PackageAction, SaveType, parse_save_type};
 use util::user_config::{
-    init_registry, set_cache_dir, set_legacy_peer_deps, set_manifests_concurrency_limit, set_omit,
+    InstallScope, init_registry, set_cache_dir, set_install_scope, set_legacy_peer_deps,
+    set_manifests_concurrency_limit, set_omit,
 };
 
 mod cmd;
@@ -467,6 +468,10 @@ async fn async_main() -> Result<()> {
                 omit_set.insert(OmitType::Peer);
             }
             set_omit(omit_set);
+
+            if global {
+                set_install_scope(InstallScope::Global);
+            }
 
             if !specs.is_empty() {
                 if global {

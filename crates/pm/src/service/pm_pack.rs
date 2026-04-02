@@ -5,8 +5,9 @@ use ignore::WalkBuilder;
 use std::path::{Path, PathBuf};
 use tar::Builder;
 
+use crate::model::package::LifecycleHook;
 use crate::model::package::PackageInfo;
-use crate::service::script::ScriptService;
+use crate::service::script::{ScriptOutput, ScriptService};
 use crate::util::integrity::compute_integrity;
 use crate::util::user_config::get_or_load_package_json;
 
@@ -41,7 +42,8 @@ pub async fn pack(package_root: &Path) -> Result<PackResult> {
         anyhow::bail!("Missing 'version' field in package.json");
     }
 
-    ScriptService::execute_script(&package_info, "prepack", true).await?;
+    ScriptService::execute_script(&package_info, LifecycleHook::Prepack, ScriptOutput::Verbose)
+        .await?;
 
     // collect_pack_files uses ignore::WalkBuilder which does synchronous I/O.
     // Run on a blocking thread to avoid stalling the tokio runtime.
@@ -66,7 +68,12 @@ pub async fn pack(package_root: &Path) -> Result<PackResult> {
     let integrity = compute_integrity(&tar_data);
     let packed_size = tar_data.len() as u64;
 
-    ScriptService::execute_script(&package_info, "postpack", true).await?;
+    ScriptService::execute_script(
+        &package_info,
+        LifecycleHook::Postpack,
+        ScriptOutput::Verbose,
+    )
+    .await?;
 
     Ok(PackResult {
         tarball_data: tar_data,

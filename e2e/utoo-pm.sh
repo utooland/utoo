@@ -561,4 +561,47 @@ echo -e "${GREEN}PASS: install-node + esbuild${NC}"
 popd
 rm -rf "$ESBUILD_DIR"
 
+# Case: broken pipe should not panic
+echo -e "${YELLOW}Case: broken pipe handling${NC}"
+SIGPIPE_DIR=$(mktemp -d)
+pushd "$SIGPIPE_DIR"
+cat > package.json <<'PKGJSON'
+{
+  "name": "sigpipe-test",
+  "version": "1.0.0",
+  "scripts": {
+    "prepare": "echo line1 && echo line2 && echo line3"
+  }
+}
+PKGJSON
+# Pipe script output to head — closes the pipe early. utoo should not panic.
+EXIT_CODE=0
+ut run prepare 2>/dev/null | head -1 > /dev/null || EXIT_CODE=$?
+if [ $EXIT_CODE -ne 0 ] && [ $EXIT_CODE -ne 141 ]; then
+    echo -e "${RED}FAIL: broken pipe caused exit code $EXIT_CODE (expected 0 or 141)${NC}"
+    popd; rm -rf "$SIGPIPE_DIR"; exit 1
+fi
+echo -e "${GREEN}PASS: broken pipe handled cleanly${NC}"
+
+# Verify that non-zero exit codes from scripts are propagated correctly
+cat > package.json <<'PKGJSON'
+{
+  "name": "sigpipe-test",
+  "version": "1.0.0",
+  "scripts": {
+    "fail": "exit 141"
+  }
+}
+PKGJSON
+EXIT_CODE=0
+ut run fail 2>/dev/null || EXIT_CODE=$?
+if [ $EXIT_CODE -eq 0 ]; then
+    echo -e "${RED}FAIL: script exiting 141 should propagate non-zero exit code${NC}"
+    popd; rm -rf "$SIGPIPE_DIR"; exit 1
+fi
+echo -e "${GREEN}PASS: script exit code propagated correctly (got $EXIT_CODE)${NC}"
+
+popd
+rm -rf "$SIGPIPE_DIR"
+
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"

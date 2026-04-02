@@ -1,7 +1,10 @@
 /// One-time system tuning: fd limits, thread pools, etc.
 pub fn init() {
     #[cfg(unix)]
-    raise_fd_limit();
+    {
+        raise_fd_limit();
+        reset_sigpipe();
+    }
 
     // Windows default thread stack is 1MB, insufficient for libdeflater + tar
     // + rayon work-stealing.
@@ -10,6 +13,15 @@ pub fn init() {
         .stack_size(8 * 1024 * 1024)
         .build_global()
         .ok();
+}
+
+/// Restore default SIGPIPE handling so broken pipes cause a clean exit
+/// instead of a panic. Same approach as ripgrep and fd.
+#[cfg(unix)]
+fn reset_sigpipe() {
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
 }
 
 /// Raise the open-file soft limit to the hard limit.
@@ -24,6 +36,22 @@ fn raise_fd_limit() {
         if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rlim) == 0 && rlim.rlim_cur < rlim.rlim_max {
             rlim.rlim_cur = rlim.rlim_max;
             libc::setrlimit(libc::RLIMIT_NOFILE, &rlim);
+        }
+    }
+}
+
+#[cfg(test)]
+#[cfg(unix)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_reset_sigpipe_sets_sig_dfl() {
+        reset_sigpipe();
+        unsafe {
+            // signal() returns the previous handler — after reset it should be SIG_DFL
+            let prev = libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+            assert_eq!(prev, libc::SIG_DFL);
         }
     }
 }
