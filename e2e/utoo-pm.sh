@@ -582,6 +582,25 @@ if [ $EXIT_CODE -ne 0 ] && [ $EXIT_CODE -ne 141 ]; then
     popd; rm -rf "$SIGPIPE_DIR"; exit 1
 fi
 echo -e "${GREEN}PASS: broken pipe handled cleanly${NC}"
+
+# Verify that non-zero exit codes from scripts are propagated correctly
+cat > package.json <<'PKGJSON'
+{
+  "name": "sigpipe-test",
+  "version": "1.0.0",
+  "scripts": {
+    "fail": "exit 141"
+  }
+}
+PKGJSON
+EXIT_CODE=0
+ut run fail 2>/dev/null || EXIT_CODE=$?
+if [ $EXIT_CODE -eq 0 ]; then
+    echo -e "${RED}FAIL: script exiting 141 should propagate non-zero exit code${NC}"
+    popd; rm -rf "$SIGPIPE_DIR"; exit 1
+fi
+echo -e "${GREEN}PASS: script exit code propagated correctly (got $EXIT_CODE)${NC}"
+
 popd
 rm -rf "$SIGPIPE_DIR"
 
