@@ -203,10 +203,11 @@ async fn fetch_and_cache_version() -> Result<String> {
         .context("Unable to get version information")?
         .to_string();
 
+    let last_update_failed = read_version_cache().ok().and_then(|c| c.last_update_failed);
     let cache = VersionCache {
         version,
         check_time: now_secs(),
-        last_update_failed: None,
+        last_update_failed,
     };
 
     save_version_cache(&cache)?;
