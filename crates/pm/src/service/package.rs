@@ -1,4 +1,4 @@
-use crate::model::package::{LifecycleScripts, PackageInfo};
+use crate::model::package::{LifecycleHook, LifecycleScripts, PackageInfo};
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
 use anyhow::{Context, Result};
 use futures;
@@ -28,23 +28,10 @@ impl PackageService {
     pub async fn process_project_hooks(root_path: &Path) -> Result<()> {
         let package_info = PackageInfo::load(root_path).await?;
 
-        let hooks = [
-            "preinstall",
-            "install",
-            "postinstall",
-            "prepublish",
-            "preprepare",
-            "prepare",
-            "postprepare",
-        ];
-
-        for hook in hooks {
-            if package_info.lifecycle_scripts.get_script(hook).is_some() {
-                tracing::debug!("Executing project hook: {hook}");
-                ScriptService::execute_script(&package_info, hook, true)
-                    .await
-                    .with_context(|| format!("Failed to execute project hook {hook}"))?;
-            }
+        for &hook in LifecycleHook::PROJECT_INSTALL_HOOKS {
+            ScriptService::execute_script(&package_info, hook, true)
+                .await
+                .with_context(|| format!("Failed to execute project hook {hook}"))?;
         }
 
         Ok(())
@@ -145,16 +132,25 @@ impl PackageService {
 
             // Script queues - skip in bins_only mode
             if !ignore_scripts {
-                if package.lifecycle_scripts.preinstall.is_some() {
-                    tracing::debug!("Adding {} to preinstall queue", package.path.display());
+                if package
+                    .lifecycle_scripts
+                    .get_script(LifecycleHook::Preinstall)
+                    .is_some()
+                {
                     queues.preinstall.push((Rc::clone(&package), is_optional));
                 }
-                if package.lifecycle_scripts.install.is_some() {
-                    tracing::debug!("Adding {} to install queue", package.path.display());
+                if package
+                    .lifecycle_scripts
+                    .get_script(LifecycleHook::Install)
+                    .is_some()
+                {
                     queues.install.push((Rc::clone(&package), is_optional));
                 }
-                if package.lifecycle_scripts.postinstall.is_some() {
-                    tracing::debug!("Adding {} to postinstall queue", package.path.display());
+                if package
+                    .lifecycle_scripts
+                    .get_script(LifecycleHook::Postinstall)
+                    .is_some()
+                {
                     queues.postinstall.push((Rc::clone(&package), is_optional));
                 }
             }
@@ -195,16 +191,13 @@ impl PackageService {
             }
 
             // Execute preinstall scripts in parallel
-            Self::execute_script_queue(&queues.preinstall, "preinstall").await?;
+            Self::execute_script_queue(&queues.preinstall, LifecycleHook::Preinstall).await?;
 
-            // Link binary files
             Self::execute_binary_linking(&queues.bin_linking).await?;
 
-            // Execute install scripts in parallel
-            Self::execute_script_queue(&queues.install, "install").await?;
+            Self::execute_script_queue(&queues.install, LifecycleHook::Install).await?;
 
-            // Execute postinstall scripts in parallel
-            Self::execute_script_queue(&queues.postinstall, "postinstall").await?;
+            Self::execute_script_queue(&queues.postinstall, LifecycleHook::Postinstall).await?;
 
             if total_scripts > 0 {
                 finish_progress_bar("scripts executed");
@@ -217,40 +210,30 @@ impl PackageService {
     /// Queue contains (PackageInfo, is_optional) tuples where is_optional indicates edge type
     async fn execute_script_queue(
         queue: &[(Rc<PackageInfo>, bool)],
-        script_name: &str,
+        hook: LifecycleHook,
     ) -> Result<()> {
         use futures;
 
         let queue_start = std::time::Instant::now();
-        tracing::debug!(
-            "Starting {} queue with {} scripts",
-            script_name,
-            queue.len()
-        );
+        tracing::debug!("Starting {} queue with {} scripts", hook, queue.len());
 
         let script_tasks: Vec<_> = queue
             .iter()
             .filter_map(|(package, is_optional)| {
-                let script_option = match script_name {
-                    "preinstall" => &package.lifecycle_scripts.preinstall,
-                    "install" => &package.lifecycle_scripts.install,
-                    "postinstall" => &package.lifecycle_scripts.postinstall,
-                    _ => return None,
-                };
-
-                script_option.as_ref().map(|script| {
+                let script = package.lifecycle_scripts.get_script(hook)?;
+                Some({
                     let package = Rc::clone(package);
                     let script = script.clone();
                     let is_optional = *is_optional;
                     async move {
-                        log_progress(&format!("{} {}", package.name, script_name));
+                        log_progress(&format!("{} {}", package.name, hook));
                         let start = std::time::Instant::now();
-                        let result = ScriptService::execute_script(&package, script_name, false)
+                        let result = ScriptService::execute_script(&package, hook, false)
                             .await
                             .with_context(|| {
                                 format!(
                                     "Failed to execute {} script for {} (command: {})",
-                                    script_name, package.name, script
+                                    hook, package.name, script
                                 )
                             });
                         let elapsed = start.elapsed();
@@ -258,7 +241,7 @@ impl PackageService {
                             "[{:.2}s] {} {} completed (path: {}, script: {})",
                             elapsed.as_secs_f64(),
                             package.name,
-                            script_name,
+                            hook,
                             package.path.display(),
                             script
                         );
@@ -284,7 +267,7 @@ impl PackageService {
         let queue_elapsed = queue_start.elapsed();
         tracing::debug!(
             "{} queue completed in {:.2}s",
-            script_name,
+            hook,
             queue_elapsed.as_secs_f64()
         );
 
@@ -1020,17 +1003,18 @@ mod tests {
             path: package_path.to_path_buf(),
             bin_files: vec![],
             scripts: Default::default(),
-            lifecycle_scripts: LifecycleScripts {
-                postinstall: Some("exit 1".to_string()),
-                ..Default::default()
-            },
+            lifecycle_scripts: LifecycleScripts::from_scripts(&HashMap::from([(
+                "postinstall".to_string(),
+                "exit 1".to_string(),
+            )])),
             name: "test-optional-fail".to_string(),
         };
 
         // Test with is_optional = true: should NOT return error
         let queue_optional: Vec<(Rc<PackageInfo>, bool)> =
             vec![(Rc::new(package_info.clone()), true)];
-        let result = PackageService::execute_script_queue(&queue_optional, "postinstall").await;
+        let result =
+            PackageService::execute_script_queue(&queue_optional, LifecycleHook::Postinstall).await;
         assert!(
             result.is_ok(),
             "Optional dependency script failure should be ignored"
@@ -1038,7 +1022,8 @@ mod tests {
 
         // Test with is_optional = false: should return error
         let queue_required: Vec<(Rc<PackageInfo>, bool)> = vec![(Rc::new(package_info), false)];
-        let result = PackageService::execute_script_queue(&queue_required, "postinstall").await;
+        let result =
+            PackageService::execute_script_queue(&queue_required, LifecycleHook::Postinstall).await;
         assert!(
             result.is_err(),
             "Required dependency script failure should return error"

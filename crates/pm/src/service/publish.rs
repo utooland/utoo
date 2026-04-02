@@ -27,6 +27,7 @@ use anyhow::{Context, Result};
 use reqwest::RequestBuilder;
 
 use crate::model::RunMode;
+use crate::model::package::LifecycleHook;
 use crate::model::package::PackageInfo;
 use crate::model::publish_payload::{PublishPayload, PublishPayloadInput};
 use crate::service::auth;
@@ -54,7 +55,7 @@ pub struct PublishResult {
 
 pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
     // Run prepublishOnly lifecycle script
-    ScriptService::execute_script(opts.package_info, "prepublishOnly", true).await?;
+    ScriptService::execute_script(opts.package_info, LifecycleHook::PrepublishOnly, true).await?;
 
     // Always pack in memory — dry-run only skips the registry PUT.
     let pack_result = pm_pack::pack(&opts.package_info.path).await?;
@@ -123,8 +124,8 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
     }
 
     // Run publish lifecycle scripts
-    ScriptService::execute_script(opts.package_info, "publish", true).await?;
-    ScriptService::execute_script(opts.package_info, "postpublish", true).await?;
+    ScriptService::execute_script(opts.package_info, LifecycleHook::Publish, true).await?;
+    ScriptService::execute_script(opts.package_info, LifecycleHook::Postpublish, true).await?;
 
     Ok(PublishResult {
         pack: pack_result,

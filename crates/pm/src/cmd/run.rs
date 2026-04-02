@@ -104,7 +104,7 @@ pub async fn run_script(
         tracing::debug!(cmd = %pre_script, args = "", "Executing command");
         println!("> {pre_script} ");
         println!();
-        ScriptService::execute_custom_script(&package, &pre_script_name, pre_script)
+        ScriptService::execute_custom_script(&package, &pre_script_name, pre_script, vec![])
             .await
             .with_context(|| format!("Failed to execute pre script {pre_script_name}"))?;
     }
@@ -121,14 +121,9 @@ pub async fn run_script(
     tracing::debug!(cmd = %script_content, args = %script_args_str, "Executing command");
     println!("> {script_content} {script_args_str}");
     println!();
-    ScriptService::execute_custom_script_with_args(
-        &package,
-        script_name,
-        script_content,
-        script_args,
-    )
-    .await
-    .with_context(|| format!("Failed to execute script {script_name}"))?;
+    ScriptService::execute_custom_script(&package, script_name, script_content, script_args)
+        .await
+        .with_context(|| format!("Failed to execute script {script_name}"))?;
 
     // Execute post script if exists
     let post_script_name = format!("post{script_name}");
@@ -136,7 +131,7 @@ pub async fn run_script(
         tracing::debug!(cmd = %post_script, args = "", "Executing command");
         println!("> {post_script} ");
         println!();
-        ScriptService::execute_custom_script(&package, &post_script_name, post_script)
+        ScriptService::execute_custom_script(&package, &post_script_name, post_script, vec![])
             .await
             .with_context(|| format!("Failed to execute post script {post_script_name}"))?;
     }

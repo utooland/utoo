@@ -561,4 +561,20 @@ echo -e "${GREEN}PASS: install-node + esbuild${NC}"
 popd
 rm -rf "$ESBUILD_DIR"
 
+# Case: broken pipe should not panic
+echo -e "${YELLOW}Case: broken pipe handling${NC}"
+SIGPIPE_DIR=$(mktemp -d)
+pushd "$SIGPIPE_DIR"
+echo '{"name":"sigpipe-test","version":"1.0.0"}' > package.json
+# Pipe utoo output to head — closes the pipe early. Should exit cleanly, not panic.
+utoo list 2>/dev/null | head -1 > /dev/null
+EXIT_CODE=$?
+if [ $EXIT_CODE -ne 0 ] && [ $EXIT_CODE -ne 141 ]; then
+    echo -e "${RED}FAIL: broken pipe caused exit code $EXIT_CODE (expected 0 or 141)${NC}"
+    popd; rm -rf "$SIGPIPE_DIR"; exit 1
+fi
+echo -e "${GREEN}PASS: broken pipe handled cleanly${NC}"
+popd
+rm -rf "$SIGPIPE_DIR"
+
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"

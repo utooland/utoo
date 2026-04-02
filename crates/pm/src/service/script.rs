@@ -9,6 +9,52 @@ use tokio::sync::OnceCell;
 
 use super::binary::get_envs;
 
+use crate::util::user_config::get_install_scope;
+
+/// Build a `Command` with the standard npm env vars for script execution.
+async fn build_script_command(
+    package: &PackageInfo,
+    script_name: &str,
+    script_content: &str,
+) -> Result<Command> {
+    let bin_paths = ScriptService::collect_bin_paths(package).await?;
+    let env_path = ScriptService::build_path_env(&bin_paths);
+
+    let mut cmd = Command::new("sh");
+    cmd.arg("-c")
+        .arg(script_content)
+        .current_dir(&package.path)
+        .env("PATH", env_path)
+        .env("npm_lifecycle_event", script_name)
+        .env(
+            "INIT_CWD",
+            env::current_dir()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+        )
+        .env(
+            "npm_package_json",
+            package.path.join("package.json").display().to_string(),
+        )
+        .env("npm_config_global", get_install_scope().as_env_value());
+
+    if let Some(envs) = get_envs().await {
+        tracing::debug!(
+            "Injecting {} binary mirror envs for {}",
+            envs.len(),
+            package.name
+        );
+        for (key, value) in envs {
+            if let Some(value_str) = value.as_str() {
+                cmd.env(key, value_str);
+            }
+        }
+    }
+
+    Ok(cmd)
+}
+
 /// Cached result of node-gyp availability check and installation
 static NODE_GYP_ENSURED: OnceCell<Result<bool, String>> = OnceCell::const_new();
 
@@ -67,15 +113,14 @@ impl ScriptService {
 
     pub async fn execute_script(
         package: &PackageInfo,
-        script_type: &str,
+        hook: crate::model::package::LifecycleHook,
         show_output: bool,
     ) -> Result<()> {
-        let script = package.lifecycle_scripts.get_script(script_type);
+        let script = package.lifecycle_scripts.get_script(hook);
 
         if let Some(script) = script {
             tracing::debug!(
-                "Executing {} script for {}: {}",
-                script_type,
+                "Executing {hook} script for {}: {}",
                 package.path.display(),
                 script
             );
@@ -90,42 +135,7 @@ impl ScriptService {
                 Self::ensure_node_gyp().await?;
             }
 
-            let bin_paths = Self::collect_bin_paths(package).await?;
-            let env_path = Self::build_path_env(&bin_paths);
-
-            let mut cmd = Command::new("sh");
-            cmd.arg("-c")
-                .arg(script)
-                .current_dir(&package.path)
-                .env("PATH", env_path)
-                .env("npm_lifecycle_event", script_type)
-                .env(
-                    "INIT_CWD",
-                    env::current_dir()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string(),
-                )
-                .env(
-                    "npm_package_json",
-                    package.path.join("package.json").display().to_string(),
-                )
-                .env("npm_config_prefix", "")
-                .env("npm_config_global", "false")
-                .env("FORCE_COLOR", "1"); // Enable color output for npm/yarn/etc
-
-            if let Some(envs) = get_envs().await {
-                tracing::debug!(
-                    "Injecting {} binary mirror envs for {}",
-                    envs.len(),
-                    package.name
-                );
-                for (key, value) in envs {
-                    if let Some(value_str) = value.as_str() {
-                        cmd.env(key, value_str);
-                    }
-                }
-            }
+            let mut cmd = build_script_command(package, hook.as_str(), script).await?;
             tracing::debug!("Executing command: {cmd:?}");
 
             if show_output {
@@ -142,7 +152,7 @@ impl ScriptService {
                 if !status.success() {
                     anyhow::bail!(
                         "Script execution failed for {} in {}: exit code {}",
-                        script_type,
+                        hook.as_str(),
                         package.path.display(),
                         status.code().unwrap_or(-1)
                     );
@@ -166,7 +176,7 @@ impl ScriptService {
                     let exit_code = output.status.code().unwrap_or(-1);
                     anyhow::bail!(
                         "Script execution failed for {} in {}:\nCommand: {}\nExit code: {}",
-                        script_type,
+                        hook.as_str(),
                         package.path.display(),
                         script,
                         exit_code
@@ -326,14 +336,6 @@ impl ScriptService {
         package: &PackageInfo,
         script_name: &str,
         script_content: &str,
-    ) -> Result<()> {
-        Self::execute_custom_script_with_args(package, script_name, script_content, vec![]).await
-    }
-
-    pub async fn execute_custom_script_with_args(
-        package: &PackageInfo,
-        script_name: &str,
-        script_content: &str,
         script_args: Vec<&str>,
     ) -> Result<()> {
         tracing::debug!(
@@ -342,47 +344,20 @@ impl ScriptService {
             script_name
         );
 
-        let bin_paths = Self::collect_bin_paths(package).await?;
-        let env_path = Self::build_path_env(&bin_paths);
-
         let cmd_content = match script_args.is_empty() {
             true => script_content,
             false => &format!("{} {}", script_content, script_args.join(" ")),
         };
 
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c")
-            .arg(cmd_content)
-            .current_dir(&package.path)
-            .env("PATH", env_path)
-            .env("npm_lifecycle_event", script_name)
-            .env(
-                "INIT_CWD",
-                env::current_dir()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string(),
-            )
-            .env(
-                "npm_package_json",
-                package.path.join("package.json").display().to_string(),
-            )
-            .env("npm_config_prefix", "")
-            .env("npm_config_global", "false")
-            .env("FORCE_COLOR", "1") // Enable color output for npm/yarn/etc
-            .stdin(std::process::Stdio::inherit())
+        let mut cmd = build_script_command(package, script_name, cmd_content).await?;
+        cmd.stdin(std::process::Stdio::inherit())
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit());
 
-        if let Some(envs) = get_envs().await {
-            for (key, value) in envs {
-                if let Some(value_str) = value.as_str() {
-                    cmd.env(key, value_str);
-                }
-            }
-        }
-
-        let status = cmd.status().context("Failed to execute custom script")?;
+        let status = tokio::process::Command::from(cmd)
+            .status()
+            .await
+            .context("Failed to execute custom script")?;
 
         if !status.success() {
             anyhow::bail!(
