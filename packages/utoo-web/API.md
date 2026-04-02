@@ -69,95 +69,41 @@ await project.installServiceWorker();
 
 ### 3. Resolve and Install Dependencies
 
-`@utoo/web` provides two approaches for dependency management:
-
-#### Option A: Generate lock file from package.json (Recommended)
-
-Use the `deps()` method to resolve dependencies directly from your `package.json`. This generates a `package-lock.json` compatible lock file without needing one beforehand.
+Resolve dependencies from `package.json` and install them. Alternatively, pass an existing `package-lock.json` string directly to `install()`. See [`project.deps()`](#projectdepsoptions) and [`project.install()`](#projectinstallpackagelockjsonstring-maxconcurrentdownloads) for full options.
 
 ```typescript
-// Resolve dependencies from package.json
-const packageLock = await project.deps({
-    registry: "https://registry.npmmirror.com", // Optional: custom registry
-    concurrency: 20, // Optional: concurrent requests (default: 20)
-});
-
-// Install the resolved dependencies
+const packageLock = await project.deps();
 await project.install(packageLock);
-```
-
-#### Option B: Use existing package-lock.json
-
-If you already have a `package-lock.json`, you can use it directly:
-
-The dependency packages in the project's `node_modules` are actually logical links pointing to a global shared storage. This means that different projects under the same browser domain can share dependencies with the same name and version without repeated downloads. This mechanism is similar to `pnpm`'s storage strategy.
-
-This design has the following advantages:
-1. **Save Storage Space**: Identical versions of dependency packages are stored only once in OPFS, avoiding redundant usage.
-2. **Accelerate Project Initialization**: When creating a new project or switching projects, if the dependency packages already exist in the global storage, they can be reused directly, achieving second-level installation.
-3. **Reduce Network Traffic**: Frequently used dependency packages only need to be downloaded once, and subsequent projects can use them directly, significantly reducing network overhead.
-4. **Cross-Tab Reuse**: Even if a new browser tab is opened, as long as it is under the same domain, dependencies can be directly reused.
-
-```typescript
-// Import your package-lock.json as a JSON object.
-import { packageLock } from "../packageLock";
-
-await project.install(JSON.stringify(packageLock));
 ```
 
 ### 4. Write Project Files
 
-With the environment set up, you can now write your source files to the real file system.
+Write your source files to the file system. See [File System Methods](#file-system-methods) for the full API.
 
 ```typescript
-// An object containing file paths and their content.
 import { demoFiles } from "../demoFiles";
 
 await project.mkdir("src");
-
 for (const filePath in demoFiles) {
-    const content = demoFiles[filePath];
-    await project.writeFile(filePath, content);
+    await project.writeFile(filePath, demoFiles[filePath]);
 }
 ```
 
-### 5. Create Build Configuration
+### 5. Build
 
-You can provide the build configuration in two ways:
-
-#### Option A: Pass config directly (Recommended)
-
-Pass a `ConfigComplete` object directly to `build()` or `dev()`. This skips reading any config file from disk.
+Pass a config object directly, or write a `utoopack.json` to the project root. See [`project.build()`](#projectbuildoptions) and [`project.dev()`](#projectdevoptions) for full options.
 
 ```typescript
-const config = {
-  entry: [
-    {
-      import: "./src/index.tsx",
-      name: "main",
-    },
-  ],
-  output: {
-    path: "dist",
+await project.build({
+  config: {
+    entry: [{ import: "./src/index.tsx", name: "main" }],
+    output: { path: "dist" },
+    stats: true,
   },
-  stats: true,
-};
-
-await project.build({ config });
-// or for dev mode:
-project.dev({ config, onUpdate: (result) => console.log(result) });
+});
 ```
 
-#### Option B: Write a `utoopack.json` file
-
-Alternatively, write a `utoopack.json` to the project root. When no `config` is passed, the bundler reads this file automatically.
-
-```typescript
-await project.writeFile('utoopack.json', JSON.stringify(config, null, 2));
-await project.build();
-```
-
-To use loaders, you must add them to the `devDependencies` in your `package.json` and install them, just as you would in a standard Webpack project. Additionally, you must install `loader-runner`, as `@utoo/web` relies on the `loader-runner` mechanism and context to execute loaders.
+To use loaders, add them to `devDependencies` in your `package.json` along with `loader-runner`, then install them. See [`loadersImportMap`](#new-utooprojectoptions) for an alternative that avoids file system I/O overhead.
 
 After these steps, your project is fully initialized and ready for interaction.
 
@@ -226,6 +172,14 @@ Removes a directory.
 * `path` (string): The path to the directory to be removed.
 
 ### Dependency Management
+
+Installed packages are stored as logical links pointing to a global shared storage in OPFS. This means different projects under the same browser domain share dependencies with the same name and version without repeated downloads — similar to `pnpm`'s storage strategy.
+
+This design provides:
+1. **Save Storage Space**: Identical versions are stored only once in OPFS.
+2. **Accelerate Project Initialization**: Existing packages are reused directly, achieving second-level installation.
+3. **Reduce Network Traffic**: Frequently used packages only need to be downloaded once.
+4. **Cross-Tab Reuse**: Dependencies are shared across browser tabs on the same domain.
 
 #### `project.deps(options?)`
 
