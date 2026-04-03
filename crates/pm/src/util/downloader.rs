@@ -41,7 +41,9 @@ fn extract_host(url: &str) -> &str {
         .strip_prefix("https://")
         .or_else(|| url.strip_prefix("http://"))
         .unwrap_or(url);
-    without_scheme.split('/').next().unwrap_or(without_scheme)
+    let host_part = without_scheme.split('/').next().unwrap_or(without_scheme);
+    // Strip user:pass@ prefix (e.g. "user:pass@registry.npmjs.org")
+    host_part.rsplit('@').next().unwrap_or(host_part)
 }
 
 /// Global download cache shared between pipeline and install phases.

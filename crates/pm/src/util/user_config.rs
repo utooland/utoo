@@ -81,9 +81,11 @@ pub async fn init_auth_token() {
     // ruborist itself has no auth awareness — it just uses whatever client is provided.
     if let Ok(builder) = ruborist_client_builder() {
         let mut headers = HeaderMap::new();
-        if let Ok(val) = format!("Bearer {token}").parse() {
-            headers.insert(AUTHORIZATION, val);
-        }
+        let Ok(val) = format!("Bearer {token}").parse() else {
+            tracing::warn!("Failed to parse auth token for registry {}", registry);
+            return;
+        };
+        headers.insert(AUTHORIZATION, val);
         if let Ok(client) = builder.default_headers(headers).build() {
             set_http_client(client);
         }
