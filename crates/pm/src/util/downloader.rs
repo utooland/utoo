@@ -19,6 +19,31 @@ use super::user_config::get_manifests_concurrency_limit_sync;
 // Global downloader client - no pool limit, concurrency controlled by OnceMap
 static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
 
+static AUTH_TOKEN: OnceLock<String> = OnceLock::new();
+
+pub fn set_auth_token(token: String) {
+    let _ = AUTH_TOKEN.set(token);
+}
+
+fn get_auth_token() -> Option<&'static str> {
+    AUTH_TOKEN.get().map(|s| s.as_str())
+}
+
+/// Only attach auth token when the tarball URL points to the configured registry.
+fn url_matches_registry(url: &str) -> bool {
+    let registry = super::user_config::get_registry();
+    extract_host(url) == extract_host(&registry)
+}
+
+/// Extract the host portion from a URL (e.g. "https://registry.npmjs.org/foo" -> "registry.npmjs.org").
+fn extract_host(url: &str) -> &str {
+    let without_scheme = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .unwrap_or(url);
+    without_scheme.split('/').next().unwrap_or(without_scheme)
+}
+
 /// Global download cache shared between pipeline and install phases.
 /// Key: "name@version", Value: cache path.
 static DOWNLOAD_CACHE: Lazy<OnceMap<String, PathBuf>> = Lazy::new(OnceMap::new);
@@ -136,7 +161,13 @@ pub async fn download_bytes(url: &str) -> Result<Bytes> {
         || async {
             let attempt = retry_count.fetch_add(1, Ordering::Relaxed);
 
-            let response = match DOWNLOADER_CLIENT.get(url).send().await {
+            let mut request = DOWNLOADER_CLIENT.get(url);
+            if let Some(token) = get_auth_token()
+                && url_matches_registry(url)
+            {
+                request = request.bearer_auth(token);
+            }
+            let response = match request.send().await {
                 Ok(r) => r,
                 Err(e) => {
                     tracing::warn!(

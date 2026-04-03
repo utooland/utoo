@@ -18,8 +18,8 @@ use helper::auto_update::init_auto_update;
 use util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
 use util::save_type::{OmitType, PackageAction, SaveType, parse_save_type};
 use util::user_config::{
-    InstallScope, init_registry, set_cache_dir, set_install_scope, set_legacy_peer_deps,
-    set_manifests_concurrency_limit, set_omit,
+    InstallScope, init_auth_token, init_registry, set_cache_dir, set_install_scope,
+    set_legacy_peer_deps, set_manifests_concurrency_limit, set_omit,
 };
 
 mod cmd;
@@ -419,6 +419,8 @@ async fn async_main() -> Result<()> {
 
     // global registry
     init_registry(cli.registry).await;
+
+    init_auth_token().await;
 
     // set cache directory
     set_cache_dir(cli.cache_dir).await;

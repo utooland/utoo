@@ -75,22 +75,28 @@
 //! More compatible with sandboxed environments where direct DNS is blocked.
 //! WASM targets skip DNS entirely (browser handles it).
 
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result, anyhow};
 
-/// Global HTTP client with connection pooling and DNS caching.
-///
-/// Stores `Result<Client, String>` so that proxy-configuration errors are
-/// surfaced to callers instead of panicking or calling `process::exit`.
-static HTTP_CLIENT: LazyLock<Result<reqwest::Client, String>> = LazyLock::new(|| {
-    client_builder()
-        .and_then(|b| b.build().context("Failed to build reqwest client"))
-        .map_err(|e| e.to_string())
-});
+/// Global HTTP client, settable from outside or lazily built on first use.
+static HTTP_CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
+
+/// Inject a pre-configured HTTP client (e.g. with auth headers).
+/// Must be called before any registry requests; subsequent calls are ignored.
+pub fn set_http_client(client: reqwest::Client) {
+    let _ = HTTP_CLIENT.set(Ok(client));
+}
 
 pub(crate) fn get_client() -> Result<&'static reqwest::Client> {
-    HTTP_CLIENT.as_ref().map_err(|e| anyhow!("{e}"))
+    HTTP_CLIENT
+        .get_or_init(|| {
+            client_builder()
+                .and_then(|b| b.build().context("Failed to build reqwest client"))
+                .map_err(|e| e.to_string())
+        })
+        .as_ref()
+        .map_err(|e| anyhow!("{e}"))
 }
 
 /// Create a [`reqwest::ClientBuilder`] with TLS, DNS caching, and proxy

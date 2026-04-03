@@ -4,8 +4,10 @@ use std::sync::{LazyLock, OnceLock};
 
 use anyhow::Result;
 use dashmap::DashMap;
+use reqwest::header::{AUTHORIZATION, HeaderMap};
 use utoo_ruborist::builder::PeerDeps;
 use utoo_ruborist::manifest::PackageJson;
+use utoo_ruborist::service::{client_builder as ruborist_client_builder, set_http_client};
 use utoo_ruborist::spec::Catalogs;
 
 use super::config_file::{Config, ConfigValue};
@@ -13,6 +15,7 @@ use super::http::client_builder;
 use super::json::load_package_json;
 use super::registry::{REGISTRY_NPMMIRROR, select_fastest_registry};
 use super::save_type::OmitType;
+use crate::service::auth::resolve_token;
 
 static REGISTRY: LazyLock<ConfigValue<String>> =
     LazyLock::new(|| ConfigValue::new("registry", REGISTRY_NPMMIRROR.to_string()));
@@ -64,6 +67,30 @@ pub async fn init_registry(registry: Option<String>) {
 
 pub fn get_registry() -> String {
     REGISTRY.get_sync()
+}
+
+/// Resolve auth token and configure HTTP clients for private registry access.
+pub async fn init_auth_token() {
+    let registry = get_registry();
+    let Some(token) = resolve_token(&registry).await else {
+        return;
+    };
+    tracing::debug!("Auth token resolved for {}", registry);
+
+    // Inject a pre-configured HTTP client into ruborist with Bearer auth default header.
+    // ruborist itself has no auth awareness — it just uses whatever client is provided.
+    if let Ok(builder) = ruborist_client_builder() {
+        let mut headers = HeaderMap::new();
+        if let Ok(val) = format!("Bearer {token}").parse() {
+            headers.insert(AUTHORIZATION, val);
+        }
+        if let Ok(client) = builder.default_headers(headers).build() {
+            set_http_client(client);
+        }
+    }
+
+    // Downloader needs per-request hostname guard, so store token separately.
+    super::downloader::set_auth_token(token);
 }
 
 static CATALOGS: tokio::sync::OnceCell<Catalogs> = tokio::sync::OnceCell::const_new();

@@ -147,7 +147,6 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                 if let Some(etag_value) = &etag {
                     request = request.header("If-None-Match", etag_value);
                 }
-
                 let response = request.send().await.map_err(classify_reqwest_error)?;
                 let status = response.status();
 
