@@ -5,7 +5,7 @@ use swc_core::ecma::ast::*;
 use swc_core::ecma::visit::{Visit, VisitWith};
 use turbo_tasks::ResolvedVc;
 use turbopack::module_options::{ModuleRule, ModuleRuleEffect, RuleCondition};
-use turbopack_core::reference_type::{ReferenceType, UrlReferenceSubType};
+use turbopack_core::reference_type::{ReferenceTypeCondition, UrlReferenceSubType};
 use turbopack_ecmascript::{CustomTransformer, EcmascriptInputTransform, TransformContext};
 
 pub fn get_classic_jsx_react_import_rule() -> ModuleRule {
@@ -14,8 +14,8 @@ pub fn get_classic_jsx_react_import_rule() -> ModuleRule {
     ) as _));
 
     let condition = RuleCondition::all(vec![
-        RuleCondition::not(RuleCondition::ReferenceType(ReferenceType::Url(
-            UrlReferenceSubType::Undefined,
+        RuleCondition::not(RuleCondition::ReferenceType(ReferenceTypeCondition::Url(
+            Some(UrlReferenceSubType::Undefined),
         ))),
         RuleCondition::any(vec![
             RuleCondition::ResourcePathEndsWith(".jsx".to_string()),

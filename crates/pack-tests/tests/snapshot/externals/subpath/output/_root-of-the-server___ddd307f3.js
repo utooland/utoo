@@ -2,42 +2,42 @@
 "[externals]/antd [external] (antd, global)", ((__turbopack_context__) => {
 "use strict";
 
-const mod = globalThis["antd"];
+var mod = globalThis["antd"];
 
 __turbopack_context__.v(mod);
 }),
 "[externals]/antd Button [external] (antd Button, global)", ((__turbopack_context__) => {
 "use strict";
 
-const mod = globalThis["antd"]["Button"];
+var mod = globalThis["antd"]["Button"];
 
 __turbopack_context__.v(mod);
 }),
 "[externals]/antd DatePicker [external] (antd DatePicker, global)", ((__turbopack_context__) => {
 "use strict";
 
-const mod = globalThis["antd"]["DatePicker"];
+var mod = globalThis["antd"]["DatePicker"];
 
 __turbopack_context__.v(mod);
 }),
 "[externals]/antd Input Group [external] (antd Input Group, global)", ((__turbopack_context__) => {
 "use strict";
 
-const mod = globalThis["antd"]["Input"]["Group"];
+var mod = globalThis["antd"]["Input"]["Group"];
 
 __turbopack_context__.v(mod);
 }),
 "[externals]/antd version [external] (antd version, global)", ((__turbopack_context__) => {
 "use strict";
 
-const mod = globalThis["antd"]["version"];
+var mod = globalThis["antd"]["version"];
 
 __turbopack_context__.v(mod);
 }),
 "[externals]/emotionReact [external] (emotionReact, global)", ((__turbopack_context__) => {
 "use strict";
 
-const mod = globalThis["emotionReact"];
+var mod = globalThis["emotionReact"];
 
 __turbopack_context__.v(mod);
 }),

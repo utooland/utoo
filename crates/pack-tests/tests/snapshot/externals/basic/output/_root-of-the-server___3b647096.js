@@ -2,19 +2,19 @@
 "[externals]/bar [external] (bar, global)", ((__turbopack_context__) => {
 "use strict";
 
-const mod = globalThis["bar"];
+var mod = globalThis["bar"];
 
 __turbopack_context__.v(mod);
 }),
 "[externals]/bar [external] (bar, cjs)", ((__turbopack_context__, module, exports) => {
 
-const mod = __turbopack_context__.x("bar", () => require("bar"));
+var mod = __turbopack_context__.x("bar", () => require("bar"));
 
 module.exports = mod;
 }),
 "[externals]/bar_require2 [external] (bar_require2, cjs)", ((__turbopack_context__, module, exports) => {
 
-const mod = __turbopack_context__.x("bar_require2", () => require("bar_require2"));
+var mod = __turbopack_context__.x("bar_require2", () => require("bar_require2"));
 
 module.exports = mod;
 }),
@@ -22,8 +22,7 @@ module.exports = mod;
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
-
-const mod = await __turbopack_context__.y("bar");
+var mod = await __turbopack_context__.y("bar");
 
 __turbopack_context__.n(mod);
 __turbopack_async_result__();
@@ -32,8 +31,7 @@ __turbopack_async_result__();
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
-
-const mod = await __turbopack_context__.y("bar_import2");
+var mod = await __turbopack_context__.y("bar_import2");
 
 __turbopack_context__.n(mod);
 __turbopack_async_result__();
@@ -42,8 +40,7 @@ __turbopack_async_result__();
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
-
-const mod = await (async () => {
+var mod = await (async () => {
   if (typeof globalThis["bar_script1"] !== 'undefined') {
     return globalThis["bar_script1"];
   }
@@ -65,8 +62,7 @@ __turbopack_async_result__();
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
-
-const mod = await (async () => {
+var mod = await (async () => {
   if (typeof globalThis["bar_script2"] !== 'undefined') {
     return globalThis["bar_script2"];
   }
@@ -88,7 +84,6 @@ __turbopack_async_result__();
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
-
 var __TURBOPACK__imported__module__$5b$externals$5d2f$bar__$5b$external$5d$__$28$bar$2c$__global$29$__ = __turbopack_context__.i("[externals]/bar [external] (bar, global)");
 var __TURBOPACK__imported__module__$5b$externals$5d2f$bar__$5b$external$5d$__$28$bar$2c$__cjs$29$__ = __turbopack_context__.i("[externals]/bar [external] (bar, cjs)");
 var __TURBOPACK__imported__module__$5b$externals$5d2f$bar_require2__$5b$external$5d$__$28$bar_require2$2c$__cjs$29$__ = __turbopack_context__.i("[externals]/bar_require2 [external] (bar_require2, cjs)");

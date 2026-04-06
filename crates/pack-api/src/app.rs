@@ -246,7 +246,13 @@ impl AppEntrypoint {
                 .server_chunking_context()
                 .entry_chunk_group(
                     project.dist_root().owned().await?.join(name)?,
-                    self.entry_evaluatable_assets(asset_context, runtime_entries),
+                    ChunkGroup::Entry(
+                        self.entry_evaluatable_assets(asset_context, runtime_entries)
+                            .await?
+                            .iter()
+                            .map(|m| ResolvedVc::upcast(*m))
+                            .collect(),
+                    ),
                     module_graph,
                     OutputAssets::empty(),
                     OutputAssets::empty(),

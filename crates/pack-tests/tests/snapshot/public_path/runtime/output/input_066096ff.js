@@ -1,7 +1,7 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-83, ((__turbopack_context__) => {
+83, (function(__turbopack_context__){
 
-__turbopack_context__.v(__turbopack_context__.p() + "asset.99aa06d3.jpg");}),
+__turbopack_context__.v(__turbopack_context__.p() + "asset.2d068005.jpg");}),
 48, ((__turbopack_context__) => {
 "use strict";
 

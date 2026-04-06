@@ -4,8 +4,7 @@ use turbo_rcstr::RcStr;
 use turbo_tasks::{NonLocalValue, ResolvedVc, TaskInput, Vc, trace::TraceRawVcs};
 use turbopack::{ModuleAssetContext, module_options::CustomModuleType};
 use turbopack_core::{
-    context::AssetContext, module::Module, reference_type::ReferenceType, resolve::ModulePart,
-    source::Source,
+    context::AssetContext, module::Module, reference_type::ReferenceType, source::Source,
 };
 use turbopack_ecmascript::EcmascriptInputTransforms;
 
@@ -101,7 +100,7 @@ impl CustomModuleType for InlineCssModuleType {
         &self,
         source: Vc<Box<dyn Source>>,
         module_asset_context: Vc<ModuleAssetContext>,
-        _part: Option<ModulePart>,
+        _reference_type: ReferenceType,
     ) -> Vc<Box<dyn Module>> {
         InlineCssModuleType::create_module(
             source,

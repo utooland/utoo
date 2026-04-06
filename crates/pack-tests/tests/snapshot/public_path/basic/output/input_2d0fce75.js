@@ -27,7 +27,7 @@ __turbopack_context__.s([
 }),
 19, ((__turbopack_context__) => {
 
-__turbopack_context__.q("https://cdn.example.com/assets/asset.99aa06d3.jpg");}),
+__turbopack_context__.q("https://cdn.example.com/assets/asset.2d068005.jpg");}),
 78, ((__turbopack_context__) => {
 
 __turbopack_context__.v((parentImport) => {

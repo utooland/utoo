@@ -1,8 +1,5 @@
-#![feature(str_split_remainder)]
-#![feature(impl_trait_in_assoc_type)]
 #![feature(arbitrary_self_types)]
 #![feature(arbitrary_self_types_pointers)]
-#![feature(iter_intersperse)]
 #![allow(unexpected_cfgs)]
 
 pub mod app;

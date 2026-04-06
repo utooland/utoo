@@ -3,8 +3,7 @@
 "use strict";
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
-
-const mod = await (async () => {
+var mod = await (async () => {
   if (typeof globalThis["_"] !== 'undefined') {
     return globalThis["_"];
   }

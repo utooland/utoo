@@ -1,6 +1,5 @@
 #![feature(arbitrary_self_types_pointers)]
 #![feature(box_patterns)]
-#![feature(str_as_str)]
 #![allow(unexpected_cfgs)]
 
 pub mod client;

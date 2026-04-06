@@ -7,12 +7,12 @@ if (!Array.isArray(globalThis["TURBOPACK"])) {
     return;
 }
 
-const CHUNK_BASE_PATH = "__RUNTIME_PUBLIC_PATH__";
-const RELATIVE_ROOT_PATH = "/ROOT";
-const RUNTIME_PUBLIC_PATH = "__RUNTIME_PUBLIC_PATH__";
-const ASSET_SUFFIX = "";
+var CHUNK_BASE_PATH = "__RUNTIME_PUBLIC_PATH__";
+var RELATIVE_ROOT_PATH = "/ROOT";
+var RUNTIME_PUBLIC_PATH = "__RUNTIME_PUBLIC_PATH__";
+var ASSET_SUFFIX = "";
 const CROSS_ORIGIN_LOADING = "";
-const WORKER_FORWARDED_GLOBALS = [];
+var WORKER_FORWARDED_GLOBALS = [];
 /**
  * This file contains runtime types and functions that are shared between all
  * TurboPack ECMAScript runtimes.
@@ -864,17 +864,27 @@ function getPathFromScript(chunkScript) {
         };
     }
 }
-const regexJsUrl = /\.js(?:\?[^#]*)?(?:#.*)?$/;
 /**
- * Checks if a given path/URL ends with .js, optionally followed by ?query or #fragment.
- */ function isJs(chunkUrlOrPath) {
-    return regexJsUrl.test(chunkUrlOrPath);
+ * Checks if a given path/URL ends with the given extension,
+ * optionally followed by ?query or #fragment.
+ */ function endsWithExtension(chunkUrlOrPath, ext) {
+    // Find where the path ends (before query or fragment)
+    const q = chunkUrlOrPath.indexOf('?');
+    let end;
+    if (q !== -1) {
+        end = q;
+    } else {
+        const h = chunkUrlOrPath.indexOf('#');
+        end = h !== -1 ? h : chunkUrlOrPath.length;
+    }
+    // Check if the path portion ends with the extension
+    return end >= ext.length && chunkUrlOrPath.startsWith(ext, end - ext.length);
 }
-const regexCssUrl = /\.css(?:\?[^#]*)?(?:#.*)?$/;
-/**
- * Checks if a given path/URL ends with .css, optionally followed by ?query or #fragment.
- */ function isCss(chunkUrl) {
-    return regexCssUrl.test(chunkUrl);
+function isJs(chunkUrlOrPath) {
+    return endsWithExtension(chunkUrlOrPath, '.js');
+}
+function isCss(chunkUrl) {
+    return endsWithExtension(chunkUrl, '.css');
 }
 function loadWebAssembly(chunkPath, edgeModule, importsObj) {
     return BACKEND.loadWebAssembly(SourceType.Parent, this.m.id, chunkPath, edgeModule, importsObj);
@@ -963,7 +973,10 @@ function registerChunk(registration) {
 /// <reference path="../../../shared/runtime/runtime-types.d.ts" />
 function getAssetSuffixFromScriptSrc() {
     // TURBOPACK_ASSET_SUFFIX is set in web workers
-    return (self.TURBOPACK_ASSET_SUFFIX ?? document?.currentScript?.getAttribute?.('src')?.replace(/^(.*(?=\?)|^.*$)/, '')) || '';
+    if (self.TURBOPACK_ASSET_SUFFIX != null) return self.TURBOPACK_ASSET_SUFFIX;
+    const src = document?.currentScript?.getAttribute?.('src') ?? '';
+    const qi = src.indexOf('?');
+    return qi >= 0 ? src.slice(qi) : '';
 }
 let BACKEND;
 /**
@@ -1137,7 +1150,7 @@ let BACKEND;
         return fetch(getChunkRelativeUrl(wasmChunkPath));
     }
 })();
-const chunksToRegister = globalThis["TURBOPACK"];
+var chunksToRegister = globalThis["TURBOPACK"];
 globalThis["TURBOPACK"] = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
 })();

@@ -1,6 +1,3 @@
-#![feature(future_join)]
-#![feature(min_specialization)]
-
 use clap::Parser;
 use dunce::canonicalize;
 use pack_api::project::{ProjectOptions, WatchOptions};

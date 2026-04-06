@@ -391,7 +391,7 @@ pub fn project_new(
                     let container_op =
                         ProjectContainer::new_operation(rcstr!("utoopack"), options.dev);
                     ProjectContainer::initialize(container_op, options).await?;
-                    container_op.resolve_strongly_consistent().await
+                    container_op.resolve().strongly_consistent().await
                 })
                 .or_else(|e| turbopack_ctx.throw_turbopack_internal_result(&e.into()))
                 .await?;

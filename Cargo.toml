@@ -58,7 +58,7 @@ serde_path_to_error               = "0.1.16"
 simd-json                         = "0.17.0"
 tempfile                          = "3"
 thiserror                         = "1.0"
-tokio                             = { version = "1.47.1" }
+tokio                             = { version = "=1.47.1" }
 tokio-fs-ext                      = "0.7.8"
 serde_yaml                        = "0.9"
 toml                              = "0.8"
@@ -70,7 +70,7 @@ swc_core                          = { version = "57.0.0", features = [
   "ecma_loader_parking_lot",
   "parallel_rayon"
 ] }
-swc_plugin_backend_wasmer         = { version = "6.0.0" }
+swc_plugin_backend_wasmer         = { version = "7.0.0" }
 testing                           = "19.0.0"
 # Keep consistent with preset_env_base through swc_core
 browserslist-rs                   = "0.19.0"
