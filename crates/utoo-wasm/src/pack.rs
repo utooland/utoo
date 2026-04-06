@@ -360,7 +360,7 @@ pub async fn init_pack_project(config: Option<String>, dev: bool) -> Result<()> 
                         ProjectContainer::new_operation("utoopack-web".into(), options.dev);
                     ProjectContainer::initialize(container_op, options).await?;
 
-                    Ok(container_op.resolve_strongly_consistent().await?)
+                    container_op.resolve().strongly_consistent().await
                 })
                 .await?;
 
