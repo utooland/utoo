@@ -81,10 +81,7 @@ fn defines_from_ref(define_env: &FxIndexMap<RcStr, RcStr>) -> CompileTimeDefines
     for (key, value) in define_entries {
         for prefix_len in 1..key.len() {
             let (prefix, suffix) = key.split_at(prefix_len);
-            if let Some((_, parent)) = defines
-                .iter_mut()
-                .find(|(candidate, _)| candidate.as_slice() == prefix)
-            {
+            if let Some(parent) = defines.get_mut(prefix) {
                 let _ = merge_nested_define(parent, suffix, value.clone());
             }
         }
