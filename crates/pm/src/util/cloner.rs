@@ -41,8 +41,9 @@ pub async fn clone_package_once(
     version: &str,
     tarball_url: &str,
     target_path: &Path,
-) -> bool {
+) -> Result<()> {
     let key = target_path.to_string_lossy().to_string();
+    let err_label = format!("{name}@{version}");
     let name = name.to_string();
     let version = version.to_string();
     let tarball_url = tarball_url.to_string();
@@ -59,7 +60,7 @@ pub async fn clone_package_once(
                 .await
                 .inspect_err(|e| {
                     tracing::warn!(
-                        "Clone failed: {}@{} to {}: {}",
+                        "Clone failed: {}@{} to {}: {:#}",
                         name,
                         version,
                         target_path.display(),
@@ -73,7 +74,8 @@ pub async fn clone_package_once(
             Some(())
         })
         .await
-        .is_some()
+        .map(|_| ())
+        .ok_or_else(|| anyhow::anyhow!("clone {err_label} failed (see warning log for details)"))
 }
 
 #[cfg(target_os = "macos")]
