@@ -306,6 +306,40 @@ finally {
     Remove-Item -Recurse -Force $antdxDir -ErrorAction SilentlyContinue
 }
 
+# Case: pnpm migration (eggjs/egg)
+Write-Yellow "Case: pnpm migration (eggjs/egg)"
+$eggDir = Join-Path $env:TEMP "utoo-e2e-egg-$(Get-Random)"
+try {
+    git clone --branch next --single-branch --depth 1 https://github.com/eggjs/egg.git $eggDir
+    Push-Location $eggDir
+
+    utoo install --from pnpm --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "utoo install --from pnpm failed for eggjs/egg" }
+
+    # Verify workspaces field was added to package.json
+    node -e "const pkg = require('./package.json'); const ws = pkg.workspaces; if (!ws || !Array.isArray(ws)) throw new Error('workspaces not set'); if (!ws.includes('packages/*')) throw new Error('missing packages/*'); console.log('  workspaces:', ws.length, 'patterns');"
+    if ($LASTEXITCODE -ne 0) { throw "workspaces field verification failed" }
+
+    # Verify overrides were added
+    node -e "const pkg = require('./package.json'); if (!pkg.overrides) throw new Error('overrides not set'); if (!pkg.overrides.vite) throw new Error('vite override missing'); console.log('  overrides:', Object.keys(pkg.overrides).length, 'entries');"
+    if ($LASTEXITCODE -ne 0) { throw "overrides field verification failed" }
+
+    # Verify .utoo.toml was created with catalogs
+    if (-not (Test-Path ".utoo.toml")) { throw ".utoo.toml not created" }
+    $tomlContent = Get-Content .utoo.toml -Raw
+    if ($tomlContent -notmatch 'lodash') { throw "catalog missing lodash" }
+    if ($tomlContent -notmatch 'path-to-regexp') { throw "named catalog missing" }
+
+    # Verify node_modules was created (install ran successfully)
+    if (-not (Test-Path "node_modules")) { throw "node_modules not created" }
+
+    Write-Green "PASS: pnpm migration (eggjs/egg)"
+}
+finally {
+    Pop-Location
+    Remove-Item -Recurse -Force $eggDir -ErrorAction SilentlyContinue
+}
+
 # Case: install-node + esbuild postinstall
 Write-Yellow "Case: install-node + esbuild"
 $esbuildDir = Join-Path $env:TEMP "utoo-e2e-esbuild-$(Get-Random)"
