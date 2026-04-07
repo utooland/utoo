@@ -255,5 +255,14 @@ export async function cjs(
   // @ts-ignore
   self.__systemjs_require__.resolve = (request: string) => request;
 
+  // @ts-ignore
+  self.createRequire = (filename: string) => {
+    const context = path.dirname(filename);
+    const req: any = (id: string) =>
+      loadModule(id, context, importMaps, entrypoint);
+    req.resolve = (request: string) => request;
+    return req;
+  };
+
   loadModule(entrypoint, path.dirname(entrypoint), importMaps, entrypoint);
 }
