@@ -4,6 +4,13 @@
 console.log(("TURBOPACK compile-time value", "aaa"));
 console.log(("TURBOPACK compile-time value", "bbb"));
 console.log(("TURBOPACK compile-time value", 1));
+console.log(("TURBOPACK compile-time value", {
+    "AAA": ("TURBOPACK compile-time value", "aaa"),
+    "BBB": ("TURBOPACK compile-time value", "bbb"),
+    "CCC": ("TURBOPACK compile-time value", "1"),
+    "CI": ("TURBOPACK compile-time value", true),
+    "NODE_ENV": ("TURBOPACK compile-time value", "production")
+}).CI);
 }),
 ]);
 

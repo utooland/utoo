@@ -9,7 +9,9 @@
     "define": {
       "AAA": "\"aaa\"",
       "BBB": "\"bbb\"",
-      "CCC": "1"
+      "CCC": "1",
+      "process.env": "{\"AAA\":\"aaa\",\"BBB\":\"bbb\",\"CCC\":\"1\"}",
+      "process.env.CI": "true"
     }
   }
 }
