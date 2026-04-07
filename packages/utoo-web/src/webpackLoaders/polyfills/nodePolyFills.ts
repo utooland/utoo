@@ -129,10 +129,14 @@ export default {
   },
 
   get module() {
-    return require("module");
+    return {
+      createRequire: (self as any).createRequire,
+    };
   },
   get "node:module"() {
-    return require("module");
+    return {
+      createRequire: (self as any).createRequire,
+    };
   },
 
   get net() {
