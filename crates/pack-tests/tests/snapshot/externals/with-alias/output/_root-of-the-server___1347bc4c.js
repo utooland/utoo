@@ -2,7 +2,7 @@
 "[externals]/Antd [external] (Antd, global)", ((__turbopack_context__) => {
 "use strict";
 
-const mod = globalThis["Antd"];
+var mod = globalThis["Antd"];
 
 __turbopack_context__.v(mod);
 }),

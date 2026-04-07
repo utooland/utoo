@@ -5,7 +5,7 @@
 
 "[externals]/fs [external] (fs, cjs)", ((__turbopack_context__, module, exports) => {
 
-const mod = __turbopack_context__.x("fs", () => require("fs"));
+var mod = __turbopack_context__.x("fs", () => require("fs"));
 
 module.exports = mod;
 }),
@@ -21,7 +21,7 @@ module.exports = {
 }),
 "[externals]/path [external] (path, cjs)", ((__turbopack_context__, module, exports) => {
 
-const mod = __turbopack_context__.x("path", () => require("path"));
+var mod = __turbopack_context__.x("path", () => require("path"));
 
 module.exports = mod;
 }),

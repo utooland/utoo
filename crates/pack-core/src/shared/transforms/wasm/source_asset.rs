@@ -26,6 +26,14 @@ impl Source for StaticWasmFileSource {
             .with_modifier(rcstr!("static wasm url"))
             .rename_as("*.mjs".into())
     }
+
+    #[turbo_tasks::function]
+    async fn description(&self) -> Result<Vc<turbo_rcstr::RcStr>> {
+        let inner = self.wasm.description().await?;
+        Ok(Vc::cell(
+            format!("static wasm url transform of {inner}").into(),
+        ))
+    }
 }
 
 #[turbo_tasks::value_impl]

@@ -1,5 +1,4 @@
 #![feature(future_join)]
-#![feature(min_specialization)]
 #![feature(arbitrary_self_types)]
 #![feature(arbitrary_self_types_pointers)]
 #![allow(unexpected_cfgs)]
@@ -83,7 +82,8 @@ pub async fn initialize_project_container(
             let container_op = ProjectContainer::new_operation("utoopack-cli".into(), dev);
             ProjectContainer::initialize(container_op, options).await?;
             container_op
-                .resolve_strongly_consistent()
+                .resolve()
+                .strongly_consistent()
                 .await
                 .context("failed to create project container")
         })

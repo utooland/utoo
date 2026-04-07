@@ -3,7 +3,7 @@ pub use modularize_imports::ModularizeImportPackageConfig;
 use turbo_rcstr::RcStr;
 use turbo_tasks::ResolvedVc;
 use turbopack::module_options::{ModuleRule, ModuleRuleEffect, ModuleType, RuleCondition};
-use turbopack_core::reference_type::{ReferenceType, UrlReferenceSubType};
+use turbopack_core::reference_type::{ReferenceTypeCondition, UrlReferenceSubType};
 use turbopack_ecmascript::{CustomTransformer, EcmascriptInputTransform};
 
 use image::{StructuredImageModuleType, module::BlurPlaceholderMode};
@@ -26,8 +26,8 @@ pub mod wasm;
 pub async fn get_image_rule(inline_limit: Option<u64>) -> Result<ModuleRule> {
     Ok(ModuleRule::new(
         RuleCondition::All(vec![
-            RuleCondition::not(RuleCondition::ReferenceType(ReferenceType::Url(
-                UrlReferenceSubType::Undefined,
+            RuleCondition::not(RuleCondition::ReferenceType(ReferenceTypeCondition::Url(
+                Some(UrlReferenceSubType::Undefined),
             ))),
             RuleCondition::any(vec![
                 RuleCondition::ResourcePathEndsWith(".jpg".to_string()),
@@ -56,8 +56,8 @@ pub async fn get_image_rule(inline_limit: Option<u64>) -> Result<ModuleRule> {
 pub async fn get_wasm_rule() -> Result<ModuleRule> {
     Ok(ModuleRule::new(
         RuleCondition::All(vec![
-            RuleCondition::not(RuleCondition::ReferenceType(ReferenceType::Url(
-                UrlReferenceSubType::Undefined,
+            RuleCondition::not(RuleCondition::ReferenceType(ReferenceTypeCondition::Url(
+                Some(UrlReferenceSubType::Undefined),
             ))),
             RuleCondition::ResourcePathEndsWith(".wasm".to_string()),
         ]),
@@ -76,8 +76,8 @@ pub async fn get_inline_css_rule(
 ) -> Result<ModuleRule> {
     Ok(ModuleRule::new(
         RuleCondition::All(vec![
-            RuleCondition::not(RuleCondition::ReferenceType(ReferenceType::Url(
-                UrlReferenceSubType::Undefined,
+            RuleCondition::not(RuleCondition::ReferenceType(ReferenceTypeCondition::Url(
+                Some(UrlReferenceSubType::Undefined),
             ))),
             RuleCondition::ResourcePathEndsWith(".css".to_string()),
         ]),
@@ -126,8 +126,8 @@ pub(crate) fn module_rule_match_js_no_url(enable_mdx_rs: bool) -> RuleCondition 
     let conditions = match_js_extension(enable_mdx_rs);
 
     RuleCondition::all(vec![
-        RuleCondition::not(RuleCondition::ReferenceType(ReferenceType::Url(
-            UrlReferenceSubType::Undefined,
+        RuleCondition::not(RuleCondition::ReferenceType(ReferenceTypeCondition::Url(
+            Some(UrlReferenceSubType::Undefined),
         ))),
         RuleCondition::any(conditions),
     ])

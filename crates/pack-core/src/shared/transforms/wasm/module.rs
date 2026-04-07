@@ -3,8 +3,7 @@ use turbo_rcstr::rcstr;
 use turbo_tasks::{ResolvedVc, Vc, fxindexmap};
 use turbopack::{ModuleAssetContext, module_options::CustomModuleType};
 use turbopack_core::{
-    context::AssetContext, module::Module, reference_type::ReferenceType, resolve::ModulePart,
-    source::Source,
+    context::AssetContext, module::Module, reference_type::ReferenceType, source::Source,
 };
 use turbopack_ecmascript::EcmascriptInputTransforms;
 use turbopack_static::ecma::StaticUrlJsModule;
@@ -48,7 +47,7 @@ impl CustomModuleType for StaticWasmModuleType {
         self: Vc<Self>,
         source: Vc<Box<dyn Source>>,
         module_asset_context: Vc<ModuleAssetContext>,
-        _part: Option<ModulePart>,
+        _reference_type: ReferenceType,
     ) -> Vc<Box<dyn Module>> {
         StaticWasmModuleType::create_module(source, module_asset_context)
     }

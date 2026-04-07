@@ -18,7 +18,7 @@ use turbo_tasks::{
 };
 use turbo_tasks_backend::{
     BackendOptions, GitVersionInfo, StartupCacheState, StorageMode, TurboTasksBackend,
-    db_invalidation::invalidation_reasons, default_backing_storage, noop_backing_storage,
+    db_invalidation::invalidation_reasons, noop_backing_storage, turbo_backing_storage,
 };
 use turbo_tasks_fs::FileContent;
 use turbopack_core::{
@@ -44,11 +44,12 @@ pub fn create_turbo_tasks(
         let is_ci: bool = false;
         // TODO: support short session: https://github.com/vercel/next.js/pull/82224/files
         let is_short_session: bool = false;
-        let (backing_storage, cache_state) = default_backing_storage(
+        let (backing_storage, cache_state) = turbo_backing_storage(
             &output_path.join(".turbopack/.cache"),
             &version_info,
             is_ci,
             is_short_session,
+            false,
         )?;
         let tt = TurboTasks::new(TurboTasksBackend::new(
             BackendOptions {

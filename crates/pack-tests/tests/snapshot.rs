@@ -122,7 +122,12 @@ async fn run(resource: PathBuf) -> Result<()> {
     tt.run(async move {
         #[turbo_tasks::function(operation)]
         async fn snapshot_issues_operation(out_op: OperationVc<FileSystemPath>) -> Result<Vc<()>> {
-            let out_path = out_op.resolve_strongly_consistent().await?.owned().await?;
+            let out_path = out_op
+                .resolve()
+                .strongly_consistent()
+                .await?
+                .owned()
+                .await?;
             let plain_issues = out_op
                 .peek_issues()
                 .get_plain_issues(IssueFilter::everything())
@@ -137,7 +142,7 @@ async fn run(resource: PathBuf) -> Result<()> {
         async fn inner_operation(resource: RcStr) -> Result<Vc<Effects>> {
             let out_op = run_test_operation(resource);
             // Ensure bundling is complete before peeking issues or reading path.
-            out_op.resolve_strongly_consistent().await?;
+            out_op.resolve().strongly_consistent().await?;
 
             // Run snapshot_issues as its own operation so its path.write() effects
             // are tracked as collectibles of snap_op (not of inner_operation).
@@ -284,7 +289,7 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
     // Initialize project container
     let container_op = ProjectContainer::new_operation(rcstr!("project"), project_options.dev);
     ProjectContainer::initialize(container_op, project_options).await?;
-    let project_container = container_op.resolve_strongly_consistent().await?;
+    let project_container = container_op.resolve().strongly_consistent().await?;
 
     // Run bundling operation using the same pattern as build.rs
     let entrypoints_with_issues_op =

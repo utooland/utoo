@@ -389,6 +389,8 @@ pub async fn get_server_chunking_context(
         nested_async_chunking,
         debug_ids,
     } = options;
+    #[cfg(not(feature = "test"))]
+    let _ = &config;
     let mode = mode.await?;
     let runtime_type = {
         #[cfg(feature = "test")]

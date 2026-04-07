@@ -42,6 +42,14 @@ impl Source for StructuredImageFileSource {
             .with_modifier(rcstr!("structured image object"))
             .rename_as("*.mjs".into())
     }
+
+    #[turbo_tasks::function]
+    async fn description(&self) -> Result<Vc<turbo_rcstr::RcStr>> {
+        let inner = self.image.description().await?;
+        Ok(Vc::cell(
+            format!("structured image transform of {inner}").into(),
+        ))
+    }
 }
 
 #[turbo_tasks::value_impl]
@@ -57,7 +65,7 @@ impl Asset for StructuredImageFileSource {
         if let Some(inline_limit) = self.inline_limit {
             if let FileContent::Content(file) = &*content.await? {
                 if (file.content().len() as u64) < inline_limit {
-                    if let Some(ext) = self.image.ident().await?.path.extension_ref() {
+                    if let Some(ext) = self.image.ident().await?.path.extension() {
                         if let Some(mime) = mime_guess::from_ext(ext).first() {
                             let data = file.content().to_bytes();
                             let data_url = format!(

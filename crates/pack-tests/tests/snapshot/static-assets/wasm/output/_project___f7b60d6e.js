@@ -1,7 +1,7 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
 42, ((__turbopack_context__) => {
 
-__turbopack_context__.q("/onig.06d92f9f.wasm");}),
+__turbopack_context__.q("/onig.278244d0.wasm");}),
 37, ((__turbopack_context__) => {
 "use strict";
 

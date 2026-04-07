@@ -7,12 +7,12 @@ if (!Array.isArray(globalThis["TURBOPACK"])) {
     return;
 }
 
-const CHUNK_BASE_PATH = "/";
-const RELATIVE_ROOT_PATH = "/ROOT";
-const RUNTIME_PUBLIC_PATH = "/";
-const ASSET_SUFFIX = "";
+var CHUNK_BASE_PATH = "/";
+var RELATIVE_ROOT_PATH = "/ROOT";
+var RUNTIME_PUBLIC_PATH = "/";
+var ASSET_SUFFIX = "";
 const CROSS_ORIGIN_LOADING = "";
-const WORKER_FORWARDED_GLOBALS = [];
+var WORKER_FORWARDED_GLOBALS = [];
 /**
  * This file contains runtime types and functions that are shared between all
  * TurboPack ECMAScript runtimes.
@@ -864,17 +864,27 @@ function getPathFromScript(chunkScript) {
         };
     }
 }
-const regexJsUrl = /\.js(?:\?[^#]*)?(?:#.*)?$/;
 /**
- * Checks if a given path/URL ends with .js, optionally followed by ?query or #fragment.
- */ function isJs(chunkUrlOrPath) {
-    return regexJsUrl.test(chunkUrlOrPath);
+ * Checks if a given path/URL ends with the given extension,
+ * optionally followed by ?query or #fragment.
+ */ function endsWithExtension(chunkUrlOrPath, ext) {
+    // Find where the path ends (before query or fragment)
+    const q = chunkUrlOrPath.indexOf('?');
+    let end;
+    if (q !== -1) {
+        end = q;
+    } else {
+        const h = chunkUrlOrPath.indexOf('#');
+        end = h !== -1 ? h : chunkUrlOrPath.length;
+    }
+    // Check if the path portion ends with the extension
+    return end >= ext.length && chunkUrlOrPath.startsWith(ext, end - ext.length);
 }
-const regexCssUrl = /\.css(?:\?[^#]*)?(?:#.*)?$/;
-/**
- * Checks if a given path/URL ends with .css, optionally followed by ?query or #fragment.
- */ function isCss(chunkUrl) {
-    return regexCssUrl.test(chunkUrl);
+function isJs(chunkUrlOrPath) {
+    return endsWithExtension(chunkUrlOrPath, '.js');
+}
+function isCss(chunkUrl) {
+    return endsWithExtension(chunkUrl, '.css');
 }
 function loadWebAssembly(chunkPath, edgeModule, importsObj) {
     return BACKEND.loadWebAssembly(SourceType.Parent, this.m.id, chunkPath, edgeModule, importsObj);
@@ -947,6 +957,7 @@ function formatDependencyChain(dependencyChain) {
  *                           This is used for server-side HMR where pages auto-accept at the top level.
  */ function getAffectedModuleEffects(moduleId, autoAcceptRootModules) {
     const outdatedModules = new Set();
+    const outdatedDependencies = new Map();
     const queue = [
         {
             moduleId,
@@ -969,7 +980,8 @@ function formatDependencyChain(dependencyChain) {
                 return {
                     type: 'accepted',
                     moduleId,
-                    outdatedModules
+                    outdatedModules,
+                    outdatedDependencies
                 };
             }
             return {
@@ -1009,8 +1021,32 @@ function formatDependencyChain(dependencyChain) {
             if (!parent) {
                 continue;
             }
-            // TODO(alexkirsz) Dependencies: check accepted and declined
-            // dependencies here.
+            const parentHotState = moduleHotState.get(parent);
+            // Check if parent declined this dependency
+            if (parentHotState?.declinedDependencies[moduleId]) {
+                return {
+                    type: 'declined',
+                    dependencyChain: [
+                        ...dependencyChain,
+                        moduleId
+                    ],
+                    moduleId,
+                    parentId
+                };
+            }
+            // Skip if parent is already outdated
+            if (outdatedModules.has(parentId)) {
+                continue;
+            }
+            // Check if parent accepts this dependency
+            if (parentHotState?.acceptedDependencies[moduleId]) {
+                if (!outdatedDependencies.has(parentId)) {
+                    outdatedDependencies.set(parentId, new Set());
+                }
+                outdatedDependencies.get(parentId).add(moduleId);
+                continue;
+            }
+            // Neither accepted nor declined — propagate to parent
             queue.push({
                 moduleId: parentId,
                 dependencyChain: [
@@ -1027,8 +1063,23 @@ function formatDependencyChain(dependencyChain) {
     return {
         type: 'accepted',
         moduleId,
-        outdatedModules
+        outdatedModules,
+        outdatedDependencies
     };
+}
+/**
+ * Merges source dependency map into target dependency map.
+ */ function mergeDependencies(target, source) {
+    for (const [parentId, deps] of source){
+        const existing = target.get(parentId);
+        if (existing) {
+            for (const dep of deps){
+                existing.add(dep);
+            }
+        } else {
+            target.set(parentId, new Set(deps));
+        }
+    }
 }
 /**
  * Computes all modules that need to be invalidated based on which modules changed.
@@ -1037,6 +1088,7 @@ function formatDependencyChain(dependencyChain) {
  * @param autoAcceptRootModules - If true, root modules auto-accept updates without explicit module.hot.accept()
  */ function computedInvalidatedModules(invalidated, autoAcceptRootModules) {
     const outdatedModules = new Set();
+    const outdatedDependencies = new Map();
     for (const moduleId of invalidated){
         const effect = getAffectedModuleEffects(moduleId, autoAcceptRootModules);
         switch(effect.type){
@@ -1044,17 +1096,22 @@ function formatDependencyChain(dependencyChain) {
                 throw new UpdateApplyError(`cannot apply update: unaccepted module. ${formatDependencyChain(effect.dependencyChain)}.`, effect.dependencyChain);
             case 'self-declined':
                 throw new UpdateApplyError(`cannot apply update: self-declined module. ${formatDependencyChain(effect.dependencyChain)}.`, effect.dependencyChain);
+            case 'declined':
+                throw new UpdateApplyError(`cannot apply update: declined dependency. ${formatDependencyChain(effect.dependencyChain)}. Declined by ${effect.parentId}.`, effect.dependencyChain);
             case 'accepted':
                 for (const outdatedModuleId of effect.outdatedModules){
                     outdatedModules.add(outdatedModuleId);
                 }
+                mergeDependencies(outdatedDependencies, effect.outdatedDependencies);
                 break;
-            // TODO(alexkirsz) Dependencies: handle dependencies effects.
             default:
                 invariant(effect, (effect)=>`Unknown effect type: ${effect?.type}`);
         }
     }
-    return outdatedModules;
+    return {
+        outdatedModules,
+        outdatedDependencies
+    };
 }
 /**
  * Creates the module.hot API object and its internal state.
@@ -1064,7 +1121,10 @@ function formatDependencyChain(dependencyChain) {
         selfAccepted: false,
         selfDeclined: false,
         selfInvalidated: false,
-        disposeHandlers: []
+        disposeHandlers: [],
+        acceptedDependencies: {},
+        acceptedErrorHandlers: {},
+        declinedDependencies: {}
     };
     const hot = {
         // TODO(alexkirsz) This is not defined in the HMR API. It was used to
@@ -1072,21 +1132,30 @@ function formatDependencyChain(dependencyChain) {
         // modules. We might want to remove it.
         active: true,
         data: hotData ?? {},
-        // TODO(alexkirsz) Support full (dep, callback, errorHandler) form.
-        accept: (modules, _callback, _errorHandler)=>{
+        accept: (modules, callback, errorHandler)=>{
             if (modules === undefined) {
                 hotState.selfAccepted = true;
             } else if (typeof modules === 'function') {
                 hotState.selfAccepted = modules;
+            } else if (typeof modules === 'object' && modules !== null) {
+                for(let i = 0; i < modules.length; i++){
+                    hotState.acceptedDependencies[modules[i]] = callback || function() {};
+                    hotState.acceptedErrorHandlers[modules[i]] = errorHandler;
+                }
             } else {
-                throw new Error('unsupported `accept` signature');
+                hotState.acceptedDependencies[modules] = callback || function() {};
+                hotState.acceptedErrorHandlers[modules] = errorHandler;
             }
         },
         decline: (dep)=>{
             if (dep === undefined) {
                 hotState.selfDeclined = true;
+            } else if (typeof dep === 'object' && dep !== null) {
+                for(let i = 0; i < dep.length; i++){
+                    hotState.declinedDependencies[dep[i]] = true;
+                }
             } else {
-                throw new Error('unsupported `decline` signature');
+                hotState.declinedDependencies[dep] = true;
             }
         },
         dispose: (callback)=>{
@@ -1128,14 +1197,19 @@ function formatDependencyChain(dependencyChain) {
  *
  * @param outdatedModules - The current set of outdated modules
  * @param autoAcceptRootModules - If true, root modules auto-accept updates without explicit module.hot.accept()
- */ function applyInvalidatedModules(outdatedModules, autoAcceptRootModules) {
+ */ function applyInvalidatedModules(outdatedModules, outdatedDependencies, autoAcceptRootModules) {
     if (queuedInvalidatedModules.size > 0) {
-        computedInvalidatedModules(queuedInvalidatedModules, autoAcceptRootModules).forEach((moduleId)=>{
+        const result = computedInvalidatedModules(queuedInvalidatedModules, autoAcceptRootModules);
+        for (const moduleId of result.outdatedModules){
             outdatedModules.add(moduleId);
-        });
+        }
+        mergeDependencies(outdatedDependencies, result.outdatedDependencies);
         queuedInvalidatedModules.clear();
     }
-    return outdatedModules;
+    return {
+        outdatedModules,
+        outdatedDependencies
+    };
 }
 /**
  * Computes which outdated modules have self-accepted and can be hot reloaded.
@@ -1180,7 +1254,6 @@ function formatDependencyChain(dependencyChain) {
         module.hot.active = false;
     }
     moduleHotState.delete(module);
-    // TODO(alexkirsz) Dependencies: delete the module from outdated deps.
     // Remove the disposed module from its children's parent list.
     // It will be added back once the module re-instantiates and imports its
     // children again.
@@ -1209,7 +1282,7 @@ function formatDependencyChain(dependencyChain) {
 /**
  * Dispose phase: runs dispose handlers and cleans up outdated/disposed modules.
  * Returns the parent modules of outdated modules for use in the apply phase.
- */ function disposePhase(outdatedModules, disposedModules) {
+ */ function disposePhase(outdatedModules, disposedModules, outdatedDependencies) {
     for (const moduleId of outdatedModules){
         disposeModule(moduleId, 'replace');
     }
@@ -1224,8 +1297,21 @@ function formatDependencyChain(dependencyChain) {
         outdatedModuleParents.set(moduleId, oldModule?.parents);
         delete devModuleCache[moduleId];
     }
-    // TODO(alexkirsz) Dependencies: remove outdated dependency from module
-    // children.
+    // Remove outdated dependencies from parent module's children list.
+    // When a parent accepts a child's update, the child is re-instantiated
+    // but the parent stays alive. We remove the old child reference so it
+    // gets re-added when the child re-imports.
+    for (const [parentId, deps] of outdatedDependencies){
+        const module = devModuleCache[parentId];
+        if (module) {
+            for (const dep of deps){
+                const idx = module.children.indexOf(dep);
+                if (idx >= 0) {
+                    module.children.splice(idx, 1);
+                }
+            }
+        }
+    }
     return {
         outdatedModuleParents
     };
@@ -1377,27 +1463,72 @@ function formatDependencyChain(dependencyChain) {
         }
     }
     // Walk dependency tree to find all modules affected by modifications
-    const outdatedModules = computedInvalidatedModules(modified.keys(), autoAcceptRootModules);
+    const { outdatedModules, outdatedDependencies } = computedInvalidatedModules(modified.keys(), autoAcceptRootModules);
     // Compile modified modules
     for (const [moduleId, entry] of modified){
         newModuleFactories.set(moduleId, evalModuleEntry(entry));
     }
     return {
         outdatedModules,
+        outdatedDependencies,
         newModuleFactories
     };
 }
 /**
  * Updates module factories and re-instantiates self-accepted modules.
  * Uses the instantiateModule function (platform-specific via callback).
- */ function applyPhase(outdatedSelfAcceptedModules, newModuleFactories, outdatedModuleParents, moduleFactories, devModuleCache, instantiateModuleFn, applyModuleFactoryNameFn, reportError) {
+ */ function applyPhase(outdatedSelfAcceptedModules, newModuleFactories, outdatedModuleParents, outdatedDependencies, moduleFactories, devModuleCache, instantiateModuleFn, applyModuleFactoryNameFn, reportError) {
     // Update module factories
     for (const [moduleId, factory] of newModuleFactories.entries()){
         applyModuleFactoryNameFn(factory);
         moduleFactories.set(moduleId, factory);
     }
     // TODO(alexkirsz) Run new runtime entries here.
-    // TODO(alexkirsz) Dependencies: call accept handlers for outdated deps.
+    // Call accept handlers for outdated dependencies.
+    // This runs BEFORE re-instantiating self-accepted modules, matching
+    // webpack's behavior.
+    for (const [parentId, deps] of outdatedDependencies){
+        const module = devModuleCache[parentId];
+        if (!module) continue;
+        const hotState = moduleHotState.get(module);
+        if (!hotState) continue;
+        // Group deps by callback, deduplicating callbacks that handle multiple deps.
+        // Each callback receives only the deps it was registered for.
+        const callbackDeps = new Map();
+        const callbackErrorHandlers = new Map();
+        for (const dep of deps){
+            const acceptCallback = hotState.acceptedDependencies[dep];
+            if (acceptCallback) {
+                let depList = callbackDeps.get(acceptCallback);
+                if (!depList) {
+                    depList = [];
+                    callbackDeps.set(acceptCallback, depList);
+                    callbackErrorHandlers.set(acceptCallback, hotState.acceptedErrorHandlers[dep]);
+                }
+                depList.push(dep);
+            }
+        }
+        for (const [callback, cbDeps] of callbackDeps){
+            try {
+                callback.call(null, cbDeps);
+            } catch (err) {
+                const errorHandler = callbackErrorHandlers.get(callback);
+                if (typeof errorHandler === 'function') {
+                    try {
+                        errorHandler(err, {
+                            moduleId: parentId,
+                            dependencyId: cbDeps[0]
+                        });
+                    } catch (err2) {
+                        reportError(err2);
+                        reportError(err);
+                    }
+                } else {
+                    reportError(err);
+                }
+            }
+        }
+    }
     // Re-instantiate all outdated self-accepted modules
     for (const { moduleId, errorHandler } of outdatedSelfAcceptedModules){
         try {
@@ -1424,23 +1555,24 @@ function formatDependencyChain(dependencyChain) {
  * invalidation, disposal, and application of new modules.
  *
  * @param autoAcceptRootModules - If true, root modules auto-accept updates without explicit module.hot.accept()
- */ function applyInternal(outdatedModules, disposedModules, newModuleFactories, moduleFactories, devModuleCache, instantiateModuleFn, applyModuleFactoryNameFn, autoAcceptRootModules) {
-    outdatedModules = applyInvalidatedModules(outdatedModules, autoAcceptRootModules);
+ */ function applyInternal(outdatedModules, outdatedDependencies, disposedModules, newModuleFactories, moduleFactories, devModuleCache, instantiateModuleFn, applyModuleFactoryNameFn, autoAcceptRootModules) {
+    ;
+    ({ outdatedModules, outdatedDependencies } = applyInvalidatedModules(outdatedModules, outdatedDependencies, autoAcceptRootModules));
     // Find self-accepted modules to re-instantiate
     const outdatedSelfAcceptedModules = computeOutdatedSelfAcceptedModules(outdatedModules);
     // Run dispose handlers, save hot.data, clear caches
-    const { outdatedModuleParents } = disposePhase(outdatedModules, disposedModules);
+    const { outdatedModuleParents } = disposePhase(outdatedModules, disposedModules, outdatedDependencies);
     let error;
     function reportError(err) {
         if (!error) error = err; // Keep first error
     }
-    applyPhase(outdatedSelfAcceptedModules, newModuleFactories, outdatedModuleParents, moduleFactories, devModuleCache, instantiateModuleFn, applyModuleFactoryNameFn, reportError);
+    applyPhase(outdatedSelfAcceptedModules, newModuleFactories, outdatedModuleParents, outdatedDependencies, moduleFactories, devModuleCache, instantiateModuleFn, applyModuleFactoryNameFn, reportError);
     if (error) {
         throw error;
     }
     // Recursively apply any queued invalidations from new module execution
     if (queuedInvalidatedModules.size > 0) {
-        applyInternal(new Set(), [], new Map(), moduleFactories, devModuleCache, instantiateModuleFn, applyModuleFactoryNameFn, autoAcceptRootModules);
+        applyInternal(new Set(), new Map(), [], new Map(), moduleFactories, devModuleCache, instantiateModuleFn, applyModuleFactoryNameFn, autoAcceptRootModules);
     }
 }
 /**
@@ -1452,8 +1584,8 @@ function formatDependencyChain(dependencyChain) {
  *                                   auto-accept at the top level.
  */ function applyEcmascriptMergedUpdateShared(options) {
     const { added, modified, disposedModules, evalModuleEntry, instantiateModule, applyModuleFactoryName, moduleFactories, devModuleCache, autoAcceptRootModules } = options;
-    const { outdatedModules, newModuleFactories } = computeOutdatedModules(added, modified, evalModuleEntry, autoAcceptRootModules);
-    applyInternal(outdatedModules, disposedModules, newModuleFactories, moduleFactories, devModuleCache, instantiateModule, applyModuleFactoryName, autoAcceptRootModules);
+    const { outdatedModules, outdatedDependencies, newModuleFactories } = computeOutdatedModules(added, modified, evalModuleEntry, autoAcceptRootModules);
+    applyInternal(outdatedModules, outdatedDependencies, disposedModules, newModuleFactories, moduleFactories, devModuleCache, instantiateModule, applyModuleFactoryName, autoAcceptRootModules);
 }
 /// <reference path="../../../shared/runtime/dev-globals.d.ts" />
 /// <reference path="../../../shared/runtime/dev-protocol.d.ts" />
@@ -1880,7 +2012,10 @@ globalThis.TURBOPACK_CHUNK_UPDATE_LISTENERS ??= [];
 /// <reference path="../../../shared/runtime/runtime-types.d.ts" />
 function getAssetSuffixFromScriptSrc() {
     // TURBOPACK_ASSET_SUFFIX is set in web workers
-    return (self.TURBOPACK_ASSET_SUFFIX ?? document?.currentScript?.getAttribute?.('src')?.replace(/^(.*(?=\?)|^.*$)/, '')) || '';
+    if (self.TURBOPACK_ASSET_SUFFIX != null) return self.TURBOPACK_ASSET_SUFFIX;
+    const src = document?.currentScript?.getAttribute?.('src') ?? '';
+    const qi = src.indexOf('?');
+    return qi >= 0 ? src.slice(qi) : '';
 }
 let BACKEND;
 /**
@@ -2068,10 +2203,13 @@ let DEV_BACKEND;
     DEV_BACKEND = {
         unloadChunk (chunkUrl) {
             deleteResolver(chunkUrl);
+            // Strip query string so we match links regardless of cache-busting
+            // params (e.g. ?ts=) that may differ between HMR updates.
+            const baseChunkUrl = chunkUrl.split('?')[0];
             // TODO(PACK-2140): remove this once all filenames are guaranteed to be escaped.
-            const decodedChunkUrl = decodeURI(chunkUrl);
+            const decodedBaseChunkUrl = decodeURI(baseChunkUrl);
             if (isCss(chunkUrl)) {
-                const links = document.querySelectorAll(`link[href="${chunkUrl}"],link[href^="${chunkUrl}?"],link[href="${decodedChunkUrl}"],link[href^="${decodedChunkUrl}?"]`);
+                const links = document.querySelectorAll(`link[href="${baseChunkUrl}"],link[href^="${baseChunkUrl}?"],link[href="${decodedBaseChunkUrl}"],link[href^="${decodedBaseChunkUrl}?"]`);
                 for (const link of Array.from(links)){
                     link.remove();
                 }
@@ -2080,7 +2218,7 @@ let DEV_BACKEND;
                 // runtime once evaluated.
                 // However, we still want to remove the script tag from the DOM to keep
                 // the HTML somewhat consistent from the user's perspective.
-                const scripts = document.querySelectorAll(`script[src="${chunkUrl}"],script[src^="${chunkUrl}?"],script[src="${decodedChunkUrl}"],script[src^="${decodedChunkUrl}?"]`);
+                const scripts = document.querySelectorAll(`script[src="${baseChunkUrl}"],script[src^="${baseChunkUrl}?"],script[src="${decodedBaseChunkUrl}"],script[src^="${decodedBaseChunkUrl}?"]`);
                 for (const script of Array.from(scripts)){
                     script.remove();
                 }
@@ -2094,8 +2232,11 @@ let DEV_BACKEND;
                     reject(new Error('The DOM backend can only reload CSS chunks'));
                     return;
                 }
-                const decodedChunkUrl = decodeURI(chunkUrl);
-                const previousLinks = document.querySelectorAll(`link[rel=stylesheet][href="${chunkUrl}"],link[rel=stylesheet][href^="${chunkUrl}?"],link[rel=stylesheet][href="${decodedChunkUrl}"],link[rel=stylesheet][href^="${decodedChunkUrl}?"]`);
+                // Strip query string so we match links regardless of cache-busting
+                // params (e.g. ?ts=) that may differ between HMR updates.
+                const baseChunkUrl = chunkUrl.split('?')[0];
+                const decodedBaseChunkUrl = decodeURI(baseChunkUrl);
+                const previousLinks = document.querySelectorAll(`link[rel=stylesheet][href="${baseChunkUrl}"],link[rel=stylesheet][href^="${baseChunkUrl}?"],link[rel=stylesheet][href="${decodedBaseChunkUrl}"],link[rel=stylesheet][href^="${decodedBaseChunkUrl}?"]`);
                 if (previousLinks.length === 0) {
                     reject(new Error(`No link element found for chunk ${chunkUrl}`));
                     return;
@@ -2105,15 +2246,22 @@ let DEV_BACKEND;
                 if (CROSS_ORIGIN_LOADING) {
                     link.crossOrigin = CROSS_ORIGIN_LOADING;
                 }
-                if (navigator.userAgent.includes('Firefox')) {
-                    // Firefox won't reload CSS files that were previously loaded on the current page,
-                    // we need to add a query param to make sure CSS is actually reloaded from the server.
+                if (navigator.userAgent.includes('Firefox') || navigator.userAgent.includes('Safari') && !navigator.userAgent.includes('Chrome') && !navigator.userAgent.includes('Chromium')) {
+                    // Firefox won't reload CSS files that were previously loaded on the
+                    // current page: https://bugzilla.mozilla.org/show_bug.cgi?id=1037506
                     //
-                    // I believe this is this issue: https://bugzilla.mozilla.org/show_bug.cgi?id=1037506
+                    // Safari serves cached CSS when a <link rel=preload> exists for the
+                    // same URL: https://bugs.webkit.org/show_bug.cgi?id=187726
                     //
-                    // Safari has a similar issue, but only if you have a `<link rel=preload ... />` tag
-                    // pointing to the same URL as the stylesheet: https://bugs.webkit.org/show_bug.cgi?id=187726
-                    link.href = `${chunkUrl}?ts=${Date.now()}`;
+                    // Replace or add a fresh `ts` cache-busting param without
+                    // discarding other query parameters that may already be present.
+                    const url = new URL(chunkUrl, location.origin);
+                    // Reduced timer precision in some browers could lead to an update getting dropped
+                    // in Firefox if it happens fast enough (in firefox precision is sometimes 100ms!).
+                    // So trust that the server is only updating us when it is important and use a
+                    // random number to bust the cache.
+                    url.searchParams.set('ts', `${Date.now()}.${Math.random()}`);
+                    link.href = url.pathname + url.search;
                 } else {
                     link.href = chunkUrl;
                 }
@@ -2150,10 +2298,10 @@ function _eval({ code, url, map }) {
     // eslint-disable-next-line no-eval
     return eval(code);
 }
-const chunksToRegister = globalThis["TURBOPACK"];
+var chunksToRegister = globalThis["TURBOPACK"];
 globalThis["TURBOPACK"] = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
-const chunkListsToRegister = globalThis["TURBOPACK_CHUNK_LISTS"] || [];
+var chunkListsToRegister = globalThis["TURBOPACK_CHUNK_LISTS"] || [];
 globalThis["TURBOPACK_CHUNK_LISTS"] = { push: registerChunkList };
 chunkListsToRegister.forEach(registerChunkList);
 })();

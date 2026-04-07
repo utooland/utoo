@@ -37,6 +37,12 @@ impl Source for InlineCssFileSource {
             .with_modifier(rcstr!("inline css"))
             .rename_as("*.js".into())
     }
+
+    #[turbo_tasks::function]
+    async fn description(&self) -> Result<Vc<RcStr>> {
+        let inner = self.css.description().await?;
+        Ok(Vc::cell(format!("inline css transform of {inner}").into()))
+    }
 }
 
 #[turbo_tasks::value_impl]

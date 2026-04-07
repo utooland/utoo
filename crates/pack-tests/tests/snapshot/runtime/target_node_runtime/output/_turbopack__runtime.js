@@ -1,7 +1,7 @@
-const RUNTIME_PUBLIC_PATH = "_turbopack__runtime.js";
-const RELATIVE_ROOT_PATH = "/ROOT";
-const ASSET_PREFIX = "/";
-const WORKER_FORWARDED_GLOBALS = [];
+var RUNTIME_PUBLIC_PATH = "_turbopack__runtime.js";
+var RELATIVE_ROOT_PATH = "/ROOT";
+var ASSET_PREFIX = "/";
+var WORKER_FORWARDED_GLOBALS = [];
 /**
  * This file contains runtime types and functions that are shared between all
  * TurboPack ECMAScript runtimes.

@@ -8,17 +8,19 @@ use turbo_tasks::{
     NonLocalValue, ResolvedVc, TaskInput, TryJoinIterExt, ValueToString, Vc, trace::TraceRawVcs,
 };
 use turbo_tasks_fs::FileSystemPath;
-use turbo_tasks_hash::{DeterministicHash, Xxh3Hash64Hasher, encode_hex, hash_xxh3_hash64};
+use turbo_tasks_hash::{
+    DeterministicHash, HashAlgorithm, Xxh3Hash64Hasher, encode_hex, hash_xxh3_hash64,
+};
 use turbopack_browser::chunking_context::{
     match_content_hash_placeholder, match_name_placeholder, replace_content_hash_placeholder,
     replace_name_placeholder,
 };
 use turbopack_core::{
-    asset::{Asset, AssetContent},
+    asset::{Asset, AssetContent, no_hash_salt},
     chunk::{
         ChunkGroupResult, ChunkItem, ChunkableModule, ChunkingConfig, ChunkingConfigs,
-        ChunkingContext, EntryChunkGroupResult, EvaluatableAsset, EvaluatableAssets, MinifyType,
-        SourceMapSourceType, SourceMapsType, UnusedReferences,
+        ChunkingContext, EntryChunkGroupResult, EvaluatableAsset, MinifyType, SourceMapSourceType,
+        SourceMapsType, UnusedReferences,
         availability_info::AvailabilityInfo,
         chunk_group::{MakeChunkGroupResult, make_chunk_group},
         chunk_id_strategy::ModuleIdStrategy,
@@ -528,16 +530,22 @@ impl ChunkingContext for LibraryChunkingContext {
 
     #[turbo_tasks::function]
     async fn asset_path(
-        &self,
-        content_hash: Vc<RcStr>,
+        self: Vc<Self>,
+        content: Vc<AssetContent>,
         original_asset_ident: Vc<AssetIdent>,
         _tag: Option<RcStr>,
     ) -> Result<Vc<FileSystemPath>> {
+        let this = self.await?;
         let source_path = original_asset_ident.path().await?;
         let basename = source_path.file_name();
-        let content_hash = content_hash.await?;
+        let content_hash = content
+            .content_hash(no_hash_salt(), HashAlgorithm::Xxh3Hash64Hex)
+            .await?;
+        let content_hash = content_hash.as_ref().context(
+            "Missing content when trying to generate the content hash for library asset",
+        )?;
 
-        let asset_path = match &self.asset_module_filename {
+        let asset_path = match &this.asset_module_filename {
             Some(filename_template) => {
                 let mut filename = filename_template.to_string();
 
@@ -548,7 +556,7 @@ impl ChunkingContext for LibraryChunkingContext {
                 }
 
                 if match_content_hash_placeholder(&filename) {
-                    filename = replace_content_hash_placeholder(&filename, &content_hash);
+                    filename = replace_content_hash_placeholder(&filename, content_hash);
                 };
 
                 if let Some(ext) = ext
@@ -559,11 +567,11 @@ impl ChunkingContext for LibraryChunkingContext {
 
                 filename
             }
-            None => match source_path.extension_ref() {
+            None => match source_path.extension() {
                 Some(ext) => format!(
                     "{basename}.{content_hash}.{ext}",
                     basename = &basename[..basename.len() - ext.len() - 1],
-                    content_hash = &content_hash[..8]
+                    content_hash = &content_hash[..8],
                 ),
                 None => format!(
                     "{basename}.{content_hash}",
@@ -572,7 +580,7 @@ impl ChunkingContext for LibraryChunkingContext {
             },
         };
 
-        self.output_root.join(&asset_path).map(|p| p.cell())
+        this.output_root.join(&asset_path).map(|p| p.cell())
     }
 
     #[turbo_tasks::function]
@@ -717,7 +725,7 @@ impl ChunkingContext for LibraryChunkingContext {
     fn entry_chunk_group(
         self: Vc<Self>,
         _path: FileSystemPath,
-        _evaluatable_assets: Vc<EvaluatableAssets>,
+        _chunk_group: ChunkGroup,
         _module_graph: Vc<ModuleGraph>,
         _extra_chunks: Vc<OutputAssets>,
         _extra_referenced_assets: Vc<OutputAssets>,
