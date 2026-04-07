@@ -14,23 +14,77 @@ use turbopack_core::{
 
 use crate::config::{ProviderConfig, ProviderConfigValue};
 
+fn parse_define_value(value: &RcStr) -> CompileTimeDefineValue {
+    match serde_json::Value::from_str(value) {
+        Ok(value) => value.into(),
+        Err(_) => CompileTimeDefineValue::Evaluate(value.clone()),
+    }
+}
+
+fn merge_nested_define(
+    current: &mut CompileTimeDefineValue,
+    path: &[DefinableNameSegment],
+    value: CompileTimeDefineValue,
+) -> bool {
+    if path.is_empty() {
+        *current = value;
+        return true;
+    }
+
+    match current {
+        CompileTimeDefineValue::Object(entries) => {
+            let DefinableNameSegment::Name(segment) = &path[0] else {
+                return false;
+            };
+
+            if path.len() == 1 {
+                if let Some((_, existing)) = entries.iter_mut().find(|(key, _)| key == segment) {
+                    *existing = value;
+                } else {
+                    entries.push((segment.clone(), value));
+                }
+                return true;
+            }
+
+            let child =
+                if let Some((_, existing)) = entries.iter_mut().find(|(key, _)| key == segment) {
+                    existing
+                } else {
+                    entries.push((segment.clone(), CompileTimeDefineValue::Object(vec![])));
+                    &mut entries.last_mut().expect("just inserted nested define").1
+                };
+
+            merge_nested_define(child, &path[1..], value)
+        }
+        _ => false,
+    }
+}
+
 fn defines_from_ref(define_env: &FxIndexMap<RcStr, RcStr>) -> CompileTimeDefines {
     let mut defines = FxIndexMap::default();
 
     for (k, v) in define_env {
-        defines
-            .entry(
-                k.split('.')
-                    .map(|s| DefinableNameSegment::Name(s.into()))
-                    .collect::<Vec<_>>(),
-            )
-            .or_insert_with(|| {
-                let val = serde_json::Value::from_str(v);
-                match val {
-                    Ok(v) => v.into(),
-                    _ => CompileTimeDefineValue::Evaluate(v.clone()),
-                }
-            });
+        let key = k
+            .split('.')
+            .map(|s| DefinableNameSegment::Name(s.into()))
+            .collect::<Vec<_>>();
+        let value = parse_define_value(v);
+
+        defines.entry(key).or_insert(value);
+    }
+
+    let define_entries = defines
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect::<Vec<_>>();
+
+    for (key, value) in define_entries {
+        for prefix_len in 1..key.len() {
+            let (prefix, suffix) = key.split_at(prefix_len);
+            if let Some(parent) = defines.get_mut(prefix) {
+                let _ = merge_nested_define(parent, suffix, value.clone());
+            }
+        }
     }
 
     CompileTimeDefines(defines)
