@@ -5502,6 +5502,7 @@ dependencies = [
  "turbo-tasks-fs",
  "turbo-unix-path",
  "turbopack",
+ "turbopack-analyze",
  "turbopack-browser",
  "turbopack-core",
  "turbopack-css",
@@ -10197,6 +10198,21 @@ dependencies = [
  "turbopack-resolve",
  "turbopack-static",
  "turbopack-wasm",
+]
+
+[[package]]
+name = "turbopack-analyze"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode 2.0.1",
+ "flate2",
+ "rustc-hash 2.1.1",
+ "serde",
+ "turbo-rcstr",
+ "turbo-tasks",
+ "turbo-tasks-fs",
+ "turbopack-core",
 ]
 
 [[package]]

@@ -447,6 +447,15 @@ export function projectFactory() {
       return binding.projectGetSourceMapSync(this._nativeProject, filePath);
     }
 
+    writeAnalyzeData(): Promise<TurbopackResult<void>> {
+      return withErrorCause(
+        () =>
+          binding.projectWriteAnalyzeData(this._nativeProject) as Promise<
+            TurbopackResult<void>
+          >,
+      );
+    }
+
     updateInfoSubscribe(aggregationMs: number) {
       return subscribe<TurbopackResult<NapiUpdateMessage>>(
         true,

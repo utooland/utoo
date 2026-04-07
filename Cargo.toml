@@ -108,6 +108,7 @@ turbo-tasks-malloc                = { path = "./next.js/turbopack/crates/turbo-t
 turbo-unix-path                   = { path = "./next.js/turbopack/crates/turbo-unix-path" }
 ## # Dependencies for bundler specially.
 turbopack                         = { path = "./next.js/turbopack/crates/turbopack" }
+turbopack-analyze                 = { path = "./next.js/turbopack/crates/turbopack-analyze" }
 turbopack-browser                 = { path = "./next.js/turbopack/crates/turbopack-browser" }
 turbopack-cli-utils               = { path = "./next.js/turbopack/crates/turbopack-cli-utils" }
 turbopack-core                    = { path = "./next.js/turbopack/crates/turbopack-core" }

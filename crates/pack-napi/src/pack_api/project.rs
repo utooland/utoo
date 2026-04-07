@@ -60,6 +60,7 @@ use turbopack_trace_utils::{
 };
 
 use super::{
+    analyze::{WriteAnalyzeResult, write_analyze_data_with_issues_operation},
     endpoint::ExternalEndpoint,
     utils::{NapiDiagnostic, NapiIssue, TurbopackResult, create_turbo_tasks, subscribe},
 };
@@ -1021,5 +1022,37 @@ pub fn project_get_source_map_sync(
 ) -> napi::Result<Option<String>> {
     within_runtime_if_available(|| {
         tokio::runtime::Handle::current().block_on(project_get_source_map(project, file_path))
+    })
+}
+
+#[napi]
+pub async fn project_write_analyze_data(
+    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: External<ProjectInstance>,
+) -> napi::Result<TurbopackResult<()>> {
+    let container = project.container;
+    let (issues, diagnostics) = project
+        .turbopack_ctx
+        .turbo_tasks()
+        .run_once(async move {
+            let analyze_data_op = write_analyze_data_with_issues_operation(container);
+            let WriteAnalyzeResult {
+                issues,
+                diagnostics,
+                effects,
+            } = &*analyze_data_op.read_strongly_consistent().await?;
+
+            effects.apply().await?;
+            Ok((issues.clone(), diagnostics.clone()))
+        })
+        .await
+        .map_err(|e| napi::Error::from_reason(PrettyPrintError(&e).to_string()))?;
+
+    Ok(TurbopackResult {
+        result: (),
+        issues: issues.iter().map(|i| NapiIssue::from(&**i)).collect(),
+        diagnostics: diagnostics
+            .iter()
+            .map(|d| NapiDiagnostic::from(d))
+            .collect(),
     })
 }

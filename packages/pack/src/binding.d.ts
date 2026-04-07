@@ -183,6 +183,7 @@ export declare function projectTraceSource(project: { __napiType: "Project" }, f
 export declare function projectGetSourceForAsset(project: { __napiType: "Project" }, filePath: string): Promise<string | null>
 export declare function projectGetSourceMap(project: { __napiType: "Project" }, filePath: RcStr): Promise<string | null>
 export declare function projectGetSourceMapSync(project: { __napiType: "Project" }, filePath: RcStr): string | null
+export declare function projectWriteAnalyzeData(project: { __napiType: "Project" }): Promise<TurbopackResult>
 /** Arguments for `NapiTurbopackCallbacks::throw_turbopack_internal_error`. */
 export interface TurbopackInternalErrorOpts {
   message: string

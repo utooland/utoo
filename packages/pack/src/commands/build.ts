@@ -16,6 +16,8 @@ import { useWorkerThreads } from "../utils/runtimePluginStratety";
 import { validateEntryPaths } from "../utils/validateEntry";
 import { xcodeProfilingReady } from "../utils/xcodeProfile";
 
+type AnalyzeMode = "none" | "native" | "webpack";
+
 export function build(
   options: BundleOptions | WebpackConfig,
   projectPath?: string,
@@ -35,6 +37,7 @@ async function buildInternal(
   projectPath?: string,
   rootPath?: string,
 ) {
+  const analyzeMode = getAnalyzeMode();
   blockStdout();
 
   if (process.env.XCODE_PROFILE) {
@@ -42,6 +45,10 @@ async function buildInternal(
   }
 
   const resolvedProjectPath = projectPath || process.cwd();
+  const outputPath = resolveOutputPath(
+    resolvedProjectPath,
+    bundleOptions.config.output?.path,
+  );
   processHtmlEntry(bundleOptions.config, resolvedProjectPath);
   validateEntryPaths(bundleOptions.config, resolvedProjectPath);
 
@@ -57,7 +64,7 @@ async function buildInternal(
       config: {
         ...bundleOptions.config,
         stats:
-          Boolean(process.env.ANALYZE) ||
+          analyzeMode === "webpack" ||
           bundleOptions.config.stats ||
           bundleOptions.config.entry.some((e: EntryOptions) => !!e.html),
         pluginRuntimeStrategy:
@@ -72,49 +79,88 @@ async function buildInternal(
       persistentCaching: bundleOptions.config.persistentCaching ?? false,
     },
   );
+  let nativeAnalyzeReady = false;
 
-  const entrypoints = await project.writeAllEntrypointsToDisk();
+  try {
+    const entrypoints = await project.writeAllEntrypointsToDisk();
 
-  handleIssues(entrypoints.issues);
+    handleIssues(entrypoints.issues);
 
-  const htmlConfigs = [
-    ...(Array.isArray((bundleOptions.config as any).html)
-      ? (bundleOptions.config as any).html
-      : (bundleOptions.config as any).html
-        ? [(bundleOptions.config as any).html]
-        : []),
-    ...bundleOptions.config.entry
-      .filter((e: EntryOptions) => !!e.html)
-      .map((e: EntryOptions) => e.html!),
-  ];
+    const htmlConfigs = [
+      ...(Array.isArray((bundleOptions.config as any).html)
+        ? (bundleOptions.config as any).html
+        : (bundleOptions.config as any).html
+          ? [(bundleOptions.config as any).html]
+          : []),
+      ...bundleOptions.config.entry
+        .filter((e: EntryOptions) => !!e.html)
+        .map((e: EntryOptions) => e.html!),
+    ];
 
-  if (htmlConfigs.length > 0) {
-    const assets = { js: [] as string[], css: [] as string[] };
+    if (htmlConfigs.length > 0) {
+      const assets = { js: [] as string[], css: [] as string[] };
 
-    const outputDir =
-      bundleOptions.config.output?.path || path.join(process.cwd(), "dist");
+      if (assets.js.length === 0 && assets.css.length === 0) {
+        const discovered = getInitialAssetsFromStats(outputPath);
+        assets.js.push(...discovered.js);
+        assets.css.push(...discovered.css);
+      }
 
-    if (assets.js.length === 0 && assets.css.length === 0) {
-      const discovered = getInitialAssetsFromStats(outputDir);
-      assets.js.push(...discovered.js);
-      assets.css.push(...discovered.css);
+      const publicPath = bundleOptions.config.output?.publicPath;
+
+      for (const config of htmlConfigs) {
+        const plugin = new HtmlPlugin(config);
+        await plugin.generate(outputPath, assets, publicPath);
+      }
     }
 
-    const publicPath = bundleOptions.config.output?.publicPath;
-
-    for (const config of htmlConfigs) {
-      const plugin = new HtmlPlugin(config);
-      await plugin.generate(outputDir, assets, publicPath);
+    if (analyzeMode === "native") {
+      const analyzeResult = await project.writeAnalyzeData();
+      handleIssues(analyzeResult.issues);
+      nativeAnalyzeReady = true;
+    } else if (analyzeMode === "webpack") {
+      await analyzeBundle(outputPath);
     }
+  } finally {
+    await project.shutdown();
   }
 
-  if (process.env.ANALYZE) {
-    await analyzeBundle(bundleOptions.config.output?.path || "dist");
+  if (nativeAnalyzeReady) {
+    const analyzeDataDir = path.join(
+      outputPath,
+      "diagnostics",
+      "analyze",
+      "data",
+    );
+    console.error(`Native analyze data written to ${analyzeDataDir}`);
   }
-  await project.shutdown();
 
   // TODO: Maybe run tasks in worker is a better way, see
   // https://github.com/vercel/next.js/blob/512d8283054407ab92b2583ecce3b253c3be7b85/packages/next/src/lib/worker.ts
+}
+
+function getAnalyzeMode(): AnalyzeMode {
+  const analyze = process.env.ANALYZE?.trim().toLowerCase();
+  if (!analyze) {
+    return "none";
+  }
+  if (analyze === "webpack" || analyze === "bundle" || analyze === "legacy") {
+    return "webpack";
+  }
+  return "native";
+}
+
+function resolveOutputPath(
+  projectPath: string,
+  configuredOutputPath?: string,
+): string {
+  if (!configuredOutputPath) {
+    return path.join(projectPath, "dist");
+  }
+
+  return path.isAbsolute(configuredOutputPath)
+    ? configuredOutputPath
+    : path.join(projectPath, configuredOutputPath);
 }
 
 async function analyzeBundle(outputPath: string): Promise<void> {

@@ -28,5 +28,5 @@ export function blockStdout() {
  * - ESM：在构建后由脚本注入 __dirname（基于 import.meta.url），此处仅用 __dirname 以保持 CJS 产物不含 import.meta，避免 Node 将 .js 判为 ESM。
  */
 export function getPackPath() {
-  return path.resolve(__dirname, "..");
+  return path.resolve(__dirname, "../..");
 }
