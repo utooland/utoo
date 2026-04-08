@@ -247,7 +247,7 @@ export interface ConfigComplete {
   };
   styles?: {
     autoCssModules?: boolean;
-    emotion?: boolean;
+    emotion?: boolean | EmotionOptions;
     postcss?: JSONValue;
     less?: {
       implementation?: string;
@@ -312,6 +312,13 @@ export interface StyledComponentsConfig {
   namespace?: string;
   pure?: boolean;
   cssProp?: boolean;
+}
+
+export interface EmotionOptions {
+  sourcemap?: boolean;
+  labelFormat?: string;
+  autoLabel?: "dev-only" | "always" | "never";
+  importMap?: Record<string, any>;
 }
 
 export interface BundleOptions {

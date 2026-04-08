@@ -21,7 +21,9 @@ use turbopack_core::{
     resolve::ResolveAliasMap,
 };
 use turbopack_ecmascript::{OptionTreeShaking, TreeShakingMode};
-use turbopack_ecmascript_plugins::transform::styled_components::StyledComponentsTransformConfig;
+use turbopack_ecmascript_plugins::transform::{
+    emotion::EmotionTransformConfig, styled_components::StyledComponentsTransformConfig,
+};
 use turbopack_ecmascript_runtime::CrossOriginLoading as RuntimeCrossOriginLoading;
 use turbopack_node::transforms::webpack::{WebpackLoaderItem, WebpackLoaderItems};
 
@@ -254,7 +256,7 @@ pub struct ReactConfig {
 #[serde(rename_all = "camelCase")]
 pub struct StyleConfig {
     pub styled_components: Option<StyledComponentsTransformOptionsOrBoolean>,
-    pub emotion: Option<bool>,
+    pub emotion: Option<EmotionConfigOrBoolean>,
     pub auto_css_modules: Option<bool>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     pub postcss: Option<serde_json::Value>,
@@ -264,6 +266,30 @@ pub struct StyleConfig {
     less: Option<serde_json::Value>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     inline_css: Option<serde_json::Value>,
+}
+
+#[turbo_tasks::value]
+#[derive(Clone, Debug, Deserialize, OperationValue)]
+#[serde(untagged)]
+pub enum EmotionConfigOrBoolean {
+    Boolean(bool),
+    Options(EmotionTransformConfig),
+}
+
+impl EmotionConfigOrBoolean {
+    pub fn is_enabled(&self) -> bool {
+        match self {
+            Self::Boolean(enabled) => *enabled,
+            Self::Options(_) => true,
+        }
+    }
+
+    pub fn options(&self) -> Option<&EmotionTransformConfig> {
+        match self {
+            Self::Options(options) => Some(options),
+            _ => None,
+        }
+    }
 }
 
 #[turbo_tasks::value(eq = "manual")]

@@ -1,0 +1,17 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.tsx",
+        "name": "main"
+      }
+    ],
+    "mode": "development",
+    "styles": {
+      "emotion": {
+        "importMap": {}
+      }
+    },
+    "sourceMaps": false
+  }
+}

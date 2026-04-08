@@ -247,7 +247,7 @@ pub async fn get_client_module_options_context(
 
     let additional_rules: Vec<ModuleRule> = vec![
         get_swc_ecma_transform_plugin_rule(config, project_path.clone()).await?,
-        get_emotion_transform_rule(config).await?,
+        get_emotion_transform_rule(config, mode).await?,
         get_styled_components_transform_rule(config).await?,
         get_styled_jsx_transform_rule(config, target_browsers).await?,
         get_remove_console_transform_rule(config).await?,

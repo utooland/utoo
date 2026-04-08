@@ -885,8 +885,8 @@ pub struct SchemaStyleConfig {
 
     /// Enable @emotion/react transform support
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Enable @emotion/react transform support")]
-    pub emotion: Option<bool>,
+    #[schemars(description = "Enable @emotion/react transform support with boolean or options")]
+    pub emotion: Option<SchemaEmotionConfigOrBoolean>,
 
     /// Enable automatic CSS Modules transform (defaults to true)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -912,6 +912,45 @@ pub struct SchemaStyleConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Inline CSS configuration")]
     pub inline_css: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SchemaEmotionConfigOrBoolean {
+    Boolean(bool),
+    Options(SchemaEmotionConfig),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaEmotionConfig {
+    /// Enable source maps in Emotion transform
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Enable source maps in Emotion transform")]
+    pub sourcemap: Option<bool>,
+
+    /// Classname label format
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Emotion label format")]
+    pub label_format: Option<String>,
+
+    /// Auto label strategy
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Emotion auto label strategy")]
+    pub auto_label: Option<SchemaEmotionLabelKind>,
+
+    /// Emotion import map configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Emotion import map configuration")]
+    pub import_map: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum SchemaEmotionLabelKind {
+    DevOnly,
+    Always,
+    Never,
 }
 
 // ---------------------------------------------------------------------------
