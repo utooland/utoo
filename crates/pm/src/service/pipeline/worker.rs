@@ -59,7 +59,9 @@ pub fn start_workers(channels: PipelineChannels, cwd: PathBuf) -> PipelineHandle
                 if let Some(ref parent) = parent_path {
                     wait_clone_if_pending(&parent.to_string_lossy()).await;
                 }
-                clone_package_once(&name, &version, &tarball_url, &target).await;
+                if let Err(e) = clone_package_once(&name, &version, &tarball_url, &target).await {
+                    tracing::debug!("Pipeline pre-clone failed for {name}@{version}: {e:#}");
+                }
             });
         }
     });

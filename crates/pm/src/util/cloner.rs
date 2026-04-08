@@ -13,8 +13,16 @@ use super::retry::create_retry_strategy;
 use crate::fs;
 
 /// Global clone cache shared between pipeline and install phases.
-/// Key: target path, Value: ()
-static CLONE_CACHE: Lazy<OnceMap<String, ()>> = Lazy::new(OnceMap::new);
+///
+/// Key: normalized target path. Install (`cwd.join("node_modules/foo")` →
+/// forward slashes) and pipeline (`Path::join` injects backslashes on
+/// Windows) produce the same logical target with different separators;
+/// without normalization OnceMap sees them as distinct keys, dedup fails,
+/// and concurrent tasks race on the same destination — manifesting as
+/// `ERROR_SHARING_VIOLATION` (os error 32) on Windows. `PathBuf` from
+/// `Path::components().collect()` parses both separators uniformly and
+/// rebuilds with the OS-preferred one, giving a stable key.
+static CLONE_CACHE: Lazy<OnceMap<PathBuf, ()>> = Lazy::new(OnceMap::new);
 
 /// Number of clones completed.
 static CLONE_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -24,12 +32,25 @@ pub fn clone_count() -> usize {
     CLONE_COUNT.load(Ordering::Relaxed)
 }
 
+/// Normalize a target path into the canonical key used by `CLONE_CACHE`.
+#[cfg(windows)]
+fn cache_key(target_path: &Path) -> PathBuf {
+    target_path.components().collect()
+}
+
+#[cfg(not(windows))]
+fn cache_key(target_path: &Path) -> PathBuf {
+    target_path.to_path_buf()
+}
+
 /// Wait for a pending clone at the given target path to complete (if any).
 ///
 /// Used by the pipeline clone worker to ensure parent packages are
 /// cloned before their children.
 pub async fn wait_clone_if_pending(target_path: &str) {
-    CLONE_CACHE.wait_if_pending(&target_path.to_string()).await;
+    CLONE_CACHE
+        .wait_if_pending(&cache_key(Path::new(target_path)))
+        .await;
 }
 
 /// Clone a package to target path, downloading to cache first if needed.
@@ -41,8 +62,9 @@ pub async fn clone_package_once(
     version: &str,
     tarball_url: &str,
     target_path: &Path,
-) -> bool {
-    let key = target_path.to_string_lossy().to_string();
+) -> Result<()> {
+    let key = cache_key(target_path);
+    let err_label = format!("{name}@{version}");
     let name = name.to_string();
     let version = version.to_string();
     let tarball_url = tarball_url.to_string();
@@ -59,7 +81,7 @@ pub async fn clone_package_once(
                 .await
                 .inspect_err(|e| {
                     tracing::warn!(
-                        "Clone failed: {}@{} to {}: {}",
+                        "Clone failed: {}@{} to {}: {:#}",
                         name,
                         version,
                         target_path.display(),
@@ -73,7 +95,8 @@ pub async fn clone_package_once(
             Some(())
         })
         .await
-        .is_some()
+        .map(|_| ())
+        .ok_or_else(|| anyhow::anyhow!("clone {err_label} failed (see warning log for details)"))
 }
 
 #[cfg(target_os = "macos")]
@@ -437,6 +460,20 @@ mod tests {
     use tokio::io::AsyncWriteExt;
 
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn cache_key_normalizes_path_separators() {
+        // install.rs joins lockfile-derived strings (forward slashes) while
+        // pipeline workers go through `Path::join` (backslashes). Both must
+        // produce the same OnceMap key — otherwise concurrent clones race
+        // and Windows raises ERROR_SHARING_VIOLATION.
+        let forward = cache_key(Path::new("node_modules/@scope/pkg/node_modules/dep"));
+        let backward = cache_key(Path::new("node_modules\\@scope\\pkg\\node_modules\\dep"));
+        let mixed = cache_key(Path::new("node_modules/@scope/pkg\\node_modules\\dep"));
+        assert_eq!(forward, backward);
+        assert_eq!(forward, mixed);
+    }
 
     async fn create_test_file(dir: &Path, name: &str, content: &[u8]) -> Result<PathBuf> {
         let path = dir.join(name);
