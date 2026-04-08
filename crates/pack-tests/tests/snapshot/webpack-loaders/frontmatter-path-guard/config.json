@@ -1,0 +1,57 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "./input/index.tsx",
+        "name": "index"
+      }
+    ],
+    "module": {
+      "rules": {
+        "*.md": [
+          {
+            "condition": {
+              "query": {
+                "type": "constant",
+                "value": "?type=frontmatter"
+              }
+            },
+            "loaders": [
+              "frontmatter-loader"
+            ],
+            "as": "*.js"
+          }
+        ],
+        "*.js": [
+          {
+            "condition": {
+              "all": [
+                {
+                  "query": {
+                    "type": "constant",
+                    "value": "?type=frontmatter"
+                  }
+                },
+                {
+                  "not": {
+                    "path": {
+                      "type": "regex",
+                      "value": {
+                        "source": "\\.md\\.js$",
+                        "flags": ""
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "loaders": [
+              "title-loader"
+            ],
+            "as": "*.js"
+          }
+        ]
+      }
+    }
+  }
+}
