@@ -20,7 +20,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use turbo_rcstr::{RcStr, rcstr};
-use turbo_tasks::{Effects, OperationVc, ResolvedVc, TurboTasks, ValueToString, Vc, get_effects};
+use turbo_tasks::{Effects, OperationVc, ResolvedVc, TurboTasks, ValueToString, Vc, take_effects};
 use turbo_tasks_backend::{BackendOptions, TurboTasksBackend, noop_backing_storage};
 use turbo_tasks_fs::FileSystemPath;
 use turbopack_core::{
@@ -119,7 +119,7 @@ async fn run(resource: PathBuf) -> Result<()> {
         },
         noop_backing_storage(),
     ));
-    tt.run(async move {
+    tt.run_once(async move {
         #[turbo_tasks::function(operation)]
         async fn snapshot_issues_operation(out_op: OperationVc<FileSystemPath>) -> Result<Vc<()>> {
             let out_path = out_op
@@ -139,27 +139,31 @@ async fn run(resource: PathBuf) -> Result<()> {
         }
 
         #[turbo_tasks::function(operation)]
-        async fn inner_operation(resource: RcStr) -> Result<Vc<Effects>> {
-            let out_op = run_test_operation(resource);
-            // Ensure bundling is complete before peeking issues or reading path.
-            out_op.resolve().strongly_consistent().await?;
-
-            // Run snapshot_issues as its own operation so its path.write() effects
-            // are tracked as collectibles of snap_op (not of inner_operation).
+        async fn snapshot_effects_operation(
+            out_op: OperationVc<FileSystemPath>,
+        ) -> Result<Vc<Effects>> {
             let snap_op = snapshot_issues_operation(out_op);
             snap_op.read_strongly_consistent().await?;
-
-            // Collect and apply the snapshot write effects from within the operation
-            // (calling get_effects / apply inside a turbo-tasks function is allowed).
-            get_effects(snap_op).await?.apply().await?;
-
-            Ok(get_effects(out_op).await?.cell())
+            Ok(take_effects(snap_op).await?.cell())
         }
-        inner_operation(resource.to_str().unwrap().into())
+
+        #[turbo_tasks::function(operation)]
+        async fn output_effects_operation(
+            out_op: OperationVc<FileSystemPath>,
+        ) -> Result<Vc<Effects>> {
+            out_op.resolve().strongly_consistent().await?;
+            Ok(take_effects(out_op).await?.cell())
+        }
+
+        let out_op = run_test_operation(resource.to_str().unwrap().into());
+        let snapshot_effects = snapshot_effects_operation(out_op)
             .read_strongly_consistent()
-            .await?
-            .apply()
             .await?;
+        let output_effects = output_effects_operation(out_op)
+            .read_strongly_consistent()
+            .await?;
+        snapshot_effects.apply().await?;
+        output_effects.apply().await?;
 
         Ok(())
     })
@@ -298,13 +302,10 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
         entrypoints: _,
         issues: _,
         diagnostics: _,
-        effects,
+        effects: _,
     } = &*entrypoints_with_issues_op
         .read_strongly_consistent()
         .await?;
-
-    // Apply effects (write assets to disk)
-    effects.apply().await?;
 
     // Get output assets and walk through them
     let project = project_container.project();

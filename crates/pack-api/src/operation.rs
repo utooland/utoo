@@ -1,5 +1,5 @@
 use anyhow::Result;
-use turbo_tasks::{CollectiblesSource, OperationVc, ResolvedVc, Vc, get_effects};
+use turbo_tasks::{CollectiblesSource, OperationVc, ResolvedVc, Vc, take_effects};
 use turbopack_core::{diagnostics::Diagnostic, issue::CollectibleIssuesExt};
 
 use crate::{
@@ -36,7 +36,7 @@ async fn entrypoints_without_collectibles_operation(
     let _ = entrypoints.read_strongly_consistent().await?;
     entrypoints.drop_collectibles::<Box<dyn Diagnostic>>();
     entrypoints.drop_issues();
-    let _ = get_effects(entrypoints).await?;
+    let _ = take_effects(entrypoints).await?;
     Ok(entrypoints.connect())
 }
 

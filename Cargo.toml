@@ -65,24 +65,24 @@ toml                              = "0.8"
 tracing                           = "0.1.41"
 tracing-subscriber                = { version = "0.3.19", features = ["env-filter", "fmt"] }
 # SWC crates
-swc_core                          = { version = "57.0.0", features = [
+swc_core                          = { version = "63.1.0", features = [
   "ecma_loader_lru",
   "ecma_loader_parking_lot",
   "parallel_rayon"
 ] }
-swc_plugin_backend_wasmer         = { version = "7.0.0" }
-testing                           = "19.0.0"
+swc_plugin_backend_wasmer         = { version = "10.0.0" }
+testing                           = "22.0.0"
 # Keep consistent with preset_env_base through swc_core
 browserslist-rs                   = "0.19.0"
 mdxjs                             = "1.0.3"
-modularize_imports                = "0.110.0"
+modularize_imports                = "3.0.0"
 preset_env_base                   = "6.0.0"
-react_remove_properties           = "0.62.0"
-remove_console                    = "0.66.0"
-styled_components                 = "0.139.0"
-styled_jsx                        = "0.114.0"
-swc_emotion                       = "0.115.0"
-swc_relay                         = "0.85.0"
+react_remove_properties           = "3.0.0"
+remove_console                    = "3.0.0"
+styled_components                 = "3.0.0"
+styled_jsx                        = "3.0.0"
+swc_emotion                       = "3.0.0"
+swc_relay                         = "3.0.0"
 indoc                             = "2.0.0"
 parking_lot                       = "0.12.4"
 qstring                           = "0.7.2"
