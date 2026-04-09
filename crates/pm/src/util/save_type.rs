@@ -31,10 +31,18 @@ pub enum OmitType {
     Peer,
 }
 
-use super::bool_enum::bool_enum;
+/// Whether to run lifecycle scripts during install/rebuild.
+///
+/// Replaces bare `ignore_scripts: bool` for readability.
+/// See: <https://blakesmith.me/2019/05/07/rust-patterns-enums-instead-of-booleans.html>
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptPolicy {
+    Run,
+    Ignore,
+}
 
-bool_enum! {
-    /// Whether to run lifecycle scripts during install/rebuild.
-    /// `false` → Run, `true` → Ignore (`--ignore-scripts`).
-    pub ScriptPolicy { Run, Ignore }
+impl From<bool> for ScriptPolicy {
+    fn from(ignore: bool) -> Self {
+        if ignore { Self::Ignore } else { Self::Run }
+    }
 }
