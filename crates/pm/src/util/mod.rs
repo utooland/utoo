@@ -1,3 +1,4 @@
+pub mod bool_enum;
 pub mod binary_resolver;
 pub mod cache;
 pub mod cloner;

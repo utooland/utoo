@@ -7,20 +7,14 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use utoo_ruborist::spec::Catalogs;
 
+use super::bool_enum::bool_enum;
+
 pub type ConfigResult<T> = Result<T>;
 
-/// Whether a config operation targets the global (`~/.utoo/config.toml`)
-/// or local (`.utoo.toml`) scope.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum ConfigScope {
-    Global,
-    Local,
-}
-
-impl From<bool> for ConfigScope {
-    fn from(global: bool) -> Self {
-        if global { Self::Global } else { Self::Local }
-    }
+bool_enum! {
+    /// Whether a config operation targets the global (`~/.utoo/config.toml`)
+    /// or local (`.utoo.toml`) scope.
+    pub ConfigScope { Local, Global }
 }
 
 /// Cached merged config (global + local). Set on first `Config::load(ConfigScope::Local)`.
