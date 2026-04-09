@@ -19,7 +19,7 @@ use service::script::MissingScript;
 use service::workspace::WorkspaceFilter;
 use util::config_file::ConfigScope;
 use util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
-use util::save_type::{OmitType, PackageAction, SaveType, parse_save_type};
+use util::save_type::{OmitType, PackageAction, SaveType, ScriptPolicy, parse_save_type};
 use util::user_config::{
     InstallScope, init_registry, set_cache_dir, set_install_scope, set_legacy_peer_deps,
     set_manifests_concurrency_limit, set_omit,
@@ -497,7 +497,7 @@ async fn async_main() -> Result<()> {
                         PackageAction::Add,
                         &spec_refs,
                         workspace.clone(),
-                        ignore_scripts,
+                        ScriptPolicy::from(ignore_scripts),
                         save_type,
                     )
                     .await?;
@@ -511,7 +511,7 @@ async fn async_main() -> Result<()> {
             } else {
                 let cwd = std::env::current_dir()?;
                 let root_path = init_project_root(&cwd).await?;
-                install(ignore_scripts, &root_path).await?;
+                install(ScriptPolicy::from(ignore_scripts), &root_path).await?;
                 log_time_end("All packages installed");
             }
         }
@@ -526,7 +526,7 @@ async fn async_main() -> Result<()> {
                     PackageAction::Remove,
                     &spec_refs,
                     workspace.clone(),
-                    ignore_scripts,
+                    ScriptPolicy::from(ignore_scripts),
                     SaveType::Prod,
                 )
                 .await?;
@@ -557,7 +557,7 @@ async fn async_main() -> Result<()> {
             log_time_end("deps resolved");
         }
         Some(Commands::Update) => {
-            update(false).await?;
+            update(ScriptPolicy::Run).await?;
             log_time_end("All packages updated");
         }
         Some(Commands::List { package }) => {
@@ -676,7 +676,7 @@ async fn async_main() -> Result<()> {
                 // Default to install if no arguments
                 let cwd = std::env::current_dir()?;
                 let root_path = init_project_root(&cwd).await?;
-                install(cli.ignore_scripts, &root_path).await?;
+                install(ScriptPolicy::from(cli.ignore_scripts), &root_path).await?;
                 log_time_end("All packages installed");
             }
         }

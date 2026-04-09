@@ -3,6 +3,7 @@ use crate::helper::global_bin::get_global_package_dir;
 use crate::helper::workspace::update_cwd_to_project;
 use crate::model::package::PackageInfo;
 use crate::util::linker::link;
+use crate::util::save_type::ScriptPolicy;
 use anyhow::{Context, Result};
 use std::path::Path;
 
@@ -17,7 +18,7 @@ pub async fn link_current_to_global(cwd: &Path, prefix: Option<&str>) -> Result<
     })?;
 
     // Install dependencies
-    install(false, &project_path)
+    install(ScriptPolicy::Run, &project_path)
         .await
         .context("Failed to prepare dependencies for package to link")?;
 

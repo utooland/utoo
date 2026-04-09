@@ -1,5 +1,5 @@
-pub mod bool_enum;
 pub mod binary_resolver;
+pub mod bool_enum;
 pub mod cache;
 pub mod cloner;
 pub mod config_file;

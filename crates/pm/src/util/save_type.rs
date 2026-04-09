@@ -38,15 +38,3 @@ bool_enum! {
     /// `false` → Run, `true` → Ignore (`--ignore-scripts`).
     pub ScriptPolicy { Run, Ignore }
 }
-
-bool_enum! {
-    /// Whether to perform a dry run.
-    /// `false` → Live, `true` → Dry (`--dry-run`).
-    pub DryRun { Live, Dry }
-}
-
-bool_enum! {
-    /// Whether to skip interactive prompts.
-    /// `false` → Prompt, `true` → AutoYes (`--yes`).
-    pub InteractiveMode { Prompt, AutoYes }
-}
