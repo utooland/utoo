@@ -102,13 +102,13 @@ function normalizeStyles(
   };
 }
 
-async function serializeConfig(
+export async function serializeConfig(
   config: ConfigComplete,
   isDev: boolean,
 ): Promise<string> {
   const configSerializable = {
     ...config,
-    ...normalizeStyles(config.styles, isDev),
+    styles: normalizeStyles(config.styles, isDev),
   };
 
   if (configSerializable.entry) {
