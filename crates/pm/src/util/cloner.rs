@@ -265,8 +265,8 @@ async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
         .await
         .with_context(|| format!("Failed to collect entries for {}", dst.display()))?;
 
-    src_entries.sort_by_key(|e| e.path.clone());
-    dst_entries.sort_by_key(|e| e.path.clone());
+    src_entries.sort_by(|a, b| a.path.cmp(&b.path));
+    dst_entries.sort_by(|a, b| a.path.cmp(&b.path));
 
     if src_entries.len() != dst_entries.len() {
         tracing::debug!(

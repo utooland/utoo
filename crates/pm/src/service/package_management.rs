@@ -48,7 +48,7 @@ impl PackageManagementService {
         tracing::debug!("Installing package {name} to cache...");
         InstallService::install_global_package(
             package_name,
-            Some(package_cache_dir.to_string_lossy().to_string().as_str()),
+            Some(package_cache_dir.to_string_lossy().into_owned().as_str()),
         )
         .await?;
         tracing::debug!("Package {name} installed successfully");

@@ -233,8 +233,8 @@ pub fn serialize_to_packages(
                     child
                         .path
                         .strip_prefix(root_path)
-                        .map(|p| p.to_string_lossy().to_string())
-                        .unwrap_or_else(|_| child.path.to_string_lossy().to_string())
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .unwrap_or_else(|_| child.path.to_string_lossy().into_owned())
                 } else {
                     format!("node_modules/{}", child.name)
                 }

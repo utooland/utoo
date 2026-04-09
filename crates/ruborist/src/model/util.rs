@@ -30,7 +30,8 @@ pub async fn read_package_json(dir: &Path) -> Result<PackageJson> {
     let mut bytes = tokio_fs_ext::read(&path)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", path.display(), e))?;
-    simd_json::serde::from_slice(&mut bytes).context(format!("Failed to parse {}", path.display()))
+    simd_json::serde::from_slice(&mut bytes)
+        .with_context(|| format!("Failed to parse {}", path.display()))
 }
 
 /// Extension trait for package name strings.

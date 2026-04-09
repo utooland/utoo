@@ -58,10 +58,7 @@ async fn build_script_command(
                 .to_string_lossy()
                 .to_string(),
         )
-        .env(
-            "npm_package_json",
-            package.path.join("package.json").display().to_string(),
-        )
+        .env("npm_package_json", package.path.join("package.json"))
         .env("npm_config_global", get_install_scope().as_env_value());
 
     if let Some(envs) = get_envs().await {
@@ -209,7 +206,7 @@ impl ScriptService {
         // Early check for file existence (works on all platforms)
         let metadata = crate::fs::metadata(&target_path)
             .await
-            .context(format!("Failed to access file {}", target_path.display()))?;
+            .with_context(|| format!("Failed to access file {}", target_path.display()))?;
 
         if !metadata.is_file() {
             anyhow::bail!("Path is not a file: {}", target_path.display());
@@ -257,10 +254,9 @@ impl ScriptService {
             use std::os::unix::fs::PermissionsExt;
             let mut perms = crate::fs::metadata(&target_path)
                 .await
-                .context(format!(
-                    "Failed to get file permissions {}",
-                    target_path.display()
-                ))?
+                .with_context(|| {
+                    format!("Failed to get file permissions {}", target_path.display())
+                })?
                 .permissions();
 
             perms.set_mode(0o755);
@@ -333,7 +329,7 @@ impl ScriptService {
         let original_path = env::var("PATH").unwrap_or_default();
         let additional_paths = bin_paths
             .iter()
-            .map(|p| p.display().to_string())
+            .map(|p| p.to_string_lossy().into_owned())
             .collect::<Vec<_>>()
             .join(path_separator);
 

@@ -80,7 +80,9 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
         let path = root_path.to_path_buf();
         let lock_clone = package_lock.clone();
         tokio::spawn(async move {
-            let _ = save_package_lock(&path, &lock_clone).await;
+            if let Err(e) = save_package_lock(&path, &lock_clone).await {
+                tracing::warn!("Failed to save package-lock.json: {e}");
+            }
         });
 
         return Ok(package_lock);

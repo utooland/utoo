@@ -120,7 +120,8 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
         match env_var("ALL_PROXY") {
             Some(url) => {
                 builder = builder.proxy(
-                    reqwest::Proxy::all(&url).context(format!("invalid ALL_PROXY url: {url}"))?,
+                    reqwest::Proxy::all(&url)
+                        .with_context(|| format!("invalid ALL_PROXY url: {url}"))?,
                 );
             }
             None => {
@@ -128,13 +129,13 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
                 if let Some(url) = env_var("HTTPS_PROXY") {
                     builder = builder.proxy(
                         reqwest::Proxy::https(&url)
-                            .context(format!("invalid HTTPS_PROXY url: {url}"))?,
+                            .with_context(|| format!("invalid HTTPS_PROXY url: {url}"))?,
                     );
                 }
                 if let Some(url) = env_var("HTTP_PROXY") {
                     builder = builder.proxy(
                         reqwest::Proxy::http(&url)
-                            .context(format!("invalid HTTP_PROXY url: {url}"))?,
+                            .with_context(|| format!("invalid HTTP_PROXY url: {url}"))?,
                     );
                 }
             }

@@ -229,7 +229,7 @@ impl PackageInfo {
 
         // Update PATH environment variable for current process
         if let Ok(current_path) = env::var("PATH") {
-            let global_bin_str = global_bin_dir.to_string_lossy().to_string();
+            let global_bin_str = global_bin_dir.to_string_lossy().into_owned();
             if !current_path.contains(&global_bin_str) {
                 let new_path = format!("{global_bin_str}:{current_path}");
                 unsafe { env::set_var("PATH", new_path) };

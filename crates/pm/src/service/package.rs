@@ -96,7 +96,7 @@ impl PackageService {
             let lifecycle_scripts = if has_scripts || !ignore_scripts {
                 Self::read_lifecycle_scripts(&package_path)
                     .await
-                    .context(format!("Failed to read scripts for package: {path}"))?
+                    .with_context(|| format!("Failed to read scripts for package: {path}"))?
             } else {
                 LifecycleScripts::default()
             };
@@ -292,9 +292,9 @@ impl PackageService {
                         continue;
                     }
 
-                    let bin_dir = package
-                        .get_bin_dir()
-                        .context(format!("Failed to get bin directory for {}", package.name))?;
+                    let bin_dir = package.get_bin_dir().with_context(|| {
+                        format!("Failed to get bin directory for {}", package.name)
+                    })?;
                     let link_path = bin_dir.join(bin_name);
 
                     ScriptService::ensure_executable(&target_path)
@@ -309,12 +309,14 @@ impl PackageService {
 
                     crate::util::linker::link_bin(&target_path, &link_path)
                         .await
-                        .context(format!(
-                            "Failed to link binary for {} (from: {} to: {})",
-                            package.name,
-                            target_path.display(),
-                            link_path.display()
-                        ))?;
+                        .with_context(|| {
+                            format!(
+                                "Failed to link binary for {} (from: {} to: {})",
+                                package.name,
+                                target_path.display(),
+                                link_path.display()
+                            )
+                        })?;
                 }
                 tracing::debug!("Linking binary files for {} successfully", package.name);
             }

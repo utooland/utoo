@@ -151,7 +151,7 @@ mod tests {
         );
         fs::write(global_pkg_dir.join("package.json"), pkg_json).unwrap();
 
-        let prefix_str = global.to_string_lossy().to_string();
+        let prefix_str = global.to_string_lossy().into_owned();
         let result = link_global_to_local(&project, pkg_name, Some(&prefix_str)).await;
         assert!(result.is_ok(), "link_global_to_local should succeed");
 
