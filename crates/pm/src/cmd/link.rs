@@ -2,8 +2,8 @@ use crate::cmd::install::install;
 use crate::helper::global_bin::get_global_package_dir;
 use crate::helper::workspace::update_cwd_to_project;
 use crate::model::package::PackageInfo;
+use crate::util::cli_enum::ScriptPolicy;
 use crate::util::linker::link;
-use crate::util::save_type::ScriptPolicy;
 use anyhow::{Context, Result};
 use std::path::Path;
 

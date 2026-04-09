@@ -10,11 +10,11 @@ use utoo_ruborist::builder::PeerDeps;
 use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::spec::Catalogs;
 
+use super::cli_enum::OmitType;
 use super::config_file::{Config, ConfigValue};
 use super::http::client_builder;
 use super::json::load_package_json;
 use super::registry::{REGISTRY_NPMMIRROR, select_fastest_registry};
-use super::save_type::OmitType;
 
 static REGISTRY: LazyLock<ConfigValue<String>> =
     LazyLock::new(|| ConfigValue::new("registry", REGISTRY_NPMMIRROR.to_string()));

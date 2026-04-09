@@ -17,9 +17,9 @@ use cmd::{clean::clean, deps::build_workspace};
 use helper::auto_update::init_auto_update;
 use service::script::MissingScript;
 use service::workspace::WorkspaceFilter;
+use util::cli_enum::{OmitType, PackageAction, SaveType, ScriptPolicy, parse_save_type};
 use util::config_file::ConfigScope;
 use util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
-use util::save_type::{OmitType, PackageAction, SaveType, ScriptPolicy, parse_save_type};
 use util::user_config::{
     InstallScope, init_registry, set_cache_dir, set_install_scope, set_legacy_peer_deps,
     set_manifests_concurrency_limit, set_omit,

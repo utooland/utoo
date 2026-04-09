@@ -7,25 +7,9 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use utoo_ruborist::spec::Catalogs;
 
+pub use super::cli_enum::ConfigScope;
+
 pub type ConfigResult<T> = Result<T>;
-
-/// Whether a config operation targets the global (`~/.utoo/config.toml`)
-/// or local (`.utoo.toml`) scope.
-///
-/// Replaces bare `bool` parameters for readability.
-/// See: <https://blakesmith.me/2019/05/07/rust-patterns-enums-instead-of-booleans.html>
-/// See: <https://github.com/rust-lang/book/issues/2186>
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConfigScope {
-    Local,
-    Global,
-}
-
-impl From<bool> for ConfigScope {
-    fn from(global: bool) -> Self {
-        if global { Self::Global } else { Self::Local }
-    }
-}
 
 /// Cached merged config (global + local). Set on first `Config::load(ConfigScope::Local)`.
 static MERGED_CONFIG: OnceLock<Config> = OnceLock::new();

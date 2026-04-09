@@ -1,5 +1,5 @@
 use crate::service::package::PackageService;
-use crate::util::save_type::ScriptPolicy;
+use crate::util::cli_enum::ScriptPolicy;
 use anyhow::Result;
 use std::path::Path;
 use utoo_ruborist::lock::PackageLock;

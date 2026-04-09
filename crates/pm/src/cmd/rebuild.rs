@@ -1,6 +1,6 @@
 use crate::helper::lock::ensure_package_lock;
 use crate::service::rebuild::RebuildService;
-use crate::util::save_type::ScriptPolicy;
+use crate::util::cli_enum::ScriptPolicy;
 use anyhow::Result;
 use std::path::Path;
 

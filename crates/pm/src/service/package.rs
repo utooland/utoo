@@ -1,6 +1,6 @@
 use crate::model::package::{LifecycleHook, LifecycleScripts, PackageInfo};
+use crate::util::cli_enum::ScriptPolicy;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
-use crate::util::save_type::ScriptPolicy;
 use anyhow::{Context, Result};
 use futures;
 use std::path::{Path, PathBuf};

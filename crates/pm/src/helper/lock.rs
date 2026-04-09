@@ -13,12 +13,12 @@ use super::ruborist_context::Context;
 use super::workspace::find_workspace_path;
 use crate::fs;
 use crate::helper::workspace::find_workspaces;
+use crate::util::cli_enum::{PackageAction, SaveType};
 use crate::util::cloner::clone_package;
 use crate::util::downloader::{is_git_url, resolve_cache_path};
 use crate::util::git_resolver::{resolve_git_spec, resolve_github_spec};
 use crate::util::json::{load_package_json, load_package_lock_json_from_path, read_json_file};
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
-use crate::util::save_type::{PackageAction, SaveType};
 use utoo_ruborist::builder::PeerDeps;
 
 use crate::util::platform_const::GLOBAL_NODE_MODULES;
@@ -786,7 +786,7 @@ mod tests {
     async fn test_update_package_json_preserves_trailing_newline() {
         use tempfile::tempdir;
 
-        use crate::util::save_type::{PackageAction, SaveType};
+        use crate::util::cli_enum::{PackageAction, SaveType};
 
         let temp_dir = tempdir().unwrap();
         let temp_path = temp_dir.path();
@@ -840,7 +840,7 @@ mod tests {
     async fn test_update_package_json_preserves_crlf() {
         use tempfile::tempdir;
 
-        use crate::util::save_type::{PackageAction, SaveType};
+        use crate::util::cli_enum::{PackageAction, SaveType};
 
         let temp_dir = tempdir().unwrap();
         let temp_path = temp_dir.path();

@@ -1,5 +1,5 @@
 use crate::service::update::clean_package_lock;
-use crate::util::save_type::ScriptPolicy;
+use crate::util::cli_enum::ScriptPolicy;
 use crate::{cmd::install::install, helper::workspace::init_project_root};
 use anyhow::{Context, Result};
 

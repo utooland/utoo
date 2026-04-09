@@ -1,4 +1,4 @@
-use crate::util::save_type::ScriptPolicy;
+use crate::util::cli_enum::ScriptPolicy;
 use anyhow::Context;
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
@@ -14,10 +14,10 @@ use crate::helper::lock::{
 use crate::helper::workspace::init_project_root;
 use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
+use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
-use crate::util::save_type::{OmitType, PackageAction, SaveType};
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 
 use super::binary::update_package_binary;

@@ -1,9 +1,9 @@
-use crate::util::save_type::ScriptPolicy;
+use crate::util::cli_enum::ScriptPolicy;
 use anyhow::Result;
 use std::path::Path;
 
 use crate::service::install::InstallService;
-use crate::util::save_type::{PackageAction, SaveType};
+use crate::util::cli_enum::{PackageAction, SaveType};
 use crate::util::user_config::get_omit;
 
 pub async fn update_packages(
