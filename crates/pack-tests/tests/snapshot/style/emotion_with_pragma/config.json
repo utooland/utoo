@@ -7,7 +7,7 @@
       }
     ],
     "styles": {
-      "emotion": true
+      "emotion": {}
     },
     "sourceMaps": false
   }

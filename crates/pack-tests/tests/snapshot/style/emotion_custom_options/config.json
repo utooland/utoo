@@ -6,9 +6,11 @@
         "name": "main"
       }
     ],
-    "mode": "development",
     "styles": {
       "emotion": {
+        "autoLabel": "always",
+        "labelFormat": "[local]",
+        "sourcemap": true,
         "importMap": {}
       }
     },

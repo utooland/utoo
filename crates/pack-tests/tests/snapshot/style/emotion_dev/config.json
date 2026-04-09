@@ -9,7 +9,8 @@
     "mode": "development",
     "styles": {
       "emotion": {
-        "autoLabel": "dev-only"
+        "sourcemap": true,
+        "autoLabel": "always"
       }
     },
     "sourceMaps": false
