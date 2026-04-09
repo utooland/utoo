@@ -1,6 +1,6 @@
 use anyhow::Result;
 use std::sync::Arc;
-use turbo_tasks::{Effects, FxIndexSet, ReadRef, ResolvedVc, TryJoinIterExt, Vc, get_effects};
+use turbo_tasks::{Effects, FxIndexSet, ReadRef, ResolvedVc, TryJoinIterExt, Vc, take_effects};
 use turbopack_core::{
     diagnostics::PlainDiagnostic,
     issue::PlainIssue,
@@ -29,7 +29,7 @@ pub async fn get_all_written_entrypoints_with_issues_operation(
     let entrypoints = entrypoints_operation.read_strongly_consistent().await?;
     let issues = get_issues(entrypoints_operation).await?;
     let diagnostics = get_diagnostics(entrypoints_operation).await?;
-    let effects = Arc::new(get_effects(entrypoints_operation).await?);
+    let effects = Arc::new(take_effects(entrypoints_operation).await?);
     Ok(EntrypointsWithIssues {
         entrypoints,
         issues,
@@ -92,7 +92,7 @@ pub async fn get_entrypoints_with_issues_operation(
     let entrypoints = entrypoints_operation.read_strongly_consistent().await?;
     let issues = get_issues(entrypoints_operation).await?;
     let diagnostics = get_diagnostics(entrypoints_operation).await?;
-    let effects = Arc::new(get_effects(entrypoints_operation).await?);
+    let effects = Arc::new(take_effects(entrypoints_operation).await?);
     Ok(EntrypointsWithIssues {
         entrypoints,
         issues,

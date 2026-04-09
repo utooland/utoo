@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use turbo_rcstr::RcStr;
-use turbo_tasks::{Effects, ReadRef, ResolvedVc, Vc, get_effects};
+use turbo_tasks::{Effects, ReadRef, ResolvedVc, Vc, take_effects};
 use turbopack_core::{
     diagnostics::PlainDiagnostic,
     issue::PlainIssue,
@@ -32,7 +32,7 @@ pub async fn hmr_update_with_issues_operation(
     let update = update_op.read_strongly_consistent().await?;
     let issues = get_issues(update_op).await?;
     let diagnostics = get_diagnostics(update_op).await?;
-    let effects = Arc::new(get_effects(update_op).await?);
+    let effects = Arc::new(take_effects(update_op).await?);
     Ok(HmrUpdateWithIssues {
         update,
         issues,
@@ -67,7 +67,7 @@ pub async fn get_hmr_identifiers_with_issues_operation(
     let hmr_identifiers = hmr_identifiers_op.read_strongly_consistent().await?;
     let issues = get_issues(hmr_identifiers_op).await?;
     let diagnostics = get_diagnostics(hmr_identifiers_op).await?;
-    let effects = Arc::new(get_effects(hmr_identifiers_op).await?);
+    let effects = Arc::new(take_effects(hmr_identifiers_op).await?);
     Ok(HmrIdentifiersWithIssues {
         identifiers: hmr_identifiers,
         issues,
