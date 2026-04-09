@@ -21,7 +21,9 @@ use turbopack_core::{
     resolve::ResolveAliasMap,
 };
 use turbopack_ecmascript::{OptionTreeShaking, TreeShakingMode};
-use turbopack_ecmascript_plugins::transform::styled_components::StyledComponentsTransformConfig;
+use turbopack_ecmascript_plugins::transform::{
+    emotion::EmotionTransformConfig, styled_components::StyledComponentsTransformConfig,
+};
 use turbopack_ecmascript_runtime::CrossOriginLoading as RuntimeCrossOriginLoading;
 use turbopack_node::transforms::webpack::{WebpackLoaderItem, WebpackLoaderItems};
 
@@ -254,7 +256,7 @@ pub struct ReactConfig {
 #[serde(rename_all = "camelCase")]
 pub struct StyleConfig {
     pub styled_components: Option<StyledComponentsTransformOptionsOrBoolean>,
-    pub emotion: Option<bool>,
+    pub emotion: Option<EmotionTransformConfig>,
     pub auto_css_modules: Option<bool>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     pub postcss: Option<serde_json::Value>,

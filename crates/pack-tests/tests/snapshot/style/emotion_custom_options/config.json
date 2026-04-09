@@ -7,7 +7,12 @@
       }
     ],
     "styles": {
-      "emotion": {}
+      "emotion": {
+        "autoLabel": "always",
+        "labelFormat": "[local]",
+        "sourcemap": true,
+        "importMap": {}
+      }
     },
     "sourceMaps": false
   }

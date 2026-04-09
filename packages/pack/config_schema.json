@@ -532,6 +532,57 @@
         }
       }
     },
+    "SchemaEmotionConfig": {
+      "type": "object",
+      "properties": {
+        "autoLabel": {
+          "description": "Emotion auto label strategy",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaEmotionLabelKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "importMap": {
+          "description": "Emotion import map configuration"
+        },
+        "labelFormat": {
+          "description": "Emotion label format",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sourcemap": {
+          "description": "Enable source maps in Emotion transform",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "SchemaEmotionConfigOrBoolean": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/SchemaEmotionConfig"
+        }
+      ]
+    },
+    "SchemaEmotionLabelKind": {
+      "type": "string",
+      "enum": [
+        "dev-only",
+        "always",
+        "never"
+      ]
+    },
     "SchemaEntryOptions": {
       "description": "Entry point configuration",
       "type": "object",
@@ -1403,10 +1454,14 @@
           ]
         },
         "emotion": {
-          "description": "Enable @emotion/react transform support",
-          "type": [
-            "boolean",
-            "null"
+          "description": "Enable @emotion/react transform support with boolean or options",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaEmotionConfigOrBoolean"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "inlineCss": {

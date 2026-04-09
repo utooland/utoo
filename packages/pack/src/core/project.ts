@@ -12,6 +12,7 @@ import type {
 import * as binding from "../binding";
 import {
   ConfigComplete,
+  EmotionOptions,
   TurbopackLoaderBuiltinCondition,
   TurbopackLoaderItem,
   TurbopackRuleCondition,
@@ -71,8 +72,44 @@ async function withErrorCause<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-async function serializeConfig(config: ConfigComplete): Promise<string> {
-  const configSerializable = { ...config };
+function normalizeEmotionConfig(
+  emotion: EmotionOptions | boolean | undefined,
+  isDev: boolean,
+): EmotionOptions | undefined {
+  if (emotion === undefined) {
+    return undefined;
+  }
+
+  const defaults = {
+    sourcemap: isDev,
+    autoLabel: isDev ? ("always" as const) : ("never" as const),
+  };
+
+  return emotion === true ? defaults : { ...defaults, ...emotion };
+}
+
+function normalizeStyles(
+  styles: ConfigComplete["styles"],
+  isDev: boolean,
+): ConfigComplete["styles"] {
+  if (!styles) {
+    return styles;
+  }
+
+  return {
+    ...styles,
+    emotion: normalizeEmotionConfig(styles.emotion, isDev),
+  };
+}
+
+async function serializeConfig(
+  config: ConfigComplete,
+  isDev: boolean,
+): Promise<string> {
+  const configSerializable = {
+    ...config,
+    ...normalizeStyles(config.styles, isDev),
+  };
 
   if (configSerializable.entry) {
     configSerializable.entry = configSerializable.entry.map((entry) => {
@@ -252,7 +289,8 @@ async function rustifyPartialProjectOptions(
     rootPath: normalizePathOption(options.rootPath),
     projectPath: normalizePathOption(options.projectPath),
     packPath: normalizePathOption(options.packPath),
-    config: options.config && (await serializeConfig(options.config)),
+    config:
+      options.config && (await serializeConfig(options.config, !!options.dev)),
     processEnv: options.processEnv && rustifyEnv(options.processEnv),
   };
 }
@@ -274,7 +312,7 @@ async function rustifyProjectOptions(
     rootPath: normalizePath(options.rootPath),
     projectPath: normalizePath(options.projectPath),
     packPath: normalizePath(options.packPath),
-    config: await serializeConfig(options.config),
+    config: await serializeConfig(options.config, options.dev),
     processEnv: rustifyEnv(options.processEnv ?? {}),
   };
 }

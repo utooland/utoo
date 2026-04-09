@@ -6,8 +6,12 @@
         "name": "main"
       }
     ],
+    "mode": "development",
     "styles": {
-      "emotion": {}
+      "emotion": {
+        "sourcemap": true,
+        "autoLabel": "always"
+      }
     },
     "sourceMaps": false
   }
