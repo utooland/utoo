@@ -127,3 +127,94 @@ fn build_row_line(items: &[String], row: usize, cols: usize, col_len: usize) -> 
 
     line
 }
+
+// ---------------------------------------------------------------------------
+// Multi-workspace run display helpers
+// ---------------------------------------------------------------------------
+
+/// Print the `> ...` line before script execution. When `workspace` is set
+/// the line is tagged with `[ws]` so multi-workspace output is distinguishable.
+pub fn announce_script(workspace: Option<&str>, script_content: &str, script_args_str: &str) {
+    let trailing = if script_args_str.is_empty() {
+        String::new()
+    } else {
+        format!(" {script_args_str}")
+    };
+    match workspace {
+        Some(label) => println!(
+            "{} {} {}{}",
+            ">".bright_cyan(),
+            format!("[{label}]").cyan(),
+            script_content,
+            trailing
+        ),
+        None => {
+            println!("> {script_content}{trailing}");
+            println!();
+        }
+    }
+}
+
+/// Header printed once before a multi-workspace run. Shows the script name,
+/// total workspace count, layer count, and a truncated listing per layer.
+pub fn print_multi_workspace_header(script_name: &str, layers: &[Vec<String>]) {
+    let total: usize = layers.iter().map(|l| l.len()).sum();
+    let layer_count = layers.len();
+    println!(
+        "{} Running {} in {} workspace{}, {} layer{}",
+        ">".bright_cyan(),
+        script_name.green(),
+        total,
+        if total == 1 { "" } else { "s" },
+        layer_count,
+        if layer_count == 1 { "" } else { "s" },
+    );
+
+    const MAX_NAMES: usize = 5;
+    for (layer_index, layer) in layers.iter().enumerate() {
+        let (shown, rest) = if layer.len() > MAX_NAMES {
+            (&layer[..MAX_NAMES], layer.len() - MAX_NAMES)
+        } else {
+            (layer.as_slice(), 0)
+        };
+        let names = shown
+            .iter()
+            .map(|n| n.cyan().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let suffix = if rest > 0 {
+            format!(" {} +{rest} more", "…".bright_black())
+        } else {
+            String::new()
+        };
+        println!(
+            "  {} {}{}",
+            format!("{}:", layer_index + 1).bright_black(),
+            names,
+            suffix
+        );
+    }
+    println!();
+}
+
+/// Print the `▶ N/M` layer separator before each layer (only when multiple layers).
+pub fn print_layer_separator(layer_index: usize, layer_count: usize) {
+    if layer_count > 1 {
+        println!("{} {}/{}", "▶".bright_cyan(), layer_index + 1, layer_count);
+    }
+}
+
+/// Print a single workspace result with ✓/✗ mark, the command header,
+/// and any captured body output.
+pub fn print_workspace_result(header: &str, body: &[u8], success: bool) {
+    let mark = if success {
+        "✓".green().to_string()
+    } else {
+        "✗".red().to_string()
+    };
+    let headline = header.trim_end();
+    println!("{} {}", mark, headline);
+    if !body.is_empty() {
+        print!("{}", String::from_utf8_lossy(body));
+    }
+}

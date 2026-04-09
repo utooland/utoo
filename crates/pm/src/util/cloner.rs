@@ -196,12 +196,13 @@ mod hardlink_clone {
                 }
             }
 
-            // Phase 3: Clone files (hardlink first, fallback to copy)
+            // Phase 3: Clone files (hardlink or copy)
             for entry in &files {
-                if !use_copy && fs::hard_link(&entry.src, &entry.dst).is_ok() {
-                    continue;
+                if use_copy {
+                    copy_file_sync(&entry.src, &entry.dst)?;
+                } else {
+                    fs::hard_link(&entry.src, &entry.dst)?;
                 }
-                copy_file_sync(&entry.src, &entry.dst)?;
             }
             Ok(())
         })

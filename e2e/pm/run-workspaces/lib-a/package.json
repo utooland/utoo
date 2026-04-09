@@ -1,0 +1,10 @@
+{
+  "name": "lib-a",
+  "version": "1.0.0",
+  "dependencies": {
+    "lib-b": "*"
+  },
+  "scripts": {
+    "build": "echo building lib-a"
+  }
+}

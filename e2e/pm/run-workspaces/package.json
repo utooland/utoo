@@ -1,0 +1,9 @@
+{
+  "name": "run-workspaces-test",
+  "private": true,
+  "workspaces": [
+    "app",
+    "lib-a",
+    "lib-b"
+  ]
+}

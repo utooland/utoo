@@ -1,14 +1,21 @@
-use crate::fs;
-use crate::model::package::PackageInfo;
-use crate::util::platform_const::PATH_SEPARATOR;
-use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::env;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use anyhow::{Context, Result};
 use tokio::sync::OnceCell;
+use tokio::task::JoinSet;
 
 use super::binary::get_envs;
-
+use crate::fs;
+use crate::helper::workspace::find_workspace_path;
+use crate::model::package::PackageInfo;
+use crate::util::format_print::{
+    announce_script, print_layer_separator, print_multi_workspace_header, print_workspace_result,
+};
+use crate::util::platform_const::PATH_SEPARATOR;
 use crate::util::user_config::get_install_scope;
 
 /// How script output is handled.
@@ -18,6 +25,15 @@ pub enum ScriptOutput {
     Verbose,
     /// Capture and only print on failure (dependency lifecycle scripts).
     Silent,
+}
+
+/// What to do when a workspace doesn't have the requested script.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum MissingScript {
+    /// Fail with an error (default, matches `npm run --workspaces`).
+    Fail,
+    /// Skip silently (`--if-present`).
+    Skip,
 }
 
 /// Build a `Command` with the standard npm env vars for script execution.
@@ -135,8 +151,7 @@ impl ScriptService {
             );
 
             if output == ScriptOutput::Verbose {
-                println!("> {script}");
-                println!();
+                announce_script(None, script, "");
             }
 
             if Self::is_node_gyp_pkg(package) {
@@ -369,6 +384,275 @@ impl ScriptService {
         }
 
         Ok(())
+    }
+
+    /// Like [`Self::execute_custom_script`], but captures stdout/stderr
+    /// instead of streaming to the terminal.
+    pub async fn execute_custom_script_captured(
+        package: &PackageInfo,
+        script_name: &str,
+        script_content: &str,
+        script_args: Vec<&str>,
+    ) -> Result<std::process::Output> {
+        let cmd_content = if script_args.is_empty() {
+            script_content
+        } else {
+            &format!("{} {}", script_content, script_args.join(" "))
+        };
+
+        let mut cmd = build_script_command(package, script_name, cmd_content).await?;
+        cmd.stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        tokio::process::Command::from(cmd)
+            .output()
+            .await
+            .context("Failed to execute custom script")
+    }
+
+    /// Run a named script (with pre/post lifecycle) in a single package,
+    /// streaming output to the terminal.
+    pub async fn run_script(
+        cwd: &Path,
+        script_name: &str,
+        workspace: Option<&str>,
+        script_args: Option<Vec<&str>>,
+    ) -> Result<()> {
+        let package_path = if let Some(workspace_name) = workspace {
+            let ws_dir = find_workspace_path(cwd, workspace_name)
+                .await
+                .context("Failed to find workspace path")?;
+            tracing::debug!(
+                "Using workspace: {} at {}",
+                workspace_name,
+                ws_dir.display()
+            );
+            ws_dir
+        } else {
+            cwd.to_path_buf()
+        };
+
+        let package = PackageInfo::load(&package_path).await?;
+
+        let pre_script_name = format!("pre{script_name}");
+        if let Some(pre_script) = package.scripts.get(&pre_script_name) {
+            announce_script(workspace, pre_script, "");
+            Self::execute_custom_script(&package, &pre_script_name, pre_script, vec![])
+                .await
+                .with_context(|| format!("Failed to execute pre script {pre_script_name}"))?;
+        }
+
+        let script_content = package
+            .scripts
+            .get(script_name)
+            .ok_or_else(|| anyhow::anyhow!("Script '{script_name}' not found in package.json"))?;
+
+        let script_args = script_args.unwrap_or_default();
+        let script_args_str = script_args.join(" ");
+        announce_script(workspace, script_content, &script_args_str);
+        Self::execute_custom_script(&package, script_name, script_content, script_args)
+            .await
+            .with_context(|| format!("Failed to execute script {script_name}"))?;
+
+        let post_script_name = format!("post{script_name}");
+        if let Some(post_script) = package.scripts.get(&post_script_name) {
+            announce_script(workspace, post_script, "");
+            Self::execute_custom_script(&package, &post_script_name, post_script, vec![])
+                .await
+                .with_context(|| format!("Failed to execute post script {post_script_name}"))?;
+        }
+
+        Ok(())
+    }
+
+    /// Run a named script across multiple workspaces in topological layers.
+    ///
+    /// Same-layer workspaces execute concurrently; output is captured per
+    /// workspace and printed grouped as each finishes (stream-as-complete).
+    pub async fn run_in_layers(
+        layers: &[Vec<String>],
+        paths: &HashMap<String, PathBuf>,
+        script_name: &str,
+        missing: MissingScript,
+        script_args: Option<Vec<String>>,
+    ) -> Result<()> {
+        if layers.is_empty() {
+            return Ok(());
+        }
+
+        let layer_count = layers.len();
+        print_multi_workspace_header(script_name, layers);
+
+        for (layer_index, layer) in layers.iter().enumerate() {
+            let workspaces_to_run: Vec<_> = layer
+                .iter()
+                .filter_map(|name| paths.get(name).map(|p| (name.clone(), p.clone())))
+                .collect();
+
+            if workspaces_to_run.is_empty() {
+                continue;
+            }
+
+            print_layer_separator(layer_index, layer_count);
+
+            let mut join_set = JoinSet::new();
+            for (workspace_name, ws_path) in workspaces_to_run {
+                let script_name = script_name.to_string();
+                let script_args = script_args.clone();
+
+                join_set.spawn(async move {
+                    run_script_captured(
+                        &ws_path,
+                        &script_name,
+                        &workspace_name,
+                        missing,
+                        script_args,
+                    )
+                    .await
+                });
+            }
+
+            let mut failed_names = Vec::new();
+            while let Some(ws) = join_set.join_next().await.transpose()? {
+                print_workspace_result(&ws.header, &ws.body, ws.success);
+                if !ws.success {
+                    failed_names.push(ws.name);
+                }
+            }
+            anyhow::ensure!(
+                failed_names.is_empty(),
+                "Script execution failed in layer {}: {}",
+                layer_index + 1,
+                failed_names.join(", ")
+            );
+        }
+
+        Ok(())
+    }
+}
+
+struct WorkspaceResult {
+    name: String,
+    header: String,
+    body: Vec<u8>,
+    success: bool,
+}
+
+async fn run_script_captured(
+    workspace_dir: &Path,
+    script_name: &str,
+    workspace_name: &str,
+    missing: MissingScript,
+    script_args: Option<Vec<String>>,
+) -> WorkspaceResult {
+    let mut header = String::new();
+    let mut body = Vec::new();
+
+    let inner = async {
+        let package = PackageInfo::load(workspace_dir).await?;
+
+        if !package.scripts.contains_key(script_name) {
+            if missing == MissingScript::Skip {
+                return Ok(());
+            }
+            anyhow::bail!(
+                "Missing script: \"{script_name}\"\n\nTo see a list of scripts, run:\n  utoo run --workspace={workspace_name}"
+            );
+        }
+
+        let pre_script_name = format!("pre{script_name}");
+        if let Some(pre_script) = package.scripts.get(&pre_script_name) {
+            let _ = writeln!(header, "[{workspace_name}] {pre_script}");
+            let cap = ScriptService::execute_custom_script_captured(
+                &package,
+                &pre_script_name,
+                pre_script,
+                vec![],
+            )
+            .await?;
+            append_captured(&mut body, &cap.stdout, &cap.stderr);
+            if !cap.status.success() {
+                anyhow::bail!("Failed to execute pre script {pre_script_name}");
+            }
+        }
+
+        let script_content = package
+            .scripts
+            .get(script_name)
+            .ok_or_else(|| anyhow::anyhow!("Script '{script_name}' not found in package.json"))?;
+
+        let script_args_refs: Vec<&str> = script_args
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
+        let _ = writeln!(
+            header,
+            "[{workspace_name}] {script_content} {}",
+            script_args_refs.join(" ")
+        );
+        let cap = ScriptService::execute_custom_script_captured(
+            &package,
+            script_name,
+            script_content,
+            script_args_refs,
+        )
+        .await?;
+        append_captured(&mut body, &cap.stdout, &cap.stderr);
+        if !cap.status.success() {
+            anyhow::bail!("Failed to execute script {script_name}");
+        }
+
+        let post_script_name = format!("post{script_name}");
+        if let Some(post_script) = package.scripts.get(&post_script_name) {
+            let _ = writeln!(header, "[{workspace_name}] {post_script}");
+            let cap = ScriptService::execute_custom_script_captured(
+                &package,
+                &post_script_name,
+                post_script,
+                vec![],
+            )
+            .await?;
+            append_captured(&mut body, &cap.stdout, &cap.stderr);
+            if !cap.status.success() {
+                anyhow::bail!("Failed to execute post script {post_script_name}");
+            }
+        }
+
+        Ok::<(), anyhow::Error>(())
+    };
+
+    match inner.await {
+        Ok(()) => WorkspaceResult {
+            name: workspace_name.to_string(),
+            header,
+            body,
+            success: true,
+        },
+        Err(e) => {
+            tracing::debug!(
+                "Failed to run script '{script_name}' in workspace '{workspace_name}': {e}"
+            );
+            WorkspaceResult {
+                name: workspace_name.to_string(),
+                header,
+                body,
+                success: false,
+            }
+        }
+    }
+}
+
+fn append_captured(buf: &mut Vec<u8>, stdout: &[u8], stderr: &[u8]) {
+    for bytes in [stdout, stderr] {
+        if !bytes.is_empty() {
+            buf.extend_from_slice(bytes);
+            if !bytes.ends_with(b"\n") {
+                buf.push(b'\n');
+            }
+        }
     }
 }
 
