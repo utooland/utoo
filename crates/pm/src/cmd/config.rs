@@ -1,4 +1,4 @@
-use crate::util::config_file::Config;
+use crate::util::config_file::{Config, ConfigScope};
 use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 
@@ -10,16 +10,21 @@ fn parse_key_val(s: &str) -> Result<(String, String)> {
     Ok((s[..pos].to_string(), s[pos + 1..].to_string()))
 }
 
-pub async fn handle_config_set(key: String, value: String, global: bool) -> Result<()> {
-    let mut config = Config::load(global).await?;
-    config.set(&key, value, global)?;
-    println!("Successfully set {key} (global: {global})");
+pub async fn handle_config_set(key: String, value: String, scope: ConfigScope) -> Result<()> {
+    let mut config = Config::load(scope).await?;
+    config.set(&key, value, scope)?;
+    let label = if scope == ConfigScope::Global {
+        "global"
+    } else {
+        "local"
+    };
+    println!("Successfully set {key} ({label})");
     Ok(())
 }
 
 pub async fn handle_config_get(
     key: String,
-    global: bool,
+    scope: ConfigScope,
     override_values: Vec<String>,
 ) -> Result<()> {
     let overrides: HashMap<String, String> = override_values
@@ -30,7 +35,7 @@ pub async fn handle_config_get(
     if let Some(value) = overrides.get(&key) {
         println!("{value}");
     } else {
-        let config = Config::load(global).await?;
+        let config = Config::load(scope).await?;
         match config.get(&key)? {
             Some(value) => println!("{value}"),
             None => {
@@ -42,12 +47,11 @@ pub async fn handle_config_get(
     Ok(())
 }
 
-pub async fn handle_config_list(global: bool) -> Result<()> {
-    let config = Config::load(global).await?;
-    let config_path = if global {
-        config.get_global_config_path()?
-    } else {
-        config.get_local_config_path()?
+pub async fn handle_config_list(scope: ConfigScope) -> Result<()> {
+    let config = Config::load(scope).await?;
+    let config_path = match scope {
+        ConfigScope::Global => config.get_global_config_path()?,
+        ConfigScope::Local => config.get_local_config_path()?,
     };
 
     println!("Configuration file: {}", config_path.display());

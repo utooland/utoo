@@ -9,7 +9,21 @@ use utoo_ruborist::spec::Catalogs;
 
 pub type ConfigResult<T> = Result<T>;
 
-/// Cached merged config (global + local). Set on first `Config::load(false)`.
+/// Whether a config operation targets the global (`~/.utoo/config.toml`)
+/// or local (`.utoo.toml`) scope.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ConfigScope {
+    Global,
+    Local,
+}
+
+impl From<bool> for ConfigScope {
+    fn from(global: bool) -> Self {
+        if global { Self::Global } else { Self::Local }
+    }
+}
+
+/// Cached merged config (global + local). Set on first `Config::load(ConfigScope::Local)`.
 static MERGED_CONFIG: OnceLock<Config> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -29,8 +43,8 @@ pub struct Config {
 // global config path is ~/.utoo/config.toml
 // local config path is .utoo.toml
 impl Config {
-    pub async fn load(global: bool) -> ConfigResult<Self> {
-        if global {
+    pub async fn load(scope: ConfigScope) -> ConfigResult<Self> {
+        if scope == ConfigScope::Global {
             return Self::load_from_path(&Self::global_config_path()?).await;
         }
 
@@ -61,27 +75,32 @@ impl Config {
         Ok(config)
     }
 
-    pub fn set(&mut self, key: &str, value: String, global: bool) -> ConfigResult<()> {
+    pub fn set(&mut self, key: &str, value: String, scope: ConfigScope) -> ConfigResult<()> {
         self.values.insert(key.to_string(), value);
-        self.save(global)
+        self.save(scope)
     }
 
     pub fn get(&self, key: &str) -> ConfigResult<Option<String>> {
         Ok(self.values.get(key).cloned())
     }
 
-    pub fn delete(&mut self, key: &str, global: bool) -> ConfigResult<()> {
+    pub fn delete(&mut self, key: &str, scope: ConfigScope) -> ConfigResult<()> {
         self.values.remove(key);
-        self.save(global)
+        self.save(scope)
     }
 
     pub fn get_array(&self, key: &str) -> Option<&Vec<String>> {
         self.arrays.get(key)
     }
 
-    pub fn set_array(&mut self, key: &str, value: Vec<String>, global: bool) -> ConfigResult<()> {
+    pub fn set_array(
+        &mut self,
+        key: &str,
+        value: Vec<String>,
+        scope: ConfigScope,
+    ) -> ConfigResult<()> {
         self.arrays.insert(key.to_string(), value);
-        self.save(global)
+        self.save(scope)
     }
 
     /// Build a `Catalogs` map from the parsed `[catalog]` and `[catalogs.*]` sections.
@@ -108,11 +127,10 @@ impl Config {
         }
     }
 
-    pub fn save(&self, global: bool) -> ConfigResult<()> {
-        let path = if global {
-            Self::global_config_path()?
-        } else {
-            Self::local_config_path()?
+    pub fn save(&self, scope: ConfigScope) -> ConfigResult<()> {
+        let path = match scope {
+            ConfigScope::Global => Self::global_config_path()?,
+            ConfigScope::Local => Self::local_config_path()?,
         };
 
         // ensure parent directory exists
@@ -191,7 +209,7 @@ impl<T: Clone + Debug + 'static> ConfigValue<T> {
 
         // Ensure merged config is loaded and cached
         if MERGED_CONFIG.get().is_none() {
-            let _ = Config::load(false).await; // populates MERGED_CONFIG
+            let _ = Config::load(ConfigScope::Local).await; // populates MERGED_CONFIG
         }
 
         // Read from cached merged config (no clone of Config itself)
@@ -265,19 +283,23 @@ mod tests {
         with_temp_home(|| {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
-                let mut config = Config::load(true).await.unwrap();
-                config.set("foo", "bar".into(), true).unwrap();
-                config.set("baz", "qux".into(), true).unwrap();
+                let mut config = Config::load(ConfigScope::Global).await.unwrap();
+                config
+                    .set("foo", "bar".into(), ConfigScope::Global)
+                    .unwrap();
+                config
+                    .set("baz", "qux".into(), ConfigScope::Global)
+                    .unwrap();
 
                 // call the actual delete method
-                config.delete("foo", true).unwrap();
+                config.delete("foo", ConfigScope::Global).unwrap();
 
                 // in-memory: foo gone, baz kept
                 assert_eq!(config.get("foo").unwrap(), None);
                 assert_eq!(config.get("baz").unwrap(), Some("qux".into()));
 
                 // reload from disk: still gone
-                let reloaded = Config::load(true).await.unwrap();
+                let reloaded = Config::load(ConfigScope::Global).await.unwrap();
                 assert_eq!(reloaded.get("foo").unwrap(), None);
                 assert_eq!(reloaded.get("baz").unwrap(), Some("qux".into()));
             });
@@ -289,11 +311,13 @@ mod tests {
         with_temp_home(|| {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
-                let mut config = Config::load(true).await.unwrap();
-                config.set("keep", "yes".into(), true).unwrap();
+                let mut config = Config::load(ConfigScope::Global).await.unwrap();
+                config
+                    .set("keep", "yes".into(), ConfigScope::Global)
+                    .unwrap();
 
                 // deleting a key that doesn't exist should not error
-                config.delete("nope", true).unwrap();
+                config.delete("nope", ConfigScope::Global).unwrap();
 
                 assert_eq!(config.get("keep").unwrap(), Some("yes".into()));
             });

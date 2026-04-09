@@ -17,6 +17,7 @@ use cmd::{clean::clean, deps::build_workspace};
 use helper::auto_update::init_auto_update;
 use service::script::MissingScript;
 use service::workspace::WorkspaceFilter;
+use util::config_file::ConfigScope;
 use util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
 use util::save_type::{OmitType, PackageAction, SaveType, parse_save_type};
 use util::user_config::{
@@ -368,7 +369,7 @@ async fn async_main() -> Result<()> {
 
     // Check for help flag
     if args.len() > 1 && (args[1] == "-h" || args[1] == "--help") {
-        let config = crate::util::config_file::Config::load(false).await?;
+        let config = crate::util::config_file::Config::load(ConfigScope::Local).await?;
         let config_service = crate::service::config::ConfigService::new(config);
         config_service.print_help()?;
         return Ok(());
@@ -631,24 +632,24 @@ async fn async_main() -> Result<()> {
         }
         Some(Commands::Config { command }) => match command {
             ConfigCommands::Set { key, value, global } => {
-                handle_config_set(key, value, global).await?;
+                handle_config_set(key, value, global.into()).await?;
             }
             ConfigCommands::Get {
                 key,
                 global,
                 override_values,
             } => {
-                handle_config_get(key, global, override_values).await?;
+                handle_config_get(key, global.into(), override_values).await?;
             }
             ConfigCommands::List { global } => {
-                handle_config_list(global).await?;
+                handle_config_list(global.into()).await?;
             }
         },
         None => {
             // Check if there's a script name provided
             if let Some(script_name) = &cli.script_name {
                 // First check if there's a custom command configured for this script name
-                let config = crate::util::config_file::Config::load(false).await?;
+                let config = crate::util::config_file::Config::load(ConfigScope::Local).await?;
                 let config_service = crate::service::config::ConfigService::new(config);
                 // Check if there's a custom command available
                 if let Ok(Some(_)) = config_service.get_available_cmd(script_name) {
