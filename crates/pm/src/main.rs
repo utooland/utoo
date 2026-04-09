@@ -15,6 +15,8 @@ use cmd::update::update;
 use cmd::view::view;
 use cmd::{clean::clean, deps::build_workspace};
 use helper::auto_update::init_auto_update;
+use service::script::MissingScript;
+use service::workspace::WorkspaceFilter;
 use util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
 use util::save_type::{OmitType, PackageAction, SaveType, parse_save_type};
 use util::user_config::{
@@ -93,11 +95,11 @@ struct Cli {
     #[arg(long, global = true)]
     manifests_concurrency_limit: Option<usize>,
 
-    /// Workspace to operate in
-    #[arg(long, global = true, hide = true)]
-    workspace: Option<String>,
+    /// Workspace to operate in (may be repeated; supports glob patterns)
+    #[arg(long, global = true, hide = true, num_args = 1)]
+    workspace: Vec<String>,
 
-    /// Workspace to operate in
+    /// Run in all workspaces with topological ordering
     #[arg(long, global = true, hide = true, default_value = "false")]
     workspaces: bool,
 
@@ -231,13 +233,18 @@ enum Commands {
         /// Script name to run (optional, will prompt if not provided)
         script: Option<String>,
 
-        /// Workspace to run script in
-        #[arg(short, long)]
-        workspace: Option<String>,
+        /// Workspace(s) to run script in. Repeatable; supports glob patterns
+        /// (e.g. `--workspace packages/a --workspace 'packages/*'`).
+        #[arg(short, long, num_args = 1)]
+        workspace: Vec<String>,
 
         /// Run script in all workspaces with topological ordering
         #[arg(long)]
         workspaces: bool,
+
+        /// Skip workspaces that don't have the specified script
+        #[arg(long)]
+        if_present: bool,
 
         /// Arguments to pass to the script
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -563,13 +570,19 @@ async fn async_main() -> Result<()> {
             script,
             workspace,
             workspaces,
+            if_present,
             args,
         }) => {
             let script_args_owned = if args.is_empty() { None } else { Some(args) };
+            let missing = if if_present {
+                MissingScript::Skip
+            } else {
+                MissingScript::Fail
+            };
             run(
                 script.as_deref(),
-                workspace.as_deref(),
-                workspaces,
+                WorkspaceFilter::from_flags(workspace, workspaces),
+                missing,
                 script_args_owned,
             )
             .await?;
@@ -653,8 +666,8 @@ async fn async_main() -> Result<()> {
 
                 run(
                     Some(script_name.as_str()),
-                    cli.workspace.as_deref(),
-                    cli.workspaces,
+                    WorkspaceFilter::from_flags(cli.workspace, cli.workspaces),
+                    MissingScript::Fail,
                     script_args_owned,
                 )
                 .await?;

@@ -12,7 +12,6 @@ use utoo_ruborist::graph::{DependencyGraph, EdgeType, PackageNode};
 
 use crate::helper::install_runtime::install_runtime;
 use crate::helper::workspace::find_workspaces;
-use crate::util::logger::{finish_progress_bar, start_progress_bar};
 use crate::util::user_config::{get_or_load_package_json, get_peer_deps};
 
 /// TreeBuilder - builds workspace dependency graph.
@@ -132,8 +131,6 @@ impl TreeBuilder {
     pub async fn build_workspace_tree(&mut self) -> Result<()> {
         let mut graph = self.init_tree().await?;
 
-        start_progress_bar();
-
         // Build a map of workspace nodes for quick lookup
         let mut workspace_map = std::collections::HashMap::new();
         for node_idx in graph.graph.node_indices() {
@@ -165,7 +162,6 @@ impl TreeBuilder {
             graph.mark_dependency_resolved(edge_id, dep_workspace_idx);
         }
 
-        finish_progress_bar("workspace resolved");
         self.ideal_tree = Some(graph);
         Ok(())
     }

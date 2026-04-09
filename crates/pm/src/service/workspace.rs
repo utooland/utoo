@@ -1,11 +1,54 @@
 use crate::helper::deps::{compute_topological_layers, find_cycle_groups};
 use crate::helper::tree_builder::TreeBuilder;
+use crate::util::cache::matches_pattern;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use utoo_ruborist::graph::EdgeType;
+
+/// Normalized workspace selection.
+///
+/// Both `--workspace` (repeatable, supports globs) and `--workspaces` (all)
+/// CLI inputs collapse into one of these variants. The service layer never
+/// sees the raw flags.
+#[derive(Debug, Clone)]
+pub enum WorkspaceFilter {
+    /// No workspace targeting; operate on the current cwd's package.
+    Current,
+    /// Operate on every workspace, ordered by the workspace topology.
+    All,
+    /// Operate on the listed workspaces (names, relative paths, or glob patterns).
+    Selected(Vec<String>),
+}
+
+impl WorkspaceFilter {
+    /// Build a filter from the two CLI flags. `--workspaces` (all) takes
+    /// precedence; an empty `workspace` list means "current package".
+    pub fn from_flags(workspace: Vec<String>, workspaces: bool) -> Self {
+        if workspaces {
+            Self::All
+        } else if workspace.is_empty() {
+            Self::Current
+        } else {
+            Self::Selected(workspace)
+        }
+    }
+}
+
+/// Outcome of resolving a [`WorkspaceFilter`] against the project on disk.
+#[derive(Debug, Clone)]
+pub enum ResolvedWorkspaces {
+    /// Operate on the current cwd's package only.
+    Current,
+    /// Operate on the given topological layers (each inner Vec runs concurrently).
+    /// Includes a name→path map so callers skip redundant workspace discovery.
+    Layers {
+        layers: Vec<Vec<String>>,
+        paths: HashMap<String, PathBuf>,
+    },
+}
 
 /// Workspace dependency edge
 #[derive(Debug, Clone)]
@@ -132,10 +175,42 @@ impl WorkspaceService {
         })
     }
 
-    /// Get only the topological ordering of workspaces
-    pub async fn get_workspace_topology(cwd: &Path) -> Result<Vec<Vec<String>>> {
-        let topology = Self::build_workspace_topology(cwd).await?;
-        Ok(topology.topology)
+    /// Resolve a workspace filter into the layers we will operate on.
+    ///
+    /// - `Current` → no targeting.
+    /// - `All` → full project topology.
+    /// - `Selected` → match each entry (name / relative path / glob) against
+    ///   the workspace nodes carried by the topology, then keep only those
+    ///   names from the layers so dependency order is preserved across the
+    ///   selected subset.
+    pub async fn resolve_layers(cwd: &Path, filter: WorkspaceFilter) -> Result<ResolvedWorkspaces> {
+        match filter {
+            WorkspaceFilter::Current => Ok(ResolvedWorkspaces::Current),
+            WorkspaceFilter::All | WorkspaceFilter::Selected(_) => {
+                let topo = Self::build_workspace_topology(cwd).await?;
+                if topo.topology.is_empty() && matches!(filter, WorkspaceFilter::All) {
+                    return Ok(ResolvedWorkspaces::Current);
+                }
+
+                // Build name→absolute-path map from topology nodes.
+                let paths: HashMap<String, PathBuf> = topo
+                    .nodes
+                    .iter()
+                    .map(|n| (n.name.clone(), cwd.join(&n.path)))
+                    .collect();
+
+                let layers = match filter {
+                    WorkspaceFilter::All => topo.topology,
+                    WorkspaceFilter::Selected(ref filters) => {
+                        let selected = expand_filters(&topo.nodes, filters)?;
+                        project_topology_layers(&topo.topology, &selected)
+                    }
+                    WorkspaceFilter::Current => unreachable!(),
+                };
+
+                Ok(ResolvedWorkspaces::Layers { layers, paths })
+            }
+        }
     }
 
     /// Build workspace topology and generate JSON output for file writing
@@ -145,7 +220,7 @@ impl WorkspaceService {
         let edges_json: Vec<serde_json::Value> = topology
             .edges
             .iter()
-            .map(|edge| json!([edge.from.clone(), edge.to.clone()]))
+            .map(|edge| json!([&edge.from, &edge.to]))
             .collect();
 
         Ok(json!({
@@ -154,6 +229,55 @@ impl WorkspaceService {
             "topology": topology.topology,
         }))
     }
+}
+
+/// Expand user-provided workspace filters into a deduplicated set of
+/// canonical workspace names.
+///
+/// Each filter is matched against the workspace name and its project-relative
+/// path via [`matches_pattern`], which handles both literal equality and the
+/// `*` glob forms supported elsewhere in the codebase (e.g. `packages/*`).
+fn expand_filters(nodes: &[WorkspaceNode], filters: &[String]) -> Result<BTreeSet<String>> {
+    // Stringify each node's relative path once instead of per filter.
+    let node_paths: Vec<(&str, String)> = nodes
+        .iter()
+        .map(|n| (n.name.as_str(), n.path.to_string_lossy().into_owned()))
+        .collect();
+
+    let mut selected = BTreeSet::new();
+    for filter in filters {
+        let mut matched = false;
+        for (name, path) in &node_paths {
+            if matches_pattern(name, filter) || matches_pattern(path, filter) {
+                selected.insert((*name).to_string());
+                matched = true;
+            }
+        }
+        if !matched {
+            anyhow::bail!("Workspace filter '{filter}' did not match any workspace");
+        }
+    }
+
+    Ok(selected)
+}
+
+/// Project the full workspace topology onto a selected subset, preserving
+/// the original layer ordering and dropping empty layers.
+fn project_topology_layers(
+    topology: &[Vec<String>],
+    selected: &BTreeSet<String>,
+) -> Vec<Vec<String>> {
+    topology
+        .iter()
+        .map(|layer| {
+            layer
+                .iter()
+                .filter(|name| selected.contains(name.as_str()))
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .filter(|layer| !layer.is_empty())
+        .collect()
 }
 
 #[cfg(test)]
@@ -255,5 +379,148 @@ mod tests {
         // Edges should be [["A", "B"]], meaning B depends on A
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0], json!(["A", "B"]));
+    }
+
+    #[test]
+    fn test_workspace_filter_from_flags() {
+        assert!(matches!(
+            WorkspaceFilter::from_flags(vec![], false),
+            WorkspaceFilter::Current
+        ));
+        assert!(matches!(
+            WorkspaceFilter::from_flags(vec![], true),
+            WorkspaceFilter::All
+        ));
+        // --workspaces wins over --workspace
+        assert!(matches!(
+            WorkspaceFilter::from_flags(vec!["a".into()], true),
+            WorkspaceFilter::All
+        ));
+        assert!(matches!(
+            WorkspaceFilter::from_flags(vec!["a".into()], false),
+            WorkspaceFilter::Selected(_)
+        ));
+    }
+
+    #[test]
+    fn test_project_topology_layers() {
+        let topology = vec![
+            vec!["a".into(), "b".into()],
+            vec!["c".into(), "d".into()],
+            vec!["e".into()],
+        ];
+        let mut selected = BTreeSet::new();
+        selected.insert("a".into());
+        selected.insert("d".into());
+        let projected = project_topology_layers(&topology, &selected);
+        // Layer 1 keeps only "a", layer 2 only "d", layer 3 is dropped.
+        assert_eq!(
+            projected,
+            vec![vec!["a".to_string()], vec!["d".to_string()]]
+        );
+    }
+
+    #[test]
+    fn test_project_topology_layers_drops_empty() {
+        let topology = vec![
+            vec!["a".into()],
+            vec!["b".into(), "c".into()],
+            vec!["d".into()],
+        ];
+        let mut selected = BTreeSet::new();
+        selected.insert("c".into());
+        let projected = project_topology_layers(&topology, &selected);
+        // Only layer 2's "c" survives; layers 1 and 3 are dropped entirely.
+        assert_eq!(projected, vec![vec!["c".to_string()]]);
+    }
+
+    #[test]
+    fn test_expand_filters_against_nodes() {
+        let nodes = vec![
+            WorkspaceNode {
+                name: "@scope/a".into(),
+                path: PathBuf::from("packages/a"),
+            },
+            WorkspaceNode {
+                name: "@scope/b".into(),
+                path: PathBuf::from("packages/b"),
+            },
+        ];
+
+        // Match by name
+        let by_name = expand_filters(&nodes, &["@scope/a".into()]).unwrap();
+        assert!(by_name.contains("@scope/a"));
+        assert_eq!(by_name.len(), 1);
+
+        // Match by relative path
+        let by_path = expand_filters(&nodes, &["packages/b".into()]).unwrap();
+        assert!(by_path.contains("@scope/b"));
+        assert_eq!(by_path.len(), 1);
+
+        // Glob match
+        let by_glob = expand_filters(&nodes, &["packages/*".into()]).unwrap();
+        assert_eq!(by_glob.len(), 2);
+        assert!(by_glob.contains("@scope/a"));
+        assert!(by_glob.contains("@scope/b"));
+
+        // Multiple filters dedupe
+        let multi = expand_filters(&nodes, &["@scope/a".into(), "packages/a".into()]).unwrap();
+        assert_eq!(multi.len(), 1);
+
+        // No-match name errors
+        assert!(expand_filters(&nodes, &["does-not-exist".into()]).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_layers_preserves_topology() {
+        // B depends on A → expected layers: [[A], [B]]
+        let dir = tempdir().unwrap();
+        create_mock_workspace(dir.path());
+        let root = dir.path();
+
+        // Selecting both should preserve the layered topology
+        let resolved = WorkspaceService::resolve_layers(
+            root,
+            WorkspaceFilter::Selected(vec!["A".into(), "B".into()]),
+        )
+        .await
+        .unwrap();
+        match resolved {
+            ResolvedWorkspaces::Layers { layers, paths } => {
+                assert_eq!(layers, vec![vec!["A".to_string()], vec!["B".to_string()]]);
+                assert!(paths.contains_key("A"));
+                assert!(paths.contains_key("B"));
+            }
+            _ => panic!("expected layered result"),
+        }
+
+        // Selecting only B should yield a single layer with just B
+        let resolved =
+            WorkspaceService::resolve_layers(root, WorkspaceFilter::Selected(vec!["B".into()]))
+                .await
+                .unwrap();
+        match resolved {
+            ResolvedWorkspaces::Layers { layers, .. } => {
+                assert_eq!(layers, vec![vec!["B".to_string()]]);
+            }
+            _ => panic!("expected layered result"),
+        }
+
+        // Current filter -> Current outcome
+        let resolved = WorkspaceService::resolve_layers(root, WorkspaceFilter::Current)
+            .await
+            .unwrap();
+        assert!(matches!(resolved, ResolvedWorkspaces::Current));
+
+        // All filter -> full topology layers
+        let resolved = WorkspaceService::resolve_layers(root, WorkspaceFilter::All)
+            .await
+            .unwrap();
+        match resolved {
+            ResolvedWorkspaces::Layers { layers, .. } => {
+                assert_eq!(layers, vec![vec!["A".to_string()], vec!["B".to_string()]]);
+            }
+            _ => panic!("expected layered result"),
+        }
     }
 }

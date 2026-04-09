@@ -494,6 +494,103 @@ fi
 echo -e "${GREEN}PASS: workspace devDep cycle handled correctly${NC}"
 cd ../../..
 
+# Case: multi-workspace `ut run` log presentation
+echo -e "${YELLOW}Case: ut run multi-workspace log presentation${NC}"
+cd e2e/pm/run-workspaces
+
+# Topology: lib-b (leaf) <- lib-a <- app
+# Expected layer order: [lib-b] -> [lib-a] -> [app]
+
+# Sub-case: --workspaces (all) should hit every workspace in topo order.
+# NO_COLOR strips ANSI so we can grep the output reliably.
+NO_COLOR=1 ut run build --workspaces > run-all.out 2>&1 \
+  || { echo -e "${RED}FAIL: ut run build --workspaces exited non-zero${NC}"; cat run-all.out; exit 1; }
+echo "--- ut run build --workspaces ---"
+cat run-all.out
+echo "---"
+
+# Header line must name the script and the workspace count.
+grep -q "Running build in 3 workspaces, 3 layers" run-all.out \
+  || { echo -e "${RED}FAIL: missing multi-workspace header${NC}"; cat run-all.out; exit 1; }
+
+# Each layer must be announced, one workspace per line of the header block.
+grep -q "1:.*lib-b" run-all.out \
+  || { echo -e "${RED}FAIL: header layer 1 should list lib-b${NC}"; cat run-all.out; exit 1; }
+grep -q "2:.*lib-a" run-all.out \
+  || { echo -e "${RED}FAIL: header layer 2 should list lib-a${NC}"; cat run-all.out; exit 1; }
+grep -q "3:.*app" run-all.out \
+  || { echo -e "${RED}FAIL: header layer 3 should list app${NC}"; cat run-all.out; exit 1; }
+
+# Each spawned script announcement must carry a [workspace] prefix so
+# concurrent output is distinguishable.
+grep -q "\[lib-b\] echo building lib-b" run-all.out \
+  || { echo -e "${RED}FAIL: missing [lib-b] prefixed script announcement${NC}"; cat run-all.out; exit 1; }
+grep -q "\[lib-a\] echo building lib-a" run-all.out \
+  || { echo -e "${RED}FAIL: missing [lib-a] prefixed script announcement${NC}"; cat run-all.out; exit 1; }
+grep -q "\[app\] echo building app" run-all.out \
+  || { echo -e "${RED}FAIL: missing [app] prefixed script announcement${NC}"; cat run-all.out; exit 1; }
+
+# Topological ordering: lib-b's build must complete before app's starts.
+# Use the actual echoed output lines (not the announcement) as the ordering
+# witness — they're printed by the child process after ScriptService spawns.
+LIB_B_LINE=$(grep -n "^building lib-b$" run-all.out | head -1 | cut -d: -f1)
+APP_LINE=$(grep -n "^building app$" run-all.out | head -1 | cut -d: -f1)
+if [ -z "$LIB_B_LINE" ] || [ -z "$APP_LINE" ] || [ "$LIB_B_LINE" -ge "$APP_LINE" ]; then
+    echo -e "${RED}FAIL: topological order broken (lib-b line=$LIB_B_LINE, app line=$APP_LINE)${NC}"
+    cat run-all.out
+    exit 1
+fi
+
+# Sub-case: explicit multi --workspace should respect topology for the subset.
+NO_COLOR=1 ut run build --workspace lib-b --workspace app > run-subset.out 2>&1 \
+  || { echo -e "${RED}FAIL: ut run build --workspace lib-b --workspace app exited non-zero${NC}"; cat run-subset.out; exit 1; }
+echo "--- ut run build --workspace lib-b --workspace app ---"
+cat run-subset.out
+echo "---"
+
+# Header must reflect subset size (2 workspaces), not the full topology.
+grep -q "Running build in 2 workspaces" run-subset.out \
+  || { echo -e "${RED}FAIL: subset header should count 2 workspaces${NC}"; cat run-subset.out; exit 1; }
+
+# lib-a was NOT selected, so its announcement must not appear.
+if grep -q "\[lib-a\]" run-subset.out; then
+    echo -e "${RED}FAIL: lib-a should be excluded from subset run${NC}"
+    cat run-subset.out
+    exit 1
+fi
+
+# Subset must still preserve topology: lib-b before app.
+LIB_B_LINE=$(grep -n "^building lib-b$" run-subset.out | head -1 | cut -d: -f1)
+APP_LINE=$(grep -n "^building app$" run-subset.out | head -1 | cut -d: -f1)
+if [ -z "$LIB_B_LINE" ] || [ -z "$APP_LINE" ] || [ "$LIB_B_LINE" -ge "$APP_LINE" ]; then
+    echo -e "${RED}FAIL: subset topological order broken${NC}"
+    cat run-subset.out
+    exit 1
+fi
+
+# Sub-case: glob filter should expand to matching workspaces only.
+NO_COLOR=1 ut run build --workspace 'lib-*' > run-glob.out 2>&1 \
+  || { echo -e "${RED}FAIL: ut run build --workspace 'lib-*' exited non-zero${NC}"; cat run-glob.out; exit 1; }
+echo "--- ut run build --workspace 'lib-*' ---"
+cat run-glob.out
+echo "---"
+
+grep -q "Running build in 2 workspaces" run-glob.out \
+  || { echo -e "${RED}FAIL: glob should match exactly 2 workspaces${NC}"; cat run-glob.out; exit 1; }
+grep -q "\[lib-a\]" run-glob.out \
+  || { echo -e "${RED}FAIL: glob should include lib-a${NC}"; cat run-glob.out; exit 1; }
+grep -q "\[lib-b\]" run-glob.out \
+  || { echo -e "${RED}FAIL: glob should include lib-b${NC}"; cat run-glob.out; exit 1; }
+if grep -q "\[app\]" run-glob.out; then
+    echo -e "${RED}FAIL: glob 'lib-*' should not match app${NC}"
+    cat run-glob.out
+    exit 1
+fi
+
+rm -f run-all.out run-subset.out run-glob.out
+echo -e "${GREEN}PASS: ut run multi-workspace log presentation${NC}"
+cd ../../..
+
 # Case: pnpm migration (eggjs/egg)
 echo -e "${YELLOW}Case: pnpm migration (eggjs/egg)${NC}"
 EGG_DIR=$(mktemp -d)
