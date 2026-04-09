@@ -104,23 +104,21 @@ impl ConfigService {
         );
 
         // Print all commands
-        builtin_commands
-            .iter()
-            .for_each(|(name, alias, description)| {
-                let description = if alias.is_empty() {
-                    description.to_string()
-                } else {
-                    format!("{} ({})", description, alias.yellow())
-                };
-                println!(
-                    "  {:<width$}    {}",
-                    name.cyan(),
-                    description,
-                    width = max_width
-                );
-            });
+        for (name, alias, description) in &builtin_commands {
+            let description = if alias.is_empty() {
+                description.to_string()
+            } else {
+                format!("{} ({})", description, alias.yellow())
+            };
+            println!(
+                "  {:<width$}    {}",
+                name.cyan(),
+                description,
+                width = max_width
+            );
+        }
 
-        config_commands.iter().for_each(|(name, alias)| {
+        for (name, alias) in &config_commands {
             println!(
                 "  {:<width$}    {} {}",
                 name.cyan(),
@@ -128,7 +126,7 @@ impl ConfigService {
                 alias,
                 width = max_width
             );
-        });
+        }
 
         println!();
         println!("{}", "Options:".bold());

@@ -5,12 +5,11 @@ use std::sync::{LazyLock, OnceLock};
 use anyhow::Result;
 use dashmap::DashMap;
 
-use super::config_file::ConfigScope;
 use utoo_ruborist::builder::PeerDeps;
 use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::spec::Catalogs;
 
-use super::cli_enum::OmitType;
+use super::cli_enum::{ConfigScope, OmitType};
 use super::config_file::{Config, ConfigValue};
 use super::http::client_builder;
 use super::json::load_package_json;
@@ -20,7 +19,7 @@ static REGISTRY: LazyLock<ConfigValue<String>> =
     LazyLock::new(|| ConfigValue::new("registry", REGISTRY_NPMMIRROR.to_string()));
 
 static LEGACY_PEER_DEPS: LazyLock<ConfigValue<bool>> =
-    LazyLock::new(|| ConfigValue::new("legacy-peer-deps", true));
+    LazyLock::new(|| ConfigValue::new("legacy-peer-deps", false));
 
 static CACHE_DIR: LazyLock<ConfigValue<String>> = LazyLock::new(|| {
     let default_cache = dirs::home_dir()
@@ -300,7 +299,7 @@ pub async fn detect_supports_semver(registry_url: &str, client: Option<&reqwest:
     };
     let mut entries = config
         .get_array("supports-semver")
-        .cloned()
+        .map(|s| s.to_vec())
         .unwrap_or_default();
     // Remove any existing entry for this registry (both "url" and "!url" forms)
     entries.retain(|e| {

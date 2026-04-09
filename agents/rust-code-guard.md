@@ -312,6 +312,28 @@ impl PathExt for std::path::Path { fn is_hidden(&self) -> bool { .. } }
 - [ ] Does `clippy` pass? Has `cargo fmt` been run?
 - [ ] Are assertions and error messages actionable?
 
+**utoo layering rules:**
+
+- [ ] `cmd/` is a thin dispatcher — parameter assembly + delegation only, no business logic.
+- [ ] Business logic lives in `service/`, workspace/topology logic in `service/workspace.rs`.
+- [ ] Display/formatting helpers go in `util/format_print.rs`.
+- [ ] CLI parameter enums (`ConfigScope`, `ScriptPolicy`, `RunMode`, etc.) are centralized in `util/cli_enum.rs`.
+
+**utoo "never do" list:**
+
+- [ ] Never `#[allow(dead_code)]` — delete the unused item instead. Re-add when something needs it.
+- [ ] Never pass bare `true` / `false` as function arguments — use a named enum (see A26).
+- [ ] Never `use` inside a function body — all imports at file top, grouped: std → external → crate.
+- [ ] Never hand-construct `io::Error` to wrap another error — propagate with `?` and add context with `.with_context()`.
+- [ ] Never `let _ = fallible_op()` — log the error at minimum (see A23).
+
+**utoo style consistency rules (prefer the dominant pattern):**
+
+- [ ] Error bail: use `anyhow::bail!(...)` not `return Err(anyhow::anyhow!(...))`.
+- [ ] Error context: use `.with_context(|| ...)` not `.map_err(|e| anyhow!("{}", e))`.
+- [ ] Side-effectful iteration: use `for` loop not `.iter().for_each(|..| { ... })`.
+- [ ] Collection building: prefer `.filter_map().collect()` over `Vec::new()` + `for` + `push` when the mapping is simple.
+
 ---
 
 ## Output Format
@@ -338,39 +360,41 @@ For each issue in each file, output in the following format:
 1. **Identify scope** — determine which files to review (PR diff, staged changes, or user-specified paths)
 2. **Read and understand context** — read each file and understand its role within the crate; check `lib.rs` exports and `Cargo.toml` dependencies
 3. **Run automated checks** — execute `cargo clippy` and `cargo fmt --check` to catch mechanical issues
-4. **Review against the 13 dimensions** — check each item in the checklist above, scanning for anti-patterns A1–A16
+4. **Review against the 13 dimensions** — check each item in the checklist above, scanning for anti-patterns A1–A26
 5. **Output findings** — report issues in the specified format, sorted by severity (🔴 first, then 🟡, then 🟢)
 
 ---
 
 ## Anti-Pattern Quick Reference
 
-Scan through this list during every review for high-frequency Rust anti-patterns:
+Scan through this list during every review for high-frequency Rust anti-patterns.
+Use the **Grep** column to detect each pattern mechanically during scans.
 
-| # | Anti-Pattern | Signal | Fix Direction |
+| # | Anti-Pattern | Grep Pattern | Fix Direction |
 |---|---|---|---|
-| A1 | Boolean Obsession | Mutually exclusive `bool` / `Option` fields | Combine into a single `enum` |
-| A2 | Over-Allocating Params | `&String`, `&Vec<T>`, or `&PathBuf` in fn args | Use `&str`, `&[T]`, `impl AsRef<Path>` |
-| A3 | Imperative Accumulator | `let mut vec = vec![]; for x in y { vec.push(..); }` | Use `.filter().map().collect()` |
-| A4 | Match Pyramids / Soup | Deeply nested `match` on `Option`/`Result` | Flatten with `?`, `and_then`, or `map` |
-| A5 | Guard Escape | `match` arm with `if` guard + `_` arm wildcard | Add explicit validation in fallthrough arm |
-| A6 | Parameterless New | `pub fn new() -> Self` with no parameters | Implement `Default` instead |
-| A7 | Edge-case Test Blind Spot | Tests only cover standard valid inputs | Add tests for malformed inputs / fallback arms |
-| A8 | Unnecessary Clone | `.clone()` inserted purely for borrow checker | Rethink lifetimes, pass by reference, or use `Cow` |
-| A9 | Known-Size Allocation | `Vec::new()` followed by loop `push()` | Use `Vec::with_capacity()` or `.collect()` |
-| A10 | Blocking in Async | `std::fs::read` or `std::thread::sleep` in async fn | Use `tokio::fs` or `tokio::time::sleep` |
-| A11 | CPU-Bound Async | Heavy math/crypto loops in `async fn` | Move to `tokio::task::spawn_blocking` |
-| A12 | Lock Across Await | `std::sync::MutexGuard` held over `.await` | Drop guard before await or use `tokio::sync::Mutex` |
-| A13 | Unjustified Box<dyn> | Taking or returning `Box<dyn Trait>` unnecessarily | Use `impl Trait` for static dispatch or `&dyn Trait` |
-| A14 | Anti-Pattern Wrapper | Struct whose only purpose is attaching helper fns | Use an Extension Trait (`trait TryExt {..}`) |
-| A15 | String Gymnastics | Multi-layer `starts_with` / `split` chains | Parse once into structured typed `enum` |
-| A16 | Broad Re-export Leak | `pub use module::*` leaking internal helpers | Export precise types explicitly |
-| A17 | Large Enum Variant Size | A single large variant inflating the enum footprint | Heap-allocate the large variant via `Box<T>` |
-| A18 | Trivial Wrapper Function | One-line fn that just forwards to another fn with identical signature | Call the underlying function directly |
-| A19 | Repetitive Conditional Push | Repeated `if x > 0 { vec.push(format!(...)) }` blocks with same structure | Data-drive with `[(value, label)].filter().map().collect()` |
-| A20 | Eager Error Context | `.context(format!(...))` allocates even on success path | Use `.with_context(\|\| format!(...))` for lazy evaluation |
-| A21 | Path-to-String Roundtrip | `.to_string_lossy().to_string()` or `.display().to_string()` | Use `.into_owned()`, pass `PathBuf` directly, or keep `Cow<str>` |
-| A22 | Sort-by-Key Clone | `sort_by_key(\|e\| e.field.clone())` clones per comparison | Use `sort_by(\|a, b\| a.field.cmp(&b.field))` to borrow |
-| A23 | Silent Fire-and-Forget | `let _ = fallible_op()` or `tokio::spawn(async { let _ = ... })` | Log the error: `if let Err(e) = ... { tracing::warn!(...) }` |
-| A24 | Boolean Match | `match expr { true => ..., false => ... }` | Use `if`/`else` — `match` on `bool` is anti-idiomatic |
-| A25 | Format-then-Push | `buf.push_str(&format!(...))` allocates an intermediate String | Use `writeln!(buf, ...)` with `std::fmt::Write` |
+| A1 | Boolean Obsession | `is_.*: bool.*is_.*: bool` in struct fields | Combine into a single `enum` |
+| A2 | Over-Allocating Params | `&String`, `&Vec<`, `&PathBuf` in fn args | Use `&str`, `&[T]`, `impl AsRef<Path>` |
+| A3 | Imperative Accumulator | `let mut.*Vec::new` → `push(` | Use `.filter().map().collect()` |
+| A4 | Match Pyramids | nested `match.*{.*match` | Flatten with `?`, `and_then`, or `map` |
+| A5 | Guard Escape | `if.*guard` + `_ =>` wildcard in same match | Add explicit fallthrough arm |
+| A6 | Parameterless New | `pub fn new() -> Self` | Implement `Default` instead |
+| A7 | Edge-case Test Gap | (manual review) | Add tests for malformed inputs |
+| A8 | Unnecessary Clone | `.clone()` where `&` or move works | Rethink lifetimes, pass by reference, or `Cow` |
+| A9 | Known-Size Alloc | `Vec::new()` then loop `push()` | Use `with_capacity()` or `.collect()` |
+| A10 | Blocking in Async | `std::fs::` or `std::thread::sleep` in `async fn` | Use `tokio::fs` or `tokio::time::sleep` |
+| A11 | CPU-Bound Async | (manual review — heavy loops in async) | Move to `spawn_blocking` |
+| A12 | Lock Across Await | `MutexGuard` or `RwLockGuard` held over `.await` | Drop guard before await |
+| A13 | Unjustified Box\<dyn\> | `Box<dyn` in fn args/return | Use `impl Trait` or `&dyn Trait` |
+| A14 | Wrapper Struct | struct with single field + only helper fns | Use an Extension Trait |
+| A15 | String Gymnastics | chained `starts_with`/`split`/`contains` | Parse once into typed `enum` |
+| A16 | Broad Re-export | `pub use.*\*` | Export precise types |
+| A17 | Large Enum Variant | (check with `std::mem::size_of`) | `Box<T>` the large variant |
+| A18 | Trivial Wrapper Fn | 1-line fn forwarding to another with same sig | Call underlying directly |
+| A19 | Repetitive Push | repeated `if x { vec.push(format!` | Data-drive with iterator |
+| A20 | Eager Error Context | `.context(format!` | `.with_context(\|\| format!` |
+| A21 | Path-to-String Roundtrip | `to_string_lossy().to_string()` or `display().to_string()` | `.into_owned()` or pass `PathBuf` |
+| A22 | Sort-by-Key Clone | `sort_by_key.*\.clone()` | `sort_by(\|a, b\| a.field.cmp(` |
+| A23 | Silent Fire-and-Forget | `let _ =` on fallible ops | `if let Err(e) = ... { tracing::warn!` |
+| A24 | Boolean Match | `match.*{ true =>` or `match.*{ false =>` | Use `if`/`else` |
+| A25 | Format-then-Push | `push_str(&format!` | `writeln!(buf, ...)` |
+| A26 | Bool Parameter | `fn.*bool.*bool` or `fn.*(.*: bool)` in pub fns | Two-variant enum + `From<bool>` ([ref](https://blakesmith.me/2019/05/07/rust-patterns-enums-instead-of-booleans.html)) |

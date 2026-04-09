@@ -64,8 +64,8 @@ impl LifecycleScripts {
         }
     }
 
-    pub fn get_script(&self, hook: LifecycleHook) -> Option<&String> {
-        self.scripts.get(&hook)
+    pub fn get_script(&self, hook: LifecycleHook) -> Option<&str> {
+        self.scripts.get(&hook).map(|s| s.as_str())
     }
 }
 

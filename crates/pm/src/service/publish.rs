@@ -107,24 +107,24 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
         200 | 201 => {}
         401 => {
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!(
+            anyhow::bail!(
                 "Authentication failed. Check your credentials or run `utoo login`.\n{body}"
-            ));
+            );
         }
         403 => {
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!("Forbidden: {}", body));
+            anyhow::bail!("Forbidden: {}", body);
         }
         409 => {
-            return Err(anyhow::anyhow!(
+            anyhow::bail!(
                 "{}@{} already exists. Use a different version.",
                 pack_result.name,
                 pack_result.version,
-            ));
+            );
         }
         other => {
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!("Publish failed (HTTP {}): {}", other, body));
+            anyhow::bail!("Publish failed (HTTP {}): {}", other, body);
         }
     }
 
@@ -176,9 +176,7 @@ async fn send_with_web_auth_retry(
     let (Some(auth_url), Some(done_url)) =
         (body_json["authUrl"].as_str(), body_json["doneUrl"].as_str())
     else {
-        return Err(anyhow::anyhow!(
-            "Authentication failed. Check your credentials or run `utoo login`.\n{body}"
-        ));
+        anyhow::bail!("Authentication failed. Check your credentials or run `utoo login`.\n{body}");
     };
 
     tracing::info!("Authenticate your account at:\n{auth_url}");

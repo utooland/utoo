@@ -200,7 +200,7 @@ pub async fn resolve_package_spec(spec: &str) -> Result<(String, String, String)
         PackageSpec::Registry { name, version_spec } => {
             let resolved = resolve_package(&Context::registry(), &name, &version_spec)
                 .await
-                .map_err(|e| anyhow!("{}", e))?;
+                .context("Failed to resolve package")?;
             Ok((name, resolved.version, version_spec))
         }
         PackageSpec::Git { url, commit_ish } => {
@@ -258,7 +258,7 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
     // Get package info from registry
     let resolved = resolve_package(&Context::registry(), &name, &version_spec)
         .await
-        .map_err(|e| anyhow!("{}", e))?;
+        .context("Failed to resolve package")?;
 
     // Get tarball URL from manifest
     let tarball_url = resolved
