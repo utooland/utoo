@@ -4,6 +4,7 @@
   "module": "esm/index.js",
   "types": "esm/index.d.ts",
   "files": [
+    "dist",
     "esm"
   ],
   "scripts": {
@@ -19,8 +20,12 @@
     "dev": "npm run build-wasm -- --profile wasm-dev && npm run bindgen-dev && npx turbo run tsc --filter=@utoo/web  && npm run build-loaderWorker && npm run copy-wasm",
     "dev:pm": "npm run build-wasm:pm -- --profile wasm-dev && npm run bindgen-dev && npm run tsc && npm run copy-wasm",
     "wasm-opt": "wasm-opt src/utoo/index_bg.wasm -o esm/utoo/index_bg.wasm --enable-threads --enable-bulk-memory --enable-reference-types --enable-simd --enable-exception-handling --enable-tail-call --enable-nontrapping-float-to-int -Oz",
-    "build": "npm run build-wasm -- --release && npm run bindgen-build && npm run tsc && npm run build-loaderWorker && npm run wasm-opt",
-    "build:local": "CC=$(brew --prefix llvm)/bin/clang CXX=$(brew --prefix llvm)/bin/clang++ npm run build-wasm -- --profile release-local && npm run bindgen-build:local && npm run build:shared && npm run tsc && npm run build-loaderWorker && npm run copy-wasm",
+    "build": "npm run build-wasm -- --release && npm run bindgen-build && npm run tsc && npm run build-worker && npm run build-threadWorker && npm run build-loaderWorker && npm run wasm-opt",
+    "build:local": "CC=$(brew --prefix llvm)/bin/clang CXX=$(brew --prefix llvm)/bin/clang++ npm run build-wasm -- --profile release-local && npm run bindgen-build:local && npm run build:shared && npm run tsc && npm run build-worker && npm run build-threadWorker && npm run build-loaderWorker && npm run copy-wasm",
+    "build-workers": "npm run build-worker && npm run build-threadWorker && npm run build-serviceWorker && npm run build-loaderWorker",
+    "build-worker": "node cli/umd.js -e ./src/worker.ts -o ./dist/worker.js -t webworker -np",
+    "build-threadWorker": "node cli/umd.js -e ./src/threadWorker.ts -o ./dist/threadWorker.js -t webworker -np",
+    "build-serviceWorker": "node cli/umd.js -e ./src/serviceWorker/index.ts -o ./dist/serviceWorker.js -t webworker -np",
     "build-loaderWorker": "node cli/umd.js -e ./src/webpackLoaders/worker.ts -o ./esm/loaderWorker.js -t webworker",
     "clean": "rm -rf esm src/utoo",
     "prepublishOnly": "turbo run build --filter=@utoo/web"

@@ -1,4 +1,5 @@
 esm
+dist
 tmp
 node_modules
 src/utoo/*
