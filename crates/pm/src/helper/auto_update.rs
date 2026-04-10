@@ -159,7 +159,9 @@ fn is_cache_expired(cache: &VersionCache) -> bool {
 fn mark_update_failed(timestamp: Option<u64>) {
     if let Ok(mut cache) = read_version_cache() {
         cache.last_update_failed = timestamp;
-        let _ = save_version_cache(&cache);
+        if let Err(e) = save_version_cache(&cache) {
+            tracing::debug!("Failed to save version cache: {e}");
+        }
     }
 }
 

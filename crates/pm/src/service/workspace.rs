@@ -90,13 +90,13 @@ impl WorkspaceService {
             });
         };
 
-        let mut node_list = Vec::new();
-        let mut nodes = Vec::new();
-        let mut edges = Vec::new();
-        let mut workspace_names = HashSet::new();
-
         // Get all workspace nodes (excluding links)
         let workspace_nodes = graph.get_workspace_nodes();
+
+        let mut node_list = Vec::with_capacity(workspace_nodes.len());
+        let mut nodes = Vec::with_capacity(workspace_nodes.len());
+        let mut edges = Vec::new();
+        let mut workspace_names = HashSet::with_capacity(workspace_nodes.len());
 
         for node_idx in &workspace_nodes {
             let node = graph

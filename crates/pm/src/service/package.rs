@@ -224,7 +224,7 @@ impl PackageService {
                 let script = package.lifecycle_scripts.get_script(hook)?;
                 Some({
                     let package = Rc::clone(package);
-                    let script = script.clone();
+                    let script = script.to_string();
                     let is_optional = *is_optional;
                     async move {
                         log_progress(&format!("{} {}", package.name, hook));

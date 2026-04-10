@@ -17,8 +17,9 @@ use cmd::{clean::clean, deps::build_workspace};
 use helper::auto_update::init_auto_update;
 use service::script::MissingScript;
 use service::workspace::WorkspaceFilter;
-use util::cli_enum::{OmitType, PackageAction, SaveType, ScriptPolicy, parse_save_type};
-use util::config_file::ConfigScope;
+use util::cli_enum::{
+    ConfigScope, OmitType, PackageAction, SaveType, ScriptPolicy, parse_save_type,
+};
 use util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
 use util::user_config::{
     InstallScope, init_registry, set_cache_dir, set_install_scope, set_legacy_peer_deps,
@@ -616,7 +617,7 @@ async fn async_main() -> Result<()> {
             log_time_end("Pack complete");
         }
         Some(Commands::Publish { tag, dry_run, otp }) => {
-            cmd::publish::publish(tag.as_deref(), dry_run, otp.as_deref()).await?;
+            cmd::publish::publish(tag.as_deref(), dry_run.into(), otp.as_deref()).await?;
         }
         Some(Commands::Ping { registry }) => {
             cmd::ping::ping(registry.as_deref()).await?;

@@ -77,8 +77,8 @@ impl Config {
         self.save(scope)
     }
 
-    pub fn get_array(&self, key: &str) -> Option<&Vec<String>> {
-        self.arrays.get(key)
+    pub fn get_array(&self, key: &str) -> Option<&[String]> {
+        self.arrays.get(key).map(|v| v.as_slice())
     }
 
     pub fn set_array(

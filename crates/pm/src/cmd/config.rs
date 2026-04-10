@@ -1,4 +1,5 @@
-use crate::util::config_file::{Config, ConfigScope};
+use crate::util::cli_enum::ConfigScope;
+use crate::util::config_file::Config;
 use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 

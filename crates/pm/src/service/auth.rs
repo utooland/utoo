@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 
-use crate::util::config_file::{Config, ConfigScope};
+use crate::util::cli_enum::ConfigScope;
+use crate::util::config_file::Config;
 use crate::util::http::client;
 
 fn registry_api(registry: &str, path: &str) -> String {
