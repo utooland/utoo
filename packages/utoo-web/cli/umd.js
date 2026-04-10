@@ -34,10 +34,16 @@ const argv = yargs(process.argv.slice(2))
     description: 'Webpack target',
     type: 'string',
   })
+  .option('no-polyfill', {
+    alias: 'np',
+    description: 'Disable custom polyfills (fs, fs/promises) and use node-stdlib-browser stubs instead',
+    type: 'boolean',
+    default: false,
+  })
   .help()
   .alias('help', 'h').argv;
 
-const { entry, output, target, stringifyEsm, stringifyCjs } = argv;
+const { entry, output, target, stringifyEsm, stringifyCjs, noPolyfill } = argv;
 const isStringify = stringifyEsm || stringifyCjs;
 
 const outputFullPath = path.resolve(process.cwd(), output);
@@ -46,6 +52,11 @@ const outputDir = isStringify
   ? path.resolve(process.cwd(), './tmp') 
   : path.dirname(outputFullPath);
 const outputFilename = path.basename(outputFullPath);
+
+const polyfillAliases = noPolyfill ? {} : {
+  fs: path.resolve(__dirname, '../src/webpackLoaders/polyfills/fsPolyfill.ts'),
+  'fs/promises': path.resolve(__dirname, '../src/webpackLoaders/polyfills/fsPromisesPolyfill.ts'),
+};
 
 const config = {
   mode: 'production',
@@ -64,9 +75,7 @@ const config = {
     extensions: ['.ts', '.js'],
     alias: {
       ...stdLibBrowser,
-      // Use the real polyfill instead of the stub
-      fs: path.resolve(__dirname, '../src/webpackLoaders/polyfills/fsPolyfill.ts'),
-      'fs/promises': path.resolve(__dirname, '../src/webpackLoaders/polyfills/fsPromisesPolyfill.ts'),
+      ...polyfillAliases,
       v8: path.resolve(__dirname, './mocks/v8.js'),
       perf_hooks: path.resolve(__dirname, './mocks/perf_hooks.js'),
       env: path.resolve(__dirname, './mocks/env.js'),
