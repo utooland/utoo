@@ -178,14 +178,14 @@ impl LockGraphService {
         let from_index = self
             .path_to_index
             .get(from_path)
-            .context(format!("Package at path '{from_path}' not found in graph"))?;
+            .with_context(|| format!("Package at path '{from_path}' not found in graph"))?;
 
         // Find target package node
         let to_index = self
             .find_dependency_node_index(from_path, to_package_name)
-            .context(format!(
-                "Dependency package '{to_package_name}' not found for path '{from_path}'"
-            ))?;
+            .with_context(|| {
+                format!("Dependency package '{to_package_name}' not found for path '{from_path}'")
+            })?;
 
         tracing::debug!(
             "Adding dependency edge: {from_index:?} {from_package_name} -> {to_index:?} {to_package_name}"

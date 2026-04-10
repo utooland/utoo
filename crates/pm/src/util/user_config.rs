@@ -4,15 +4,17 @@ use std::sync::{LazyLock, OnceLock};
 
 use anyhow::Result;
 use dashmap::DashMap;
+
+use super::config_file::ConfigScope;
 use utoo_ruborist::builder::PeerDeps;
 use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::spec::Catalogs;
 
+use super::cli_enum::OmitType;
 use super::config_file::{Config, ConfigValue};
 use super::http::client_builder;
 use super::json::load_package_json;
 use super::registry::{REGISTRY_NPMMIRROR, select_fastest_registry};
-use super::save_type::OmitType;
 
 static REGISTRY: LazyLock<ConfigValue<String>> =
     LazyLock::new(|| ConfigValue::new("registry", REGISTRY_NPMMIRROR.to_string()));
@@ -40,7 +42,7 @@ pub async fn init_registry(registry: Option<String>) {
         tracing::debug!("Using registry from env: {}", env_reg);
         Some(env_reg)
     } else {
-        let config_registry = Config::load(false)
+        let config_registry = Config::load(ConfigScope::Local)
             .await
             .ok()
             .and_then(|c| c.get("registry").ok().flatten());
@@ -71,7 +73,7 @@ static CATALOGS: tokio::sync::OnceCell<Catalogs> = tokio::sync::OnceCell::const_
 pub async fn get_catalogs() -> Catalogs {
     CATALOGS
         .get_or_init(|| async {
-            Config::load(false)
+            Config::load(ConfigScope::Local)
                 .await
                 .map(|c| c.catalogs())
                 .unwrap_or_default()
@@ -157,7 +159,7 @@ pub async fn set_cache_dir(cache_dir: Option<String>) {
         Some(env_dir)
     } else {
         // Read from config file if no CLI arg or env var
-        Config::load(false)
+        Config::load(ConfigScope::Local)
             .await
             .ok()
             .and_then(|config| config.get("cache-dir").ok().flatten())
@@ -245,7 +247,7 @@ pub async fn detect_supports_semver(registry_url: &str, client: Option<&reqwest:
     }
 
     // Check config cache (TOML array of "url" / "!url" entries)
-    let mut config = Config::load(true).await.unwrap_or_default();
+    let mut config = Config::load(ConfigScope::Global).await.unwrap_or_default();
     let cached = config.get_array("supports-semver");
 
     if let Some(entries) = cached {
@@ -306,7 +308,7 @@ pub async fn detect_supports_semver(registry_url: &str, client: Option<&reqwest:
         url != registry_url
     });
     entries.push(new_entry);
-    if let Err(e) = config.set_array("supports-semver", entries, true) {
+    if let Err(e) = config.set_array("supports-semver", entries, ConfigScope::Global) {
         tracing::warn!("Failed to save semver support to config: {}", e);
     }
 

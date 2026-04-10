@@ -1,15 +1,16 @@
+use crate::util::cli_enum::ScriptPolicy;
 use anyhow::Result;
 use std::path::Path;
 
 use crate::service::install::InstallService;
-use crate::util::save_type::{PackageAction, SaveType};
+use crate::util::cli_enum::{PackageAction, SaveType};
 use crate::util::user_config::get_omit;
 
 pub async fn update_packages(
     action: PackageAction,
     specs: &[&str],
     workspace: Option<String>,
-    ignore_scripts: bool,
+    scripts: ScriptPolicy,
     save_type: SaveType,
 ) -> Result<()> {
     // Parameter validation
@@ -18,13 +19,12 @@ pub async fn update_packages(
     }
 
     let omit = get_omit();
-    InstallService::update_packages(action, specs, workspace, ignore_scripts, save_type, &omit)
-        .await
+    InstallService::update_packages(action, specs, workspace, scripts, save_type, &omit).await
 }
 
-pub async fn install(ignore_scripts: bool, root_path: &Path) -> Result<()> {
+pub async fn install(scripts: ScriptPolicy, root_path: &Path) -> Result<()> {
     let omit = get_omit();
-    InstallService::install(ignore_scripts, root_path, &omit).await
+    InstallService::install(scripts, root_path, &omit).await
 }
 
 pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Result<()> {
@@ -57,7 +57,14 @@ mod tests {
     #[tokio::test]
     async fn test_update_packages_empty_specs() {
         // Test update with empty specs
-        let result = update_packages(PackageAction::Add, &[], None, false, SaveType::Prod).await;
+        let result = update_packages(
+            PackageAction::Add,
+            &[],
+            None,
+            ScriptPolicy::Run,
+            SaveType::Prod,
+        )
+        .await;
         assert!(result.is_err(), "Should fail with empty specs");
     }
 }

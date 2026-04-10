@@ -1,5 +1,6 @@
 pub mod binary_resolver;
 pub mod cache;
+pub mod cli_enum;
 pub mod cloner;
 pub mod config_file;
 pub mod downloader;
@@ -15,6 +16,5 @@ pub mod oncemap;
 pub mod platform_const;
 pub mod registry;
 pub mod retry;
-pub mod save_type;
 pub mod sysconf;
 pub mod user_config;

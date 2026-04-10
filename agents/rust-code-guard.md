@@ -368,3 +368,9 @@ Scan through this list during every review for high-frequency Rust anti-patterns
 | A17 | Large Enum Variant Size | A single large variant inflating the enum footprint | Heap-allocate the large variant via `Box<T>` |
 | A18 | Trivial Wrapper Function | One-line fn that just forwards to another fn with identical signature | Call the underlying function directly |
 | A19 | Repetitive Conditional Push | Repeated `if x > 0 { vec.push(format!(...)) }` blocks with same structure | Data-drive with `[(value, label)].filter().map().collect()` |
+| A20 | Eager Error Context | `.context(format!(...))` allocates even on success path | Use `.with_context(\|\| format!(...))` for lazy evaluation |
+| A21 | Path-to-String Roundtrip | `.to_string_lossy().to_string()` or `.display().to_string()` | Use `.into_owned()`, pass `PathBuf` directly, or keep `Cow<str>` |
+| A22 | Sort-by-Key Clone | `sort_by_key(\|e\| e.field.clone())` clones per comparison | Use `sort_by(\|a, b\| a.field.cmp(&b.field))` to borrow |
+| A23 | Silent Fire-and-Forget | `let _ = fallible_op()` or `tokio::spawn(async { let _ = ... })` | Log the error: `if let Err(e) = ... { tracing::warn!(...) }` |
+| A24 | Boolean Match | `match expr { true => ..., false => ... }` | Use `if`/`else` — `match` on `bool` is anti-idiomatic |
+| A25 | Format-then-Push | `buf.push_str(&format!(...))` allocates an intermediate String | Use `writeln!(buf, ...)` with `std::fmt::Write` |

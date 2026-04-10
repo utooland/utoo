@@ -24,10 +24,9 @@ async fn prepare_link(src: &Path, dst: &Path) -> Result<Option<(PathBuf, PathBuf
     }
 
     if let Some(parent) = abs_dst.parent() {
-        fs::create_dir_all(parent).await.context(format!(
-            "Failed to create parent directory: {}",
-            parent.display()
-        ))?;
+        fs::create_dir_all(parent)
+            .await
+            .with_context(|| format!("Failed to create parent directory: {}", parent.display()))?;
     }
 
     if let Ok(metadata) = fs::symlink_metadata(&abs_dst).await {
@@ -46,10 +45,7 @@ async fn prepare_link(src: &Path, dst: &Path) -> Result<Option<(PathBuf, PathBuf
         } else {
             fs::remove_file(&abs_dst).await
         }
-        .context(format!(
-            "Failed to remove existing path: {}",
-            abs_dst.display()
-        ))?;
+        .with_context(|| format!("Failed to remove existing path: {}", abs_dst.display()))?;
     }
 
     Ok(Some((abs_src, abs_dst)))
@@ -95,11 +91,13 @@ pub async fn link_bin(src: &Path, dst: &Path) -> Result<()> {
 
 #[cfg(unix)]
 async fn symlink(src: &Path, dst: &Path) -> Result<()> {
-    fs::symlink(src, dst).await.context(format!(
-        "Failed to create symbolic link from {} to {}",
-        src.display(),
-        dst.display()
-    ))
+    fs::symlink(src, dst).await.with_context(|| {
+        format!(
+            "Failed to create symbolic link from {} to {}",
+            src.display(),
+            dst.display()
+        )
+    })
 }
 
 #[cfg(windows)]
@@ -118,11 +116,13 @@ async fn symlink(src: &Path, dst: &Path) -> Result<()> {
     } else {
         fs::symlink_file(src, dst).await
     }
-    .context(format!(
-        "Failed to create symbolic link from {} to {}",
-        src.display(),
-        dst.display()
-    ))
+    .with_context(|| {
+        format!(
+            "Failed to create symbolic link from {} to {}",
+            src.display(),
+            dst.display()
+        )
+    })
 }
 
 // ── Windows bin shims ───────────────────────────────────────────────
@@ -179,11 +179,13 @@ async fn win_bin_shims(src: &Path, dst: &Path) -> Result<()> {
 async fn win_link_native(src: &Path, dst: &Path) -> Result<()> {
     // bare name
     if fs::hard_link(src, dst).await.is_err() {
-        fs::copy(src, dst).await.context(format!(
-            "Failed to copy binary from {} to {}",
-            src.display(),
-            dst.display()
-        ))?;
+        fs::copy(src, dst).await.with_context(|| {
+            format!(
+                "Failed to copy binary from {} to {}",
+                src.display(),
+                dst.display()
+            )
+        })?;
     }
     // .exe alias — link to bare name (already on disk) to avoid copying large binaries twice
     let exe_dst = dst.with_extension("exe");

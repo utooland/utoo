@@ -17,8 +17,9 @@ use cmd::{clean::clean, deps::build_workspace};
 use helper::auto_update::init_auto_update;
 use service::script::MissingScript;
 use service::workspace::WorkspaceFilter;
+use util::cli_enum::{OmitType, PackageAction, SaveType, ScriptPolicy, parse_save_type};
+use util::config_file::ConfigScope;
 use util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
-use util::save_type::{OmitType, PackageAction, SaveType, parse_save_type};
 use util::user_config::{
     InstallScope, init_registry, set_cache_dir, set_install_scope, set_legacy_peer_deps,
     set_manifests_concurrency_limit, set_omit,
@@ -368,7 +369,7 @@ async fn async_main() -> Result<()> {
 
     // Check for help flag
     if args.len() > 1 && (args[1] == "-h" || args[1] == "--help") {
-        let config = crate::util::config_file::Config::load(false).await?;
+        let config = crate::util::config_file::Config::load(ConfigScope::Local).await?;
         let config_service = crate::service::config::ConfigService::new(config);
         config_service.print_help()?;
         return Ok(());
@@ -496,7 +497,7 @@ async fn async_main() -> Result<()> {
                         PackageAction::Add,
                         &spec_refs,
                         workspace.clone(),
-                        ignore_scripts,
+                        ScriptPolicy::from(ignore_scripts),
                         save_type,
                     )
                     .await?;
@@ -510,7 +511,7 @@ async fn async_main() -> Result<()> {
             } else {
                 let cwd = std::env::current_dir()?;
                 let root_path = init_project_root(&cwd).await?;
-                install(ignore_scripts, &root_path).await?;
+                install(ScriptPolicy::from(ignore_scripts), &root_path).await?;
                 log_time_end("All packages installed");
             }
         }
@@ -525,7 +526,7 @@ async fn async_main() -> Result<()> {
                     PackageAction::Remove,
                     &spec_refs,
                     workspace.clone(),
-                    ignore_scripts,
+                    ScriptPolicy::from(ignore_scripts),
                     SaveType::Prod,
                 )
                 .await?;
@@ -556,7 +557,7 @@ async fn async_main() -> Result<()> {
             log_time_end("deps resolved");
         }
         Some(Commands::Update) => {
-            update(false).await?;
+            update(ScriptPolicy::Run).await?;
             log_time_end("All packages updated");
         }
         Some(Commands::List { package }) => {
@@ -631,24 +632,24 @@ async fn async_main() -> Result<()> {
         }
         Some(Commands::Config { command }) => match command {
             ConfigCommands::Set { key, value, global } => {
-                handle_config_set(key, value, global).await?;
+                handle_config_set(key, value, global.into()).await?;
             }
             ConfigCommands::Get {
                 key,
                 global,
                 override_values,
             } => {
-                handle_config_get(key, global, override_values).await?;
+                handle_config_get(key, global.into(), override_values).await?;
             }
             ConfigCommands::List { global } => {
-                handle_config_list(global).await?;
+                handle_config_list(global.into()).await?;
             }
         },
         None => {
             // Check if there's a script name provided
             if let Some(script_name) = &cli.script_name {
                 // First check if there's a custom command configured for this script name
-                let config = crate::util::config_file::Config::load(false).await?;
+                let config = crate::util::config_file::Config::load(ConfigScope::Local).await?;
                 let config_service = crate::service::config::ConfigService::new(config);
                 // Check if there's a custom command available
                 if let Ok(Some(_)) = config_service.get_available_cmd(script_name) {
@@ -675,7 +676,7 @@ async fn async_main() -> Result<()> {
                 // Default to install if no arguments
                 let cwd = std::env::current_dir()?;
                 let root_path = init_project_root(&cwd).await?;
-                install(cli.ignore_scripts, &root_path).await?;
+                install(ScriptPolicy::from(cli.ignore_scripts), &root_path).await?;
                 log_time_end("All packages installed");
             }
         }

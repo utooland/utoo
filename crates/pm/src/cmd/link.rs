@@ -2,6 +2,7 @@ use crate::cmd::install::install;
 use crate::helper::global_bin::get_global_package_dir;
 use crate::helper::workspace::update_cwd_to_project;
 use crate::model::package::PackageInfo;
+use crate::util::cli_enum::ScriptPolicy;
 use crate::util::linker::link;
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -17,7 +18,7 @@ pub async fn link_current_to_global(cwd: &Path, prefix: Option<&str>) -> Result<
     })?;
 
     // Install dependencies
-    install(false, &project_path)
+    install(ScriptPolicy::Run, &project_path)
         .await
         .context("Failed to prepare dependencies for package to link")?;
 
@@ -151,7 +152,7 @@ mod tests {
         );
         fs::write(global_pkg_dir.join("package.json"), pkg_json).unwrap();
 
-        let prefix_str = global.to_string_lossy().to_string();
+        let prefix_str = global.to_string_lossy().into_owned();
         let result = link_global_to_local(&project, pkg_name, Some(&prefix_str)).await;
         assert!(result.is_ok(), "link_global_to_local should succeed");
 

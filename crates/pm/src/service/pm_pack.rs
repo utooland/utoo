@@ -58,7 +58,7 @@ pub async fn pack(package_root: &Path) -> Result<PackResult> {
     let unpacked_size: u64 = collected.iter().map(|(_, size)| size).sum();
     let file_paths: Vec<(String, u64)> = collected
         .iter()
-        .map(|(p, size)| (p.to_string_lossy().to_string(), *size))
+        .map(|(p, size)| (p.to_string_lossy().into_owned(), *size))
         .collect();
 
     // create_tarball reads each file via std::fs — also blocking I/O.

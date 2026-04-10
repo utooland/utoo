@@ -1,4 +1,5 @@
 use crate::service::package::PackageService;
+use crate::util::cli_enum::ScriptPolicy;
 use anyhow::Result;
 use std::path::Path;
 use utoo_ruborist::lock::PackageLock;
@@ -15,21 +16,20 @@ impl RebuildService {
     pub async fn rebuild(
         package_lock: &PackageLock,
         root_path: &Path,
-        ignore_scripts: bool,
+        scripts: ScriptPolicy,
     ) -> Result<()> {
-        // Collect packages based on ignore_scripts parameter
+        // Collect packages based on scripts parameter
         let packages =
-            PackageService::collect_packages_from_lock(package_lock, root_path, ignore_scripts)
-                .await?;
+            PackageService::collect_packages_from_lock(package_lock, root_path, scripts).await?;
 
         if !packages.is_empty() {
             let execution_queues =
-                PackageService::create_execution_queues_with_options(packages, ignore_scripts)?;
-            PackageService::execute_queues_with_options(execution_queues, ignore_scripts).await?;
+                PackageService::create_execution_queues_with_options(packages, scripts)?;
+            PackageService::execute_queues_with_options(execution_queues, scripts).await?;
         }
 
         // bins_only mode does not execute project root hooks
-        if !ignore_scripts {
+        if scripts == ScriptPolicy::Run {
             PackageService::process_project_hooks(root_path).await?;
         }
 
@@ -156,7 +156,8 @@ mod tests {
         );
 
         // Test rebuild with empty package lock
-        let result = RebuildService::rebuild(&package_lock, temp_dir.path(), false).await;
+        let result =
+            RebuildService::rebuild(&package_lock, temp_dir.path(), ScriptPolicy::Run).await;
         assert!(
             result.is_ok(),
             "Rebuild with empty package lock should succeed"
@@ -171,7 +172,8 @@ mod tests {
         let package_lock = create_test_package_lock();
 
         // Test rebuild without project package.json (should fail for project hooks)
-        let result = RebuildService::rebuild(&package_lock, temp_dir.path(), false).await;
+        let result =
+            RebuildService::rebuild(&package_lock, temp_dir.path(), ScriptPolicy::Run).await;
         assert!(
             result.is_err(),
             "Rebuild without project package.json should fail"

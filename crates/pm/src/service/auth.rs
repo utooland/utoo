@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 
-use crate::util::config_file::Config;
+use crate::util::config_file::{Config, ConfigScope};
 use crate::util::http::client;
 
 fn registry_api(registry: &str, path: &str) -> String {
@@ -33,7 +33,7 @@ pub async fn resolve_token(registry: &str) -> Option<String> {
         }
     }
 
-    let config = Config::load(true).await.ok()?;
+    let config = Config::load(ConfigScope::Global).await.ok()?;
     let token = config.get(&token_key(registry)).ok().flatten()?;
     if token.is_empty() { None } else { Some(token) }
 }
@@ -170,15 +170,15 @@ pub async fn logout(registry: &str, token: &str) -> Result<()> {
         );
     }
 
-    let mut config = Config::load(true).await?;
-    config.delete(&token_key(registry), true)?;
+    let mut config = Config::load(ConfigScope::Global).await?;
+    config.delete(&token_key(registry), ConfigScope::Global)?;
     Ok(())
 }
 
 /// Save token to ~/.utoo/config.toml, keyed by registry.
 pub async fn save_token(registry: &str, token: String) -> Result<()> {
-    let mut config = Config::load(true).await?;
-    config.set(&token_key(registry), token, true)?;
+    let mut config = Config::load(ConfigScope::Global).await?;
+    config.set(&token_key(registry), token, ConfigScope::Global)?;
     Ok(())
 }
 

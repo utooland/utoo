@@ -1,3 +1,4 @@
+use crate::util::cli_enum::ScriptPolicy;
 use anyhow::Context;
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
@@ -13,10 +14,10 @@ use crate::helper::lock::{
 use crate::helper::workspace::init_project_root;
 use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
+use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
-use crate::util::save_type::{OmitType, PackageAction, SaveType};
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 
 use super::binary::update_package_binary;
@@ -173,7 +174,7 @@ impl InstallService {
         action: PackageAction,
         specs: &[&str],
         workspace: Option<String>,
-        ignore_scripts: bool,
+        scripts: ScriptPolicy,
         save_type: SaveType,
         omit: &HashSet<OmitType>,
     ) -> Result<()> {
@@ -182,7 +183,7 @@ impl InstallService {
             action,
             specs,
             &workspace,
-            ignore_scripts
+            scripts
         );
 
         if specs.is_empty() {
@@ -210,7 +211,7 @@ impl InstallService {
             .await
             .context("Failed to build package-lock.json")?;
 
-        Self::install(ignore_scripts, &root_path, omit)
+        Self::install(scripts, &root_path, omit)
             .await
             .context("Failed to install packages")?;
 
@@ -218,7 +219,7 @@ impl InstallService {
     }
 
     pub async fn install(
-        ignore_scripts: bool,
+        scripts: ScriptPolicy,
         root_path: &Path,
         omit: &HashSet<OmitType>,
     ) -> Result<()> {
@@ -256,7 +257,7 @@ impl InstallService {
 
         finish_progress_bar("node_modules cloned");
 
-        RebuildService::rebuild(&package_lock, root_path, ignore_scripts).await?;
+        RebuildService::rebuild(&package_lock, root_path, scripts).await?;
         Ok(())
     }
 
@@ -269,7 +270,7 @@ impl InstallService {
         tracing::debug!("Installing global package: {npm_spec}");
 
         // Install dependencies (global install never omits)
-        Self::install(false, &package_path, &HashSet::new())
+        Self::install(ScriptPolicy::Run, &package_path, &HashSet::new())
             .await
             .context("Failed to install global package dependencies")?;
 

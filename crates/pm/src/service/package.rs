@@ -1,4 +1,5 @@
 use crate::model::package::{LifecycleHook, LifecycleScripts, PackageInfo};
+use crate::util::cli_enum::ScriptPolicy;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
 use anyhow::{Context, Result};
 use futures;
@@ -47,7 +48,7 @@ impl PackageService {
     pub async fn collect_packages_from_lock(
         package_lock: &PackageLock,
         root_path: &Path,
-        ignore_scripts: bool,
+        scripts: ScriptPolicy,
     ) -> Result<Vec<(PackageInfo, bool)>> {
         tracing::debug!("Collecting packages from memory lock...");
 
@@ -57,7 +58,7 @@ impl PackageService {
                 continue;
             }
 
-            // Early filtering based on ignore_scripts parameter
+            // Early filtering based on scripts parameter
             let has_scripts = lock_package.has_install_scripts();
             let package_name = lock_package.get_name(path);
             let bin_files = lock_package
@@ -68,10 +69,10 @@ impl PackageService {
             let has_bin = !bin_files.is_empty();
 
             // Skip packages that don't meet the filter criteria
-            if ignore_scripts && !has_bin {
-                continue; // ignore_scripts mode: only process packages with binaries
+            if scripts == ScriptPolicy::Ignore && !has_bin {
+                continue; // scripts mode: only process packages with binaries
             }
-            if !ignore_scripts && !has_scripts && !has_bin {
+            if scripts == ScriptPolicy::Run && !has_scripts && !has_bin {
                 continue; // full mode: process packages with scripts or binaries
             }
 
@@ -93,10 +94,10 @@ impl PackageService {
             }
 
             // Read lifecycle scripts from package.json only if needed
-            let lifecycle_scripts = if has_scripts || !ignore_scripts {
+            let lifecycle_scripts = if has_scripts || scripts == ScriptPolicy::Run {
                 Self::read_lifecycle_scripts(&package_path)
                     .await
-                    .context(format!("Failed to read scripts for package: {path}"))?
+                    .with_context(|| format!("Failed to read scripts for package: {path}"))?
             } else {
                 LifecycleScripts::default()
             };
@@ -122,7 +123,7 @@ impl PackageService {
     /// Takes Vec<(PackageInfo, is_optional)> where is_optional indicates edge type
     pub fn create_execution_queues_with_options(
         packages: Vec<(PackageInfo, bool)>,
-        ignore_scripts: bool,
+        scripts: ScriptPolicy,
     ) -> Result<ExecutionQueues> {
         tracing::debug!("Creating execution queues with options...");
         let mut queues = ExecutionQueues::default();
@@ -131,7 +132,7 @@ impl PackageService {
             let package = Rc::new(package);
 
             // Script queues - skip in bins_only mode
-            if !ignore_scripts {
+            if scripts == ScriptPolicy::Run {
                 if package
                     .lifecycle_scripts
                     .get_script(LifecycleHook::Preinstall)
@@ -176,9 +177,9 @@ impl PackageService {
     /// Execute queues with bins_only parameter support
     pub async fn execute_queues_with_options(
         queues: ExecutionQueues,
-        ignore_scripts: bool,
+        scripts: ScriptPolicy,
     ) -> Result<()> {
-        if ignore_scripts {
+        if scripts == ScriptPolicy::Ignore {
             // Binary-only mode: only execute binary linking
             Self::execute_binary_linking(&queues.bin_linking).await?;
         } else {
@@ -292,9 +293,9 @@ impl PackageService {
                         continue;
                     }
 
-                    let bin_dir = package
-                        .get_bin_dir()
-                        .context(format!("Failed to get bin directory for {}", package.name))?;
+                    let bin_dir = package.get_bin_dir().with_context(|| {
+                        format!("Failed to get bin directory for {}", package.name)
+                    })?;
                     let link_path = bin_dir.join(bin_name);
 
                     ScriptService::ensure_executable(&target_path)
@@ -309,12 +310,14 @@ impl PackageService {
 
                     crate::util::linker::link_bin(&target_path, &link_path)
                         .await
-                        .context(format!(
-                            "Failed to link binary for {} (from: {} to: {})",
-                            package.name,
-                            target_path.display(),
-                            link_path.display()
-                        ))?;
+                        .with_context(|| {
+                            format!(
+                                "Failed to link binary for {} (from: {} to: {})",
+                                package.name,
+                                target_path.display(),
+                                link_path.display()
+                            )
+                        })?;
                 }
                 tracing::debug!("Linking binary files for {} successfully", package.name);
             }
@@ -691,12 +694,12 @@ mod tests {
         };
 
         // Should not panic or error, even though the bin file does not exist
-        let result = PackageService::execute_queues_with_options(queues, false).await;
+        let result = PackageService::execute_queues_with_options(queues, ScriptPolicy::Run).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
-    async fn test_collect_packages_from_lock_with_ignore_scripts() {
+    async fn test_collect_packages_from_lock_with_scripts() {
         use serde_json::json;
         use std::collections::HashMap;
         use tempfile::TempDir;
@@ -782,16 +785,24 @@ mod tests {
             .unwrap();
         }
 
-        // Test ignore_scripts = false (should collect packages with scripts or binaries)
-        let result =
-            PackageService::collect_packages_from_lock(&package_lock, temp_dir.path(), false).await;
+        // Test scripts = false (should collect packages with scripts or binaries)
+        let result = PackageService::collect_packages_from_lock(
+            &package_lock,
+            temp_dir.path(),
+            ScriptPolicy::Run,
+        )
+        .await;
         assert!(result.is_ok());
         let packages_full = result.unwrap();
         assert_eq!(packages_full.len(), 3); // full-package, bin-only, script-only (no-hooks excluded)
 
-        // Test ignore_scripts = true (should only collect packages with binaries)
-        let result =
-            PackageService::collect_packages_from_lock(&package_lock, temp_dir.path(), true).await;
+        // Test scripts = true (should only collect packages with binaries)
+        let result = PackageService::collect_packages_from_lock(
+            &package_lock,
+            temp_dir.path(),
+            ScriptPolicy::Ignore,
+        )
+        .await;
         assert!(result.is_ok());
         let packages_bins_only = result.unwrap();
         assert_eq!(packages_bins_only.len(), 2); // full-package, bin-only (script-only and no-hooks excluded)
@@ -800,7 +811,7 @@ mod tests {
         for (package_info, _is_optional) in &packages_bins_only {
             assert!(
                 !package_info.bin_files.is_empty(),
-                "Package {} should have bin_files in ignore_scripts mode",
+                "Package {} should have bin_files in scripts mode",
                 package_info.name
             );
         }
@@ -869,8 +880,12 @@ mod tests {
         }
 
         // Test that only compatible packages are collected
-        let result =
-            PackageService::collect_packages_from_lock(&package_lock, temp_dir.path(), true).await;
+        let result = PackageService::collect_packages_from_lock(
+            &package_lock,
+            temp_dir.path(),
+            ScriptPolicy::Ignore,
+        )
+        .await;
         assert!(result.is_ok());
         let packages_collected = result.unwrap();
 
@@ -954,8 +969,12 @@ mod tests {
         }
 
         // Collect packages
-        let result =
-            PackageService::collect_packages_from_lock(&package_lock, temp_dir.path(), true).await;
+        let result = PackageService::collect_packages_from_lock(
+            &package_lock,
+            temp_dir.path(),
+            ScriptPolicy::Ignore,
+        )
+        .await;
         assert!(result.is_ok());
         let packages_collected = result.unwrap();
         assert_eq!(packages_collected.len(), 3);
