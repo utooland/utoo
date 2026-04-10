@@ -76,7 +76,7 @@ function normalizeEmotionConfig(
   emotion: EmotionOptions | boolean | undefined,
   isDev: boolean,
 ): EmotionOptions | undefined {
-  if (emotion === undefined) {
+  if (emotion === undefined || emotion === false) {
     return undefined;
   }
 
