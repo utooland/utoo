@@ -41,6 +41,7 @@ use turbopack_core::{
 };
 
 use crate::{
+    analyze::{AnalyzeTarget, AnalyzeTargets},
     endpoint::{Endpoint, EndpointOutput, EndpointOutputPaths},
     project::Project,
     webpack_stats::generate_webpack_stats,
@@ -398,6 +399,31 @@ impl AppEndpoint {
                 project.pack_path().owned().await?,
             )),
         }
+    }
+
+    #[turbo_tasks::function]
+    pub async fn analyze_targets(self: Vc<Self>) -> Result<Vc<AnalyzeTargets>> {
+        let asset_context = self.app_module_context();
+        let runtime_entries = self.app_runtime_entries();
+
+        let this = self.await?;
+        let targets = this
+            .entrypoints
+            .iter()
+            .map(|entry| async move {
+                let name = entry.await?.name.clone();
+                Ok(AnalyzeTarget {
+                    name,
+                    output_assets: entry
+                        .output_assets_for_entry(Vc::upcast(asset_context), runtime_entries)
+                        .to_resolved()
+                        .await?,
+                })
+            })
+            .try_join()
+            .await?;
+
+        Ok(AnalyzeTargets(targets).cell())
     }
 }
 

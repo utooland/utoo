@@ -3,7 +3,8 @@
   "version": "0.0.1",
   "scripts": {
     "build": "up build",
-    "dev": "up dev"
+    "dev": "up dev",
+    "analyze": "ANALYZE=1 up build"
   },
   "dependencies": {
     "react": "^18.2.0",

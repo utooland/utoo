@@ -310,7 +310,7 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { registerWorkerScheduler, workerCreated, recvTaskMessageInWorker, sendTaskMessage, endpointWriteToDisk, endpointServerChangedSubscribe, endpointClientChangedSubscribe, projectNew, projectUpdate, projectOnExit, projectShutdown, projectWriteAllEntrypointsToDisk, projectEntrypointsSubscribe, projectHmrEvents, projectHmrIdentifiersSubscribe, projectUpdateInfoSubscribe, projectTraceSource, projectGetSourceForAsset, projectGetSourceMap, projectGetSourceMapSync, rootTaskDispose, initCustomTraceSubscriber, teardownTraceSubscriber } = nativeBinding
+const { registerWorkerScheduler, workerCreated, recvTaskMessageInWorker, sendTaskMessage, endpointWriteToDisk, endpointServerChangedSubscribe, endpointClientChangedSubscribe, projectNew, projectUpdate, projectOnExit, projectShutdown, projectWriteAllEntrypointsToDisk, projectEntrypointsSubscribe, projectHmrEvents, projectHmrIdentifiersSubscribe, projectUpdateInfoSubscribe, projectTraceSource, projectGetSourceForAsset, projectGetSourceMap, projectGetSourceMapSync, projectWriteAnalyzeData, rootTaskDispose, initCustomTraceSubscriber, teardownTraceSubscriber } = nativeBinding
 
 module.exports.registerWorkerScheduler = registerWorkerScheduler
 module.exports.workerCreated = workerCreated
@@ -332,6 +332,7 @@ module.exports.projectTraceSource = projectTraceSource
 module.exports.projectGetSourceForAsset = projectGetSourceForAsset
 module.exports.projectGetSourceMap = projectGetSourceMap
 module.exports.projectGetSourceMapSync = projectGetSourceMapSync
+module.exports.projectWriteAnalyzeData = projectWriteAnalyzeData
 module.exports.rootTaskDispose = rootTaskDispose
 module.exports.initCustomTraceSubscriber = initCustomTraceSubscriber
 module.exports.teardownTraceSubscriber = teardownTraceSubscriber

@@ -40,6 +40,7 @@ use turbopack_core::{
 use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 
 use crate::{
+    analyze::AnalyzeTarget,
     endpoint::{Endpoint, EndpointOutput, EndpointOutputPaths},
     project::Project,
     webpack_stats::generate_webpack_stats,
@@ -340,6 +341,16 @@ impl LibraryEndpoint {
     pub async fn output_assets(self: Vc<Self>) -> Result<Vc<OutputAssets>> {
         let chunk_group_assets = *self.library_chunk().await?.assets;
         Ok(chunk_group_assets)
+    }
+
+    #[turbo_tasks::function]
+    pub async fn analyze_target(self: Vc<Self>) -> Result<Vc<AnalyzeTarget>> {
+        let this = self.await?;
+        Ok(AnalyzeTarget {
+            name: this.name.clone(),
+            output_assets: self.output_assets().to_resolved().await?,
+        }
+        .cell())
     }
 }
 

@@ -29,6 +29,7 @@ turbo-tasks-env     = { workspace = true }
 turbo-tasks-fs      = { workspace = true }
 turbo-unix-path     = { workspace = true }
 turbopack           = { workspace = true }
+turbopack-analyze   = { workspace = true }
 turbopack-browser   = { workspace = true }
 turbopack-core      = { workspace = true }
 turbopack-css       = { workspace = true }

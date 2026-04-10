@@ -77,6 +77,7 @@ export interface Project {
 
   getSourceMap(filePath: string): Promise<string | null>;
   getSourceMapSync(filePath: string): string | null;
+  writeAnalyzeData(): Promise<TurbopackResult<void>>;
 
   traceSource(
     stackFrame: StackFrame,
