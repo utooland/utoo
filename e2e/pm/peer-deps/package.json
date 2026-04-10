@@ -1,0 +1,7 @@
+{
+  "name": "peer-deps-test",
+  "version": "1.0.0",
+  "dependencies": {
+    "react-dom": "^19.0.0"
+  }
+}
