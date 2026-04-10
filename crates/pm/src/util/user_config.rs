@@ -19,7 +19,7 @@ static REGISTRY: LazyLock<ConfigValue<String>> =
     LazyLock::new(|| ConfigValue::new("registry", REGISTRY_NPMMIRROR.to_string()));
 
 static LEGACY_PEER_DEPS: LazyLock<ConfigValue<bool>> =
-    LazyLock::new(|| ConfigValue::new("legacy-peer-deps", false));
+    LazyLock::new(|| ConfigValue::new("legacy-peer-deps", true));
 
 static CACHE_DIR: LazyLock<ConfigValue<String>> = LazyLock::new(|| {
     let default_cache = dirs::home_dir()

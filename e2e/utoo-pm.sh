@@ -701,4 +701,50 @@ echo -e "${GREEN}PASS: script exit code propagated correctly (got $EXIT_CODE)${N
 popd
 rm -rf "$SIGPIPE_DIR"
 
+# Case: legacyPeerDeps defaults to true (peer deps not auto-installed)
+echo -e "${YELLOW}Case: legacyPeerDeps default (skip peer deps)${NC}"
+cd e2e/pm/peer-deps
+rm -rf node_modules package-lock.json
+
+utoo install --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: utoo install failed for peer-deps test${NC}"; exit 1; }
+
+# react-dom has react as a peerDependency.
+# With legacyPeerDeps=true (default), react should NOT be auto-installed.
+if [ -d "node_modules/react" ]; then
+    echo -e "${RED}FAIL: react was auto-installed as peer dep — legacyPeerDeps default is broken${NC}"
+    exit 1
+fi
+
+# react-dom itself must be installed
+if [ ! -d "node_modules/react-dom" ]; then
+    echo -e "${RED}FAIL: react-dom not installed${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}PASS: legacyPeerDeps default — peer deps not auto-installed${NC}"
+
+# Sub-case: explicitly disable legacyPeerDeps via config — peer deps SHOULD be installed
+echo -e "${YELLOW}Case: legacyPeerDeps=false (peer deps auto-installed)${NC}"
+rm -rf node_modules package-lock.json
+
+# Write local config to disable legacyPeerDeps
+cat > .utoo.toml <<'EOF'
+[values]
+legacy-peer-deps = "false"
+EOF
+
+utoo install --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: utoo install failed for peer-deps test (legacy=false)${NC}"; rm -f .utoo.toml; exit 1; }
+rm -f .utoo.toml
+
+# With legacyPeerDeps=false, react SHOULD be auto-installed as a peer dep of react-dom
+if [ ! -d "node_modules/react" ]; then
+    echo -e "${RED}FAIL: react was NOT auto-installed — legacyPeerDeps=false is broken${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}PASS: legacyPeerDeps=false — peer deps auto-installed${NC}"
+cd ../../..
+
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"
