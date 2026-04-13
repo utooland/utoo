@@ -20,6 +20,7 @@ import {
   ServiceWorkerOptions,
   Stats,
 } from "../types";
+import { createWorkerFromDataUri } from "../workers/inline";
 import { checkCompatibility } from "./checkCompatibility";
 import { ForkedProject } from "./ForkedProject";
 
@@ -64,7 +65,9 @@ export class Project implements ProjectEndpoint {
     this.remote ??= comlink.wrap(port1);
 
     if (!ProjectWorker) {
-      ProjectWorker = new Worker(workerUrl);
+      ProjectWorker = workerUrl.startsWith("data:")
+        ? createWorkerFromDataUri(workerUrl)
+        : new Worker(workerUrl);
       window.addEventListener("message", (e) => {
         this.connectWorker(e);
       });

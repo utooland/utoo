@@ -1,7 +1,6 @@
 const path = require("path");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
-const CopyPlugin = require("copy-webpack-plugin");
 const { DefinePlugin } = require("webpack");
 
 module.exports = [
@@ -79,16 +78,6 @@ module.exports = [
   {
     mode: "development",
     entry: {
-      worker: {
-        import: "./src/worker.ts",
-        filename: "worker.js",
-        chunkLoading: false,
-      },
-      tokioWorker: {
-        import: "./src/threadWorker.ts",
-        filename: "threadWorker.js",
-        chunkLoading: false,
-      },
       serviceWorker: {
         import: "./src/serviceWorker.ts",
         filename: "serviceWorker.js",
@@ -117,25 +106,6 @@ module.exports = [
     resolve: {
       extensions: [".ts", ".js"],
     },
-    plugins: [
-      new CopyPlugin({
-        patterns: [
-          {
-            from: path.resolve(
-              __dirname,
-              "../../packages/utoo-web/esm/loaderWorker.js",
-            ),
-            to: "loaderWorker.js",
-          },
-          {
-            from: path.resolve(
-              __dirname,
-              "../../packages/utoo-web/esm/utoo/index_bg.wasm",
-            ),
-            to: "index_bg.wasm",
-          },
-        ],
-      }),
-    ],
+    plugins: [],
   },
 ];

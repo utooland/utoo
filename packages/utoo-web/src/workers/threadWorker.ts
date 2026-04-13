@@ -1,4 +1,4 @@
-import { initSync } from "./utoo";
+import { initSync } from "../utoo";
 
 declare let self: WorkerGlobalScope;
 
