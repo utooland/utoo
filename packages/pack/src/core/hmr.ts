@@ -109,6 +109,7 @@ export async function createHotReloader(
   rootPath?: string,
 ): Promise<HotReloaderInterface> {
   const resolvedProjectPath = projectPath || process.cwd();
+  const resolvedRootPath = rootPath || projectPath || process.cwd();
   processHtmlEntry(bundleOptions.config, resolvedProjectPath);
   validateEntryPaths(bundleOptions.config, resolvedProjectPath);
 
@@ -140,7 +141,7 @@ export async function createHotReloader(
           (useWorkerThreads() ? "workerThreads" : "childProcesses"),
       },
       projectPath: normalizePath(resolvedProjectPath),
-      rootPath: rootPath || projectPath || process.cwd(),
+      rootPath: resolvedRootPath,
       packPath: getPackPath(),
     },
     {

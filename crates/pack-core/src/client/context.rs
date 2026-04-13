@@ -397,7 +397,6 @@ pub async fn get_client_resolve_options_context(
     )
     .to_resolved()
     .await?;
-
     let custom_conditions = vec![mode.await?.condition().into()];
     let resolve_options_context = ResolveOptionsContext {
         enable_node_modules: Some(project_path.root().owned().await?),

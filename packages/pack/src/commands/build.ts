@@ -42,6 +42,7 @@ async function buildInternal(
   }
 
   const resolvedProjectPath = projectPath || process.cwd();
+  const resolvedRootPath = rootPath || projectPath || process.cwd();
   processHtmlEntry(bundleOptions.config, resolvedProjectPath);
   validateEntryPaths(bundleOptions.config, resolvedProjectPath);
 
@@ -65,7 +66,7 @@ async function buildInternal(
           (useWorkerThreads() ? "workerThreads" : "childProcesses"),
       },
       projectPath: normalizePath(resolvedProjectPath),
-      rootPath: rootPath || projectPath || process.cwd(),
+      rootPath: resolvedRootPath,
       packPath: getPackPath(),
     },
     {
