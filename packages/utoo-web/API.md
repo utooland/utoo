@@ -32,19 +32,25 @@ Create a `Project` instance with configuration for workers and the service worke
 
 ```typescript
 import { Project as UtooProject } from "@utoo/web";
+import workerUrl from "@utoo/web/esm/workerInline";
+import threadWorkerUrl from "@utoo/web/esm/threadWorkerInline";
+import loaderWorkerUrl from "@utoo/web/esm/loaderWorkerInline";
 
 const project = new UtooProject({
     // Project root directory in the file system.
     cwd: "/utooweb-demo",
 
-    // Worker script URL for file system and core functionality.
-    workerUrl: `${location.origin}/worker.js`,
+    // Inline worker data URI for file system and core functionality.
+    workerUrl,
 
-    // Worker script URL for heavy tasks.
-    threadWorkerUrl: `${location.origin}/threadWorker.js`,
+    // Inline worker data URI for heavy tasks.
+    threadWorkerUrl,
     
-    // Worker script URL for webpack loaders.
-    loaderWorkerUrl: `${location.origin}/loaderWorker.js`,
+    // Inline worker data URI for webpack loaders.
+    loaderWorkerUrl,
+
+    // URL to the WASM binary. Use `new URL()` to let your bundler handle it.
+    wasmUrl: new URL("@utoo/web/esm/utoo/index_bg.wasm", import.meta.url).href,
 
     // Preview service worker configuration.
     serviceWorker: {
@@ -58,6 +64,8 @@ const project = new UtooProject({
     }
 });
 ```
+
+Worker scripts are pre-bundled as inline base64 data URIs by `@utoo/web`. This eliminates cross-origin issues and removes the need to set up separate worker entry points in your build.
 
 ### 2. Install the Service Worker
 
@@ -118,9 +126,10 @@ Creates a new project instance.
 **Options:**
 
 * `cwd` (string, required): The absolute path that will serve as the root of the project in the real file system (e.g., `/my-app`).
-* `workerUrl` (string, optional): Specifies the URL of the Worker thread where the `Project` instance's core logic actually runs. The `Project` object you interact with in the main thread is a proxy that delegates all core tasks (like file system operations) to this Worker. This architecture is key to keeping the UI responsive.
-* `threadWorkerUrl` (string, required): Specifies the URL of a separate Worker thread dedicated to handling CPU-intensive tasks like bundling and compiling. This isolates the heavy build process from the `Project`'s main logic worker.
-* `loaderWorkerUrl` (string, required): Specifies the URL of a separate Worker thread dedicated to handling webpack loaders.
+* `workerUrl` (string, required): URL or inline data URI for the Worker thread where the `Project` instance's core logic actually runs. The `Project` object you interact with in the main thread is a proxy that delegates all core tasks (like file system operations) to this Worker. Import the pre-bundled inline version: `import workerUrl from "@utoo/web/esm/workerInline"`.
+* `threadWorkerUrl` (string, required): URL or inline data URI for a separate Worker thread dedicated to handling CPU-intensive tasks like bundling and compiling. Import: `import threadWorkerUrl from "@utoo/web/esm/threadWorkerInline"`.
+* `loaderWorkerUrl` (string, optional): URL or inline data URI for a separate Worker thread dedicated to handling webpack loaders. Import: `import loaderWorkerUrl from "@utoo/web/esm/loaderWorkerInline"`.
+* `wasmUrl` (string, optional): URL to the WASM binary. When using inline workers, this must be set explicitly since Blob URL workers cannot auto-resolve the WASM path. Use `new URL("@utoo/web/esm/utoo/index_bg.wasm", import.meta.url).href` to let your bundler handle it.
 * `serviceWorker` (object, optional):
   * `url` (string, required): The URL to the service worker script.
   * `scope` (string, required): The URL scope that the service worker will intercept requests for. This is the base path for your preview environment.
@@ -422,47 +431,30 @@ module.exports = {
 
 ## Setting Up the Worker Scripts
 
-A key part of setting up a `@utoo/web` project is creating the worker scripts that you pass to the `UtooProject` constructor. As seen in the `utooweb-demo` example, the content of these files is minimal. Their purpose is to simply load the necessary worker logic from the `@utoo/web` library itself.
-
-You will need to create three files in your project's source, which will then be compiled by your bundler (e.g., Webpack, Vite) into the final URLs passed to the constructor.
-
-#### 1. Project Main Worker (`worker.ts`)
-
-This file provides the logic for the main project worker, which handles file system operations and other core tasks.
+`@utoo/web` ships pre-bundled inline workers as base64 data URI modules. Simply import them and pass to the constructor — no separate build entries or cross-origin configuration needed.
 
 ```typescript
-// src/worker.ts
-import "@utoo/web/esm/worker";
+import workerUrl from "@utoo/web/esm/workerInline";
+import threadWorkerUrl from "@utoo/web/esm/threadWorkerInline";
+import loaderWorkerUrl from "@utoo/web/esm/loaderWorkerInline";
 ```
 
-#### 2. Thread Worker (`threadWorker.ts`)
+Inline workers solve the **cross-origin Worker restriction**: when your app is served from a CDN or different domain, `new Worker(url)` would fail. Inline workers bypass this by embedding the worker code as data URIs and creating Blob URLs at runtime.
 
-This file provides the logic for the build worker, which handles CPU-intensive tasks like bundling.
+#### Service Worker (`serviceWorker.ts`)
 
-```typescript
-// src/threadWorker.ts
-import "@utoo/web/esm/threadWorker";
-```
-
-#### 3. Service Worker (`serviceWorker.ts`)
-
-This file provides the logic for the service worker, which serves the preview from the real file system.
+The Service Worker **cannot** be inlined (browsers require a real URL for `navigator.serviceWorker.register()`). Create a thin wrapper file in your project:
 
 ```typescript
 // src/serviceWorker.ts
 import "@utoo/web/esm/serviceWorker";
 ```
 
-#### 4. Loader Worker (`loaderWorker.ts`)
+Configure your bundler to output this as a separate file, then pass its URL to the constructor.
 
-This file provides the logic for the loader worker, which handles webpack loaders.
+#### `createWorkerFromDataUri(dataUri, options?)`
 
-```typescript
-// src/loaderWorker.ts
-import "@utoo/web/esm/loaderWorker";
-```
-
-Your build setup should be configured to output these files to a location that your main application can access, so you can provide their URLs to the `UtooProject` constructor.
+A utility function exported from `@utoo/web` that creates a Worker from a data URI string. It uses Blob URL internally for cross-browser compatibility (Firefox does not support `new Worker("data:...")` directly). The `Project` class uses this automatically when it detects a `data:` URI, so you typically don't need to call it directly.
 
 ## Notes
 

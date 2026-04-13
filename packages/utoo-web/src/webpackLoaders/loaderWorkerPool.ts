@@ -6,6 +6,7 @@ import {
   WebWorkerTermination,
   workerCreated,
 } from "../utoo";
+import { createWorkerFromDataUri } from "../workers/inline";
 import { LoaderRunnerMeta } from "./types";
 
 let nextWorkerId = 0;
@@ -25,7 +26,9 @@ export const runLoaderWorkerPool = async (
       nextWorkerId += 1;
       const workerId = nextWorkerId;
 
-      const worker = new Worker(loaderWorkerUrl, { name: filename });
+      const worker = loaderWorkerUrl.startsWith("data:")
+        ? createWorkerFromDataUri(loaderWorkerUrl, { name: filename })
+        : new Worker(loaderWorkerUrl, { name: filename });
 
       let finalCwd = cwd;
       let finalFilename = filename;

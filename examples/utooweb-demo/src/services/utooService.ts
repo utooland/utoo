@@ -1,4 +1,7 @@
 import { Project as UtooProject } from "@utoo/web";
+import loaderWorkerUrl from "@utoo/web/esm/loaderWorkerInline";
+import threadWorkerUrl from "@utoo/web/esm/threadWorkerInline";
+import workerUrl from "@utoo/web/esm/workerInline";
 import { demoFiles } from "../demoFiles";
 
 const projectName = "/utooweb-demo";
@@ -84,9 +87,10 @@ export const deleteProjectFiles = async (
 export const initializeProject = async () => {
   const projectInstance = new UtooProject({
     cwd: projectName,
-    workerUrl: "http://localhost:8081/worker.js",
-    threadWorkerUrl: "http://localhost:8081/threadWorker.js",
-    loaderWorkerUrl: "http://localhost:8081/loaderWorker.js",
+    workerUrl,
+    threadWorkerUrl,
+    loaderWorkerUrl,
+    wasmUrl: new URL("@utoo/web/esm/utoo/index_bg.wasm", import.meta.url).href,
     serviceWorker: {
       url: "http://localhost:8081/serviceWorker.js",
       scope: serviceWorkerScope,
