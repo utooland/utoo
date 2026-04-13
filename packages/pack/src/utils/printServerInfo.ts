@@ -1,6 +1,8 @@
 import os from "os";
 import pc from "picocolors";
 
+const BOX_INNER_WIDTH = 50;
+
 export function printServerInfo(
   protocol: "http" | "https",
   hostname: string,
@@ -16,49 +18,42 @@ export function printServerInfo(
   console.log(
     pc.green("  ┌──────────────────────────────────────────────────┐"),
   );
-  console.log(
-    pc.green("  │                                                  │"),
-  );
-  console.log(
-    pc.green("  │   ") +
-      pc.bold("Serving!") +
-      pc.green("                                       │"),
-  );
-  console.log(
-    pc.green("  │                                                  │"),
-  );
-
-  const localLabel = "  │   - Local:    ";
-  const localPadding = 50 - 15 - localUrl.length; // 15 is "   - Local:    ".length
-  console.log(
-    pc.green(localLabel) +
-      pc.cyan(localUrl) +
-      pc.green(" ".repeat(Math.max(0, localPadding)) + "│"),
+  printPlainBoxLine();
+  printStyledBoxLine("   Serving!", `   ${pc.bold("Serving!")}`);
+  printPlainBoxLine();
+  printStyledBoxLine(
+    `   - Local:    ${localUrl}`,
+    `   - Local:    ${pc.cyan(localUrl)}`,
   );
 
   if (networkUrl) {
-    const netLabel = "  │   - Network:  ";
-    const netPadding = 50 - 17 - networkUrl.length; // 17 is "   - Network:  ".length
-    console.log(
-      pc.green(netLabel) +
-        pc.cyan(networkUrl) +
-        pc.green(" ".repeat(Math.max(0, netPadding)) + "│"),
+    printStyledBoxLine(
+      `   - Network:  ${networkUrl}`,
+      `   - Network:  ${pc.cyan(networkUrl)}`,
     );
   }
 
-  console.log(
-    pc.green("  │                                                  │"),
-  );
-  console.log(
-    pc.green("  │   Copied local address to clipboard!             │"),
-  );
-  console.log(
-    pc.green("  │                                                  │"),
-  );
+  printPlainBoxLine();
+  printPlainBoxLine("   Copied local address to clipboard!");
+  printPlainBoxLine();
   console.log(
     pc.green("  └──────────────────────────────────────────────────┘"),
   );
   console.log();
+}
+
+function printPlainBoxLine(content = "") {
+  console.log(pc.green(`  │${content.padEnd(BOX_INNER_WIDTH, " ")}│`));
+}
+
+function printStyledBoxLine(plainContent: string, styledContent: string) {
+  console.log(
+    pc.green("  │") +
+      styledContent +
+      pc.green(
+        `${" ".repeat(Math.max(0, BOX_INNER_WIDTH - plainContent.length))}│`,
+      ),
+  );
 }
 
 function getNetworkAddress() {
