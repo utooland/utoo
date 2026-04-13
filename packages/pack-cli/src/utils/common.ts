@@ -15,6 +15,13 @@ export interface BuildOptions {
   projectOptions: utooPack.WebpackConfig | utooPack.BundleOptions;
 }
 
+function resolveOptionalPath(
+  baseDir: string,
+  value: unknown,
+): string | undefined {
+  return typeof value === "string" ? path.resolve(baseDir, value) : undefined;
+}
+
 export async function resolveFromConfigFile(
   configDir: string,
 ): Promise<Record<string, unknown>> {
@@ -58,7 +65,8 @@ export async function resolveBuildOptions(flags: {
 }): Promise<BuildOptions> {
   const { project, root, webpack } = flags;
   const cwd = process.cwd();
-  let projectPath = path.resolve(cwd, project || cwd);
+  const configDir = path.resolve(cwd, project || "");
+  let projectPath = project ? path.resolve(cwd, project) : undefined;
   let rootPath = root ? path.resolve(cwd, root) : undefined;
 
   let projectOptions: utooPack.WebpackConfig | utooPack.BundleOptions;
@@ -66,7 +74,6 @@ export async function resolveBuildOptions(flags: {
   if (webpack) {
     projectOptions = { webpackMode: true } as utooPack.WebpackConfig;
   } else {
-    const configDir = path.resolve(cwd, project || "");
     const rawOptions = await resolveFromConfigFile(configDir);
     const {
       processEnv,
@@ -74,10 +81,17 @@ export async function resolveBuildOptions(flags: {
       dev,
       buildId,
       packPath,
-      rootPath: _rootPath,
-      projectPath: _projectPath,
+      rootPath: configRootPath,
+      projectPath: configProjectPath,
       ...config
     } = rawOptions;
+
+    projectPath =
+      projectPath ??
+      resolveOptionalPath(configDir, configProjectPath) ??
+      configDir;
+    rootPath = rootPath || resolveOptionalPath(configDir, configRootPath);
+
     projectOptions = {
       config,
       processEnv,
@@ -88,5 +102,5 @@ export async function resolveBuildOptions(flags: {
     } as unknown as utooPack.BundleOptions;
   }
 
-  return { projectPath, rootPath, projectOptions };
+  return { projectPath: projectPath ?? configDir, rootPath, projectOptions };
 }
