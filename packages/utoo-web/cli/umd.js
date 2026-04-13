@@ -150,6 +150,10 @@ webpack(config, async (err, stats) => {
       const finalContent = `export default ${JSON.stringify(dataUri)};\n`;
 
       await fs.writeFile(outputFullPath, finalContent, 'utf-8');
+      
+      const dtsPath = outputFullPath.replace(/\.js$/, '.d.ts');
+      await fs.writeFile(dtsPath, 'declare const url: string;\nexport default url;\n', 'utf-8');
+
       await fs.unlink(bundlePath).catch(() => {});
       console.log(`✅ Build and base64-url successful: ${output}`);
     } catch (e) {

@@ -92,7 +92,8 @@ export const initializeProject = async () => {
     loaderWorkerUrl,
     wasmUrl: new URL("@utoo/web/esm/utoo/index_bg.wasm", import.meta.url).href,
     serviceWorker: {
-      url: "http://localhost:8081/serviceWorker.js",
+      url: new URL("@utoo/web/esm/serviceWorkerBundle.js", import.meta.url)
+        .href,
       scope: serviceWorkerScope,
       targetDirToCwd: "../utooweb-demo/",
     },
