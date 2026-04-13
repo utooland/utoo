@@ -1,6 +1,6 @@
 import * as comlink from "comlink";
-import { WorkerMessageType } from "./message";
-import { internalEndpoint } from "./project/InternalProject";
+import { WorkerMessageType } from "../message";
+import { internalEndpoint } from "../project/InternalProject";
 
 declare let self: DedicatedWorkerGlobalScope;
 

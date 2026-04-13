@@ -19,14 +19,9 @@ const argv = yargs(process.argv.slice(2))
     type: 'string',
     demandOption: true,
   })
-  .option('stringify-esm', {
-    alias: 'se',
-    description: 'Export content as ESM string',
-    type: 'boolean',
-  })
-  .option('stringify-cjs', {
-    alias: 'sc',
-    description: 'Export content as CJS string',
+  .option('base64-url', {
+    alias: 'b64',
+    description: 'Export bundled content as a data:application/javascript;base64 URL string (ESM)',
     type: 'boolean',
   })
   .option('target', {
@@ -43,12 +38,11 @@ const argv = yargs(process.argv.slice(2))
   .help()
   .alias('help', 'h').argv;
 
-const { entry, output, target, stringifyEsm, stringifyCjs, noPolyfill } = argv;
-const isStringify = stringifyEsm || stringifyCjs;
+const { entry, output, target, base64Url, noPolyfill } = argv;
 
 const outputFullPath = path.resolve(process.cwd(), output);
-// If stringifying, use a temp dir. Otherwise output directly.
-const outputDir = isStringify 
+// If base64-url, use a temp dir. Otherwise output directly.
+const outputDir = base64Url
   ? path.resolve(process.cwd(), './tmp') 
   : path.dirname(outputFullPath);
 const outputFilename = path.basename(outputFullPath);
@@ -147,22 +141,19 @@ webpack(config, async (err, stats) => {
     process.exit(1);
   }
 
-  if (isStringify) {
+  if (base64Url) {
     try {
       const bundlePath = path.join(outputDir, outputFilename);
-      const content = await fs.readFile(bundlePath, 'utf-8');
-      const escapedContent = JSON.stringify(content);
-      
-      const finalContent = stringifyEsm
-        ? `export default ${escapedContent};\n`
-        : `module.exports = ${escapedContent};\n`;
+      const content = await fs.readFile(bundlePath);
+      const base64 = content.toString('base64');
+      const dataUri = `data:application/javascript;base64,${base64}`;
+      const finalContent = `export default ${JSON.stringify(dataUri)};\n`;
 
       await fs.writeFile(outputFullPath, finalContent, 'utf-8');
-      // Optional: clean up temp file
-      // await fs.unlink(bundlePath); 
-      console.log(`✅ Build and stringify successful: ${output}`);
+      await fs.unlink(bundlePath).catch(() => {});
+      console.log(`✅ Build and base64-url successful: ${output}`);
     } catch (e) {
-      console.error('❌ Failed to write stringified output:', e);
+      console.error('❌ Failed to write base64-url output:', e);
       process.exit(1);
     }
   } else {

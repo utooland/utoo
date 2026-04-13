@@ -32,19 +32,25 @@
 
 ```typescript
 import { Project as UtooProject } from "@utoo/web";
+import workerUrl from "@utoo/web/esm/workerInline";
+import threadWorkerUrl from "@utoo/web/esm/threadWorkerInline";
+import loaderWorkerUrl from "@utoo/web/esm/loaderWorkerInline";
 
 const project = new UtooProject({
     // 文件系统中的项目根目录。
     cwd: "/utooweb-demo",
 
-    // 核心功能 Worker 脚本 URL。
-    workerUrl: `${location.origin}/worker.js`,
+    // 核心功能内联 Worker data URI。
+    workerUrl,
 
-    // 重度任务 Worker 脚本 URL。
-    threadWorkerUrl: `${location.origin}/threadWorker.js`,
+    // 重度任务内联 Worker data URI。
+    threadWorkerUrl,
 
-    // webpack loaders Worker 脚本 URL。
-    loaderWorkerUrl: `${location.origin}/loaderWorker.js`,
+    // webpack loaders 内联 Worker data URI。
+    loaderWorkerUrl,
+
+    // WASM 二进制文件 URL。使用 `new URL()` 让打包器自动处理。
+    wasmUrl: new URL("@utoo/web/esm/utoo/index_bg.wasm", import.meta.url).href,
     
     // 预览 Service Worker 配置。
     serviceWorker: {
@@ -58,6 +64,8 @@ const project = new UtooProject({
     }
 });
 ```
+
+Worker 脚本已由 `@utoo/web` 预构建为内联的 base64 data URI 模块。这消除了跨域问题，无需在构建中设置单独的 Worker 入口点。
 
 ### 2. 安装 Service Worker
 
@@ -118,9 +126,10 @@ await project.build({
 **选项:**
 
 * `cwd` (string, 必需): 在真实文件系统中作为项目根目录的绝对路径（例如 `/my-app`）。
-* `workerUrl` (string, 可选): 指定 `Project` 实例核心逻辑实际运行的 Worker 线程的 URL。您在主线程中与之交互的 `Project` 对象是一个代理，它将所有核心任务（如文件系统操作）委托给此 Worker。这种架构是保持 UI 响应的关键。
-* `threadWorkerUrl` (string, 必需): 指定一个专用于处理 CPU 密集型任务（如打包和编译）的独立 Worker 线程的 URL。这将重量级的构建过程与 `Project` 的主要逻辑 Worker 隔离开来。
-* `loaderWorkerUrl` (string, 必需): 指定一个专用于处理 webpack 加载器的独立 Worker 线程的 URL。
+* `workerUrl` (string, 必需): `Project` 实例核心逻辑实际运行的 Worker 线程的 URL 或内联 data URI。您在主线程中与之交互的 `Project` 对象是一个代理，它将所有核心任务（如文件系统操作）委托给此 Worker。导入预构建的内联版本：`import workerUrl from "@utoo/web/esm/workerInline"`。
+* `threadWorkerUrl` (string, 必需): 专用于处理 CPU 密集型任务（如打包和编译）的独立 Worker 线程的 URL 或内联 data URI。导入：`import threadWorkerUrl from "@utoo/web/esm/threadWorkerInline"`。
+* `loaderWorkerUrl` (string, 可选): 专用于处理 webpack 加载器的独立 Worker 线程的 URL 或内联 data URI。导入：`import loaderWorkerUrl from "@utoo/web/esm/loaderWorkerInline"`。
+* `wasmUrl` (string, 可选): WASM 二进制文件的 URL。使用内联 Worker 时必须显式设置，因为 Blob URL Worker 无法自动解析 WASM 路径。使用 `new URL("@utoo/web/esm/utoo/index_bg.wasm", import.meta.url).href` 让打包器自动处理。
 * `serviceWorker` (object, 可选):
   * `url` (string, 必需): Service Worker 脚本的 URL。
   * `scope` (string, 必需): Service Worker 将拦截请求的 URL 范围。这是您预览环境的基路径。
@@ -422,47 +431,30 @@ module.exports = {
 
 ## 设置 Worker 脚本
 
-设置 `@utoo/web` 项目的一个关键部分是创建您传递给 `UtooProject` 构造函数的 Worker 脚本。正如在 `utooweb-demo` 示例中所见，这些文件的内容非常少。它们的目的是简单地从 `@utoo/web` 库本身加载必要的 Worker 逻辑。
-
-您需要在项目的源代码中创建三个文件，然后由您的打包器（例如 webpack、Vite）编译成最终传递给构造函数的 URL。
-
-#### 1. 项目主 Worker (`worker.ts`)
-
-此文件为主项目 Worker 提供逻辑，该 Worker 处理文件系统操作和其他核心任务。
+`@utoo/web` 提供预构建的内联 Worker，以 base64 data URI 模块的形式发布。只需导入并传递给构造函数即可——无需设置单独的构建入口或处理跨域配置。
 
 ```typescript
-// src/worker.ts
-import "@utoo/web/esm/worker";
+import workerUrl from "@utoo/web/esm/workerInline";
+import threadWorkerUrl from "@utoo/web/esm/threadWorkerInline";
+import loaderWorkerUrl from "@utoo/web/esm/loaderWorkerInline";
 ```
 
-#### 2. 线程 Worker (`threadWorker.ts`)
+内联 Worker 解决了**跨域 Worker 限制**：当应用从 CDN 或不同域名提供服务时，`new Worker(url)` 会因同源策略而失败。内联 Worker 通过将 Worker 代码嵌入为 data URI 并在运行时创建 Blob URL 来绕过此限制。
 
-此文件为构建 Worker 提供逻辑，该 Worker 处理 CPU 密集型任务，如打包。
+#### 服务 Worker (`serviceWorker.ts`)
 
-```typescript
-// src/threadWorker.ts
-import "@utoo/web/esm/threadWorker";
-```
-
-#### 3. 服务 Worker (`serviceWorker.ts`)
-
-此文件为 Service Worker 提供逻辑，该 Worker 从真实文件系统提供预览。
+Service Worker **不能**被内联（浏览器要求 `navigator.serviceWorker.register()` 使用真实 URL）。在项目中创建一个简单的包装文件：
 
 ```typescript
 // src/serviceWorker.ts
 import "@utoo/web/esm/serviceWorker";
 ```
 
-#### 4. 加载器 Worker (`loaderWorker.ts`)
+配置打包器将此文件输出为单独的文件，然后将其 URL 传递给构造函数。
 
-此文件为加载器 Worker 提供逻辑，该 Worker 处理 webpack 加载器。
+#### `createWorkerFromDataUri(dataUri, options?)`
 
-```typescript
-// src/loaderWorker.ts
-import "@utoo/web/esm/loaderWorker";
-```
-
-您的构建设置应配置为将这些文件输出到主应用程序可以访问的位置，以便您可以将其 URL 提供给 `UtooProject` 构造函数。
+从 `@utoo/web` 导出的工具函数，用于从 data URI 字符串创建 Worker。内部使用 Blob URL 以确保跨浏览器兼容性（Firefox 不支持直接使用 `new Worker("data:...")` ）。`Project` 类在检测到 `data:` URI 时会自动使用此函数，通常无需手动调用。
 
 ## 注意
 
