@@ -8,6 +8,7 @@ license     = "MIT"
 # tombi: format.rules.table-keys-order.disabled = true
 [dependencies]
 anyhow       = { workspace = true }
+bytes        = "1"
 deno_semver  = "0.7"
 dirs         = { workspace = true }
 futures      = "0.3"
@@ -34,6 +35,10 @@ gix          = { workspace = true, features = [
   "blocking-network-client",
 ], optional = true }
 tempfile     = { workspace = true, optional = true }
+# HTTP tarball extraction (optional, native-only — gated on `native-git` feature
+# alongside git resolution since both share tempfile + blocking threadpool).
+flate2       = { version = "1.0", optional = true }
+tar          = { version = "0.4", optional = true }
 
 # Async runtime (works on both native and WASM with forked tokio)
 [dependencies.tokio]
@@ -52,4 +57,4 @@ js-sys = "0.3"  # For time in WASM
 
 [features]
 default    = []
-native-git = ["gix", "tempfile"]
+native-git = ["flate2", "gix", "tar", "tempfile"]

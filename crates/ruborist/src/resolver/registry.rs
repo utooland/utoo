@@ -28,7 +28,9 @@ pub enum ResolveError<E> {
     ManifestNotFound { name: String, version: String },
     /// Git resolution failed
     Git { url: String, source: anyhow::Error },
-    /// Dependency type not yet supported (e.g. local file path, HTTP tarball)
+    /// HTTP tarball resolution failed
+    Http { url: String, source: anyhow::Error },
+    /// Dependency type not yet supported (e.g. local file path)
     Unsupported { spec: String, reason: &'static str },
 }
 
@@ -43,6 +45,9 @@ impl<E: std::fmt::Display> std::fmt::Display for ResolveError<E> {
             }
             ResolveError::Git { url, source } => {
                 write!(f, "Git resolution failed for {}: {}", url, source)
+            }
+            ResolveError::Http { url, source } => {
+                write!(f, "HTTP tarball resolution failed for {}: {}", url, source)
             }
             ResolveError::Unsupported { spec, reason } => {
                 write!(f, "Unsupported dependency '{spec}': {reason}")
@@ -59,7 +64,9 @@ impl<E: std::error::Error + 'static> std::error::Error for ResolveError<E> {
             | ResolveError::NoVersions(_)
             | ResolveError::ManifestNotFound { .. }
             | ResolveError::Unsupported { .. } => None,
-            ResolveError::Git { source, .. } => Some(source.as_ref()),
+            ResolveError::Git { source, .. } | ResolveError::Http { source, .. } => {
+                Some(source.as_ref())
+            }
         }
     }
 }
