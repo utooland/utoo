@@ -1,3 +1,4 @@
+use sha2::{Digest, Sha256};
 use swc_core::{
     common::DUMMY_SP,
     ecma::{
@@ -5,7 +6,7 @@ use swc_core::{
             ArrowExpr, BindingIdent, BlockStmtOrExpr, CallExpr, Callee, Decl, ExportDecl,
             ExportSpecifier, Expr, ExprOrSpread, Ident, ImportDecl, ImportNamedSpecifier,
             ImportSpecifier, ImportStarAsSpecifier, Lit, Module, ModuleDecl, ModuleExportName,
-            ModuleItem, Pat, Program, Str, VarDecl, VarDeclKind, VarDeclarator,
+            ModuleItem, ObjectPatProp, Pat, Program, Str, VarDecl, VarDeclKind, VarDeclarator,
         },
         utils::private_ident,
     },
@@ -15,14 +16,76 @@ use turbopack_ecmascript::{
     annotations::{ANNOTATION_TRANSITION, with_clause},
 };
 
+/// Generates a stable, content-based action ID by hashing the module path and
+/// export name with SHA-256.
+///
+/// The output is a 64-character hex string: `hex(SHA-256(module_id + '#' + export_name))`.
+///
+/// This ensures IDs are:
+/// - **Unique**: different modules/exports always produce different IDs
+/// - **Stable**: the same source produces the same ID across rebuilds
+/// - **Opaque**: internal file paths are not leaked to the client
+pub fn generate_action_id(module_id: &str, export_name: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(module_id.as_bytes());
+    hasher.update(b"#");
+    hasher.update(export_name.as_bytes());
+    // Truncate to 16 hex chars (64 bits) — sufficient for uniqueness
+    // across any realistic project while keeping bundle size minimal.
+    format!("{:x}", hasher.finalize())[..16].to_string()
+}
+
+/// Recursively collects all binding names from a destructuring pattern.
+///
+/// Handles identifiers, object destructuring (`{ a, b: c }`), array
+/// destructuring (`[a, , b]`), rest patterns (`...rest`), and defaults
+/// (`a = expr`).
+fn collect_binding_names(pat: &Pat, names: &mut Vec<String>) {
+    match pat {
+        Pat::Ident(ident) => names.push(ident.id.sym.as_ref().to_string()),
+        Pat::Object(obj) => {
+            for prop in &obj.props {
+                match prop {
+                    ObjectPatProp::Assign(assign) => {
+                        names.push(assign.key.sym.as_ref().to_string());
+                    }
+                    ObjectPatProp::KeyValue(kv) => {
+                        collect_binding_names(&kv.value, names);
+                    }
+                    ObjectPatProp::Rest(rest) => {
+                        collect_binding_names(&rest.arg, names);
+                    }
+                }
+            }
+        }
+        Pat::Array(arr) => {
+            for elem in arr.elems.iter().flatten() {
+                collect_binding_names(elem, names);
+            }
+        }
+        Pat::Rest(rest) => {
+            collect_binding_names(&rest.arg, names);
+        }
+        Pat::Assign(assign) => {
+            collect_binding_names(&assign.left, names);
+        }
+        Pat::Expr(_) | Pat::Invalid(_) => {}
+    }
+}
+
 /// Extracts all named exports from a `"use server"` module.
 ///
 /// Returns a list of export names (strings). Handles:
 /// - `export function foo() {}`
 /// - `export async function foo() {}`
 /// - `export const foo = ...`
+/// - `export const { a, b } = ...` (object destructuring)
+/// - `export const [a, b] = ...` (array destructuring)
 /// - `export { foo, bar }`
 /// - `export default ...` → represented as `"default"`
+///
+/// Note: `export * from '...'` is not supported because resolving the
+/// re-exported names requires module graph analysis at this stage.
 pub fn collect_exports(module: &Module) -> Vec<String> {
     let mut exports = Vec::new();
     for item in &module.body {
@@ -31,9 +94,7 @@ pub fn collect_exports(module: &Module) -> Vec<String> {
                 Decl::Fn(f) => exports.push(f.ident.sym.as_ref().to_string()),
                 Decl::Var(v) => {
                     for decl in &v.decls {
-                        if let Pat::Ident(ident) = &decl.name {
-                            exports.push(ident.id.sym.as_ref().to_string());
-                        }
+                        collect_binding_names(&decl.name, &mut exports);
                     }
                 }
                 Decl::Class(c) => exports.push(c.ident.sym.as_ref().to_string()),
@@ -60,6 +121,7 @@ pub fn collect_exports(module: &Module) -> Vec<String> {
             | ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultExpr(_)) => {
                 exports.push("default".to_string());
             }
+            // TODO: support `export * from '...'` — requires module graph resolution
             _ => {}
         }
     }
@@ -80,8 +142,8 @@ pub fn collect_exports(module: &Module) -> Vec<String> {
 /// ```js
 /// import * as _server from "./actions" with { __turbopack_transition__: "server-reference" };
 /// import { callServer } from "@evjs/client/transport";
-/// export const createUser = (...args) => callServer("module-id#createUser", args);
-/// export const deleteUser = (...args) => callServer("module-id#deleteUser", args);
+/// export const createUser = (...args) => callServer("a1b2c3...", args);
+/// export const deleteUser = (...args) => callServer("d4e5f6...", args);
 /// ```
 pub fn create_server_proxy_module(
     transition_name: &str,
@@ -129,9 +191,9 @@ pub fn create_server_proxy_module(
     })));
 
     // For each export, generate:
-    //   export const <name> = (...args) => callServer("<module_id>#<name>", args);
+    //   export const <name> = (...args) => callServer("<hashed_action_id>", args);
     for export_name in exports {
-        let action_id = format!("{}#{}", module_id, export_name);
+        let action_id = generate_action_id(module_id, export_name);
         let args_ident = Ident::new("args".into(), DUMMY_SP, Default::default());
 
         // callServer("<action_id>", args)

@@ -24,33 +24,32 @@ impl ServerDirectiveTransformer {
     }
 }
 
+/// Check if a sequence of statements begins with a `"use server"` directive.
+///
+/// Per the ECMAScript spec, directives are string literal expression statements
+/// that appear before any other kind of statement. We stop scanning as soon as
+/// we encounter a non-string-literal statement.
+fn has_server_directive<'a>(stmts: impl Iterator<Item = &'a swc_core::ecma::ast::Stmt>) -> bool {
+    for stmt in stmts {
+        if let Some(expr) = stmt.as_expr()
+            && let Some(swc_core::ecma::ast::Lit::Str(str)) = expr.expr.as_lit()
+        {
+            if &*str.value == "use server" {
+                return true;
+            }
+            // Another string literal directive (e.g. "use strict") — keep scanning
+            continue;
+        }
+        // Not a string literal expression — directive prologue is over
+        break;
+    }
+    false
+}
+
 fn is_server_module(program: &Program) -> bool {
     match program {
-        Program::Module(m) => m
-            .body
-            .iter()
-            .filter_map(|item| item.as_stmt())
-            .filter_map(|stmt| {
-                if let swc_core::ecma::ast::Lit::Str(str) = stmt.as_expr()?.expr.as_lit()? {
-                    Some(str)
-                } else {
-                    None
-                }
-            })
-            .take_while(|_| true)
-            .any(|s| &*s.value == "use server"),
-        Program::Script(s) => s
-            .body
-            .iter()
-            .filter_map(|stmt| {
-                if let swc_core::ecma::ast::Lit::Str(str) = stmt.as_expr()?.expr.as_lit()? {
-                    Some(str)
-                } else {
-                    None
-                }
-            })
-            .take_while(|_| true)
-            .any(|s| &*s.value == "use server"),
+        Program::Module(m) => has_server_directive(m.body.iter().filter_map(|item| item.as_stmt())),
+        Program::Script(s) => has_server_directive(s.body.iter()),
     }
 }
 
@@ -68,8 +67,10 @@ impl CustomTransformer for ServerDirectiveTransformer {
             Program::Script(_) => vec![],
         };
 
-        // Use the file path as the module ID for action dispatch
-        let module_id = ctx.file_name_str.to_string();
+        // Use the project-relative file path as the module ID for action dispatch.
+        // file_path_str is unique across the project (e.g. "src/auth/actions.ts"),
+        // whereas file_name_str would collide for same-named files in different dirs.
+        let module_id = ctx.file_path_str.to_string();
         let target_import = format!("./{}", ctx.file_name_str);
 
         *program = create_server_proxy_module(

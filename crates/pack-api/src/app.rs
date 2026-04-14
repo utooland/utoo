@@ -559,17 +559,20 @@ impl AppEndpoint {
         let this = self.await?;
         let project = *this.project;
 
-        // Get the module graph (already computed for client chunking)
-        let module_graphs: Vec<_> = this
+        // Await all graphs simultaneously for better parallelization
+        let resolved_graphs = this
             .entrypoints
             .iter()
-            .map(|e| e.module_graph_for_entry(asset_context, runtime_entries))
-            .collect();
+            .map(|e| async {
+                e.module_graph_for_entry(asset_context, runtime_entries)
+                    .await
+            })
+            .try_join()
+            .await?;
 
         // Walk all graphs to find ServerReferenceModule instances
         let mut server_modules = vec![];
-        for mg in &module_graphs {
-            let graph = mg.await?;
+        for graph in &resolved_graphs {
             for module in graph.iter_nodes() {
                 if let Some(server_ref) =
                     ResolvedVc::try_downcast_type::<ServerReferenceModule>(module)

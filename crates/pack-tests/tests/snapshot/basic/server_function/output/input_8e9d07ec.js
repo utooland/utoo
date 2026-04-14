@@ -13,8 +13,8 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$
 })();
 ;
 ;
-const createUser = (...args)=>callServer("actions.ts#createUser", args);
-const deleteUser = (...args)=>callServer("actions.ts#deleteUser", args);
+const createUser = (...args)=>callServer("bdadcaefd8ce9058", args);
+const deleteUser = (...args)=>callServer("63c89b1b411a2fd0", args);
 __turbopack_context__.s([
     "createUser",
     0,
