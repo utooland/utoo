@@ -282,6 +282,12 @@ export interface ConfigComplete {
   persistentCaching?: boolean;
   nodePolyfill?: boolean;
   devServer?: DevServerConfig;
+  server?: {
+    functions?: {
+      /** Module that exports `callServer(actionId, args)` for client-side transport. */
+      callServerModule: string;
+    };
+  };
 }
 
 export interface HtmlConfig {

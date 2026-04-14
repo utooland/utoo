@@ -103,6 +103,11 @@ pub struct CompleteConfig {
     #[schemars(description = "Development server configuration")]
     pub dev_server: Option<SchemaDevServer>,
 
+    /// Server-side configuration (server functions, future RSC)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Server-side configuration")]
+    pub server: Option<SchemaServerConfig>,
+
     /// Experimental features
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Experimental features")]
@@ -154,6 +159,32 @@ pub struct SchemaDevServer {
     /// Enable hot module replacement
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hot: Option<bool>,
+}
+
+// ---------------------------------------------------------------------------
+// Server
+// ---------------------------------------------------------------------------
+
+/// Server-side configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaServerConfig {
+    /// Server function configuration ("use server" directive support)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Server function configuration")]
+    pub functions: Option<SchemaServerFunctionsConfig>,
+}
+
+/// Server function configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaServerFunctionsConfig {
+    /// Module that exports `callServer(actionId, args)` for client-side transport.
+    /// e.g. "@evjs/client/transport" or custom module path.
+    #[schemars(
+        description = "Module that exports callServer(actionId, args) for client-side transport"
+    )]
+    pub call_server_module: String,
 }
 
 // ---------------------------------------------------------------------------

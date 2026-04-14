@@ -88,6 +88,24 @@ pub struct ProviderConfig(
     #[bincode(with = "turbo_bincode::indexmap")] FxIndexMap<RcStr, ProviderConfigValue>,
 );
 
+#[turbo_tasks::value(eq = "manual")]
+#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize, OperationValue)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerConfig {
+    /// Server function configuration ("use server" directive support)
+    pub functions: Option<ServerFunctionsConfig>,
+    // Future: entry, runtime, etc.
+}
+
+#[turbo_tasks::value(eq = "manual")]
+#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize, OperationValue)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerFunctionsConfig {
+    /// Module that exports `callServer(actionId, args)` for client-side transport.
+    /// e.g. "@evjs/client/transport" or custom module path.
+    pub call_server_module: RcStr,
+}
+
 #[turbo_tasks::value(serialization = "custom", eq = "manual")]
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, OperationValue, Encode, Decode)]
 #[serde(rename_all = "camelCase")]
@@ -117,6 +135,8 @@ pub struct Config {
     persistent_caching: Option<bool>,
     node_polyfill: Option<bool>,
     dev_server: Option<DevServer>,
+    #[bincode(with = "turbo_bincode::serde_self_describing")]
+    server: Option<ServerConfig>,
     #[cfg(feature = "test")]
     #[serde(rename = "runtimeType")]
     runtime_type: Option<RcStr>,
@@ -1094,6 +1114,11 @@ impl Config {
     #[turbo_tasks::function]
     pub fn dev_server(&self) -> Vc<DevServer> {
         self.dev_server.clone().unwrap_or_default().cell()
+    }
+
+    #[turbo_tasks::function]
+    pub fn server(&self) -> Vc<ServerConfig> {
+        self.server.clone().unwrap_or_default().cell()
     }
 
     // Almost align to https://webpack.js.org/configuration/target/#target,

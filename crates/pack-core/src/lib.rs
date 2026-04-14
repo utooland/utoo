@@ -12,6 +12,7 @@ pub mod mode;
 pub mod node_polyfill;
 pub mod server;
 pub mod server_component;
+pub mod server_reference;
 pub mod shared;
 pub mod tracing_presets;
 pub mod transform_options;

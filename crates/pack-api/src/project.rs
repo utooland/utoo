@@ -1162,6 +1162,65 @@ impl Project {
         }))
     }
 
+    /// Server chunking context for server functions (without client-side
+    /// export_usage, since server function modules live in a separate graph).
+    #[turbo_tasks::function]
+    pub(super) async fn server_fn_chunking_context(
+        self: Vc<Self>,
+    ) -> Result<Vc<NodeJsChunkingContext>> {
+        let mode = self.mode();
+        let config = self.config();
+        let source_maps = if *config.source_maps().await? {
+            SourceMapsType::Full
+        } else {
+            SourceMapsType::None
+        };
+        let dist_root = self.dist_root().owned().await?;
+        Ok(get_server_chunking_context(ServerChunkingContextOptions {
+            mode,
+            config,
+            root_path: dist_root.clone(),
+            node_root: dist_root,
+            node_root_to_root_path: rcstr!("/ROOT"),
+            environment: self.server_compile_time_info().environment(),
+            module_id_strategy: self.module_ids(),
+            export_usage: Vc::cell(None),
+            unused_references: Vc::cell(Default::default()),
+            minify: config.minify(mode),
+            compress: self.compress(),
+            source_maps: source_maps.cell(),
+            no_mangling: self.no_mangling(),
+            scope_hoisting: config.concatenate_modules(mode),
+            nested_async_chunking: config.nested_async_chunking(mode),
+            debug_ids: Vc::cell(false),
+        }))
+    }
+
+    /// Build a module graph specifically for server function modules.
+    /// Always uses per-entry graph (not whole-app) since server functions
+    /// are discovered dynamically and are not part of the app's entry registry.
+    #[turbo_tasks::function]
+    pub(super) async fn server_fn_module_graph(
+        self: Vc<Self>,
+        evaluatable_assets: Vc<EvaluatableAssets>,
+    ) -> Result<Vc<ModuleGraph>> {
+        let is_production = self.mode().await?.is_production();
+        let entries = evaluatable_assets
+            .await?
+            .iter()
+            .copied()
+            .map(ResolvedVc::upcast)
+            .collect();
+        Ok(
+            ModuleGraph::from_single_graph(SingleModuleGraph::new_with_entries(
+                ResolvedVc::cell(vec![ChunkGroupEntry::Entry(entries)]),
+                is_production,
+                is_production,
+            ))
+            .connect(),
+        )
+    }
+
     #[turbo_tasks::function]
     pub(super) fn edge_chunking_context(
         self: Vc<Self>,
