@@ -283,6 +283,12 @@ export interface ConfigComplete {
   nodePolyfill?: boolean;
   devServer?: DevServerConfig;
   server?: {
+    output?: {
+      /** Output path for server chunks, relative to project root. */
+      path?: string;
+      /** Server chunk filename template (e.g. "[name].js"). */
+      filename?: string;
+    };
     functions?: {
       /** Module that exports `callServer(actionId, args)` for client-side transport. */
       callServerModule: string;

@@ -94,7 +94,8 @@ pub struct ProviderConfig(
 pub struct ServerConfig {
     /// Server function configuration ("use server" directive support)
     pub functions: Option<ServerFunctionsConfig>,
-    // Future: entry, runtime, etc.
+    /// Server output configuration
+    pub output: Option<ServerOutputConfig>,
 }
 
 #[turbo_tasks::value(eq = "manual")]
@@ -104,6 +105,17 @@ pub struct ServerFunctionsConfig {
     /// Module that exports `callServer(actionId, args)` for client-side transport.
     /// e.g. "@evjs/client/transport" or custom module path.
     pub call_server_module: RcStr,
+}
+
+#[turbo_tasks::value(eq = "manual")]
+#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize, OperationValue)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerOutputConfig {
+    /// Output path for server chunks, relative to project root.
+    /// Defaults to "{output.path}/server".
+    pub path: Option<RcStr>,
+    /// Server entry chunk filename. Defaults to the app endpoint name.
+    pub filename: Option<RcStr>,
 }
 
 #[turbo_tasks::value(serialization = "custom", eq = "manual")]

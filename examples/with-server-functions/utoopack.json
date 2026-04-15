@@ -10,7 +10,7 @@
     }
   ],
   "output": {
-    "path": "./dist",
+    "path": "dist/client",
     "filename": "[name].[contenthash:8].js",
     "chunkFilename": "[name].[contenthash:8].js",
     "cssFilename": "[name].[contenthash:8].css",
@@ -20,8 +20,12 @@
     "minify": false
   },
   "server": {
+    "output": {
+      "path": "dist/server",
+      "filename": "main.[contenthash:8].js"
+    },
     "functions": {
-      "callServerModule": "./src/transport"
+      "callServerModule": "./transport"
     }
   }
 }

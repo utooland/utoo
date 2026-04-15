@@ -25,4 +25,4 @@ async function deleteUser(id) {
 }),
 ];
 
-//# sourceMappingURL=_project__basic_server_function_input_actions_ts_a042c951.js.map
+//# sourceMappingURL=main.js.map

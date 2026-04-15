@@ -11,7 +11,7 @@ use turbo_tasks_fs::FileSystemPath;
 use turbo_tasks_hash::{
     DeterministicHash, HashAlgorithm, Xxh3Hash64Hasher, encode_hex, hash_xxh3_hash64,
 };
-use turbopack_browser::chunking_context::{
+use turbopack_core::utils::{
     match_content_hash_placeholder, match_name_placeholder, replace_content_hash_placeholder,
     replace_name_placeholder,
 };

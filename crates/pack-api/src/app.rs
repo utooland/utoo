@@ -240,15 +240,28 @@ impl AppEntrypoint {
 
             let module_graph = self.module_graph_for_entry(asset_context, runtime_entries);
 
-            let name = if this.name.ends_with(".js") {
-                this.name.as_str()
+            let server_config = project.config().server().await?;
+            let entry_name = server_config
+                .output
+                .as_ref()
+                .and_then(|o| o.filename.as_ref())
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| {
+                    if this.name.ends_with(".js") {
+                        this.name.to_string()
+                    } else {
+                        format!("{}.js", this.name)
+                    }
+                });
+            let name = if entry_name.ends_with(".js") {
+                entry_name
             } else {
-                &format!("{}.js", this.name)
+                format!("{entry_name}.js")
             };
             let app_chunk_group = project
                 .server_chunking_context()
                 .entry_chunk_group(
-                    project.dist_root().owned().await?.join(name)?,
+                    project.dist_root().owned().await?.join(&name)?,
                     ChunkGroup::Entry(
                         self.entry_evaluatable_assets(asset_context, runtime_entries)
                             .await?

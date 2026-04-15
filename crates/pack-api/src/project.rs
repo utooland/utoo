@@ -823,6 +823,63 @@ impl Project {
         self.client_fs().root()
     }
 
+    /// Returns the server output directory name, relative to the project root.
+    ///
+    /// Reads from `config.server.output.path` if set, otherwise defaults
+    /// to `{output.path}/server`.
+    #[turbo_tasks::function]
+    pub async fn server_dist_dir(self: Vc<Self>) -> Result<Vc<RcStr>> {
+        let this = self.await?;
+        let server_dir = if let Some(server_path) = this
+            .config
+            .server()
+            .await?
+            .output
+            .as_ref()
+            .and_then(|o| o.path.clone())
+        {
+            server_path.to_string()
+        } else {
+            let client_dist = this
+                .config
+                .output()
+                .await?
+                .path
+                .clone()
+                .unwrap_or("dist".into());
+            format!("{}/server", client_dist)
+        };
+
+        let relative = convert_to_project_relative(&server_dir, &this.project_path)?;
+        let relative = unix_to_sys(relative.strip_prefix("./").unwrap_or(&relative));
+
+        Ok(Vc::cell(relative.into()))
+    }
+
+    /// Returns the output root for server chunks on the output filesystem.
+    #[turbo_tasks::function]
+    pub async fn server_dist_root(self: Vc<Self>) -> Result<Vc<FileSystemPath>> {
+        let this = self.await?;
+        let server_dist_dir = self.server_dist_dir().await?;
+
+        let project_relative = strip_root_prefix(&this.project_path, &this.root_path)
+            .with_context(|| {
+                format!(
+                    "project_path `{}` is not inside root_path `{}`",
+                    this.project_path, this.root_path
+                )
+            })?;
+        let project_relative = unix_to_sys(trim_leading_path_separators(&project_relative));
+
+        Ok(self
+            .output_fs()
+            .root()
+            .await?
+            .join(&project_relative)?
+            .join(server_dist_dir.as_str())?
+            .cell())
+    }
+
     #[turbo_tasks::function]
     pub async fn node_root_to_root_path(self: Vc<Self>) -> Result<Vc<RcStr>> {
         Ok(Vc::cell(
@@ -1141,12 +1198,12 @@ impl Project {
         } else {
             SourceMapsType::None
         };
-        let dist_root = self.dist_root().owned().await?;
+        let server_root = self.dist_root().owned().await?;
         Ok(get_server_chunking_context(ServerChunkingContextOptions {
             mode,
             config,
-            root_path: dist_root.clone(),
-            node_root: dist_root,
+            root_path: server_root.clone(),
+            node_root: server_root,
             node_root_to_root_path: rcstr!("/ROOT"),
             environment: self.server_compile_time_info().environment(),
             module_id_strategy: self.module_ids(),
@@ -1159,6 +1216,7 @@ impl Project {
             scope_hoisting: config.concatenate_modules(mode),
             nested_async_chunking: config.nested_async_chunking(mode),
             debug_ids: Vc::cell(false),
+            filename: None,
         }))
     }
 
@@ -1175,15 +1233,27 @@ impl Project {
         } else {
             SourceMapsType::None
         };
-        let dist_root = self.dist_root().owned().await?;
+        let server_root = self.server_dist_root().owned().await?;
+        let server_filename = config
+            .server()
+            .await?
+            .output
+            .as_ref()
+            .and_then(|o| o.filename.clone());
         Ok(get_server_chunking_context(ServerChunkingContextOptions {
             mode,
             config,
-            root_path: dist_root.clone(),
-            node_root: dist_root,
+            root_path: server_root.clone(),
+            node_root: server_root,
             node_root_to_root_path: rcstr!("/ROOT"),
             environment: self.server_compile_time_info().environment(),
-            module_id_strategy: self.module_ids(),
+            // Server function modules live in a separate graph, so they
+            // can't use the whole-app deterministic ID map. Use named IDs.
+            module_id_strategy: ModuleIdStrategy {
+                module_id_map: None,
+                fallback: ModuleIdFallback::Ident,
+            }
+            .cell(),
             export_usage: Vc::cell(None),
             unused_references: Vc::cell(Default::default()),
             minify: config.minify(mode),
@@ -1193,6 +1263,7 @@ impl Project {
             scope_hoisting: config.concatenate_modules(mode),
             nested_async_chunking: config.nested_async_chunking(mode),
             debug_ids: Vc::cell(false),
+            filename: server_filename,
         }))
     }
 
@@ -1295,7 +1366,8 @@ impl Project {
                 }
             }
             let client_root = self.client_root().owned().await?;
-            let dist_root = self.dist_root().owned().await?;
+            let client_output = self.dist_root().owned().await?;
+            let output_root = self.output_fs().root().owned().await?;
 
             let all_output_assets_op = all_assets_from_entries_operation(output_assets);
 
@@ -1304,9 +1376,9 @@ impl Project {
                 let _ = map
                     .insert_output_assets(
                         all_output_assets_op,
-                        dist_root.clone(),
+                        output_root.clone(),
                         client_root.clone(),
-                        dist_root.clone(),
+                        client_output.clone(),
                     )
                     .resolve()
                     .await?;
@@ -1315,7 +1387,7 @@ impl Project {
             } else {
                 let all_output_assets = all_output_assets_op.connect();
 
-                let _ = emit_assets(all_output_assets, dist_root.clone(), client_root, dist_root)
+                let _ = emit_assets(all_output_assets, output_root, client_root, client_output)
                     .resolve()
                     .await?;
 
