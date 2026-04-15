@@ -44,7 +44,7 @@
     "@utoo/pack-shared": "*",
     "domparser-rs": "^0.0.7",
     "find-up": "4.1.0",
-    "get-port": "^7.1.0",
+    "get-port": "5.1.1",
     "hono": "^4.12.5",
     "nanoid": "^3.3.11",
     "picocolors": "^1.1.1",
