@@ -51,6 +51,7 @@ use crate::{
             styled_components::get_styled_components_transform_rule,
             styled_jsx::get_styled_jsx_transform_rule,
             swc_ecma_transform_plugins::get_swc_ecma_transform_plugin_rule,
+            webpack_public_path::get_webpack_public_path_transform_rule,
         },
         webpack_rules::{WebpackLoaderBuiltinCondition, webpack_loader_options},
     },
@@ -251,6 +252,7 @@ pub async fn get_client_module_options_context(
         get_styled_components_transform_rule(config).await?,
         get_styled_jsx_transform_rule(config, target_browsers).await?,
         get_remove_console_transform_rule(config).await?,
+        Some(get_webpack_public_path_transform_rule()),
     ]
     .into_iter()
     .flatten()
