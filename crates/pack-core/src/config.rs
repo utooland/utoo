@@ -114,8 +114,12 @@ pub struct ServerOutputConfig {
     /// Output path for server chunks, relative to project root.
     /// Defaults to "{output.path}/server".
     pub path: Option<RcStr>,
-    /// Server entry chunk filename. Defaults to the app endpoint name.
+    /// Server entry chunk filename template. Supports [name].
+    /// Defaults to the app endpoint name.
     pub filename: Option<RcStr>,
+    /// Non-entry chunk filename template. Supports [name] and [contenthash:N].
+    /// Defaults to the standard chunk naming convention.
+    pub chunk_filename: Option<RcStr>,
 }
 
 #[turbo_tasks::value(serialization = "custom", eq = "manual")]

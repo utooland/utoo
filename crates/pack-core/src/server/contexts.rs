@@ -364,7 +364,10 @@ pub struct ServerChunkingContextOptions {
     pub scope_hoisting: Vc<bool>,
     pub nested_async_chunking: Vc<bool>,
     pub debug_ids: Vc<bool>,
+    /// Entry chunk filename template. Supports [name].
     pub filename: Option<RcStr>,
+    /// Non-entry chunk filename template. Supports [name] and [contenthash:N].
+    pub chunk_filename: Option<RcStr>,
 }
 
 // By default, assets are server assets, but the StructuredImageModuleType ones are on the server
@@ -390,6 +393,7 @@ pub async fn get_server_chunking_context(
         nested_async_chunking,
         debug_ids,
         filename,
+        chunk_filename,
     } = options;
     #[cfg(not(feature = "test"))]
     let _ = &config;
@@ -437,6 +441,10 @@ pub async fn get_server_chunking_context(
 
     if let Some(filename) = filename {
         builder = builder.filename(filename);
+    }
+
+    if let Some(chunk_filename) = chunk_filename {
+        builder = builder.chunk_filename(chunk_filename);
     }
 
     if mode.is_development() {

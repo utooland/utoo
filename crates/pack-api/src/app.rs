@@ -240,19 +240,11 @@ impl AppEntrypoint {
 
             let module_graph = self.module_graph_for_entry(asset_context, runtime_entries);
 
-            let server_config = project.config().server().await?;
-            let entry_name = server_config
-                .output
-                .as_ref()
-                .and_then(|o| o.filename.as_ref())
-                .map(|n| n.to_string())
-                .unwrap_or_else(|| {
-                    if this.name.ends_with(".js") {
-                        this.name.to_string()
-                    } else {
-                        format!("{}.js", this.name)
-                    }
-                });
+            let entry_name = if this.name.ends_with(".js") {
+                this.name.to_string()
+            } else {
+                format!("{}.js", this.name)
+            };
             let name = if entry_name.ends_with(".js") {
                 entry_name
             } else {
@@ -619,13 +611,19 @@ impl AppEndpoint {
             .iter()
             .map(|e| ResolvedVc::upcast(*e))
             .collect();
-        let ident = evaluatable_assets[0].ident();
-        Ok(server_chunking_context
-            .root_chunk_group(
-                ident,
+
+        let server_root = project.server_dist_root().owned().await?;
+        let entry_chunk = server_chunking_context
+            .entry_chunk_group(
+                server_root.join("index.js")?,
                 ChunkGroup::Entry(all_evaluatables),
                 server_module_graph,
+                OutputAssets::empty(),
+                OutputAssets::empty(),
+                AvailabilityInfo::root(),
             )
-            .all_assets())
+            .await?;
+
+        Ok(Vc::cell(vec![entry_chunk.asset]))
     }
 }

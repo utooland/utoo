@@ -1217,6 +1217,7 @@ impl Project {
             nested_async_chunking: config.nested_async_chunking(mode),
             debug_ids: Vc::cell(false),
             filename: None,
+            chunk_filename: None,
         }))
     }
 
@@ -1234,12 +1235,18 @@ impl Project {
             SourceMapsType::None
         };
         let server_root = self.server_dist_root().owned().await?;
-        let server_filename = config
-            .server()
-            .await?
-            .output
-            .as_ref()
-            .and_then(|o| o.filename.clone());
+        let server_config = config.server().await?;
+        // Only apply custom filename templates in production builds.
+        // Dev mode files change constantly, so custom naming adds no value.
+        let (filename, chunk_filename) = if mode.await?.is_production() {
+            let output = server_config.output.as_ref();
+            (
+                output.and_then(|o| o.filename.clone()),
+                output.and_then(|o| o.chunk_filename.clone()),
+            )
+        } else {
+            (None, None)
+        };
         Ok(get_server_chunking_context(ServerChunkingContextOptions {
             mode,
             config,
@@ -1263,7 +1270,8 @@ impl Project {
             scope_hoisting: config.concatenate_modules(mode),
             nested_async_chunking: config.nested_async_chunking(mode),
             debug_ids: Vc::cell(false),
-            filename: server_filename,
+            filename,
+            chunk_filename,
         }))
     }
 

@@ -22,7 +22,8 @@
   "server": {
     "output": {
       "path": "dist/server",
-      "filename": "main.[contenthash:8].js"
+      "filename": "[name].[contenthash:8].js",
+      "chunkFilename": "[name].[contenthash:8].js"
     },
     "functions": {
       "callServerModule": "./transport"
