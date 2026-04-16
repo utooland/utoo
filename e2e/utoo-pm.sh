@@ -182,6 +182,49 @@ done
 echo -e "${GREEN}PASS: HTTP tarball warm install successful${NC}"
 cd ../../..
 
+# Case 8.4: stale lockfile is detected and regenerated on `ut install`
+#
+# package.json declares two deps; we seed an empty lockfile. A correct
+# `ut install` must notice the mismatch, re-resolve, and install both.
+# Regression guard for #2576.
+echo -e "${YELLOW}Case 8.4: stale lockfile detection${NC}"
+cd e2e/pm/stale-lockfile
+rm -rf node_modules
+cat > package-lock.json <<'JSON'
+{
+  "name": "e2e-stale-lockfile",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "e2e-stale-lockfile",
+      "version": "1.0.0",
+      "dependencies": {}
+    }
+  }
+}
+JSON
+utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed on stale lockfile fixture${NC}"; exit 1; }
+for pkg in abbrev ini; do
+    if [ ! -f "node_modules/$pkg/package.json" ]; then
+        echo -e "${RED}FAIL: $pkg not installed (stale lockfile not regenerated)${NC}"; exit 1
+    fi
+done
+# Assert the ROOT entry's dependencies got rewritten — grep would match
+# transitive node_modules/... entries even if the regen failed.
+node -e '
+const lock = require("./package-lock.json");
+const root = (lock.packages || {})[""] || {};
+const deps = root.dependencies || {};
+if (!deps.abbrev || !deps.ini) {
+    console.error("root deps after install:", deps);
+    process.exit(1);
+}
+' || { echo -e "${RED}FAIL: package-lock.json root deps not regenerated${NC}"; exit 1; }
+echo -e "${GREEN}PASS: stale lockfile detected + regenerated${NC}"
+cd ../../..
+
 # Case 9: reinstall ant-design by npmjs.org
 echo -e "${YELLOW}Case 9: reinstall ant-design${NC} by npmjs.org"
 cd e2e/pm/ant-design/ant-design

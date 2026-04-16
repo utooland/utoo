@@ -8,7 +8,7 @@ use crate::cmd::deps::build_deps;
 use crate::fs;
 use crate::helper::global_bin::get_global_bin_dir;
 use crate::helper::lock::{
-    Package, UpdatePackageJsonOptions, extract_package_name, group_by_depth,
+    Package, UpdatePackageJsonOptions, extract_package_name, group_by_depth, is_pkg_lock_outdated,
     prepare_global_package_json, update_package_json,
 };
 use crate::helper::workspace::init_project_root;
@@ -224,14 +224,16 @@ impl InstallService {
         omit: &HashSet<OmitType>,
     ) -> Result<()> {
         let lock_path = root_path.join("package-lock.json");
+        // Treat a failing freshness check as stale: regenerate rather than
+        // install from a lockfile we couldn't validate. `is_pkg_lock_outdated`
+        // itself emits a `tracing::warn` with the specific mismatch reason.
+        let use_fresh_lock = fs::try_exists(&lock_path).await.unwrap_or(false)
+            && !is_pkg_lock_outdated(root_path).await.unwrap_or(true);
 
-        let (package_lock, pipeline_handles) = if fs::try_exists(&lock_path).await.unwrap_or(false)
-        {
-            // Lock exists: install directly, skip manifest resolution
+        let (package_lock, pipeline_handles) = if use_fresh_lock {
             let lock = load_package_lock_json_from_path(root_path).await?;
             (lock, None)
         } else {
-            // No lock: full pipeline flow (resolve + concurrent download/clone)
             start_progress_bar();
             let result = super::pipeline::resolve_with_pipeline(root_path).await?;
             finish_progress_bar("package-lock.json resolved");
