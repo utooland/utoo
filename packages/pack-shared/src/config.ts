@@ -68,7 +68,7 @@ export type TurbopackModuleType =
   | "bytes";
 
 export type TurbopackRuleConfigItem = {
-  loaders: TurbopackLoaderItem[];
+  loaders?: TurbopackLoaderItem[];
   as?: string;
   /**
    * Controls the configured module type for matching resources.
