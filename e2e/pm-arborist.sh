@@ -66,6 +66,9 @@ SKIP_FILE_PROTOCOL=(
   testing-asymmetrical-bin-no-lock testing-asymmetrical-bin-with-lock
   workspaces-with-files-spec workspace4
   audit-mkdirp
+  # yarn-stuff also has https://…/.tgz remote (now supported), but the
+  # file:abbrev-1.1.1.tgz and file:./abbrev-link-target entries still block.
+  yarn-stuff
 )
 
 # [SKIP:optional-transitive] optional dep subtree with missing transitive deps should be skipped
@@ -101,11 +104,9 @@ SKIP_DEP_CYCLE=(
 
 # [SKIP:misc] various fixture-specific issues
 # workspaces-conflicting-dev-deps: ajv@5.11.2 was unpublished from registry
-# yarn-stuff: has "remote": "https://...tgz" dep spec (URL-as-version)
 # ancient-lockfile-invalid: depends on @isaacs/this-does-not-exist-at-all
 SKIP_MISC=(
   workspaces-conflicting-dev-deps
-  yarn-stuff
   ancient-lockfile-invalid
 )
 

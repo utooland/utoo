@@ -8,6 +8,7 @@ use once_cell::sync::Lazy;
 use reqwest::{Client, StatusCode};
 use tokio::sync::Semaphore;
 use tokio_retry::RetryIf;
+use utoo_ruborist::http::http_cache_slot;
 use utoo_ruborist::spec::Protocol;
 
 use super::cache::get_cache_dir;
@@ -66,16 +67,43 @@ pub async fn git_cache_lookup(name: &str, version: &str, tarball_url: &str) -> O
     None
 }
 
+/// Look up the cache path for an HTTP(S) tarball dep.
+///
+/// ruborist's BFS extracts these to `<cache_dir>/<name>/_http_<url_hash>/`
+/// during resolution; we key on the same slot here. Returns `None` if the
+/// slot is absent or incomplete, letting the caller fall through to the
+/// registry download path (which expects `<name>/<version>/`).
+pub async fn http_tarball_cache_lookup(name: &str, tarball_url: &str) -> Option<PathBuf> {
+    let cache_path = get_cache_dir()
+        .join(name)
+        .join(http_cache_slot(tarball_url));
+    if crate::fs::try_exists(&cache_path.join("_resolved"))
+        .await
+        .unwrap_or(false)
+    {
+        tracing::debug!("HTTP tarball cache hit: {} ({})", name, tarball_url);
+        Some(cache_path)
+    } else {
+        None
+    }
+}
+
 /// Resolve the local cache path for a package, downloading if necessary.
 ///
-/// Routes git URLs to [`git_cache_lookup`] and registry tarballs to
-/// [`download_to_cache`].
+/// Routing order:
+/// 1. Git URLs → [`git_cache_lookup`] (cache keyed on commit sha)
+/// 2. Non-git URLs: try [`http_tarball_cache_lookup`] (keyed on URL hash);
+///    if present, the tarball was pre-extracted by BFS.
+/// 3. Fall through to [`download_to_cache`] for registry tarball URLs
+///    (keyed on `<name>/<version>`).
 pub async fn resolve_cache_path(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
     if is_git_url(tarball_url) {
-        git_cache_lookup(name, version, tarball_url).await
-    } else {
-        download_to_cache(name, version, tarball_url).await
+        return git_cache_lookup(name, version, tarball_url).await;
     }
+    if let Some(p) = http_tarball_cache_lookup(name, tarball_url).await {
+        return Some(p);
+    }
+    download_to_cache(name, version, tarball_url).await
 }
 
 /// Download a registry tarball to the global cache directory, returning the cache path.

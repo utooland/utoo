@@ -8,6 +8,7 @@ license     = "MIT"
 # tombi: format.rules.table-keys-order.disabled = true
 [dependencies]
 anyhow       = { workspace = true }
+bytes        = "1"
 deno_semver  = "0.7"
 dirs         = { workspace = true }
 futures      = "0.3"
@@ -28,12 +29,19 @@ reqwest      = { version = "0.12", default-features = false, features = [
   "rustls-tls-native-roots",
   "socks"
 ] }
-# Git clone (optional, native-only)
+# Shared URL-hash + staging helpers for native-only resolvers (git / http)
+sha2         = { workspace = true, optional = true }
+tempfile     = { workspace = true, optional = true }
+# Git clone (gated on `native-git`)
 gix          = { workspace = true, features = [
   "blocking-http-transport-reqwest-rust-tls",
   "blocking-network-client",
 ], optional = true }
-tempfile     = { workspace = true, optional = true }
+# HTTP tarball extraction (gated on `http-tarball`)
+# Uses libdeflater to match pm's extractor and avoid pulling a second gzip
+# implementation (flate2) into the workspace.
+libdeflater  = { version = "1.25", optional = true }
+tar          = { version = "0.4", optional = true }
 
 # Async runtime (works on both native and WASM with forked tokio)
 [dependencies.tokio]
@@ -51,5 +59,10 @@ libc = "0.2"
 js-sys = "0.3"  # For time in WASM
 
 [features]
-default    = []
-native-git = ["gix", "tempfile"]
+default      = []
+# HTTP tarball resolver pre-extracts to <cache>/<name>/_http_<url_sha256>/
+# during BFS, so install-phase hits a cache and never re-downloads. The
+# URL-hash disambiguator also keeps HTTP tarball slots from colliding with
+# registry tarball slots (<name>/<version>/).
+http-tarball = ["libdeflater", "sha2", "tar", "tempfile"]
+native-git   = ["gix", "tempfile"]
