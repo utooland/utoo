@@ -59,8 +59,8 @@ js-sys = "0.3"  # For time in WASM
 
 [features]
 default      = []
-native-git   = ["gix", "tempfile"]
 # HTTP tarball parsing does not extract to disk — install-phase handles that
 # via pm's existing `download_to_cache`. So we only need gzip + tar for
 # reading package.json out of the archive.
 http-tarball = ["libdeflater", "tar"]
+native-git   = ["gix", "tempfile"]

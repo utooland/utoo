@@ -61,7 +61,7 @@ toml               = { workspace = true }
 tracing            = { workspace = true }
 tracing-appender   = "0.2"
 tracing-subscriber = { workspace = true }
-utoo-ruborist      = { path = "../ruborist", features = ["native-git", "http-tarball"] }
+utoo-ruborist      = { path = "../ruborist", features = ["http-tarball", "native-git"] }
 
 [dev-dependencies]
 mockito = "1.7.0"
