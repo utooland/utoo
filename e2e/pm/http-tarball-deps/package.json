@@ -1,0 +1,11 @@
+{
+  "name": "e2e-http-tarball-deps",
+  "version": "1.0.0",
+  "private": true,
+  "description": "e2e test for HTTP(S) tarball dependency resolution",
+  "dependencies": {
+    "abbrev": "https://registry.npmjs.org/abbrev/-/abbrev-2.0.0.tgz",
+    "ini": "https://registry.npmjs.org/ini/-/ini-5.0.0.tgz",
+    "isexe": "https://registry.npmjs.org/isexe/-/isexe-3.1.1.tgz"
+  }
+}

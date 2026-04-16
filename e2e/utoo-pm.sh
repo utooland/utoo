@@ -147,6 +147,41 @@ fi
 echo -e "${GREEN}PASS: git dependency warm install successful${NC}"
 cd ../../..
 
+# Case 8.2: HTTP(S) tarball dependency install
+echo -e "${YELLOW}Case 8.2: HTTP tarball dependency install${NC}"
+cd e2e/pm/http-tarball-deps
+rm -rf node_modules package-lock.json
+utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for http-tarball-deps${NC}"; exit 1; }
+if [ ! -d "node_modules" ]; then
+    echo -e "${RED}FAIL: node_modules directory not created${NC}"
+    exit 1
+fi
+for pkg in abbrev ini isexe; do
+    if [ ! -f "node_modules/$pkg/package.json" ]; then
+        echo -e "${RED}FAIL: $pkg (http tarball) not installed${NC}"
+        exit 1
+    fi
+done
+# Lockfile records the URL — not a registry version range — as resolved source
+if ! grep -q '"https://registry.npmjs.org/abbrev/-/abbrev-2.0.0.tgz"' package-lock.json; then
+    echo -e "${RED}FAIL: tarball URL missing from package-lock.json resolved field${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: HTTP tarball dependency install successful${NC}"
+
+# Case 8.3: HTTP tarball warm install (cache hit, no re-download)
+echo -e "${YELLOW}Case 8.3: HTTP tarball warm install${NC}"
+rm -rf node_modules package-lock.json
+utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo warm install failed for http-tarball-deps${NC}"; exit 1; }
+for pkg in abbrev ini isexe; do
+    if [ ! -d "node_modules/$pkg" ]; then
+        echo -e "${RED}FAIL: $pkg missing after warm install${NC}"
+        exit 1
+    fi
+done
+echo -e "${GREEN}PASS: HTTP tarball warm install successful${NC}"
+cd ../../..
+
 # Case 9: reinstall ant-design by npmjs.org
 echo -e "${YELLOW}Case 9: reinstall ant-design${NC} by npmjs.org"
 cd e2e/pm/ant-design/ant-design
