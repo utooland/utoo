@@ -21,17 +21,20 @@ jobs:
       image: ubuntu:20.04
     steps:
       - name: Install dependencies
+        timeout-minutes: 6
         env:
           DEBIAN_FRONTEND: noninteractive
+        # Short per-apt timeouts: on GHA runners that can't route to
+        # archive/security.ubuntu.com, apt otherwise sits in 90s × 8-IP SYN
+        # timeouts. Bail after 60s on the default mirror, swap to the
+        # Fastly-backed kernel.org mirror, and retry once.
         run: |
           install_pkgs() {
-            apt-get update && apt-get install -y build-essential curl pkg-config git
+            timeout 60 apt-get update \
+              && timeout 60 apt-get install -y build-essential curl pkg-config git
           }
-          # Default Ubuntu mirrors (archive/security.ubuntu.com) sometimes drop
-          # connections from GHA Azure runners. One attempt, then fall back to
-          # the Fastly-backed kernel.org mirror so total step time stays low.
           install_pkgs && exit 0
-          echo "apt default mirror failed, falling back to mirrors.edge.kernel.org"
+          echo "apt default mirror failed/timed out, falling back to mirrors.edge.kernel.org"
           sed -i 's|http://archive\.ubuntu\.com|http://mirrors.edge.kernel.org|g; s|http://security\.ubuntu\.com|http://mirrors.edge.kernel.org|g' /etc/apt/sources.list
           install_pkgs
 
