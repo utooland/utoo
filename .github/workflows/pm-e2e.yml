@@ -27,15 +27,11 @@ jobs:
           install_pkgs() {
             apt-get update && apt-get install -y build-essential curl pkg-config git
           }
-          # Default Ubuntu mirrors (archive/security.ubuntu.com) occasionally
-          # drop connections from GHA Azure runners. Try default + retries
-          # first, fall back to a CDN-backed mirror only if all fail.
-          for i in 1 2 3; do
-            install_pkgs && exit 0
-            echo "apt attempt $i failed; sleeping $((i*5))s"
-            sleep $((i*5))
-          done
-          echo "Falling back to mirrors.edge.kernel.org"
+          # Default Ubuntu mirrors (archive/security.ubuntu.com) sometimes drop
+          # connections from GHA Azure runners. One attempt, then fall back to
+          # the Fastly-backed kernel.org mirror so total step time stays low.
+          install_pkgs && exit 0
+          echo "apt default mirror failed, falling back to mirrors.edge.kernel.org"
           sed -i 's|http://archive\.ubuntu\.com|http://mirrors.edge.kernel.org|g; s|http://security\.ubuntu\.com|http://mirrors.edge.kernel.org|g' /etc/apt/sources.list
           install_pkgs
 
