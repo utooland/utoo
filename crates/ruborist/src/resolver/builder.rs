@@ -33,12 +33,9 @@ use crate::spec::{Catalogs, PackageSpec, Protocol};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
 use crate::traits::registry::{RegistryClient, ResolvedPackage};
 
-/// Resolve a non-registry dependency spec (git/github).
-///
-/// Dispatches to the real `gix`-backed implementation when the `native-git`
-/// feature is enabled; otherwise returns an error telling the caller to enable
-/// the feature.
-async fn resolve_non_registry_dep(
+/// Dispatch a git/github spec to the real `gix`-backed resolver when the
+/// `native-git` feature is enabled, otherwise error with a hint.
+async fn resolve_git_dep(
     cache_dir: Option<&std::path::Path>,
     spec: &PackageSpec,
     name: &str,
@@ -46,7 +43,7 @@ async fn resolve_non_registry_dep(
 ) -> anyhow::Result<ResolvedPackage> {
     #[cfg(feature = "native-git")]
     {
-        crate::resolver::git::resolve_non_registry_dep(cache_dir, spec, name, clone_cache).await
+        crate::resolver::git::resolve_git_dep(cache_dir, spec, name, clone_cache).await
     }
     #[cfg(not(feature = "native-git"))]
     {
@@ -59,38 +56,40 @@ async fn resolve_non_registry_dep(
 
 /// Resolve an HTTP(S) tarball dependency spec.
 ///
-/// Dispatches to the real implementation when the `native-git` feature is
-/// enabled (which also gates the tar + flate2 deps); otherwise returns an
-/// error telling the caller to enable the feature.
+/// Dispatches to the real implementation when the `http-tarball` feature is
+/// enabled; otherwise returns an error telling the caller to enable it.
+/// No `cache_dir` is needed because BFS only parses the manifest — the
+/// actual download + extraction happens later in pm's install phase via
+/// `download_to_cache`, which handles any tarball URL.
 async fn resolve_http_dep(
-    cache_dir: Option<&std::path::Path>,
     url: &str,
     fetch_cache: &HttpFetchCache,
 ) -> anyhow::Result<ResolvedPackage> {
-    #[cfg(feature = "native-git")]
+    #[cfg(feature = "http-tarball")]
     {
-        crate::resolver::http::resolve_http_dep(cache_dir, url, fetch_cache).await
+        crate::resolver::http::resolve_http_dep(url, fetch_cache).await
     }
-    #[cfg(not(feature = "native-git"))]
+    #[cfg(not(feature = "http-tarball"))]
     {
-        let _ = (cache_dir, fetch_cache);
+        let _ = fetch_cache;
         anyhow::bail!(
-            "HTTP tarball resolution not available for '{url}' (enable the 'native-git' feature)"
+            "HTTP tarball resolution not available for '{url}' (enable the 'http-tarball' feature)"
         )
     }
 }
 
-// Re-export the git clone cache type so callers can construct a `BuildDepsConfig`
-// without depending on the `native-git` feature directly.
+// Callers construct a `BuildDepsConfig` without touching feature flags — when
+// a resolver is disabled the cache alias falls back to `DedupCache<()>`, which
+// has the same shape so the struct literal still compiles.
 #[cfg(feature = "native-git")]
 use crate::resolver::git::GitCloneCache;
-#[cfg(feature = "native-git")]
+#[cfg(feature = "http-tarball")]
 use crate::resolver::http::HttpFetchCache;
 
 #[cfg(not(feature = "native-git"))]
-type GitCloneCache = tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::OnceCell<Arc<()>>>>>;
-#[cfg(not(feature = "native-git"))]
-type HttpFetchCache = tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::OnceCell<Arc<()>>>>>;
+type GitCloneCache = crate::resolver::common::DedupCache<()>;
+#[cfg(not(feature = "http-tarball"))]
+type HttpFetchCache = crate::resolver::common::DedupCache<()>;
 
 // Re-export edge types
 pub use super::edges::{
@@ -350,8 +349,8 @@ pub enum ProcessResult {
 /// 2. If not, resolve from registry (or git) and create a new node
 /// 3. Handle conflicts by installing nested
 ///
-/// Non-registry specs (git, github, etc.) are routed through
-/// [`resolve_non_registry_dep`] instead of the registry.
+/// Non-registry specs (git/github, http tarball) are routed through
+/// [`resolve_git_dep`] / [`resolve_http_dep`] instead of the registry.
 ///
 /// # Arguments
 /// * `graph` - The dependency graph
@@ -414,7 +413,7 @@ pub async fn process_dependency<R: RegistryClient>(
                 PackageSpec::Git { .. } | PackageSpec::GitHub { .. } => {
                     // TODO: add spec => version expiry check so stale git caches
                     // are invalidated (e.g. branch refs that have moved forward).
-                    match resolve_non_registry_dep(
+                    match resolve_git_dep(
                         config.cache_dir.as_deref(),
                         &parsed_spec,
                         &edge_info.name,
@@ -460,13 +459,7 @@ pub async fn process_dependency<R: RegistryClient>(
                     });
                 }
                 PackageSpec::Http { url } => {
-                    match resolve_http_dep(
-                        config.cache_dir.as_deref(),
-                        url,
-                        &config.http_fetch_cache,
-                    )
-                    .await
-                    {
+                    match resolve_http_dep(url, &config.http_fetch_cache).await {
                         Ok(r) => r,
                         Err(_) if edge_info.edge_type == EdgeType::Optional => {
                             tracing::debug!(

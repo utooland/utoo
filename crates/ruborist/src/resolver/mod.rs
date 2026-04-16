@@ -1,10 +1,11 @@
 //! Version resolution algorithms.
 
 pub mod builder;
+pub mod common;
 pub mod edges;
 #[cfg(feature = "native-git")]
 pub mod git;
-#[cfg(feature = "native-git")]
+#[cfg(feature = "http-tarball")]
 pub mod http;
 pub mod preload;
 pub mod registry;

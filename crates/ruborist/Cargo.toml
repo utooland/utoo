@@ -29,15 +29,17 @@ reqwest      = { version = "0.12", default-features = false, features = [
   "rustls-tls-native-roots",
   "socks"
 ] }
-# Git clone (optional, native-only)
+# Shared by native-only resolvers (git / http tarball)
+tempfile     = { workspace = true, optional = true }
+# Git clone (gated on `native-git`)
 gix          = { workspace = true, features = [
   "blocking-http-transport-reqwest-rust-tls",
   "blocking-network-client",
 ], optional = true }
-tempfile     = { workspace = true, optional = true }
-# HTTP tarball extraction (optional, native-only — gated on `native-git` feature
-# alongside git resolution since both share tempfile + blocking threadpool).
-flate2       = { version = "1.0", optional = true }
+# HTTP tarball extraction (gated on `http-tarball`)
+# Uses libdeflater to match pm's extractor and avoid pulling a second gzip
+# implementation (flate2) into the workspace.
+libdeflater  = { version = "1.25", optional = true }
 tar          = { version = "0.4", optional = true }
 
 # Async runtime (works on both native and WASM with forked tokio)
@@ -56,5 +58,9 @@ libc = "0.2"
 js-sys = "0.3"  # For time in WASM
 
 [features]
-default    = []
-native-git = ["flate2", "gix", "tar", "tempfile"]
+default      = []
+native-git   = ["gix", "tempfile"]
+# HTTP tarball parsing does not extract to disk — install-phase handles that
+# via pm's existing `download_to_cache`. So we only need gzip + tar for
+# reading package.json out of the archive.
+http-tarball = ["libdeflater", "tar"]
