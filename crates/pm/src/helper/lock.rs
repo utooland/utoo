@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, anyhow};
 use serde_json::Value;
 use utoo_ruborist::lock::{LockPackage, PackageLock};
-use utoo_ruborist::manifest::{DepsView, EnginesView, PackageJson};
+use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::registry::resolve_package;
 use utoo_ruborist::spec::{PackageSpec, Protocol, resolve_catalog_spec};
 use utoo_ruborist::util::PackageNameStr;
@@ -17,12 +17,14 @@ use crate::util::cli_enum::{PackageAction, SaveType};
 use crate::util::cloner::clone_package;
 use crate::util::downloader::{is_git_url, resolve_cache_path};
 use crate::util::git_resolver::{resolve_git_spec, resolve_github_spec};
-use crate::util::json::{load_package_json, load_package_lock_json_from_path, read_json_file};
+use crate::util::json::{load_package_lock_json_from_path, read_json_file};
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
 use utoo_ruborist::builder::PeerDeps;
 
 use crate::util::platform_const::GLOBAL_NODE_MODULES;
-use crate::util::user_config::{get_catalogs, get_peer_deps, set_package_json};
+use crate::util::user_config::{
+    get_catalogs, get_or_load_package_json, get_peer_deps, set_package_json,
+};
 
 // Platform-specific line endings
 #[cfg(target_os = "windows")]
@@ -349,16 +351,22 @@ pub fn path_to_pkg_name(path_str: &str) -> Option<&str> {
 }
 
 pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
-    // Always read from disk — this function checks whether the on-disk
-    // package.json has diverged from the lock file, so it must not use the
-    // in-process cache.
-    let pkg: DepsView = load_package_json(root_path).await?;
+    // Root package.json is served from the in-process cache. The cache
+    // stays consistent with disk across the full `ut install` lifetime
+    // because `update_package_json` calls `set_package_json` write-through
+    // after every edit, and a fresh `ut install` process starts with a
+    // cold cache (so external edits / git checkout always see a re-read).
+    // The lockfile itself is still read from disk each time — it's the
+    // thing whose freshness we're checking.
+    let root_pkg = get_or_load_package_json(root_path).await?;
     let lock_file: PackageLock = read_json_file(&root_path.join("package-lock.json")).await?;
 
     let catalogs = get_catalogs().await;
-    let deps_match = |pkg_deps: &HashMap<String, String>,
+    let deps_match = |pkg_deps: Option<&HashMap<String, String>>,
                       lock_deps: Option<&HashMap<String, String>>|
      -> bool {
+        let empty = HashMap::new();
+        let pkg_deps = pkg_deps.unwrap_or(&empty);
         match lock_deps {
             None => pkg_deps.is_empty(),
             Some(ld) => {
@@ -372,23 +380,19 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
     };
 
     let packages = &lock_file.packages;
+    let peer_deps = get_peer_deps().await;
 
-    // prepare packages to check: (relative_path, deps)
-    let mut pkgs_to_check: Vec<(String, DepsView)> = vec![("".to_string(), pkg)];
-
-    // populate all workspaces (load only the deps view for each)
     let workspaces = find_workspaces(root_path).await?;
-    for (_, path, _) in workspaces {
+    let mut pkgs_to_check: Vec<(String, &PackageJson)> = Vec::with_capacity(1 + workspaces.len());
+    pkgs_to_check.push((String::new(), &root_pkg));
+    for (_, path, pkg) in &workspaces {
         let target_path = path
             .strip_prefix(root_path)
-            .unwrap_or(&path)
+            .unwrap_or(path)
             .to_string_lossy()
             .to_string();
-        let ws_deps: DepsView = load_package_json(&path).await?;
-        pkgs_to_check.push((target_path, ws_deps));
+        pkgs_to_check.push((target_path, pkg));
     }
-
-    let peer_deps = get_peer_deps().await;
 
     for (path, pkg) in &pkgs_to_check {
         let lock = match packages.get(path.as_str()) {
@@ -402,40 +406,43 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
 
         let name = if path.is_empty() { "root" } else { path };
 
-        // check dependencies whether changed
-        if !deps_match(&pkg.dependencies, lock.dependencies.as_ref()) {
+        if !deps_match(pkg.dependencies.as_ref(), lock.dependencies.as_ref()) {
             tracing::warn!("package-lock.json is outdated, {name} dependencies changed");
             return Ok(true);
         }
 
         if !deps_match(
-            &pkg.optional_dependencies,
+            pkg.optional_dependencies.as_ref(),
             lock.optional_dependencies.as_ref(),
         ) {
             tracing::warn!("package-lock.json is outdated, {name} optionalDependencies changed");
             return Ok(true);
         }
 
-        if !deps_match(&pkg.dev_dependencies, lock.dev_dependencies.as_ref()) {
+        if !deps_match(
+            pkg.dev_dependencies.as_ref(),
+            lock.dev_dependencies.as_ref(),
+        ) {
             tracing::warn!("package-lock.json is outdated, {name} devDependencies changed");
             return Ok(true);
         }
 
         if peer_deps == PeerDeps::Include
-            && !deps_match(&pkg.peer_dependencies, lock.peer_dependencies.as_ref())
+            && !deps_match(
+                pkg.peer_dependencies.as_ref(),
+                lock.peer_dependencies.as_ref(),
+            )
         {
             tracing::warn!("package-lock.json is outdated, {name} peerDependencies changed");
             return Ok(true);
         }
     }
 
-    // engines: root package only
-    let root_engines: EnginesView = load_package_json(root_path).await?;
+    // engines: root only — derived from the same loaded `root_pkg`
     let root_lock = packages
         .get("")
         .ok_or_else(|| anyhow!("Missing root in package-lock.json"))?;
-
-    let pkg_engines = root_engines.engines.as_ref().filter(|m| !m.is_empty());
+    let pkg_engines = root_pkg.engines.as_ref().filter(|m| !m.is_empty());
     let lock_engines = root_lock.engines.as_ref().filter(|m| !m.is_empty());
 
     let engines_match = match (pkg_engines, lock_engines) {
@@ -560,25 +567,13 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_is_pkg_lock_outdated() {
-        // Create a temporary directory
-        let temp_dir = TempDir::new().unwrap();
-        let temp_path = temp_dir.path();
-
-        // Test case 1: package.json and package-lock.json are in sync
-        let pkg_json = json!({
-            "name": "test-package",
-            "version": "1.0.0",
-            "dependencies": {
-                "lodash": "^4.17.20"
-            },
-            "devDependencies": {
-                "typescript": "^4.9.0"
-            }
-        });
-
-        let pkg_lock = json!({
+    /// Baseline lockfile for the outdated-check scenarios.
+    ///
+    /// Each scenario uses a fresh `TempDir` (unique path) so the in-process
+    /// package.json cache never serves a stale entry — which mirrors real
+    /// `ut install` where every invocation starts with a cold cache.
+    fn baseline_pkg_lock() -> Value {
+        json!({
             "name": "test-package",
             "version": "1.0.0",
             "lockfileVersion": 3,
@@ -587,94 +582,100 @@ mod tests {
                 "": {
                     "name": "test-package",
                     "version": "1.0.0",
-                    "dependencies": {
-                        "lodash": "^4.17.20"
-                    },
-                    "devDependencies": {
-                        "typescript": "^4.9.0"
-                    }
+                    "dependencies": { "lodash": "^4.17.20" },
+                    "devDependencies": { "typescript": "^4.9.0" }
                 }
             }
-        });
+        })
+    }
 
-        // Write test files to temporary directory
+    async fn assert_outdated(pkg_json: Value, expected: bool) {
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path();
         fs::write(temp_path.join("package.json"), pkg_json.to_string()).unwrap();
-        fs::write(temp_path.join("package-lock.json"), pkg_lock.to_string()).unwrap();
-
-        // Test that files are in sync
-        assert!(!is_pkg_lock_outdated(temp_path).await.unwrap());
-
-        // Test case 2: package.json has new dependency
-        let pkg_json_updated = json!({
-            "name": "test-package",
-            "version": "1.0.0",
-            "dependencies": {
-                "lodash": "^4.17.20",
-                "react": "^18.0.0"  // New dependency
-            },
-            "devDependencies": {
-                "typescript": "^4.9.0"
-            }
-        });
-
-        fs::write(temp_path.join("package.json"), pkg_json_updated.to_string()).unwrap();
-        let outdated = is_pkg_lock_outdated(temp_path).await.unwrap();
-        assert!(outdated);
-
-        // Test case 3: package.json has updated version
-        let pkg_json_version_updated = json!({
-            "name": "test-package",
-            "version": "1.0.0",
-            "dependencies": {
-                "lodash": "^4.17.21"  // Updated version
-            },
-            "devDependencies": {
-                "typescript": "^4.9.0"
-            }
-        });
-
         fs::write(
-            temp_path.join("package.json"),
-            pkg_json_version_updated.to_string(),
+            temp_path.join("package-lock.json"),
+            baseline_pkg_lock().to_string(),
         )
         .unwrap();
-        assert!(is_pkg_lock_outdated(temp_path).await.unwrap());
+        assert_eq!(
+            is_pkg_lock_outdated(temp_path).await.unwrap(),
+            expected,
+            "package.json:\n{pkg_json}"
+        );
+    }
 
-        // Test case 4: package.json has removed dependency
-        let pkg_json_removed = json!({
-            "name": "test-package",
-            "version": "1.0.0",
-            "dependencies": {
-                "lodash": "^4.17.20"
-            }
-            // Removed devDependencies
-        });
-
-        fs::write(temp_path.join("package.json"), pkg_json_removed.to_string()).unwrap();
-        assert!(is_pkg_lock_outdated(temp_path).await.unwrap());
-
-        // Test case 4: package.json has removed dependency
-        let pkg_json_engines_changed = json!({
-            "name": "test-package",
-            "version": "1.0.0",
-            "dependencies": {
-                "lodash": "^4.17.20"
-            },
-            "devDependencies": {
-                "typescript": "^4.9.0"
-            },
-            "engines": {
-                "install-node": "16"
-            }
-            // Removed devDependencies
-        });
-
-        fs::write(
-            temp_path.join("package.json"),
-            pkg_json_engines_changed.to_string(),
+    #[tokio::test]
+    async fn test_is_pkg_lock_outdated_in_sync() {
+        assert_outdated(
+            json!({
+                "name": "test-package",
+                "version": "1.0.0",
+                "dependencies": { "lodash": "^4.17.20" },
+                "devDependencies": { "typescript": "^4.9.0" }
+            }),
+            false,
         )
-        .unwrap();
-        assert!(is_pkg_lock_outdated(temp_path).await.unwrap());
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_is_pkg_lock_outdated_new_dep_added() {
+        assert_outdated(
+            json!({
+                "name": "test-package",
+                "version": "1.0.0",
+                "dependencies": {
+                    "lodash": "^4.17.20",
+                    "react": "^18.0.0"
+                },
+                "devDependencies": { "typescript": "^4.9.0" }
+            }),
+            true,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_is_pkg_lock_outdated_version_bumped() {
+        assert_outdated(
+            json!({
+                "name": "test-package",
+                "version": "1.0.0",
+                "dependencies": { "lodash": "^4.17.21" },
+                "devDependencies": { "typescript": "^4.9.0" }
+            }),
+            true,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_is_pkg_lock_outdated_dev_deps_removed() {
+        assert_outdated(
+            json!({
+                "name": "test-package",
+                "version": "1.0.0",
+                "dependencies": { "lodash": "^4.17.20" }
+            }),
+            true,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_is_pkg_lock_outdated_engines_added() {
+        assert_outdated(
+            json!({
+                "name": "test-package",
+                "version": "1.0.0",
+                "dependencies": { "lodash": "^4.17.20" },
+                "devDependencies": { "typescript": "^4.9.0" },
+                "engines": { "install-node": "16" }
+            }),
+            true,
+        )
+        .await;
     }
 
     #[test]
