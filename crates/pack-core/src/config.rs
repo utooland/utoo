@@ -575,13 +575,49 @@ impl TryFrom<ConfigConditionItem> for ConditionItem {
     }
 }
 
+#[turbo_tasks::value(operation)]
+#[derive(Copy, Clone, Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TurbopackModuleType {
+    Asset,
+    Ecmascript,
+    Typescript,
+    Css,
+    CssModule,
+    Json,
+    Wasm,
+    Raw,
+    Node,
+    Bytes,
+}
+
+impl From<&TurbopackModuleType> for RcStr {
+    fn from(value: &TurbopackModuleType) -> Self {
+        match value {
+            TurbopackModuleType::Asset => rcstr!("asset"),
+            TurbopackModuleType::Ecmascript => rcstr!("ecmascript"),
+            TurbopackModuleType::Typescript => rcstr!("typescript"),
+            TurbopackModuleType::Css => rcstr!("css"),
+            TurbopackModuleType::CssModule => rcstr!("css-module"),
+            TurbopackModuleType::Json => rcstr!("json"),
+            TurbopackModuleType::Wasm => rcstr!("wasm"),
+            TurbopackModuleType::Raw => rcstr!("raw"),
+            TurbopackModuleType::Node => rcstr!("node"),
+            TurbopackModuleType::Bytes => rcstr!("bytes"),
+        }
+    }
+}
+
 #[turbo_tasks::value]
 #[derive(Clone, Debug, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
 pub struct RuleConfigItem {
+    #[serde(default)]
     pub loaders: Vec<LoaderItem>,
     #[serde(default, alias = "as")]
     pub rename_as: Option<RcStr>,
+    #[serde(default, alias = "type")]
+    pub module_type: Option<TurbopackModuleType>,
     #[serde(default)]
     pub condition: Option<ConfigConditionItem>,
 }
@@ -1229,6 +1265,7 @@ impl Config {
                     RuleConfigCollectionItem::Full(RuleConfigItem {
                         loaders,
                         rename_as,
+                        module_type,
                         condition,
                     }) => {
                         // If the extension contains a wildcard, and the rename_as does not,
@@ -1270,7 +1307,9 @@ impl Config {
                                 loaders: transform_loaders(&mut loaders.iter()),
                                 rename_as: rename_as.clone(),
                                 condition,
-                                module_type: None,
+                                // `module_type` is optional and is configured in userland as a string.
+                                // Turbopack consumes it as `Option<RcStr>`.
+                                module_type: module_type.as_ref().map(RcStr::from),
                             },
                         ));
                     }

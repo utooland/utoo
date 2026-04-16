@@ -1,0 +1,23 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "./input/index.ts",
+        "name": "index"
+      }
+    ],
+    "module": {
+      "rules": {
+        "*.txt": {
+          "loaders": [
+            "test-file-loader"
+          ],
+          "type": "ecmascript"
+        },
+        "*.svg": {
+          "type": "asset"
+        }
+      }
+    }
+  }
+}

@@ -1412,6 +1412,17 @@
             "string",
             "null"
           ]
+        },
+        "type": {
+          "description": "Optional configured module type (`type` / `moduleType`).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaTurbopackModuleType"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -1505,6 +1516,22 @@
             "minItems": 2
           }
         }
+      ]
+    },
+    "SchemaTurbopackModuleType": {
+      "description": "Module type for a module rule (`type` / `moduleType` field).\n\nValues must match pack-core / Turbopack's `ConfiguredModuleType::parse()`.",
+      "type": "string",
+      "enum": [
+        "asset",
+        "ecmascript",
+        "typescript",
+        "css",
+        "css-module",
+        "json",
+        "wasm",
+        "raw",
+        "node",
+        "bytes"
       ]
     }
   }

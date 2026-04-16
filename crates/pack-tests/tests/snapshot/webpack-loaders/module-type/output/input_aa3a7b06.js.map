@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 3, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/webpack-loaders/module-type/input/data.txt"],"sourcesContent":["module.exports = \"Got a buffer of 23 bytes\""],"names":["module","exports"],"mappings":"AAAAA,OAAOC,OAAO,GAAG"}},
+    {"offset": {"line": 11, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/webpack-loaders/module-type/input/index.ts"],"sourcesContent":["// @ts-ignore\nimport data from \"./data.txt\";\n// @ts-ignore\nimport iconUrl from \"./icon.svg\";\n\nexport default { data, iconUrl };\n"],"names":["data","iconUrl"],"mappings":"AAAA,aAAa;AACb;AACA,aAAa;AACb;;;qCAEe;IAAEA,MAAAA,6JAAI;IAAEC,SAAAA,yJAAO;AAAC"}}]
+}
