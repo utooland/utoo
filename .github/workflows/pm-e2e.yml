@@ -23,7 +23,21 @@ jobs:
       - name: Install dependencies
         env:
           DEBIAN_FRONTEND: noninteractive
-        run: apt-get update && apt-get install -y build-essential curl pkg-config git
+        run: |
+          install_pkgs() {
+            apt-get update && apt-get install -y build-essential curl pkg-config git
+          }
+          # Default Ubuntu mirrors (archive/security.ubuntu.com) occasionally
+          # drop connections from GHA Azure runners. Try default + retries
+          # first, fall back to a CDN-backed mirror only if all fail.
+          for i in 1 2 3; do
+            install_pkgs && exit 0
+            echo "apt attempt $i failed; sleeping $((i*5))s"
+            sleep $((i*5))
+          done
+          echo "Falling back to mirrors.edge.kernel.org"
+          sed -i 's|http://archive\.ubuntu\.com|http://mirrors.edge.kernel.org|g; s|http://security\.ubuntu\.com|http://mirrors.edge.kernel.org|g' /etc/apt/sources.list
+          install_pkgs
 
       - uses: actions/checkout@v4
 
