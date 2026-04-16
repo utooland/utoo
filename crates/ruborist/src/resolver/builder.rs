@@ -54,24 +54,23 @@ async fn resolve_git_dep(
     }
 }
 
-/// Resolve an HTTP(S) tarball dependency spec.
+/// Dispatch an HTTP(S) tarball spec to the real resolver when the
+/// `http-tarball` feature is enabled, otherwise error with a hint.
 ///
-/// Dispatches to the real implementation when the `http-tarball` feature is
-/// enabled; otherwise returns an error telling the caller to enable it.
-/// No `cache_dir` is needed because BFS only parses the manifest — the
-/// actual download + extraction happens later in pm's install phase via
-/// `download_to_cache`, which handles any tarball URL.
+/// BFS extracts to `<cache_dir>/<name>/_http_<url_hash>/` so install-phase
+/// skips re-download; see [`super::http`] module docs.
 async fn resolve_http_dep(
+    cache_dir: Option<&std::path::Path>,
     url: &str,
     fetch_cache: &HttpFetchCache,
 ) -> anyhow::Result<ResolvedPackage> {
     #[cfg(feature = "http-tarball")]
     {
-        crate::resolver::http::resolve_http_dep(url, fetch_cache).await
+        crate::resolver::http::resolve_http_dep(cache_dir, url, fetch_cache).await
     }
     #[cfg(not(feature = "http-tarball"))]
     {
-        let _ = fetch_cache;
+        let _ = (cache_dir, fetch_cache);
         anyhow::bail!(
             "HTTP tarball resolution not available for '{url}' (enable the 'http-tarball' feature)"
         )
@@ -459,7 +458,13 @@ pub async fn process_dependency<R: RegistryClient>(
                     });
                 }
                 PackageSpec::Http { url } => {
-                    match resolve_http_dep(url, &config.http_fetch_cache).await {
+                    match resolve_http_dep(
+                        config.cache_dir.as_deref(),
+                        url,
+                        &config.http_fetch_cache,
+                    )
+                    .await
+                    {
                         Ok(r) => r,
                         Err(_) if edge_info.edge_type == EdgeType::Optional => {
                             tracing::debug!(

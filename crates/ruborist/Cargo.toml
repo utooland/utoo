@@ -29,7 +29,8 @@ reqwest      = { version = "0.12", default-features = false, features = [
   "rustls-tls-native-roots",
   "socks"
 ] }
-# Shared by native-only resolvers (git / http tarball)
+# Shared URL-hash + staging helpers for native-only resolvers (git / http)
+sha2         = { workspace = true, optional = true }
 tempfile     = { workspace = true, optional = true }
 # Git clone (gated on `native-git`)
 gix          = { workspace = true, features = [
@@ -59,8 +60,9 @@ js-sys = "0.3"  # For time in WASM
 
 [features]
 default      = []
-# HTTP tarball parsing does not extract to disk — install-phase handles that
-# via pm's existing `download_to_cache`. So we only need gzip + tar for
-# reading package.json out of the archive.
-http-tarball = ["libdeflater", "tar"]
+# HTTP tarball resolver pre-extracts to <cache>/<name>/_http_<url_sha256>/
+# during BFS, so install-phase hits a cache and never re-downloads. The
+# URL-hash disambiguator also keeps HTTP tarball slots from colliding with
+# registry tarball slots (<name>/<version>/).
+http-tarball = ["libdeflater", "sha2", "tar", "tempfile"]
 native-git   = ["gix", "tempfile"]

@@ -1,29 +1,26 @@
 //! Shared helpers for native, non-registry resolvers (git, http tarball).
 //!
-//! Shared between both:
 //! - [`DedupCache<T>`] / [`dedup_init`] — session-scoped one-fetch-per-key
 //! - [`validate_package_name`] — path-traversal guard for cache paths
 //! - [`finalize_non_registry_manifest`] — empty-version default, `dist`,
 //!   `has_install_script`
-//!
-//! Git-only (http hands the URL off to pm's install-phase downloader rather
-//! than pre-extracting — see [`super::http`] module docs):
 //! - [`commit_cache_dir_atomic`] — staging-dir → final-path with `_resolved`
 //!   marker and ENOTEMPTY race handling
 //!
 //! Consumers:
-//!   `super::git`   — all helpers (incl. `commit_cache_dir_atomic`)
-//!   `super::http`  — dedup + manifest finalize only
+//!   `super::git`   — caches at `<cache>/<name>/<commit_sha>/`
+//!   `super::http`  — caches at `<cache>/<name>/_http_<url_hash>/`
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-#[cfg(feature = "native-git")]
+#[cfg(any(feature = "native-git", feature = "http-tarball"))]
+use std::path::Path;
+
+#[cfg(any(feature = "native-git", feature = "http-tarball"))]
 use anyhow::Context;
 use anyhow::{Result, anyhow};
-#[cfg(feature = "native-git")]
-use std::path::Path;
 
 use crate::model::manifest::{CoreVersionManifest, Dist};
 
@@ -98,10 +95,7 @@ pub fn finalize_non_registry_manifest(
 /// If another process wins the race (EEXIST / ENOTEMPTY on rename), the
 /// staging dir is discarded silently and the winner's committed dir is
 /// left untouched.
-///
-/// Only the git resolver uses this — the http tarball resolver hands the
-/// URL off to pm's install-phase downloader rather than pre-extracting.
-#[cfg(feature = "native-git")]
+#[cfg(any(feature = "native-git", feature = "http-tarball"))]
 pub fn commit_cache_dir_atomic<F>(package_dir: &Path, write: F) -> Result<()>
 where
     F: FnOnce(&Path) -> Result<()>,
@@ -211,7 +205,7 @@ mod tests {
         assert!(finalize_non_registry_manifest(&mut m, "u".into()).is_err());
     }
 
-    #[cfg(feature = "native-git")]
+    #[cfg(any(feature = "native-git", feature = "http-tarball"))]
     #[test]
     fn commit_atomic_persists_resolved_marker() {
         let tmp = tempfile::tempdir().unwrap();
@@ -225,7 +219,7 @@ mod tests {
         assert_eq!(std::fs::read(target.join("hello.txt")).unwrap(), b"hi");
     }
 
-    #[cfg(feature = "native-git")]
+    #[cfg(any(feature = "native-git", feature = "http-tarball"))]
     #[test]
     fn commit_atomic_race_loser_is_noop() {
         let tmp = tempfile::tempdir().unwrap();

@@ -94,6 +94,12 @@ pub mod git {
     pub use crate::resolver::git::{GitCloneCache, ensure_repo_cached};
 }
 
+/// HTTP(S) tarball resolver helpers.
+pub mod http {
+    #[cfg(feature = "http-tarball")]
+    pub use crate::resolver::http::http_cache_slot;
+}
+
 /// Utility functions.
 pub mod util {
     pub use crate::model::util::{PackageNameStr, parse_package_spec, read_package_json};
