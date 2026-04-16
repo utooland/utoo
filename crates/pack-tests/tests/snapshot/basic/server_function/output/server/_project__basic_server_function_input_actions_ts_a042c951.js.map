@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/server_function/input/actions.ts"],"sourcesContent":["\"use server\";\n\nexport async function createUser(name: string, email: string) {\n  // This runs on the server\n  const user = { id: Math.random().toString(36), name, email };\n  return user;\n}\n\nexport async function deleteUser(id: string) {\n  // This runs on the server\n  console.log(`Deleting user ${id}`);\n}\n"],"names":["createUser","name","email","user","id","Math","random","toString","deleteUser","console","log"],"mappings":";;;;;;AAAA;AAEO,eAAeA,WAAWC,IAAY,EAAEC,KAAa;IAC1D,0BAA0B;IAC1B,MAAMC,OAAO;QAAEC,IAAIC,KAAKC,MAAM,GAAGC,QAAQ,CAAC;QAAKN;QAAMC;IAAM;IAC3D,OAAOC;AACT;AAEO,eAAeK,WAAWJ,EAAU;IACzC,0BAA0B;IAC1BK,QAAQC,GAAG,CAAC,CAAC,cAAc,EAAEN,IAAI;AACnC"}}]
-}

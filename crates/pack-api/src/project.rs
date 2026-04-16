@@ -8,6 +8,7 @@ use pack_core::{
     },
     config::{Config, ModuleIds as ModuleIdStrategyConfig, OptionCompressType, Platform},
     emit_assets,
+    library::contexts::{LibraryChunkingContextOptions, get_library_chunking_context},
     mode::Mode,
     server::contexts::{
         ServerChunkingContextOptions, get_server_chunking_context, get_server_compile_time_info,
@@ -1216,63 +1217,43 @@ impl Project {
             scope_hoisting: config.concatenate_modules(mode),
             nested_async_chunking: config.nested_async_chunking(mode),
             debug_ids: Vc::cell(false),
-            filename: None,
-            chunk_filename: None,
         }))
     }
 
-    /// Server chunking context for server functions (without client-side
-    /// export_usage, since server function modules live in a separate graph).
+    /// Server chunking context for server functions — uses the library
+    /// chunking context which has built-in content hash support (no cycle).
     #[turbo_tasks::function]
     pub(super) async fn server_fn_chunking_context(
         self: Vc<Self>,
-    ) -> Result<Vc<NodeJsChunkingContext>> {
+    ) -> Result<Vc<Box<dyn ChunkingContext>>> {
         let mode = self.mode();
         let config = self.config();
-        let source_maps = if *config.source_maps().await? {
-            SourceMapsType::Full
-        } else {
-            SourceMapsType::None
-        };
         let server_root = self.server_dist_root().owned().await?;
-        let server_config = config.server().await?;
-        // Only apply custom filename templates in production builds.
-        // Dev mode files change constantly, so custom naming adds no value.
-        let (filename, chunk_filename) = if mode.await?.is_production() {
-            let output = server_config.output.as_ref();
-            (
-                output.and_then(|o| o.filename.clone()),
-                output.and_then(|o| o.chunk_filename.clone()),
-            )
-        } else {
-            (None, None)
-        };
-        Ok(get_server_chunking_context(ServerChunkingContextOptions {
-            mode,
-            config,
-            root_path: server_root.clone(),
-            node_root: server_root,
-            node_root_to_root_path: rcstr!("/ROOT"),
-            environment: self.server_compile_time_info().environment(),
-            // Server function modules live in a separate graph, so they
-            // can't use the whole-app deterministic ID map. Use named IDs.
-            module_id_strategy: ModuleIdStrategy {
-                module_id_map: None,
-                fallback: ModuleIdFallback::Ident,
-            }
-            .cell(),
-            export_usage: Vc::cell(None),
-            unused_references: Vc::cell(Default::default()),
-            minify: config.minify(mode),
-            compress: self.compress(),
-            source_maps: source_maps.cell(),
-            no_mangling: self.no_mangling(),
-            scope_hoisting: config.concatenate_modules(mode),
-            nested_async_chunking: config.nested_async_chunking(mode),
-            debug_ids: Vc::cell(false),
-            filename,
-            chunk_filename,
-        }))
+
+        Ok(get_library_chunking_context(
+            LibraryChunkingContextOptions {
+                mode,
+                root_path: server_root.clone(),
+                output_root: server_root,
+                output_root_to_root_path: rcstr!("/ROOT"),
+                environment: self.server_compile_time_info().environment(),
+                // Server function modules live in a separate graph, so they
+                // can't use the whole-app deterministic ID map. Use named IDs.
+                module_id_strategy: ModuleIdStrategy {
+                    module_id_map: None,
+                    fallback: ModuleIdFallback::Ident,
+                }
+                .cell(),
+                no_mangling: self.no_mangling(),
+                compress: self.compress(),
+                runtime_root: Vc::cell(None),
+                runtime_export: Vc::cell(vec![]),
+                config,
+                export_usage: Vc::cell(None),
+                unused_references: Vc::cell(Default::default()),
+                platform: Platform::Node.cell(),
+            },
+        ))
     }
 
     /// Build a module graph specifically for server function modules.

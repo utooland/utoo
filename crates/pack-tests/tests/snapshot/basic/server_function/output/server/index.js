@@ -1,4 +1,8 @@
-module.exports = [
+((__UTOOPACK__) => {
+// Dummy runtime
+})([
+["index.js",
+
 "[project]/basic/server_function/input/actions.ts [server-fn] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
@@ -23,6 +27,9 @@ async function deleteUser(id) {
     console.log(`Deleting user ${id}`);
 }
 }),
-];
+],
+["index.js", {"otherChunks":[],"runtimeModuleIds":["[project]/basic/server_function/input/actions.ts [server-fn] (ecmascript)"]}],
+]);
 
-//# sourceMappingURL=_project__basic_server_function_input_actions_ts_a042c951.js.map
+
+//# sourceMappingURL=index.js.map

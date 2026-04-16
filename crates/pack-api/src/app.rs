@@ -240,20 +240,16 @@ impl AppEntrypoint {
 
             let module_graph = self.module_graph_for_entry(asset_context, runtime_entries);
 
-            let entry_name = if this.name.ends_with(".js") {
-                this.name.to_string()
+            let name = if this.name.ends_with(".js") {
+                this.name.as_str()
             } else {
-                format!("{}.js", this.name)
+                &format!("{}.js", this.name)
             };
-            let name = if entry_name.ends_with(".js") {
-                entry_name
-            } else {
-                format!("{entry_name}.js")
-            };
+
             let app_chunk_group = project
                 .server_chunking_context()
                 .entry_chunk_group(
-                    project.dist_root().owned().await?.join(&name)?,
+                    project.dist_root().owned().await?.join(name)?,
                     ChunkGroup::Entry(
                         self.entry_evaluatable_assets(asset_context, runtime_entries)
                             .await?
@@ -458,7 +454,7 @@ impl Endpoint for AppEndpoint {
             .entrypoints
             .iter()
             .map(|e| async {
-                let entry_modules: Vec<_> = e
+                let entry_modules = e
                     .entry_evaluatable_assets(Vc::upcast(asset_context), runtime_entries)
                     .await?
                     .iter()
@@ -612,18 +608,17 @@ impl AppEndpoint {
             .map(|e| ResolvedVc::upcast(*e))
             .collect();
 
-        let server_root = project.server_dist_root().owned().await?;
-        let entry_chunk = server_chunking_context
-            .entry_chunk_group(
-                server_root.join("index.js")?,
+        let ident = AssetIdent::from_path(project.project_path().await?.join("index.js")?)
+            .with_query("?name=index".into());
+        let chunk_group_result = server_chunking_context
+            .evaluated_chunk_group(
+                ident,
                 ChunkGroup::Entry(all_evaluatables),
                 server_module_graph,
-                OutputAssets::empty(),
-                OutputAssets::empty(),
                 AvailabilityInfo::root(),
             )
             .await?;
 
-        Ok(Vc::cell(vec![entry_chunk.asset]))
+        Ok(*chunk_group_result.assets)
     }
 }

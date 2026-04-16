@@ -883,7 +883,7 @@ pub struct ExternalsConfig(
     #[bincode(with = "turbo_bincode::indexmap")] FxIndexMap<RcStr, ExternalConfig>,
 );
 
-#[turbo_tasks::value]
+#[turbo_tasks::value(shared)]
 pub enum Platform {
     Web,
     Node,
