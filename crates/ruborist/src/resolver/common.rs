@@ -1,15 +1,19 @@
 //! Shared helpers for native, non-registry resolvers (git, http tarball).
 //!
-//! What's shared between both:
-//! - Session-scoped dedup cache ([`DedupCache<T>`], [`dedup_init`])
-//! - Package-name traversal validation ([`validate_package_name`])
-//! - Non-registry manifest finalization: empty-version default, `dist`, and
-//!   `has_install_script` flag ([`finalize_non_registry_manifest`])
+//! Shared between both:
+//! - [`DedupCache<T>`] / [`dedup_init`] — session-scoped one-fetch-per-key
+//! - [`validate_package_name`] — path-traversal guard for cache paths
+//! - [`finalize_non_registry_manifest`] — empty-version default, `dist`,
+//!   `has_install_script`
 //!
-//! Git-only (not used by http tarball — see the [`super::http`] module docs
-//! for why pre-extraction isn't needed there):
-//! - Atomic staging-dir → final-path commit with `_resolved` marker and
-//!   ENOTEMPTY race handling ([`commit_cache_dir_atomic`])
+//! Git-only (http hands the URL off to pm's install-phase downloader rather
+//! than pre-extracting — see [`super::http`] module docs):
+//! - [`commit_cache_dir_atomic`] — staging-dir → final-path with `_resolved`
+//!   marker and ENOTEMPTY race handling
+//!
+//! Consumers:
+//!   `super::git`   — all helpers (incl. `commit_cache_dir_atomic`)
+//!   `super::http`  — dedup + manifest finalize only
 
 use std::collections::HashMap;
 use std::path::PathBuf;

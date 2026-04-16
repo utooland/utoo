@@ -1,12 +1,22 @@
 //! Shared HTTP retry infrastructure.
 //!
-//! All of ruborist's fetchers (manifest JSON, http tarball downloads) share
-//! the same classification of transient vs. permanent failures and the same
-//! fixed-backoff retry strategy. This module centralizes both.
+//! All of ruborist's fetchers share the same classification of transient vs.
+//! permanent failures and the same fixed-backoff retry strategy.
 //!
 //! Callers map their success path into an async closure and combine
 //! [`classify_reqwest_error`] + [`classify_status`] to produce a
 //! [`FetchError`] that the retry layer then dispatches via [`is_retryable`].
+//!
+//! Consumers:
+//!   `service::manifest`        — npm registry JSON (full + version manifests)
+//!   `resolver::http`           — HTTP tarball byte downloads
+//!
+//! Note: pm has its own [`util::retry`] for tarball/binary file downloads
+//! (longer backoffs, string-payload errors). The two layers are intentionally
+//! separate — pm's retry doesn't run in WASM, and ruborist's `fetch` is
+//! WASM-compatible because `utoo-wasm` consumes `service::build_deps`.
+//!
+//! [`util::retry`]: https://github.com/utooland/utoo/blob/main/crates/pm/src/util/retry.rs
 
 use std::time::Duration;
 

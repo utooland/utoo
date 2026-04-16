@@ -17,6 +17,60 @@
 //! and throw the rest away. Install will re-download (one extra cold-path
 //! fetch per unique URL) and extract via pm's tuned libdeflate+rayon pipeline.
 //!
+//! # Flow
+//!
+//! ```text
+//!   package.json:  "foo": "https://example.com/foo-1.2.3.tgz"
+//!                                   │
+//!  ┌── BFS resolution (this module) ─────────────────────────────────────────┐
+//!  │                                ▼                                        │
+//!  │  resolve_http_dep(url, &fetch_cache)                                    │
+//!  │      │                                                                  │
+//!  │      ▼                                                                  │
+//!  │  HttpFetchCache  ── dedup_init  ★                                       │
+//!  │      │            (one fetch per URL across BFS)                        │
+//!  │      ▼                                                                  │
+//!  │  download_tarball  ── FetchError + classify_*  ☆                        │
+//!  │      │                                                                  │
+//!  │      ▼  Bytes                                                           │
+//!  │  spawn_blocking → parse_manifest:                                       │
+//!  │      gzip_decompress (libdeflater)                                      │
+//!  │      find_package_json (single-pass tar scan)                           │
+//!  │      finalize_non_registry_manifest  ★                                  │
+//!  │      │                                                                  │
+//!  │      ▼                                                                  │
+//!  │  ResolvedPackage { dist.tarball = url, … }    ── bytes dropped here     │
+//!  └──────│──────────────────────────────────────────────────────────────────┘
+//!         ▼  (lockfile)
+//!  ┌── Install phase (pm/util/downloader.rs) ────────────────────────────────┐
+//!  │  download_to_cache(name, version, url)                                  │
+//!  │      │                                                                  │
+//!  │      ├─ ~/.cache/nm/<name>/<version>/_resolved exists?  → return        │
+//!  │      │                                                                  │
+//!  │      └─ miss: download_bytes → extract_and_write (libdeflate + rayon)   │
+//!  │              writes ~/.cache/nm/<name>/<version>/{package/, _resolved}  │
+//!  │                                                                         │
+//!  │  cloner:  clonefile (mac) / hardlink (linux)                            │
+//!  │      ~/.cache/nm/<name>/<version>/package/  →  node_modules/<name>/     │
+//!  └─────────────────────────────────────────────────────────────────────────┘
+//!
+//!  Cache layout (identical to registry tarballs and git deps):
+//!
+//!    ~/.cache/nm/
+//!    └── foo/
+//!        └── 1.2.3/              cache slot = <name>/<version>
+//!            ├── _resolved        install-phase marker (BFS does NOT write this)
+//!            └── package/         npm-canonical wrapper
+//!                ├── package.json
+//!                └── ...
+//!
+//!  Legend:
+//!    ★ shared with the git resolver via `super::common`
+//!      (DedupCache, dedup_init, finalize_non_registry_manifest, validate_package_name)
+//!    ☆ shared with registry manifest fetching via `crate::service::fetch`
+//!      (FetchError, classify_reqwest_error, classify_status, retry_strategy)
+//! ```
+//!
 //! [`download_to_cache`]: https://github.com/utooland/utoo/blob/main/crates/pm/src/util/downloader.rs
 
 use std::io::Read;
