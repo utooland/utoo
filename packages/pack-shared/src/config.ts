@@ -55,9 +55,26 @@ export type TurbopackRuleCondition =
       contentType?: string | RegExp;
     };
 
+export type TurbopackModuleType =
+  | "asset"
+  | "ecmascript"
+  | "typescript"
+  | "css"
+  | "css-module"
+  | "json"
+  | "wasm"
+  | "raw"
+  | "node"
+  | "bytes";
+
 export type TurbopackRuleConfigItem = {
-  loaders: TurbopackLoaderItem[];
+  loaders?: TurbopackLoaderItem[];
   as?: string;
+  /**
+   * Controls the configured module type for matching resources.
+   * Mapped to Turbopack's `ConfiguredModuleType`.
+   */
+  type?: TurbopackModuleType;
   condition?: TurbopackRuleCondition;
 };
 

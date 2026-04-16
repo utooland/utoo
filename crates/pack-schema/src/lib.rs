@@ -725,15 +725,42 @@ pub enum SchemaModuleRuleItem {
     Full(Box<SchemaRuleConfigItem>),
 }
 
+/// Module type for a module rule (`type` / `moduleType` field).
+///
+/// Values must match pack-core / Turbopack's `ConfiguredModuleType::parse()`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum SchemaTurbopackModuleType {
+    Asset,
+    Ecmascript,
+    Typescript,
+    Css,
+    CssModule,
+    Json,
+    Wasm,
+    Raw,
+    Node,
+    Bytes,
+}
+
 /// Full module rule configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SchemaRuleConfigItem {
     /// Loaders to apply
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub loaders: Vec<SchemaLoaderItem>,
     /// Rename the module as another extension
     #[serde(default, alias = "as")]
     pub rename_as: Option<String>,
+    /// Optional configured module type (`type` / `moduleType`).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "type",
+        alias = "moduleType"
+    )]
+    pub module_type: Option<SchemaTurbopackModuleType>,
     /// Condition for applying the rule
     #[serde(default)]
     pub condition: Option<SchemaConfigConditionItem>,
@@ -1197,7 +1224,8 @@ mod tests {
             "rules": {
               "*.txt": {
                 "loaders": ["./test-file-loader.js"],
-                "as": "*.js"
+                "as": "*.js",
+                "type": "css-module"
               },
               "*.svg": "svg-loader"
             }
