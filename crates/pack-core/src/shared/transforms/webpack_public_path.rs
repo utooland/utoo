@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use swc_core::{
-    atoms::atom,
+    atoms::{Atom, atom},
     common::SyntaxContext,
     ecma::{
         ast::*,
@@ -43,7 +43,7 @@ struct WebpackPublicPathVisitor {
 }
 
 impl WebpackPublicPathVisitor {
-    fn is_webpack_public_path(&self, sym: &swc_core::atoms::Atom, ctxt: SyntaxContext) -> bool {
+    fn is_webpack_public_path(&self, sym: &Atom, ctxt: SyntaxContext) -> bool {
         sym == &atom!(WEBPACK_PUBLIC_PATH) && ctxt == self.unresolved_ctxt
     }
 
