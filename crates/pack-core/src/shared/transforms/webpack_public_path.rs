@@ -13,8 +13,6 @@ use turbopack_ecmascript::{CustomTransformer, TransformContext};
 
 use super::{EcmascriptTransformStage, get_ecma_transform_rule};
 
-const WEBPACK_PUBLIC_PATH: &str = "__webpack_public_path__";
-
 /// Returns a rule that maps webpack's runtime public path global onto utoopack's
 /// existing runtime public path hook.
 pub fn get_webpack_public_path_transform_rule() -> ModuleRule {
@@ -44,7 +42,7 @@ struct WebpackPublicPathVisitor {
 
 impl WebpackPublicPathVisitor {
     fn is_webpack_public_path(&self, sym: &Atom, ctxt: SyntaxContext) -> bool {
-        sym == &atom!(WEBPACK_PUBLIC_PATH) && ctxt == self.unresolved_ctxt
+        sym == &atom!("__webpack_public_path__") && ctxt == self.unresolved_ctxt
     }
 
     fn global_public_path_member(&self, span: swc_core::common::Span) -> MemberExpr {
