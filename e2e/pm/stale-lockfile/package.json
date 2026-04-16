@@ -1,0 +1,10 @@
+{
+  "name": "e2e-stale-lockfile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "e2e: package.json declares deps the lockfile hasn't been resolved for yet",
+  "dependencies": {
+    "abbrev": "^2.0.0",
+    "ini": "^5.0.0"
+  }
+}

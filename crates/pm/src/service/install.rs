@@ -8,7 +8,7 @@ use crate::cmd::deps::build_deps;
 use crate::fs;
 use crate::helper::global_bin::get_global_bin_dir;
 use crate::helper::lock::{
-    Package, UpdatePackageJsonOptions, extract_package_name, group_by_depth,
+    Package, UpdatePackageJsonOptions, extract_package_name, group_by_depth, is_pkg_lock_outdated,
     prepare_global_package_json, update_package_json,
 };
 use crate::helper::workspace::init_project_root;
@@ -224,14 +224,21 @@ impl InstallService {
         omit: &HashSet<OmitType>,
     ) -> Result<()> {
         let lock_path = root_path.join("package-lock.json");
+        let lock_exists = fs::try_exists(&lock_path).await.unwrap_or(false);
 
-        let (package_lock, pipeline_handles) = if fs::try_exists(&lock_path).await.unwrap_or(false)
-        {
-            // Lock exists: install directly, skip manifest resolution
+        // An existing lockfile is trusted only when it still matches
+        // package.json. A failure to answer the freshness check (corrupt
+        // lockfile, unreadable package.json, …) is treated as stale so we
+        // regenerate rather than install from a file we can't validate.
+        let lock_stale = lock_exists && is_pkg_lock_outdated(root_path).await.unwrap_or(true);
+
+        let (package_lock, pipeline_handles) = if lock_exists && !lock_stale {
             let lock = load_package_lock_json_from_path(root_path).await?;
             (lock, None)
         } else {
-            // No lock: full pipeline flow (resolve + concurrent download/clone)
+            if lock_stale {
+                tracing::warn!("package-lock.json is outdated, regenerating");
+            }
             start_progress_bar();
             let result = super::pipeline::resolve_with_pipeline(root_path).await?;
             finish_progress_bar("package-lock.json resolved");
