@@ -1412,24 +1412,26 @@ impl Config {
 
     #[turbo_tasks::function]
     pub async fn remove_unused_exports(&self, mode: Vc<Mode>) -> Result<Vc<bool>> {
-        let is_prod = matches!(*mode.await?, Mode::Production);
-        let remove_unused_exports = self
-            .optimization
-            .as_ref()
-            .and_then(|op| op.remove_unused_exports)
-            .unwrap_or(is_prod);
-        Ok(Vc::cell(remove_unused_exports))
+        Ok(Vc::cell(match *mode.await? {
+            Mode::Development => false,
+            Mode::Production => self
+                .optimization
+                .as_ref()
+                .and_then(|op| op.remove_unused_exports)
+                .unwrap_or(true),
+        }))
     }
 
     #[turbo_tasks::function]
     pub async fn remove_unused_imports(&self, mode: Vc<Mode>) -> Result<Vc<bool>> {
-        let is_prod = matches!(*mode.await?, Mode::Production);
-        let remove_unused_imports = self
-            .optimization
-            .as_ref()
-            .and_then(|op| op.remove_unused_imports)
-            .unwrap_or(is_prod);
-        Ok(Vc::cell(remove_unused_imports))
+        Ok(Vc::cell(match *mode.await? {
+            Mode::Development => false,
+            Mode::Production => self
+                .optimization
+                .as_ref()
+                .and_then(|op| op.remove_unused_imports)
+                .unwrap_or(true),
+        }))
     }
 
     #[turbo_tasks::function]
