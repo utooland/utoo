@@ -688,7 +688,8 @@ function compatOptimization(
   }
   const { moduleIds, minimize, concatenateModules, usedExports } =
     webpackOptimization;
-  const enableWebpackUsedExports = usedExports !== false;
+  const enableWebpackUsedExports =
+    typeof usedExports === "undefined" ? undefined : usedExports !== false;
   return {
     moduleIds:
       moduleIds === "named"

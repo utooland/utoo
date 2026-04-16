@@ -22,6 +22,7 @@ pub mod styled_components;
 pub mod styled_jsx;
 pub mod swc_ecma_transform_plugins;
 pub mod wasm;
+pub mod webpack_public_path;
 
 pub async fn get_image_rule(inline_limit: Option<u64>) -> Result<ModuleRule> {
     Ok(ModuleRule::new(
