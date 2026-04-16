@@ -43,8 +43,8 @@ struct WebpackPublicPathVisitor {
 }
 
 impl WebpackPublicPathVisitor {
-    fn is_webpack_public_path(&self, ident: &Ident) -> bool {
-        &*ident.sym == WEBPACK_PUBLIC_PATH && ident.ctxt == self.unresolved_ctxt
+    fn is_webpack_public_path(&self, sym: &swc_core::atoms::Atom, ctxt: SyntaxContext) -> bool {
+        sym == &atom!(WEBPACK_PUBLIC_PATH) && ctxt == self.unresolved_ctxt
     }
 
     fn global_public_path_member(&self, span: swc_core::common::Span) -> MemberExpr {
@@ -68,7 +68,7 @@ impl VisitMut for WebpackPublicPathVisitor {
     fn visit_mut_assign_expr(&mut self, assign_expr: &mut AssignExpr) {
         match &assign_expr.left {
             AssignTarget::Simple(SimpleAssignTarget::Ident(binding_ident))
-                if self.is_webpack_public_path(&binding_ident.id) =>
+                if self.is_webpack_public_path(&binding_ident.id.sym, binding_ident.id.ctxt) =>
             {
                 assign_expr.left = AssignTarget::Simple(SimpleAssignTarget::Member(
                     self.global_public_path_member(binding_ident.id.span),
@@ -84,7 +84,7 @@ impl VisitMut for WebpackPublicPathVisitor {
 
     fn visit_mut_expr(&mut self, expr: &mut Expr) {
         if let Expr::Ident(ident) = expr
-            && self.is_webpack_public_path(ident)
+            && self.is_webpack_public_path(&ident.sym, ident.ctxt)
         {
             *expr = self.global_public_path_expr(ident.span);
             return;
