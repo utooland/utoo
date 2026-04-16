@@ -224,21 +224,16 @@ impl InstallService {
         omit: &HashSet<OmitType>,
     ) -> Result<()> {
         let lock_path = root_path.join("package-lock.json");
-        let lock_exists = fs::try_exists(&lock_path).await.unwrap_or(false);
+        // Treat a failing freshness check as stale: regenerate rather than
+        // install from a lockfile we couldn't validate. `is_pkg_lock_outdated`
+        // itself emits a `tracing::warn` with the specific mismatch reason.
+        let use_fresh_lock = fs::try_exists(&lock_path).await.unwrap_or(false)
+            && !is_pkg_lock_outdated(root_path).await.unwrap_or(true);
 
-        // An existing lockfile is trusted only when it still matches
-        // package.json. A failure to answer the freshness check (corrupt
-        // lockfile, unreadable package.json, …) is treated as stale so we
-        // regenerate rather than install from a file we can't validate.
-        let lock_stale = lock_exists && is_pkg_lock_outdated(root_path).await.unwrap_or(true);
-
-        let (package_lock, pipeline_handles) = if lock_exists && !lock_stale {
+        let (package_lock, pipeline_handles) = if use_fresh_lock {
             let lock = load_package_lock_json_from_path(root_path).await?;
             (lock, None)
         } else {
-            if lock_stale {
-                tracing::warn!("package-lock.json is outdated, regenerating");
-            }
             start_progress_bar();
             let result = super::pipeline::resolve_with_pipeline(root_path).await?;
             finish_progress_bar("package-lock.json resolved");
