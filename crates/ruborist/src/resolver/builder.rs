@@ -23,6 +23,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[cfg(feature = "http-tarball")]
+use anyhow::Context as _;
+
 use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
 use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
@@ -381,26 +384,27 @@ async fn process_file_dep<E>(
     path_spec: &str,
     cache_dir: Option<&Path>,
 ) -> Result<FileResolution, ResolveError<E>> {
-    use anyhow::Context as _;
-
     use crate::resolver::http::file_cache_slot;
     use crate::resolver::tar::commit_tarball_bytes;
 
+    let file_err = |source: anyhow::Error| ResolveError::File {
+        spec: edge.spec.clone(),
+        source,
+    };
     let base = file_base_dir(graph, node_index).ok_or_else(|| ResolveError::Unsupported {
         spec: edge.spec.clone(),
         reason: "transitive file: deps inside a published registry package are not supported",
     })?;
     let abs = base.join(path_spec);
 
-    let Some(meta) = std::fs::metadata(&abs).ok() else {
-        return if edge.edge_type == EdgeType::Optional {
-            Ok(FileResolution::Skipped)
-        } else {
-            Err(ResolveError::File {
-                spec: edge.spec.clone(),
-                source: anyhow::anyhow!("file: target does not exist: {}", abs.display()),
-            })
-        };
+    let meta = match std::fs::metadata(&abs) {
+        Ok(m) => m,
+        Err(_) if edge.edge_type == EdgeType::Optional => return Ok(FileResolution::Skipped),
+        Err(e) => {
+            return Err(file_err(
+                anyhow::Error::new(e).context(format!("file: target {}", abs.display())),
+            ));
+        }
     };
 
     if meta.is_dir() {
@@ -409,10 +413,7 @@ async fn process_file_dep<E>(
         // (npm-link semantics: the linked dir owns its own node_modules).
         let pkg = crate::model::util::read_package_json(&abs)
             .await
-            .map_err(|source| ResolveError::File {
-                spec: edge.spec.clone(),
-                source,
-            })?;
+            .map_err(file_err)?;
         let idx = graph.add_node(PackageNode::link_from_package_json(abs, pkg));
         graph.add_physical_edge(conflict_parent, idx);
         graph.mark_dependency_resolved(edge.edge_id, idx);
@@ -421,29 +422,23 @@ async fn process_file_dep<E>(
     }
 
     let cache_dir = cache_dir
-        .ok_or_else(|| ResolveError::File {
-            spec: edge.spec.clone(),
-            source: anyhow::anyhow!("cache_dir required for file: tarball"),
-        })?
+        .ok_or_else(|| file_err(anyhow::anyhow!("cache_dir required for file: tarball")))?
         .to_path_buf();
     let slot = file_cache_slot(&abs);
     let pinned = format!("file:{}", abs.display());
-    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+    let manifest = match tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
         let bytes = std::fs::read(&abs)
             .with_context(|| format!("failed to read tarball {}", abs.display()))?;
         commit_tarball_bytes(&cache_dir, &bytes, pinned, &slot)
     })
-    .await;
-
-    let manifest = match result.map_err(anyhow::Error::from).and_then(|r| r) {
-        Ok(m) => m,
-        Err(_) if edge.edge_type == EdgeType::Optional => return Ok(FileResolution::Skipped),
-        Err(source) => {
-            return Err(ResolveError::File {
-                spec: edge.spec.clone(),
-                source,
-            });
+    .await
+    {
+        Ok(Ok(m)) => m,
+        Ok(Err(_)) | Err(_) if edge.edge_type == EdgeType::Optional => {
+            return Ok(FileResolution::Skipped);
         }
+        Ok(Err(source)) => return Err(file_err(source)),
+        Err(join) => return Err(file_err(join.into())),
     };
     Ok(FileResolution::Tarball(ResolvedPackage {
         name: manifest.name.clone(),

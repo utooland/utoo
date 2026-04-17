@@ -92,13 +92,11 @@ pub async fn install_packages(
                     // Cloner only understands absolute URLs — re-absolutize
                     // here so the cloner/downloader stays unaware of project
                     // root plumbing.
-                    let resolved = if let Some(rel) = resolved.strip_prefix("file:")
-                        && let p = Path::new(rel)
-                        && !p.is_absolute()
-                    {
-                        format!("file:{}", cwd.join(p).display())
-                    } else {
-                        resolved.clone()
+                    let resolved = match resolved.strip_prefix("file:") {
+                        Some(rel) if !Path::new(rel).is_absolute() => {
+                            format!("file:{}", cwd.join(rel).display())
+                        }
+                        _ => resolved.clone(),
                     };
                     if package.link.is_some() {
                         let link_name = extract_package_name(&path);

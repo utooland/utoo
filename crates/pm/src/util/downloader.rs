@@ -114,19 +114,14 @@ pub async fn http_tarball_cache_lookup(name: &str, tarball_url: &str) -> Option<
 /// rewriting before we get here.
 pub async fn resolve_cache_path(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
     match tarball_url.parse::<Protocol>() {
-        // Git: BFS cloned to `<cache>/<name>/<commit_sha>/`
         Ok(Protocol::Git) => git_cache_lookup(name, version, tarball_url).await,
-        // Local tarball: BFS extracted to `<cache>/<name>/_file_<hash>/`
         Ok(Protocol::File) => file_cache_lookup(name, tarball_url).await,
-        // HTTP(S) tarball (either a URL-pinned dep or a registry tarball):
-        // try the URL-hashed slot BFS may have seeded, then fall through
-        // to the registry download path keyed on `<name>/<version>/`.
-        _ => {
-            if let Some(p) = http_tarball_cache_lookup(name, tarball_url).await {
-                return Some(p);
-            }
-            download_to_cache(name, version, tarball_url).await
-        }
+        // Otherwise try the URL-hashed http slot BFS may have seeded,
+        // then fall through to the registry `<name>/<version>/` path.
+        _ => match http_tarball_cache_lookup(name, tarball_url).await {
+            Some(p) => Some(p),
+            None => download_to_cache(name, version, tarball_url).await,
+        },
     }
 }
 
