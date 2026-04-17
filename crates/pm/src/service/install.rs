@@ -138,7 +138,8 @@ pub async fn install_packages(
 
                     let task = tokio::spawn(async move {
                         if let Err(e) =
-                            clone_package_once(&name, &version, &resolved, &target_path).await
+                            clone_package_once(&name, &version, &resolved, &target_path, &cwd_clone)
+                                .await
                         {
                             if is_optional {
                                 tracing::warn!("Optional dependency {name} failed (ignored)");

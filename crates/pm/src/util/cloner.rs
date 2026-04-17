@@ -62,6 +62,7 @@ pub async fn clone_package_once(
     version: &str,
     tarball_url: &str,
     target_path: &Path,
+    cwd: &Path,
 ) -> Result<()> {
     let key = cache_key(target_path);
     let err_label = format!("{name}@{version}");
@@ -69,6 +70,7 @@ pub async fn clone_package_once(
     let version = version.to_string();
     let tarball_url = tarball_url.to_string();
     let target_path = target_path.to_path_buf();
+    let cwd = cwd.to_path_buf();
 
     // Git packages are extracted flat (no `package/` wrapper directory),
     // so skip `find_real_src` which would incorrectly pick a subdirectory.
@@ -76,7 +78,7 @@ pub async fn clone_package_once(
 
     CLONE_CACHE
         .get_or_init(key, || async move {
-            let cache_path = resolve_cache_path(&name, &version, &tarball_url).await?;
+            let cache_path = resolve_cache_path(&name, &version, &tarball_url, &cwd).await?;
             clone_package(&cache_path, &target_path, &name, &version, !is_git)
                 .await
                 .inspect_err(|e| {

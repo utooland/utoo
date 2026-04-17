@@ -220,13 +220,17 @@ if [ "$ACTUAL" != "2.3.4" ]; then
     echo -e "${RED}FAIL: local-tarball-pkg expected v2.3.4, got $ACTUAL${NC}"
     exit 1
 fi
-# Lockfile: dir dep = `link: true`, tarball dep = `resolved: file:<abs>`.
+# Lockfile entries match npm's format:
+#  - dir dep:     link: true + resolved: <root-relative path>  (no file: prefix)
+#  - tarball dep: resolved:   file:<root-relative path>        (with file: prefix)
+# Absolute paths in the lockfile would make it non-portable across machines.
 node -e '
 const lock = require("./package-lock.json");
 const dir = lock.packages["node_modules/local-dir-pkg"] || {};
 const tar = lock.packages["node_modules/local-tarball-pkg"] || {};
-if (dir.link !== true) { console.error("local-dir-pkg missing link:true in lockfile", dir); process.exit(1); }
-if (!tar.resolved || !tar.resolved.startsWith("file:")) { console.error("local-tarball-pkg resolved field should be file:<abs>", tar); process.exit(1); }
+if (dir.link !== true) { console.error("local-dir-pkg missing link:true", dir); process.exit(1); }
+if (dir.resolved !== "local-dir") { console.error("local-dir-pkg resolved expected \"local-dir\", got", dir.resolved); process.exit(1); }
+if (tar.resolved !== "file:local-tarball.tgz") { console.error("local-tarball-pkg resolved expected \"file:local-tarball.tgz\", got", tar.resolved); process.exit(1); }
 ' || { echo -e "${RED}FAIL: lockfile entries wrong for file: deps${NC}"; exit 1; }
 echo -e "${GREEN}PASS: file: dependency install successful${NC}"
 

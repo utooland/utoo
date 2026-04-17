@@ -11799,6 +11799,7 @@ dependencies = [
  "libc",
  "libdeflater",
  "parking_lot",
+ "pathdiff",
  "petgraph 0.6.5",
  "reqwest 0.12.24",
  "serde",

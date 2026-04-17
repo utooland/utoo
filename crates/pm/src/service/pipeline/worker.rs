@@ -55,11 +55,14 @@ pub fn start_workers(channels: PipelineChannels, cwd: PathBuf) -> PipelineHandle
             let version = msg.info.version;
             let target = cwd.join(&msg.path);
             let parent_path = msg.parent_path.map(|p| cwd.join(&p));
+            let cwd_for_task = cwd.clone();
             tokio::spawn(async move {
                 if let Some(ref parent) = parent_path {
                     wait_clone_if_pending(&parent.to_string_lossy()).await;
                 }
-                if let Err(e) = clone_package_once(&name, &version, &tarball_url, &target).await {
+                if let Err(e) =
+                    clone_package_once(&name, &version, &tarball_url, &target, &cwd_for_task).await
+                {
                     tracing::debug!("Pipeline pre-clone failed for {name}@{version}: {e:#}");
                 }
             });
