@@ -8,8 +8,7 @@ use once_cell::sync::Lazy;
 use reqwest::{Client, StatusCode};
 use tokio::sync::Semaphore;
 use tokio_retry::RetryIf;
-use utoo_ruborist::file::file_cache_slot;
-use utoo_ruborist::http::http_cache_slot;
+use utoo_ruborist::http::{file_cache_slot, http_cache_slot};
 use utoo_ruborist::spec::Protocol;
 
 use super::cache::get_cache_dir;

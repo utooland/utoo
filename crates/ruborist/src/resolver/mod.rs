@@ -3,8 +3,6 @@
 pub mod builder;
 pub mod common;
 pub mod edges;
-#[cfg(feature = "http-tarball")]
-pub mod file;
 #[cfg(feature = "native-git")]
 pub mod git;
 #[cfg(feature = "http-tarball")]

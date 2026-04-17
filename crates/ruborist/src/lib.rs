@@ -94,16 +94,10 @@ pub mod git {
     pub use crate::resolver::git::{GitCloneCache, ensure_repo_cached};
 }
 
-/// HTTP(S) tarball resolver helpers.
+/// Non-registry tarball cache-slot helpers (http + local file).
 pub mod http {
     #[cfg(feature = "http-tarball")]
-    pub use crate::resolver::http::http_cache_slot;
-}
-
-/// Local `file:` resolver helpers.
-pub mod file {
-    #[cfg(feature = "http-tarball")]
-    pub use crate::resolver::file::file_cache_slot;
+    pub use crate::resolver::http::{file_cache_slot, http_cache_slot};
 }
 
 /// Utility functions.

@@ -84,7 +84,7 @@
 //!
 //! [`download_to_cache`]: https://github.com/utooland/utoo/blob/main/crates/pm/src/util/downloader.rs
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
@@ -114,6 +114,18 @@ pub(crate) type HttpFetchCache = DedupCache<CoreVersionManifest>;
 /// to agree on the same slot for a given URL.
 pub fn http_cache_slot(url: &str) -> String {
     cache_slot("_http_", url.as_bytes())
+}
+
+/// Cache sub-directory for a local tarball file keyed on its absolute path.
+/// Exposed for pm install-phase lookup; the tarball extraction path mirrors
+/// http's exactly, only the bytes come from disk.
+///
+/// The path is normalized via `Path::components()` before hashing so BFS
+/// (`base.join("./foo.tgz")`) and install (`cwd.join("foo.tgz")` from a
+/// root-relative lockfile entry) land on the same slot.
+pub fn file_cache_slot(abs_path: &Path) -> String {
+    let normalized: PathBuf = abs_path.components().collect();
+    cache_slot("_file_", normalized.as_os_str().as_encoded_bytes())
 }
 
 fn fetch_and_extract_blocking(
