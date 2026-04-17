@@ -825,4 +825,51 @@ fi
 echo -e "${GREEN}PASS: legacyPeerDeps=false — peer deps auto-installed${NC}"
 cd ../../..
 
+# Case: tarball permission normalization
+# google-protobuf@4.0.2 ships files at 0o640 in its tarball (package.json,
+# google-protobuf.js, README.md, LICENSE*). Preserving raw tar modes leaves
+# them unreadable by "other" and breaks container/cross-user reads — npm and
+# pnpm both normalize to 0o644. This is a regression guard for that behavior.
+echo -e "${YELLOW}Case: tarball permission normalization (google-protobuf)${NC}"
+PERM_DIR=$(mktemp -d)
+pushd "$PERM_DIR"
+cat > package.json <<'PKGJSON'
+{
+  "name": "perm-normalize-test",
+  "version": "1.0.0",
+  "dependencies": {
+    "google-protobuf": "4.0.2"
+  }
+}
+PKGJSON
+
+# Force a cold extract so the normalization path actually runs
+rm -rf ~/.cache/nm/google-protobuf
+
+utoo install --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: utoo install failed for perm-normalize-test${NC}"; popd; rm -rf "$PERM_DIR"; exit 1; }
+
+# Every file under the package must be world-readable.
+# Without the fix, the 0o640 files above are listed here and the case fails.
+NON_READABLE=$(find node_modules/google-protobuf -type f ! -perm -0004 -print)
+if [ -n "$NON_READABLE" ]; then
+    echo -e "${RED}FAIL: files missing other-read bit after install:${NC}"
+    echo "$NON_READABLE"
+    ls -la node_modules/google-protobuf/
+    popd; rm -rf "$PERM_DIR"; exit 1
+fi
+
+# Spot-check one of the known-0o640 files landed at exactly 0o644 (not 0o640,
+# not 0o755 — we should not grant exec unless the tar entry had it).
+# `stat -c` (GNU) / `stat -f` (BSD) differ; use Node for portability.
+MODE=$(node -e "console.log((require('fs').statSync('node_modules/google-protobuf/package.json').mode & 0o777).toString(8))")
+if [ "$MODE" != "644" ]; then
+    echo -e "${RED}FAIL: package.json mode is 0o$MODE, expected 0o644${NC}"
+    popd; rm -rf "$PERM_DIR"; exit 1
+fi
+echo -e "${GREEN}PASS: tarball permissions normalized to 0o644${NC}"
+
+popd
+rm -rf "$PERM_DIR"
+
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"

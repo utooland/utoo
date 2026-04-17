@@ -54,19 +54,38 @@ jobs:
     steps:
       - name: Install Linux Dependencies
         if: ${{ matrix.platform_os == 'linux' }}
+        timeout-minutes: 10
         env:
           DEBIAN_FRONTEND: noninteractive
+        # Short per-apt timeouts: on GHA runners that can't route to
+        # archive/security.ubuntu.com, apt otherwise sits in 90s × 8-IP SYN
+        # timeouts. Bail after 60s on the default mirror, swap to the
+        # Fastly-backed kernel.org mirror, and retry once.
+        #
+        # If the first attempt times out mid-unpack (e.g. libc6 upgrade),
+        # dpkg is left half-configured and the retry fails with
+        # "dpkg was interrupted". `dpkg --configure -a` finalises any
+        # pending unpack before we retry on the fallback mirror.
         run: |
-          apt-get update && apt-get install -y \
-            build-essential \
-            libc6-dev \
-            libglib2.0-0 \
-            curl \
-            tzdata \
-            pkg-config \
-            gnupg2 \
-            software-properties-common \
-            git
+          install_pkgs() {
+            timeout 60 apt-get update \
+              && timeout 180 apt-get install -y \
+                build-essential \
+                libc6-dev \
+                libglib2.0-0 \
+                curl \
+                tzdata \
+                pkg-config \
+                gnupg2 \
+                software-properties-common \
+                git
+          }
+          if ! install_pkgs; then
+            echo "apt default mirror failed/timed out, falling back to mirrors.edge.kernel.org"
+            dpkg --configure -a || true
+            sed -i 's|http://archive\.ubuntu\.com|http://mirrors.edge.kernel.org|g; s|http://security\.ubuntu\.com|http://mirrors.edge.kernel.org|g' /etc/apt/sources.list
+            install_pkgs
+          fi
           curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
           chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null

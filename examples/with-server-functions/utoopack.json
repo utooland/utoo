@@ -1,0 +1,32 @@
+{
+  "$schema": "../../packages/pack/config_schema.json",
+  "entry": [
+    {
+      "import": "./src/index.tsx",
+      "html": {
+        "template": "./index.html"
+      },
+      "name": "index"
+    }
+  ],
+  "output": {
+    "path": "dist/client",
+    "filename": "[name].[contenthash:8].js",
+    "chunkFilename": "[name].[contenthash:8].js",
+    "cssFilename": "[name].[contenthash:8].css",
+    "clean": true
+  },
+  "optimization": {
+    "minify": false
+  },
+  "server": {
+    "output": {
+      "path": "dist/server",
+      "filename": "[name].[contenthash:8].js",
+      "chunkFilename": "[name].[contenthash:8].js"
+    },
+    "functions": {
+      "callServerModule": "./transport"
+    }
+  }
+}
