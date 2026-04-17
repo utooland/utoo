@@ -277,46 +277,49 @@ impl DependencyGraph {
 
     /// Collect the logical dependency ancestry of a node in root→`from` order (inclusive).
     ///
-    /// Walks the "required by" chain — i.e. for each node, finds a node whose
-    /// resolved dependency points at it, and continues until reaching the root
-    /// (or hitting a cycle). This is *logical* ancestry: which package declared
-    /// the dependency. It differs from the *physical* tree (install location),
-    /// where hoisted packages all sit directly under root regardless of who
-    /// required them.
+    /// Walks the "required by" chain — for each node, finds a node whose resolved
+    /// dependency points at it, and continues until reaching the root (or hitting
+    /// a cycle). This is *logical* ancestry: which package declared the dependency.
+    /// It differs from the *physical* tree (install location), where hoisted
+    /// packages all sit directly under root regardless of who required them.
     ///
     /// Each entry is `(name, version)`. Used to report which dependency chain
     /// introduced a failing package.
     pub(crate) fn logical_ancestry(&self, from: NodeIndex) -> Vec<(String, String)> {
-        // Reverse index: resolved target → first depender encountered.
-        // Built lazily because this is only called on error paths.
-        let mut requester: HashMap<NodeIndex, NodeIndex> = HashMap::new();
-        for idx in self.graph.node_indices() {
-            for (_, dep) in self.get_dependency_edges(idx) {
-                if let Some(target) = dep.to
-                    && target != idx
-                {
-                    requester.entry(target).or_insert(idx);
-                }
-            }
-        }
+        let requester = self.build_requester_index();
 
-        let mut chain = Vec::new();
-        let mut visited = HashSet::new();
-        let mut current = Some(from);
-        while let Some(idx) = current {
-            if !visited.insert(idx) {
-                break;
-            }
-            if let Some(node) = self.get_node(idx) {
-                chain.push((node.name.clone(), node.version.clone()));
-            }
+        let mut chain: Vec<(String, String)> = std::iter::successors(Some(from), |&idx| {
             if idx == self.root_index {
-                break;
+                None
+            } else {
+                requester.get(&idx).copied()
             }
-            current = requester.get(&idx).copied();
-        }
+        })
+        .scan(HashSet::new(), |seen, idx| seen.insert(idx).then_some(idx))
+        .map(|idx| {
+            let node = &self.graph[idx];
+            (node.name.clone(), node.version.clone())
+        })
+        .collect();
         chain.reverse();
         chain
+    }
+
+    /// Reverse index: resolved dep target → first depender encountered.
+    ///
+    /// Scanning every dep edge is `O(E)`; fine because the only caller
+    /// (`logical_ancestry`) runs on the error path.
+    fn build_requester_index(&self) -> HashMap<NodeIndex, NodeIndex> {
+        let mut index = HashMap::new();
+        for edge in self.graph.edge_references() {
+            if let GraphEdge::Dependency(dep) = edge.weight()
+                && let Some(target) = dep.to
+                && target != edge.source()
+            {
+                index.entry(target).or_insert(edge.source());
+            }
+        }
+        index
     }
 
     /// Get all physical children of a node.
