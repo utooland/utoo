@@ -182,7 +182,7 @@ mod hardlink_clone {
             // Switch to copy for all remaining files as soon as a cross-device
             // hardlink error is encountered (EXDEV), since the entire clone will
             // be cross-device in that case.
-            let mut use_copy = has_install_script_sync(&src);
+            let mut force_copy = has_install_script_sync(&src);
 
             // Phase 1: Collect all files and directories
             let mut files = Vec::new();
@@ -202,7 +202,7 @@ mod hardlink_clone {
 
             // Phase 3: Clone files (hardlink or copy)
             for entry in &files {
-                if use_copy {
+                if force_copy {
                     copy_file_sync(&entry.src, &entry.dst)?;
                 } else {
                     match fs::hard_link(&entry.src, &entry.dst) {
@@ -214,7 +214,7 @@ mod hardlink_clone {
                                 "hard_link cross-device, falling back to copy: {}",
                                 entry.src.display()
                             );
-                            use_copy = true;
+                            force_copy = true;
                             copy_file_sync(&entry.src, &entry.dst)?;
                         }
                         Err(e) => return Err(e),
@@ -397,7 +397,9 @@ async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
         // different filesystems — retrying would be pointless; fall back to
         // hardlink/copy instead.
         let first_ret = unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) };
-        if first_ret != 0 {
+        if first_ret == 0 {
+            tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
+        } else {
             let io_err = std::io::Error::last_os_error();
             let _ = fs::remove_dir_all(dst).await.map_err(|e| {
                 tracing::debug!("Failed to clean target directory {}: {}", dst.display(), e);
@@ -413,6 +415,11 @@ async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
                     hardlink_clone::clone_dir(&real_src, dst).await
                 })
                 .await?;
+                tracing::debug!(
+                    "hardlink/copy fallback succeeded: {} -> {}",
+                    real_src.display(),
+                    dst.display()
+                );
             } else {
                 // Transient error: retry clonefile.
                 Retry::spawn(create_retry_strategy(), || async {
@@ -434,9 +441,9 @@ async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
                     }
                 })
                 .await?;
+                tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
             }
         }
-        tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
     }
 
     #[cfg(not(target_os = "macos"))]
