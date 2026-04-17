@@ -750,7 +750,17 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
                 receiver.on_event(BuildEvent::Resolving {
                     name: &edge_info.name,
                 });
-                match process_dependency(graph, registry, node_index, &edge_info, config).await? {
+                let result = process_dependency(graph, registry, node_index, &edge_info, config)
+                    .await
+                    .map_err(|inner| {
+                        let mut chain = graph.logical_ancestry(node_index);
+                        chain.push((edge_info.name.clone(), edge_info.spec.clone()));
+                        ResolveError::WithChain {
+                            chain,
+                            source: Box::new(inner),
+                        }
+                    });
+                match result? {
                     ProcessResult::Created(idx) => {
                         // Extract node info for events
                         if let Some(node) = graph.get_node(idx) {
