@@ -32,6 +32,16 @@ pub enum ResolveError<E> {
     Http { url: String, source: anyhow::Error },
     /// Dependency type not yet supported (e.g. local file path)
     Unsupported { spec: String, reason: &'static str },
+    /// Error augmented with the dependency chain that led to the failing dep.
+    ///
+    /// `chain` is ordered root → immediate parent as resolved `(name, version)`
+    /// pairs; the failing dep's `(name, spec)` is appended as the final entry.
+    /// (Ancestor entries carry resolved versions; the last entry carries the
+    /// unresolved requested spec.)
+    WithChain {
+        chain: Vec<(String, String)>,
+        source: Box<ResolveError<E>>,
+    },
 }
 
 impl<E: std::fmt::Display> std::fmt::Display for ResolveError<E> {
@@ -52,6 +62,19 @@ impl<E: std::fmt::Display> std::fmt::Display for ResolveError<E> {
             ResolveError::Unsupported { spec, reason } => {
                 write!(f, "Unsupported dependency '{spec}': {reason}")
             }
+            ResolveError::WithChain { chain, source } => {
+                write!(f, "{source}")?;
+                f.write_str("\n\nrequired by:")?;
+                for (i, (name, version)) in chain.iter().enumerate() {
+                    if i == 0 {
+                        write!(f, "\n  {name}@{version}")?;
+                    } else {
+                        let indent = "    ".repeat(i - 1);
+                        write!(f, "\n  {indent}└── {name}@{version}")?;
+                    }
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -67,6 +90,7 @@ impl<E: std::error::Error + 'static> std::error::Error for ResolveError<E> {
             ResolveError::Git { source, .. } | ResolveError::Http { source, .. } => {
                 Some(source.as_ref())
             }
+            ResolveError::WithChain { source, .. } => Some(source.as_ref()),
         }
     }
 }
@@ -246,5 +270,26 @@ mod tests {
         let result =
             resolve_registry_dep(&registry, "nonexistent", "^1.0.0", &EdgeType::Prod).await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_with_chain_display_renders_tree() {
+        let inner: ResolveError<std::io::Error> =
+            ResolveError::NoVersions("@antskill/tegg-agent".to_string());
+        let wrapped: ResolveError<std::io::Error> = ResolveError::WithChain {
+            chain: vec![
+                ("my-app".to_string(), "1.0.0".to_string()),
+                ("parent-pkg".to_string(), "1.2.3".to_string()),
+                ("@antskill/tegg-agent".to_string(), "^1.0.0".to_string()),
+            ],
+            source: Box::new(inner),
+        };
+
+        let rendered = wrapped.to_string();
+        assert!(rendered.contains("No versions available for @antskill/tegg-agent"));
+        assert!(rendered.contains("required by:"));
+        assert!(rendered.contains("  my-app@1.0.0"));
+        assert!(rendered.contains("└── parent-pkg@1.2.3"));
+        assert!(rendered.contains("└── @antskill/tegg-agent@^1.0.0"));
     }
 }
