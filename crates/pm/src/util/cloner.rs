@@ -178,7 +178,7 @@ mod hardlink_clone {
                 ));
             }
 
-            let use_copy = has_install_script_sync(&src);
+            let mut force_copy = has_install_script_sync(&src);
 
             // Phase 1: Collect all files and directories
             let mut files = Vec::new();
@@ -196,12 +196,24 @@ mod hardlink_clone {
                 }
             }
 
-            // Phase 3: Clone files (hardlink or copy)
+            // Phase 3: Clone files (hardlink or copy). On any hardlink
+            // failure — EXDEV (cache and target on different filesystems,
+            // e.g. global installs into /usr/local), EPERM, EMLINK, etc. —
+            // fall back to copy for the rest of this clone. Once one file
+            // fails, the others on the same src/dst pair will fail the same
+            // way, so retrying hardlink would be wasted work.
             for entry in &files {
-                if use_copy {
+                if force_copy {
                     copy_file_sync(&entry.src, &entry.dst)?;
-                } else {
-                    fs::hard_link(&entry.src, &entry.dst)?;
+                } else if let Err(e) = fs::hard_link(&entry.src, &entry.dst) {
+                    tracing::warn!(
+                        "hardlink failed for {} -> {}: {}; falling back to copy for remaining files",
+                        entry.src.display(),
+                        entry.dst.display(),
+                        e
+                    );
+                    force_copy = true;
+                    copy_file_sync(&entry.src, &entry.dst)?;
                 }
             }
             Ok(())
