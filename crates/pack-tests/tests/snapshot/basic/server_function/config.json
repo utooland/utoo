@@ -1,0 +1,22 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.ts",
+        "name": "main"
+      }
+    ],
+    "output": {
+      "path": "output/client"
+    },
+    "server": {
+      "output": {
+        "path": "output/server",
+        "filename": "main.js"
+      },
+      "functions": {
+        "callServerModule": "@app/transport"
+      }
+    }
+  }
+}
