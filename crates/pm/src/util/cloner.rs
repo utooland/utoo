@@ -196,23 +196,37 @@ mod hardlink_clone {
                 }
             }
 
-            // Phase 3: Clone files (hardlink or copy). On any hardlink
-            // failure — EXDEV (cache and target on different filesystems,
-            // e.g. global installs into /usr/local), EPERM, EMLINK, etc. —
-            // fall back to copy for the rest of this clone. Once one file
-            // fails, the others on the same src/dst pair will fail the same
-            // way, so retrying hardlink would be wasted work.
+            // Phase 3: Clone files (hardlink, fall back to copy on error).
+            //
+            // EXDEV (src cache and dst on different filesystems, e.g. a
+            // global install where ~/.cache/nm lives on a different volume
+            // than /usr/local) is a property of the src/dst pair — every
+            // remaining file would fail the same way, so latch `force_copy`
+            // and skip hardlink for the rest of this clone.
+            //
+            // Any other hardlink error (EMLINK on a single inode whose link
+            // count is exhausted, EPERM on a specific file, etc.) is
+            // per-file: copy this one and keep trying hardlink on the next.
             for entry in &files {
                 if force_copy {
                     copy_file_sync(&entry.src, &entry.dst)?;
                 } else if let Err(e) = fs::hard_link(&entry.src, &entry.dst) {
-                    tracing::warn!(
-                        "hardlink failed for {} -> {}: {}; falling back to copy for remaining files",
-                        entry.src.display(),
-                        entry.dst.display(),
-                        e
-                    );
-                    force_copy = true;
+                    if e.kind() == io::ErrorKind::CrossesDevices {
+                        tracing::warn!(
+                            "cross-device hardlink {} -> {}: {}; falling back to copy for remaining files",
+                            src.display(),
+                            dst.display(),
+                            e
+                        );
+                        force_copy = true;
+                    } else {
+                        tracing::warn!(
+                            "hardlink failed for {} -> {}: {}; falling back to copy for this file",
+                            entry.src.display(),
+                            entry.dst.display(),
+                            e
+                        );
+                    }
                     copy_file_sync(&entry.src, &entry.dst)?;
                 }
             }
