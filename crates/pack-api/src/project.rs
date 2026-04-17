@@ -24,8 +24,8 @@ use std::{
 use tracing::{Instrument, field::Empty};
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{
-    Completion, Completions, NonLocalValue, OperationValue, OperationVc, ReadRef, ResolvedVc,
-    State, TaskInput, TransientInstance, TryFlatJoinIterExt, TryJoinIterExt, Vc,
+    Completion, Completions, FxIndexMap, NonLocalValue, OperationValue, OperationVc, ReadRef,
+    ResolvedVc, State, TaskInput, TransientInstance, TryFlatJoinIterExt, TryJoinIterExt, Vc,
     trace::TraceRawVcs,
 };
 use turbo_tasks_env::{EnvMap, ProcessEnv};
@@ -176,6 +176,44 @@ fn strip_root_prefix(path: &str, root: &str) -> Option<String> {
         .strip_prefix(root_sys.as_ref())
         .ok()
         .map(|relative| trim_leading_path_separators(&relative.to_string_lossy()).to_owned())
+}
+
+fn extend_client_define_env_with_socket_server(
+    define_env: &mut FxIndexMap<RcStr, RcStr>,
+    socket_server: Option<RcStr>,
+) {
+    match socket_server {
+        Some(socket_server) => {
+            define_env.insert(
+                "process.env.SOCKET_SERVER".into(),
+                serde_json::to_string(socket_server.as_str())
+                    .unwrap()
+                    .into(),
+            );
+        }
+        None => {
+            define_env
+                .entry("process.env.SOCKET_SERVER".into())
+                .or_insert_with(|| "undefined".into());
+        }
+    }
+}
+
+async fn client_define_env(
+    config: Vc<Config>,
+    process_env: ResolvedVc<Box<dyn ProcessEnv>>,
+) -> Result<Vc<EnvMap>> {
+    let mut define_env = (*config.define_env().await?).clone();
+    let socket_server =
+        if let Some(socket_server) = &*process_env.read(rcstr!("SOCKET_SERVER")).await? {
+            Some(socket_server.clone())
+        } else {
+            std::env::var("SOCKET_SERVER").ok().map(Into::into)
+        };
+
+    extend_client_define_env_with_socket_server(&mut define_env, socket_server);
+
+    Ok(Vc::cell(define_env))
 }
 
 #[derive(
@@ -1117,10 +1155,9 @@ impl Project {
 
     #[turbo_tasks::function]
     pub(super) async fn client_compile_time_info(&self) -> Result<Vc<CompileTimeInfo>> {
-        let define_env = (*self.config.define_env().await?).clone();
         Ok(get_client_compile_time_info(
             (*self.config.target().await?).clone(),
-            Vc::cell(define_env),
+            client_define_env(*self.config, self.process_env).await?,
             self.config.mode(),
             self.config.provider_config(),
         ))
@@ -1139,21 +1176,22 @@ impl Project {
     /// Returns the appropriate compile-time info for the given platform.
     #[turbo_tasks::function]
     pub(super) async fn compile_time_info_for_platform(&self) -> Result<Vc<CompileTimeInfo>> {
-        let define_env = (*self.config.define_env().await?).clone();
         let target = (*self.config.target().await?).clone();
-        let define_env_vc = Vc::cell(define_env);
         match &*self.config.platform().await? {
             Platform::Web => Ok(get_client_compile_time_info(
                 target,
-                define_env_vc,
+                client_define_env(*self.config, self.process_env).await?,
                 self.config.mode(),
                 self.config.provider_config(),
             )),
-            Platform::Node => Ok(get_server_compile_time_info(
-                target,
-                define_env_vc,
-                self.config.provider_config(),
-            )),
+            Platform::Node => {
+                let define_env = (*self.config.define_env().await?).clone();
+                Ok(get_server_compile_time_info(
+                    target,
+                    Vc::cell(define_env),
+                    self.config.provider_config(),
+                ))
+            }
         }
     }
 
