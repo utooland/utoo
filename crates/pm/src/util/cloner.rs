@@ -107,7 +107,6 @@ use std::os::unix::ffi::OsStrExt;
 #[cfg(target_os = "macos")]
 use libc::clonefile;
 
-#[cfg(not(target_os = "macos"))]
 mod hardlink_clone {
     use std::collections::HashSet;
     use std::path::{Path, PathBuf};
@@ -164,7 +163,7 @@ mod hardlink_clone {
     }
 
     /// Clone directory using spawn_blocking for sync I/O.
-    /// Uses hardlink when possible, falls back to copy.
+    /// Uses hardlink when possible, falls back to copy on cross-device errors.
     pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
         let err_msg = format!("Failed to clone {} to {}", src.display(), dst.display());
         let src = src.to_path_buf();
@@ -178,7 +177,12 @@ mod hardlink_clone {
                 ));
             }
 
-            let use_copy = has_install_script_sync(&src);
+            // Prefer hardlink unless the package has an install script (copy is
+            // required then to ensure the install-script marker is not shared).
+            // Switch to copy for all remaining files as soon as a cross-device
+            // hardlink error is encountered (EXDEV), since the entire clone will
+            // be cross-device in that case.
+            let mut use_copy = has_install_script_sync(&src);
 
             // Phase 1: Collect all files and directories
             let mut files = Vec::new();
@@ -201,7 +205,20 @@ mod hardlink_clone {
                 if use_copy {
                     copy_file_sync(&entry.src, &entry.dst)?;
                 } else {
-                    fs::hard_link(&entry.src, &entry.dst)?;
+                    match fs::hard_link(&entry.src, &entry.dst) {
+                        Ok(()) => {}
+                        Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {
+                            // Cache and install dirs are on different filesystems.
+                            // Switch to copy for this file and all remaining ones.
+                            tracing::debug!(
+                                "hard_link cross-device, falling back to copy: {}",
+                                entry.src.display()
+                            );
+                            use_copy = true;
+                            copy_file_sync(&entry.src, &entry.dst)?;
+                        }
+                        Err(e) => return Err(e),
+                    }
                 }
             }
             Ok(())
@@ -374,28 +391,52 @@ async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
         let src_c = CString::new(real_src.as_os_str().as_bytes())?;
         let dst_c = CString::new(dst.as_os_str().as_bytes())?;
 
-        Retry::spawn(create_retry_strategy(), || async {
-            match unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) } {
-                0 => {
-                    tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
-                    Ok(())
-                }
-                _ => {
-                    let _ = fs::remove_dir_all(dst).await.map_err(|e| {
-                        tracing::debug!(
-                            "Failed to clean target directory {}: {}",
-                            dst.display(),
-                            e
-                        );
-                    });
-                    Err(anyhow::anyhow!(
-                        "Failed to clone file: {}",
-                        std::io::Error::last_os_error()
-                    ))
-                }
+        // First attempt outside the retry loop so we can inspect the errno.
+        // clonefile(2) fails immediately and deterministically with EXDEV when
+        // the source (cache-dir) and destination (install location) are on
+        // different filesystems — retrying would be pointless; fall back to
+        // hardlink/copy instead.
+        let first_ret = unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) };
+        if first_ret != 0 {
+            let io_err = std::io::Error::last_os_error();
+            let _ = fs::remove_dir_all(dst).await.map_err(|e| {
+                tracing::debug!("Failed to clean target directory {}: {}", dst.display(), e);
+            });
+
+            if io_err.kind() == std::io::ErrorKind::CrossesDevices {
+                tracing::debug!(
+                    "clonefile cross-device (EXDEV), falling back to hardlink/copy: {} -> {}",
+                    real_src.display(),
+                    dst.display()
+                );
+                Retry::spawn(create_retry_strategy(), || async {
+                    hardlink_clone::clone_dir(&real_src, dst).await
+                })
+                .await?;
+            } else {
+                // Transient error: retry clonefile.
+                Retry::spawn(create_retry_strategy(), || async {
+                    match unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) } {
+                        0 => Ok(()),
+                        _ => {
+                            let _ = fs::remove_dir_all(dst).await.map_err(|e| {
+                                tracing::debug!(
+                                    "Failed to clean target directory {}: {}",
+                                    dst.display(),
+                                    e
+                                );
+                            });
+                            Err(anyhow::anyhow!(
+                                "Failed to clone file: {}",
+                                std::io::Error::last_os_error()
+                            ))
+                        }
+                    }
+                })
+                .await?;
             }
-        })
-        .await?;
+        }
+        tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
     }
 
     #[cfg(not(target_os = "macos"))]
