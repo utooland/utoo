@@ -204,12 +204,7 @@ async fn client_define_env(
     process_env: ResolvedVc<Box<dyn ProcessEnv>>,
 ) -> Result<Vc<EnvMap>> {
     let mut define_env = (*config.define_env().await?).clone();
-    let socket_server =
-        if let Some(socket_server) = &*process_env.read(rcstr!("SOCKET_SERVER")).await? {
-            Some(socket_server.clone())
-        } else {
-            std::env::var("SOCKET_SERVER").ok().map(Into::into)
-        };
+    let socket_server = (*process_env.read(rcstr!("SOCKET_SERVER")).await?).clone();
 
     extend_client_define_env_with_socket_server(&mut define_env, socket_server);
 
