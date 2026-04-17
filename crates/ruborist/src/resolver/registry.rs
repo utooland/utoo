@@ -32,6 +32,19 @@ pub enum ResolveError<E> {
     Http { url: String, source: anyhow::Error },
     /// Dependency type not yet supported (e.g. local file path)
     Unsupported { spec: String, reason: &'static str },
+    /// Error augmented with the dependency chain that led to the failing dep.
+    ///
+    /// `chain` is ordered root → immediate parent as resolved `(name, version)`
+    /// pairs; the failing dep's `(name, spec)` is appended as the final entry.
+    /// (Ancestor entries carry resolved versions; the last entry carries the
+    /// unresolved requested spec.)
+    ///
+    /// `Display` intentionally does not render `chain` — CLI consumers render
+    /// it via downcast (see `pm::util::format_print::format_resolve_chain`).
+    WithChain {
+        chain: Vec<(String, String)>,
+        source: Box<ResolveError<E>>,
+    },
 }
 
 impl<E: std::fmt::Display> std::fmt::Display for ResolveError<E> {
@@ -52,6 +65,10 @@ impl<E: std::fmt::Display> std::fmt::Display for ResolveError<E> {
             ResolveError::Unsupported { spec, reason } => {
                 write!(f, "Unsupported dependency '{spec}': {reason}")
             }
+            // Display delegates to the wrapped error. The `chain` payload is
+            // structured data meant for CLI renderers (pm's `format_print`) to
+            // decorate — keeping presentation concerns out of the library.
+            ResolveError::WithChain { source, .. } => write!(f, "{source}"),
         }
     }
 }
@@ -67,6 +84,7 @@ impl<E: std::error::Error + 'static> std::error::Error for ResolveError<E> {
             ResolveError::Git { source, .. } | ResolveError::Http { source, .. } => {
                 Some(source.as_ref())
             }
+            ResolveError::WithChain { source, .. } => Some(source.as_ref()),
         }
     }
 }
@@ -246,5 +264,25 @@ mod tests {
         let result =
             resolve_registry_dep(&registry, "nonexistent", "^1.0.0", &EdgeType::Prod).await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_with_chain_display_delegates_to_source() {
+        // Display is data-only: delegates to the inner error. CLI presentation
+        // of the chain lives in the pm crate, not here.
+        let inner: ResolveError<std::io::Error> =
+            ResolveError::NoVersions("@antskill/tegg-agent".to_string());
+        let wrapped: ResolveError<std::io::Error> = ResolveError::WithChain {
+            chain: vec![
+                ("my-app".to_string(), "1.0.0".to_string()),
+                ("@antskill/tegg-agent".to_string(), "^1.0.0".to_string()),
+            ],
+            source: Box::new(inner),
+        };
+
+        assert_eq!(
+            wrapped.to_string(),
+            "No versions available for @antskill/tegg-agent"
+        );
     }
 }

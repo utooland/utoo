@@ -275,6 +275,55 @@ impl DependencyGraph {
             .map(|edge| edge.source())
     }
 
+    /// Collect the logical dependency ancestry of a node in root→`from` order (inclusive).
+    ///
+    /// Walks the "required by" chain — for each node, finds a node whose resolved
+    /// dependency points at it, and continues until reaching the root (or hitting
+    /// a cycle). This is *logical* ancestry: which package declared the dependency.
+    /// It differs from the *physical* tree (install location), where hoisted
+    /// packages all sit directly under root regardless of who required them.
+    ///
+    /// Each entry is `(name, version)`. Used to report which dependency chain
+    /// introduced a failing package.
+    pub(crate) fn logical_ancestry(&self, from: NodeIndex) -> Vec<(String, String)> {
+        let requester = self.build_requester_index();
+
+        let mut chain: Vec<(String, String)> = std::iter::successors(Some(from), |&idx| {
+            requester
+                .get(&idx)
+                .copied()
+                .filter(|_| idx != self.root_index)
+        })
+        .scan(HashSet::new(), |seen, idx| seen.insert(idx).then_some(idx))
+        .map(|idx| {
+            let node = &self.graph[idx];
+            (node.name.clone(), node.version.clone())
+        })
+        .collect();
+        chain.reverse();
+        chain
+    }
+
+    /// Reverse index: resolved dep target → first depender encountered.
+    ///
+    /// Scanning every dep edge is `O(E)`; fine because the only caller
+    /// (`logical_ancestry`) runs on the error path.
+    fn build_requester_index(&self) -> HashMap<NodeIndex, NodeIndex> {
+        let mut index = HashMap::new();
+        for edge in self.graph.edge_references() {
+            let GraphEdge::Dependency(dep) = edge.weight() else {
+                continue;
+            };
+            let Some(target) = dep.to else { continue };
+            let src = edge.source();
+            if target == src {
+                continue;
+            }
+            index.entry(target).or_insert(src);
+        }
+        index
+    }
+
     /// Get all physical children of a node.
     pub fn get_physical_children(&self, node: NodeIndex) -> Vec<NodeIndex> {
         self.graph
@@ -672,6 +721,55 @@ mod tests {
         let deps = graph.get_dependency_edges(graph.root_index);
         assert!(deps[0].1.valid);
         assert_eq!(deps[0].1.to, Some(child_idx));
+    }
+
+    #[test]
+    fn test_logical_ancestry_traces_hoisted_chain() {
+        // root has a dep on A; A has a dep on B; B has a dep on C.
+        // All three are hoisted flat under root (physical tree: root→A, root→B, root→C).
+        // Logical chain for C should be root → A → B → C, NOT just root → C.
+        let pkg = create_pkg("my-app", "1.0.0");
+        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
+
+        let a_idx = graph.add_node(PackageNode::from_version_manifest(
+            "a".to_string(),
+            PathBuf::from("node_modules/a"),
+            create_version_manifest("a", "1.0.0"),
+        ));
+        let b_idx = graph.add_node(PackageNode::from_version_manifest(
+            "b".to_string(),
+            PathBuf::from("node_modules/b"),
+            create_version_manifest("b", "2.0.0"),
+        ));
+        let c_idx = graph.add_node(PackageNode::from_version_manifest(
+            "c".to_string(),
+            PathBuf::from("node_modules/c"),
+            create_version_manifest("c", "3.0.0"),
+        ));
+
+        // Hoisted installation layout — all three are direct physical children of root.
+        graph.add_physical_edge(graph.root_index, a_idx);
+        graph.add_physical_edge(graph.root_index, b_idx);
+        graph.add_physical_edge(graph.root_index, c_idx);
+
+        // Logical edges: root → A, A → B, B → C
+        let e1 = graph.add_dependency_edge(
+            graph.root_index,
+            "a".to_string(),
+            "^1.0.0".to_string(),
+            EdgeType::Prod,
+        );
+        graph.mark_dependency_resolved(e1, a_idx);
+        let e2 =
+            graph.add_dependency_edge(a_idx, "b".to_string(), "^2.0.0".to_string(), EdgeType::Prod);
+        graph.mark_dependency_resolved(e2, b_idx);
+        let e3 =
+            graph.add_dependency_edge(b_idx, "c".to_string(), "^3.0.0".to_string(), EdgeType::Prod);
+        graph.mark_dependency_resolved(e3, c_idx);
+
+        let chain = graph.logical_ancestry(c_idx);
+        let names: Vec<&str> = chain.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, vec!["my-app", "a", "b", "c"]);
     }
 
     #[test]

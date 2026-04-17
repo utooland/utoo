@@ -357,7 +357,11 @@ fn main() {
         .block_on(async_main());
 
     if let Err(e) = result {
-        tracing::error!("{:#}", e);
+        if let Some(chain) = util::format_print::format_resolve_chain(&e) {
+            tracing::error!("{:#}\n\n{chain}", e);
+        } else {
+            tracing::error!("{:#}", e);
+        }
         if let Some(log_path) = get_log_file_path() {
             eprintln!("Full logs saved to: {}", log_path.display());
         }
