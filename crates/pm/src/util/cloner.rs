@@ -178,7 +178,7 @@ mod hardlink_clone {
                 ));
             }
 
-            let use_copy = has_install_script_sync(&src);
+            let mut force_copy = has_install_script_sync(&src);
 
             // Phase 1: Collect all files and directories
             let mut files = Vec::new();
@@ -196,12 +196,38 @@ mod hardlink_clone {
                 }
             }
 
-            // Phase 3: Clone files (hardlink or copy)
+            // Phase 3: Clone files (hardlink, fall back to copy on error).
+            //
+            // EXDEV (src cache and dst on different filesystems, e.g. a
+            // global install where ~/.cache/nm lives on a different volume
+            // than /usr/local) is a property of the src/dst pair — every
+            // remaining file would fail the same way, so latch `force_copy`
+            // and skip hardlink for the rest of this clone.
+            //
+            // Any other hardlink error (EMLINK on a single inode whose link
+            // count is exhausted, EPERM on a specific file, etc.) is
+            // per-file: copy this one and keep trying hardlink on the next.
             for entry in &files {
-                if use_copy {
+                if force_copy {
                     copy_file_sync(&entry.src, &entry.dst)?;
-                } else {
-                    fs::hard_link(&entry.src, &entry.dst)?;
+                } else if let Err(e) = fs::hard_link(&entry.src, &entry.dst) {
+                    if e.kind() == io::ErrorKind::CrossesDevices {
+                        tracing::warn!(
+                            "cross-device hardlink {} -> {}: {}; falling back to copy for remaining files",
+                            src.display(),
+                            dst.display(),
+                            e
+                        );
+                        force_copy = true;
+                    } else {
+                        tracing::warn!(
+                            "hardlink failed for {} -> {}: {}; falling back to copy for this file",
+                            entry.src.display(),
+                            entry.dst.display(),
+                            e
+                        );
+                    }
+                    copy_file_sync(&entry.src, &entry.dst)?;
                 }
             }
             Ok(())
@@ -1079,6 +1105,94 @@ mod tests {
                 "Regular file should preserve permissions in subdirectories"
             );
 
+            Ok(())
+        }
+
+        /// Pre-populate the destination with a conflicting file so
+        /// `fs::hard_link` fails with `AlreadyExists` (a non-EXDEV kind).
+        /// The failing file must be copied (not hardlinked), and the
+        /// remaining file must still be hardlinked — no global latch on
+        /// per-file errors.
+        #[cfg(unix)]
+        #[tokio::test]
+        async fn test_clone_dir_per_file_fallback_does_not_latch() -> Result<()> {
+            use std::os::unix::fs::MetadataExt;
+
+            let temp = TempDir::new()?;
+            let src_dir = temp.path().join("src");
+            let dst_dir = temp.path().join("dst");
+
+            create_test_structure(
+                &src_dir,
+                &[
+                    ("file_a.txt", Some(b"content_a")),
+                    ("file_b.txt", Some(b"content_b")),
+                ],
+            )
+            .await?;
+
+            // Pre-create a conflicting file_a so hard_link fails with AlreadyExists
+            fs::create_dir_all(&dst_dir).await?;
+            fs::write(dst_dir.join("file_a.txt"), b"stale").await?;
+
+            hardlink_clone::clone_dir(&src_dir, &dst_dir).await?;
+
+            assert_eq!(
+                fs::read_to_string(dst_dir.join("file_a.txt")).await?,
+                "content_a",
+                "file_a should be overwritten by the copy fallback"
+            );
+            assert_eq!(
+                fs::read_to_string(dst_dir.join("file_b.txt")).await?,
+                "content_b"
+            );
+
+            // file_a: different inode → copied (fallback triggered)
+            // file_b: same inode as src → hardlinked (no latch from file_a's failure)
+            let src_a_ino = fs::metadata(src_dir.join("file_a.txt")).await?.ino();
+            let dst_a_ino = fs::metadata(dst_dir.join("file_a.txt")).await?.ino();
+            assert_ne!(
+                src_a_ino, dst_a_ino,
+                "file_a was copied, inode should differ"
+            );
+
+            let src_b_ino = fs::metadata(src_dir.join("file_b.txt")).await?.ino();
+            let dst_b_ino = fs::metadata(dst_dir.join("file_b.txt")).await?.ino();
+            assert_eq!(
+                src_b_ino, dst_b_ino,
+                "file_b should be hardlinked — per-file fallback must not latch"
+            );
+
+            Ok(())
+        }
+
+        /// When `_hasInstallScript` is set in the cache's parent, every
+        /// file must be copied — hardlinks would let later install-script
+        /// mutations leak back into the shared cache.
+        #[cfg(unix)]
+        #[tokio::test]
+        async fn test_clone_dir_install_script_forces_copy() -> Result<()> {
+            use std::os::unix::fs::MetadataExt;
+
+            let temp = TempDir::new()?;
+            // has_install_script_sync checks `src.parent()/_hasInstallScript`,
+            // mirroring the cache layout `<cache>/<name>/<version>/package`.
+            let cache_version = temp.path().join("pkg/1.0.0");
+            let src_dir = cache_version.join("package");
+            let dst_dir = temp.path().join("node_modules/pkg");
+
+            fs::create_dir_all(&src_dir).await?;
+            fs::write(src_dir.join("index.js"), b"module.exports = {}").await?;
+            fs::write(cache_version.join("_hasInstallScript"), b"").await?;
+
+            hardlink_clone::clone_dir(&src_dir, &dst_dir).await?;
+
+            let src_ino = fs::metadata(src_dir.join("index.js")).await?.ino();
+            let dst_ino = fs::metadata(dst_dir.join("index.js")).await?.ino();
+            assert_ne!(
+                src_ino, dst_ino,
+                "install-script packages must be copied, not hardlinked"
+            );
             Ok(())
         }
     }
