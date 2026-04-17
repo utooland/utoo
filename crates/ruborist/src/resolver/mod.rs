@@ -11,5 +11,7 @@ pub mod preload;
 pub mod registry;
 pub mod runtime;
 pub mod semver;
+#[cfg(feature = "http-tarball")]
+pub(crate) mod tar;
 pub mod version;
 pub mod workspace;

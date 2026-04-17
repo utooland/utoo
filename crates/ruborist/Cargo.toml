@@ -9,6 +9,7 @@ license     = "MIT"
 [dependencies]
 anyhow       = { workspace = true }
 bytes        = "1"
+pathdiff     = { workspace = true }
 deno_semver  = "0.7"
 dirs         = { workspace = true }
 futures      = "0.3"

@@ -1,0 +1,10 @@
+{
+  "name": "e2e-file-deps",
+  "version": "1.0.0",
+  "private": true,
+  "description": "e2e test for file: dependency resolution",
+  "dependencies": {
+    "local-dir-pkg": "file:./local-dir",
+    "local-tarball-pkg": "file:./local-tarball.tgz"
+  }
+}

@@ -182,12 +182,74 @@ done
 echo -e "${GREEN}PASS: HTTP tarball warm install successful${NC}"
 cd ../../..
 
-# Case 8.4: stale lockfile is detected and regenerated on `ut install`
+# Case 8.4: file: dependency install. Directory deps install as a SYMLINK
+# (npm-compatible); tarball deps extract + clone from the cache slot.
+echo -e "${YELLOW}Case 8.4: file: dependency install${NC}"
+cd e2e/pm/file-deps
+rm -rf node_modules package-lock.json
+rm -rf ~/.cache/nm/local-dir-pkg ~/.cache/nm/local-tarball-pkg
+utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for file-deps${NC}"; exit 1; }
+for pkg in local-dir-pkg local-tarball-pkg; do
+    if [ ! -f "node_modules/$pkg/package.json" ]; then
+        echo -e "${RED}FAIL: $pkg (file:) not installed${NC}"
+        exit 1
+    fi
+done
+# Directory dep must be a SYMLINK (to ../local-dir), not a copy — matches npm.
+if [ ! -L "node_modules/local-dir-pkg" ]; then
+    echo -e "${RED}FAIL: local-dir-pkg should be a symlink to ../local-dir, got a regular directory${NC}"
+    exit 1
+fi
+LINK_TARGET=$(readlink node_modules/local-dir-pkg)
+if [ "$LINK_TARGET" != "../local-dir" ]; then
+    echo -e "${RED}FAIL: local-dir-pkg symlink points to '$LINK_TARGET', expected '../local-dir'${NC}"
+    exit 1
+fi
+# Tarball dep must be a real directory (clone from cache), not a symlink.
+if [ -L "node_modules/local-tarball-pkg" ]; then
+    echo -e "${RED}FAIL: local-tarball-pkg should be a real directory (clone), got a symlink${NC}"
+    exit 1
+fi
+ACTUAL=$(node -e "console.log(require('./node_modules/local-dir-pkg/package.json').version)")
+if [ "$ACTUAL" != "0.1.0" ]; then
+    echo -e "${RED}FAIL: local-dir-pkg expected v0.1.0, got $ACTUAL${NC}"
+    exit 1
+fi
+ACTUAL=$(node -e "console.log(require('./node_modules/local-tarball-pkg/package.json').version)")
+if [ "$ACTUAL" != "2.3.4" ]; then
+    echo -e "${RED}FAIL: local-tarball-pkg expected v2.3.4, got $ACTUAL${NC}"
+    exit 1
+fi
+# Lockfile entries match npm's format:
+#  - dir dep:     link: true + resolved: <root-relative path>  (no file: prefix)
+#  - tarball dep: resolved:   file:<root-relative path>        (with file: prefix)
+# Absolute paths in the lockfile would make it non-portable across machines.
+node -e '
+const lock = require("./package-lock.json");
+const dir = lock.packages["node_modules/local-dir-pkg"] || {};
+const tar = lock.packages["node_modules/local-tarball-pkg"] || {};
+if (dir.link !== true) { console.error("local-dir-pkg missing link:true", dir); process.exit(1); }
+if (dir.resolved !== "local-dir") { console.error("local-dir-pkg resolved expected \"local-dir\", got", dir.resolved); process.exit(1); }
+if (tar.resolved !== "file:local-tarball.tgz") { console.error("local-tarball-pkg resolved expected \"file:local-tarball.tgz\", got", tar.resolved); process.exit(1); }
+' || { echo -e "${RED}FAIL: lockfile entries wrong for file: deps${NC}"; exit 1; }
+echo -e "${GREEN}PASS: file: dependency install successful${NC}"
+
+# Case 8.5: file: warm install (cache hit for tarball; dir symlink rewritten)
+echo -e "${YELLOW}Case 8.5: file: warm install${NC}"
+rm -rf node_modules package-lock.json
+utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo warm install failed for file-deps${NC}"; exit 1; }
+[ -L "node_modules/local-dir-pkg" ] || { echo -e "${RED}FAIL: local-dir-pkg symlink missing after warm install${NC}"; exit 1; }
+[ -d "node_modules/local-tarball-pkg" ] && [ ! -L "node_modules/local-tarball-pkg" ] \
+  || { echo -e "${RED}FAIL: local-tarball-pkg should be a real dir after warm install${NC}"; exit 1; }
+echo -e "${GREEN}PASS: file: warm install successful${NC}"
+cd ../../..
+
+# Case 8.6: stale lockfile is detected and regenerated on `ut install`
 #
 # package.json declares two deps; we seed an empty lockfile. A correct
 # `ut install` must notice the mismatch, re-resolve, and install both.
 # Regression guard for #2576.
-echo -e "${YELLOW}Case 8.4: stale lockfile detection${NC}"
+echo -e "${YELLOW}Case 8.6: stale lockfile detection${NC}"
 cd e2e/pm/stale-lockfile
 rm -rf node_modules
 cat > package-lock.json <<'JSON'

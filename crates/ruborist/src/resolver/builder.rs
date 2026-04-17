@@ -23,6 +23,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[cfg(feature = "http-tarball")]
+use anyhow::Context as _;
+
 use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
 use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
@@ -341,6 +344,101 @@ pub enum ProcessResult {
     Skipped,
 }
 
+/// Handle a `file:` dep: dir → Link node inline (returns
+/// `ControlFlow::Break`); tarball → stream bytes through the shared
+/// `commit_tarball_bytes` and hand the `ResolvedPackage` back to the
+/// normal BFS flow via `ControlFlow::Continue`.
+#[cfg(feature = "http-tarball")]
+async fn process_file_dep<E>(
+    graph: &mut DependencyGraph,
+    node_index: NodeIndex,
+    conflict_parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    path_spec: &str,
+    cache_dir: Option<&Path>,
+) -> Result<std::ops::ControlFlow<ProcessResult, ResolvedPackage>, ResolveError<E>> {
+    use std::ops::ControlFlow;
+
+    use crate::resolver::http::file_cache_slot;
+    use crate::resolver::tar::commit_tarball_bytes;
+
+    let file_err = |source: anyhow::Error| ResolveError::File {
+        spec: edge.spec.clone(),
+        source,
+    };
+
+    // Base dir is the on-disk source for root/workspace/link nodes, or
+    // the parent of the `file:<abs>` tarball URL stamped on a transitive
+    // file-tarball dep's manifest. Registry nodes have no valid base.
+    let node = graph.get_node(node_index);
+    let base = node
+        .filter(|n| n.is_root() || n.is_workspace() || n.is_link())
+        .map(|n| n.path.clone())
+        .or_else(|| {
+            let NodeManifest::Registry(m) = &node?.manifest else {
+                return None;
+            };
+            let url = m.dist.tarball.as_deref()?.strip_prefix("file:")?;
+            std::path::Path::new(url).parent().map(Path::to_path_buf)
+        })
+        .ok_or_else(|| ResolveError::Unsupported {
+            spec: edge.spec.clone(),
+            reason: "transitive file: deps inside a published registry package are not supported",
+        })?;
+    let abs = base.join(path_spec);
+
+    let meta = match std::fs::metadata(&abs) {
+        Ok(m) => m,
+        Err(_) if edge.edge_type == EdgeType::Optional => {
+            return Ok(ControlFlow::Break(ProcessResult::Skipped));
+        }
+        Err(e) => {
+            return Err(file_err(
+                anyhow::Error::new(e).context(format!("file: target {}", abs.display())),
+            ));
+        }
+    };
+
+    if meta.is_dir() {
+        // Symlink install — same graph shape as a workspace link. We
+        // intentionally do not walk the linked package's transitive deps
+        // (npm-link semantics: the linked dir owns its own node_modules).
+        let pkg = crate::model::util::read_package_json(&abs)
+            .await
+            .map_err(file_err)?;
+        let idx = graph.add_node(PackageNode::link_from_package_json(abs, pkg));
+        graph.add_physical_edge(conflict_parent, idx);
+        graph.mark_dependency_resolved(edge.edge_id, idx);
+        update_node_type_from_edge(graph, node_index, idx, &edge.edge_type);
+        return Ok(ControlFlow::Break(ProcessResult::Created(idx)));
+    }
+
+    let cache_dir = cache_dir
+        .ok_or_else(|| file_err(anyhow::anyhow!("cache_dir required for file: tarball")))?
+        .to_path_buf();
+    let slot = file_cache_slot(&abs);
+    let pinned = format!("file:{}", abs.display());
+    let manifest = match tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+        let bytes = std::fs::read(&abs)
+            .with_context(|| format!("failed to read tarball {}", abs.display()))?;
+        commit_tarball_bytes(&cache_dir, &bytes, pinned, &slot)
+    })
+    .await
+    {
+        Ok(Ok(m)) => m,
+        Ok(Err(_)) | Err(_) if edge.edge_type == EdgeType::Optional => {
+            return Ok(ControlFlow::Break(ProcessResult::Skipped));
+        }
+        Ok(Err(source)) => return Err(file_err(source)),
+        Err(join) => return Err(file_err(join.into())),
+    };
+    Ok(ControlFlow::Continue(ResolvedPackage {
+        name: manifest.name.clone(),
+        version: manifest.version.clone(),
+        manifest: Arc::new(manifest),
+    }))
+}
+
 /// Process a single dependency edge.
 ///
 /// This is the core logic for resolving a dependency:
@@ -451,10 +549,39 @@ pub async fn process_dependency<R: RegistryClient>(
                     );
                     return Ok(ProcessResult::Skipped);
                 }
+                PackageSpec::Local {
+                    protocol: Protocol::File,
+                    path,
+                } => {
+                    #[cfg(feature = "http-tarball")]
+                    {
+                        match process_file_dep(
+                            graph,
+                            node_index,
+                            conflict_parent,
+                            edge_info,
+                            path,
+                            config.cache_dir.as_deref(),
+                        )
+                        .await?
+                        {
+                            std::ops::ControlFlow::Break(r) => return Ok(r),
+                            std::ops::ControlFlow::Continue(pkg) => pkg,
+                        }
+                    }
+                    #[cfg(not(feature = "http-tarball"))]
+                    {
+                        let _ = path;
+                        return Err(ResolveError::Unsupported {
+                            spec: edge_info.spec.clone(),
+                            reason: "file: deps require the 'http-tarball' feature",
+                        });
+                    }
+                }
                 PackageSpec::Local { .. } => {
                     return Err(ResolveError::Unsupported {
                         spec: edge_info.spec.clone(),
-                        reason: "local (file:/link:/portal:) dependencies are not yet supported",
+                        reason: "local (link:/portal:) dependencies are not yet supported",
                     });
                 }
                 PackageSpec::Http { url } => {

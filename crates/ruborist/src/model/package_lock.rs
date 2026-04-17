@@ -326,6 +326,8 @@ fn create_non_root_lock_package(
     if node.is_workspace() {
         pkg.version = Some(manifest.version().to_string());
     } else if node.is_link() {
+        // Workspace links and `file:<dir>` deps both use `NodeType::Link`;
+        // `node.path` is the on-disk source in both cases.
         pkg.link = Some(true);
         pkg.resolved = Some(get_relative_path(&node.path, root_path));
     } else {
@@ -334,7 +336,10 @@ fn create_non_root_lock_package(
         pkg.version = Some(manifest.version().to_string());
 
         if let Some(dist) = manifest.dist() {
-            pkg.resolved = dist.tarball.clone();
+            pkg.resolved = dist
+                .tarball
+                .as_deref()
+                .map(|t| rewrite_resolved(t, root_path));
             pkg.integrity = dist.integrity.clone();
         }
     }
@@ -386,12 +391,26 @@ fn collect_edge_deps(graph: &DependencyGraph, node_index: NodeIndex, pkg: &mut L
     }
 }
 
-/// Get relative path from root.
+/// Compute `path` relative to `root_path`, using POSIX-style separators so
+/// the lockfile is identical across platforms. Falls back to `path` as-is
+/// when neither is absolute (npm convention for already-relative `resolved`
+/// values).
 fn get_relative_path(path: &Path, root_path: &Path) -> String {
-    path.strip_prefix(root_path)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .to_string()
+    let rel = pathdiff::diff_paths(path, root_path).unwrap_or_else(|| path.to_path_buf());
+    rel.to_string_lossy().replace('\\', "/")
+}
+
+/// Rewrite a `dist.tarball` value for the lockfile's `resolved` field.
+///
+/// `file:<abs>` URLs stamped by the file tarball resolver are stored
+/// absolute in memory but must serialize as `file:<root-relative>` to match
+/// npm's format and keep the lockfile portable. Registry HTTPS tarballs
+/// and git URLs pass through unchanged.
+fn rewrite_resolved(tarball: &str, root_path: &Path) -> String {
+    let Some(abs) = tarball.strip_prefix("file:") else {
+        return tarball.to_string();
+    };
+    format!("file:{}", get_relative_path(Path::new(abs), root_path))
 }
 
 #[cfg(test)]

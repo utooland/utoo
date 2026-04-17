@@ -55,20 +55,39 @@ clean_fixture() {
 # Remove entries as features are implemented.
 # ----------------------------------------------------------------
 
-# [SKIP:file-protocol] utoo sends file:path to registry instead of local resolve
-SKIP_FILE_PROTOCOL=(
-  link-dep link-dep-empty link-dep-nested link-dep-cycle
-  link-dep-has-dep-with-optional-dep link-dep-lifecycle-scripts
-  link-dev-dep link-meta-deps link-meta-deps-empty external-link-dep
-  cli-750 cli-750-fresh old-lock-with-link
-  conflict-bundle-file-dep root-bundler
-  tarball-dependencies
-  testing-asymmetrical-bin-no-lock testing-asymmetrical-bin-with-lock
-  workspaces-with-files-spec workspace4
-  audit-mkdirp
-  # yarn-stuff also has https://…/.tgz remote (now supported), but the
-  # file:abbrev-1.1.1.tgz and file:./abbrev-link-target entries still block.
+# [SKIP:file-target-missing] fixture declares `file:` deps whose target
+# directories/tarballs are NOT included in our ported copy (npm's arborist
+# tests originally ran against a mock registry and in-tree sibling dirs that
+# we did not carry over). The `file:` protocol itself is supported — see
+# Case 8.4/8.5 in e2e/utoo-pm.sh.
+SKIP_FILE_TARGET_MISSING=(
+  link-dep link-dep-empty link-dep-cycle
+  link-dep-lifecycle-scripts link-dev-dep
+  external-link-dep cli-750 cli-750-fresh
+  # yarn-stuff references file:abbrev-1.1.1.tgz and file:./abbrev-link-target
+  # which never existed even upstream.
   yarn-stuff
+)
+
+# [SKIP:file-semantic] limitations of utoo's current `file:` resolver:
+#  * link-meta-deps / link-meta-deps-empty — transitive `file:` deps inside
+#    a *registry-published* package; utoo cannot recover the origin dir for
+#    those, since the parent's tarball came from the registry, not disk.
+#  * link-dep-has-dep-with-optional-dep — spec "./a" is parsed as GitHub
+#    shorthand rather than a file path (pre-existing spec-parser behavior).
+#  * audit-mkdirp — inner file: target has a `package.json` without a name.
+SKIP_FILE_SEMANTIC=(
+  link-meta-deps link-meta-deps-empty
+  link-dep-has-dep-with-optional-dep
+  audit-mkdirp
+)
+
+# [SKIP:bundled-dep-copy] bundled-deps copy semantics from local file: roots
+# are not yet implemented (root-bundler/conflict-bundle-file-dep use a mix of
+# file: + bundledDependencies).
+SKIP_BUNDLED_FILE=(
+  conflict-bundle-file-dep root-bundler
+  workspace4 testing-asymmetrical-bin-with-lock
 )
 
 # [SKIP:optional-transitive] optional dep subtree with missing transitive deps should be skipped
@@ -118,7 +137,9 @@ _add_skip() {
     SKIP_LIST="${SKIP_LIST}${n}|${reason}"$'\n'
   done
 }
-_add_skip "file: protocol"      "${SKIP_FILE_PROTOCOL[@]}"
+_add_skip "file: target missing from fixture port" "${SKIP_FILE_TARGET_MISSING[@]}"
+_add_skip "file: resolver limitation"              "${SKIP_FILE_SEMANTIC[@]}"
+_add_skip "bundled file: deps unsupported"         "${SKIP_BUNDLED_FILE[@]}"
 _add_skip "optional transitive"  "${SKIP_OPTIONAL_TRANSITIVE[@]}"
 _add_skip "strict peer deps"    "${SKIP_PEER_STRICT[@]}"
 _add_skip "platform reject"     "${SKIP_PLATFORM[@]}"

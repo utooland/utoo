@@ -88,7 +88,16 @@ pub async fn install_packages(
                 let path = path.clone();
                 let package = package.clone();
                 if let Some(ref resolved) = package.resolved {
-                    let resolved = resolved.clone();
+                    // Lockfile stores `file:` URLs root-relative (npm format).
+                    // Cloner only understands absolute URLs — re-absolutize
+                    // here so the cloner/downloader stays unaware of project
+                    // root plumbing.
+                    let resolved = match resolved.strip_prefix("file:") {
+                        Some(rel) if !Path::new(rel).is_absolute() => {
+                            format!("file:{}", cwd.join(rel).display())
+                        }
+                        _ => resolved.clone(),
+                    };
                     if package.link.is_some() {
                         let link_name = extract_package_name(&path);
                         if link_name.is_empty() {
