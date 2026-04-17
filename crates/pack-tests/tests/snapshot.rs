@@ -22,13 +22,13 @@ use std::{
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{Effects, OperationVc, ResolvedVc, TurboTasks, ValueToString, Vc, take_effects};
 use turbo_tasks_backend::{BackendOptions, TurboTasksBackend, noop_backing_storage};
-use turbo_tasks_fs::FileSystemPath;
+use turbo_tasks_fs::{DirectoryContent, DirectoryEntry, FileSystemPath};
 use turbopack_core::{
     asset::Asset,
     issue::{CollectibleIssuesExt, IssueFilter},
     output::{OutputAsset, OutputAssetsReference},
 };
-use turbopack_test_utils::snapshot::{UPDATE, diff, expected, matches_expected, snapshot_issues};
+use turbopack_test_utils::snapshot::{UPDATE, diff, matches_expected, snapshot_issues};
 
 use crate::util::REPO_ROOT;
 
@@ -309,10 +309,21 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
 
     // Get output assets and walk through them
     let project = project_container.project();
-    let output_path = project.dist_root().owned().await?;
+    let dist_root = project.dist_root().owned().await?;
+    let server_dist_root = project.server_dist_root().owned().await?;
 
-    // Get expected output files from the output directory
-    let expected_paths = expected(output_path.clone()).await?;
+    // Determine snapshot comparison root:
+    // If server output is inside client dist_root (e.g. dist/ + dist/server),
+    // use dist_root. Otherwise they're siblings (e.g. output/client + output/server),
+    // so use the parent directory.
+    let output_path = if server_dist_root.is_inside_ref(&dist_root) {
+        dist_root.clone()
+    } else {
+        dist_root.parent()
+    };
+
+    // Get expected output files from the output directory (recursive)
+    let expected_paths = expected_recursive(output_path.clone()).await?;
 
     let output_assets = all_output_assets_operation(project_container)
         .connect()
@@ -329,7 +340,7 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
 
     // Process all assets
     while let Some(asset) = queue.pop_front() {
-        walk_asset(asset, &output_path, &mut seen, &mut queue)
+        walk_asset(asset, &output_path, &dist_root, &mut seen, &mut queue)
             .await
             .context(format!(
                 "Failed to walk asset {}",
@@ -346,32 +357,51 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
     Ok(project.project_path().owned().await?.cell())
 }
 
+/// Like `expected()` from turbopack_test_utils but recursively descends into subdirectories.
+async fn expected_recursive(dir: FileSystemPath) -> Result<FxHashSet<FileSystemPath>> {
+    let mut result = FxHashSet::default();
+    let entries = dir.read_dir().await?;
+    if let DirectoryContent::Entries(entries) = &*entries {
+        for (_name, entry) in entries {
+            match entry {
+                DirectoryEntry::File(file) => {
+                    result.insert(file.clone());
+                }
+                DirectoryEntry::Directory(sub_dir) => {
+                    let sub_files = Box::pin(expected_recursive(sub_dir.clone())).await?;
+                    result.extend(sub_files);
+                }
+                _ => {} // skip symlinks etc.
+            }
+        }
+    }
+    Ok(result)
+}
+
 async fn walk_asset(
     asset: ResolvedVc<Box<dyn OutputAsset>>,
     output_path: &FileSystemPath,
+    dist_root: &FileSystemPath,
     seen: &mut FxHashSet<FileSystemPath>,
     queue: &mut VecDeque<ResolvedVc<Box<dyn OutputAsset>>>,
 ) -> Result<()> {
     let path = asset.path().owned().await?;
 
-    // Check if the path is already relative to output_path
     let full_path = if let Some(relative_path) = output_path.get_path_to(&path) {
-        // Path is already inside output_path, join it
+        // Path is on the output FS, inside output_path (e.g. server chunks)
         output_path.join(relative_path)?
     } else {
-        // Path is not inside output_path.
-        // This might happen if it's a virtual path or if it's from a different FS.
+        // Path is on a different FS (client virtual FS).
+        // Rebase to dist_root to match real emit behavior.
         let path_str = path.to_string();
         if path_str.starts_with('/') {
-            // If it's an absolute path, we only want the filename to avoid mirroring absolute paths
-            // into the snapshot directory.
             let filename = Path::new(&path_str)
                 .file_name()
                 .and_then(|f| f.to_str())
                 .unwrap_or(&path_str);
-            output_path.join(filename)?
+            dist_root.join(filename)?
         } else {
-            output_path.join(&path_str)?
+            dist_root.join(&path_str)?
         }
     };
 

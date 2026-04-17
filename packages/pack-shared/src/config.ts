@@ -299,6 +299,20 @@ export interface ConfigComplete {
   persistentCaching?: boolean;
   nodePolyfill?: boolean;
   devServer?: DevServerConfig;
+  server?: {
+    output?: {
+      /** Output path for server chunks, relative to project root. */
+      path?: string;
+      /** Entry chunk filename template. Supports [name]. */
+      filename?: string;
+      /** Non-entry chunk filename template. Supports [name] and [contenthash:N]. */
+      chunkFilename?: string;
+    };
+    functions?: {
+      /** Module that exports `callServer(actionId, args)` for client-side transport. */
+      callServerModule: string;
+    };
+  };
 }
 
 export interface HtmlConfig {
