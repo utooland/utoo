@@ -121,7 +121,11 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
                 .read_to_end(&mut content)
                 .with_context(|| format!("Failed to read tar entry: {}", path.display()))?;
 
-            let mode = entry.header().mode().unwrap_or(0o644);
+            // Normalize to npm/pnpm convention: 0o755 if any exec bit is set,
+            // else 0o644. Preserving raw tar modes (e.g. 0o640 in google-protobuf)
+            // breaks world-readability in containers and multi-user setups.
+            let raw_mode = entry.header().mode().unwrap_or(0o644);
+            let mode = if raw_mode & 0o111 != 0 { 0o755 } else { 0o644 };
             entries.push(ExtractedEntry {
                 path: full_path,
                 content,
