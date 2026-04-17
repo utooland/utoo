@@ -91,10 +91,8 @@ use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
 use tokio_retry::RetryIf;
 
-use super::common::{
-    DedupCache, cache_slot, commit_cache_dir_atomic, dedup_init, finalize_non_registry_manifest,
-};
-use super::tar::{gzip_decompress, scan_tarball, write_entries};
+use super::common::{DedupCache, cache_slot, dedup_init};
+use super::tar::commit_tarball_bytes;
 use crate::model::manifest::CoreVersionManifest;
 use crate::service::fetch::{
     FetchError, classify_reqwest_error, classify_status, is_retryable, retry_strategy,
@@ -118,30 +116,17 @@ pub fn http_cache_slot(url: &str) -> String {
     cache_slot("_http_", url.as_bytes())
 }
 
-// ============================================================================
-// Blocking core: decompress → parse → extract to URL-hashed cache slot
-// ============================================================================
-
 fn fetch_and_extract_blocking(
     cache_dir: &Path,
     url: &str,
     tarball_bytes: Bytes,
 ) -> Result<CoreVersionManifest> {
-    let decompressed = gzip_decompress(tarball_bytes.as_ref())?;
-    let (entries, manifest_blob) = scan_tarball(&decompressed)?;
-
-    let mut manifest: CoreVersionManifest = serde_json::from_slice(&manifest_blob)
-        .context("failed to parse package.json from tarball")?;
-    finalize_non_registry_manifest(&mut manifest, url.to_string())?;
-
-    let package_dir = cache_dir.join(&manifest.name).join(http_cache_slot(url));
-    if package_dir.join("_resolved").exists() {
-        return Ok(manifest);
-    }
-
-    commit_cache_dir_atomic(&package_dir, |stage| write_entries(&entries, stage))?;
-
-    Ok(manifest)
+    commit_tarball_bytes(
+        cache_dir,
+        tarball_bytes.as_ref(),
+        url.to_string(),
+        &http_cache_slot(url),
+    )
 }
 
 // ============================================================================

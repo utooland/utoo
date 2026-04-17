@@ -182,7 +182,8 @@ done
 echo -e "${GREEN}PASS: HTTP tarball warm install successful${NC}"
 cd ../../..
 
-# Case 8.4: file: dependency install (local tarball + local directory)
+# Case 8.4: file: dependency install. Directory deps install as a SYMLINK
+# (npm-compatible); tarball deps extract + clone from the cache slot.
 echo -e "${YELLOW}Case 8.4: file: dependency install${NC}"
 cd e2e/pm/file-deps
 rm -rf node_modules package-lock.json
@@ -194,35 +195,48 @@ for pkg in local-dir-pkg local-tarball-pkg; do
         exit 1
     fi
 done
-# Directory dep should install the expected name+version from its package.json
+# Directory dep must be a SYMLINK (to ../local-dir), not a copy — matches npm.
+if [ ! -L "node_modules/local-dir-pkg" ]; then
+    echo -e "${RED}FAIL: local-dir-pkg should be a symlink to ../local-dir, got a regular directory${NC}"
+    exit 1
+fi
+LINK_TARGET=$(readlink node_modules/local-dir-pkg)
+if [ "$LINK_TARGET" != "../local-dir" ]; then
+    echo -e "${RED}FAIL: local-dir-pkg symlink points to '$LINK_TARGET', expected '../local-dir'${NC}"
+    exit 1
+fi
+# Tarball dep must be a real directory (clone from cache), not a symlink.
+if [ -L "node_modules/local-tarball-pkg" ]; then
+    echo -e "${RED}FAIL: local-tarball-pkg should be a real directory (clone), got a symlink${NC}"
+    exit 1
+fi
 ACTUAL=$(node -e "console.log(require('./node_modules/local-dir-pkg/package.json').version)")
 if [ "$ACTUAL" != "0.1.0" ]; then
     echo -e "${RED}FAIL: local-dir-pkg expected v0.1.0, got $ACTUAL${NC}"
     exit 1
 fi
-# Tarball dep: version comes from the .tgz's inner package.json
 ACTUAL=$(node -e "console.log(require('./node_modules/local-tarball-pkg/package.json').version)")
 if [ "$ACTUAL" != "2.3.4" ]; then
     echo -e "${RED}FAIL: local-tarball-pkg expected v2.3.4, got $ACTUAL${NC}"
     exit 1
 fi
-# Lockfile records `file:<absolute_path>` as the resolved source
-if ! grep -q '"file:' package-lock.json; then
-    echo -e "${RED}FAIL: file: URL missing from package-lock.json resolved field${NC}"
-    exit 1
-fi
+# Lockfile: dir dep = `link: true`, tarball dep = `resolved: file:<abs>`.
+node -e '
+const lock = require("./package-lock.json");
+const dir = lock.packages["node_modules/local-dir-pkg"] || {};
+const tar = lock.packages["node_modules/local-tarball-pkg"] || {};
+if (dir.link !== true) { console.error("local-dir-pkg missing link:true in lockfile", dir); process.exit(1); }
+if (!tar.resolved || !tar.resolved.startsWith("file:")) { console.error("local-tarball-pkg resolved field should be file:<abs>", tar); process.exit(1); }
+' || { echo -e "${RED}FAIL: lockfile entries wrong for file: deps${NC}"; exit 1; }
 echo -e "${GREEN}PASS: file: dependency install successful${NC}"
 
-# Case 8.5: file: warm install (cache hit, no re-extract)
+# Case 8.5: file: warm install (cache hit for tarball; dir symlink rewritten)
 echo -e "${YELLOW}Case 8.5: file: warm install${NC}"
 rm -rf node_modules package-lock.json
 utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo warm install failed for file-deps${NC}"; exit 1; }
-for pkg in local-dir-pkg local-tarball-pkg; do
-    if [ ! -d "node_modules/$pkg" ]; then
-        echo -e "${RED}FAIL: $pkg missing after warm install${NC}"
-        exit 1
-    fi
-done
+[ -L "node_modules/local-dir-pkg" ] || { echo -e "${RED}FAIL: local-dir-pkg symlink missing after warm install${NC}"; exit 1; }
+[ -d "node_modules/local-tarball-pkg" ] && [ ! -L "node_modules/local-tarball-pkg" ] \
+  || { echo -e "${RED}FAIL: local-tarball-pkg should be a real dir after warm install${NC}"; exit 1; }
 echo -e "${GREEN}PASS: file: warm install successful${NC}"
 cd ../../..
 

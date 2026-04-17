@@ -390,14 +390,20 @@ fn file_base_dir(graph: &DependencyGraph, node_index: NodeIndex) -> Option<PathB
     if node.is_root() || node.is_workspace() {
         return Some(node.path.clone());
     }
-    // Transitive case: recover origin from the pinned `file:` URL we stamped
-    // into dist.tarball when the parent was resolved. Dependency nodes hold
+    // Transitive case: recover origin from the pinned URL we stamped into
+    // dist.tarball when the parent was resolved. Dependency nodes hold
     // `NodeManifest::Registry(Arc<CoreVersionManifest>)`.
+    //
+    // - `file:<abs>` — tarball parent is the directory containing the .tgz.
+    // - `link:<abs>` — a symlinked directory IS the origin dir itself.
     let manifest = match &node.manifest {
         crate::model::manifest::NodeManifest::Registry(m) => m.as_ref(),
         crate::model::manifest::NodeManifest::Local(_) => return None,
     };
     let url = manifest.dist.tarball.as_deref()?;
+    if let Some(abs) = url.strip_prefix("link:") {
+        return Some(PathBuf::from(abs));
+    }
     let path = url.strip_prefix("file:")?;
     std::path::Path::new(path)
         .parent()

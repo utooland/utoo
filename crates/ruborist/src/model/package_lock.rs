@@ -328,6 +328,15 @@ fn create_non_root_lock_package(
     } else if node.is_link() {
         pkg.link = Some(true);
         pkg.resolved = Some(get_relative_path(&node.path, root_path));
+    } else if let Some(abs) = manifest
+        .dist()
+        .and_then(|d| d.tarball.as_deref())
+        .and_then(|t| t.strip_prefix("link:"))
+    {
+        // `file:<dir>` dep — installed as a symlink, not cloned. The
+        // `link:<abs>` sentinel is stamped by the file resolver.
+        pkg.link = Some(true);
+        pkg.resolved = Some(get_relative_path(Path::new(abs), root_path));
     } else {
         // Regular package
         *total_packages += 1;

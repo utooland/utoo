@@ -10,6 +10,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 
+use super::common::{commit_cache_dir_atomic, finalize_non_registry_manifest};
+use crate::model::manifest::CoreVersionManifest;
+
 /// Decoded tar entry held in memory until the package name/version is known
 /// and the final cache path can be resolved.
 #[derive(Debug)]
@@ -134,6 +137,39 @@ fn estimate_uncompressed_size(gzip_bytes: &[u8]) -> usize {
     } else {
         gzip_bytes.len() * 10
     }
+}
+
+/// Shared tarball-commit pipeline used by the http and file tarball
+/// resolvers.
+///
+/// Decompresses `gzip_bytes`, parses the embedded `package.json`, stamps
+/// `pinned_url` onto `dist.tarball` via `finalize_non_registry_manifest`,
+/// and atomically commits the extracted tree to
+/// `<cache_dir>/<name>/<slot>/package/`.
+///
+/// Cache is idempotent: the `_resolved` marker short-circuits re-extraction
+/// on warm runs. Returns the finalized manifest so BFS can produce a
+/// [`crate::traits::registry::ResolvedPackage`].
+pub(crate) fn commit_tarball_bytes(
+    cache_dir: &Path,
+    gzip_bytes: &[u8],
+    pinned_url: String,
+    slot: &str,
+) -> Result<CoreVersionManifest> {
+    let decompressed = gzip_decompress(gzip_bytes)?;
+    let (entries, manifest_blob) = scan_tarball(&decompressed)?;
+
+    let mut manifest: CoreVersionManifest = serde_json::from_slice(&manifest_blob)
+        .context("failed to parse package.json from tarball")?;
+    finalize_non_registry_manifest(&mut manifest, pinned_url)?;
+
+    let package_dir = cache_dir.join(&manifest.name).join(slot);
+    if package_dir.join("_resolved").exists() {
+        return Ok(manifest);
+    }
+    commit_cache_dir_atomic(&package_dir, |stage| write_entries(&entries, stage))?;
+
+    Ok(manifest)
 }
 
 pub(crate) fn gzip_decompress(gzip_bytes: &[u8]) -> Result<Vec<u8>> {

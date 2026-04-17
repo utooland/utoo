@@ -1,33 +1,29 @@
-//! Local `file:` dependency resolver — handles `file:./foo-1.2.3.tgz`
-//! (extract) and `file:./local-pkg/` (copy).
+//! Local `file:` dependency resolver with npm-compatible semantics:
 //!
-//! The cache slot is keyed on the **absolute source path** (not name/version)
-//! so two unrelated packages in a monorepo with colliding names still land
-//! in distinct slots. The base directory for a `file:` spec is caller-
-//! supplied (see [`super::builder::process_dependency`]) because transitive
-//! file: deps must resolve against the parent package's on-disk origin, not
-//! its install-time path in `node_modules`.
+//! - `file:./foo-1.2.3.tgz` — tarball; extract into the shared cache slot
+//!   (via [`super::tar::commit_tarball_bytes`], same machinery as http).
+//! - `file:./local-dir/`    — directory; **install as a symlink**. We only
+//!   read the directory's `package.json` here so BFS can walk its deps; the
+//!   actual symlink is created at install time, driven by a `link:<abs>`
+//!   sentinel we stamp onto `manifest.dist.tarball`. The lockfile serializer
+//!   turns that sentinel into `link: true` + `resolved: <relative_path>`.
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 
-use super::common::{
-    DedupCache, cache_slot, commit_cache_dir_atomic, dedup_init, finalize_non_registry_manifest,
-};
-use super::tar::{MAX_UNCOMPRESSED_BYTES, TarEntry, gzip_decompress, scan_tarball, write_entries};
+use super::common::{DedupCache, cache_slot, dedup_init, finalize_non_registry_manifest};
+use super::tar::commit_tarball_bytes;
 use crate::model::manifest::CoreVersionManifest;
 use crate::traits::registry::ResolvedPackage;
 
 pub(crate) type FileFetchCache = DedupCache<CoreVersionManifest>;
 
-const EXCLUDED_DIR_NAMES: &[&str] = &["node_modules", ".git"];
-
-/// Derive the cache sub-directory name for an absolute file path.
+/// Derive the cache sub-directory name for an absolute tarball path.
 ///
-/// Both ruborist (writing) and pm (lookup) call this helper to agree on the
-/// same slot for a given path.
+/// Only tarball `file:` deps touch the cache — directory deps symlink in
+/// place. Shared between ruborist (writer) and pm (install-time lookup).
 pub fn file_cache_slot(abs_path: &Path) -> String {
     cache_slot("_file_", abs_path.as_os_str().as_encoded_bytes())
 }
@@ -57,149 +53,42 @@ fn normalize_path(base_dir: &Path, spec: &str) -> PathBuf {
     normalized
 }
 
-fn scan_directory(root: &Path) -> Result<(Vec<TarEntry>, Vec<u8>)> {
-    let mut entries = Vec::new();
-    let mut manifest_blob: Option<Vec<u8>> = None;
-    let mut total_bytes: u64 = 0;
-
-    // The synthetic `package/` top-level dir keeps install-phase
-    // `find_real_src` compatible with the tarball layout.
-    entries.push(TarEntry {
-        rel_path: PathBuf::from("package"),
-        content: Vec::new(),
-        mode: 0o755,
-        is_dir: true,
-    });
-
-    walk_into(
-        root,
-        Path::new("package"),
-        &mut entries,
-        &mut manifest_blob,
-        &mut total_bytes,
-    )?;
-
-    let manifest_blob = manifest_blob
-        .ok_or_else(|| anyhow!("package.json not found in directory {}", root.display()))?;
-    Ok((entries, manifest_blob))
+/// Directory deps: read `package.json` only — installation is a symlink,
+/// not a copy. The `link:<abs>` sentinel on `dist.tarball` tells the
+/// lockfile serializer to emit `link: true` + `resolved: <relative>`.
+fn resolve_dir_blocking(abs_src: &Path) -> Result<CoreVersionManifest> {
+    let manifest_path = abs_src.join("package.json");
+    let blob = std::fs::read(&manifest_path)
+        .with_context(|| format!("package.json not found in directory {}", abs_src.display()))?;
+    let mut manifest: CoreVersionManifest = serde_json::from_slice(&blob)
+        .with_context(|| format!("failed to parse package.json from {}", abs_src.display()))?;
+    let pinned_url = format!("link:{}", abs_src.to_string_lossy());
+    finalize_non_registry_manifest(&mut manifest, pinned_url)?;
+    Ok(manifest)
 }
 
-fn walk_into(
-    dir: &Path,
-    rel_prefix: &Path,
-    entries: &mut Vec<TarEntry>,
-    manifest_blob: &mut Option<Vec<u8>>,
-    total_bytes: &mut u64,
-) -> Result<()> {
-    let read = std::fs::read_dir(dir)
-        .with_context(|| format!("failed to read directory {}", dir.display()))?;
-    for entry in read {
-        let entry = entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-        if EXCLUDED_DIR_NAMES.iter().any(|ex| *ex == name_str) {
-            continue;
-        }
-
-        let src_path = entry.path();
-        let rel_path = rel_prefix.join(&name);
-
-        // Follow symlinks (fs::metadata, unlike DirEntry::file_type, does).
-        // A broken symlink surfaces as an Err here rather than being read as
-        // bytes. One stat covers both type and mode on unix.
-        let meta = match std::fs::metadata(&src_path) {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::warn!("Skipping unreadable entry {} ({})", src_path.display(), e);
-                continue;
-            }
-        };
-        let file_type = meta.file_type();
-
-        #[cfg(unix)]
-        let mode = {
-            use std::os::unix::fs::PermissionsExt;
-            meta.permissions().mode() & 0o7777
-        };
-        #[cfg(not(unix))]
-        let mode = if file_type.is_dir() { 0o755 } else { 0o644 };
-
-        if file_type.is_dir() {
-            entries.push(TarEntry {
-                rel_path: rel_path.clone(),
-                content: Vec::new(),
-                mode,
-                is_dir: true,
-            });
-            walk_into(&src_path, &rel_path, entries, manifest_blob, total_bytes)?;
-        } else if file_type.is_file() {
-            let content = std::fs::read(&src_path)
-                .with_context(|| format!("failed to read {}", src_path.display()))?;
-            *total_bytes = total_bytes.saturating_add(content.len() as u64);
-            if *total_bytes > MAX_UNCOMPRESSED_BYTES {
-                return Err(anyhow!(
-                    "file: directory {} exceeds {} MiB size limit",
-                    dir.display(),
-                    MAX_UNCOMPRESSED_BYTES / (1024 * 1024)
-                ));
-            }
-            // depth == 2 because of the synthetic `package/` wrapper.
-            if name_str == "package.json"
-                && rel_path.components().count() == 2
-                && manifest_blob.is_none()
-            {
-                *manifest_blob = Some(content.clone());
-            }
-            entries.push(TarEntry {
-                rel_path,
-                content,
-                mode,
-                is_dir: false,
-            });
-        } else {
-            tracing::debug!("Skipping non-file entry {}", src_path.display());
-        }
-    }
-    Ok(())
-}
-
-/// Decompress + scan a local tarball file into tar entries.
-fn scan_tarball_file(path: &Path) -> Result<(Vec<TarEntry>, Vec<u8>)> {
-    let bytes = std::fs::read(path)
-        .with_context(|| format!("failed to read tarball {}", path.display()))?;
-    let decompressed = gzip_decompress(&bytes)?;
-    scan_tarball(&decompressed)
+/// Tarball deps: delegate the decompress → scan → finalize → commit
+/// pipeline to the shared helper, matching the http path exactly.
+fn resolve_tarball_blocking(cache_dir: &Path, abs_src: &Path) -> Result<CoreVersionManifest> {
+    let bytes = std::fs::read(abs_src)
+        .with_context(|| format!("failed to read tarball {}", abs_src.display()))?;
+    let pinned_url = format!("file:{}", abs_src.to_string_lossy());
+    commit_tarball_bytes(cache_dir, &bytes, pinned_url, &file_cache_slot(abs_src))
 }
 
 fn resolve_blocking(cache_dir: &Path, abs_src: &Path) -> Result<CoreVersionManifest> {
     let metadata = std::fs::metadata(abs_src)
         .with_context(|| format!("file: target does not exist: {}", abs_src.display()))?;
-
-    let (entries, manifest_blob) = if metadata.is_dir() {
-        scan_directory(abs_src)?
+    if metadata.is_dir() {
+        resolve_dir_blocking(abs_src)
     } else if metadata.is_file() {
-        scan_tarball_file(abs_src)?
+        resolve_tarball_blocking(cache_dir, abs_src)
     } else {
-        return Err(anyhow!(
+        Err(anyhow!(
             "file: target is neither a file nor a directory: {}",
             abs_src.display()
-        ));
-    };
-
-    let mut manifest: CoreVersionManifest = serde_json::from_slice(&manifest_blob)
-        .with_context(|| format!("failed to parse package.json from {}", abs_src.display()))?;
-    let pinned_url = format!("file:{}", abs_src.to_string_lossy());
-    finalize_non_registry_manifest(&mut manifest, pinned_url)?;
-
-    let package_dir = cache_dir
-        .join(&manifest.name)
-        .join(file_cache_slot(abs_src));
-    if package_dir.join("_resolved").exists() {
-        return Ok(manifest);
+        ))
     }
-    commit_cache_dir_atomic(&package_dir, |stage| write_entries(&entries, stage))?;
-
-    Ok(manifest)
 }
 
 /// Resolve a `file:` spec to a [`ResolvedPackage`] and seed the cache.
@@ -334,33 +223,34 @@ mod tests {
     }
 
     #[test]
-    fn resolves_local_directory() {
+    fn directory_dep_returns_link_sentinel_and_skips_cache() {
         let tmp = tempfile::tempdir().unwrap();
         let cache = tempfile::tempdir().unwrap();
 
         let pkg_dir = tmp.path().join("local-pkg");
-        std::fs::create_dir_all(pkg_dir.join("src")).unwrap();
-        std::fs::create_dir_all(pkg_dir.join("node_modules/should-be-excluded")).unwrap();
+        std::fs::create_dir_all(&pkg_dir).unwrap();
         std::fs::write(
             pkg_dir.join("package.json"),
             br#"{"name":"local-pkg","version":"0.0.1"}"#,
         )
         .unwrap();
-        std::fs::write(pkg_dir.join("src/index.js"), b"module.exports = 42;\n").unwrap();
-        std::fs::write(pkg_dir.join("node_modules/should-be-excluded/dummy"), b"x").unwrap();
+        std::fs::write(pkg_dir.join("index.js"), b"module.exports = 42;\n").unwrap();
 
         let manifest = resolve_blocking(cache.path(), &pkg_dir).unwrap();
         assert_eq!(manifest.name, "local-pkg");
         assert_eq!(manifest.version, "0.0.1");
 
-        let expected_dir = cache
-            .path()
-            .join("local-pkg")
-            .join(file_cache_slot(&pkg_dir));
-        assert!(expected_dir.join("_resolved").exists());
-        assert!(expected_dir.join("package/package.json").exists());
-        assert!(expected_dir.join("package/src/index.js").exists());
-        assert!(!expected_dir.join("package/node_modules").exists());
+        // Directory deps stamp the `link:<abs>` sentinel so the lockfile
+        // emits `link: true`, and must NOT touch the cache.
+        let expected_sentinel = format!("link:{}", pkg_dir.to_string_lossy());
+        assert_eq!(
+            manifest.dist.tarball.as_deref(),
+            Some(expected_sentinel.as_str())
+        );
+        assert!(
+            !cache.path().join("local-pkg").exists(),
+            "directory dep must not populate the cache slot"
+        );
     }
 
     #[test]
@@ -382,68 +272,18 @@ mod tests {
         assert!(err.to_string().contains("does not exist"));
     }
 
-    #[cfg(unix)]
     #[test]
-    fn symlinks_are_followed_not_read_as_bytes() {
-        // Regression: previously `DirEntry::file_type().is_file()` returned
-        // false for symlinks so the walker's `is_file() || is_symlink()`
-        // branch read a symlinked *directory* as raw bytes, corrupting the
-        // cache. Now `fs::metadata` resolves the target first.
+    fn tarball_dep_is_idempotent() {
         let tmp = tempfile::tempdir().unwrap();
         let cache = tempfile::tempdir().unwrap();
 
-        let pkg_dir = tmp.path().join("demo");
-        let real_src = tmp.path().join("real-src");
-        std::fs::create_dir_all(&real_src).unwrap();
-        std::fs::write(real_src.join("hello.txt"), b"hi").unwrap();
-        std::fs::create_dir_all(&pkg_dir).unwrap();
-        std::fs::write(
-            pkg_dir.join("package.json"),
-            br#"{"name":"demo","version":"1.0.0"}"#,
-        )
-        .unwrap();
-        std::os::unix::fs::symlink(&real_src, pkg_dir.join("linked")).unwrap();
+        let pkg = br#"{"name":"demo","version":"1.0.0"}"#;
+        let tarball_path = tmp.path().join("demo.tgz");
+        std::fs::write(&tarball_path, make_targz(&[("package/package.json", pkg)])).unwrap();
 
-        let manifest = resolve_blocking(cache.path(), &pkg_dir).unwrap();
-        assert_eq!(manifest.name, "demo");
-
-        let slot = cache.path().join("demo").join(file_cache_slot(&pkg_dir));
-        assert!(slot.join("package/linked/hello.txt").exists());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn broken_symlinks_are_skipped_not_fatal() {
-        let tmp = tempfile::tempdir().unwrap();
-        let cache = tempfile::tempdir().unwrap();
-
-        let pkg_dir = tmp.path().join("demo");
-        std::fs::create_dir_all(&pkg_dir).unwrap();
-        std::fs::write(
-            pkg_dir.join("package.json"),
-            br#"{"name":"demo","version":"1.0.0"}"#,
-        )
-        .unwrap();
-        std::os::unix::fs::symlink("/nonexistent-target", pkg_dir.join("dangling")).unwrap();
-
-        resolve_blocking(cache.path(), &pkg_dir).unwrap();
-    }
-
-    #[test]
-    fn warm_cache_is_idempotent() {
-        let tmp = tempfile::tempdir().unwrap();
-        let cache = tempfile::tempdir().unwrap();
-
-        let pkg_dir = tmp.path().join("demo");
-        std::fs::create_dir_all(&pkg_dir).unwrap();
-        std::fs::write(
-            pkg_dir.join("package.json"),
-            br#"{"name":"demo","version":"1.0.0"}"#,
-        )
-        .unwrap();
-
-        resolve_blocking(cache.path(), &pkg_dir).unwrap();
-        // Second run hits the `_resolved` marker short-circuit.
-        resolve_blocking(cache.path(), &pkg_dir).unwrap();
+        resolve_blocking(cache.path(), &tarball_path).unwrap();
+        // Second call hits the `_resolved` marker short-circuit inside
+        // `commit_tarball_bytes` rather than re-extracting.
+        resolve_blocking(cache.path(), &tarball_path).unwrap();
     }
 }
