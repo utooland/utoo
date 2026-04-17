@@ -38,6 +38,9 @@ pub enum ResolveError<E> {
     /// pairs; the failing dep's `(name, spec)` is appended as the final entry.
     /// (Ancestor entries carry resolved versions; the last entry carries the
     /// unresolved requested spec.)
+    ///
+    /// `Display` intentionally does not render `chain` — CLI consumers render
+    /// it via downcast (see `pm::util::format_print::format_resolve_chain`).
     WithChain {
         chain: Vec<(String, String)>,
         source: Box<ResolveError<E>>,
@@ -62,19 +65,10 @@ impl<E: std::fmt::Display> std::fmt::Display for ResolveError<E> {
             ResolveError::Unsupported { spec, reason } => {
                 write!(f, "Unsupported dependency '{spec}': {reason}")
             }
-            ResolveError::WithChain { chain, source } => {
-                write!(f, "{source}")?;
-                f.write_str("\n\nrequired by:")?;
-                for (i, (name, version)) in chain.iter().enumerate() {
-                    if i == 0 {
-                        write!(f, "\n  {name}@{version}")?;
-                    } else {
-                        let indent = "    ".repeat(i - 1);
-                        write!(f, "\n  {indent}└── {name}@{version}")?;
-                    }
-                }
-                Ok(())
-            }
+            // Display delegates to the wrapped error. The `chain` payload is
+            // structured data meant for CLI renderers (pm's `format_print`) to
+            // decorate — keeping presentation concerns out of the library.
+            ResolveError::WithChain { source, .. } => write!(f, "{source}"),
         }
     }
 }
@@ -273,23 +267,22 @@ mod tests {
     }
 
     #[test]
-    fn test_with_chain_display_renders_tree() {
+    fn test_with_chain_display_delegates_to_source() {
+        // Display is data-only: delegates to the inner error. CLI presentation
+        // of the chain lives in the pm crate, not here.
         let inner: ResolveError<std::io::Error> =
             ResolveError::NoVersions("@antskill/tegg-agent".to_string());
         let wrapped: ResolveError<std::io::Error> = ResolveError::WithChain {
             chain: vec![
                 ("my-app".to_string(), "1.0.0".to_string()),
-                ("parent-pkg".to_string(), "1.2.3".to_string()),
                 ("@antskill/tegg-agent".to_string(), "^1.0.0".to_string()),
             ],
             source: Box::new(inner),
         };
 
-        let rendered = wrapped.to_string();
-        assert!(rendered.contains("No versions available for @antskill/tegg-agent"));
-        assert!(rendered.contains("required by:"));
-        assert!(rendered.contains("  my-app@1.0.0"));
-        assert!(rendered.contains("└── parent-pkg@1.2.3"));
-        assert!(rendered.contains("└── @antskill/tegg-agent@^1.0.0"));
+        assert_eq!(
+            wrapped.to_string(),
+            "No versions available for @antskill/tegg-agent"
+        );
     }
 }

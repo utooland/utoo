@@ -4,6 +4,8 @@ use std::io::Write;
 
 use colored::Colorize;
 use term_size;
+use utoo_ruborist::resolver::registry::ResolveError;
+use utoo_ruborist::traits::registry::RegistryError;
 
 use crate::helper::migrate::MigrateResult;
 use crate::service::pm_pack::PackResult;
@@ -62,6 +64,33 @@ pub fn print_pack_details(
     }
     writeln!(w)?;
     Ok(())
+}
+
+/// Scan an anyhow error's cause chain for a `ResolveError::WithChain` and,
+/// if found, return a tree-decorated "required by" section in the `ut list`
+/// style. Returns `None` if the error is not a dependency-chain error.
+///
+/// Kept separate from `ResolveError::Display` because tree-drawing with box
+/// characters is a CLI presentation concern.
+pub fn format_resolve_chain(err: &anyhow::Error) -> Option<String> {
+    let chain = err
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<ResolveError<RegistryError>>())
+        .and_then(|re| match re {
+            ResolveError::WithChain { chain, .. } => Some(chain),
+            _ => None,
+        })?;
+
+    let mut out = String::from("required by:");
+    for (i, (name, version)) in chain.iter().enumerate() {
+        if i == 0 {
+            out.push_str(&format!("\n  {name}@{version}"));
+        } else {
+            let indent = "    ".repeat(i - 1);
+            out.push_str(&format!("\n  {indent}└── {name}@{version}"));
+        }
+    }
+    Some(out)
 }
 
 pub fn format_size(bytes: u64) -> String {

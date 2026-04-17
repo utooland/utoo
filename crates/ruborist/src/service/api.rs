@@ -290,9 +290,12 @@ where
         );
     }
 
+    // Preserve the typed error via `Error::new` + `.context(...)` so CLI
+    // renderers (e.g. pm's format_print) can downcast and pretty-print the
+    // dependency chain carried by `ResolveError::WithChain`.
     build_deps_with_config(&mut graph, &registry, config, &receiver)
         .await
-        .map_err(|e| anyhow::anyhow!("Dependency resolution failed: {}", e))?;
+        .map_err(|e| anyhow::Error::new(e).context("Dependency resolution failed"))?;
 
     // 11. Serialize to PackageLock
     let (packages, _total) = graph.serialize_to_packages(&root_path);
