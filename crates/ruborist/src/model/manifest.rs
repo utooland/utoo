@@ -430,6 +430,12 @@ pub struct Dist {
     #[serde(rename = "npm-signature")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub npm_signature: Option<String>,
+
+    /// Absolute path to a local directory that should be **symlinked** at
+    /// install time (set by the `file:` resolver for directory deps; never
+    /// populated by the registry). When `Some`, `tarball` is meaningless.
+    #[serde(skip)]
+    pub link_target: Option<std::path::PathBuf>,
 }
 
 /// Package maintainer information.

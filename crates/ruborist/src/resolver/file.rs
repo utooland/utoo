@@ -1,12 +1,10 @@
-//! Local `file:` dependency resolver with npm-compatible semantics:
+//! Local `file:` dependency resolver — npm-compatible semantics:
 //!
 //! - `file:./foo-1.2.3.tgz` — tarball; extract into the shared cache slot
 //!   (via [`super::tar::commit_tarball_bytes`], same machinery as http).
-//! - `file:./local-dir/`    — directory; **install as a symlink**. We only
-//!   read the directory's `package.json` here so BFS can walk its deps; the
-//!   actual symlink is created at install time, driven by a `link:<abs>`
-//!   sentinel we stamp onto `manifest.dist.tarball`. The lockfile serializer
-//!   turns that sentinel into `link: true` + `resolved: <relative_path>`.
+//! - `file:./local-dir/`    — directory; install as a symlink. The
+//!   directory's absolute path travels through `manifest.dist.link_target`
+//!   so the lockfile serializer emits `link: true` + relative `resolved`.
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -54,21 +52,22 @@ fn normalize_path(base_dir: &Path, spec: &str) -> PathBuf {
 }
 
 /// Directory deps: read `package.json` only — installation is a symlink,
-/// not a copy. The `link:<abs>` sentinel on `dist.tarball` tells the
-/// lockfile serializer to emit `link: true` + `resolved: <relative>`.
+/// not a copy. `dist.link_target` carries the absolute source path; the
+/// lockfile serializer turns it into `link: true` + `resolved: <relative>`.
 fn resolve_dir_blocking(abs_src: &Path) -> Result<CoreVersionManifest> {
     let manifest_path = abs_src.join("package.json");
     let blob = std::fs::read(&manifest_path)
         .with_context(|| format!("package.json not found in directory {}", abs_src.display()))?;
     let mut manifest: CoreVersionManifest = serde_json::from_slice(&blob)
         .with_context(|| format!("failed to parse package.json from {}", abs_src.display()))?;
-    let pinned_url = format!("link:{}", abs_src.to_string_lossy());
+    // Synthesize the manifest like git/http but mark this as a symlink
+    // dep instead of staging anything to the cache.
+    let pinned_url = format!("file:{}", abs_src.to_string_lossy());
     finalize_non_registry_manifest(&mut manifest, pinned_url)?;
+    manifest.dist.link_target = Some(abs_src.to_path_buf());
     Ok(manifest)
 }
 
-/// Tarball deps: delegate the decompress → scan → finalize → commit
-/// pipeline to the shared helper, matching the http path exactly.
 fn resolve_tarball_blocking(cache_dir: &Path, abs_src: &Path) -> Result<CoreVersionManifest> {
     let bytes = std::fs::read(abs_src)
         .with_context(|| format!("failed to read tarball {}", abs_src.display()))?;
@@ -223,7 +222,7 @@ mod tests {
     }
 
     #[test]
-    fn directory_dep_returns_link_sentinel_and_skips_cache() {
+    fn directory_dep_sets_link_target_and_skips_cache() {
         let tmp = tempfile::tempdir().unwrap();
         let cache = tempfile::tempdir().unwrap();
 
@@ -239,13 +238,10 @@ mod tests {
         let manifest = resolve_blocking(cache.path(), &pkg_dir).unwrap();
         assert_eq!(manifest.name, "local-pkg");
         assert_eq!(manifest.version, "0.0.1");
-
-        // Directory deps stamp the `link:<abs>` sentinel so the lockfile
-        // emits `link: true`, and must NOT touch the cache.
-        let expected_sentinel = format!("link:{}", pkg_dir.to_string_lossy());
+        // The directory IS the install target — symlink at install time.
         assert_eq!(
-            manifest.dist.tarball.as_deref(),
-            Some(expected_sentinel.as_str())
+            manifest.dist.link_target.as_deref(),
+            Some(pkg_dir.as_path())
         );
         assert!(
             !cache.path().join("local-pkg").exists(),

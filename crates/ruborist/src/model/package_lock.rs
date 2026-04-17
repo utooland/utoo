@@ -323,20 +323,19 @@ fn create_non_root_lock_package(
         ..LockPackage::default()
     };
 
+    // Workspace links and `file:<dir>` deps both serialize as
+    // `link: true` + `resolved: <relative>`; only the source path differs.
+    let link_src: Option<&Path> = if node.is_link() {
+        Some(&node.path)
+    } else {
+        manifest.dist().and_then(|d| d.link_target.as_deref())
+    };
+
     if node.is_workspace() {
         pkg.version = Some(manifest.version().to_string());
-    } else if node.is_link() {
+    } else if let Some(src) = link_src {
         pkg.link = Some(true);
-        pkg.resolved = Some(get_relative_path(&node.path, root_path));
-    } else if let Some(abs) = manifest
-        .dist()
-        .and_then(|d| d.tarball.as_deref())
-        .and_then(|t| t.strip_prefix("link:"))
-    {
-        // `file:<dir>` dep — installed as a symlink, not cloned. The
-        // `link:<abs>` sentinel is stamped by the file resolver.
-        pkg.link = Some(true);
-        pkg.resolved = Some(get_relative_path(Path::new(abs), root_path));
+        pkg.resolved = Some(get_relative_path(src, root_path));
     } else {
         // Regular package
         *total_packages += 1;
