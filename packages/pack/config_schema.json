@@ -1303,6 +1303,13 @@
             "null"
           ]
         },
+        "keepJsxDevFilename": {
+          "description": "Keep React dev source filenames as absolute disk paths for editor integrations",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "runtime": {
           "description": "JSX runtime to use (automatic or classic)",
           "type": [

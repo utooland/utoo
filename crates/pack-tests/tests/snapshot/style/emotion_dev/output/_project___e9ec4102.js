@@ -53,14 +53,14 @@ function Card() {
         css: cardStyle,
         children: "Card"
     }, void 0, false, {
-        fileName: "[project]/style/emotion_dev/input/index.tsx",
+        fileName: "/Users/zoomdong/utoo/crates/pack-tests/tests/snapshot/style/emotion_dev/input/index.tsx",
         lineNumber: 9,
         columnNumber: 10
     }, this);
 }
 function App() {
     return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$emotion$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Card, {}, void 0, false, {
-        fileName: "[project]/style/emotion_dev/input/index.tsx",
+        fileName: "/Users/zoomdong/utoo/crates/pack-tests/tests/snapshot/style/emotion_dev/input/index.tsx",
         lineNumber: 13,
         columnNumber: 10
     }, this);
