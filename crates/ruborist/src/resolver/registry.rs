@@ -30,6 +30,8 @@ pub enum ResolveError<E> {
     Git { url: String, source: anyhow::Error },
     /// HTTP tarball resolution failed
     Http { url: String, source: anyhow::Error },
+    /// Local `file:` resolution failed
+    File { spec: String, source: anyhow::Error },
     /// Dependency type not yet supported (e.g. local file path)
     Unsupported { spec: String, reason: &'static str },
     /// Error augmented with the dependency chain that led to the failing dep.
@@ -62,6 +64,9 @@ impl<E: std::fmt::Display> std::fmt::Display for ResolveError<E> {
             ResolveError::Http { url, source } => {
                 write!(f, "HTTP tarball resolution failed for {}: {}", url, source)
             }
+            ResolveError::File { spec, source } => {
+                write!(f, "File resolution failed for '{spec}': {source}")
+            }
             ResolveError::Unsupported { spec, reason } => {
                 write!(f, "Unsupported dependency '{spec}': {reason}")
             }
@@ -81,9 +86,9 @@ impl<E: std::error::Error + 'static> std::error::Error for ResolveError<E> {
             | ResolveError::NoVersions(_)
             | ResolveError::ManifestNotFound { .. }
             | ResolveError::Unsupported { .. } => None,
-            ResolveError::Git { source, .. } | ResolveError::Http { source, .. } => {
-                Some(source.as_ref())
-            }
+            ResolveError::Git { source, .. }
+            | ResolveError::Http { source, .. }
+            | ResolveError::File { source, .. } => Some(source.as_ref()),
             ResolveError::WithChain { source, .. } => Some(source.as_ref()),
         }
     }

@@ -77,9 +77,36 @@ async fn resolve_http_dep(
     }
 }
 
+/// Dispatch a `file:` spec to the real resolver when the `http-tarball`
+/// feature is enabled (file + http share tarball infra), otherwise error
+/// with a hint.
+///
+/// BFS extracts/copies to `<cache_dir>/<name>/_file_<path_hash>/` so
+/// install-phase skips re-extraction; see [`super::file`] module docs.
+async fn resolve_file_dep(
+    cache_dir: Option<&std::path::Path>,
+    base_dir: &std::path::Path,
+    path_spec: &str,
+    fetch_cache: &FileFetchCache,
+) -> anyhow::Result<ResolvedPackage> {
+    #[cfg(feature = "http-tarball")]
+    {
+        crate::resolver::file::resolve_file_dep(cache_dir, base_dir, path_spec, fetch_cache).await
+    }
+    #[cfg(not(feature = "http-tarball"))]
+    {
+        let _ = (cache_dir, base_dir, fetch_cache);
+        anyhow::bail!(
+            "file: dependency resolution not available for 'file:{path_spec}' (enable the 'http-tarball' feature)"
+        )
+    }
+}
+
 // Callers construct a `BuildDepsConfig` without touching feature flags — when
 // a resolver is disabled the cache alias falls back to `DedupCache<()>`, which
 // has the same shape so the struct literal still compiles.
+#[cfg(feature = "http-tarball")]
+use crate::resolver::file::FileFetchCache;
 #[cfg(feature = "native-git")]
 use crate::resolver::git::GitCloneCache;
 #[cfg(feature = "http-tarball")]
@@ -89,6 +116,8 @@ use crate::resolver::http::HttpFetchCache;
 type GitCloneCache = crate::resolver::common::DedupCache<()>;
 #[cfg(not(feature = "http-tarball"))]
 type HttpFetchCache = crate::resolver::common::DedupCache<()>;
+#[cfg(not(feature = "http-tarball"))]
+type FileFetchCache = crate::resolver::common::DedupCache<()>;
 
 // Re-export edge types
 pub use super::edges::{
@@ -111,6 +140,8 @@ pub struct BuildDepsConfig {
     pub git_clone_cache: Arc<GitCloneCache>,
     /// Shared dedup cache for concurrent HTTP tarball fetches
     pub http_fetch_cache: Arc<HttpFetchCache>,
+    /// Shared dedup cache for concurrent `file:` resolutions
+    pub file_fetch_cache: Arc<FileFetchCache>,
     /// Catalog definitions for the `catalog:` dependency protocol.
     /// Key `""` = default catalog, other keys = named catalogs.
     pub catalogs: Catalogs,
@@ -125,6 +156,7 @@ impl Default for BuildDepsConfig {
             cache_dir: dirs::home_dir().map(|d| d.join(".cache/nm")),
             git_clone_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             http_fetch_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            file_fetch_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             catalogs: HashMap::new(),
         }
     }
@@ -341,6 +373,37 @@ pub enum ProcessResult {
     Skipped,
 }
 
+/// Determine the absolute directory against which a `file:` spec declared
+/// by `node_index` should be resolved.
+///
+/// - **Root / workspace**: use the node's own absolute source path (the
+///   project root or workspace directory).
+/// - **Transitive from a `file:`/http/git package**: use the parent of the
+///   pinned source URL encoded in `manifest.dist.tarball` (set by
+///   [`super::common::finalize_non_registry_manifest`]).
+/// - **Otherwise** (e.g. a registry package that somehow has `file:` deps):
+///   return `None`. Registry packages should never contain `file:` deps in
+///   practice — the caller surfaces this as an explicit error rather than
+///   silently resolving against an unrelated directory.
+fn file_base_dir(graph: &DependencyGraph, node_index: NodeIndex) -> Option<PathBuf> {
+    let node = graph.get_node(node_index)?;
+    if node.is_root() || node.is_workspace() {
+        return Some(node.path.clone());
+    }
+    // Transitive case: recover origin from the pinned `file:` URL we stamped
+    // into dist.tarball when the parent was resolved. Dependency nodes hold
+    // `NodeManifest::Registry(Arc<CoreVersionManifest>)`.
+    let manifest = match &node.manifest {
+        crate::model::manifest::NodeManifest::Registry(m) => m.as_ref(),
+        crate::model::manifest::NodeManifest::Local(_) => return None,
+    };
+    let url = manifest.dist.tarball.as_deref()?;
+    let path = url.strip_prefix("file:")?;
+    std::path::Path::new(path)
+        .parent()
+        .map(std::path::Path::to_path_buf)
+}
+
 /// Process a single dependency edge.
 ///
 /// This is the core logic for resolving a dependency:
@@ -451,10 +514,50 @@ pub async fn process_dependency<R: RegistryClient>(
                     );
                     return Ok(ProcessResult::Skipped);
                 }
+                PackageSpec::Local {
+                    protocol: Protocol::File,
+                    path,
+                } => {
+                    let base_dir = match file_base_dir(graph, node_index) {
+                        Some(dir) => dir,
+                        None => {
+                            return Err(ResolveError::Unsupported {
+                                spec: edge_info.spec.clone(),
+                                reason: "cannot determine base directory for file: dep \
+                                    (transitive file: deps inside published registry \
+                                    packages are not supported)",
+                            });
+                        }
+                    };
+                    match resolve_file_dep(
+                        config.cache_dir.as_deref(),
+                        &base_dir,
+                        path,
+                        &config.file_fetch_cache,
+                    )
+                    .await
+                    {
+                        Ok(r) => r,
+                        Err(_) if edge_info.edge_type == EdgeType::Optional => {
+                            tracing::debug!(
+                                "Skipped optional file: dependency {}@{}",
+                                edge_info.name,
+                                edge_info.spec
+                            );
+                            return Ok(ProcessResult::Skipped);
+                        }
+                        Err(e) => {
+                            return Err(ResolveError::File {
+                                spec: edge_info.spec.clone(),
+                                source: e,
+                            });
+                        }
+                    }
+                }
                 PackageSpec::Local { .. } => {
                     return Err(ResolveError::Unsupported {
                         spec: edge_info.spec.clone(),
-                        reason: "local (file:/link:/portal:) dependencies are not yet supported",
+                        reason: "local (link:/portal:) dependencies are not yet supported",
                     });
                 }
                 PackageSpec::Http { url } => {

@@ -30,6 +30,28 @@ use crate::model::manifest::{CoreVersionManifest, Dist};
 /// so only the first caller performs the fetch and the rest await.
 pub type DedupCache<T> = tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::OnceCell<Arc<T>>>>>;
 
+/// Derive a prefixed cache-slot name of shape `<prefix><16-hex>`, where the
+/// hex suffix is the first 8 bytes (16 hex chars) of `sha256(bytes)`.
+///
+/// Used by non-registry resolvers to keep their cache-slots visually
+/// distinct from registry tarball slots (`<name>/<version>/`) and from git
+/// commit shas (40 hex chars). Callers pick the prefix (`_http_`, `_file_`)
+/// and hash source.
+#[cfg(any(feature = "native-git", feature = "http-tarball"))]
+pub(crate) fn cache_slot(prefix: &str, bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+
+    use sha2::{Digest, Sha256};
+
+    let digest = Sha256::digest(bytes);
+    let mut out = String::with_capacity(prefix.len() + 16);
+    out.push_str(prefix);
+    for b in &digest[..8] {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
+}
+
 /// Reject package names that contain path-traversal components
 /// (`..`, absolute roots) before using them in `cache_dir.join(name)`.
 pub fn validate_package_name(name: &str) -> Result<()> {

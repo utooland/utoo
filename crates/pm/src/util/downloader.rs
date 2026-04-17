@@ -8,6 +8,7 @@ use once_cell::sync::Lazy;
 use reqwest::{Client, StatusCode};
 use tokio::sync::Semaphore;
 use tokio_retry::RetryIf;
+use utoo_ruborist::file::file_cache_slot;
 use utoo_ruborist::http::http_cache_slot;
 use utoo_ruborist::spec::Protocol;
 
@@ -40,6 +41,14 @@ pub fn is_git_url(url: &str) -> bool {
     matches!(url.parse::<Protocol>(), Ok(Protocol::Git))
 }
 
+/// Check whether a tarball URL refers to a `file:` dependency.
+///
+/// Pinned URL shape is `file:<absolute_path>` (see ruborist's
+/// `finalize_non_registry_manifest`).
+pub fn is_file_url(url: &str) -> bool {
+    matches!(url.parse::<Protocol>(), Ok(Protocol::File))
+}
+
 /// Look up the cache path for a git-resolved package.
 ///
 /// Git packages are cloned during BFS resolution (inside ruborist) and
@@ -67,38 +76,58 @@ pub async fn git_cache_lookup(name: &str, version: &str, tarball_url: &str) -> O
     None
 }
 
-/// Look up the cache path for an HTTP(S) tarball dep.
+/// Look up a ruborist-seeded cache slot at `<cache_dir>/<name>/<slot>/`.
 ///
-/// ruborist's BFS extracts these to `<cache_dir>/<name>/_http_<url_hash>/`
-/// during resolution; we key on the same slot here. Returns `None` if the
-/// slot is absent or incomplete, letting the caller fall through to the
-/// registry download path (which expects `<name>/<version>/`).
-pub async fn http_tarball_cache_lookup(name: &str, tarball_url: &str) -> Option<PathBuf> {
-    let cache_path = get_cache_dir()
-        .join(name)
-        .join(http_cache_slot(tarball_url));
+/// Returns `Some(path)` only if the slot's `_resolved` marker exists —
+/// otherwise returns `None` so the caller can fall through to the next
+/// routing step (typically the registry download path).
+async fn slot_cache_lookup(name: &str, slot: String) -> Option<PathBuf> {
+    let cache_path = get_cache_dir().join(name).join(slot);
     if crate::fs::try_exists(&cache_path.join("_resolved"))
         .await
         .unwrap_or(false)
     {
-        tracing::debug!("HTTP tarball cache hit: {} ({})", name, tarball_url);
         Some(cache_path)
     } else {
         None
     }
 }
 
+/// Look up the cache path for a `file:` dependency.
+pub async fn file_cache_lookup(name: &str, tarball_url: &str) -> Option<PathBuf> {
+    let abs_path = tarball_url.strip_prefix("file:")?;
+    let hit = slot_cache_lookup(name, file_cache_slot(std::path::Path::new(abs_path))).await;
+    if hit.is_some() {
+        tracing::debug!("file: dep cache hit: {} ({})", name, tarball_url);
+    }
+    hit
+}
+
+/// Look up the cache path for an HTTP(S) tarball dep.
+pub async fn http_tarball_cache_lookup(name: &str, tarball_url: &str) -> Option<PathBuf> {
+    let hit = slot_cache_lookup(name, http_cache_slot(tarball_url)).await;
+    if hit.is_some() {
+        tracing::debug!("HTTP tarball cache hit: {} ({})", name, tarball_url);
+    }
+    hit
+}
+
 /// Resolve the local cache path for a package, downloading if necessary.
 ///
 /// Routing order:
 /// 1. Git URLs → [`git_cache_lookup`] (cache keyed on commit sha)
-/// 2. Non-git URLs: try [`http_tarball_cache_lookup`] (keyed on URL hash);
-///    if present, the tarball was pre-extracted by BFS.
-/// 3. Fall through to [`download_to_cache`] for registry tarball URLs
+/// 2. `file:` URLs → [`file_cache_lookup`] (keyed on absolute-path hash);
+///    the extracted/copied tree was seeded by ruborist BFS.
+/// 3. Other non-git URLs: try [`http_tarball_cache_lookup`] (keyed on URL
+///    hash); if present, the tarball was pre-extracted by BFS.
+/// 4. Fall through to [`download_to_cache`] for registry tarball URLs
 ///    (keyed on `<name>/<version>`).
 pub async fn resolve_cache_path(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
     if is_git_url(tarball_url) {
         return git_cache_lookup(name, version, tarball_url).await;
+    }
+    if is_file_url(tarball_url) {
+        return file_cache_lookup(name, tarball_url).await;
     }
     if let Some(p) = http_tarball_cache_lookup(name, tarball_url).await {
         return Some(p);

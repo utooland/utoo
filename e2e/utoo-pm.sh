@@ -182,12 +182,56 @@ done
 echo -e "${GREEN}PASS: HTTP tarball warm install successful${NC}"
 cd ../../..
 
-# Case 8.4: stale lockfile is detected and regenerated on `ut install`
+# Case 8.4: file: dependency install (local tarball + local directory)
+echo -e "${YELLOW}Case 8.4: file: dependency install${NC}"
+cd e2e/pm/file-deps
+rm -rf node_modules package-lock.json
+rm -rf ~/.cache/nm/local-dir-pkg ~/.cache/nm/local-tarball-pkg
+utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for file-deps${NC}"; exit 1; }
+for pkg in local-dir-pkg local-tarball-pkg; do
+    if [ ! -f "node_modules/$pkg/package.json" ]; then
+        echo -e "${RED}FAIL: $pkg (file:) not installed${NC}"
+        exit 1
+    fi
+done
+# Directory dep should install the expected name+version from its package.json
+ACTUAL=$(node -e "console.log(require('./node_modules/local-dir-pkg/package.json').version)")
+if [ "$ACTUAL" != "0.1.0" ]; then
+    echo -e "${RED}FAIL: local-dir-pkg expected v0.1.0, got $ACTUAL${NC}"
+    exit 1
+fi
+# Tarball dep: version comes from the .tgz's inner package.json
+ACTUAL=$(node -e "console.log(require('./node_modules/local-tarball-pkg/package.json').version)")
+if [ "$ACTUAL" != "2.3.4" ]; then
+    echo -e "${RED}FAIL: local-tarball-pkg expected v2.3.4, got $ACTUAL${NC}"
+    exit 1
+fi
+# Lockfile records `file:<absolute_path>` as the resolved source
+if ! grep -q '"file:' package-lock.json; then
+    echo -e "${RED}FAIL: file: URL missing from package-lock.json resolved field${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: file: dependency install successful${NC}"
+
+# Case 8.5: file: warm install (cache hit, no re-extract)
+echo -e "${YELLOW}Case 8.5: file: warm install${NC}"
+rm -rf node_modules package-lock.json
+utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo warm install failed for file-deps${NC}"; exit 1; }
+for pkg in local-dir-pkg local-tarball-pkg; do
+    if [ ! -d "node_modules/$pkg" ]; then
+        echo -e "${RED}FAIL: $pkg missing after warm install${NC}"
+        exit 1
+    fi
+done
+echo -e "${GREEN}PASS: file: warm install successful${NC}"
+cd ../../..
+
+# Case 8.6: stale lockfile is detected and regenerated on `ut install`
 #
 # package.json declares two deps; we seed an empty lockfile. A correct
 # `ut install` must notice the mismatch, re-resolve, and install both.
 # Regression guard for #2576.
-echo -e "${YELLOW}Case 8.4: stale lockfile detection${NC}"
+echo -e "${YELLOW}Case 8.6: stale lockfile detection${NC}"
 cd e2e/pm/stale-lockfile
 rm -rf node_modules
 cat > package-lock.json <<'JSON'

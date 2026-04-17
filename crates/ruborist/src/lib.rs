@@ -100,6 +100,12 @@ pub mod http {
     pub use crate::resolver::http::http_cache_slot;
 }
 
+/// Local `file:` resolver helpers.
+pub mod file {
+    #[cfg(feature = "http-tarball")]
+    pub use crate::resolver::file::file_cache_slot;
+}
+
 /// Utility functions.
 pub mod util {
     pub use crate::model::util::{PackageNameStr, parse_package_spec, read_package_json};
