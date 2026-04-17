@@ -33,6 +33,7 @@
     }
   },
   "react": {
-    "runtime": "classic"
+    "runtime": "classic",
+    "keepJsxDevFilename": true
   }
 }
