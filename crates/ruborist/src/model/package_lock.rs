@@ -323,19 +323,13 @@ fn create_non_root_lock_package(
         ..LockPackage::default()
     };
 
-    // Workspace links and `file:<dir>` deps both serialize as
-    // `link: true` + `resolved: <relative>`; only the source path differs.
-    let link_src: Option<&Path> = if node.is_link() {
-        Some(&node.path)
-    } else {
-        manifest.dist().and_then(|d| d.link_target.as_deref())
-    };
-
     if node.is_workspace() {
         pkg.version = Some(manifest.version().to_string());
-    } else if let Some(src) = link_src {
+    } else if node.is_link() {
+        // Workspace links and `file:<dir>` deps both use `NodeType::Link`;
+        // `node.path` is the on-disk source in both cases.
         pkg.link = Some(true);
-        pkg.resolved = Some(get_relative_path(src, root_path));
+        pkg.resolved = Some(get_relative_path(&node.path, root_path));
     } else {
         // Regular package
         *total_packages += 1;

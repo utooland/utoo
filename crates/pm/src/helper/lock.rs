@@ -270,10 +270,8 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
         .as_ref()
         .ok_or_else(|| anyhow!("Failed to get tarball URL from manifest"))?;
 
-    // Download and extract package to cache. Global-install context has no
-    // project root; pass `package_path` (the destination dir) as the base
-    // for relative `file:` URLs — global installs never use them anyway.
-    let cache_path = resolve_cache_path(&name, &resolved.version, tarball_url, &package_path)
+    // Download and extract package to cache.
+    let cache_path = resolve_cache_path(&name, &resolved.version, tarball_url)
         .await
         .ok_or_else(|| anyhow!("Failed to download package {name}"))?;
 

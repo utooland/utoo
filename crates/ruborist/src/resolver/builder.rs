@@ -77,29 +77,38 @@ async fn resolve_http_dep(
     }
 }
 
-/// Dispatch a `file:` spec to the real resolver when the `http-tarball`
-/// feature is enabled (file + http share tarball infra), otherwise error
-/// with a hint.
+/// Dispatch a `file:<tarball>` spec to the shared tarball resolver when
+/// the `http-tarball` feature is enabled, otherwise error with a hint.
 ///
-/// BFS extracts/copies to `<cache_dir>/<name>/_file_<path_hash>/` so
-/// install-phase skips re-extraction; see [`super::file`] module docs.
-async fn resolve_file_dep(
+/// Directory `file:<dir>` specs do **not** come through here — the builder
+/// creates a `NodeType::Link` directly (see `process_dependency`).
+async fn resolve_file_tarball(
     cache_dir: Option<&std::path::Path>,
-    base_dir: &std::path::Path,
-    path_spec: &str,
+    abs_src: std::path::PathBuf,
     fetch_cache: &FileFetchCache,
 ) -> anyhow::Result<ResolvedPackage> {
     #[cfg(feature = "http-tarball")]
     {
-        crate::resolver::file::resolve_file_dep(cache_dir, base_dir, path_spec, fetch_cache).await
+        crate::resolver::file::resolve_file_tarball_dep(cache_dir, abs_src, fetch_cache).await
     }
     #[cfg(not(feature = "http-tarball"))]
     {
-        let _ = (cache_dir, base_dir, fetch_cache);
+        let _ = (cache_dir, fetch_cache);
         anyhow::bail!(
-            "file: dependency resolution not available for 'file:{path_spec}' (enable the 'http-tarball' feature)"
+            "file: tarball resolution not available for '{}' (enable the 'http-tarball' feature)",
+            abs_src.display()
         )
     }
+}
+
+/// Normalize a `file:` spec against its base directory (`.` / `..`
+/// collapsed, no filesystem access). Shared with the tarball resolver.
+#[cfg(feature = "http-tarball")]
+use crate::resolver::file::normalize_path as normalize_file_path;
+
+#[cfg(not(feature = "http-tarball"))]
+fn normalize_file_path(base: &std::path::Path, spec: &str) -> std::path::PathBuf {
+    base.join(spec)
 }
 
 // Callers construct a `BuildDepsConfig` without touching feature flags — when
@@ -387,20 +396,17 @@ pub enum ProcessResult {
 ///   silently resolving against an unrelated directory.
 fn file_base_dir(graph: &DependencyGraph, node_index: NodeIndex) -> Option<PathBuf> {
     let node = graph.get_node(node_index)?;
-    if node.is_root() || node.is_workspace() {
+    // Nodes whose `path` already points at an on-disk source directory:
+    // root project, workspace packages, and `file:<dir>` link targets.
+    if node.is_root() || node.is_workspace() || node.is_link() {
         return Some(node.path.clone());
     }
-    // Transitive case: recover origin from the parent's resolved source.
-    // - `dist.link_target` is set for `file:<dir>` deps (the dir IS the origin).
-    // - `dist.tarball = file:<abs>` for `file:<.tgz>` deps (origin is the
-    //   tarball's parent directory).
+    // Transitive `file:<tarball>`: parent's `dist.tarball` is the absolute
+    // tarball path stamped at resolution; origin dir is its parent.
     let manifest = match &node.manifest {
         crate::model::manifest::NodeManifest::Registry(m) => m.as_ref(),
         crate::model::manifest::NodeManifest::Local(_) => return None,
     };
-    if let Some(dir) = manifest.dist.link_target.as_deref() {
-        return Some(dir.to_path_buf());
-    }
     let url = manifest.dist.tarball.as_deref()?;
     let path = url.strip_prefix("file:")?;
     std::path::Path::new(path)
@@ -522,21 +528,73 @@ pub async fn process_dependency<R: RegistryClient>(
                     protocol: Protocol::File,
                     path,
                 } => {
-                    let base_dir = match file_base_dir(graph, node_index) {
-                        Some(dir) => dir,
-                        None => {
-                            return Err(ResolveError::Unsupported {
-                                spec: edge_info.spec.clone(),
-                                reason: "cannot determine base directory for file: dep \
-                                    (transitive file: deps inside published registry \
-                                    packages are not supported)",
-                            });
+                    let base_dir = file_base_dir(graph, node_index).ok_or_else(|| {
+                        ResolveError::Unsupported {
+                            spec: edge_info.spec.clone(),
+                            reason: "cannot determine base directory for file: dep \
+                                (transitive file: deps inside published registry \
+                                packages are not supported)",
                         }
+                    })?;
+                    let abs_src = normalize_file_path(&base_dir, path);
+
+                    // Dispatch by on-disk type: directories install as a
+                    // symlink (graph `NodeType::Link`, no cache touch);
+                    // tarballs go through the shared extraction pipeline.
+                    let metadata = std::fs::metadata(&abs_src).map_err(|e| {
+                        if edge_info.edge_type == EdgeType::Optional {
+                            tracing::debug!(
+                                "Skipped optional file: dep {}@{}: {}",
+                                edge_info.name,
+                                edge_info.spec,
+                                e
+                            );
+                        }
+                        ResolveError::File {
+                            spec: edge_info.spec.clone(),
+                            source: anyhow::anyhow!(
+                                "file: target does not exist: {} ({})",
+                                abs_src.display(),
+                                e
+                            ),
+                        }
+                    });
+                    let metadata = match metadata {
+                        Ok(m) => m,
+                        Err(_) if edge_info.edge_type == EdgeType::Optional => {
+                            return Ok(ProcessResult::Skipped);
+                        }
+                        Err(e) => return Err(e),
                     };
-                    match resolve_file_dep(
+
+                    if metadata.is_dir() {
+                        // Create a Link node directly — same shape as a
+                        // workspace link. Install-phase symlinks it; we
+                        // intentionally don't walk the linked package's
+                        // transitive deps (npm-link semantics: the linked
+                        // dir manages its own node_modules).
+                        let pkg_json = crate::model::util::read_package_json(&abs_src)
+                            .await
+                            .map_err(|e| ResolveError::File {
+                                spec: edge_info.spec.clone(),
+                                source: e,
+                            })?;
+                        let link_node = PackageNode::link_from_package_json(abs_src, pkg_json);
+                        let new_index = graph.add_node(link_node);
+                        graph.add_physical_edge(conflict_parent, new_index);
+                        graph.mark_dependency_resolved(edge_info.edge_id, new_index);
+                        update_node_type_from_edge(
+                            graph,
+                            node_index,
+                            new_index,
+                            &edge_info.edge_type,
+                        );
+                        return Ok(ProcessResult::Created(new_index));
+                    }
+
+                    match resolve_file_tarball(
                         config.cache_dir.as_deref(),
-                        &base_dir,
-                        path,
+                        abs_src,
                         &config.file_fetch_cache,
                     )
                     .await
@@ -544,7 +602,7 @@ pub async fn process_dependency<R: RegistryClient>(
                         Ok(r) => r,
                         Err(_) if edge_info.edge_type == EdgeType::Optional => {
                             tracing::debug!(
-                                "Skipped optional file: dependency {}@{}",
+                                "Skipped optional file: tarball {}@{}",
                                 edge_info.name,
                                 edge_info.spec
                             );

@@ -41,14 +41,6 @@ pub fn is_git_url(url: &str) -> bool {
     matches!(url.parse::<Protocol>(), Ok(Protocol::Git))
 }
 
-/// Check whether a tarball URL refers to a `file:` dependency.
-///
-/// Pinned URL shape is `file:<absolute_path>` (see ruborist's
-/// `finalize_non_registry_manifest`).
-pub fn is_file_url(url: &str) -> bool {
-    matches!(url.parse::<Protocol>(), Ok(Protocol::File))
-}
-
 /// Look up the cache path for a git-resolved package.
 ///
 /// Git packages are cloned during BFS resolution (inside ruborist) and
@@ -93,25 +85,14 @@ async fn slot_cache_lookup(name: &str, slot: String) -> Option<PathBuf> {
     }
 }
 
-/// Look up the cache path for a `file:` dependency.
+/// Look up the cache path for a `file:<absolute_tarball>` dependency.
 ///
-/// `tarball_url` may be `file:<absolute>` (in-memory pipeline path) or
-/// `file:<root-relative>` (read from the lockfile). `cwd` (project root) is
-/// the base for re-absolutizing the latter so the slot hash matches what
-/// BFS wrote.
-pub async fn file_cache_lookup(
-    name: &str,
-    tarball_url: &str,
-    cwd: &std::path::Path,
-) -> Option<PathBuf> {
-    let raw = tarball_url.strip_prefix("file:")?;
-    let path = std::path::Path::new(raw);
-    let abs = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        cwd.join(path)
-    };
-    let hit = slot_cache_lookup(name, file_cache_slot(&abs)).await;
+/// The URL must already be absolute; call sites that read relative URLs
+/// from the lockfile are responsible for re-absolutizing against the
+/// project root before reaching the cloner.
+pub async fn file_cache_lookup(name: &str, tarball_url: &str) -> Option<PathBuf> {
+    let abs_path = tarball_url.strip_prefix("file:")?;
+    let hit = slot_cache_lookup(name, file_cache_slot(std::path::Path::new(abs_path))).await;
     if hit.is_some() {
         tracing::debug!("file: dep cache hit: {} ({})", name, tarball_url);
     }
@@ -129,30 +110,25 @@ pub async fn http_tarball_cache_lookup(name: &str, tarball_url: &str) -> Option<
 
 /// Resolve the local cache path for a package, downloading if necessary.
 ///
-/// Routing order:
-/// 1. Git URLs → [`git_cache_lookup`] (cache keyed on commit sha)
-/// 2. `file:` URLs → [`file_cache_lookup`] (keyed on absolute-path hash;
-///    `cwd` re-absolutizes the root-relative form stored in the lockfile)
-/// 3. Other non-git URLs: try [`http_tarball_cache_lookup`] (keyed on URL
-///    hash); if present, the tarball was pre-extracted by BFS.
-/// 4. Fall through to [`download_to_cache`] for registry tarball URLs
-///    (keyed on `<name>/<version>`).
-pub async fn resolve_cache_path(
-    name: &str,
-    version: &str,
-    tarball_url: &str,
-    cwd: &std::path::Path,
-) -> Option<PathBuf> {
-    if is_git_url(tarball_url) {
-        return git_cache_lookup(name, version, tarball_url).await;
+/// The cloner calls this with a fully-qualified URL (never a relative
+/// path) — the install loop is responsible for any lockfile-format
+/// rewriting before we get here.
+pub async fn resolve_cache_path(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
+    match tarball_url.parse::<Protocol>() {
+        // Git: BFS cloned to `<cache>/<name>/<commit_sha>/`
+        Ok(Protocol::Git) => git_cache_lookup(name, version, tarball_url).await,
+        // Local tarball: BFS extracted to `<cache>/<name>/_file_<hash>/`
+        Ok(Protocol::File) => file_cache_lookup(name, tarball_url).await,
+        // HTTP(S) tarball (either a URL-pinned dep or a registry tarball):
+        // try the URL-hashed slot BFS may have seeded, then fall through
+        // to the registry download path keyed on `<name>/<version>/`.
+        _ => {
+            if let Some(p) = http_tarball_cache_lookup(name, tarball_url).await {
+                return Some(p);
+            }
+            download_to_cache(name, version, tarball_url).await
+        }
     }
-    if is_file_url(tarball_url) {
-        return file_cache_lookup(name, tarball_url, cwd).await;
-    }
-    if let Some(p) = http_tarball_cache_lookup(name, tarball_url).await {
-        return Some(p);
-    }
-    download_to_cache(name, version, tarball_url).await
 }
 
 /// Download a registry tarball to the global cache directory, returning the cache path.
