@@ -16,6 +16,7 @@ pub mod default_export_namer;
 pub mod emotion;
 pub mod image;
 pub mod inline_css;
+pub mod jsx_dev_filename;
 pub mod modularize_imports;
 pub mod remove_console;
 pub mod styled_components;
