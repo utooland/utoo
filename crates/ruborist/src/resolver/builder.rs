@@ -348,6 +348,10 @@ pub enum ProcessResult {
 /// node in the graph, the dep was skipped, or we have a freshly-seeded
 /// tarball cache slot that the normal BFS flow can turn into a Regular
 /// node.
+///
+/// Variants are only constructed by the feature-gated `process_file_dep`
+/// implementation; the fallback stub returns `Err` unconditionally.
+#[cfg_attr(not(feature = "http-tarball"), allow(dead_code))]
 enum FileResolution {
     Linked(NodeIndex),
     Skipped,
@@ -358,6 +362,7 @@ enum FileResolution {
 /// `node_index`. Returns `None` for a registry package that somehow
 /// carries `file:` deps — transitive file: inside a published tarball
 /// has no valid base and should surface as an explicit error.
+#[cfg(feature = "http-tarball")]
 fn file_base_dir(graph: &DependencyGraph, node_index: NodeIndex) -> Option<PathBuf> {
     let node = graph.get_node(node_index)?;
     if node.is_root() || node.is_workspace() || node.is_link() {
