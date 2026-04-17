@@ -292,7 +292,7 @@ export interface ConfigComplete {
   react?: {
     runtime?: "automatic" | "classic";
     importSource?: string;
-    keepJsxDevFilename?: boolean;
+    absoluteSourceFilename?: boolean;
   };
   stats?: boolean;
   swcPlugins?: [string, any][];

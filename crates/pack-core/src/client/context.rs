@@ -248,7 +248,7 @@ pub async fn get_client_module_options_context(
         client_rules.push(get_default_export_namer_rule());
     }
 
-    if is_react_development && react_config.keep_jsx_dev_filename.unwrap_or(false) {
+    if is_react_development && react_config.absolute_source_filename.unwrap_or(false) {
         client_rules.push(get_jsx_dev_filename_rule());
     }
 

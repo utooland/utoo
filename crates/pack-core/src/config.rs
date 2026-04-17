@@ -285,7 +285,7 @@ impl ReactRuntime {
 pub struct ReactConfig {
     pub runtime: Option<ReactRuntime>,
     pub import_source: Option<RcStr>,
-    pub keep_jsx_dev_filename: Option<bool>,
+    pub absolute_source_filename: Option<bool>,
 }
 
 #[turbo_tasks::value(eq = "manual")]

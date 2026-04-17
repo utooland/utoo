@@ -1303,7 +1303,7 @@
             "null"
           ]
         },
-        "keepJsxDevFilename": {
+        "absoluteSourceFilename": {
           "description": "Keep React dev source filenames as absolute disk paths for editor integrations",
           "type": [
             "boolean",
