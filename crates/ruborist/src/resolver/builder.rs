@@ -344,42 +344,10 @@ pub enum ProcessResult {
     Skipped,
 }
 
-/// Outcome of a `file:` dep resolution — either we already placed a Link
-/// node in the graph, the dep was skipped, or we have a freshly-seeded
-/// tarball cache slot that the normal BFS flow can turn into a Regular
-/// node.
-///
-/// Variants are only constructed by the feature-gated `process_file_dep`
-/// implementation; the fallback stub returns `Err` unconditionally.
-#[cfg_attr(not(feature = "http-tarball"), allow(dead_code))]
-enum FileResolution {
-    Linked(NodeIndex),
-    Skipped,
-    Tarball(ResolvedPackage),
-}
-
-/// Resolve the absolute origin directory for a `file:` spec declared by
-/// `node_index`. Returns `None` for a registry package that somehow
-/// carries `file:` deps — transitive file: inside a published tarball
-/// has no valid base and should surface as an explicit error.
-#[cfg(feature = "http-tarball")]
-fn file_base_dir(graph: &DependencyGraph, node_index: NodeIndex) -> Option<PathBuf> {
-    let node = graph.get_node(node_index)?;
-    if node.is_root() || node.is_workspace() || node.is_link() {
-        return Some(node.path.clone());
-    }
-    // Transitive `file:<tarball>`: origin is the tarball's parent dir,
-    // recovered from the `file:<abs>` URL we stamp at resolution time.
-    let NodeManifest::Registry(m) = &node.manifest else {
-        return None;
-    };
-    let url = m.dist.tarball.as_deref()?.strip_prefix("file:")?;
-    std::path::Path::new(url).parent().map(Path::to_path_buf)
-}
-
-/// Handle a `file:` dep: dir → create Link node inline; tarball → feed
-/// bytes through the shared `commit_tarball_bytes` pipeline. Gated on
-/// `http-tarball` (tar infra); without it, errors out with a hint.
+/// Handle a `file:` dep: dir → Link node inline (returns
+/// `ControlFlow::Break`); tarball → stream bytes through the shared
+/// `commit_tarball_bytes` and hand the `ResolvedPackage` back to the
+/// normal BFS flow via `ControlFlow::Continue`.
 #[cfg(feature = "http-tarball")]
 async fn process_file_dep<E>(
     graph: &mut DependencyGraph,
@@ -388,7 +356,9 @@ async fn process_file_dep<E>(
     edge: &DependencyEdgeInfo,
     path_spec: &str,
     cache_dir: Option<&Path>,
-) -> Result<FileResolution, ResolveError<E>> {
+) -> Result<std::ops::ControlFlow<ProcessResult, ResolvedPackage>, ResolveError<E>> {
+    use std::ops::ControlFlow;
+
     use crate::resolver::http::file_cache_slot;
     use crate::resolver::tar::commit_tarball_bytes;
 
@@ -396,15 +366,32 @@ async fn process_file_dep<E>(
         spec: edge.spec.clone(),
         source,
     };
-    let base = file_base_dir(graph, node_index).ok_or_else(|| ResolveError::Unsupported {
-        spec: edge.spec.clone(),
-        reason: "transitive file: deps inside a published registry package are not supported",
-    })?;
+
+    // Base dir is the on-disk source for root/workspace/link nodes, or
+    // the parent of the `file:<abs>` tarball URL stamped on a transitive
+    // file-tarball dep's manifest. Registry nodes have no valid base.
+    let node = graph.get_node(node_index);
+    let base = node
+        .filter(|n| n.is_root() || n.is_workspace() || n.is_link())
+        .map(|n| n.path.clone())
+        .or_else(|| {
+            let NodeManifest::Registry(m) = &node?.manifest else {
+                return None;
+            };
+            let url = m.dist.tarball.as_deref()?.strip_prefix("file:")?;
+            std::path::Path::new(url).parent().map(Path::to_path_buf)
+        })
+        .ok_or_else(|| ResolveError::Unsupported {
+            spec: edge.spec.clone(),
+            reason: "transitive file: deps inside a published registry package are not supported",
+        })?;
     let abs = base.join(path_spec);
 
     let meta = match std::fs::metadata(&abs) {
         Ok(m) => m,
-        Err(_) if edge.edge_type == EdgeType::Optional => return Ok(FileResolution::Skipped),
+        Err(_) if edge.edge_type == EdgeType::Optional => {
+            return Ok(ControlFlow::Break(ProcessResult::Skipped));
+        }
         Err(e) => {
             return Err(file_err(
                 anyhow::Error::new(e).context(format!("file: target {}", abs.display())),
@@ -423,7 +410,7 @@ async fn process_file_dep<E>(
         graph.add_physical_edge(conflict_parent, idx);
         graph.mark_dependency_resolved(edge.edge_id, idx);
         update_node_type_from_edge(graph, node_index, idx, &edge.edge_type);
-        return Ok(FileResolution::Linked(idx));
+        return Ok(ControlFlow::Break(ProcessResult::Created(idx)));
     }
 
     let cache_dir = cache_dir
@@ -440,31 +427,16 @@ async fn process_file_dep<E>(
     {
         Ok(Ok(m)) => m,
         Ok(Err(_)) | Err(_) if edge.edge_type == EdgeType::Optional => {
-            return Ok(FileResolution::Skipped);
+            return Ok(ControlFlow::Break(ProcessResult::Skipped));
         }
         Ok(Err(source)) => return Err(file_err(source)),
         Err(join) => return Err(file_err(join.into())),
     };
-    Ok(FileResolution::Tarball(ResolvedPackage {
+    Ok(ControlFlow::Continue(ResolvedPackage {
         name: manifest.name.clone(),
         version: manifest.version.clone(),
         manifest: Arc::new(manifest),
     }))
-}
-
-#[cfg(not(feature = "http-tarball"))]
-async fn process_file_dep<E>(
-    _graph: &mut DependencyGraph,
-    _node_index: NodeIndex,
-    _conflict_parent: NodeIndex,
-    edge: &DependencyEdgeInfo,
-    _path_spec: &str,
-    _cache_dir: Option<&Path>,
-) -> Result<FileResolution, ResolveError<E>> {
-    Err(ResolveError::Unsupported {
-        spec: edge.spec.clone(),
-        reason: "file: deps require the 'http-tarball' feature",
-    })
 }
 
 /// Process a single dependency edge.
@@ -580,20 +552,32 @@ pub async fn process_dependency<R: RegistryClient>(
                 PackageSpec::Local {
                     protocol: Protocol::File,
                     path,
-                } => match process_file_dep(
-                    graph,
-                    node_index,
-                    conflict_parent,
-                    edge_info,
-                    path,
-                    config.cache_dir.as_deref(),
-                )
-                .await?
-                {
-                    FileResolution::Linked(idx) => return Ok(ProcessResult::Created(idx)),
-                    FileResolution::Skipped => return Ok(ProcessResult::Skipped),
-                    FileResolution::Tarball(pkg) => pkg,
-                },
+                } => {
+                    #[cfg(feature = "http-tarball")]
+                    {
+                        match process_file_dep(
+                            graph,
+                            node_index,
+                            conflict_parent,
+                            edge_info,
+                            path,
+                            config.cache_dir.as_deref(),
+                        )
+                        .await?
+                        {
+                            std::ops::ControlFlow::Break(r) => return Ok(r),
+                            std::ops::ControlFlow::Continue(pkg) => pkg,
+                        }
+                    }
+                    #[cfg(not(feature = "http-tarball"))]
+                    {
+                        let _ = path;
+                        return Err(ResolveError::Unsupported {
+                            spec: edge_info.spec.clone(),
+                            reason: "file: deps require the 'http-tarball' feature",
+                        });
+                    }
+                }
                 PackageSpec::Local { .. } => {
                     return Err(ResolveError::Unsupported {
                         spec: edge_info.spec.clone(),

@@ -84,14 +84,16 @@
 //!
 //! [`download_to_cache`]: https://github.com/utooland/utoo/blob/main/crates/pm/src/util/downloader.rs
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
+use sha2::{Digest, Sha256};
 use tokio_retry::RetryIf;
 
-use super::common::{DedupCache, cache_slot, dedup_init};
+use super::common::{DedupCache, dedup_init};
 use super::tar::commit_tarball_bytes;
 use crate::model::manifest::CoreVersionManifest;
 use crate::service::fetch::{
@@ -103,26 +105,27 @@ use crate::traits::registry::ResolvedPackage;
 /// Session-scoped dedup cache: one fetch per URL even under concurrent BFS.
 pub(crate) type HttpFetchCache = DedupCache<CoreVersionManifest>;
 
-/// Derive the cache sub-directory name for an HTTP(S) tarball URL.
-///
-/// Returns `"_http_<first-16-hex-of-sha256(url)>"`. The `_http_` prefix and
-/// 16-char suffix keep this visually distinct from a 40-char git commit sha
-/// and from a semver string, so `<cache>/<name>/<slot>/` entries never
-/// collide between resolver families.
-///
-/// Both ruborist (writing) and pm (lookup at install time) call this helper
-/// to agree on the same slot for a given URL.
+/// `<prefix><16 hex>` from `sha256(bytes)`. Used by the two non-registry
+/// cache slots (`_http_<url>`, `_file_<path>`) to stay visually distinct
+/// from `<name>/<version>/` and 40-char git commit shas.
+fn cache_slot(prefix: &str, bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut out = String::with_capacity(prefix.len() + 16);
+    out.push_str(prefix);
+    for b in &digest[..8] {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
+}
+
 pub fn http_cache_slot(url: &str) -> String {
     cache_slot("_http_", url.as_bytes())
 }
 
-/// Cache sub-directory for a local tarball file keyed on its absolute path.
-/// Exposed for pm install-phase lookup; the tarball extraction path mirrors
-/// http's exactly, only the bytes come from disk.
-///
-/// The path is normalized via `Path::components()` before hashing so BFS
-/// (`base.join("./foo.tgz")`) and install (`cwd.join("foo.tgz")` from a
-/// root-relative lockfile entry) land on the same slot.
+/// Cache slot for a local tarball keyed on its absolute path. Path is
+/// normalized via `Path::components()` first so BFS (`base.join("./foo.tgz")`)
+/// and install (`cwd.join("foo.tgz")` from a root-relative lockfile entry)
+/// hash to the same slot.
 pub fn file_cache_slot(abs_path: &Path) -> String {
     let normalized: PathBuf = abs_path.components().collect();
     cache_slot("_file_", normalized.as_os_str().as_encoded_bytes())
