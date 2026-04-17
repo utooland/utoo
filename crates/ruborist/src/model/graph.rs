@@ -289,11 +289,10 @@ impl DependencyGraph {
         let requester = self.build_requester_index();
 
         let mut chain: Vec<(String, String)> = std::iter::successors(Some(from), |&idx| {
-            if idx == self.root_index {
-                None
-            } else {
-                requester.get(&idx).copied()
-            }
+            requester
+                .get(&idx)
+                .copied()
+                .filter(|_| idx != self.root_index)
         })
         .scan(HashSet::new(), |seen, idx| seen.insert(idx).then_some(idx))
         .map(|idx| {
@@ -312,12 +311,15 @@ impl DependencyGraph {
     fn build_requester_index(&self) -> HashMap<NodeIndex, NodeIndex> {
         let mut index = HashMap::new();
         for edge in self.graph.edge_references() {
-            if let GraphEdge::Dependency(dep) = edge.weight()
-                && let Some(target) = dep.to
-                && target != edge.source()
-            {
-                index.entry(target).or_insert(edge.source());
+            let GraphEdge::Dependency(dep) = edge.weight() else {
+                continue;
+            };
+            let Some(target) = dep.to else { continue };
+            let src = edge.source();
+            if target == src {
+                continue;
             }
+            index.entry(target).or_insert(src);
         }
         index
     }
