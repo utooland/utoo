@@ -2,19 +2,32 @@
 "[project]/basic/server_function/input/actions.ts [server-fn] (ecmascript, server reference)", (function(__turbopack_context__){
 
 }),
+"[project]/basic/server_function/input/transport.ts [client] (ecmascript)", ((__turbopack_context__) => {
+"use strict";
+
+function createServerReference(id, name) {
+    return async function(...args) {
+        console.log(`[Transport] Call ${name} (${id}) with`, args);
+        return {
+            ok: true
+        };
+    };
+}
+__turbopack_context__.s([
+    "createServerReference",
+    0,
+    createServerReference
+]);
+}),
 "[project]/basic/server_function/input/actions.ts [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$actions$2e$ts__$5b$server$2d$fn$5d$__$28$ecmascript$2c$__server__reference$29$__ = __turbopack_context__.i("[project]/basic/server_function/input/actions.ts [server-fn] (ecmascript, server reference)");
-(()=>{
-    const e = new Error("Cannot find module '@app/transport'");
-    e.code = 'MODULE_NOT_FOUND';
-    throw e;
-})();
+var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$transport$2e$ts__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/server_function/input/transport.ts [client] (ecmascript)");
 ;
 ;
-const createUser = (...args)=>callServer("bdadcaefd8ce9058", args);
-const deleteUser = (...args)=>callServer("63c89b1b411a2fd0", args);
+const createUser = (0, __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$transport$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["createServerReference"])("bdadcaefd8ce9058", "createUser");
+const deleteUser = (0, __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$transport$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["createServerReference"])("63c89b1b411a2fd0", "deleteUser");
 __turbopack_context__.s([
     "createUser",
     0,
@@ -40,4 +53,4 @@ __turbopack_context__.s([]);
 }),
 ]);
 
-//# sourceMappingURL=input_8e9d07ec.js.map
+//# sourceMappingURL=input_019d5048.js.map

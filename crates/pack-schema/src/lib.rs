@@ -169,22 +169,24 @@ pub struct SchemaDevServer {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SchemaServerConfig {
-    /// Server function configuration ("use server" directive support)
+    /// Entry point for the server runtime (e.g. "src/server.ts")
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Server function configuration")]
-    pub functions: Option<SchemaServerFunctionsConfig>,
-}
+    #[schemars(description = "Entry point for the server runtime (e.g. \"src/server.ts\")")]
+    pub entry: Option<String>,
 
-/// Server function configuration
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SchemaServerFunctionsConfig {
-    /// Module that exports `callServer(actionId, args)` for client-side transport.
-    /// e.g. "@evjs/client/transport" or custom module path.
+    /// Module that exports `createServerReference` for client-side proxy generation.
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
-        description = "Module that exports callServer(actionId, args) for client-side transport"
+        description = "Module that exports createServerReference(actionId, name) for client proxy"
     )]
-    pub call_server_module: String,
+    pub client_reference: Option<String>,
+
+    /// Module that exports `registerServerReference` for the server bundle.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Module that exports registerServerReference(action, actionId, name) for the server bundle"
+    )]
+    pub server_reference: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

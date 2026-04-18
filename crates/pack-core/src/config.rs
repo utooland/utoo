@@ -92,19 +92,15 @@ pub struct ProviderConfig(
 #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerConfig {
-    /// Server function configuration ("use server" directive support)
-    pub functions: Option<ServerFunctionsConfig>,
+    /// Entry point for the server runtime (e.g. "src/server.ts")
+    pub entry: Option<RcStr>,
+    /// Module that exports `createServerReference` for client-side proxy generation.
+    pub client_reference: Option<RcStr>,
+    /// Module that exports `registerServerReference` for the server bundle.
+    #[serde(default)]
+    pub server_reference: Option<RcStr>,
     /// Server output configuration
     pub output: Option<ServerOutputConfig>,
-}
-
-#[turbo_tasks::value(eq = "manual")]
-#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize, OperationValue)]
-#[serde(rename_all = "camelCase")]
-pub struct ServerFunctionsConfig {
-    /// Module that exports `callServer(actionId, args)` for client-side transport.
-    /// e.g. "@evjs/client/transport" or custom module path.
-    pub call_server_module: RcStr,
 }
 
 #[turbo_tasks::value(eq = "manual")]

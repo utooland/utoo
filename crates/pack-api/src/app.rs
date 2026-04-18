@@ -353,7 +353,7 @@ impl AppEndpoint {
             ResolvedVc<Box<dyn turbopack::transition::Transition>>,
         > = FxHashMap::default();
         let server_config = project.config().server().await?;
-        if server_config.functions.is_some() {
+        if server_config.client_reference.is_some() {
             let server_module_options_context = get_server_module_options_context(
                 project.project_path().owned().await?,
                 project.execution_context(),
@@ -490,9 +490,9 @@ impl Endpoint for AppEndpoint {
 
             // Build server functions as Node.js if configured
             let server_config = this.project.config().server().await?;
-            let output_assets = if server_config.functions.is_some() {
+            let output_assets = if server_config.client_reference.is_some() {
                 let server_output =
-                    self.server_function_output_assets(Vc::upcast(asset_context), runtime_entries);
+                    self.server_reference_output_assets(Vc::upcast(asset_context), runtime_entries);
                 output_assets.concatenate(server_output)
             } else {
                 output_assets
@@ -552,7 +552,7 @@ impl AppEndpoint {
     /// Discovers `ServerReferenceModule`s in the client module graph and builds
     /// their inner server modules as Node.js chunks.
     #[turbo_tasks::function]
-    async fn server_function_output_assets(
+    async fn server_reference_output_assets(
         self: Vc<Self>,
         asset_context: Vc<Box<dyn AssetContext>>,
         runtime_entries: Vc<EvaluatableAssets>,
@@ -572,17 +572,33 @@ impl AppEndpoint {
             .await?;
 
         // Walk all graphs to find ServerReferenceModule instances
-        let mut server_modules = vec![];
+        let mut unique_server_modules = turbo_tasks::FxIndexSet::default();
         for graph in &resolved_graphs {
             for module in graph.iter_nodes() {
                 if let Some(server_ref) =
                     ResolvedVc::try_downcast_type::<ServerReferenceModule>(module)
                 {
                     let inner = server_ref.await?;
-                    server_modules.push(inner.server_module);
+                    unique_server_modules.insert(inner.server_module);
                 }
             }
         }
+
+        if unique_server_modules.is_empty() {
+            return Ok(OutputAssets::empty());
+        }
+
+        // Resolving VCs to strings for a deterministic sorting pass guarantees our
+        // AST chunk hashes remain tightly identical between runs, following Next.js's
+        // FxIndexMap/IndexSet pattern for chunking server routines.
+        let mut pairs = unique_server_modules
+            .into_iter()
+            .map(|m| async move { Ok((m.ident().to_string().await?, m)) })
+            .try_join()
+            .await?;
+
+        pairs.sort_by(|a, b| a.0.cmp(&b.0));
+        let server_modules: Vec<_> = pairs.into_iter().map(|(_, m)| m).collect();
 
         if server_modules.is_empty() {
             return Ok(OutputAssets::empty());
@@ -592,10 +608,64 @@ impl AppEndpoint {
         // which is a separate turbo_tasks function (avoids deadlock)
         let server_chunking_context = project.server_fn_chunking_context();
 
-        let evaluatable_assets: Vec<ResolvedVc<Box<dyn EvaluatableAsset>>> = server_modules
+        let mut evaluatable_assets: Vec<ResolvedVc<Box<dyn EvaluatableAsset>>> = server_modules
             .iter()
             .filter_map(|m| ResolvedVc::try_sidecast::<Box<dyn EvaluatableAsset>>(*m))
             .collect();
+
+        let server_config = project.config().server().await?;
+        if let Some(entry_import) = &server_config.entry {
+            let relative_import =
+                convert_to_project_relative(entry_import, &project.project_path().await?.path)?;
+            let entry_request = Request::relative(
+                relative_import.into(),
+                Default::default(),
+                Default::default(),
+                false,
+            );
+            let server_layer =
+                Layer::new_with_user_friendly_name(rcstr!("server"), rcstr!("Nodejs"));
+            let server_compile_time_info = project.server_compile_time_info();
+            let server_module_options_context = get_server_module_options_context(
+                project.project_path().owned().await?,
+                project.execution_context(),
+                project.server_compile_time_info().environment(),
+                project.mode(),
+                project.config(),
+            );
+            let server_resolve_options_context = get_server_resolve_options_context(
+                project.project_path().owned().await?,
+                project.mode(),
+                project.config(),
+                project.execution_context(),
+                project.pack_path().owned().await?,
+            );
+            let server_asset_context: Vc<Box<dyn AssetContext>> =
+                Vc::upcast(ModuleAssetContext::new(
+                    TransitionOptions::default().cell(),
+                    server_compile_time_info,
+                    server_module_options_context,
+                    server_resolve_options_context,
+                    server_layer,
+                ));
+
+            let origin = PlainResolveOrigin::new(
+                server_asset_context,
+                project.project_path().await?.join("_")?,
+            );
+            let ty = ReferenceType::Entry(EntryReferenceSubType::Undefined);
+            let modules = origin
+                .resolve_asset(entry_request, origin.resolve_options(), ty)
+                .await?
+                .primary_modules()
+                .await?;
+            for &module in &*modules {
+                if let Some(entry) = ResolvedVc::try_downcast::<Box<dyn EvaluatableAsset>>(module) {
+                    evaluatable_assets.push(entry);
+                }
+            }
+        }
+
         if evaluatable_assets.is_empty() {
             return Ok(OutputAssets::empty());
         }
@@ -608,8 +678,11 @@ impl AppEndpoint {
             .map(|e| ResolvedVc::upcast(*e))
             .collect();
 
-        let ident = AssetIdent::from_path(project.project_path().await?.join("index.js")?)
-            .with_query("?name=index".into());
+        let chunk_name = "index.js";
+        let chunk_query = "?name=index";
+
+        let ident = AssetIdent::from_path(project.project_path().await?.join(chunk_name)?)
+            .with_query(chunk_query.into());
         let chunk_group_result = server_chunking_context
             .evaluated_chunk_group(
                 ident,

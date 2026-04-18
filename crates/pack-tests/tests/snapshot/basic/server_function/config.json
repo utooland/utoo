@@ -9,14 +9,16 @@
     "output": {
       "path": "output/client"
     },
+
+
     "server": {
+      "entry": "input/server.ts",
       "output": {
         "path": "output/server",
         "filename": "main.js"
       },
-      "functions": {
-        "callServerModule": "@app/transport"
-      }
+      "clientReference": "./input/transport.ts",
+      "serverReference": "./input/register.ts"
     }
   }
 }
