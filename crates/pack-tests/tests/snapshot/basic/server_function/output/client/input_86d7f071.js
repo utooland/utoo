@@ -37,20 +37,41 @@ __turbopack_context__.s([
     deleteUser
 ]);
 }),
+"[project]/basic/server_function/input/admin.ts [server-fn] (ecmascript, server reference)", (function(__turbopack_context__){
+
+}),
+"[project]/basic/server_function/input/admin.ts [client] (ecmascript)", ((__turbopack_context__) => {
+"use strict";
+
+var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$admin$2e$ts__$5b$server$2d$fn$5d$__$28$ecmascript$2c$__server__reference$29$__ = __turbopack_context__.i("[project]/basic/server_function/input/admin.ts [server-fn] (ecmascript, server reference)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$transport$2e$ts__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/server_function/input/transport.ts [client] (ecmascript)");
+;
+;
+const createUser = (0, __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$transport$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["createServerReference"])("18fccc60e484024c", "createUser");
+__turbopack_context__.s([
+    "createUser",
+    0,
+    createUser
+]);
+}),
 "[project]/basic/server_function/input/index.ts [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$actions$2e$ts__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/server_function/input/actions.ts [client] (ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$admin$2e$ts__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/server_function/input/admin.ts [client] (ecmascript)");
+;
 ;
 async function main() {
     const user = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$actions$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["createUser"])("Alice", "alice@example.com");
     console.log("Created user:", user);
     await (0, __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$actions$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["deleteUser"])(user.id);
     console.log("Deleted user");
+    const admin = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$admin$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["createUser"])("Bob", "superadmin");
+    console.log("Created admin user:", admin);
 }
 main();
 __turbopack_context__.s([]);
 }),
 ]);
 
-//# sourceMappingURL=input_019d5048.js.map
+//# sourceMappingURL=input_86d7f071.js.map
