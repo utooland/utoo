@@ -81,6 +81,8 @@ export interface NapiProjectOptions {
   dev: boolean
   /** The build id. */
   buildId: string
+  /** Whether to enable default tracing logs. */
+  tracing: boolean
   packPath: string
 }
 /** [NapiProjectOptions] with all fields optional. */

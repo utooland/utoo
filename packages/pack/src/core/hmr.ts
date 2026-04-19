@@ -123,6 +123,7 @@ export async function createHotReloader(
       },
       dev: true,
       buildId: bundleOptions.buildId || nanoid(),
+      tracing: bundleOptions.tracing ?? true,
       config: {
         ...bundleOptions.config,
         mode: "development",

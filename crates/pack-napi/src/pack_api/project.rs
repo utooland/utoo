@@ -116,6 +116,9 @@ pub struct NapiProjectOptions {
     /// The build id.
     pub build_id: String,
 
+    /// Whether to enable default tracing logs.
+    pub tracing: bool,
+
     pub pack_path: String,
 }
 
@@ -333,7 +336,7 @@ pub fn project_new(
                 .with(chrome_layer)
                 .init();
         });
-    } else {
+    } else if options.tracing {
         TRACING_INIT.call_once(|| {
             let env_filter = EnvFilter::try_from_default_env();
             let env_filter_enabled = env_filter.is_ok();
