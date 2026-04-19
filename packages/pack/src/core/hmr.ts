@@ -225,16 +225,10 @@ export async function createHotReloader(
       return;
     }
 
-    const assets = { js: [] as string[], css: [] as string[] };
     const outputDir =
       bundleOptions.config.output?.path || path.join(process.cwd(), "dist");
     const publicPath = bundleOptions.config.output?.publicPath;
-
-    if (assets.js.length === 0 && assets.css.length === 0) {
-      const discovered = getInitialAssetsFromStats(outputDir);
-      assets.js.push(...discovered.js);
-      assets.css.push(...discovered.css);
-    }
+    const assets = getInitialAssetsFromStats(outputDir);
 
     for (const config of htmlConfigs) {
       const plugin = new HtmlPlugin(config);
