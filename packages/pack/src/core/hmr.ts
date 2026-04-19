@@ -22,7 +22,7 @@ import { normalizePath } from "../utils/normalize-path";
 import { useWorkerThreads } from "../utils/runtimePluginStratety";
 import { validateEntryPaths } from "../utils/validateEntry";
 import { projectFactory } from "./project";
-import { Project, Update as TurbopackUpdate } from "./types";
+import { Endpoint, Project, Update as TurbopackUpdate } from "./types";
 
 const wsServer = new WebSocketServer({ noServer: true });
 
@@ -162,6 +162,25 @@ export async function createHotReloader(
 
   const clients = new Set<WSLike>();
   const clientStates = new WeakMap<WSLike, ClientState>();
+  const backgroundWatchSubscriptions = new Set<
+    AsyncIterableIterator<TurbopackResult>
+  >();
+  const htmlConfigs = [
+    ...(Array.isArray((bundleOptions.config as any).html)
+      ? (bundleOptions.config as any).html
+      : (bundleOptions.config as any).html
+        ? [(bundleOptions.config as any).html]
+        : []),
+    ...bundleOptions.config.entry
+      .filter((e: EntryOptions) => !!e.html)
+      .map((e: EntryOptions) => e.html!),
+  ];
+
+  let currentWatchedEntrypoints: Endpoint[] = [];
+  let backgroundWatchersStarted = false;
+  let backgroundWatchGeneration = 0;
+  const backgroundWriteTasks = new Map<Endpoint, Promise<void>>();
+  let closed = false;
 
   function sendToClient(client: WSLike, payload: HMR_ACTION_TYPES) {
     client.send(JSON.stringify(payload));
@@ -200,6 +219,129 @@ export async function createHotReloader(
 
     hmrEventHappened = true;
     sendEnqueuedMessagesDebounce();
+  }
+
+  async function regenerateHtml() {
+    if (htmlConfigs.length === 0) {
+      return;
+    }
+
+    const outputDir =
+      bundleOptions.config.output?.path || path.join(process.cwd(), "dist");
+    const publicPath = bundleOptions.config.output?.publicPath;
+    const assets = getInitialAssetsFromStats(outputDir);
+
+    for (const config of htmlConfigs) {
+      const plugin = new HtmlPlugin(config);
+      await plugin.generate(outputDir, assets, publicPath);
+    }
+  }
+
+  async function writeEntrypointToDisk(entrypoint: Endpoint) {
+    const result = await entrypoint.writeToDisk();
+    processIssues(result, true, true);
+    await regenerateHtml();
+  }
+
+  async function writeEntrypointsToDisk(entrypoints: Endpoint[]) {
+    await Promise.all(
+      entrypoints.map((entrypoint) => writeEntrypointToDisk(entrypoint)),
+    );
+  }
+
+  async function disposeBackgroundWatchSubscriptions() {
+    const subscriptions = [...backgroundWatchSubscriptions];
+    backgroundWatchSubscriptions.clear();
+    backgroundWriteTasks.clear();
+    await Promise.all(
+      subscriptions.map((subscription) => subscription.return?.()),
+    );
+  }
+
+  function scheduleEntrypointWrite(entrypoint: Endpoint, generation: number) {
+    if (
+      !backgroundWatchersStarted ||
+      closed ||
+      generation !== backgroundWatchGeneration
+    ) {
+      return;
+    }
+
+    const previousTask =
+      backgroundWriteTasks.get(entrypoint) ?? Promise.resolve();
+    const task = previousTask
+      .catch(() => {})
+      .then(async () => {
+        await currentEntriesHandling;
+        if (closed || generation !== backgroundWatchGeneration) {
+          return;
+        }
+
+        await writeEntrypointToDisk(entrypoint);
+        hmrEventHappened = true;
+      })
+      .finally(() => {
+        if (backgroundWriteTasks.get(entrypoint) === task) {
+          backgroundWriteTasks.delete(entrypoint);
+        }
+      });
+
+    backgroundWriteTasks.set(entrypoint, task);
+  }
+
+  async function refreshBackgroundWatchers() {
+    const generation = ++backgroundWatchGeneration;
+
+    await disposeBackgroundWatchSubscriptions();
+
+    if (!backgroundWatchersStarted || closed) {
+      return;
+    }
+
+    await Promise.all(
+      currentWatchedEntrypoints.map(async (entrypoint) => {
+        const [clientChanges, serverChanges] = await Promise.all([
+          entrypoint.clientChanged(),
+          entrypoint.serverChanged(true),
+        ]);
+
+        if (closed || generation !== backgroundWatchGeneration) {
+          await Promise.all([
+            clientChanges.return?.(),
+            serverChanges.return?.(),
+          ]);
+          return;
+        }
+
+        backgroundWatchSubscriptions.add(clientChanges);
+        backgroundWatchSubscriptions.add(serverChanges);
+
+        const watchChanges = async (
+          subscription: AsyncIterableIterator<TurbopackResult>,
+        ) => {
+          try {
+            for await (const data of subscription) {
+              if (closed || generation !== backgroundWatchGeneration) {
+                return;
+              }
+
+              processIssues(data, true, true);
+              scheduleEntrypointWrite(entrypoint, generation);
+            }
+          } catch (error) {
+            if (!closed && generation === backgroundWatchGeneration) {
+              console.error(error);
+              process.exit(1);
+            }
+          } finally {
+            backgroundWatchSubscriptions.delete(subscription);
+          }
+        };
+
+        void watchChanges(clientChanges);
+        void watchChanges(serverChanges);
+      }),
+    );
   }
 
   async function subscribeToHmrEvents(client: WSLike, id: string) {
@@ -256,41 +398,14 @@ export async function createHotReloader(
         );
       }
 
-      const assets = { js: [] as string[], css: [] as string[] };
-      await Promise.all(
-        [...entrypoints.apps, ...entrypoints.libraries].map((l) =>
-          l.writeToDisk().then((res) => {
-            processIssues(res, true, true);
-          }),
-        ),
-      );
-
-      const htmlConfigs = [
-        ...(Array.isArray((bundleOptions.config as any).html)
-          ? (bundleOptions.config as any).html
-          : (bundleOptions.config as any).html
-            ? [(bundleOptions.config as any).html]
-            : []),
-        ...bundleOptions.config.entry
-          .filter((e: EntryOptions) => !!e.html)
-          .map((e: EntryOptions) => e.html!),
+      currentWatchedEntrypoints = [
+        ...entrypoints.apps,
+        ...entrypoints.libraries,
       ];
+      await writeEntrypointsToDisk(currentWatchedEntrypoints);
 
-      if (htmlConfigs.length > 0) {
-        const outputDir =
-          bundleOptions.config.output?.path || path.join(process.cwd(), "dist");
-        const publicPath = bundleOptions.config.output?.publicPath;
-
-        if (assets.js.length === 0 && assets.css.length === 0) {
-          const discovered = getInitialAssetsFromStats(outputDir);
-          assets.js.push(...discovered.js);
-          assets.css.push(...discovered.css);
-        }
-
-        for (const config of htmlConfigs) {
-          const plugin = new HtmlPlugin(config);
-          await plugin.generate(outputDir, assets, publicPath);
-        }
+      if (backgroundWatchersStarted) {
+        await refreshBackgroundWatchers();
       }
 
       currentEntriesHandlingResolve!();
@@ -490,13 +605,23 @@ export async function createHotReloader(
     clearHmrServerError() {
       // Not implemented yet.
     },
-    async start() {},
+    async start() {
+      if (backgroundWatchersStarted) {
+        return;
+      }
+
+      backgroundWatchersStarted = true;
+      await refreshBackgroundWatchers();
+    },
 
     async buildFallbackError() {
       // Not implemented yet.
     },
 
     close() {
+      closed = true;
+      void disposeBackgroundWatchSubscriptions();
+
       for (const wsClient of clients) {
         wsClient.close();
       }
