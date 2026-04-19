@@ -141,9 +141,9 @@ pub fn collect_exports(module: &Module) -> Vec<String> {
 /// Generated code for a module with `createUser` and `deleteUser` exports:
 /// ```js
 /// import * as _server from "./actions" with { __turbopack_transition__: "server-reference" };
-/// import { callServer } from "@evjs/client/transport";
-/// export const createUser = (...args) => callServer("a1b2c3...", args);
-/// export const deleteUser = (...args) => callServer("d4e5f6...", args);
+/// import { createServerReference } from "@utoo/server-reference/client";
+/// export const createUser = createServerReference("a1b2c3...", "createUser");
+/// export const deleteUser = createServerReference("d4e5f6...", "deleteUser");
 /// ```
 pub fn create_server_proxy_module(
     transition_name: &str,
