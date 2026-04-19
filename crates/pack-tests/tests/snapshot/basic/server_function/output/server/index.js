@@ -23,13 +23,13 @@ function registerServerReference(action, id, name) {
 
 __turbopack_context__.s([
     "createUser",
-    ()=>createUser1,
+    ()=>createUser,
     "deleteUser",
-    ()=>deleteUser1
+    ()=>deleteUser
 ]);
 var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$register$2e$ts__$5b$server$2d$fn$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/server_function/input/register.ts [server-fn] (ecmascript)");
 "use server";
-async function createUser1(name, email) {
+async function createUser(name, email) {
     // This runs on the server
     const user = {
         id: Math.random().toString(36),
@@ -38,7 +38,7 @@ async function createUser1(name, email) {
     };
     return user;
 }
-async function deleteUser1(id) {
+async function deleteUser(id) {
     // This runs on the server
     console.log(`Deleting user ${id}`);
 }
