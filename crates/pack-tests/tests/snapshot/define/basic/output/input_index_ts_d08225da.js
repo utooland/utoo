@@ -9,6 +9,7 @@ console.log(("TURBOPACK compile-time value", {
     "BBB": ("TURBOPACK compile-time value", "bbb"),
     "CCC": ("TURBOPACK compile-time value", "1"),
     "CI": ("TURBOPACK compile-time value", true),
+    "SOCKET_SERVER": ("TURBOPACK compile-time value", undefined),
     "NODE_ENV": ("TURBOPACK compile-time value", "production")
 }).CI);
 }),
