@@ -55,6 +55,7 @@ async function buildInternal(
       },
       dev: bundleOptions.dev ?? false,
       buildId: bundleOptions.buildId || nanoid(),
+      tracing: bundleOptions.tracing ?? true,
       config: {
         ...bundleOptions.config,
         stats:

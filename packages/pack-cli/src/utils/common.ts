@@ -62,8 +62,9 @@ export async function resolveBuildOptions(flags: {
   project?: string;
   root?: string;
   webpack?: boolean;
+  tracing?: boolean;
 }): Promise<BuildOptions> {
-  const { project, root, webpack } = flags;
+  const { project, root, webpack, tracing: tracingFlag } = flags;
   const cwd = process.cwd();
   const configDir = path.resolve(cwd, project || "");
   let projectPath = project ? path.resolve(cwd, project) : undefined;
@@ -80,6 +81,7 @@ export async function resolveBuildOptions(flags: {
       watch,
       dev,
       buildId,
+      tracing: configTracing,
       packPath,
       rootPath: configRootPath,
       projectPath: configProjectPath,
@@ -98,6 +100,7 @@ export async function resolveBuildOptions(flags: {
       watch,
       dev,
       buildId,
+      tracing: tracingFlag ?? configTracing,
       packPath,
     } as unknown as utooPack.BundleOptions;
   }

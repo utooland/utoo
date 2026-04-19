@@ -383,6 +383,12 @@ export interface BundleOptions {
   buildId?: string;
 
   /**
+   * Whether to enable default utoopack tracing logs.
+   * Defaults to true.
+   */
+  tracing?: boolean;
+
+  /**
    * Absolute path for `@utoo/pack`.
    */
   packPath?: string;
@@ -395,7 +401,10 @@ export interface BundleOptions {
  */
 export type UserConfig = ConfigComplete &
   Partial<
-    Pick<BundleOptions, "processEnv" | "watch" | "dev" | "buildId" | "packPath">
+    Pick<
+      BundleOptions,
+      "processEnv" | "watch" | "dev" | "buildId" | "tracing" | "packPath"
+    >
   > & {
     rootPath?: string;
     projectPath?: string;
