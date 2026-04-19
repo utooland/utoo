@@ -536,13 +536,23 @@ impl Endpoint for AppEndpoint {
     }
 
     #[turbo_tasks::function]
-    fn server_changed(self: Vc<Self>) -> Vc<Completion> {
-        Completion::new()
+    async fn server_changed(self: Vc<Self>) -> Result<Vc<Completion>> {
+        let EndpointOutput {
+            output_assets,
+            project,
+            ..
+        } = *self.output().await?;
+        Ok(project.server_changed(*output_assets))
     }
 
     #[turbo_tasks::function]
-    fn client_changed(self: Vc<Self>) -> Vc<Completion> {
-        Completion::new()
+    async fn client_changed(self: Vc<Self>) -> Result<Vc<Completion>> {
+        let EndpointOutput {
+            output_assets,
+            project,
+            ..
+        } = *self.output().await?;
+        Ok(project.client_changed(*output_assets))
     }
 }
 
