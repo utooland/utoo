@@ -26,20 +26,25 @@ pub async fn insert_server_reference_aliases(
 ) -> Result<()> {
     let server_config = config.server().await?;
 
-    if let Some(ref client_ref) = server_config.client_reference {
-        import_map.insert_exact_alias(
-            "@utoo/server-reference/client",
-            ImportMapping::PrimaryAlternative(client_ref.clone(), Some(project_path.clone()))
-                .resolved_cell(),
-        );
-    }
+    if let Some(ref func) = server_config.function {
+        if let Some(ref client_proxy) = func.client_proxy {
+            import_map.insert_exact_alias(
+                "@utoo/server-reference/client",
+                ImportMapping::PrimaryAlternative(client_proxy.clone(), Some(project_path.clone()))
+                    .resolved_cell(),
+            );
+        }
 
-    if let Some(ref server_ref) = server_config.server_reference {
-        import_map.insert_exact_alias(
-            "@utoo/server-reference/server",
-            ImportMapping::PrimaryAlternative(server_ref.clone(), Some(project_path.clone()))
+        if let Some(ref server_register) = func.server_register {
+            import_map.insert_exact_alias(
+                "@utoo/server-reference/server",
+                ImportMapping::PrimaryAlternative(
+                    server_register.clone(),
+                    Some(project_path.clone()),
+                )
                 .resolved_cell(),
-        );
+            );
+        }
     }
 
     Ok(())

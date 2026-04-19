@@ -17,8 +17,10 @@
         "path": "output/server",
         "filename": "main.js"
       },
-      "clientReference": "./input/transport.ts",
-      "serverReference": "./input/register.ts"
+      "function": {
+        "clientProxy": "./input/transport.ts",
+        "serverRegister": "./input/register.ts"
+      }
     }
   }
 }

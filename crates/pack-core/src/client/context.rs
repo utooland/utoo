@@ -266,9 +266,9 @@ pub async fn get_client_module_options_context(
 
     client_rules.extend(additional_rules);
 
-    // Register "use server" directive transformer when server.clientReference is configured
+    // Register "use server" directive transformer when server.function is configured
     let server_config = config.server().await?;
-    if server_config.client_reference.is_some() {
+    if server_config.function.is_some() {
         use crate::server_reference::server_directive_transformer::ServerDirectiveTransformer;
         use crate::shared::transforms::{EcmascriptTransformStage, get_ecma_transform_rule};
 

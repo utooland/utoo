@@ -174,19 +174,28 @@ pub struct SchemaServerConfig {
     #[schemars(description = "Entry point for the server runtime (e.g. \"src/server.ts\")")]
     pub entry: Option<String>,
 
+    /// Configuration for Server Functions (RPC)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Configuration for Server Functions (RPC) boundaries")]
+    pub function: Option<SchemaServerFunctionConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaServerFunctionConfig {
     /// Module that exports `createServerReference` for client-side proxy generation.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
         description = "Module that exports createServerReference(actionId, name) for client proxy"
     )]
-    pub client_reference: Option<String>,
+    pub client_proxy: Option<String>,
 
     /// Module that exports `registerServerReference` for the server bundle.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
         description = "Module that exports registerServerReference(action, actionId, name) for the server bundle"
     )]
-    pub server_reference: Option<String>,
+    pub server_register: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

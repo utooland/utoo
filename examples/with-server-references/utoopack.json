@@ -21,8 +21,10 @@
   },
   "server": {
     "entry": "./src/server.ts",
-    "clientReference": "./src/transport.ts",
-    "serverReference": "./src/register.ts",
+    "function": {
+      "clientProxy": "./src/transport.ts",
+      "serverRegister": "./src/register.ts"
+    },
     "output": {
       "path": "dist/server",
       "filename": "[name].[contenthash:8].js",

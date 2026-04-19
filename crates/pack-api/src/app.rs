@@ -353,7 +353,7 @@ impl AppEndpoint {
             ResolvedVc<Box<dyn turbopack::transition::Transition>>,
         > = FxHashMap::default();
         let server_config = project.config().server().await?;
-        if server_config.client_reference.is_some() {
+        if server_config.function.is_some() {
             let server_module_options_context = get_server_module_options_context(
                 project.project_path().owned().await?,
                 project.execution_context(),
@@ -490,14 +490,14 @@ impl Endpoint for AppEndpoint {
 
             // Build server functions as Node.js if configured
             let server_config = this.project.config().server().await?;
-            let output_assets =
-                if server_config.client_reference.is_some() || server_config.entry.is_some() {
-                    let server_output = self
-                        .server_reference_output_assets(Vc::upcast(asset_context), runtime_entries);
-                    output_assets.concatenate(server_output)
-                } else {
-                    output_assets
-                };
+            let output_assets = if server_config.function.is_some() || server_config.entry.is_some()
+            {
+                let server_output =
+                    self.server_reference_output_assets(Vc::upcast(asset_context), runtime_entries);
+                output_assets.concatenate(server_output)
+            } else {
+                output_assets
+            };
 
             let dist_root = this.project.dist_root().await?;
 

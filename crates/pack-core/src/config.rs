@@ -94,13 +94,34 @@ pub struct ProviderConfig(
 pub struct ServerConfig {
     /// Entry point for the server runtime (e.g. "src/server.ts")
     pub entry: Option<RcStr>,
-    /// Module that exports `createServerReference` for client-side proxy generation.
-    pub client_reference: Option<RcStr>,
-    /// Module that exports `registerServerReference` for the server bundle.
-    #[serde(default)]
-    pub server_reference: Option<RcStr>,
+    /// Configuration for Server Functions (RPC)
+    pub function: Option<ServerFunctionConfig>,
+    /*
+    TODO: Support React Server Components (RSC) boundary mediation
+    pub component: Option<ServerComponentConfig>,
+
+    #[turbo_tasks::value(eq = "manual")]
+    #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize, OperationValue)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ServerComponentConfig {
+        /// Module serving as the client registry for mapping RSC chunks and hydration
+        pub client_registry: Option<RcStr>,
+        /// Module handling the serialization of client references during SSR
+        pub server_proxy: Option<RcStr>,
+    }
+    */
     /// Server output configuration
     pub output: Option<ServerOutputConfig>,
+}
+
+#[turbo_tasks::value(eq = "manual")]
+#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize, OperationValue)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerFunctionConfig {
+    /// Module that exports the RPC transport (client-side proxy generation)
+    pub client_proxy: Option<RcStr>,
+    /// Module that exports the handler registration for the server bundle
+    pub server_register: Option<RcStr>,
 }
 
 #[turbo_tasks::value(eq = "manual")]
