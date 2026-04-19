@@ -490,13 +490,14 @@ impl Endpoint for AppEndpoint {
 
             // Build server functions as Node.js if configured
             let server_config = this.project.config().server().await?;
-            let output_assets = if server_config.client_reference.is_some() {
-                let server_output =
-                    self.server_reference_output_assets(Vc::upcast(asset_context), runtime_entries);
-                output_assets.concatenate(server_output)
-            } else {
-                output_assets
-            };
+            let output_assets =
+                if server_config.client_reference.is_some() || server_config.entry.is_some() {
+                    let server_output = self
+                        .server_reference_output_assets(Vc::upcast(asset_context), runtime_entries);
+                    output_assets.concatenate(server_output)
+                } else {
+                    output_assets
+                };
 
             let dist_root = this.project.dist_root().await?;
 
@@ -584,10 +585,6 @@ impl AppEndpoint {
             }
         }
 
-        if unique_server_modules.is_empty() {
-            return Ok(OutputAssets::empty());
-        }
-
         // Resolving VCs to strings for a deterministic sorting pass guarantees our
         // AST chunk hashes remain tightly identical between runs, following Next.js's
         // FxIndexMap/IndexSet pattern for chunking server routines.
@@ -599,10 +596,6 @@ impl AppEndpoint {
 
         pairs.sort_by(|a, b| a.0.cmp(&b.0));
         let server_modules: Vec<_> = pairs.into_iter().map(|(_, m)| m).collect();
-
-        if server_modules.is_empty() {
-            return Ok(OutputAssets::empty());
-        }
 
         // Build server module graph via project.module_graph_for_modules()
         // which is a separate turbo_tasks function (avoids deadlock)
@@ -678,7 +671,12 @@ impl AppEndpoint {
             .map(|e| ResolvedVc::upcast(*e))
             .collect();
 
-        let chunk_name = "index.js";
+        let chunk_name = server_config
+            .output
+            .as_ref()
+            .and_then(|o| o.filename.as_ref())
+            .map(|s| s.as_str())
+            .unwrap_or("index.js");
         let chunk_query = "?name=index";
 
         let ident = AssetIdent::from_path(project.project_path().await?.join(chunk_name)?)

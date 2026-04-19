@@ -286,11 +286,6 @@ pub fn create_server_registration_ast(
     })));
 
     for export_name in exports {
-        if export_name == "default" {
-            // Evjs guidelines explicitly forbid default exports in server modules
-            continue;
-        }
-
         let action_id = generate_action_id(module_id, export_name);
         let export_ident = Ident::new(export_name.as_str().into(), DUMMY_SP, Default::default());
 
