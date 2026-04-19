@@ -184,6 +184,12 @@ pub struct SchemaServerConfig {
 #[serde(rename_all = "camelCase")]
 pub struct SchemaServerFunctionConfig {
     /// Module that exports `createServerReference` for client-side proxy generation.
+    /// Expected signature:
+    /// ```ts
+    /// export function createServerReference(actionId: string, name: string) {
+    ///   return async function (...args: any[]) { /* HTTP fetch to server */ }
+    /// }
+    /// ```
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
         description = "Module that exports createServerReference(actionId, name) for client proxy"
@@ -191,6 +197,12 @@ pub struct SchemaServerFunctionConfig {
     pub client_proxy: Option<String>,
 
     /// Module that exports `registerServerReference` for the server bundle.
+    /// Expected signature:
+    /// ```ts
+    /// export function registerServerReference(action: any, actionId: string, name: string) {
+    ///   /* Register the action to a global router/map */
+    /// }
+    /// ```
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
         description = "Module that exports registerServerReference(action, actionId, name) for the server bundle"

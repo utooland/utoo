@@ -118,9 +118,22 @@ pub struct ServerConfig {
 #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerFunctionConfig {
-    /// Module that exports the RPC transport (client-side proxy generation)
+    /// Module that exports the RPC transport (client-side proxy generation).
+    /// Expected signature:
+    /// ```ts
+    /// export function createServerReference(actionId: string, name: string) {
+    ///   return async function (...args: any[]) { /* HTTP fetch to server */ }
+    /// }
+    /// ```
     pub client_proxy: Option<RcStr>,
-    /// Module that exports the handler registration for the server bundle
+
+    /// Module that exports the handler registration for the server bundle.
+    /// Expected signature:
+    /// ```ts
+    /// export function registerServerReference(action: any, actionId: string, name: string) {
+    ///   /* Register the action to a global router/map */
+    /// }
+    /// ```
     pub server_register: Option<RcStr>,
 }
 
