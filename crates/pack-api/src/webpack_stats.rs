@@ -45,10 +45,7 @@ pub async fn get_asset_intermediate_info(
     let mut local_chunk_items = vec![];
     let mut local_dev_chunk_list = None;
 
-    let mut is_app_building = false;
-
     if let Some(chunk) = ResolvedVc::try_downcast_type::<EcmascriptBrowserEvaluateChunk>(asset) {
-        is_app_building = true;
         let entry_path_full = chunk.path().await?;
         let entry_path = dist_root
             .await?
@@ -168,9 +165,7 @@ pub async fn get_asset_intermediate_info(
         });
     }
 
-    if !is_app_building
-        && let Some(chunk) = ResolvedVc::try_downcast_type::<EcmascriptLibraryEvaluateChunk>(asset)
-    {
+    if let Some(chunk) = ResolvedVc::try_downcast_type::<EcmascriptLibraryEvaluateChunk>(asset) {
         let entry_path_full = chunk.path().await?;
         let entry_path = dist_root
             .await?

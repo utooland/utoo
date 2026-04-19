@@ -490,13 +490,13 @@ impl Endpoint for AppEndpoint {
 
             // Build server functions as Node.js if configured
             let server_config = this.project.config().server().await?;
-            let output_assets = if server_config.function.is_some() || server_config.entry.is_some()
+            let server_output = if server_config.function.is_some() || server_config.entry.is_some()
             {
-                let server_output =
-                    self.server_reference_output_assets(Vc::upcast(asset_context), runtime_entries);
-                output_assets.concatenate(server_output)
+                Some(
+                    self.server_reference_output_assets(Vc::upcast(asset_context), runtime_entries),
+                )
             } else {
-                output_assets
+                None
             };
 
             let dist_root = this.project.dist_root().await?;
@@ -509,7 +509,7 @@ impl Endpoint for AppEndpoint {
 
             let should_create_webpack_stats = *this.project.should_create_webpack_stats().await?;
 
-            let output_assets = if !should_create_webpack_stats {
+            let mut output_assets = if !should_create_webpack_stats {
                 output_assets
             } else {
                 let webpack_stats = generate_webpack_stats(output_assets, this.project.dist_root());
@@ -524,6 +524,10 @@ impl Endpoint for AppEndpoint {
                 .await?;
                 output_assets.concatenate(*ResolvedVc::cell(vec![ResolvedVc::upcast(stats_output)]))
             };
+
+            if let Some(server_output) = server_output {
+                output_assets = output_assets.concatenate(server_output);
+            }
 
             Ok(EndpointOutput {
                 output_assets: output_assets.to_resolved().await?,
