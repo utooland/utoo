@@ -32,6 +32,7 @@ pub fn create_turbo_tasks(
     persistent_caching: bool,
     _memory_limit: usize,
     dependency_tracking: bool,
+    is_short_session: bool,
 ) -> Result<UtooTurboTasks> {
     Ok(if persistent_caching {
         let version_info = GitVersionInfo {
@@ -42,8 +43,6 @@ pub fn create_turbo_tasks(
 
         // TODO: check is_ci;
         let is_ci: bool = false;
-        // TODO: support short session: https://github.com/vercel/next.js/pull/82224/files
-        let is_short_session: bool = false;
         let (backing_storage, cache_state) = turbo_backing_storage(
             &output_path.join(".turbopack/.cache"),
             &version_info,
@@ -55,6 +54,8 @@ pub fn create_turbo_tasks(
             BackendOptions {
                 storage_mode: Some(if std::env::var("TURBO_ENGINE_READ_ONLY").is_ok() {
                     StorageMode::ReadOnly
+                } else if is_ci || is_short_session {
+                    StorageMode::ReadWriteOnShutdown
                 } else {
                     StorageMode::ReadWrite
                 }),

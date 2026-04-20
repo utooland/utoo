@@ -71,7 +71,7 @@ pub async fn initialize_project_container(
 > {
     let turbo_tasks = TurboTasks::new(TurboTasksBackend::new(
         BackendOptions {
-            dependency_tracking: true,
+            dependency_tracking: dev,
             storage_mode: None,
             ..Default::default()
         },
