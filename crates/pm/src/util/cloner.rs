@@ -107,7 +107,275 @@ use std::os::unix::ffi::OsStrExt;
 #[cfg(target_os = "macos")]
 use libc::clonefile;
 
-#[cfg(not(target_os = "macos"))]
+/// Linux path uses openat + linkat with relative names so the kernel resolves
+/// each filename against a cached directory fd instead of re-walking the full
+/// absolute path on every link call. For a typical node_modules (hundreds of
+/// packages × thousands of files), absolute `link(2)` calls like
+/// `/home/user/.cache/nm/<pkg>/<ver>/package/src/foo.js → /proj/node_modules/<pkg>/src/foo.js`
+/// re-run 10+ dentry lookups per file. After `openat`-ing the src and dst
+/// directory pair once, `linkat(src_fd, "foo.js", dst_fd, "foo.js", 0)` only
+/// resolves a single component on each side.
+#[cfg(target_os = "linux")]
+mod hardlink_clone {
+    use std::ffi::{CStr, CString, OsStr};
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::Path;
+    use std::{fs, io};
+
+    use anyhow::{Context, Result};
+
+    /// Flags for opening directories used as linkat anchors. `O_RDONLY` is
+    /// required so the same fd can later back `fdopendir` for iteration.
+    const DIR_FLAGS: i32 = libc::O_DIRECTORY | libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW;
+
+    fn has_install_script_sync(src: &Path) -> bool {
+        src.parent().is_some_and(|parent| {
+            fs::metadata(parent.join("_hasInstallScript")).is_ok_and(|m| m.is_file())
+        })
+    }
+
+    fn copy_file_abs(src: &Path, dst: &Path) -> io::Result<()> {
+        fs::copy(src, dst)?;
+        let src_perms = fs::metadata(src)?.permissions();
+        fs::set_permissions(dst, src_perms)?;
+        Ok(())
+    }
+
+    fn to_cstring(path: &Path) -> io::Result<CString> {
+        CString::new(path.as_os_str().as_bytes())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains NUL byte"))
+    }
+
+    fn open_dir(path: &Path) -> io::Result<OwnedFd> {
+        let c = to_cstring(path)?;
+        let fd = unsafe { libc::open(c.as_ptr(), DIR_FLAGS) };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+    }
+
+    fn open_subdir(parent: &OwnedFd, name: &CStr) -> io::Result<OwnedFd> {
+        let fd = unsafe { libc::openat(parent.as_raw_fd(), name.as_ptr(), DIR_FLAGS) };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+    }
+
+    fn mkdir_at(parent: &OwnedFd, name: &CStr, mode: libc::mode_t) -> io::Result<()> {
+        if unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), mode) } < 0 {
+            let err = io::Error::last_os_error();
+            if err.kind() != io::ErrorKind::AlreadyExists {
+                return Err(err);
+            }
+        }
+        Ok(())
+    }
+
+    fn link_at(src_parent: &OwnedFd, name: &CStr, dst_parent: &OwnedFd) -> io::Result<()> {
+        let rc = unsafe {
+            libc::linkat(
+                src_parent.as_raw_fd(),
+                name.as_ptr(),
+                dst_parent.as_raw_fd(),
+                name.as_ptr(),
+                0,
+            )
+        };
+        if rc < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    /// Iterator that reads a directory by fd. Duplicates the fd with
+    /// `FD_CLOEXEC` because `fdopendir` takes ownership — the caller keeps
+    /// using the original fd for openat/linkat/mkdirat.
+    struct DirIter {
+        dirp: *mut libc::DIR,
+    }
+
+    impl DirIter {
+        fn new(fd: &OwnedFd) -> io::Result<Self> {
+            let dup = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 0) };
+            if dup < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let dirp = unsafe { libc::fdopendir(dup) };
+            if dirp.is_null() {
+                let err = io::Error::last_os_error();
+                unsafe { libc::close(dup) };
+                return Err(err);
+            }
+            Ok(DirIter { dirp })
+        }
+    }
+
+    impl Drop for DirIter {
+        fn drop(&mut self) {
+            if !self.dirp.is_null() {
+                unsafe { libc::closedir(self.dirp) };
+            }
+        }
+    }
+
+    /// Returns `Ok(Some((name, d_type)))` for next entry, `Ok(None)` on EOF.
+    ///
+    /// `readdir(3)` signals error vs EOF via errno: reset to 0 before each
+    /// call, inspect after NULL return. The name is copied into an owned
+    /// `CString` because the dirent buffer is invalidated by the next call.
+    fn read_next_entry(iter: &mut DirIter) -> io::Result<Option<(CString, u8)>> {
+        loop {
+            unsafe { *libc::__errno_location() = 0 };
+            let entry = unsafe { libc::readdir(iter.dirp) };
+            if entry.is_null() {
+                let errno = unsafe { *libc::__errno_location() };
+                if errno != 0 {
+                    return Err(io::Error::from_raw_os_error(errno));
+                }
+                return Ok(None);
+            }
+            let name_cstr = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) };
+            let bytes = name_cstr.to_bytes();
+            if bytes == b"." || bytes == b".." {
+                continue;
+            }
+            let d_type = unsafe { (*entry).d_type };
+            return Ok(Some((name_cstr.to_owned(), d_type)));
+        }
+    }
+
+    enum Kind {
+        Dir,
+        Linkable,
+    }
+
+    fn classify(src_fd: &OwnedFd, name: &CStr, d_type: u8) -> io::Result<Kind> {
+        // DT_REG / DT_LNK → linkat handles both (links create a new name for
+        // the inode; for symlinks that inode is the symlink itself, matching
+        // the previous `fs::hard_link` behavior).
+        match d_type {
+            libc::DT_DIR => Ok(Kind::Dir),
+            libc::DT_REG | libc::DT_LNK => Ok(Kind::Linkable),
+            libc::DT_UNKNOWN => {
+                // Some filesystems (older XFS, ReiserFS) don't populate d_type.
+                let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+                let rc = unsafe {
+                    libc::fstatat(
+                        src_fd.as_raw_fd(),
+                        name.as_ptr(),
+                        &mut stat,
+                        libc::AT_SYMLINK_NOFOLLOW,
+                    )
+                };
+                if rc < 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                let mode = stat.st_mode & libc::S_IFMT;
+                if mode == libc::S_IFDIR {
+                    Ok(Kind::Dir)
+                } else {
+                    Ok(Kind::Linkable)
+                }
+            }
+            _ => Ok(Kind::Linkable),
+        }
+    }
+
+    /// `src_path` / `dst_path` are only used for diagnostic messages and the
+    /// copy fallback. The hot linkat/mkdirat calls operate on dir-fd + name
+    /// and never touch absolute paths.
+    fn clone_dir_at(
+        src_fd: &OwnedFd,
+        dst_fd: &OwnedFd,
+        src_path: &Path,
+        dst_path: &Path,
+        force_copy: &mut bool,
+    ) -> io::Result<()> {
+        let mut iter = DirIter::new(src_fd)?;
+        while let Some((name, d_type)) = read_next_entry(&mut iter)? {
+            let name_os = OsStr::from_bytes(name.to_bytes());
+            match classify(src_fd, &name, d_type)? {
+                Kind::Dir => {
+                    mkdir_at(dst_fd, &name, 0o755)?;
+                    let child_src = open_subdir(src_fd, &name)?;
+                    let child_dst = open_subdir(dst_fd, &name)?;
+                    clone_dir_at(
+                        &child_src,
+                        &child_dst,
+                        &src_path.join(name_os),
+                        &dst_path.join(name_os),
+                        force_copy,
+                    )?;
+                }
+                Kind::Linkable => {
+                    // EXDEV (src cache and dst on different filesystems, e.g.
+                    // a global install where ~/.cache/nm lives on a different
+                    // volume than /usr/local) affects the whole src/dst pair —
+                    // latch `force_copy` and skip linkat for the rest.
+                    //
+                    // Other linkat errors (EMLINK on an inode whose link
+                    // count is exhausted, EPERM on a specific file, etc.)
+                    // are per-file: copy this one, keep trying linkat on the
+                    // rest.
+                    if *force_copy {
+                        copy_file_abs(&src_path.join(name_os), &dst_path.join(name_os))?;
+                    } else if let Err(e) = link_at(src_fd, &name, dst_fd) {
+                        if e.kind() == io::ErrorKind::CrossesDevices {
+                            tracing::warn!(
+                                "cross-device hardlink {} -> {}: {}; falling back to copy for remaining files",
+                                src_path.display(),
+                                dst_path.display(),
+                                e
+                            );
+                            *force_copy = true;
+                        } else {
+                            tracing::warn!(
+                                "hardlink failed for {}/{} -> {}/{}: {}; falling back to copy for this file",
+                                src_path.display(),
+                                name_os.to_string_lossy(),
+                                dst_path.display(),
+                                name_os.to_string_lossy(),
+                                e
+                            );
+                        }
+                        copy_file_abs(&src_path.join(name_os), &dst_path.join(name_os))?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
+        let err_msg = format!("Failed to clone {} to {}", src.display(), dst.display());
+        let src = src.to_path_buf();
+        let dst = dst.to_path_buf();
+
+        tokio::task::spawn_blocking(move || -> io::Result<()> {
+            if !fs::metadata(&src)?.is_dir() {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotADirectory,
+                    "Source is not a directory",
+                ));
+            }
+
+            let mut force_copy = has_install_script_sync(&src);
+            fs::create_dir_all(&dst)?;
+
+            let src_fd = open_dir(&src)?;
+            let dst_fd = open_dir(&dst)?;
+
+            clone_dir_at(&src_fd, &dst_fd, &src, &dst, &mut force_copy)
+        })
+        .await?
+        .with_context(|| err_msg)
+    }
+}
+
+#[cfg(all(not(target_os = "macos"), not(target_os = "linux")))]
 mod hardlink_clone {
     use std::collections::HashSet;
     use std::path::{Path, PathBuf};
@@ -180,12 +448,10 @@ mod hardlink_clone {
 
             let mut force_copy = has_install_script_sync(&src);
 
-            // Phase 1: Collect all files and directories
             let mut files = Vec::new();
             let mut dirs = Vec::new();
             collect_entries(&src, &dst, &mut files, &mut dirs)?;
 
-            // Phase 2: Create all directories
             let mut created_dirs = HashSet::new();
             for dir in &dirs {
                 if created_dirs.insert(dir.clone())
@@ -196,17 +462,6 @@ mod hardlink_clone {
                 }
             }
 
-            // Phase 3: Clone files (hardlink, fall back to copy on error).
-            //
-            // EXDEV (src cache and dst on different filesystems, e.g. a
-            // global install where ~/.cache/nm lives on a different volume
-            // than /usr/local) is a property of the src/dst pair — every
-            // remaining file would fail the same way, so latch `force_copy`
-            // and skip hardlink for the rest of this clone.
-            //
-            // Any other hardlink error (EMLINK on a single inode whose link
-            // count is exhausted, EPERM on a specific file, etc.) is
-            // per-file: copy this one and keep trying hardlink on the next.
             for entry in &files {
                 if force_copy {
                     copy_file_sync(&entry.src, &entry.dst)?;
