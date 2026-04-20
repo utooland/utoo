@@ -107,10 +107,10 @@ pub fn finish_progress_bar(msg: &str, elapsed: Option<Duration>) {
 /// Print the install counts line, e.g.
 /// `+ 513 added · 3017 reused · 123 downloaded`.
 ///
-/// `added`/`reused` count `node_modules/` directory outcomes — how much
-/// filesystem work was done vs skipped. `downloaded` counts registry
-/// tarballs fetched this run, which stays meaningful on CI where
-/// `node_modules/` is always fresh but the tarball cache may persist.
+/// Semantics match pnpm:
+/// - `added`: packages linked into `node_modules/` this run
+/// - `reused`: tarballs served from the local cache (no network)
+/// - `downloaded`: tarballs fetched from the registry
 pub fn print_install_counts(added: usize, reused: usize, downloaded: usize) {
     println!(
         "+ {} {} · {} {} · {} {}",

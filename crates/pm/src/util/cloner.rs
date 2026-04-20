@@ -24,34 +24,13 @@ use crate::fs;
 /// rebuilds with the OS-preferred one, giving a stable key.
 static CLONE_CACHE: Lazy<OnceMap<PathBuf, ()>> = Lazy::new(OnceMap::new);
 
+/// Number of `node_modules/` directories freshly materialized this run.
+/// Mirrors pnpm's "added" semantic.
 static CLONE_COUNT: AtomicUsize = AtomicUsize::new(0);
-static REUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-/// Process-global counters for `node_modules/` clone outcomes.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct CloneStats {
-    /// Target directories freshly materialized.
-    pub cloned: usize,
-    /// Target directories already valid and left alone.
-    pub reused: usize,
-}
-
-impl std::ops::Sub for CloneStats {
-    type Output = CloneStats;
-    fn sub(self, rhs: Self) -> Self {
-        CloneStats {
-            cloned: self.cloned.saturating_sub(rhs.cloned),
-            reused: self.reused.saturating_sub(rhs.reused),
-        }
-    }
-}
-
-/// Snapshot the current clone/reuse counters.
-pub fn clone_stats() -> CloneStats {
-    CloneStats {
-        cloned: CLONE_COUNT.load(Ordering::Relaxed),
-        reused: REUSE_COUNT.load(Ordering::Relaxed),
-    }
+/// Returns the number of fresh clones performed (pnpm "added" equivalent).
+pub fn clone_count() -> usize {
+    CLONE_COUNT.load(Ordering::Relaxed)
 }
 
 /// Normalize a target path into the canonical key used by `CLONE_CACHE`.
@@ -115,8 +94,6 @@ pub async fn clone_package_once(
             if fresh {
                 CLONE_COUNT.fetch_add(1, Ordering::Relaxed);
                 tracing::debug!("Cloned: {}@{} to {}", name, version, target_path.display());
-            } else {
-                REUSE_COUNT.fetch_add(1, Ordering::Relaxed);
             }
             Some(())
         })

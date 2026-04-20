@@ -16,7 +16,7 @@ use crate::helper::workspace::init_project_root;
 use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
 use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
-use crate::util::cloner::clone_stats;
+use crate::util::cloner::clone_count;
 use crate::util::downloader::download_stats;
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
@@ -242,7 +242,7 @@ impl InstallService {
     ) -> Result<()> {
         // Snapshot counts so nested install() calls (e.g. global install)
         // report only their own delta instead of the whole process total.
-        let clone_baseline = clone_stats();
+        let clone_baseline = clone_count();
         let download_baseline = download_stats();
 
         let lock_path = root_path.join("package-lock.json");
@@ -284,13 +284,9 @@ impl InstallService {
 
         RebuildService::rebuild(&package_lock, root_path, scripts).await?;
 
-        let clone_delta = clone_stats() - clone_baseline;
+        let added = clone_count().saturating_sub(clone_baseline);
         let download_delta = download_stats() - download_baseline;
-        print_install_counts(
-            clone_delta.cloned,
-            clone_delta.reused,
-            download_delta.downloaded,
-        );
+        print_install_counts(added, download_delta.reused, download_delta.downloaded);
         Ok(())
     }
 
