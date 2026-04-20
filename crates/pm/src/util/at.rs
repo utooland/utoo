@@ -14,12 +14,7 @@ use std::io;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::path::Path;
 
-use rustix::fs::{AtFlags, Dir, Mode, OFlags, RawMode, Stat};
-
-/// POSIX mode bits as `u32`. Inside this module we cast to `RawMode`
-/// (which is `u32` on Linux and `u16` on macOS) — Linux is the only
-/// production target, macOS compiles only via cross-arch smoke tests.
-pub type Mode32 = u32;
+use rustix::fs::{AtFlags, Dir, Mode, OFlags, Stat};
 
 const DIR_OPEN_FLAGS: OFlags = OFlags::DIRECTORY
     .union(OFlags::RDONLY)
@@ -50,8 +45,8 @@ impl DirFd {
     }
 
     /// `mkdirat(self, name, mode)`. EEXIST is treated as success.
-    pub fn mkdir(&self, name: &CStr, mode: Mode32) -> io::Result<()> {
-        match rustix::fs::mkdirat(&self.fd, name, Mode::from_raw_mode(mode as RawMode)) {
+    pub fn mkdir(&self, name: &CStr, mode: u32) -> io::Result<()> {
+        match rustix::fs::mkdirat(&self.fd, name, Mode::from_raw_mode(mode)) {
             Ok(()) => Ok(()),
             Err(e) if e == rustix::io::Errno::EXIST => Ok(()),
             Err(e) => Err(e.into()),
@@ -69,13 +64,8 @@ impl DirFd {
     /// `openat(self, name, O_WRONLY | O_CREAT | O_TRUNC, mode)`. Returns
     /// an owned fd ready for `write`. Caller converts to `std::fs::File`
     /// if buffered I/O is needed.
-    pub fn create_file(&self, name: &CStr, mode: Mode32) -> io::Result<OwnedFd> {
-        let fd = rustix::fs::openat(
-            &self.fd,
-            name,
-            FILE_CREATE_FLAGS,
-            Mode::from_raw_mode(mode as RawMode),
-        )?;
+    pub fn create_file(&self, name: &CStr, mode: u32) -> io::Result<OwnedFd> {
+        let fd = rustix::fs::openat(&self.fd, name, FILE_CREATE_FLAGS, Mode::from_raw_mode(mode))?;
         Ok(fd)
     }
 

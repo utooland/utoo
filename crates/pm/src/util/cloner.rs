@@ -1,9 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-#[cfg(not(target_os = "linux"))]
-use anyhow::Context;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
 use tokio_retry::Retry;
 use utoo_ruborist::manifest::IdentityView;
@@ -357,141 +355,16 @@ mod hardlink_clone {
     }
 }
 
-#[cfg(target_os = "linux")]
 async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
     if !crate::fs::try_exists(dst).await? {
         return Ok(false);
     }
-    let src_owned = src.to_path_buf();
-    let dst_owned = dst.to_path_buf();
-    tokio::task::spawn_blocking(move || linux_validate::validate(&src_owned, &dst_owned)).await?
-}
 
-#[cfg(not(target_os = "linux"))]
-async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
-    if !crate::fs::try_exists(dst).await? {
-        return Ok(false);
-    }
     if !fs::metadata(src).await?.is_dir() || !fs::metadata(dst).await?.is_dir() {
         tracing::debug!("validating failed, since it's not a directory");
         return Ok(false);
     }
-    validate_directory_tokio(src, dst).await
-}
 
-#[cfg(target_os = "linux")]
-mod linux_validate {
-    use std::ffi::CString;
-    use std::path::Path;
-    use std::{fs, io};
-
-    use anyhow::{Context, Result};
-    use rustix::fs::FileType;
-
-    use crate::util::at::DirFd;
-
-    struct EntryMeta {
-        name: CString,
-        is_dir: bool,
-        size: u64,
-    }
-
-    pub fn validate(src_path: &Path, dst_path: &Path) -> Result<bool> {
-        let src_meta = match fs::metadata(src_path) {
-            Ok(m) => m,
-            Err(e) => return Err(e).with_context(|| format!("stat {}", src_path.display())),
-        };
-        if !src_meta.is_dir() {
-            tracing::debug!("validate: src is not a directory");
-            return Ok(false);
-        }
-
-        let src_dir = DirFd::open(src_path)?;
-        let dst_dir = match DirFd::open(dst_path) {
-            Ok(fd) => fd,
-            Err(e)
-                if matches!(
-                    e.kind(),
-                    io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
-                ) =>
-            {
-                tracing::debug!("validate: dst missing or not a dir");
-                return Ok(false);
-            }
-            Err(e) => return Err(e.into()),
-        };
-
-        validate_dir_at(&src_dir, &dst_dir).map_err(Into::into)
-    }
-
-    fn collect_meta(dir: &DirFd) -> io::Result<Vec<EntryMeta>> {
-        let mut out = Vec::new();
-        for entry in dir.read_entries()? {
-            let entry = entry?;
-            let name = entry.file_name();
-            let bytes = name.to_bytes();
-            if bytes == b"." || bytes == b".." || bytes == b"node_modules" {
-                continue;
-            }
-            let stat = dir.stat(name)?;
-            let kind = FileType::from_raw_mode(stat.st_mode);
-            let is_dir = kind == FileType::Directory;
-            let size = if kind == FileType::RegularFile {
-                stat.st_size as u64
-            } else {
-                0
-            };
-            out.push(EntryMeta {
-                name: name.to_owned(),
-                is_dir,
-                size,
-            });
-        }
-        out.sort_by(|a, b| a.name.cmp(&b.name));
-        Ok(out)
-    }
-
-    fn validate_dir_at(src_dir: &DirFd, dst_dir: &DirFd) -> io::Result<bool> {
-        let src_entries = collect_meta(src_dir)?;
-        let dst_entries = collect_meta(dst_dir)?;
-
-        if src_entries.len() != dst_entries.len() {
-            tracing::debug!(
-                "validate: entry count mismatch src={} dst={}",
-                src_entries.len(),
-                dst_entries.len()
-            );
-            return Ok(false);
-        }
-
-        for (s, d) in src_entries.iter().zip(dst_entries.iter()) {
-            if s.name != d.name || s.is_dir != d.is_dir {
-                tracing::debug!("validate: entry mismatch {:?} vs {:?}", s.name, d.name);
-                return Ok(false);
-            }
-            if s.is_dir {
-                let child_src = src_dir.open_child(&s.name)?;
-                let child_dst = dst_dir.open_child(&d.name)?;
-                if !validate_dir_at(&child_src, &child_dst)? {
-                    return Ok(false);
-                }
-            } else if s.size != d.size {
-                tracing::debug!(
-                    "validate: size mismatch {:?} {} vs {}",
-                    s.name,
-                    s.size,
-                    d.size
-                );
-                return Ok(false);
-            }
-        }
-
-        Ok(true)
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-async fn validate_directory_tokio(src: &Path, dst: &Path) -> Result<bool> {
     #[derive(Debug)]
     struct EntryInfo {
         path: PathBuf,
@@ -560,7 +433,7 @@ async fn validate_directory_tokio(src: &Path, dst: &Path) -> Result<bool> {
 
     for (src_entry, dst_entry) in src_entries.iter().zip(dst_entries.iter()) {
         if src_entry.is_dir && dst_entry.is_dir {
-            let future = validate_directory_tokio(&src_entry.path, &dst_entry.path);
+            let future = validate_directory(&src_entry.path, &dst_entry.path);
             if !Box::pin(future).await? {
                 return Ok(false);
             }
