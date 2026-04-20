@@ -3,10 +3,10 @@ use swc_core::{
     common::DUMMY_SP,
     ecma::{
         ast::{
-            ArrowExpr, BindingIdent, BlockStmtOrExpr, CallExpr, Callee, Decl, ExportDecl,
-            ExportSpecifier, Expr, ExprOrSpread, Ident, ImportDecl, ImportNamedSpecifier,
-            ImportSpecifier, ImportStarAsSpecifier, Lit, Module, ModuleDecl, ModuleExportName,
-            ModuleItem, ObjectPatProp, Pat, Program, Str, VarDecl, VarDeclKind, VarDeclarator,
+            BindingIdent, CallExpr, Callee, Decl, ExportDecl, ExportSpecifier, Expr, ExprOrSpread,
+            Ident, ImportDecl, ImportNamedSpecifier, ImportSpecifier, ImportStarAsSpecifier, Lit,
+            Module, ModuleDecl, ModuleExportName, ModuleItem, ObjectPatProp, Pat, Program, Str,
+            VarDecl, VarDeclKind, VarDeclarator,
         },
         utils::private_ident,
     },
@@ -40,14 +40,19 @@ pub fn generate_action_id(module_id: &str, export_name: &str) -> String {
 /// Handles identifiers, object destructuring (`{ a, b: c }`), array
 /// destructuring (`[a, , b]`), rest patterns (`...rest`), and defaults
 /// (`a = expr`).
-fn collect_binding_names(pat: &Pat, names: &mut Vec<String>) {
+fn collect_binding_names(pat: &Pat, names: &mut Vec<(String, Option<Ident>)>) {
     match pat {
-        Pat::Ident(ident) => names.push(ident.id.sym.as_ref().to_string()),
+        Pat::Ident(ident) => {
+            names.push((ident.id.sym.as_ref().to_string(), Some(ident.id.clone())))
+        }
         Pat::Object(obj) => {
             for prop in &obj.props {
                 match prop {
                     ObjectPatProp::Assign(assign) => {
-                        names.push(assign.key.sym.as_ref().to_string());
+                        names.push((
+                            assign.key.sym.as_ref().to_string(),
+                            Some(assign.key.id.clone()),
+                        ));
                     }
                     ObjectPatProp::KeyValue(kv) => {
                         collect_binding_names(&kv.value, names);
@@ -75,7 +80,7 @@ fn collect_binding_names(pat: &Pat, names: &mut Vec<String>) {
 
 /// Extracts all named exports from a `"use server"` module.
 ///
-/// Returns a list of export names (strings). Handles:
+/// Returns a list of (export_name, local_ident). Handles:
 /// - `export function foo() {}`
 /// - `export async function foo() {}`
 /// - `export const foo = ...`
@@ -86,18 +91,22 @@ fn collect_binding_names(pat: &Pat, names: &mut Vec<String>) {
 ///
 /// Note: `export * from '...'` is not supported because resolving the
 /// re-exported names requires module graph analysis at this stage.
-pub fn collect_exports(module: &Module) -> Vec<String> {
+pub fn collect_exports(module: &Module) -> Vec<(String, Option<Ident>)> {
     let mut exports = Vec::new();
     for item in &module.body {
         match item {
             ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl { decl, .. })) => match decl {
-                Decl::Fn(f) => exports.push(f.ident.sym.as_ref().to_string()),
+                Decl::Fn(f) => {
+                    exports.push((f.ident.sym.as_ref().to_string(), Some(f.ident.clone())))
+                }
                 Decl::Var(v) => {
                     for decl in &v.decls {
                         collect_binding_names(&decl.name, &mut exports);
                     }
                 }
-                Decl::Class(c) => exports.push(c.ident.sym.as_ref().to_string()),
+                Decl::Class(c) => {
+                    exports.push((c.ident.sym.as_ref().to_string(), Some(c.ident.clone())))
+                }
                 _ => {}
             },
             ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(named)) => {
@@ -113,13 +122,24 @@ pub fn collect_exports(module: &Module) -> Vec<String> {
                                 ModuleExportName::Str(s) => s.value.to_string_lossy().into_owned(),
                             },
                         };
-                        exports.push(name);
+                        let local_ident = match &n.orig {
+                            ModuleExportName::Ident(i) => Some(i.clone()),
+                            ModuleExportName::Str(_) => None,
+                        };
+                        exports.push((name, local_ident));
                     }
                 }
             }
-            ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultDecl(_))
-            | ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultExpr(_)) => {
-                exports.push("default".to_string());
+            ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultDecl(d)) => {
+                let local_ident = match &d.decl {
+                    swc_core::ecma::ast::DefaultDecl::Class(c) => c.ident.clone(),
+                    swc_core::ecma::ast::DefaultDecl::Fn(f) => f.ident.clone(),
+                    _ => None,
+                };
+                exports.push(("default".to_string(), local_ident));
+            }
+            ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultExpr(_)) => {
+                exports.push(("default".to_string(), None));
             }
             // TODO: support `export * from '...'` — requires module graph resolution
             _ => {}
@@ -141,18 +161,18 @@ pub fn collect_exports(module: &Module) -> Vec<String> {
 /// Generated code for a module with `createUser` and `deleteUser` exports:
 /// ```js
 /// import * as _server from "./actions" with { __turbopack_transition__: "server-reference" };
-/// import { callServer } from "@evjs/client/transport";
-/// export const createUser = (...args) => callServer("a1b2c3...", args);
-/// export const deleteUser = (...args) => callServer("d4e5f6...", args);
+/// import { createServerReference } from "@utoo/server-function/client";
+/// export const createUser = createServerReference("a1b2c3...", "createUser");
+/// export const deleteUser = createServerReference("d4e5f6...", "deleteUser");
 /// ```
 pub fn create_server_proxy_module(
     transition_name: &str,
-    call_server_module: &str,
+    client_reference: &str,
     target_import: &str,
     module_id: &str,
-    exports: &[String],
+    exports: &[(String, Option<Ident>)],
 ) -> Program {
-    let call_server_ident = Ident::new("callServer".into(), DUMMY_SP, Default::default());
+    let create_ref_ident = Ident::new("createServerReference".into(), DUMMY_SP, Default::default());
 
     let mut body: Vec<ModuleItem> = Vec::new();
 
@@ -175,15 +195,15 @@ pub fn create_server_proxy_module(
         phase: Default::default(),
     })));
 
-    // import { callServer } from "<call_server_module>";
+    // import { createServerReference } from "<client_reference>";
     body.push(ModuleItem::ModuleDecl(ModuleDecl::Import(ImportDecl {
         specifiers: vec![ImportSpecifier::Named(ImportNamedSpecifier {
-            local: call_server_ident.clone(),
+            local: create_ref_ident.clone(),
             imported: None,
             span: DUMMY_SP,
             is_type_only: false,
         })],
-        src: Box::new(call_server_module.into()),
+        src: Box::new(client_reference.into()),
         type_only: false,
         with: None,
         span: DUMMY_SP,
@@ -191,14 +211,13 @@ pub fn create_server_proxy_module(
     })));
 
     // For each export, generate:
-    //   export const <name> = (...args) => callServer("<hashed_action_id>", args);
-    for export_name in exports {
+    //   export const <name> = createServerReference("<hashed_action_id>", "<export_name>");
+    for (export_name, _) in exports {
         let action_id = generate_action_id(module_id, export_name);
-        let args_ident = Ident::new("args".into(), DUMMY_SP, Default::default());
 
-        // callServer("<action_id>", args)
+        // createServerReference("<action_id>", "<export_name>")
         let call_expr = Expr::Call(CallExpr {
-            callee: Callee::Expr(Box::new(Expr::Ident(call_server_ident.clone()))),
+            callee: Callee::Expr(Box::new(Expr::Ident(create_ref_ident.clone()))),
             args: vec![
                 ExprOrSpread {
                     spread: None,
@@ -210,7 +229,11 @@ pub fn create_server_proxy_module(
                 },
                 ExprOrSpread {
                     spread: None,
-                    expr: Box::new(Expr::Ident(args_ident.clone())),
+                    expr: Box::new(Expr::Lit(Lit::Str(Str {
+                        value: export_name.as_str().into(),
+                        span: DUMMY_SP,
+                        raw: None,
+                    }))),
                 },
             ],
             span: DUMMY_SP,
@@ -218,36 +241,16 @@ pub fn create_server_proxy_module(
             ctxt: Default::default(),
         });
 
-        // (...args) => callServer(...)
-        let arrow = Expr::Arrow(ArrowExpr {
-            params: vec![Pat::Rest(swc_core::ecma::ast::RestPat {
-                dot3_token: DUMMY_SP,
-                arg: Box::new(Pat::Ident(BindingIdent {
-                    id: args_ident,
-                    type_ann: None,
-                })),
-                span: DUMMY_SP,
-                type_ann: None,
-            })],
-            body: Box::new(BlockStmtOrExpr::Expr(Box::new(call_expr))),
-            is_async: false,
-            is_generator: false,
-            span: DUMMY_SP,
-            type_params: None,
-            return_type: None,
-            ctxt: Default::default(),
-        });
-
         if export_name == "default" {
-            // export default (...args) => callServer(...)
+            // export default createServerReference(...)
             body.push(ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultExpr(
                 swc_core::ecma::ast::ExportDefaultExpr {
-                    expr: Box::new(arrow),
+                    expr: Box::new(call_expr),
                     span: DUMMY_SP,
                 },
             )));
         } else {
-            // export const <name> = (...args) => callServer(...)
+            // export const <name> = createServerReference(...)
             let export_ident =
                 Ident::new(export_name.as_str().into(), DUMMY_SP, Default::default());
             body.push(ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl {
@@ -258,7 +261,7 @@ pub fn create_server_proxy_module(
                             id: export_ident,
                             type_ann: None,
                         }),
-                        init: Some(Box::new(arrow)),
+                        init: Some(Box::new(call_expr)),
                         span: DUMMY_SP,
                         definite: false,
                     }],
@@ -276,4 +279,89 @@ pub fn create_server_proxy_module(
         shebang: None,
         span: DUMMY_SP,
     })
+}
+
+pub fn create_server_registration_ast(
+    program: &mut Program,
+    register_module: &str,
+    module_id: &str,
+    exports: &[(String, Option<Ident>)],
+) {
+    let register_ident = private_ident!("registerServerReference");
+    let mut stmts = Vec::new();
+
+    // import { registerServerReference } from "<register_module>";
+    stmts.push(ModuleItem::ModuleDecl(ModuleDecl::Import(ImportDecl {
+        specifiers: vec![ImportSpecifier::Named(ImportNamedSpecifier {
+            local: register_ident.clone(),
+            imported: None,
+            span: DUMMY_SP,
+            is_type_only: false,
+        })],
+        src: Box::new(register_module.into()),
+        type_only: false,
+        with: None,
+        span: DUMMY_SP,
+        phase: Default::default(),
+    })));
+
+    for (export_name, local_ident_opt) in exports {
+        let action_id = generate_action_id(module_id, export_name);
+
+        let export_ident = match local_ident_opt {
+            Some(ident) => ident.clone(),
+            None => {
+                if export_name == "default" {
+                    // Cannot safely append `registerServerReference` for an anonymous default export
+                    // because there is no local identifier to reference.
+                    continue;
+                }
+                Ident::new(export_name.as_str().into(), DUMMY_SP, Default::default())
+            }
+        };
+
+        // registerServerReference(fn, "<action_id>", "<export_name>")
+        let call_expr = Expr::Call(CallExpr {
+            callee: Callee::Expr(Box::new(Expr::Ident(register_ident.clone()))),
+            args: vec![
+                ExprOrSpread {
+                    spread: None,
+                    expr: Box::new(Expr::Ident(export_ident)),
+                },
+                ExprOrSpread {
+                    spread: None,
+                    expr: Box::new(Expr::Lit(Lit::Str(Str {
+                        value: action_id.into(),
+                        span: DUMMY_SP,
+                        raw: None,
+                    }))),
+                },
+                ExprOrSpread {
+                    spread: None,
+                    expr: Box::new(Expr::Lit(Lit::Str(Str {
+                        value: export_name.as_str().into(),
+                        span: DUMMY_SP,
+                        raw: None,
+                    }))),
+                },
+            ],
+            span: DUMMY_SP,
+            type_args: None,
+            ctxt: Default::default(),
+        });
+
+        stmts.push(ModuleItem::Stmt(swc_core::ecma::ast::Stmt::Expr(
+            swc_core::ecma::ast::ExprStmt {
+                span: DUMMY_SP,
+                expr: Box::new(call_expr),
+            },
+        )));
+    }
+
+    match program {
+        Program::Module(m) => {
+            m.body.extend(stmts);
+        }
+        Program::Script(_) => {}
+    }
 }

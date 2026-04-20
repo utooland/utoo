@@ -3,7 +3,9 @@ pub use modularize_imports::ModularizeImportPackageConfig;
 use turbo_rcstr::RcStr;
 use turbo_tasks::ResolvedVc;
 use turbopack::module_options::{ModuleRule, ModuleRuleEffect, ModuleType, RuleCondition};
-use turbopack_core::reference_type::{ReferenceTypeCondition, UrlReferenceSubType};
+use turbopack_core::reference_type::{
+    CssReferenceSubType, ReferenceTypeCondition, UrlReferenceSubType,
+};
 use turbopack_ecmascript::{CustomTransformer, EcmascriptInputTransform};
 
 use image::{StructuredImageModuleType, module::BlurPlaceholderMode};
@@ -80,6 +82,12 @@ pub async fn get_inline_css_rule(
         RuleCondition::All(vec![
             RuleCondition::not(RuleCondition::ReferenceType(ReferenceTypeCondition::Url(
                 Some(UrlReferenceSubType::Undefined),
+            ))),
+            // CSS module facade analysis must still see a CSS-processable asset.
+            // If we inline the Analyze reference into JS here, class extraction
+            // later fails with "inner asset should be CSS processable".
+            RuleCondition::not(RuleCondition::ReferenceType(ReferenceTypeCondition::Css(
+                Some(CssReferenceSubType::Analyze),
             ))),
             RuleCondition::ResourcePathEndsWith(".css".to_string()),
         ]),

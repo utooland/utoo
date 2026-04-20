@@ -74,8 +74,8 @@ impl Transition for ServerReferenceTransition {
     ///
     /// The default impl inherits the caller's layer (e.g. `[client]`), which
     /// would cause duplicate idents since the proxy module also lives in
-    /// `[client]`. We switch to `[server-fn]` so the server-processed module
-    /// gets a distinct ident like `actions.ts [server-fn] (ecmascript)`.
+    /// `[client]`. We switch to `[server]` so the server-processed module
+    /// gets a distinct ident like `actions.ts [server] (ecmascript)`.
     #[turbo_tasks::function]
     async fn process_context(
         self: Vc<Self>,
@@ -90,8 +90,7 @@ impl Transition for ServerReferenceTransition {
             self.process_resolve_options_context(*module_asset_context.resolve_options_context);
 
         // Use a server-specific layer instead of inheriting the caller's layer
-        let layer =
-            Layer::new_with_user_friendly_name(rcstr!("server-fn"), rcstr!("Server Function"));
+        let layer = Layer::new_with_user_friendly_name(rcstr!("server"), rcstr!("Nodejs"));
 
         // Use empty transitions — the server context should NOT inherit the
         // client's "server-reference" transition to avoid infinite recursion

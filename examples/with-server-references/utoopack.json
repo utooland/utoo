@@ -20,13 +20,15 @@
     "minify": false
   },
   "server": {
+    "entry": "./src/server.ts",
+    "function": {
+      "clientProxy": "./src/transport.ts",
+      "serverRegister": "./src/register.ts"
+    },
     "output": {
       "path": "dist/server",
       "filename": "[name].[contenthash:8].js",
       "chunkFilename": "[name].[contenthash:8].js"
-    },
-    "functions": {
-      "callServerModule": "./transport"
     }
   }
 }

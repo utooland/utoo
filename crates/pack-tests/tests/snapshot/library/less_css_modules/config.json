@@ -1,0 +1,20 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.ts",
+        "name": "main",
+        "library": {
+          "name": "LessCssModulesLibrary"
+        }
+      }
+    ],
+    "optimization": {
+      "minify": false
+    },
+    "styles": {
+      "inlineCss": {}
+    },
+    "stats": true
+  }
+}
