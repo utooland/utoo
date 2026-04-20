@@ -19,7 +19,9 @@ on:
         type: choice
         options:
           - utoo,bun
+          - utoo,bun,aube
           - utoo,pnpm,bun
+          - utoo,pnpm,bun,aube
           - all
       baseline:
         description: 'Compare with published utoo from npm'
@@ -164,7 +166,7 @@ jobs:
         run: |
           PM_LIST="${{ github.event.inputs.pm_list || 'utoo,bun' }}"
           if [ "$PM_LIST" = "all" ]; then
-            PM_LIST="utoo,pnpm,yarn,bun"
+            PM_LIST="utoo,pnpm,yarn,bun,aube"
           fi
           echo "list=$PM_LIST" >> $GITHUB_OUTPUT
 
@@ -183,6 +185,10 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
+      - name: Install aube
+        if: contains(steps.pm.outputs.list, 'aube')
+        run: npm install -g @endevco/aube
 
       - name: Install hyperfine and GNU time
         run: sudo apt-get update && sudo apt-get install -y hyperfine time
@@ -267,7 +273,7 @@ jobs:
         run: |
           PM_LIST="${{ github.event.inputs.pm_list || 'utoo,bun' }}"
           if [ "$PM_LIST" = "all" ]; then
-            PM_LIST="utoo,pnpm,yarn,bun"
+            PM_LIST="utoo,pnpm,yarn,bun,aube"
           fi
           echo "list=$PM_LIST" >> $GITHUB_OUTPUT
 
@@ -286,6 +292,10 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
+      - name: Install aube
+        if: contains(steps.pm.outputs.list, 'aube')
+        run: npm install -g @endevco/aube
 
       - name: Install hyperfine
         run: brew install hyperfine
