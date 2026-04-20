@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use anyhow::{Context, Result};
+#[cfg(not(target_os = "linux"))]
+use anyhow::Context;
+use anyhow::Result;
 use once_cell::sync::Lazy;
 use tokio_retry::Retry;
 use utoo_ruborist::manifest::IdentityView;
@@ -144,8 +146,7 @@ mod hardlink_clone {
         dst_path: &Path,
         force_copy: &mut bool,
     ) -> io::Result<()> {
-        let mut entries = src_dir.read_entries()?;
-        while let Some(entry) = entries.next() {
+        for entry in src_dir.read_entries()? {
             let entry = entry?;
             let name = entry.file_name();
             let bytes = name.to_bytes();
@@ -356,29 +357,26 @@ mod hardlink_clone {
     }
 }
 
+#[cfg(target_os = "linux")]
 async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
     if !crate::fs::try_exists(dst).await? {
         return Ok(false);
     }
+    let src_owned = src.to_path_buf();
+    let dst_owned = dst.to_path_buf();
+    tokio::task::spawn_blocking(move || linux_validate::validate(&src_owned, &dst_owned)).await?
+}
 
-    #[cfg(target_os = "linux")]
-    {
-        let src_owned = src.to_path_buf();
-        let dst_owned = dst.to_path_buf();
-        return tokio::task::spawn_blocking(move || {
-            linux_validate::validate(&src_owned, &dst_owned)
-        })
-        .await?;
+#[cfg(not(target_os = "linux"))]
+async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
+    if !crate::fs::try_exists(dst).await? {
+        return Ok(false);
     }
-
-    #[cfg(not(target_os = "linux"))]
-    {
-        if !fs::metadata(src).await?.is_dir() || !fs::metadata(dst).await?.is_dir() {
-            tracing::debug!("validating failed, since it's not a directory");
-            return Ok(false);
-        }
-        validate_directory_tokio(src, dst).await
+    if !fs::metadata(src).await?.is_dir() || !fs::metadata(dst).await?.is_dir() {
+        tracing::debug!("validating failed, since it's not a directory");
+        return Ok(false);
     }
+    validate_directory_tokio(src, dst).await
 }
 
 #[cfg(target_os = "linux")]
@@ -427,9 +425,8 @@ mod linux_validate {
     }
 
     fn collect_meta(dir: &DirFd) -> io::Result<Vec<EntryMeta>> {
-        let mut iter = dir.read_entries()?;
         let mut out = Vec::new();
-        while let Some(entry) = iter.next() {
+        for entry in dir.read_entries()? {
             let entry = entry?;
             let name = entry.file_name();
             let bytes = name.to_bytes();

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use bytes::Bytes;
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "linux")))]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
@@ -147,12 +147,14 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
     let mut rel_dirs: Vec<PathBuf> = seen.into_iter().collect();
     rel_dirs.sort_unstable_by_key(|p| p.as_os_str().len());
 
-    #[cfg(target_os = "linux")]
-    return write_via_dirfd(dest, &entries, &rel_dirs);
-
-    #[cfg(not(target_os = "linux"))]
-    write_via_paths(dest, &entries, &rel_dirs)
+    write_entries(dest, &entries, &rel_dirs)
 }
+
+#[cfg(target_os = "linux")]
+use write_via_dirfd as write_entries;
+
+#[cfg(not(target_os = "linux"))]
+use write_via_paths as write_entries;
 
 #[cfg(not(target_os = "linux"))]
 fn write_via_paths(dest: &Path, entries: &[ExtractedEntry], rel_dirs: &[PathBuf]) -> Result<()> {
