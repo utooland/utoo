@@ -24,12 +24,34 @@ use crate::fs;
 /// rebuilds with the OS-preferred one, giving a stable key.
 static CLONE_CACHE: Lazy<OnceMap<PathBuf, ()>> = Lazy::new(OnceMap::new);
 
-/// Number of clones completed.
 static CLONE_COUNT: AtomicUsize = AtomicUsize::new(0);
+static REUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-/// Returns the number of fresh clones performed.
-pub fn clone_count() -> usize {
-    CLONE_COUNT.load(Ordering::Relaxed)
+/// Process-global counters for clone outcomes.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CloneStats {
+    /// Target directories freshly materialized.
+    pub cloned: usize,
+    /// Target directories already valid and left alone.
+    pub reused: usize,
+}
+
+impl std::ops::Sub for CloneStats {
+    type Output = CloneStats;
+    fn sub(self, rhs: Self) -> Self {
+        CloneStats {
+            cloned: self.cloned.saturating_sub(rhs.cloned),
+            reused: self.reused.saturating_sub(rhs.reused),
+        }
+    }
+}
+
+/// Snapshot the current clone/reuse counters.
+pub fn clone_stats() -> CloneStats {
+    CloneStats {
+        cloned: CLONE_COUNT.load(Ordering::Relaxed),
+        reused: REUSE_COUNT.load(Ordering::Relaxed),
+    }
 }
 
 /// Normalize a target path into the canonical key used by `CLONE_CACHE`.
@@ -77,7 +99,7 @@ pub async fn clone_package_once(
     CLONE_CACHE
         .get_or_init(key, || async move {
             let cache_path = resolve_cache_path(&name, &version, &tarball_url).await?;
-            clone_package(&cache_path, &target_path, &name, &version, !is_git)
+            let fresh = clone_package(&cache_path, &target_path, &name, &version, !is_git)
                 .await
                 .inspect_err(|e| {
                     tracing::warn!(
@@ -90,8 +112,12 @@ pub async fn clone_package_once(
                 })
                 .ok()?;
 
-            CLONE_COUNT.fetch_add(1, Ordering::Relaxed);
-            tracing::debug!("Cloned: {}@{} to {}", name, version, target_path.display());
+            if fresh {
+                CLONE_COUNT.fetch_add(1, Ordering::Relaxed);
+                tracing::debug!("Cloned: {}@{} to {}", name, version, target_path.display());
+            } else {
+                REUSE_COUNT.fetch_add(1, Ordering::Relaxed);
+            }
             Some(())
         })
         .await
@@ -450,35 +476,35 @@ async fn validate_name_version(dst: &Path, name: &str, version: &str) -> bool {
 /// `find_real`: if `true`, look for the first subdirectory in `src` (registry
 /// tarballs use a `package/` wrapper); if `false`, use `src` directly (git
 /// packages are extracted flat).
+/// Returns `Ok(true)` when the package was freshly materialized at `dst`,
+/// `Ok(false)` when a valid existing directory was reused.
 pub async fn clone_package(
     src: &Path,
     dst: &Path,
     name: &str,
     version: &str,
     find_real: bool,
-) -> Result<()> {
-    match crate::fs::try_exists(dst).await? {
-        true if validate_name_version(dst, name, version).await => {
+) -> Result<bool> {
+    if crate::fs::try_exists(dst).await? {
+        if validate_name_version(dst, name, version).await {
             tracing::debug!(
                 "Package {}@{} already exists at {}, skipping clone",
                 name,
                 version,
                 dst.display()
             );
-            Ok(())
+            return Ok(false);
         }
-        true => {
-            tracing::debug!(
-                "Package at {} has mismatched name/version, removing and re-cloning",
-                dst.display()
-            );
-            if let Err(e) = fs::remove_dir_all(dst).await {
-                tracing::warn!("Failed to clean target directory {}: {}", dst.display(), e);
-            }
-            clone(src, dst, find_real).await
+        tracing::debug!(
+            "Package at {} has mismatched name/version, removing and re-cloning",
+            dst.display()
+        );
+        if let Err(e) = fs::remove_dir_all(dst).await {
+            tracing::warn!("Failed to clean target directory {}: {}", dst.display(), e);
         }
-        false => clone(src, dst, find_real).await,
     }
+    clone(src, dst, find_real).await?;
+    Ok(true)
 }
 
 #[cfg(test)]

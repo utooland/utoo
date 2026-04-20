@@ -12,7 +12,7 @@ pub async fn build_deps(cwd: &Path) -> Result<PackageLock> {
 
     let package_lock = Context::build_deps(cwd.to_path_buf()).await?;
 
-    finish_progress_bar("package-lock.json resolved");
+    finish_progress_bar("package-lock.json resolved", None);
 
     // Save to disk
     save_package_lock(cwd, &package_lock).await?;

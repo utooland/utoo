@@ -86,18 +86,57 @@ pub fn get_log_file_path() -> Option<&'static PathBuf> {
     LOG_FILE_PATH.get()
 }
 
-pub fn finish_progress_bar(msg: &str) {
-    // If progress bar length is 0, just hide and return
+/// Finish the progress bar, optionally appending a dimmed `[2.6s]` suffix.
+pub fn finish_progress_bar(msg: &str, elapsed: Option<Duration>) {
     if PROGRESS_BAR.length().unwrap_or(0) == 0 {
         return;
     }
     PROGRESS_BAR.set_style(
         ProgressStyle::with_template("✓ {pos:.green}/{len:.magenta} {wide_msg}").unwrap(),
     );
-    PROGRESS_BAR.finish_with_message(msg.to_string());
+    let full_msg = match elapsed {
+        Some(d) => format!("{msg} {}", format_elapsed_time(d).dimmed()),
+        None => msg.to_string(),
+    };
+    PROGRESS_BAR.finish_with_message(full_msg);
     PROGRESS_BAR.set_draw_target(indicatif::ProgressDrawTarget::hidden());
     // reset color
     println!("\x1b[0m");
+}
+
+/// Inputs for [`print_install_summary`].
+pub struct InstallSummary {
+    pub added: usize,
+    pub reused: usize,
+    pub resolve: Option<Duration>,
+    pub link: Duration,
+    pub scripts: Duration,
+    pub total: Duration,
+}
+
+/// Print a two-line install summary:
+/// ```text
+/// + 513 added · 3017 reused
+/// timing  resolve 0.2s  link 2.6s  scripts 3.2s  total 6.0s
+/// ```
+pub fn print_install_summary(s: &InstallSummary) {
+    let phases = s.resolve.map(|r| ("resolve", r)).into_iter().chain([
+        ("link", s.link),
+        ("scripts", s.scripts),
+        ("total", s.total),
+    ]);
+    let parts: Vec<String> = phases
+        .map(|(label, d)| format!("{label} {}", fmt_duration(d)))
+        .collect();
+
+    println!(
+        "+ {} {} · {} {}",
+        s.added.to_string().green(),
+        "added".dimmed(),
+        s.reused.to_string().magenta(),
+        "reused".dimmed(),
+    );
+    println!("{}  {}", "timing".dimmed(), parts.join("  ").dimmed());
 }
 
 pub fn start_progress_bar() {
@@ -123,24 +162,26 @@ pub fn log_time() {
     let _ = START_TIME.set(Instant::now());
 }
 
-/// Format a Duration into a human-readable colored string.
-pub fn format_elapsed_time(elapsed: Duration) -> String {
+/// Format a Duration like `1.5s`, `2m5s`, `1h2m3s`.
+fn fmt_duration(elapsed: Duration) -> String {
     let total_secs = elapsed.as_secs();
     let hours = total_secs / 3600;
     let minutes = (total_secs % 3600) / 60;
     let seconds = total_secs % 60;
-    // Show as x.x s if less than 60 seconds
-    if hours == 0 && minutes == 0 {
-        let secs = elapsed.as_secs_f64();
-        // Format to 1 decimal place
-        return format!("[{secs:.1}s]");
-    }
 
-    if hours > 0 {
-        format!("[{hours}h{minutes}m{seconds}s]")
-    } else {
-        format!("[{minutes}m{seconds}s]")
+    if hours == 0 && minutes == 0 {
+        return format!("{:.1}s", elapsed.as_secs_f64());
     }
+    if hours > 0 {
+        format!("{hours}h{minutes}m{seconds}s")
+    } else {
+        format!("{minutes}m{seconds}s")
+    }
+}
+
+/// Format a Duration into `[1.5s]` / `[2m5s]` / `[1h2m3s]`.
+pub fn format_elapsed_time(elapsed: Duration) -> String {
+    format!("[{}]", fmt_duration(elapsed))
 }
 
 /// End the global timer and print elapsed time with a message.

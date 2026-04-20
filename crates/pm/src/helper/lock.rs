@@ -76,7 +76,7 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
 
         let package_lock = Context::build_deps(root_path.to_path_buf()).await?;
 
-        finish_progress_bar("package-lock.json resolved");
+        finish_progress_bar("package-lock.json resolved", None);
 
         // Write to disk asynchronously in background
         let path = root_path.to_path_buf();

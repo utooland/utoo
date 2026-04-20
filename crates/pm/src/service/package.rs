@@ -186,6 +186,7 @@ impl PackageService {
             // Full mode: execute all queues in sequence
             let total_scripts =
                 queues.preinstall.len() + queues.install.len() + queues.postinstall.len();
+            let scripts_start = std::time::Instant::now();
             if total_scripts > 0 {
                 start_progress_bar();
                 PROGRESS_BAR.set_length(total_scripts as u64);
@@ -201,7 +202,7 @@ impl PackageService {
             Self::execute_script_queue(&queues.postinstall, LifecycleHook::Postinstall).await?;
 
             if total_scripts > 0 {
-                finish_progress_bar("scripts executed");
+                finish_progress_bar("scripts executed", Some(scripts_start.elapsed()));
             }
         }
         Ok(())
