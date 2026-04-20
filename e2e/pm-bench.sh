@@ -83,6 +83,10 @@ echo ""
 UTOO_CACHE_DIR="${UTOO_CACHE_DIR:-$HOME/.cache/nm}"
 PNPM_STORE_DIR="${PNPM_STORE_DIR:-$(pnpm store path 2>/dev/null || echo "$HOME/.pnpm-store")}"
 BUN_INSTALL_DIR="${BUN_INSTALL_DIR:-$HOME/.bun/install}"
+# aube: store = tarball CAS ($XDG_DATA_HOME/aube/store/v1/files),
+#       cache = packument/manifest + global-links ($XDG_CACHE_HOME/aube)
+AUBE_STORE_DIR="${AUBE_STORE_DIR:-$HOME/.local/share/aube}"
+AUBE_CACHE_DIR="${AUBE_CACHE_DIR:-$HOME/.cache/aube}"
 
 # ---------------------------------------------------------------------------
 # Generate helper scripts (called by hyperfine in subprocesses)
@@ -98,6 +102,8 @@ PROJECT_DIR="$1"; PM="$2"; COLD="$3"
 UTOO_CACHE_DIR="${UTOO_CACHE_DIR:-$HOME/.cache/nm}"
 PNPM_STORE_DIR="${PNPM_STORE_DIR:-$(pnpm store path 2>/dev/null || echo "$HOME/.pnpm-store")}"
 BUN_INSTALL_DIR="${BUN_INSTALL_DIR:-$HOME/.bun/install}"
+AUBE_STORE_DIR="${AUBE_STORE_DIR:-$HOME/.local/share/aube}"
+AUBE_CACHE_DIR="${AUBE_CACHE_DIR:-$HOME/.cache/aube}"
 
 cd "$PROJECT_DIR" && git clean -dfx
 
@@ -107,10 +113,11 @@ if [ "$COLD" = "--cold" ]; then
     yarn) yarn cache clean 2>/dev/null || rm -rf ~/.yarn/cache "$(yarn cache dir 2>/dev/null)" ;;
     pnpm) pnpm store prune 2>/dev/null || rm -rf "$PNPM_STORE_DIR" ;;
     bun)  rm -rf "$BUN_INSTALL_DIR"; bun pm cache rm 2>/dev/null || true ;;
+    aube) rm -rf "$AUBE_STORE_DIR" "$AUBE_CACHE_DIR" ;;
   esac
 fi
 
-if [ "$PM" = "pnpm" ]; then
+if [ "$PM" = "pnpm" ] || [ "$PM" = "aube" ]; then
   cd "$PROJECT_DIR"
   if [ -f "package.json" ] && grep -q '"workspaces"' package.json; then
     node -e "
@@ -215,8 +222,8 @@ clone_projects() {
   fi
 
   for pm in "${PACKAGE_MANAGERS[@]}"; do
-    if [ "$pm" = "pnpm" ]; then
-      echo -e "${YELLOW}Setting up pnpm workspace configs...${NC}"
+    if [ "$pm" = "pnpm" ] || [ "$pm" = "aube" ]; then
+      echo -e "${YELLOW}Setting up pnpm-workspace.yaml (shared by pnpm/aube)...${NC}"
       setup_pnpm_workspace "$BENCH_DIR/ant-design"
       setup_pnpm_workspace "$BENCH_DIR/ant-design-x"
       break
@@ -255,6 +262,9 @@ get_install_cmd() {
       else
         echo "bun install --ignore-scripts --registry $registry"
       fi
+      ;;
+    aube)
+      echo "NPM_CONFIG_REGISTRY=$registry aube install --ignore-scripts"
       ;;
   esac
 }
@@ -309,7 +319,7 @@ run_warm_benchmarks() {
     local prepop_log="$LOG_DIR/${project}_${reg_short}_prepopulate_${pm}.log"
     cd "$project_dir"
     git clean -dfx
-    if [ "$pm" = "pnpm" ]; then
+    if [ "$pm" = "pnpm" ] || [ "$pm" = "aube" ]; then
       setup_pnpm_workspace "$project_dir"
     fi
     echo -e "    ${CYAN}Pre-populating $pm cache...${NC}"
