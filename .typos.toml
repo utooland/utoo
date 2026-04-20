@@ -2,7 +2,10 @@
 # cargo install typos-cli
 # typos
 
-[default]
+[default.extend-identifiers]
+# POSIX open(2) flags
+WRONLY = "WRONLY"
+RDONLY = "RDONLY"
 
 [files]
 ignore-vcs = true 
