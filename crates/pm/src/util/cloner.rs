@@ -109,25 +109,18 @@ use libc::clonefile;
 
 /// Linux path uses openat + linkat with relative names so the kernel resolves
 /// each filename against a cached directory fd instead of re-walking the full
-/// absolute path on every link call. For a typical node_modules (hundreds of
-/// packages × thousands of files), absolute `link(2)` calls like
-/// `/home/user/.cache/nm/<pkg>/<ver>/package/src/foo.js → /proj/node_modules/<pkg>/src/foo.js`
-/// re-run 10+ dentry lookups per file. After `openat`-ing the src and dst
-/// directory pair once, `linkat(src_fd, "foo.js", dst_fd, "foo.js", 0)` only
-/// resolves a single component on each side.
+/// absolute path on every link call. See `util::at` for the shared abstraction.
 #[cfg(target_os = "linux")]
 mod hardlink_clone {
-    use std::ffi::{CStr, CString, OsStr};
-    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
     use std::path::Path;
     use std::{fs, io};
 
     use anyhow::{Context, Result};
+    use rustix::fs::FileType;
 
-    /// Flags for opening directories used as linkat anchors. `O_RDONLY` is
-    /// required so the same fd can later back `fdopendir` for iteration.
-    const DIR_FLAGS: i32 = libc::O_DIRECTORY | libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW;
+    use crate::util::at::DirFd;
 
     fn has_install_script_sync(src: &Path) -> bool {
         src.parent().is_some_and(|parent| {
@@ -142,207 +135,78 @@ mod hardlink_clone {
         Ok(())
     }
 
-    fn to_cstring(path: &Path) -> io::Result<CString> {
-        CString::new(path.as_os_str().as_bytes())
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains NUL byte"))
-    }
-
-    fn open_dir(path: &Path) -> io::Result<OwnedFd> {
-        let c = to_cstring(path)?;
-        let fd = unsafe { libc::open(c.as_ptr(), DIR_FLAGS) };
-        if fd < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
-    }
-
-    fn open_subdir(parent: &OwnedFd, name: &CStr) -> io::Result<OwnedFd> {
-        let fd = unsafe { libc::openat(parent.as_raw_fd(), name.as_ptr(), DIR_FLAGS) };
-        if fd < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
-    }
-
-    fn mkdir_at(parent: &OwnedFd, name: &CStr, mode: libc::mode_t) -> io::Result<()> {
-        if unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), mode) } < 0 {
-            let err = io::Error::last_os_error();
-            if err.kind() != io::ErrorKind::AlreadyExists {
-                return Err(err);
-            }
-        }
-        Ok(())
-    }
-
-    fn link_at(src_parent: &OwnedFd, name: &CStr, dst_parent: &OwnedFd) -> io::Result<()> {
-        let rc = unsafe {
-            libc::linkat(
-                src_parent.as_raw_fd(),
-                name.as_ptr(),
-                dst_parent.as_raw_fd(),
-                name.as_ptr(),
-                0,
-            )
-        };
-        if rc < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(())
-    }
-
-    /// Iterator that reads a directory by fd. Duplicates the fd with
-    /// `FD_CLOEXEC` because `fdopendir` takes ownership — the caller keeps
-    /// using the original fd for openat/linkat/mkdirat.
-    struct DirIter {
-        dirp: *mut libc::DIR,
-    }
-
-    impl DirIter {
-        fn new(fd: &OwnedFd) -> io::Result<Self> {
-            let dup = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 0) };
-            if dup < 0 {
-                return Err(io::Error::last_os_error());
-            }
-            let dirp = unsafe { libc::fdopendir(dup) };
-            if dirp.is_null() {
-                let err = io::Error::last_os_error();
-                unsafe { libc::close(dup) };
-                return Err(err);
-            }
-            Ok(DirIter { dirp })
-        }
-    }
-
-    impl Drop for DirIter {
-        fn drop(&mut self) {
-            if !self.dirp.is_null() {
-                unsafe { libc::closedir(self.dirp) };
-            }
-        }
-    }
-
-    /// Returns `Ok(Some((name, d_type)))` for next entry, `Ok(None)` on EOF.
-    ///
-    /// `readdir(3)` signals error vs EOF via errno: reset to 0 before each
-    /// call, inspect after NULL return. The name is copied into an owned
-    /// `CString` because the dirent buffer is invalidated by the next call.
-    fn read_next_entry(iter: &mut DirIter) -> io::Result<Option<(CString, u8)>> {
-        loop {
-            unsafe { *libc::__errno_location() = 0 };
-            let entry = unsafe { libc::readdir(iter.dirp) };
-            if entry.is_null() {
-                let errno = unsafe { *libc::__errno_location() };
-                if errno != 0 {
-                    return Err(io::Error::from_raw_os_error(errno));
-                }
-                return Ok(None);
-            }
-            let name_cstr = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) };
-            let bytes = name_cstr.to_bytes();
-            if bytes == b"." || bytes == b".." {
-                continue;
-            }
-            let d_type = unsafe { (*entry).d_type };
-            return Ok(Some((name_cstr.to_owned(), d_type)));
-        }
-    }
-
-    enum Kind {
-        Dir,
-        Linkable,
-    }
-
-    fn classify(src_fd: &OwnedFd, name: &CStr, d_type: u8) -> io::Result<Kind> {
-        // DT_REG / DT_LNK → linkat handles both (links create a new name for
-        // the inode; for symlinks that inode is the symlink itself, matching
-        // the previous `fs::hard_link` behavior).
-        match d_type {
-            libc::DT_DIR => Ok(Kind::Dir),
-            libc::DT_REG | libc::DT_LNK => Ok(Kind::Linkable),
-            libc::DT_UNKNOWN => {
-                // Some filesystems (older XFS, ReiserFS) don't populate d_type.
-                let mut stat: libc::stat = unsafe { std::mem::zeroed() };
-                let rc = unsafe {
-                    libc::fstatat(
-                        src_fd.as_raw_fd(),
-                        name.as_ptr(),
-                        &mut stat,
-                        libc::AT_SYMLINK_NOFOLLOW,
-                    )
-                };
-                if rc < 0 {
-                    return Err(io::Error::last_os_error());
-                }
-                let mode = stat.st_mode & libc::S_IFMT;
-                if mode == libc::S_IFDIR {
-                    Ok(Kind::Dir)
-                } else {
-                    Ok(Kind::Linkable)
-                }
-            }
-            _ => Ok(Kind::Linkable),
-        }
-    }
-
-    /// `src_path` / `dst_path` are only used for diagnostic messages and the
-    /// copy fallback. The hot linkat/mkdirat calls operate on dir-fd + name
-    /// and never touch absolute paths.
+    /// `src_path` / `dst_path` carry only for diagnostics and copy fallback.
+    /// Hot linkat/mkdirat calls never see absolute paths.
     fn clone_dir_at(
-        src_fd: &OwnedFd,
-        dst_fd: &OwnedFd,
+        src_dir: &DirFd,
+        dst_dir: &DirFd,
         src_path: &Path,
         dst_path: &Path,
         force_copy: &mut bool,
     ) -> io::Result<()> {
-        let mut iter = DirIter::new(src_fd)?;
-        while let Some((name, d_type)) = read_next_entry(&mut iter)? {
-            let name_os = OsStr::from_bytes(name.to_bytes());
-            match classify(src_fd, &name, d_type)? {
-                Kind::Dir => {
-                    mkdir_at(dst_fd, &name, 0o755)?;
-                    let child_src = open_subdir(src_fd, &name)?;
-                    let child_dst = open_subdir(dst_fd, &name)?;
-                    clone_dir_at(
-                        &child_src,
-                        &child_dst,
-                        &src_path.join(name_os),
-                        &dst_path.join(name_os),
-                        force_copy,
-                    )?;
+        let mut entries = src_dir.read_entries()?;
+        while let Some(entry) = entries.next() {
+            let entry = entry?;
+            let name = entry.file_name();
+            let bytes = name.to_bytes();
+            if bytes == b"." || bytes == b".." {
+                continue;
+            }
+            let name_os = OsStr::from_bytes(bytes);
+
+            // Resolve file type. Some filesystems (older XFS, ReiserFS)
+            // return `Unknown` from readdir — `statat` the entry in that case.
+            let is_dir = match entry.file_type() {
+                FileType::Directory => true,
+                FileType::Unknown => {
+                    let stat = src_dir.stat(name)?;
+                    FileType::from_raw_mode(stat.st_mode) == FileType::Directory
                 }
-                Kind::Linkable => {
-                    // EXDEV (src cache and dst on different filesystems, e.g.
-                    // a global install where ~/.cache/nm lives on a different
-                    // volume than /usr/local) affects the whole src/dst pair —
-                    // latch `force_copy` and skip linkat for the rest.
-                    //
-                    // Other linkat errors (EMLINK on an inode whose link
-                    // count is exhausted, EPERM on a specific file, etc.)
-                    // are per-file: copy this one, keep trying linkat on the
-                    // rest.
-                    if *force_copy {
-                        copy_file_abs(&src_path.join(name_os), &dst_path.join(name_os))?;
-                    } else if let Err(e) = link_at(src_fd, &name, dst_fd) {
-                        if e.kind() == io::ErrorKind::CrossesDevices {
-                            tracing::warn!(
-                                "cross-device hardlink {} -> {}: {}; falling back to copy for remaining files",
-                                src_path.display(),
-                                dst_path.display(),
-                                e
-                            );
-                            *force_copy = true;
-                        } else {
-                            tracing::warn!(
-                                "hardlink failed for {}/{} -> {}/{}: {}; falling back to copy for this file",
-                                src_path.display(),
-                                name_os.to_string_lossy(),
-                                dst_path.display(),
-                                name_os.to_string_lossy(),
-                                e
-                            );
-                        }
-                        copy_file_abs(&src_path.join(name_os), &dst_path.join(name_os))?;
+                _ => false,
+            };
+
+            if is_dir {
+                dst_dir.mkdir(name, 0o755)?;
+                let child_src = src_dir.open_child(name)?;
+                let child_dst = dst_dir.open_child(name)?;
+                clone_dir_at(
+                    &child_src,
+                    &child_dst,
+                    &src_path.join(name_os),
+                    &dst_path.join(name_os),
+                    force_copy,
+                )?;
+            } else {
+                // EXDEV (src cache and dst on different filesystems, e.g. a
+                // global install where ~/.cache/nm lives on a different volume
+                // than /usr/local) affects the whole src/dst pair — latch
+                // `force_copy` and skip linkat for the rest.
+                //
+                // Other linkat errors (EMLINK on an inode whose link count
+                // is exhausted, EPERM on a specific file, etc.) are per-file:
+                // copy this one, keep trying linkat on the rest.
+                if *force_copy {
+                    copy_file_abs(&src_path.join(name_os), &dst_path.join(name_os))?;
+                } else if let Err(e) = dst_dir.link_from(src_dir, name) {
+                    if e.kind() == io::ErrorKind::CrossesDevices {
+                        tracing::warn!(
+                            "cross-device hardlink {} -> {}: {}; falling back to copy for remaining files",
+                            src_path.display(),
+                            dst_path.display(),
+                            e
+                        );
+                        *force_copy = true;
+                    } else {
+                        tracing::warn!(
+                            "hardlink failed for {}/{} -> {}/{}: {}; falling back to copy for this file",
+                            src_path.display(),
+                            name_os.to_string_lossy(),
+                            dst_path.display(),
+                            name_os.to_string_lossy(),
+                            e
+                        );
                     }
+                    copy_file_abs(&src_path.join(name_os), &dst_path.join(name_os))?;
                 }
             }
         }
@@ -365,10 +229,10 @@ mod hardlink_clone {
             let mut force_copy = has_install_script_sync(&src);
             fs::create_dir_all(&dst)?;
 
-            let src_fd = open_dir(&src)?;
-            let dst_fd = open_dir(&dst)?;
+            let src_dir = DirFd::open(&src)?;
+            let dst_dir = DirFd::open(&dst)?;
 
-            clone_dir_at(&src_fd, &dst_fd, &src, &dst, &mut force_copy)
+            clone_dir_at(&src_dir, &dst_dir, &src, &dst, &mut force_copy)
         })
         .await?
         .with_context(|| err_msg)
@@ -497,11 +361,140 @@ async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
         return Ok(false);
     }
 
-    if !fs::metadata(src).await?.is_dir() || !fs::metadata(dst).await?.is_dir() {
-        tracing::debug!("validating failed, since it's not a directory");
-        return Ok(false);
+    #[cfg(target_os = "linux")]
+    {
+        let src_owned = src.to_path_buf();
+        let dst_owned = dst.to_path_buf();
+        return tokio::task::spawn_blocking(move || {
+            linux_validate::validate(&src_owned, &dst_owned)
+        })
+        .await?;
     }
 
+    #[cfg(not(target_os = "linux"))]
+    {
+        if !fs::metadata(src).await?.is_dir() || !fs::metadata(dst).await?.is_dir() {
+            tracing::debug!("validating failed, since it's not a directory");
+            return Ok(false);
+        }
+        validate_directory_tokio(src, dst).await
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod linux_validate {
+    use std::ffi::CString;
+    use std::path::Path;
+    use std::{fs, io};
+
+    use anyhow::{Context, Result};
+    use rustix::fs::FileType;
+
+    use crate::util::at::DirFd;
+
+    struct EntryMeta {
+        name: CString,
+        is_dir: bool,
+        size: u64,
+    }
+
+    pub fn validate(src_path: &Path, dst_path: &Path) -> Result<bool> {
+        let src_meta = match fs::metadata(src_path) {
+            Ok(m) => m,
+            Err(e) => return Err(e).with_context(|| format!("stat {}", src_path.display())),
+        };
+        if !src_meta.is_dir() {
+            tracing::debug!("validate: src is not a directory");
+            return Ok(false);
+        }
+
+        let src_dir = DirFd::open(src_path)?;
+        let dst_dir = match DirFd::open(dst_path) {
+            Ok(fd) => fd,
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                ) =>
+            {
+                tracing::debug!("validate: dst missing or not a dir");
+                return Ok(false);
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        validate_dir_at(&src_dir, &dst_dir).map_err(Into::into)
+    }
+
+    fn collect_meta(dir: &DirFd) -> io::Result<Vec<EntryMeta>> {
+        let mut iter = dir.read_entries()?;
+        let mut out = Vec::new();
+        while let Some(entry) = iter.next() {
+            let entry = entry?;
+            let name = entry.file_name();
+            let bytes = name.to_bytes();
+            if bytes == b"." || bytes == b".." || bytes == b"node_modules" {
+                continue;
+            }
+            let stat = dir.stat(name)?;
+            let kind = FileType::from_raw_mode(stat.st_mode);
+            let is_dir = kind == FileType::Directory;
+            let size = if kind == FileType::RegularFile {
+                stat.st_size as u64
+            } else {
+                0
+            };
+            out.push(EntryMeta {
+                name: name.to_owned(),
+                is_dir,
+                size,
+            });
+        }
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(out)
+    }
+
+    fn validate_dir_at(src_dir: &DirFd, dst_dir: &DirFd) -> io::Result<bool> {
+        let src_entries = collect_meta(src_dir)?;
+        let dst_entries = collect_meta(dst_dir)?;
+
+        if src_entries.len() != dst_entries.len() {
+            tracing::debug!(
+                "validate: entry count mismatch src={} dst={}",
+                src_entries.len(),
+                dst_entries.len()
+            );
+            return Ok(false);
+        }
+
+        for (s, d) in src_entries.iter().zip(dst_entries.iter()) {
+            if s.name != d.name || s.is_dir != d.is_dir {
+                tracing::debug!("validate: entry mismatch {:?} vs {:?}", s.name, d.name);
+                return Ok(false);
+            }
+            if s.is_dir {
+                let child_src = src_dir.open_child(&s.name)?;
+                let child_dst = dst_dir.open_child(&d.name)?;
+                if !validate_dir_at(&child_src, &child_dst)? {
+                    return Ok(false);
+                }
+            } else if s.size != d.size {
+                tracing::debug!(
+                    "validate: size mismatch {:?} {} vs {}",
+                    s.name,
+                    s.size,
+                    d.size
+                );
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn validate_directory_tokio(src: &Path, dst: &Path) -> Result<bool> {
     #[derive(Debug)]
     struct EntryInfo {
         path: PathBuf,
@@ -570,7 +563,7 @@ async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
 
     for (src_entry, dst_entry) in src_entries.iter().zip(dst_entries.iter()) {
         if src_entry.is_dir && dst_entry.is_dir {
-            let future = validate_directory(&src_entry.path, &dst_entry.path);
+            let future = validate_directory_tokio(&src_entry.path, &dst_entry.path);
             if !Box::pin(future).await? {
                 return Ok(false);
             }

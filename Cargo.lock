@@ -10947,6 +10947,7 @@ dependencies = [
  "rayon",
  "regex",
  "reqwest 0.12.24",
+ "rustix 1.1.2",
  "serde",
  "serde_json",
  "serde_yaml",

@@ -42,7 +42,8 @@ fn estimate_uncompressed_size(gzip_data: &[u8]) -> usize {
 }
 
 struct ExtractedEntry {
-    path: PathBuf,
+    /// Path relative to `dest`.
+    rel_path: PathBuf,
     content: Vec<u8>,
     mode: u32,
 }
@@ -67,10 +68,8 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
 
 /// Synchronous extraction: decompress + parse + parallel write, all on rayon.
 fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -> Result<()> {
-    use rayon::prelude::*;
     use std::collections::HashSet;
-    use std::fs;
-    use std::io::{Cursor, Read, Write};
+    use std::io::{Cursor, Read};
 
     // Decompress gzip using libdeflate
     let mut output = vec![0u8; estimated_size];
@@ -113,8 +112,6 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
             continue;
         }
 
-        let full_path = dest.join(&path);
-
         if !entry.header().entry_type().is_dir() {
             let mut content = Vec::new();
             entry
@@ -127,57 +124,154 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
             let raw_mode = entry.header().mode().unwrap_or(0o644);
             let mode = if raw_mode & 0o111 != 0 { 0o755 } else { 0o644 };
             entries.push(ExtractedEntry {
-                path: full_path,
+                rel_path: path,
                 content,
                 mode,
             });
         }
     }
 
-    // Collect every ancestor directory (up to `dest`), then create them
-    // shallowest-first so a single mkdir() per dir is sufficient.
+    // Collect every ancestor directory relative to `dest`, shallowest-first.
+    // Empty `PathBuf::new()` represents `dest` itself and is implicit
+    // (already created by the caller).
     let mut seen = HashSet::new();
     for entry in &entries {
-        let mut p = entry.path.parent();
+        let mut p = entry.rel_path.parent();
         while let Some(dir) = p {
-            if dir == dest || !seen.insert(dir.to_path_buf()) {
+            if dir.as_os_str().is_empty() || !seen.insert(dir.to_path_buf()) {
                 break;
             }
             p = dir.parent();
         }
     }
-    let mut dirs: Vec<_> = seen.into_iter().collect();
-    dirs.sort_unstable_by_key(|p| p.as_os_str().len());
-    for dir in &dirs {
-        fs::create_dir(dir).ok();
+    let mut rel_dirs: Vec<PathBuf> = seen.into_iter().collect();
+    rel_dirs.sort_unstable_by_key(|p| p.as_os_str().len());
+
+    #[cfg(target_os = "linux")]
+    return write_via_dirfd(dest, &entries, &rel_dirs);
+
+    #[cfg(not(target_os = "linux"))]
+    write_via_paths(dest, &entries, &rel_dirs)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn write_via_paths(dest: &Path, entries: &[ExtractedEntry], rel_dirs: &[PathBuf]) -> Result<()> {
+    use rayon::prelude::*;
+    use std::fs;
+    use std::io::Write;
+
+    for rel_dir in rel_dirs {
+        fs::create_dir(dest.join(rel_dir)).ok();
     }
 
-    // Write files in parallel using rayon
     entries.par_iter().try_for_each(|entry| -> Result<()> {
-        let mut file = fs::File::create(&entry.path)
-            .with_context(|| format!("Failed to create: {}", entry.path.display()))?;
+        let abs = dest.join(&entry.rel_path);
+        let mut file = fs::File::create(&abs)
+            .with_context(|| format!("Failed to create: {}", abs.display()))?;
         file.write_all(&entry.content)
-            .with_context(|| format!("Failed to write: {}", entry.path.display()))?;
+            .with_context(|| format!("Failed to write: {}", abs.display()))?;
 
         // Skip chmod for 0o644 (most files) — File::create() already produces
         // this via umask (0o666 & ~0o022 = 0o644).
         #[cfg(unix)]
         if entry.mode != 0o644 {
-            fs::set_permissions(&entry.path, fs::Permissions::from_mode(entry.mode)).ok();
+            fs::set_permissions(&abs, fs::Permissions::from_mode(entry.mode)).ok();
         }
         Ok(())
     })?;
 
-    // Set directory permissions
     #[cfg(unix)]
     {
         let perms = fs::Permissions::from_mode(0o755);
         fs::set_permissions(dest, perms).ok();
     }
 
-    // Create resolution marker
     fs::File::create(dest.join("_resolved"))
         .with_context(|| format!("Failed to create resolution marker in: {}", dest.display()))?;
+
+    Ok(())
+}
+
+/// Linux path: open every intermediate dir as a `DirFd`, then do parallel
+/// `openat(parent_fd, leaf, O_WRONLY | O_CREAT | O_TRUNC, mode)` + write.
+/// Each file write touches a single-component path — no absolute-path
+/// dentry walk, no per-file `chmod` (mode is set at openat time, applied
+/// through umask just like `File::create`).
+#[cfg(target_os = "linux")]
+fn write_via_dirfd(dest: &Path, entries: &[ExtractedEntry], rel_dirs: &[PathBuf]) -> Result<()> {
+    use rayon::prelude::*;
+    use std::collections::HashMap;
+    use std::ffi::CString;
+    use std::io::Write;
+    use std::os::unix::ffi::OsStrExt;
+    use std::sync::Arc;
+
+    use rustix::fs::{Mode, fchmod};
+
+    use crate::util::at::DirFd;
+
+    fn to_cstring(bytes: &[u8]) -> Result<CString> {
+        CString::new(bytes).with_context(|| "tar entry name contains NUL byte")
+    }
+
+    let root_fd = Arc::new(
+        DirFd::open(dest)
+            .with_context(|| format!("Failed to open dest dir fd: {}", dest.display()))?,
+    );
+
+    let mut fds: HashMap<PathBuf, Arc<DirFd>> = HashMap::with_capacity(rel_dirs.len() + 1);
+    fds.insert(PathBuf::new(), Arc::clone(&root_fd));
+
+    for rel_dir in rel_dirs {
+        let parent = rel_dir.parent().unwrap_or(Path::new(""));
+        let parent_fd = fds
+            .get(parent)
+            .expect("rel_dirs is sorted shallow-first, parent already opened");
+        let leaf = rel_dir
+            .file_name()
+            .expect("rel_dirs entries are never empty");
+        let leaf_cstr = to_cstring(leaf.as_bytes())?;
+        parent_fd
+            .mkdir(&leaf_cstr, 0o755)
+            .with_context(|| format!("mkdirat {}", rel_dir.display()))?;
+        let new_fd = parent_fd
+            .open_child(&leaf_cstr)
+            .with_context(|| format!("openat {}", rel_dir.display()))?;
+        fds.insert(rel_dir.clone(), Arc::new(new_fd));
+    }
+
+    let fds_ref = &fds;
+    entries.par_iter().try_for_each(|entry| -> Result<()> {
+        let parent = entry.rel_path.parent().unwrap_or(Path::new(""));
+        let parent_fd = fds_ref
+            .get(parent)
+            .expect("all dirs pre-opened before parallel writes");
+        let leaf = entry
+            .rel_path
+            .file_name()
+            .expect("file entries have a leaf name");
+        let leaf_cstr = to_cstring(leaf.as_bytes())?;
+
+        let file_fd = parent_fd
+            .create_file(&leaf_cstr, entry.mode)
+            .with_context(|| format!("openat O_CREAT {}", entry.rel_path.display()))?;
+        let mut file = std::fs::File::from(file_fd);
+        file.write_all(&entry.content)
+            .with_context(|| format!("Failed to write: {}", entry.rel_path.display()))?;
+        Ok(())
+    })?;
+
+    // Ensure dest itself has 0o755 regardless of umask.
+    let _ = fchmod(root_fd.as_ref(), Mode::from_raw_mode(0o755));
+
+    let resolved_cstr = CString::new("_resolved").expect("static string has no NUL");
+    drop(
+        root_fd
+            .create_file(&resolved_cstr, 0o644)
+            .with_context(|| {
+                format!("Failed to create resolution marker in: {}", dest.display())
+            })?,
+    );
 
     Ok(())
 }
