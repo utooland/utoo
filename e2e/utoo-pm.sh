@@ -793,7 +793,28 @@ node_modules/.bin/node -v || { echo -e "${RED}FAIL: local node not executable${N
 # Verify esbuild postinstall ran and binary works
 node_modules/.bin/esbuild --version || { echo -e "${RED}FAIL: esbuild not executable${NC}"; exit 1; }
 
-echo -e "${GREEN}PASS: install-node + esbuild${NC}"
+# Regression guard: running install a second time on an `engines.install-node`
+# project must not re-resolve the lockfile. The outdated check used to see the
+# synthetic `node-bin-*` optionalDependencies on the lock side only and judge
+# the lock stale on every call → infinite re-resolve. `save_package_lock` uses
+# write-tmp + rename, so a rewrite always changes the inode; an identical
+# inode across invocations is the strongest signal that the cached lock was
+# reused.
+INODE_BEFORE=$(node -e "console.log(require('fs').statSync('package-lock.json').ino)")
+utoo install --registry=https://registry.npmjs.org 2>&1 | tee warm.out \
+  || { echo -e "${RED}FAIL: warm utoo install failed for install-node + esbuild${NC}"; exit 1; }
+INODE_AFTER=$(node -e "console.log(require('fs').statSync('package-lock.json').ino)")
+if [ "$INODE_BEFORE" != "$INODE_AFTER" ]; then
+    echo -e "${RED}FAIL: package-lock.json was regenerated on warm install (install-node optionalDeps asymmetry)${NC}"
+    exit 1
+fi
+if grep -q "package-lock.json is outdated" warm.out; then
+    echo -e "${RED}FAIL: outdated warning on warm install — outdated check still asymmetric${NC}"
+    cat warm.out
+    exit 1
+fi
+rm -f warm.out
+echo -e "${GREEN}PASS: install-node + esbuild (cold + warm, lockfile reused)${NC}"
 
 popd
 rm -rf "$ESBUILD_DIR"

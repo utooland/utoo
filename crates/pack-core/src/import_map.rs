@@ -13,6 +13,43 @@ use turbopack_node::execution_context::ExecutionContext;
 
 use crate::{config::Config, embed_js, util::convert_to_project_relative};
 
+/// Registers `@utoo/server-function/client` and `@utoo/server-function/server`
+/// as import map aliases pointing to the user's configured project-relative paths.
+///
+/// This enables users to write natural project-relative paths in their config
+/// (e.g. `"./src/transport.ts"`) while the AST transformer always emits fixed
+/// internal specifiers. Turbopack's import map handles the indirection.
+pub async fn insert_server_reference_aliases(
+    import_map: &mut ImportMap,
+    project_path: &FileSystemPath,
+    config: Vc<Config>,
+) -> Result<()> {
+    let server_config = config.server().await?;
+
+    if let Some(ref func) = server_config.function {
+        if let Some(ref client_proxy) = func.client_proxy {
+            import_map.insert_exact_alias(
+                "@utoo/server-function/client",
+                ImportMapping::PrimaryAlternative(client_proxy.clone(), Some(project_path.clone()))
+                    .resolved_cell(),
+            );
+        }
+
+        if let Some(ref server_register) = func.server_register {
+            import_map.insert_exact_alias(
+                "@utoo/server-function/server",
+                ImportMapping::PrimaryAlternative(
+                    server_register.clone(),
+                    Some(project_path.clone()),
+                )
+                .resolved_cell(),
+            );
+        }
+    }
+
+    Ok(())
+}
+
 #[turbo_tasks::function]
 #[allow(unused_variables)]
 pub async fn get_postcss_package_mapping() -> Result<Vc<ImportMapping>> {

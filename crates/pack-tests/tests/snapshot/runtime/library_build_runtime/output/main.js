@@ -746,14 +746,18 @@ __UTOOPACK__ = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
 function factory () {
     const runtimeModuleIds = ["[project]/runtime/library_build_runtime/input/index.js [library-client] (ecmascript)"];
-    if (runtimeModuleIds.length > 0) {
-        const module = moduleCache[runtimeModuleIds[0]];
+    let exports;
+    for (let i = 0; i < runtimeModuleIds.length; i++) {
+        const module = moduleCache[runtimeModuleIds[i]];
         if (module.error) throw module.error;
+        exports = module;
+    }
+    if (exports) {
         // any ES module has to have `module.namespaceObject` defined.
-        if (module.namespaceObject) return module.namespaceObject;
+        if (exports.namespaceObject) return exports.namespaceObject;
         // only ESM can be an async module, so we don't need to worry about exports being a promise here.
-        const raw = module.exports;
-        return module.namespaceObject = interopEsm(raw, createNS(raw), raw && raw.__esModule);
+        const raw = exports.exports;
+        return exports.namespaceObject = interopEsm(raw, createNS(raw), raw && raw.__esModule);
     }
 }
 

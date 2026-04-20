@@ -38,6 +38,31 @@ function getSocketProtocol() {
     : "ws";
 }
 
+function getSocketUrl() {
+  const socketServer = process.env.SOCKET_SERVER;
+  if (socketServer) {
+    try {
+      const parsed = new URL(socketServer);
+      const protocol =
+        parsed.protocol === "https:"
+          ? "wss:"
+          : parsed.protocol === "http:"
+            ? "ws:"
+            : parsed.protocol;
+
+      if (protocol === "ws:" || protocol === "wss:") {
+        const pathname =
+          parsed.pathname === "/" ? "" : parsed.pathname.replace(/\/+$/, "");
+        return `${protocol}//${parsed.host}${pathname}`;
+      }
+    } catch {}
+  }
+
+  const { hostname, port } = location;
+  const protocol = getSocketProtocol();
+  return `${protocol}://${hostname}${port ? `:${port}` : ""}`;
+}
+
 export interface HMROptions {
   path: string;
 }
@@ -141,12 +166,7 @@ export function connectHMR(options: HMROptions) {
       timer = setTimeout(init, reconnections > 5 ? 5000 : 1000);
     }
 
-    const { hostname, port } = location;
-    const protocol = getSocketProtocol();
-
-    let url = `${protocol}://${hostname}:${port}`;
-
-    source = new WebSocket(`${url}${options.path}`);
+    source = new WebSocket(`${getSocketUrl()}${options.path}`);
     source.onopen = handleOnline;
     source.onerror = handleDisconnect;
     source.onmessage = handleMessage;

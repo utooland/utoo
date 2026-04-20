@@ -3,9 +3,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, anyhow};
 use serde_json::Value;
+use utoo_ruborist::builder::PeerDeps;
 use utoo_ruborist::lock::{LockPackage, PackageLock};
 use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::registry::resolve_package;
+use utoo_ruborist::resolver::runtime::install_runtime_from_map;
 use utoo_ruborist::spec::{PackageSpec, Protocol, resolve_catalog_spec};
 use utoo_ruborist::util::PackageNameStr;
 
@@ -19,7 +21,6 @@ use crate::util::downloader::{is_git_url, resolve_cache_path};
 use crate::util::git_resolver::{resolve_git_spec, resolve_github_spec};
 use crate::util::json::{load_package_lock_json_from_path, read_json_file};
 use crate::util::logger::{finish_progress_bar, start_progress_bar};
-use utoo_ruborist::builder::PeerDeps;
 
 use crate::util::platform_const::GLOBAL_NODE_MODULES;
 use crate::util::user_config::{
@@ -350,6 +351,25 @@ pub fn path_to_pkg_name(path_str: &str) -> Option<&str> {
     }
 }
 
+/// Root-entry optionalDependencies as the lock will have them: user's own
+/// merged with the synthetic `node-bin-*` deps injected from
+/// `engines.install-node`. Returns `None` when no merge is needed and the
+/// caller should compare against `pkg.optional_dependencies` directly.
+fn root_optional_with_runtime(path: &str, pkg: &PackageJson) -> Option<HashMap<String, String>> {
+    if !path.is_empty() {
+        return None;
+    }
+    let runtime = install_runtime_from_map(pkg.engines.as_ref()?);
+    if runtime.is_empty() {
+        return None;
+    }
+    let mut merged = pkg.optional_dependencies.clone().unwrap_or_default();
+    for (name, version) in runtime {
+        merged.entry(name).or_insert(version);
+    }
+    Some(merged)
+}
+
 pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
     // Root package.json is served from the in-process cache. The cache
     // stays consistent with disk across the full `ut install` lifetime
@@ -411,10 +431,15 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
             return Ok(true);
         }
 
-        if !deps_match(
-            pkg.optional_dependencies.as_ref(),
-            lock.optional_dependencies.as_ref(),
-        ) {
+        // `Context::build_deps` folds synthetic `node-bin-*` runtime deps into
+        // the root lock entry from `engines.install-node`; mirror that here so
+        // a project using `install-node` isn't judged outdated forever.
+        let runtime_merged = root_optional_with_runtime(path, pkg);
+        let expected_optional = runtime_merged
+            .as_ref()
+            .or(pkg.optional_dependencies.as_ref());
+
+        if !deps_match(expected_optional, lock.optional_dependencies.as_ref()) {
             tracing::warn!("package-lock.json is outdated, {name} optionalDependencies changed");
             return Ok(true);
         }
@@ -661,6 +686,45 @@ mod tests {
             true,
         )
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_is_pkg_lock_outdated_install_node_in_sync() {
+        // package.json never carries the synthetic node-bin optionalDependencies
+        // that `Context::build_deps` injects from `engines.install-node`, but
+        // the lock does — the check must still treat this pair as in-sync.
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path();
+
+        let pkg_json = json!({
+            "name": "test-package",
+            "version": "1.0.0",
+            "engines": { "install-node": "16" }
+        });
+        let pkg_lock = json!({
+            "name": "test-package",
+            "version": "1.0.0",
+            "lockfileVersion": 3,
+            "requires": true,
+            "packages": {
+                "": {
+                    "name": "test-package",
+                    "version": "1.0.0",
+                    "optionalDependencies": {
+                        "node-darwin-x64": "16",
+                        "node-bin-darwin-arm64": "16",
+                        "node-linux-x64": "16",
+                        "node-linux-arm64": "16",
+                        "node-win-x64": "16",
+                        "node-win-x86": "16"
+                    },
+                    "engines": { "install-node": "16" }
+                }
+            }
+        });
+        fs::write(temp_path.join("package.json"), pkg_json.to_string()).unwrap();
+        fs::write(temp_path.join("package-lock.json"), pkg_lock.to_string()).unwrap();
+        assert!(!is_pkg_lock_outdated(temp_path).await.unwrap());
     }
 
     #[tokio::test]

@@ -43,6 +43,7 @@ async function buildInternal(
 
   const resolvedProjectPath = projectPath || process.cwd();
   const resolvedRootPath = rootPath || projectPath || process.cwd();
+  const persistentCaching = bundleOptions.config.persistentCaching ?? false;
   processHtmlEntry(bundleOptions.config, resolvedProjectPath);
   validateEntryPaths(bundleOptions.config, resolvedProjectPath);
 
@@ -55,6 +56,7 @@ async function buildInternal(
       },
       dev: bundleOptions.dev ?? false,
       buildId: bundleOptions.buildId || nanoid(),
+      tracing: bundleOptions.tracing ?? true,
       config: {
         ...bundleOptions.config,
         stats:
@@ -70,7 +72,11 @@ async function buildInternal(
       packPath: getPackPath(),
     },
     {
-      persistentCaching: bundleOptions.config.persistentCaching ?? false,
+      persistentCaching,
+      // Build mode is a short-lived, one-shot compilation, so avoid paying
+      // dependency graph bookkeeping cost unless the persistent cache needs it.
+      dependencyTracking: persistentCaching,
+      isShortSession: true,
     },
   );
 

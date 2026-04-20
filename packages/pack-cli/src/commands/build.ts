@@ -22,6 +22,10 @@ export default defineCommand({
       type: "boolean",
       description: "Enable webpack mode",
     },
+    tracing: {
+      type: "boolean",
+      description: "Enable default tracing logs (pass --no-tracing to disable)",
+    },
   },
   async run({ args }) {
     const { projectOptions, projectPath, rootPath } =

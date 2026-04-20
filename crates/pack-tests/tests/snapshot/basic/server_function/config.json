@@ -9,13 +9,17 @@
     "output": {
       "path": "output/client"
     },
+
+
     "server": {
+      "entry": "input/server.ts",
       "output": {
         "path": "output/server",
         "filename": "main.js"
       },
-      "functions": {
-        "callServerModule": "@app/transport"
+      "function": {
+        "clientProxy": "./input/transport.ts",
+        "serverRegister": "./input/register.ts"
       }
     }
   }

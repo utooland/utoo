@@ -47,7 +47,8 @@ use crate::{
         transforms::{
             css_modules::get_auto_css_modules_rule,
             default_export_namer::get_default_export_namer_rule,
-            emotion::get_emotion_transform_rule, remove_console::get_remove_console_transform_rule,
+            emotion::get_emotion_transform_rule, jsx_dev_filename::get_jsx_dev_filename_rule,
+            remove_console::get_remove_console_transform_rule,
             styled_components::get_styled_components_transform_rule,
             styled_jsx::get_styled_jsx_transform_rule,
             swc_ecma_transform_plugins::get_swc_ecma_transform_plugin_rule,
@@ -187,6 +188,7 @@ pub async fn get_client_module_options_context(
         .to_resolved()
         .await?;
     let decorators_options = get_decorators_transform_options(project_path.clone());
+    let react_config = config.react().await?;
     let is_react_development = mode.await?.is_react_development();
     let enable_react_refresh = if *watch.await? && is_react_development {
         assert_can_resolve_react_refresh(project_path.clone(), resolve_options_context)
@@ -246,6 +248,10 @@ pub async fn get_client_module_options_context(
         client_rules.push(get_default_export_namer_rule());
     }
 
+    if is_react_development && react_config.absolute_source_filename.unwrap_or(false) {
+        client_rules.push(get_jsx_dev_filename_rule());
+    }
+
     let additional_rules: Vec<ModuleRule> = vec![
         get_swc_ecma_transform_plugin_rule(config, project_path.clone()).await?,
         get_emotion_transform_rule(config).await?,
@@ -260,16 +266,18 @@ pub async fn get_client_module_options_context(
 
     client_rules.extend(additional_rules);
 
-    // Register "use server" directive transformer when server.functions is configured
+    // Register "use server" directive transformer when server.function is configured
     let server_config = config.server().await?;
-    if let Some(ref functions) = server_config.functions {
+    if server_config.function.is_some() {
         use crate::server_reference::server_directive_transformer::ServerDirectiveTransformer;
         use crate::shared::transforms::{EcmascriptTransformStage, get_ecma_transform_rule};
 
         client_rules.push(get_ecma_transform_rule(
             Box::new(ServerDirectiveTransformer::new(
                 rcstr!("server-reference"),
-                functions.call_server_module.clone(),
+                rcstr!("@utoo/server-function/client"),
+                Some(rcstr!("@utoo/server-function/server")),
+                false,
             )),
             false,
             EcmascriptTransformStage::Preprocess,
