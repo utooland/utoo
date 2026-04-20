@@ -55,17 +55,21 @@ clean_fixture() {
 # Remove entries as features are implemented.
 # ----------------------------------------------------------------
 
-# [SKIP:file-target-missing] fixture declares `file:` deps whose target
-# directories/tarballs are NOT included in our ported copy (npm's arborist
-# tests originally ran against a mock registry and in-tree sibling dirs that
-# we did not carry over). The `file:` protocol itself is supported — see
-# Case 8.4/8.5 in e2e/utoo-pm.sh.
+# [SKIP:file-target-missing] fixture declares `file:` deps that cannot be
+# satisfied from our ported copy. Most of the originally-missing `target/`
+# link dirs are now ported back; the remaining entries are kept for issues
+# unrelated to simple data absence:
+#   * link-dep-cycle — a→b→a file: cycle; needs cycle-safe resolution.
+#   * link-dep-lifecycle-scripts — runs `prepare`/`postinstall` in a file: dep
+#     and also requires lockfile-driven install-script semantics.
+#   * external-link-dep — self-references `file:./node_modules/abbrev`, which
+#     only exists after install (chicken-and-egg).
+#   * yarn-stuff — references `file:abbrev-1.1.1.tgz` and
+#     `file:./abbrev-link-target` which never existed even upstream.
 SKIP_FILE_TARGET_MISSING=(
-  link-dep link-dep-empty link-dep-cycle
-  link-dep-lifecycle-scripts link-dev-dep
-  external-link-dep cli-750 cli-750-fresh
-  # yarn-stuff references file:abbrev-1.1.1.tgz and file:./abbrev-link-target
-  # which never existed even upstream.
+  link-dep-cycle
+  link-dep-lifecycle-scripts
+  external-link-dep
   yarn-stuff
 )
 

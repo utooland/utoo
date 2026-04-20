@@ -24,25 +24,18 @@ each feature is implemented.
 
 ---
 
-### `file:` protocol dependencies
+### `file:` protocol dependencies — remaining skips
 
-**Fixtures (20):**
-`link-dep`, `link-dep-empty`, `link-dep-nested`, `link-dep-cycle`,
-`link-dep-has-dep-with-optional-dep`, `link-dep-lifecycle-scripts`,
-`link-dev-dep`, `link-meta-deps`, `link-meta-deps-empty`, `external-link-dep`,
-`cli-750`, `cli-750-fresh`, `old-lock-with-link`,
-`conflict-bundle-file-dep`, `root-bundler`, `tarball-dependencies`,
-`testing-asymmetrical-bin-no-lock`, `testing-asymmetrical-bin-with-lock`,
-`workspaces-with-files-spec`, `workspace4`
+The bulk of `file:`-protocol fixtures now run (utoo supports the spec, and the
+missing `target/` link dirs were ported back from upstream). The remaining
+skips in this category are issues unrelated to simple data absence:
 
-**Error:** `Registry error: Failed to fetch linked-dep@file:target: HTTP 500`
-
-**Root cause:** utoo sends `file:path` to the registry as a version specifier
-instead of resolving it as a local filesystem path.
-
-**Expected behavior:** Resolve `file:` paths relative to the package root,
-symlink (or copy) the target into `node_modules`, and install its transitive
-dependencies.
+| Fixture | Issue |
+|---|---|
+| `link-dep-cycle` | `a→b→a` file: cycle; needs cycle-safe resolution |
+| `link-dep-lifecycle-scripts` | runs `prepare`/`postinstall` in a file: dep; needs lockfile-driven install-script semantics |
+| `external-link-dep` | self-references `file:./node_modules/abbrev` — only exists after install (chicken-and-egg) |
+| `yarn-stuff` | references `file:abbrev-1.1.1.tgz` and `file:./abbrev-link-target` which never existed even upstream |
 
 ---
 

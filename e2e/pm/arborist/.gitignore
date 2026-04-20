@@ -1,2 +1,8 @@
 node_modules/
 package-lock.json
+
+# Fixture `target/` dirs are real test inputs for file: link deps,
+# not Rust build output — override the root-level /target ignore.
+!link-dep/target/
+!link-dep-empty/target/
+!link-dev-dep/target/
