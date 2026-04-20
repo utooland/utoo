@@ -83,6 +83,8 @@ echo ""
 UTOO_CACHE_DIR="${UTOO_CACHE_DIR:-$HOME/.cache/nm}"
 PNPM_STORE_DIR="${PNPM_STORE_DIR:-$(pnpm store path 2>/dev/null || echo "$HOME/.pnpm-store")}"
 BUN_INSTALL_DIR="${BUN_INSTALL_DIR:-$HOME/.bun/install}"
+# aube: store = tarball CAS ($XDG_DATA_HOME/aube/store/v1/files),
+#       cache = packument/manifest + global-links ($XDG_CACHE_HOME/aube)
 AUBE_STORE_DIR="${AUBE_STORE_DIR:-$HOME/.local/share/aube}"
 AUBE_CACHE_DIR="${AUBE_CACHE_DIR:-$HOME/.cache/aube}"
 

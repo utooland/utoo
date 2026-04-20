@@ -13,16 +13,10 @@ on:
           - npmjs
           - npmmirror
       pm_list:
-        description: 'Package managers to benchmark'
+        description: 'Comma-separated list (e.g. utoo,aube or utoo,pnpm,bun,aube); "all" expands to utoo,pnpm,yarn,bun,aube'
         required: true
         default: 'utoo,bun'
-        type: choice
-        options:
-          - utoo,bun
-          - utoo,bun,aube
-          - utoo,pnpm,bun
-          - utoo,pnpm,bun,aube
-          - all
+        type: string
       baseline:
         description: 'Compare with published utoo from npm'
         required: false
