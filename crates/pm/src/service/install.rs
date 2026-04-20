@@ -20,8 +20,7 @@ use crate::util::cloner::clone_stats;
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
 use crate::util::logger::{
-    InstallSummary, PROGRESS_BAR, finish_progress_bar, log_progress, print_install_summary,
-    start_progress_bar,
+    PROGRESS_BAR, finish_progress_bar, log_progress, print_install_counts, start_progress_bar,
 };
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 
@@ -240,7 +239,6 @@ impl InstallService {
         root_path: &Path,
         omit: &HashSet<OmitType>,
     ) -> Result<()> {
-        let total_start = Instant::now();
         // Snapshot counts so nested install() calls (e.g. global install)
         // report only their own delta instead of the whole process total.
         let stats_baseline = clone_stats();
@@ -252,16 +250,15 @@ impl InstallService {
         let use_fresh_lock = fs::try_exists(&lock_path).await.unwrap_or(false)
             && !is_pkg_lock_outdated(root_path).await.unwrap_or(true);
 
-        let (package_lock, pipeline_handles, resolve_elapsed) = if use_fresh_lock {
+        let (package_lock, pipeline_handles) = if use_fresh_lock {
             let lock = load_package_lock_json_from_path(root_path).await?;
-            (lock, None, None)
+            (lock, None)
         } else {
             start_progress_bar();
             let resolve_start = Instant::now();
             let result = super::pipeline::resolve_with_pipeline(root_path).await?;
-            let elapsed = resolve_start.elapsed();
-            finish_progress_bar("package-lock.json resolved", Some(elapsed));
-            (result.package_lock, Some(result.handles), Some(elapsed))
+            finish_progress_bar("package-lock.json resolved", Some(resolve_start.elapsed()));
+            (result.package_lock, Some(result.handles))
         };
 
         let groups = group_by_depth(&package_lock.packages);
@@ -281,22 +278,12 @@ impl InstallService {
             handles.await_completion().await;
             super::pipeline::print_pipeline_summary();
         }
-        let link_elapsed = link_start.elapsed();
-        finish_progress_bar("node_modules cloned", Some(link_elapsed));
+        finish_progress_bar("node_modules cloned", Some(link_start.elapsed()));
 
-        let scripts_start = Instant::now();
         RebuildService::rebuild(&package_lock, root_path, scripts).await?;
-        let scripts_elapsed = scripts_start.elapsed();
 
         let delta = clone_stats() - stats_baseline;
-        print_install_summary(&InstallSummary {
-            added: delta.cloned,
-            reused: delta.reused,
-            resolve: resolve_elapsed,
-            link: link_elapsed,
-            scripts: scripts_elapsed,
-            total: total_start.elapsed(),
-        });
+        print_install_counts(delta.cloned, delta.reused);
         Ok(())
     }
 

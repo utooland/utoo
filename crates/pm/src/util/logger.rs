@@ -104,39 +104,15 @@ pub fn finish_progress_bar(msg: &str, elapsed: Option<Duration>) {
     println!("\x1b[0m");
 }
 
-/// Inputs for [`print_install_summary`].
-pub struct InstallSummary {
-    pub added: usize,
-    pub reused: usize,
-    pub resolve: Option<Duration>,
-    pub link: Duration,
-    pub scripts: Duration,
-    pub total: Duration,
-}
-
-/// Print a two-line install summary:
-/// ```text
-/// + 513 added · 3017 reused
-/// timing  resolve 0.2s  link 2.6s  scripts 3.2s  total 6.0s
-/// ```
-pub fn print_install_summary(s: &InstallSummary) {
-    let phases = s.resolve.map(|r| ("resolve", r)).into_iter().chain([
-        ("link", s.link),
-        ("scripts", s.scripts),
-        ("total", s.total),
-    ]);
-    let parts: Vec<String> = phases
-        .map(|(label, d)| format!("{label} {}", fmt_duration(d)))
-        .collect();
-
+/// Print the install counts line, e.g. `+ 513 added · 3017 reused`.
+pub fn print_install_counts(added: usize, reused: usize) {
     println!(
         "+ {} {} · {} {}",
-        s.added.to_string().green(),
+        added.to_string().green(),
         "added".dimmed(),
-        s.reused.to_string().magenta(),
+        reused.to_string().magenta(),
         "reused".dimmed(),
     );
-    println!("{}  {}", "timing".dimmed(), parts.join("  ").dimmed());
 }
 
 pub fn start_progress_bar() {
