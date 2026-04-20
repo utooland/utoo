@@ -1,5 +1,5 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[project]/basic/server_function/input/actions.ts [server-fn] (ecmascript, server reference)", (function(__turbopack_context__){
+"[project]/basic/server_function/input/actions.ts [server] (ecmascript, server reference)", (function(__turbopack_context__){
 
 }),
 "[project]/basic/server_function/input/transport.ts [client] (ecmascript)", ((__turbopack_context__) => {
@@ -22,7 +22,7 @@ __turbopack_context__.s([
 "[project]/basic/server_function/input/actions.ts [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
-var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$actions$2e$ts__$5b$server$2d$fn$5d$__$28$ecmascript$2c$__server__reference$29$__ = __turbopack_context__.i("[project]/basic/server_function/input/actions.ts [server-fn] (ecmascript, server reference)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$actions$2e$ts__$5b$server$5d$__$28$ecmascript$2c$__server__reference$29$__ = __turbopack_context__.i("[project]/basic/server_function/input/actions.ts [server] (ecmascript, server reference)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$transport$2e$ts__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/server_function/input/transport.ts [client] (ecmascript)");
 ;
 ;
@@ -37,13 +37,13 @@ __turbopack_context__.s([
     deleteUser
 ]);
 }),
-"[project]/basic/server_function/input/admin.ts [server-fn] (ecmascript, server reference)", (function(__turbopack_context__){
+"[project]/basic/server_function/input/admin.ts [server] (ecmascript, server reference)", (function(__turbopack_context__){
 
 }),
 "[project]/basic/server_function/input/admin.ts [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
-var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$admin$2e$ts__$5b$server$2d$fn$5d$__$28$ecmascript$2c$__server__reference$29$__ = __turbopack_context__.i("[project]/basic/server_function/input/admin.ts [server-fn] (ecmascript, server reference)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$admin$2e$ts__$5b$server$5d$__$28$ecmascript$2c$__server__reference$29$__ = __turbopack_context__.i("[project]/basic/server_function/input/admin.ts [server] (ecmascript, server reference)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$transport$2e$ts__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/server_function/input/transport.ts [client] (ecmascript)");
 ;
 ;
@@ -74,4 +74,4 @@ __turbopack_context__.s([]);
 }),
 ]);
 
-//# sourceMappingURL=input_86d7f071.js.map
+//# sourceMappingURL=input_526bc30c.js.map

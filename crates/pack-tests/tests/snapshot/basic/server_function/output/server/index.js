@@ -3,7 +3,7 @@
 })([
 ["index.js",
 
-"[project]/basic/server_function/input/actions.ts [server-fn] (ecmascript)", ((__turbopack_context__) => {
+"[project]/basic/server_function/input/actions.ts [server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 __turbopack_context__.s([
@@ -12,7 +12,7 @@ __turbopack_context__.s([
     "deleteUser",
     ()=>deleteUser
 ]);
-var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$register$2e$ts__$5b$server$2d$fn$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/server_function/input/register.ts [server-fn] (ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$register$2e$ts__$5b$server$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/server_function/input/register.ts [server] (ecmascript)");
 "use server";
 async function createUser(name, email) {
     // This runs on the server
@@ -28,17 +28,17 @@ async function deleteUser(id) {
     console.log(`Deleting user ${id}`);
 }
 ;
-(0, __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$register$2e$ts__$5b$server$2d$fn$5d$__$28$ecmascript$29$__["registerServerReference"])(createUser, "bdadcaefd8ce9058", "createUser");
-(0, __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$register$2e$ts__$5b$server$2d$fn$5d$__$28$ecmascript$29$__["registerServerReference"])(deleteUser, "63c89b1b411a2fd0", "deleteUser");
+(0, __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$register$2e$ts__$5b$server$5d$__$28$ecmascript$29$__["registerServerReference"])(createUser, "bdadcaefd8ce9058", "createUser");
+(0, __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$register$2e$ts__$5b$server$5d$__$28$ecmascript$29$__["registerServerReference"])(deleteUser, "63c89b1b411a2fd0", "deleteUser");
 }),
-"[project]/basic/server_function/input/admin.ts [server-fn] (ecmascript)", ((__turbopack_context__) => {
+"[project]/basic/server_function/input/admin.ts [server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 __turbopack_context__.s([
     "createUser",
     ()=>createUser
 ]);
-var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$register$2e$ts__$5b$server$2d$fn$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/server_function/input/register.ts [server-fn] (ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$register$2e$ts__$5b$server$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/server_function/input/register.ts [server] (ecmascript)");
 "use server";
 async function createUser(name, role) {
     // Admin createUser implementation
@@ -50,9 +50,9 @@ async function createUser(name, role) {
     };
 }
 ;
-(0, __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$register$2e$ts__$5b$server$2d$fn$5d$__$28$ecmascript$29$__["registerServerReference"])(createUser, "18fccc60e484024c", "createUser");
+(0, __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$server_function$2f$input$2f$register$2e$ts__$5b$server$5d$__$28$ecmascript$29$__["registerServerReference"])(createUser, "18fccc60e484024c", "createUser");
 }),
-"[project]/basic/server_function/input/register.ts [server-fn] (ecmascript)", ((__turbopack_context__) => {
+"[project]/basic/server_function/input/register.ts [server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 __turbopack_context__.s([
@@ -72,7 +72,7 @@ function registerServerReference(action, id, name) {
 console.log("This is the main Server Entry");
 }),
 ],
-["index.js", {"otherChunks":[],"runtimeModuleIds":["[project]/basic/server_function/input/actions.ts [server-fn] (ecmascript)","[project]/basic/server_function/input/admin.ts [server-fn] (ecmascript)","[project]/basic/server_function/input/server.ts [server] (ecmascript)"]}],
+["index.js", {"otherChunks":[],"runtimeModuleIds":["[project]/basic/server_function/input/actions.ts [server] (ecmascript)","[project]/basic/server_function/input/admin.ts [server] (ecmascript)","[project]/basic/server_function/input/server.ts [server] (ecmascript)"]}],
 ]);
 
 
