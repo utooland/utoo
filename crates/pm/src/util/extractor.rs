@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use bytes::Bytes;
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
@@ -150,13 +150,13 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
     write_entries(dest, &entries, &rel_dirs)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use write_via_dirfd as write_entries;
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 use write_via_paths as write_entries;
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn write_via_paths(dest: &Path, entries: &[ExtractedEntry], rel_dirs: &[PathBuf]) -> Result<()> {
     use rayon::prelude::*;
     use std::fs;
@@ -194,12 +194,14 @@ fn write_via_paths(dest: &Path, entries: &[ExtractedEntry], rel_dirs: &[PathBuf]
     Ok(())
 }
 
-/// Linux path: open every intermediate dir as a `DirFd`, then do parallel
-/// `openat(parent_fd, leaf, O_WRONLY | O_CREAT | O_TRUNC, mode)` + write.
+/// Linux/macOS path: open every intermediate dir as a `DirFd`, then do
+/// parallel `openat(parent_fd, leaf, O_WRONLY | O_CREAT | O_TRUNC, mode)`
+/// + write.
+///
 /// Each file write touches a single-component path — no absolute-path
-/// dentry walk, no per-file `chmod` (mode is set at openat time, applied
-/// through umask just like `File::create`).
-#[cfg(target_os = "linux")]
+/// dentry walk, and no per-file `chmod` (mode is set at openat time,
+/// applied through umask just like `File::create`).
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn write_via_dirfd(dest: &Path, entries: &[ExtractedEntry], rel_dirs: &[PathBuf]) -> Result<()> {
     use rayon::prelude::*;
     use std::collections::HashMap;

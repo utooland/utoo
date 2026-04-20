@@ -7,7 +7,7 @@
 // Some exports are only used on specific platforms (e.g., hard_link/copy on non-Unix)
 #![allow(unused_imports)]
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod at;
 
 // Re-export tokio-fs-ext APIs

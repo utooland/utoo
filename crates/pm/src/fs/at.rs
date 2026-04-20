@@ -1,20 +1,20 @@
 //! Directory-fd-based filesystem ops.
 //!
-//! All I/O inside a package tree (clone, tarball extraction, validation)
-//! works relative to an opened directory fd instead of re-resolving
-//! absolute paths on every syscall. For a node_modules with 100k+ files
-//! that cuts ~10 dentry lookups per file × 2 paths down to 1 on each side.
+//! All I/O inside a package tree works relative to an opened directory fd
+//! instead of re-resolving absolute paths on every syscall. For a
+//! `node_modules` with 100k+ files that cuts ~10 dentry lookups per file
+//! per path down to 1 on each side.
 //!
-//! Linux-only. macOS uses `clonefile`, Windows keeps the path-based API.
-
-#![cfg(any(target_os = "linux", target_os = "macos"))]
+//! Available on Linux and macOS. Windows keeps the path-based API (no
+//! `*at` equivalents). On macOS, cloning still uses `clonefile` — this
+//! module is only wired into the extractor there.
 
 use std::ffi::CStr;
 use std::io;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::path::Path;
 
-use rustix::fs::{AtFlags, Dir, Mode, OFlags, Stat};
+use rustix::fs::{AtFlags, Dir, Mode, OFlags, RawMode, Stat};
 
 const DIR_OPEN_FLAGS: OFlags = OFlags::DIRECTORY
     .union(OFlags::RDONLY)
@@ -31,6 +31,10 @@ pub struct DirFd {
     fd: OwnedFd,
 }
 
+// `link_from`, `stat`, and `read_entries` are only exercised by the Linux
+// cloner (macOS uses `clonefile`). Silencing dead_code here instead of
+// per-method `#[cfg]` gates keeps the API surface uniform.
+#[allow(dead_code)]
 impl DirFd {
     /// Open a directory by absolute path.
     pub fn open(path: &Path) -> io::Result<Self> {
@@ -45,8 +49,12 @@ impl DirFd {
     }
 
     /// `mkdirat(self, name, mode)`. EEXIST is treated as success.
+    ///
+    /// `mode` is accepted as `u32` regardless of platform; the cast to
+    /// `RawMode` (u32 on Linux, u16 on macOS) is a no-op for the values
+    /// we pass (`0o644` / `0o755` fit comfortably in 16 bits).
     pub fn mkdir(&self, name: &CStr, mode: u32) -> io::Result<()> {
-        match rustix::fs::mkdirat(&self.fd, name, Mode::from_raw_mode(mode)) {
+        match rustix::fs::mkdirat(&self.fd, name, Mode::from_raw_mode(mode as RawMode)) {
             Ok(()) => Ok(()),
             Err(e) if e == rustix::io::Errno::EXIST => Ok(()),
             Err(e) => Err(e.into()),
@@ -65,7 +73,12 @@ impl DirFd {
     /// an owned fd ready for `write`. Caller converts to `std::fs::File`
     /// if buffered I/O is needed.
     pub fn create_file(&self, name: &CStr, mode: u32) -> io::Result<OwnedFd> {
-        let fd = rustix::fs::openat(&self.fd, name, FILE_CREATE_FLAGS, Mode::from_raw_mode(mode))?;
+        let fd = rustix::fs::openat(
+            &self.fd,
+            name,
+            FILE_CREATE_FLAGS,
+            Mode::from_raw_mode(mode as RawMode),
+        )?;
         Ok(fd)
     }
 
