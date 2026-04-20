@@ -3,6 +3,7 @@ use anyhow::Context;
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::time::Instant;
 
 use crate::cmd::deps::build_deps;
 use crate::fs;
@@ -15,9 +16,13 @@ use crate::helper::workspace::init_project_root;
 use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
 use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
+use crate::util::cloner::clone_count;
+use crate::util::downloader::download_stats;
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
-use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
+use crate::util::logger::{
+    PROGRESS_BAR, finish_progress_bar, log_progress, print_install_counts, start_progress_bar,
+};
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 
 use super::binary::update_package_binary;
@@ -64,8 +69,11 @@ pub async fn install_packages(
 ) -> Result<()> {
     use crate::util::cloner::clone_package_once;
 
-    // clean unused deps
+    // Surface the clean step in the spinner — it doesn't move `pos`, so
+    // without a message the bar looks frozen on large trees.
+    log_progress("validating node_modules");
     clean_deps(groups, cwd).await?;
+    log_progress("linking packages");
 
     // Always process level-by-level to ensure parent directories exist before
     // children. Within each level, tasks run concurrently. The pipeline's
@@ -232,6 +240,11 @@ impl InstallService {
         root_path: &Path,
         omit: &HashSet<OmitType>,
     ) -> Result<()> {
+        // Snapshot counts so nested install() calls (e.g. global install)
+        // report only their own delta instead of the whole process total.
+        let clone_baseline = clone_count();
+        let download_baseline = download_stats();
+
         let lock_path = root_path.join("package-lock.json");
         // Treat a failing freshness check as stale: regenerate rather than
         // install from a lockfile we couldn't validate. `is_pkg_lock_outdated`
@@ -244,8 +257,9 @@ impl InstallService {
             (lock, None)
         } else {
             start_progress_bar();
+            let resolve_start = Instant::now();
             let result = super::pipeline::resolve_with_pipeline(root_path).await?;
-            finish_progress_bar("package-lock.json resolved");
+            finish_progress_bar("package-lock.json resolved", Some(resolve_start.elapsed()));
             (result.package_lock, Some(result.handles))
         };
 
@@ -256,6 +270,7 @@ impl InstallService {
             PROGRESS_BAR.set_length(package_lock.packages.len() as u64);
         }
 
+        let link_start = Instant::now();
         install_packages(&groups, root_path, omit)
             .await
             .context("Failed to install packages")?;
@@ -265,10 +280,13 @@ impl InstallService {
             handles.await_completion().await;
             super::pipeline::print_pipeline_summary();
         }
-
-        finish_progress_bar("node_modules cloned");
+        finish_progress_bar("node_modules cloned", Some(link_start.elapsed()));
 
         RebuildService::rebuild(&package_lock, root_path, scripts).await?;
+
+        let added = clone_count().saturating_sub(clone_baseline);
+        let download_delta = download_stats() - download_baseline;
+        print_install_counts(added, download_delta.reused, download_delta.downloaded);
         Ok(())
     }
 
