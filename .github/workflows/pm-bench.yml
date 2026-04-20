@@ -28,6 +28,11 @@ on:
         required: false
         default: true
         type: boolean
+      build_current:
+        description: 'Build utoo from the current branch (disable to benchmark only the npm baseline + other PMs)'
+        required: false
+        default: true
+        type: boolean
       build_next:
         description: 'Compare with utoo built from next branch'
         required: false
@@ -53,7 +58,7 @@ concurrency:
 jobs:
   build-linux:
     if: >
-      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.build_current != 'false' || github.event.inputs.build_next == 'true')) ||
       (github.event_name == 'pull_request' && github.event.label.name == 'benchmark')
     runs-on: ubuntu-latest
     container:
@@ -83,9 +88,11 @@ jobs:
           shared-key: pm-bench-linux
 
       - name: Build current branch utoo
+        if: github.event.inputs.build_current != 'false'
         run: cargo build --release --bin utoo -p utoo-pm
 
       - name: Upload current binary
+        if: github.event.inputs.build_current != 'false'
         uses: actions/upload-artifact@v4
         with:
           name: utoo-linux-bench-current
@@ -110,12 +117,14 @@ jobs:
 
   benchmark-linux:
     needs: [build-linux]
+    if: >
+      always() &&
+      (needs.build-linux.result == 'success' || needs.build-linux.result == 'skipped') &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'pull_request' && github.event.label.name == 'benchmark'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Init git submodules
-        run: git submodule update --init --recursive --depth 1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -123,28 +132,36 @@ jobs:
           node-version: 22
 
       - name: Download current binary
+        if: github.event.inputs.build_current != 'false'
         uses: actions/download-artifact@v4
         with:
           name: utoo-linux-bench-current
           path: dist
 
       - name: Setup current binary
+        if: github.event.inputs.build_current != 'false'
         run: |
           chmod +x dist/utoo
           echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
 
       - name: Create ut symlink
+        if: github.event.inputs.build_current != 'false'
         run: ln -sf utoo $(dirname $(which utoo))/ut
 
       - name: Install baseline utoo from npm
         if: github.event.inputs.baseline != 'false'
         run: |
           npm install -g utoo
-          BASELINE_PATH=$(which utoo)
-          cp "$BASELINE_PATH" /tmp/utoo-npm
-          chmod +x /tmp/utoo-npm
-          echo "Baseline utoo (npm) version: $(/tmp/utoo-npm --version)"
-          echo "UTOO_NPM_BIN=/tmp/utoo-npm" >> $GITHUB_ENV
+          if [ "${{ github.event.inputs.build_current }}" != "false" ]; then
+            BASELINE_PATH=$(which utoo)
+            cp "$BASELINE_PATH" /tmp/utoo-npm
+            chmod +x /tmp/utoo-npm
+            echo "Baseline utoo (npm) version: $(/tmp/utoo-npm --version)"
+            echo "UTOO_NPM_BIN=/tmp/utoo-npm" >> $GITHUB_ENV
+          else
+            ln -sf "$(which utoo)" "$(dirname "$(which utoo)")/ut"
+            echo "utoo (npm, primary): $(utoo --version)"
+          fi
 
       - name: Setup next binary
         if: github.event.inputs.build_next == 'true'
@@ -217,6 +234,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Init git submodules
+        if: github.event.inputs.build_current != 'false' || github.event.inputs.build_next == 'true'
         run: git submodule update --init --recursive --depth 1
 
       - name: Setup Node.js
@@ -225,11 +243,13 @@ jobs:
           node-version: 22
 
       - name: Install Rust
+        if: github.event.inputs.build_current != 'false' || github.event.inputs.build_next == 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: nightly-2026-04-02
 
       - name: Cache cargo
+        if: github.event.inputs.build_current != 'false' || github.event.inputs.build_next == 'true'
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: pm-bench-macos-latest
@@ -238,11 +258,16 @@ jobs:
         if: github.event.inputs.baseline != 'false'
         run: |
           npm install -g utoo
-          BASELINE_PATH=$(which utoo)
-          cp "$BASELINE_PATH" /tmp/utoo-npm
-          chmod +x /tmp/utoo-npm
-          echo "Baseline utoo (npm) version: $(/tmp/utoo-npm --version)"
-          echo "UTOO_NPM_BIN=/tmp/utoo-npm" >> $GITHUB_ENV
+          if [ "${{ github.event.inputs.build_current }}" != "false" ]; then
+            BASELINE_PATH=$(which utoo)
+            cp "$BASELINE_PATH" /tmp/utoo-npm
+            chmod +x /tmp/utoo-npm
+            echo "Baseline utoo (npm) version: $(/tmp/utoo-npm --version)"
+            echo "UTOO_NPM_BIN=/tmp/utoo-npm" >> $GITHUB_ENV
+          else
+            ln -sf "$(which utoo)" "$(dirname "$(which utoo)")/ut"
+            echo "utoo (npm, primary): $(utoo --version)"
+          fi
 
       - name: Build baseline utoo from next branch
         if: github.event.inputs.build_next == 'true'
@@ -260,12 +285,15 @@ jobs:
           git submodule update --init --recursive --depth 1
 
       - name: Build utoo-pm
+        if: github.event.inputs.build_current != 'false'
         run: cargo build --release --bin utoo -p utoo-pm
 
       - name: Update PATH
+        if: github.event.inputs.build_current != 'false'
         run: echo "${{ github.workspace }}/target/release" >> $GITHUB_PATH
 
       - name: Create ut symlink
+        if: github.event.inputs.build_current != 'false'
         run: ln -sf utoo $(dirname $(which utoo))/ut
 
       - name: Resolve pm_list
