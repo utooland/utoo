@@ -73,56 +73,15 @@ SKIP_FILE_TARGET_MISSING=(
   yarn-stuff
 )
 
-# [SKIP:file-semantic] limitations of utoo's current `file:` resolver:
-#  * link-meta-deps / link-meta-deps-empty — transitive `file:` deps inside
-#    a *registry-published* package; utoo cannot recover the origin dir for
-#    those, since the parent's tarball came from the registry, not disk.
-#  * link-dep-has-dep-with-optional-dep — spec "./a" is parsed as GitHub
-#    shorthand rather than a file path (pre-existing spec-parser behavior).
-#  * audit-mkdirp — inner file: target has a `package.json` without a name.
-SKIP_FILE_SEMANTIC=(
-  link-meta-deps link-meta-deps-empty
-  link-dep-has-dep-with-optional-dep
-  audit-mkdirp
-)
-
-# [SKIP:bundled-dep-copy] bundled-deps copy semantics from local file: roots
-# are not yet implemented (root-bundler/conflict-bundle-file-dep use a mix of
-# file: + bundledDependencies).
-SKIP_BUNDLED_FILE=(
-  conflict-bundle-file-dep root-bundler
-  workspace4 testing-asymmetrical-bin-with-lock
-)
-
-# [SKIP:optional-transitive] optional dep subtree with missing transitive deps should be skipped
-SKIP_OPTIONAL_TRANSITIVE=(
-  optional-dep-tgz-missing optional-metadep-missing optional-metadep-enotarget
-)
-
-# [SKIP:peer-strict] utoo does not emit ERESOLVE for unsatisfiable peer deps
-SKIP_PEER_STRICT=(
-  testing-peer-deps-unresolvable
-)
-
-# [SKIP:platform-reject] utoo does not check os/cpu/libc fields (EBADPLATFORM)
-SKIP_PLATFORM=(
-  platform-specification
-)
-
-# [SKIP:workspace-duplicate] utoo does not detect duplicate workspace package names
-SKIP_WORKSPACE_DUP=(
-  workspaces-duplicate
-)
+# Former utoo-limitation skip lists (`FILE_SEMANTIC`, `BUNDLED_FILE`,
+# `OPTIONAL_TRANSITIVE`, `PEER_STRICT`, `PLATFORM`, `WORKSPACE_DUP`,
+# `DEP_CYCLE`) have been opened up — utoo is believed to cover them now.
+# Re-add entries here (with a one-line reason) if CI proves otherwise.
 
 # [SKIP:mock-registry] packages only exist in npm's @npmcli/mock-registry
 SKIP_REGISTRY_ONLY=(
   audit-linked-package
   testing-missing-tgz
-)
-
-# [SKIP:dep-cycle-oom] infinite dep cycle causes OOM/timeout
-SKIP_DEP_CYCLE=(
-  pathological-dep-nesting-cycle
 )
 
 # [SKIP:misc] various fixture-specific issues
@@ -142,14 +101,7 @@ _add_skip() {
   done
 }
 _add_skip "file: target missing from fixture port" "${SKIP_FILE_TARGET_MISSING[@]}"
-_add_skip "file: resolver limitation"              "${SKIP_FILE_SEMANTIC[@]}"
-_add_skip "bundled file: deps unsupported"         "${SKIP_BUNDLED_FILE[@]}"
-_add_skip "optional transitive"  "${SKIP_OPTIONAL_TRANSITIVE[@]}"
-_add_skip "strict peer deps"    "${SKIP_PEER_STRICT[@]}"
-_add_skip "platform reject"     "${SKIP_PLATFORM[@]}"
-_add_skip "workspace duplicate"  "${SKIP_WORKSPACE_DUP[@]}"
 _add_skip "mock registry only"  "${SKIP_REGISTRY_ONLY[@]}"
-_add_skip "dep cycle OOM"       "${SKIP_DEP_CYCLE[@]}"
 _add_skip "misc"                "${SKIP_MISC[@]}"
 
 is_skipped() {

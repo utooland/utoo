@@ -39,78 +39,14 @@ skips in this category are issues unrelated to simple data absence:
 
 ---
 
-### Optional transitive dep failure tolerance
-
-**Fixtures (3):**
-`optional-dep-tgz-missing`, `optional-metadep-missing`, `optional-metadep-enotarget`
-
-**Error:** `Dependency resolution failed: Registry error: Failed to fetch ...`
-
-**Root cause:** When an optional dependency has a transitive dependency that is
-missing or unreachable, utoo hard-fails the entire install instead of skipping
-the optional subtree.
-
-**Expected behavior:** If any dependency in an optional dep's subtree cannot be
-resolved, skip the entire optional package gracefully (like npm does) and
-continue installing the rest.
-
----
-
-### Strict peer dep conflict detection (ERESOLVE)
-
-**Fixtures (1):** `testing-peer-deps-unresolvable`
-
-**Error:** Install succeeds when it should fail.
-
-**Root cause:** utoo does not validate whether peer dependency constraints are
-mutually satisfiable. The fixture has `@isaacs/testing-peer-deps-c@1` and
-`@isaacs/testing-peer-deps-b@2` (which peer-depends on `c@2`) — these conflict.
-
-**Expected behavior:** Detect unsatisfiable peer dep constraints and exit with
-an ERESOLVE-style error, similar to npm v7+.
-
----
-
-### Platform mismatch rejection
-
-**Fixtures (1):** `platform-specification`
-
-**Error:** Install succeeds when it should fail.
-
-**Root cause:** utoo does not check the `os`, `cpu`, or `libc` fields in
-dependency package.json files against the current platform.
-
-**Expected behavior:** For non-optional dependencies, check `os`/`cpu`/`libc`
-fields and refuse to install if the current platform does not match
-(EBADPLATFORM).
-
----
-
-### Duplicate workspace name detection
-
-**Fixtures (1):** `workspaces-duplicate`
-
-**Error:** Install succeeds when it should fail.
-
-**Root cause:** utoo does not check whether multiple workspace packages declare
-the same `name` in their package.json.
-
-**Expected behavior:** Error with EDUPLICATEWORKSPACE when two or more workspace
-directories have the same package name.
-
----
-
 ### Mock-registry-only packages
 
-**Fixtures (3):**
-`audit-linked-package`, `pathological-dep-nesting-cycle`, `testing-missing-tgz`
+**Fixtures (2):**
+`audit-linked-package`, `testing-missing-tgz`
 
 **Details:**
 - `audit-linked-package` — depends on `electron-test-app@1.0.0` which does not
   exist on the real npm registry (only in npm's mock `@npmcli/mock-registry`).
-- `pathological-dep-nesting-cycle` — depends on `@isaacs/pathological-dep-nesting-a`
-  which creates a deeply recursive A→B→A→B cycle. utoo gets killed (OOM/timeout)
-  instead of handling the cycle gracefully.
 - `testing-missing-tgz` — has a `preinstall` script `"this never gets run"` which
   utoo tries to execute (it should be a zero-dep package with no install needed).
 
