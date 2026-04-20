@@ -275,8 +275,8 @@ pub async fn get_client_module_options_context(
         client_rules.push(get_ecma_transform_rule(
             Box::new(ServerDirectiveTransformer::new(
                 rcstr!("server-reference"),
-                rcstr!("@utoo/server-reference/client"),
-                Some(rcstr!("@utoo/server-reference/server")),
+                rcstr!("@utoo/server-function/client"),
+                Some(rcstr!("@utoo/server-function/server")),
                 false,
             )),
             false,

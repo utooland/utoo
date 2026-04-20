@@ -176,8 +176,8 @@ pub async fn get_server_module_options_context(
         server_rules.push(get_ecma_transform_rule(
             Box::new(ServerDirectiveTransformer::new(
                 turbo_rcstr::rcstr!("server-reference"),
-                turbo_rcstr::rcstr!("@utoo/server-reference/client"),
-                Some(turbo_rcstr::rcstr!("@utoo/server-reference/server")),
+                turbo_rcstr::rcstr!("@utoo/server-function/client"),
+                Some(turbo_rcstr::rcstr!("@utoo/server-function/server")),
                 true,
             )),
             false,

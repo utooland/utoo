@@ -161,7 +161,7 @@ pub fn collect_exports(module: &Module) -> Vec<(String, Option<Ident>)> {
 /// Generated code for a module with `createUser` and `deleteUser` exports:
 /// ```js
 /// import * as _server from "./actions" with { __turbopack_transition__: "server-reference" };
-/// import { createServerReference } from "@utoo/server-reference/client";
+/// import { createServerReference } from "@utoo/server-function/client";
 /// export const createUser = createServerReference("a1b2c3...", "createUser");
 /// export const deleteUser = createServerReference("d4e5f6...", "deleteUser");
 /// ```

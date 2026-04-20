@@ -13,7 +13,7 @@ use turbopack_node::execution_context::ExecutionContext;
 
 use crate::{config::Config, embed_js, util::convert_to_project_relative};
 
-/// Registers `@utoo/server-reference/client` and `@utoo/server-reference/server`
+/// Registers `@utoo/server-function/client` and `@utoo/server-function/server`
 /// as import map aliases pointing to the user's configured project-relative paths.
 ///
 /// This enables users to write natural project-relative paths in their config
@@ -29,7 +29,7 @@ pub async fn insert_server_reference_aliases(
     if let Some(ref func) = server_config.function {
         if let Some(ref client_proxy) = func.client_proxy {
             import_map.insert_exact_alias(
-                "@utoo/server-reference/client",
+                "@utoo/server-function/client",
                 ImportMapping::PrimaryAlternative(client_proxy.clone(), Some(project_path.clone()))
                     .resolved_cell(),
             );
@@ -37,7 +37,7 @@ pub async fn insert_server_reference_aliases(
 
         if let Some(ref server_register) = func.server_register {
             import_map.insert_exact_alias(
-                "@utoo/server-reference/server",
+                "@utoo/server-function/server",
                 ImportMapping::PrimaryAlternative(
                     server_register.clone(),
                     Some(project_path.clone()),
