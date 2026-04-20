@@ -50,7 +50,7 @@
     "examples/inline-css",
     "examples/with-postcss",
     "examples/with-swc-plugin",
-    "examples/with-server-functions"
+    "examples/with-server-references"
   ],
   "repository": "https://github.com/utooland/utoo",
   "engines": {

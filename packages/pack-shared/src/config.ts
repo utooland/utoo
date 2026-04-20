@@ -301,6 +301,8 @@ export interface ConfigComplete {
   nodePolyfill?: boolean;
   devServer?: DevServerConfig;
   server?: {
+    /** Entry point for the server runtime (e.g. "src/server.ts") */
+    entry?: string;
     output?: {
       /** Output path for server chunks, relative to project root. */
       path?: string;
@@ -309,9 +311,11 @@ export interface ConfigComplete {
       /** Non-entry chunk filename template. Supports [name] and [contenthash:N]. */
       chunkFilename?: string;
     };
-    functions?: {
-      /** Module that exports `callServer(actionId, args)` for client-side transport. */
-      callServerModule: string;
+    function?: {
+      /** Module that exports `createServerReference(actionId, name)` for client-side proxy generation. */
+      clientProxy?: string;
+      /** Module that exports `registerServerReference(action, actionId, name)` for the server bundle. */
+      serverRegister?: string;
     };
   };
 }

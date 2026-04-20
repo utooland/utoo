@@ -4,7 +4,7 @@ use swc_core::ecma::{ast::Program, transforms::base::resolver, visit::VisitMutWi
 use turbo_rcstr::RcStr;
 use turbopack_ecmascript::{CustomTransformer, TransformContext};
 
-use super::proxy::{collect_exports, create_server_proxy_module};
+use super::proxy::{collect_exports, create_server_proxy_module, create_server_registration_ast};
 
 /// Detects `"use server"` directive in a module and replaces the program
 /// with a client-side proxy containing `callServer` stubs and a
@@ -12,14 +12,23 @@ use super::proxy::{collect_exports, create_server_proxy_module};
 #[derive(Debug)]
 pub struct ServerDirectiveTransformer {
     transition_name: RcStr,
-    call_server_module: RcStr,
+    client_reference: RcStr,
+    server_reference: Option<RcStr>,
+    is_server: bool,
 }
 
 impl ServerDirectiveTransformer {
-    pub fn new(transition_name: RcStr, call_server_module: RcStr) -> Self {
+    pub fn new(
+        transition_name: RcStr,
+        client_reference: RcStr,
+        server_reference: Option<RcStr>,
+        is_server: bool,
+    ) -> Self {
         Self {
             transition_name,
-            call_server_module,
+            client_reference,
+            server_reference,
+            is_server,
         }
     }
 }
@@ -71,15 +80,28 @@ impl CustomTransformer for ServerDirectiveTransformer {
         // file_path_str is unique across the project (e.g. "src/auth/actions.ts"),
         // whereas file_name_str would collide for same-named files in different dirs.
         let module_id = ctx.file_path_str.to_string();
-        let target_import = format!("./{}", ctx.file_name_str);
 
-        *program = create_server_proxy_module(
-            self.transition_name.as_str(),
-            self.call_server_module.as_str(),
-            &target_import,
-            &module_id,
-            &exports,
-        );
+        if self.is_server {
+            if let Some(server_reference) = &self.server_reference {
+                create_server_registration_ast(
+                    program,
+                    server_reference.as_str(),
+                    &module_id,
+                    &exports,
+                );
+            }
+        } else {
+            let target_import = format!("./{}", ctx.file_name_str);
+
+            *program = create_server_proxy_module(
+                self.transition_name.as_str(),
+                self.client_reference.as_str(),
+                &target_import,
+                &module_id,
+                &exports,
+            );
+        }
+
         program.visit_mut_with(&mut resolver(
             ctx.unresolved_mark,
             ctx.top_level_mark,
