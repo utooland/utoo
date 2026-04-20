@@ -526,7 +526,27 @@ impl Endpoint for AppEndpoint {
             };
 
             if let Some(server_output) = server_output {
-                output_assets = output_assets.concatenate(server_output);
+                if should_create_webpack_stats {
+                    let server_stats =
+                        generate_webpack_stats(server_output, this.project.server_dist_root());
+                    let server_stats_read = server_stats.await?;
+                    let server_dist_root_owned = this.project.server_dist_root().owned().await?;
+                    let server_stats_json = serde_json::to_string_pretty(&*server_stats_read)?;
+                    let server_stats_output = VirtualOutputAsset::new(
+                        server_dist_root_owned.join("stats.json")?,
+                        AssetContent::file(FileContent::from(File::from(server_stats_json)).cell()),
+                    )
+                    .to_resolved()
+                    .await?;
+                    output_assets =
+                        output_assets
+                            .concatenate(server_output)
+                            .concatenate(*ResolvedVc::cell(vec![ResolvedVc::upcast(
+                                server_stats_output,
+                            )]));
+                } else {
+                    output_assets = output_assets.concatenate(server_output);
+                }
             }
 
             Ok(EndpointOutput {
