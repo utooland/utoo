@@ -210,7 +210,7 @@ fn write_via_dirfd(dest: &Path, entries: &[ExtractedEntry], rel_dirs: &[PathBuf]
 
     use rustix::fs::{Mode, fchmod};
 
-    use crate::util::at::DirFd;
+    use crate::fs::at::DirFd;
 
     fn to_cstring(bytes: &[u8]) -> Result<CString> {
         CString::new(bytes).with_context(|| "tar entry name contains NUL byte")

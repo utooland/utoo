@@ -112,7 +112,7 @@ use libc::clonefile;
 
 /// Linux path uses openat + linkat with relative names so the kernel resolves
 /// each filename against a cached directory fd instead of re-walking the full
-/// absolute path on every link call. See `util::at` for the shared abstraction.
+/// absolute path on every link call. See `crate::fs::at` for the shared abstraction.
 #[cfg(target_os = "linux")]
 mod hardlink_clone {
     use std::ffi::OsStr;
@@ -123,7 +123,7 @@ mod hardlink_clone {
     use anyhow::{Context, Result};
     use rustix::fs::FileType;
 
-    use crate::util::at::DirFd;
+    use crate::fs::at::DirFd;
 
     fn has_install_script_sync(src: &Path) -> bool {
         src.parent().is_some_and(|parent| {

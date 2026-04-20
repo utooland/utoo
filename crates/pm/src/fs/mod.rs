@@ -1,11 +1,14 @@
-//! Unified async filesystem operations.
+//! Unified filesystem operations.
 //!
-//! Re-exports tokio-fs-ext APIs and provides fallbacks for unsupported operations.
-//! This module serves as a dispatch layer, making it easy to migrate to tokio-fs-ext
-//! while maintaining fallbacks for APIs not yet supported.
+//! Re-exports tokio-fs-ext async APIs and provides fallbacks for unsupported
+//! operations. Linux-only sync primitives (`DirFd` for `openat`/`linkat`-based
+//! I/O) live in the [`at`] submodule.
 
 // Some exports are only used on specific platforms (e.g., hard_link/copy on non-Unix)
 #![allow(unused_imports)]
+
+#[cfg(target_os = "linux")]
+pub mod at;
 
 // Re-export tokio-fs-ext APIs
 pub use tokio_fs_ext::{
