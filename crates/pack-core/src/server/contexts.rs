@@ -168,6 +168,23 @@ pub async fn get_server_module_options_context(
 
     server_rules.extend(additional_rules);
 
+    let server_config = config.server().await?;
+    if server_config.function.is_some() {
+        use crate::server_reference::server_directive_transformer::ServerDirectiveTransformer;
+        use crate::shared::transforms::{EcmascriptTransformStage, get_ecma_transform_rule};
+
+        server_rules.push(get_ecma_transform_rule(
+            Box::new(ServerDirectiveTransformer::new(
+                turbo_rcstr::rcstr!("server-reference"),
+                turbo_rcstr::rcstr!("@utoo/server-function/client"),
+                Some(turbo_rcstr::rcstr!("@utoo/server-function/server")),
+                true,
+            )),
+            false,
+            EcmascriptTransformStage::Preprocess,
+        ));
+    }
+
     let postcss_config_content = (*config.postcss_config_content().await?).clone();
 
     let postcss_transform_options = Some(PostCssTransformOptions {

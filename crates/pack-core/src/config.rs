@@ -92,8 +92,24 @@ pub struct ProviderConfig(
 #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerConfig {
-    /// Server function configuration ("use server" directive support)
-    pub functions: Option<ServerFunctionsConfig>,
+    /// Entry point for the server runtime (e.g. "src/server.ts")
+    pub entry: Option<RcStr>,
+    /// Configuration for Server Functions (RPC)
+    pub function: Option<ServerFunctionConfig>,
+    /*
+    TODO: Support React Server Components (RSC) boundary mediation
+    pub component: Option<ServerComponentConfig>,
+
+    #[turbo_tasks::value(eq = "manual")]
+    #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize, OperationValue)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ServerComponentConfig {
+        /// Module serving as the client registry for mapping RSC chunks and hydration
+        pub client_registry: Option<RcStr>,
+        /// Module handling the serialization of client references during SSR
+        pub server_proxy: Option<RcStr>,
+    }
+    */
     /// Server output configuration
     pub output: Option<ServerOutputConfig>,
 }
@@ -101,10 +117,24 @@ pub struct ServerConfig {
 #[turbo_tasks::value(eq = "manual")]
 #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
-pub struct ServerFunctionsConfig {
-    /// Module that exports `callServer(actionId, args)` for client-side transport.
-    /// e.g. "@evjs/client/transport" or custom module path.
-    pub call_server_module: RcStr,
+pub struct ServerFunctionConfig {
+    /// Module that exports the RPC transport (client-side proxy generation).
+    /// Expected signature:
+    /// ```ts
+    /// export function createServerReference(actionId: string, name: string) {
+    ///   return async function (...args: any[]) { /* HTTP fetch to server */ }
+    /// }
+    /// ```
+    pub client_proxy: Option<RcStr>,
+
+    /// Module that exports the handler registration for the server bundle.
+    /// Expected signature:
+    /// ```ts
+    /// export function registerServerReference(action: any, actionId: string, name: string) {
+    ///   /* Register the action to a global router/map */
+    /// }
+    /// ```
+    pub server_register: Option<RcStr>,
 }
 
 #[turbo_tasks::value(eq = "manual")]

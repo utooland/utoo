@@ -6,7 +6,7 @@ use turbopack_node::execution_context::ExecutionContext;
 
 use crate::{
     config::Config,
-    import_map::{insert_alias_option, insert_shared_aliases},
+    import_map::{insert_alias_option, insert_server_reference_aliases, insert_shared_aliases},
     node_polyfill::get_node_polyfill_import_map,
 };
 
@@ -50,6 +50,9 @@ pub async fn get_client_import_map(
         ["browser"],
     )
     .await?;
+
+    // Auto-register server reference aliases from config
+    insert_server_reference_aliases(&mut import_map, &project_path, config).await?;
 
     Ok(import_map.cell())
 }
