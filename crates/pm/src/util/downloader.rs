@@ -27,12 +27,37 @@ static DOWNLOAD_CACHE: Lazy<OnceMap<String, PathBuf>> = Lazy::new(OnceMap::new);
 /// Semaphore controlling concurrent download count.
 static DOWNLOAD_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
 
-/// Number of fresh downloads (not cache hits).
 static DOWNLOAD_COUNT: AtomicUsize = AtomicUsize::new(0);
+static REUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-/// Returns the number of fresh downloads performed.
-pub fn download_count() -> usize {
-    DOWNLOAD_COUNT.load(Ordering::Relaxed)
+/// Process-global counters for tarball outcomes, matching pnpm's
+/// vocabulary. Each unique `(name, version)` pair lands in exactly one
+/// bucket thanks to `DOWNLOAD_CACHE`'s `OnceMap` dedup; git/file/link
+/// packages bypass this path and are not counted in either bucket.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DownloadStats {
+    /// Tarballs fetched from the registry this run.
+    pub downloaded: usize,
+    /// Tarballs served from the local cache (no network).
+    pub reused: usize,
+}
+
+impl std::ops::Sub for DownloadStats {
+    type Output = DownloadStats;
+    fn sub(self, rhs: Self) -> Self {
+        DownloadStats {
+            downloaded: self.downloaded.saturating_sub(rhs.downloaded),
+            reused: self.reused.saturating_sub(rhs.reused),
+        }
+    }
+}
+
+/// Snapshot the current download/reuse counters.
+pub fn download_stats() -> DownloadStats {
+    DownloadStats {
+        downloaded: DOWNLOAD_COUNT.load(Ordering::Relaxed),
+        reused: REUSE_COUNT.load(Ordering::Relaxed),
+    }
 }
 
 /// Check whether a tarball URL refers to a git-resolved package.
@@ -147,6 +172,7 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
                 .await
                 .unwrap_or(false)
             {
+                REUSE_COUNT.fetch_add(1, Ordering::Relaxed);
                 tracing::debug!("Cache hit: {}@{}", name, version);
                 return Some(cache_path);
             }

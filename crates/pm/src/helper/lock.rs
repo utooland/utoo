@@ -20,7 +20,6 @@ use crate::util::cloner::clone_package;
 use crate::util::downloader::{is_git_url, resolve_cache_path};
 use crate::util::git_resolver::{resolve_git_spec, resolve_github_spec};
 use crate::util::json::{load_package_lock_json_from_path, read_json_file};
-use crate::util::logger::{finish_progress_bar, start_progress_bar};
 
 use crate::util::platform_const::GLOBAL_NODE_MODULES;
 use crate::util::user_config::{
@@ -73,11 +72,7 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
 
     if needs_regenerate {
         tracing::debug!("Resolving dependencies");
-        start_progress_bar();
-
         let package_lock = Context::build_deps(root_path.to_path_buf()).await?;
-
-        finish_progress_bar("package-lock.json resolved");
 
         // Write to disk asynchronously in background
         let path = root_path.to_path_buf();
