@@ -119,6 +119,8 @@ export interface NapiTurboEngineOptions {
   memoryLimit?: number
   /** Track dependencies between tasks. If false, any change during build will error. */
   dependencyTracking?: boolean
+  /** Hint that this turbo-tasks instance is for a short-lived one-shot session. */
+  isShortSession?: boolean
 }
 export declare function projectNew(options: NapiProjectOptions, turboEngineOptions: NapiTurboEngineOptions, napiCallbacks: NapiTurbopackCallbacksJsObject): Promise<{ __napiType: "Project" }>
 export declare function projectUpdate(project: { __napiType: "Project" }, options: NapiPartialProjectOptions): Promise<void>

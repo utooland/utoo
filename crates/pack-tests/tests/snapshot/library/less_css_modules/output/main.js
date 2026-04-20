@@ -1,5 +1,9 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[@utoo/pack-runtime]/inline_css/injectStylesIntoStyleTag.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+((__UTOOPACK__) => {
+// Dummy runtime
+})([
+["main.js",
+
+15, ((__turbopack_context__, module, exports) => {
 
 /**
  * Injects styles into the DOM using <style> tags.
@@ -221,32 +225,51 @@ module.exports = function(list, options) {
     };
 };
 }),
-"[project]/style/inline_css/input/style.css.js [client] (inline css, ecmascript)", ((__turbopack_context__) => {
+67, ((__turbopack_context__) => {
 "use strict";
 
-var __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$inline_css$2f$injectStylesIntoStyleTag$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[@utoo/pack-runtime]/inline_css/injectStylesIntoStyleTag.js [client] (ecmascript)");
+var __TURBOPACK__imported__module__15__ = __turbopack_context__.i(15);
 ;
-var content = ".container {\n  color: red;\n  font-size: 14px;\n}\n\n.container .child {\n  color: #00f;\n}\n\n.container:hover {\n  color: green;\n}\n";
+var content = ".widget-button {\n  color: red;\n}\n";
 var options = {};
 options.insert = "head";
 options.singleton = false;
-var update = (0, __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$inline_css$2f$injectStylesIntoStyleTag$2e$js__$5b$client$5d$__$28$ecmascript$29$__["default"])([
+var update = (0, __TURBOPACK__imported__module__15__["default"])([
     [
-        "style/inline_css/input/style.css",
+        "library/less_css_modules/input/index.less.css",
         content,
         undefined,
         undefined
     ]
 ], options);
 var __TURBOPACK__default__export__ = {};
-__turbopack_context__.s([]);
+__turbopack_context__.s([
+    "default",
+    0,
+    __TURBOPACK__default__export__
+]);
 }),
-"[project]/style/inline_css/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {
+56, ((__turbopack_context__) => {
+
+__turbopack_context__.v({
+  "widget-button": "index-less__-C211G__widget-button",
+});
+}),
+91, ((__turbopack_context__) => {
 "use strict";
 
-var __TURBOPACK__imported__module__$5b$project$5d2f$style$2f$inline_css$2f$input$2f$style$2e$css$2e$js__$5b$client$5d$__$28$inline__css$2c$__ecmascript$29$__ = __turbopack_context__.i("[project]/style/inline_css/input/style.css.js [client] (inline css, ecmascript)");
+var __TURBOPACK__imported__module__56__ = __turbopack_context__.i(56);
 ;
-console.log("inline css test");
-__turbopack_context__.s([]);
-}),
+var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__56__["default"];
+__turbopack_context__.s([
+    "default",
+    0,
+    __TURBOPACK__default__export__
 ]);
+}),
+],
+["main.js", {"otherChunks":[],"runtimeModuleIds":[91]}],
+]);
+
+
+//# sourceMappingURL=main.js.map
