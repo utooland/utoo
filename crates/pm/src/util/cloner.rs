@@ -27,7 +27,7 @@ static CLONE_CACHE: Lazy<OnceMap<PathBuf, ()>> = Lazy::new(OnceMap::new);
 static CLONE_COUNT: AtomicUsize = AtomicUsize::new(0);
 static REUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-/// Process-global counters for clone outcomes.
+/// Process-global counters for `node_modules/` clone outcomes.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CloneStats {
     /// Target directories freshly materialized.

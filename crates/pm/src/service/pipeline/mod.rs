@@ -12,13 +12,13 @@ pub use receiver::{PipelineChannels, PipelineReceiver};
 pub use worker::PipelineHandles;
 
 use crate::util::cloner::clone_stats;
-use crate::util::downloader::download_count;
+use crate::util::downloader::download_stats;
 
 /// Print pipeline summary stats.
 pub fn print_pipeline_summary() {
     tracing::debug!(
         "Pipeline stats: downloaded={}, cloned={}",
-        download_count(),
+        download_stats().downloaded,
         clone_stats().cloned,
     );
 }

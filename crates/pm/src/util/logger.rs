@@ -104,14 +104,22 @@ pub fn finish_progress_bar(msg: &str, elapsed: Option<Duration>) {
     println!("\x1b[0m");
 }
 
-/// Print the install counts line, e.g. `+ 513 added · 3017 reused`.
-pub fn print_install_counts(added: usize, reused: usize) {
+/// Print the install counts line, e.g.
+/// `+ 513 added · 3017 reused · 123 downloaded`.
+///
+/// `added`/`reused` count `node_modules/` directory outcomes — how much
+/// filesystem work was done vs skipped. `downloaded` counts registry
+/// tarballs fetched this run, which stays meaningful on CI where
+/// `node_modules/` is always fresh but the tarball cache may persist.
+pub fn print_install_counts(added: usize, reused: usize, downloaded: usize) {
     println!(
-        "+ {} {} · {} {}",
+        "+ {} {} · {} {} · {} {}",
         added.to_string().green(),
         "added".dimmed(),
         reused.to_string().magenta(),
         "reused".dimmed(),
+        downloaded.to_string().cyan(),
+        "downloaded".dimmed(),
     );
 }
 
