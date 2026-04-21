@@ -112,7 +112,7 @@ if [ "$COLD" = "--cold" ]; then
     utoo|utoo-npm|utoo-next) rm -rf "$UTOO_CACHE_DIR" ;;
     yarn) yarn cache clean 2>/dev/null || rm -rf ~/.yarn/cache "$(yarn cache dir 2>/dev/null)" ;;
     pnpm) pnpm store prune 2>/dev/null || rm -rf "$PNPM_STORE_DIR" ;;
-    bun)  rm -rf "$BUN_INSTALL_DIR"; bun pm cache rm 2>/dev/null || true ;;
+    bun)  rm -rf "$BUN_INSTALL_DIR" "$HOME/Library/Caches/bun" "$HOME/.cache/bun"; bun pm cache rm 2>/dev/null || true ;;
     aube) rm -rf "$AUBE_STORE_DIR" "$AUBE_CACHE_DIR" ;;
   esac
 fi
