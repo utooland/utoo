@@ -293,13 +293,14 @@ run_cold_benchmarks() {
     > "$metrics_file"
 
     echo -e "    ${CYAN}$pm${NC}..."
-    hyperfine \
+    if ! hyperfine \
       --runs "$BENCH_COLD_RUNS" \
       --prepare "bash $PREPARE_SCRIPT $project_dir $pm --cold" \
       --export-json "$json_file" \
       -n "$pm" \
-      "bash $METRICS_WRAPPER $metrics_file $cmd_script" \
-      2>&1 | tail -1 || echo -e "    ${RED}$pm cold install failed${NC}"
+      "bash $METRICS_WRAPPER $metrics_file $cmd_script"; then
+      echo -e "    ${RED}$pm cold install failed${NC}"
+    fi
   done
 }
 
@@ -372,7 +373,15 @@ print_results() {
     // --- Parse hyperfine timing ---
     const timeRows = [];
     for (const file of jsonFiles) {
-      const data = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
+      let data;
+      try {
+        const raw = fs.readFileSync(path.join(dir, file), 'utf8');
+        if (!raw.trim()) { console.log('  skip empty: ' + file); continue; }
+        data = JSON.parse(raw);
+      } catch (err) {
+        console.log('  skip unparseable: ' + file + ' (' + err.message + ')');
+        continue;
+      }
       const base = file.replace('.json', '');
       const parts = base.split('_');
       const typeIdx = parts.findIndex(p => p === 'cold' || p === 'warm');
@@ -406,7 +415,11 @@ print_results() {
         .trim().split('\n').filter(Boolean);
       if (lines.length === 0) continue;
 
-      const entries = lines.map(l => JSON.parse(l));
+      const entries = [];
+      for (const l of lines) {
+        try { entries.push(JSON.parse(l)); } catch (_) { /* skip malformed line */ }
+      }
+      if (entries.length === 0) continue;
       const avg = {};
       for (const key of ['rss', 'page_faults', 'vol_ctx', 'invol_ctx', 'io_in', 'io_out']) {
         avg[key] = Math.round(entries.reduce((s, e) => s + (e[key] || 0), 0) / entries.length);
@@ -513,7 +526,11 @@ main() {
       echo -e "${YELLOW}----------------------------------------${NC}"
 
       run_cold_benchmarks "$project" "$registry" "$reg_short"
-      run_warm_benchmarks "$project" "$registry" "$reg_short"
+      if [ "$BENCH_WARM_RUNS" -gt 0 ]; then
+        run_warm_benchmarks "$project" "$registry" "$reg_short"
+      else
+        echo -e "  ${YELLOW}Warm installs: skipped (BENCH_WARM_RUNS=0)${NC}"
+      fi
 
       echo ""
     done
