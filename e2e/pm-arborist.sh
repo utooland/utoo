@@ -249,6 +249,40 @@ test_install_optional_graceful() {
   fi
 }
 
+test_workspace_runtime_resolution() {
+  local name="$1"
+  local workspace_dir="$2"
+  local dep_name="$3"
+  local dir="$ARBORIST_DIR/$name"
+
+  if [ ! -f "$dir/package.json" ]; then
+    skip "$name (no package.json)"
+    return
+  fi
+
+  if is_skipped "$name"; then
+    skip "$name ($(skip_reason "$name"))"
+    return
+  fi
+
+  cd "$dir"
+  clean_fixture .
+
+  if ! utoo install 2>&1; then
+    fail "$name (install exited non-zero)"
+    return
+  fi
+
+  if (
+    cd "$workspace_dir" &&
+    node -e "require.resolve(process.argv[1] + '/package.json')" "$dep_name"
+  ) 2>&1; then
+    pass "$name ($workspace_dir resolves $dep_name)"
+  else
+    fail "$name ($workspace_dir cannot resolve $dep_name)"
+  fi
+}
+
 should_run() {
   local name="$1"
   if [ -z "$FILTER" ]; then
@@ -436,6 +470,12 @@ for name in \
 ; do
   should_run "$name" && test_install_success "$name"
 done
+
+should_run "workspaces-sibling-hoist-reachability" && \
+  test_workspace_runtime_resolution \
+    "workspaces-sibling-hoist-reachability" \
+    "packages/file-loaders" \
+    "abbrev"
 
 for name in \
   workspaces-duplicate \

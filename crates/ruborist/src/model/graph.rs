@@ -438,12 +438,15 @@ impl DependencyGraph {
         } else {
             version_spec.to_string()
         };
+        let requester_path = self
+            .get_node(from)
+            .map(|node| normalize_lexical_path(&node.path))
+            .unwrap_or_default();
 
-        // Get physical parent of from node, default to from if it's the root
-        let parent = self.get_physical_parent(from).unwrap_or(from);
-
-        // Recursively search up the parent chain
-        self.find_in_parent_chain(parent, name, &effective_spec, from)
+        // Search from the requester itself, then walk up through only the
+        // ancestors whose `node_modules/` directories are actually reachable
+        // via Node's upward resolution from the requester's on-disk path.
+        self.find_in_parent_chain(from, name, &effective_spec, from, &requester_path)
     }
 
     /// Recursively search for compatible node in parent chain.
@@ -453,39 +456,72 @@ impl DependencyGraph {
         name: &str,
         spec: &str,
         requester: NodeIndex,
+        requester_path: &Path,
     ) -> FindResult {
-        // Check all physical children of current node
-        for child_idx in self.get_physical_children(current) {
-            let child = &self.graph[child_idx];
-            if child.name == name {
-                if matches(spec, &child.version) {
-                    tracing::debug!(
-                        "found existing deps {}@{} got {}, reuse at {:?}",
-                        name,
-                        spec,
-                        child.version,
-                        child_idx
-                    );
-                    return FindResult::Reuse(child_idx);
-                } else {
-                    tracing::debug!(
-                        "found conflict deps {}@{} got {}, conflict at {:?}",
-                        name,
-                        spec,
-                        child.version,
-                        child_idx
-                    );
-                    return FindResult::Conflict(requester);
+        let mut reachable_parent = requester;
+
+        if self.is_node_modules_reachable_from_requester(requester_path, current) {
+            reachable_parent = current;
+
+            // Check all physical children of current node
+            for child_idx in self.get_physical_children(current) {
+                let child = &self.graph[child_idx];
+                if child.name == name {
+                    if matches(spec, &child.version) {
+                        tracing::debug!(
+                            "found existing deps {}@{} got {}, reuse at {:?}",
+                            name,
+                            spec,
+                            child.version,
+                            child_idx
+                        );
+                        return FindResult::Reuse(child_idx);
+                    } else {
+                        tracing::debug!(
+                            "found conflict deps {}@{} got {}, conflict at {:?}",
+                            name,
+                            spec,
+                            child.version,
+                            child_idx
+                        );
+                        return FindResult::Conflict(requester);
+                    }
                 }
             }
         }
 
         // Recurse to parent
         if let Some(parent) = self.get_physical_parent(current) {
-            self.find_in_parent_chain(parent, name, spec, requester)
+            match self.find_in_parent_chain(parent, name, spec, requester, requester_path) {
+                FindResult::New(parent_idx) if parent_idx == requester => {
+                    FindResult::New(reachable_parent)
+                }
+                result => result,
+            }
         } else {
-            // Reached root, install here
-            FindResult::New(current)
+            // Reached the top; install under the nearest reachable parent.
+            FindResult::New(reachable_parent)
+        }
+    }
+
+    fn is_node_modules_reachable_from_requester(
+        &self,
+        requester_path: &Path,
+        candidate_parent: NodeIndex,
+    ) -> bool {
+        let Some(candidate_node) = self.get_node(candidate_parent) else {
+            return false;
+        };
+        let candidate_path = normalize_lexical_path(&candidate_node.path);
+
+        match pathdiff::diff_paths(requester_path, &candidate_path) {
+            Some(relative) => {
+                let relative = normalize_lexical_path(&relative);
+                !relative
+                    .components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir))
+            }
+            None => normalize_lexical_path(requester_path) == candidate_path,
         }
     }
 
@@ -646,6 +682,31 @@ pub enum FindResult {
     Conflict(NodeIndex),
     /// Need to install under this parent (usually root)
     New(NodeIndex),
+}
+
+fn normalize_lexical_path(path: &Path) -> PathBuf {
+    use std::path::Component;
+
+    let mut normalized = PathBuf::new();
+
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => match normalized.components().next_back() {
+                Some(Component::Normal(_)) => {
+                    normalized.pop();
+                }
+                Some(Component::ParentDir) | None => normalized.push(component.as_os_str()),
+                Some(Component::RootDir | Component::Prefix(_)) => {}
+                Some(Component::CurDir) => unreachable!("CurDir is skipped above"),
+            },
+            Component::Normal(_) => normalized.push(component.as_os_str()),
+        }
+    }
+
+    normalized
 }
 
 #[cfg(test)]
@@ -846,6 +907,66 @@ mod tests {
         // From express, should find lodash in parent (root)
         let result = graph.find_compatible_node(express_idx, "lodash", "^4.17.0");
         assert_eq!(result, FindResult::Reuse(lodash_idx));
+    }
+
+    #[test]
+    fn test_find_compatible_node_prefers_nested_before_hoisted_parent() {
+        let pkg = create_pkg("root", "1.0.0");
+        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
+
+        let express = PackageNode::from_version_manifest(
+            "express".to_string(),
+            PathBuf::from("node_modules/express"),
+            create_version_manifest("express", "4.18.0"),
+        );
+        let express_idx = graph.add_node(express);
+        graph.add_physical_edge(graph.root_index, express_idx);
+
+        let nested_debug = PackageNode::from_version_manifest(
+            "debug".to_string(),
+            PathBuf::from("node_modules/express/node_modules/debug"),
+            create_version_manifest("debug", "4.3.4"),
+        );
+        let nested_debug_idx = graph.add_node(nested_debug);
+        graph.add_physical_edge(express_idx, nested_debug_idx);
+
+        let hoisted_debug = PackageNode::from_version_manifest(
+            "debug".to_string(),
+            PathBuf::from("node_modules/debug"),
+            create_version_manifest("debug", "4.3.3"),
+        );
+        let hoisted_debug_idx = graph.add_node(hoisted_debug);
+        graph.add_physical_edge(graph.root_index, hoisted_debug_idx);
+
+        let result = graph.find_compatible_node(express_idx, "debug", "^4.3.0");
+        assert_eq!(result, FindResult::Reuse(nested_debug_idx));
+        assert_ne!(result, FindResult::Reuse(hoisted_debug_idx));
+    }
+
+    #[test]
+    fn test_find_compatible_node_does_not_reuse_anchor_hoist_for_sibling_workspace() {
+        let pkg = create_pkg("desktop-app", "1.0.0");
+        let anchor_path = PathBuf::from("apps/desktop");
+        let mut graph = DependencyGraph::from_package_json(anchor_path.clone(), pkg);
+
+        let electron_client_ipc = PackageNode::workspace_from_package_json(
+            anchor_path.join("../../packages/electron-client-ipc"),
+            create_pkg("electron-client-ipc", "1.0.0"),
+        );
+        let electron_client_ipc_idx = graph.add_node(electron_client_ipc);
+        graph.add_physical_edge(graph.root_index, electron_client_ipc_idx);
+
+        let anchor_hoisted = PackageNode::from_version_manifest(
+            "@electron/get".to_string(),
+            anchor_path.join("node_modules/@electron/get"),
+            create_version_manifest("@electron/get", "2.0.0"),
+        );
+        let anchor_hoisted_idx = graph.add_node(anchor_hoisted);
+        graph.add_physical_edge(graph.root_index, anchor_hoisted_idx);
+
+        let result = graph.find_compatible_node(electron_client_ipc_idx, "@electron/get", "^2.0.0");
+        assert_eq!(result, FindResult::New(electron_client_ipc_idx));
+        assert_ne!(result, FindResult::Reuse(anchor_hoisted_idx));
     }
 
     #[test]
