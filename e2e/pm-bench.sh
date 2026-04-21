@@ -503,7 +503,9 @@ main() {
       echo -e "${YELLOW}----------------------------------------${NC}"
 
       run_cold_benchmarks "$project" "$registry" "$reg_short"
-      run_warm_benchmarks "$project" "$registry" "$reg_short"
+      if [ "$BENCH_WARM_RUNS" != "0" ]; then
+        run_warm_benchmarks "$project" "$registry" "$reg_short"
+      fi
 
       echo ""
     done
