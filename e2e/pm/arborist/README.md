@@ -39,6 +39,56 @@ skips in this category are issues unrelated to simple data absence:
 
 ---
 
+### `file:` resolver semantic limitations
+
+**Fixtures (4):** `link-meta-deps`, `link-meta-deps-empty`, `link-dep-has-dep-with-optional-dep`, `audit-mkdirp`
+
+- `link-meta-deps` / `link-meta-deps-empty` — transitive `file:` dep inside a registry-published package; utoo cannot recover the origin dir after the parent's tarball came from the registry.
+- `link-dep-has-dep-with-optional-dep` — spec `"./a"` is parsed as a GitHub shorthand rather than a file path (spec-parser behavior).
+- `audit-mkdirp` — inner `file:` target has a `package.json` without a name.
+
+---
+
+### Optional transitive dep failure tolerance
+
+**Fixtures (3):** `optional-dep-tgz-missing`, `optional-metadep-missing`, `optional-metadep-enotarget`
+
+When an optional dependency has a transitive dep that is missing or unreachable, utoo hard-fails the entire install instead of silently skipping the optional subtree.
+
+---
+
+### Strict peer dep conflict detection (ERESOLVE)
+
+**Fixtures (1):** `testing-peer-deps-unresolvable`
+
+utoo does not validate whether peer-dep constraints are mutually satisfiable and does not emit an `ERESOLVE`-style error when they conflict.
+
+---
+
+### Platform mismatch rejection (EBADPLATFORM)
+
+**Fixtures (1):** `platform-specification`
+
+utoo does not check `os` / `cpu` / `libc` fields against the current platform for non-optional dependencies.
+
+---
+
+### Duplicate workspace name detection
+
+**Fixtures (1):** `workspaces-duplicate`
+
+utoo does not detect when multiple workspace packages declare the same `name` in their package.json (should error with `EDUPLICATEWORKSPACE`).
+
+---
+
+### Dependency cycle OOM
+
+**Fixtures (1):** `pathological-dep-nesting-cycle`
+
+`@isaacs/pathological-dep-nesting-a` creates a deep recursive `A→B→A→B` cycle. utoo enters a recursive fetch loop and CI kills the runner with SIGTERM (exit 143).
+
+---
+
 ### Mock-registry-only packages
 
 **Fixtures (2):**
