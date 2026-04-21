@@ -65,9 +65,14 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
     rx.await.with_context(|| "Extract task panicked")?
 }
 
-/// Synchronous extraction: decompress + parse + parallel write, all on rayon.
+/// Synchronous extraction: decompress + parse + sequential write, all on rayon.
+///
+/// Writes are sequential within a package: tar entries are naturally streamed in order,
+/// and files are typically small (< 64KB). Intra-package parallelism via `par_iter`
+/// creates many short tasks that trigger rayon work-stealing (futex park/unpark) and
+/// dominate context switches on large dep graphs. Cross-package parallelism is preserved
+/// by the outer `rayon::spawn` in `extract_tarball`.
 fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -> Result<()> {
-    use rayon::prelude::*;
     use std::collections::HashSet;
     use std::fs;
     use std::io::{Cursor, Read, Write};
@@ -152,8 +157,10 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
         fs::create_dir(dir).ok();
     }
 
-    // Write files in parallel using rayon
-    entries.par_iter().try_for_each(|entry| -> Result<()> {
+    // Write files sequentially. Cross-package parallelism is handled by the outer
+    // rayon::spawn; splitting individual files into rayon tasks caused excessive
+    // work-stealing ctx switches on large dep trees.
+    for entry in &entries {
         let mut file = fs::File::create(&entry.path)
             .with_context(|| format!("Failed to create: {}", entry.path.display()))?;
         file.write_all(&entry.content)
@@ -165,8 +172,7 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
         if entry.mode != 0o644 {
             fs::set_permissions(&entry.path, fs::Permissions::from_mode(entry.mode)).ok();
         }
-        Ok(())
-    })?;
+    }
 
     // Set directory permissions
     #[cfg(unix)]
