@@ -24,42 +24,36 @@ each feature is implemented.
 
 ---
 
-### `file:` protocol dependencies
+### `file:` protocol dependencies — remaining skips
 
-**Fixtures (20):**
-`link-dep`, `link-dep-empty`, `link-dep-nested`, `link-dep-cycle`,
-`link-dep-has-dep-with-optional-dep`, `link-dep-lifecycle-scripts`,
-`link-dev-dep`, `link-meta-deps`, `link-meta-deps-empty`, `external-link-dep`,
-`cli-750`, `cli-750-fresh`, `old-lock-with-link`,
-`conflict-bundle-file-dep`, `root-bundler`, `tarball-dependencies`,
-`testing-asymmetrical-bin-no-lock`, `testing-asymmetrical-bin-with-lock`,
-`workspaces-with-files-spec`, `workspace4`
+The bulk of `file:`-protocol fixtures now run (utoo supports the spec, and the
+missing `target/` link dirs were ported back from upstream). The remaining
+skips in this category are issues unrelated to simple data absence:
 
-**Error:** `Registry error: Failed to fetch linked-dep@file:target: HTTP 500`
+| Fixture | Issue |
+|---|---|
+| `link-dep-cycle` | `a→b→a` file: cycle; needs cycle-safe resolution |
+| `link-dep-lifecycle-scripts` | runs `prepare`/`postinstall` in a file: dep; needs lockfile-driven install-script semantics |
+| `external-link-dep` | self-references `file:./node_modules/abbrev` — only exists after install (chicken-and-egg) |
+| `yarn-stuff` | references `file:abbrev-1.1.1.tgz` and `file:./abbrev-link-target` which never existed even upstream |
 
-**Root cause:** utoo sends `file:path` to the registry as a version specifier
-instead of resolving it as a local filesystem path.
+---
 
-**Expected behavior:** Resolve `file:` paths relative to the package root,
-symlink (or copy) the target into `node_modules`, and install its transitive
-dependencies.
+### `file:` resolver semantic limitations
+
+**Fixtures (4):** `link-meta-deps`, `link-meta-deps-empty`, `link-dep-has-dep-with-optional-dep`, `audit-mkdirp`
+
+- `link-meta-deps` / `link-meta-deps-empty` — transitive `file:` dep inside a registry-published package; utoo cannot recover the origin dir after the parent's tarball came from the registry.
+- `link-dep-has-dep-with-optional-dep` — spec `"./a"` is parsed as a GitHub shorthand rather than a file path (spec-parser behavior).
+- `audit-mkdirp` — inner `file:` target has a `package.json` without a name.
 
 ---
 
 ### Optional transitive dep failure tolerance
 
-**Fixtures (3):**
-`optional-dep-tgz-missing`, `optional-metadep-missing`, `optional-metadep-enotarget`
+**Fixtures (3):** `optional-dep-tgz-missing`, `optional-metadep-missing`, `optional-metadep-enotarget`
 
-**Error:** `Dependency resolution failed: Registry error: Failed to fetch ...`
-
-**Root cause:** When an optional dependency has a transitive dependency that is
-missing or unreachable, utoo hard-fails the entire install instead of skipping
-the optional subtree.
-
-**Expected behavior:** If any dependency in an optional dep's subtree cannot be
-resolved, skip the entire optional package gracefully (like npm does) and
-continue installing the rest.
+When an optional dependency has a transitive dep that is missing or unreachable, utoo hard-fails the entire install instead of silently skipping the optional subtree.
 
 ---
 
@@ -67,29 +61,15 @@ continue installing the rest.
 
 **Fixtures (1):** `testing-peer-deps-unresolvable`
 
-**Error:** Install succeeds when it should fail.
-
-**Root cause:** utoo does not validate whether peer dependency constraints are
-mutually satisfiable. The fixture has `@isaacs/testing-peer-deps-c@1` and
-`@isaacs/testing-peer-deps-b@2` (which peer-depends on `c@2`) — these conflict.
-
-**Expected behavior:** Detect unsatisfiable peer dep constraints and exit with
-an ERESOLVE-style error, similar to npm v7+.
+utoo does not validate whether peer-dep constraints are mutually satisfiable and does not emit an `ERESOLVE`-style error when they conflict.
 
 ---
 
-### Platform mismatch rejection
+### Platform mismatch rejection (EBADPLATFORM)
 
 **Fixtures (1):** `platform-specification`
 
-**Error:** Install succeeds when it should fail.
-
-**Root cause:** utoo does not check the `os`, `cpu`, or `libc` fields in
-dependency package.json files against the current platform.
-
-**Expected behavior:** For non-optional dependencies, check `os`/`cpu`/`libc`
-fields and refuse to install if the current platform does not match
-(EBADPLATFORM).
+utoo does not check `os` / `cpu` / `libc` fields against the current platform for non-optional dependencies.
 
 ---
 
@@ -97,27 +77,26 @@ fields and refuse to install if the current platform does not match
 
 **Fixtures (1):** `workspaces-duplicate`
 
-**Error:** Install succeeds when it should fail.
+utoo does not detect when multiple workspace packages declare the same `name` in their package.json (should error with `EDUPLICATEWORKSPACE`).
 
-**Root cause:** utoo does not check whether multiple workspace packages declare
-the same `name` in their package.json.
+---
 
-**Expected behavior:** Error with EDUPLICATEWORKSPACE when two or more workspace
-directories have the same package name.
+### Dependency cycle OOM
+
+**Fixtures (1):** `pathological-dep-nesting-cycle`
+
+`@isaacs/pathological-dep-nesting-a` creates a deep recursive `A→B→A→B` cycle. utoo enters a recursive fetch loop and CI kills the runner with SIGTERM (exit 143).
 
 ---
 
 ### Mock-registry-only packages
 
-**Fixtures (3):**
-`audit-linked-package`, `pathological-dep-nesting-cycle`, `testing-missing-tgz`
+**Fixtures (2):**
+`audit-linked-package`, `testing-missing-tgz`
 
 **Details:**
 - `audit-linked-package` — depends on `electron-test-app@1.0.0` which does not
   exist on the real npm registry (only in npm's mock `@npmcli/mock-registry`).
-- `pathological-dep-nesting-cycle` — depends on `@isaacs/pathological-dep-nesting-a`
-  which creates a deeply recursive A→B→A→B cycle. utoo gets killed (OOM/timeout)
-  instead of handling the cycle gracefully.
 - `testing-missing-tgz` — has a `preinstall` script `"this never gets run"` which
   utoo tries to execute (it should be a zero-dep package with no install needed).
 

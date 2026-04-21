@@ -55,24 +55,31 @@ clean_fixture() {
 # Remove entries as features are implemented.
 # ----------------------------------------------------------------
 
-# [SKIP:file-target-missing] fixture declares `file:` deps whose target
-# directories/tarballs are NOT included in our ported copy (npm's arborist
-# tests originally ran against a mock registry and in-tree sibling dirs that
-# we did not carry over). The `file:` protocol itself is supported — see
-# Case 8.4/8.5 in e2e/utoo-pm.sh.
+# [SKIP:file-target-missing] fixture declares `file:` deps that cannot be
+# satisfied from our ported copy. Most of the originally-missing `target/`
+# link dirs are now ported back; the remaining entries are kept for issues
+# unrelated to simple data absence:
+#   * link-dep-cycle — a→b→a file: cycle; needs cycle-safe resolution.
+#   * link-dep-lifecycle-scripts — runs `prepare`/`postinstall` in a file: dep
+#     and also requires lockfile-driven install-script semantics.
+#   * external-link-dep — self-references `file:./node_modules/abbrev`, which
+#     only exists after install (chicken-and-egg).
+#   * yarn-stuff — references `file:abbrev-1.1.1.tgz` and
+#     `file:./abbrev-link-target` which never existed even upstream.
 SKIP_FILE_TARGET_MISSING=(
-  link-dep link-dep-empty link-dep-cycle
-  link-dep-lifecycle-scripts link-dev-dep
-  external-link-dep cli-750 cli-750-fresh
-  # yarn-stuff references file:abbrev-1.1.1.tgz and file:./abbrev-link-target
-  # which never existed even upstream.
+  link-dep-cycle
+  link-dep-lifecycle-scripts
+  external-link-dep
   yarn-stuff
 )
 
-# [SKIP:file-semantic] limitations of utoo's current `file:` resolver:
-#  * link-meta-deps / link-meta-deps-empty — transitive `file:` deps inside
-#    a *registry-published* package; utoo cannot recover the origin dir for
-#    those, since the parent's tarball came from the registry, not disk.
+# `SKIP_BUNDLED_FILE` has been opened up — utoo handles bundled file: deps.
+
+# [SKIP:file-semantic] limitations of utoo's current `file:` resolver that
+# surface on real fixtures (verified via CI):
+#  * link-meta-deps / link-meta-deps-empty — transitive `file:` deps inside a
+#    registry-published package; utoo cannot recover the origin dir since the
+#    parent's tarball came from the registry, not disk.
 #  * link-dep-has-dep-with-optional-dep — spec "./a" is parsed as GitHub
 #    shorthand rather than a file path (pre-existing spec-parser behavior).
 #  * audit-mkdirp — inner file: target has a `package.json` without a name.
@@ -82,43 +89,37 @@ SKIP_FILE_SEMANTIC=(
   audit-mkdirp
 )
 
-# [SKIP:bundled-dep-copy] bundled-deps copy semantics from local file: roots
-# are not yet implemented (root-bundler/conflict-bundle-file-dep use a mix of
-# file: + bundledDependencies).
-SKIP_BUNDLED_FILE=(
-  conflict-bundle-file-dep root-bundler
-  workspace4 testing-asymmetrical-bin-with-lock
-)
-
-# [SKIP:optional-transitive] optional dep subtree with missing transitive deps should be skipped
+# [SKIP:optional-transitive] optional dep subtree with missing transitive deps
+# should be silently skipped; utoo still hard-fails the whole install.
 SKIP_OPTIONAL_TRANSITIVE=(
   optional-dep-tgz-missing optional-metadep-missing optional-metadep-enotarget
 )
 
-# [SKIP:peer-strict] utoo does not emit ERESOLVE for unsatisfiable peer deps
+# [SKIP:peer-strict] utoo does not emit ERESOLVE for unsatisfiable peer deps.
 SKIP_PEER_STRICT=(
   testing-peer-deps-unresolvable
 )
 
-# [SKIP:platform-reject] utoo does not check os/cpu/libc fields (EBADPLATFORM)
+# [SKIP:platform-reject] utoo does not check os/cpu/libc fields (EBADPLATFORM).
 SKIP_PLATFORM=(
   platform-specification
 )
 
-# [SKIP:workspace-duplicate] utoo does not detect duplicate workspace package names
+# [SKIP:workspace-duplicate] utoo does not detect duplicate workspace package names.
 SKIP_WORKSPACE_DUP=(
   workspaces-duplicate
+)
+
+# [SKIP:dep-cycle-oom] infinite dep cycle causes OOM/timeout — CI runner kills
+# the whole job with SIGTERM once utoo goes into a recursive fetch loop.
+SKIP_DEP_CYCLE=(
+  pathological-dep-nesting-cycle
 )
 
 # [SKIP:mock-registry] packages only exist in npm's @npmcli/mock-registry
 SKIP_REGISTRY_ONLY=(
   audit-linked-package
   testing-missing-tgz
-)
-
-# [SKIP:dep-cycle-oom] infinite dep cycle causes OOM/timeout
-SKIP_DEP_CYCLE=(
-  pathological-dep-nesting-cycle
 )
 
 # [SKIP:misc] various fixture-specific issues
@@ -139,13 +140,12 @@ _add_skip() {
 }
 _add_skip "file: target missing from fixture port" "${SKIP_FILE_TARGET_MISSING[@]}"
 _add_skip "file: resolver limitation"              "${SKIP_FILE_SEMANTIC[@]}"
-_add_skip "bundled file: deps unsupported"         "${SKIP_BUNDLED_FILE[@]}"
 _add_skip "optional transitive"  "${SKIP_OPTIONAL_TRANSITIVE[@]}"
 _add_skip "strict peer deps"    "${SKIP_PEER_STRICT[@]}"
 _add_skip "platform reject"     "${SKIP_PLATFORM[@]}"
 _add_skip "workspace duplicate"  "${SKIP_WORKSPACE_DUP[@]}"
-_add_skip "mock registry only"  "${SKIP_REGISTRY_ONLY[@]}"
 _add_skip "dep cycle OOM"       "${SKIP_DEP_CYCLE[@]}"
+_add_skip "mock registry only"  "${SKIP_REGISTRY_ONLY[@]}"
 _add_skip "misc"                "${SKIP_MISC[@]}"
 
 is_skipped() {
