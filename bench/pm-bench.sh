@@ -297,6 +297,7 @@ run_cold_benchmarks() {
       --runs "$BENCH_COLD_RUNS" \
       --prepare "bash $PREPARE_SCRIPT $project_dir $pm --cold" \
       --export-json "$json_file" \
+      --show-output \
       -n "$pm" \
       "bash $METRICS_WRAPPER $metrics_file $cmd_script"; then
       echo -e "    ${RED}$pm cold install failed${NC}"
