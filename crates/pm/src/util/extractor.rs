@@ -89,21 +89,13 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
     };
     output.truncate(actual_size);
 
-    // Parse tar entries. Fast path (no `.` components anywhere) just pushes
-    // into a `Vec`. Slow path kicks in only when we see at least one `.`
-    // component — some npm tarballs ship the same logical file under two
-    // path forms (e.g. `package/dist/index.js` and `package/./dist/index.js`),
-    // and writing both concurrently races on macOS APFS where
-    // `openat(O_CREAT | O_TRUNC)` is not atomic mid-truncate.
-    //
-    // Measured cost of the old always-dedup implementation on ant-design
-    // (npmjs): ~10% regression on cold install, because ~250k tar entries
-    // × PathBuf rebuild + HashMap insert dominated over the linkat savings.
-    // The fast path skips both and only pays an `any()` scan per entry.
+    // Parse tar entries. No upfront normalization or dedup — duplicate-path
+    // entries (e.g. `package/dist/index.js` + `package/./dist/index.js` in
+    // `data-uri-to-buffer@6.0.2`) are extremely rare in real npm tarballs
+    // and get handled at write time via a fallback path.
     let cursor = Cursor::new(&output[..]);
     let mut archive = tar::Archive::new(cursor);
     let mut entries: Vec<ExtractedEntry> = Vec::new();
-    let mut needs_dedup = false;
 
     for entry_result in archive.entries()? {
         let mut entry = entry_result.with_context(|| "Failed to read tar entry")?;
@@ -135,39 +127,12 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
             let raw_mode = entry.header().mode().unwrap_or(0o644);
             let mode = if raw_mode & 0o111 != 0 { 0o755 } else { 0o644 };
 
-            // Strip `.` components only when present. 99%+ of npm tarballs
-            // don't ship `.` in their entry paths, so we skip the rebuild.
-            let rel_path = if path
-                .components()
-                .any(|c| matches!(c, std::path::Component::CurDir))
-            {
-                needs_dedup = true;
-                path.components()
-                    .filter(|c| !matches!(c, std::path::Component::CurDir))
-                    .collect()
-            } else {
-                path
-            };
-
             entries.push(ExtractedEntry {
-                rel_path,
+                rel_path: path,
                 content,
                 mode,
             });
         }
-    }
-
-    // Dedupe by `rel_path`, keeping the last occurrence (tar convention),
-    // only when we saw at least one `.` component — exact-path duplicates
-    // without `.` are vanishingly rare in real npm tarballs, and the old
-    // path-based writer tolerated them via overwrite.
-    if needs_dedup {
-        let mut dedup: std::collections::HashMap<PathBuf, ExtractedEntry> =
-            std::collections::HashMap::with_capacity(entries.len());
-        for entry in entries {
-            dedup.insert(entry.rel_path.clone(), entry);
-        }
-        entries = dedup.into_values().collect();
     }
 
     // Collect every ancestor directory relative to `dest`, shallowest-first.
@@ -295,10 +260,24 @@ fn write_via_dirfd(dest: &Path, entries: &[ExtractedEntry], rel_dirs: &[PathBuf]
             .expect("file entries have a leaf name");
         let leaf_cstr = to_cstring(leaf.as_bytes())?;
 
-        let file_fd = parent_fd
-            .create_file(&leaf_cstr, entry.mode)
-            .with_context(|| format!("openat O_CREAT {}", entry.rel_path.display()))?;
-        let mut file = std::fs::File::from(file_fd);
+        // Hot path: openat via dir fd. On ENOENT, fall back to absolute-path
+        // `File::create` which goes through a different kernel code path —
+        // handles the rare APFS race when a tarball ships the same logical
+        // path twice (e.g. `package/dist/index.js` + `package/./dist/index.js`
+        // in `data-uri-to-buffer`). Almost every real tarball takes the fast
+        // path and never allocates the fallback.
+        let mut file = match parent_fd.create_file(&leaf_cstr, entry.mode) {
+            Ok(fd) => std::fs::File::from(fd),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::File::create(dest.join(&entry.rel_path)).with_context(|| {
+                    format!("File::create fallback {}", entry.rel_path.display())
+                })?
+            }
+            Err(e) => {
+                return Err(e)
+                    .with_context(|| format!("openat O_CREAT {}", entry.rel_path.display()));
+            }
+        };
         file.write_all(&entry.content)
             .with_context(|| format!("Failed to write: {}", entry.rel_path.display()))?;
         Ok(())
