@@ -110,8 +110,8 @@ cd "$PROJECT_DIR" && git clean -dfx
 if [ "$COLD" = "--cold" ]; then
   case "$PM" in
     utoo|utoo-npm|utoo-next) rm -rf "$UTOO_CACHE_DIR" ;;
-    yarn) yarn cache clean 2>/dev/null || rm -rf ~/.yarn/cache "$(yarn cache dir 2>/dev/null)" ;;
-    pnpm) pnpm store prune 2>/dev/null || rm -rf "$PNPM_STORE_DIR" ;;
+    yarn) rm -rf ~/.yarn/cache "$HOME/Library/Caches/Yarn" "$(yarn cache dir 2>/dev/null)" ;;
+    pnpm) rm -rf "$PNPM_STORE_DIR" "$HOME/Library/Caches/pnpm" "$HOME/.cache/pnpm" ;;
     bun)  rm -rf "$BUN_INSTALL_DIR" "$HOME/Library/Caches/bun" "$HOME/.cache/bun"; bun pm cache rm 2>/dev/null || true ;;
     aube) rm -rf "$AUBE_STORE_DIR" "$AUBE_CACHE_DIR" ;;
   esac
