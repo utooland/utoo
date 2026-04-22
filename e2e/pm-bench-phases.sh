@@ -13,8 +13,12 @@ BENCH_DIR=${BENCH_DIR:-/tmp/pm-bench}
 RESULTS_DIR=${RESULTS_DIR:-/tmp/pm-bench-results}
 mkdir -p "$BENCH_DIR" "$RESULTS_DIR"
 
-UTOO_CACHE="$HOME/.cache/nm"
-BUN_CACHE="$HOME/.bun/install/cache"
+# Explicit bench-scoped cache dirs so rm -rf is unambiguous and we don't
+# depend on what each PM considers the default (which varies by HOME, OS
+# image, and previously-set user config).
+UTOO_CACHE="${UTOO_CACHE:-/tmp/utoo-bench-cache}"
+BUN_CACHE="${BUN_CACHE:-/tmp/bun-bench-cache}"
+export BUN_INSTALL_CACHE_DIR="$BUN_CACHE"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -51,16 +55,16 @@ find . -maxdepth 4 -type d -path '*/packages/*/node_modules' -exec rm -rf {} + 2
 
 EOF
 
-  # Use each PM's own cache-clean command so we don't rely on guessing its
-  # cache directory (the CI runner's HOME differs between images).
+  # Use explicit bench-scoped cache paths and rm -rf them directly — previously
+  # `utoo clean` / `bun pm cache rm` didn't actually empty the cache on the CI
+  # runner, leading to cache-hit runs masquerading as cold installs.
   case "$phase" in
     p1)
       # Phase 1: cold resolve — wipe lockfiles AND caches so nothing can be reused.
       cat >> "$path" <<EOF
 rm -f package-lock.json bun.lock yarn.lock pnpm-lock.yaml
-utoo clean >/dev/null 2>&1 || true
-bun pm cache rm >/dev/null 2>&1 || true
-echo "[prep] phase 1 $pm: cleaned lockfiles + all caches + node_modules"
+rm -rf "$UTOO_CACHE" "$BUN_CACHE"
+echo "[prep] phase 1 $pm: cleaned lockfiles + caches + node_modules"
 EOF
       ;;
     p3)
@@ -70,14 +74,14 @@ EOF
       case "$pm" in
         utoo) cat >> "$path" <<EOF
 rm -f bun.lock yarn.lock pnpm-lock.yaml
-utoo clean >/dev/null 2>&1 || true
-echo "[prep] phase 3 utoo: kept package-lock.json, ran utoo clean"
+rm -rf "$UTOO_CACHE"
+echo "[prep] phase 3 utoo: kept package-lock.json, wiped $UTOO_CACHE"
 EOF
           ;;
         bun) cat >> "$path" <<EOF
 rm -f package-lock.json yarn.lock pnpm-lock.yaml
-bun pm cache rm >/dev/null 2>&1 || true
-echo "[prep] phase 3 bun: kept bun.lock, ran bun pm cache rm"
+rm -rf "$BUN_CACHE"
+echo "[prep] phase 3 bun: kept bun.lock, wiped $BUN_CACHE"
 EOF
           ;;
       esac
@@ -111,7 +115,7 @@ seed_for_phase() {
     p3:utoo|p4:utoo)
       if [ ! -f package-lock.json ]; then
         echo -e "  ${CYAN}seed: running \`utoo deps\` to generate package-lock.json${NC}"
-        utoo deps --registry="$REGISTRY" > "$RESULTS_DIR/seed_${phase}_${pm}.log" 2>&1
+        utoo deps --registry="$REGISTRY" --cache-dir="$UTOO_CACHE" > "$RESULTS_DIR/seed_${phase}_${pm}.log" 2>&1
       fi
       ;;
     p3:bun|p4:bun)
@@ -130,7 +134,7 @@ seed_for_phase() {
       echo -e "  ${CYAN}seed: warming $pm cache via full install${NC}"
       rm -rf node_modules
       case "$pm" in
-        utoo) utoo install --ignore-scripts --registry="$REGISTRY" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
+        utoo) utoo install --ignore-scripts --registry="$REGISTRY" --cache-dir="$UTOO_CACHE" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
         bun)  bun  install --ignore-scripts --registry="$REGISTRY" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
       esac
       rm -rf node_modules
@@ -140,14 +144,14 @@ seed_for_phase() {
 
 install_cmd() {
   case "$1" in
-    utoo) echo "utoo install --ignore-scripts --registry=$REGISTRY" ;;
+    utoo) echo "utoo install --ignore-scripts --registry=$REGISTRY --cache-dir=$UTOO_CACHE" ;;
     bun)  echo "bun install --ignore-scripts --registry=$REGISTRY" ;;
   esac
 }
 
 resolve_cmd() {
   case "$1" in
-    utoo) echo "utoo deps --registry=$REGISTRY" ;;
+    utoo) echo "utoo deps --registry=$REGISTRY --cache-dir=$UTOO_CACHE" ;;
     bun)  echo "bun install --lockfile-only --registry=$REGISTRY" ;;
   esac
 }
