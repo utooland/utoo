@@ -51,30 +51,33 @@ find . -maxdepth 4 -type d -path '*/packages/*/node_modules' -exec rm -rf {} + 2
 
 EOF
 
+  # Use each PM's own cache-clean command so we don't rely on guessing its
+  # cache directory (the CI runner's HOME differs between images).
   case "$phase" in
     p1)
       # Phase 1: cold resolve — wipe lockfiles AND caches so nothing can be reused.
       cat >> "$path" <<EOF
 rm -f package-lock.json bun.lock yarn.lock pnpm-lock.yaml
-rm -rf "$UTOO_CACHE" "$BUN_CACHE"
-echo "[prep] cleaned: lockfiles + utoo/bun caches + node_modules"
+utoo clean >/dev/null 2>&1 || true
+bun pm cache rm >/dev/null 2>&1 || true
+echo "[prep] phase 1 $pm: cleaned lockfiles + all caches + node_modules"
 EOF
       ;;
     p3)
-      # Phase 3: cold install — keep THIS pm's lockfile, wipe THIS pm's cache,
-      # and delete the OTHER pm's lockfile so bun doesn't try to migrate from
-      # utoo's package-lock.json (and vice versa).
+      # Phase 3: cold install — keep THIS pm's lockfile, wipe THIS pm's cache.
+      # Delete the other pm's lockfile so bun doesn't try to migrate utoo's
+      # package-lock.json (and vice versa).
       case "$pm" in
         utoo) cat >> "$path" <<EOF
 rm -f bun.lock yarn.lock pnpm-lock.yaml
-rm -rf "$UTOO_CACHE"
-echo "[prep] phase 3 utoo: kept package-lock.json, wiped $UTOO_CACHE"
+utoo clean >/dev/null 2>&1 || true
+echo "[prep] phase 3 utoo: kept package-lock.json, ran utoo clean"
 EOF
           ;;
         bun) cat >> "$path" <<EOF
 rm -f package-lock.json yarn.lock pnpm-lock.yaml
-rm -rf "$BUN_CACHE"
-echo "[prep] phase 3 bun: kept bun.lock, wiped $BUN_CACHE"
+bun pm cache rm >/dev/null 2>&1 || true
+echo "[prep] phase 3 bun: kept bun.lock, ran bun pm cache rm"
 EOF
           ;;
       esac
