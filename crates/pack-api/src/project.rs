@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use async_trait::async_trait;
 use bincode::{Decode, Encode};
 #[cfg(any(feature = "process_pool", feature = "worker_pool"))]
 use pack_core::config::PluginRuntimeStrategy;
@@ -52,9 +53,7 @@ use turbopack_core::{
         ChunkingContext, EvaluatableAssets, SourceMapsType, chunk_id_strategy::ModuleIdStrategy,
     },
     compile_time_info::CompileTimeInfo,
-    issue::{
-        CollectibleIssuesExt, Issue, IssueSeverity, IssueStage, OptionStyledString, StyledString,
-    },
+    issue::{CollectibleIssuesExt, Issue, IssueSeverity, IssueStage, StyledString},
     module_graph::{
         GraphEntries, ModuleGraph, SingleModuleGraph, VisitedModules,
         chunk_group_info::ChunkGroupEntry,
@@ -600,30 +599,27 @@ struct ConflictIssue {
     severity: IssueSeverity,
 }
 
+#[async_trait]
 #[turbo_tasks::value_impl]
 impl Issue for ConflictIssue {
-    #[turbo_tasks::function]
-    fn stage(&self) -> Vc<IssueStage> {
-        IssueStage::AppStructure.cell()
+    fn stage(&self) -> IssueStage {
+        IssueStage::AppStructure
     }
 
     fn severity(&self) -> IssueSeverity {
         self.severity
     }
 
-    #[turbo_tasks::function]
-    fn file_path(&self) -> Vc<FileSystemPath> {
-        self.path.clone().cell()
+    async fn file_path(&self) -> Result<FileSystemPath> {
+        Ok(self.path.clone())
     }
 
-    #[turbo_tasks::function]
-    fn title(&self) -> Vc<StyledString> {
-        *self.title
+    async fn title(&self) -> Result<StyledString> {
+        Ok((*self.title.await?).clone())
     }
 
-    #[turbo_tasks::function]
-    fn description(&self) -> Vc<OptionStyledString> {
-        Vc::cell(Some(self.description))
+    async fn description(&self) -> Result<Option<StyledString>> {
+        Ok(Some((*self.description.await?).clone()))
     }
 }
 
@@ -750,7 +746,7 @@ impl Project {
 
         Ok(DiskFileSystem::new_with_denied_paths_and_watched_ignored(
             PROJECT_FILESYSTEM_NAME.into(),
-            self.root_path.clone(),
+            Vc::cell(self.root_path.clone()),
             denied_paths,
             watched_ignored,
         ))
@@ -764,7 +760,7 @@ impl Project {
 
     #[turbo_tasks::function]
     pub fn output_fs(&self) -> Vc<DiskFileSystem> {
-        DiskFileSystem::new(rcstr!("output"), self.root_path.clone())
+        DiskFileSystem::new(rcstr!("output"), Vc::cell(self.root_path.clone()))
     }
 
     #[turbo_tasks::function]

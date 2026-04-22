@@ -114,7 +114,7 @@ async fn endpoint_output_assets_operation(
     Ok(*output.connect().await?.output_assets)
 }
 
-#[turbo_tasks::value(serialization = "none")]
+#[turbo_tasks::value(serialization = "skip")]
 pub struct WrittenEndpointWithIssues {
     pub written: Option<ReadRef<EndpointOutputPaths>>,
     pub issues: Arc<Vec<ReadRef<PlainIssue>>>,
@@ -141,7 +141,7 @@ pub async fn get_written_endpoint_with_issues_operation(
     .cell())
 }
 
-#[turbo_tasks::value(shared, serialization = "none", eq = "manual")]
+#[turbo_tasks::value(shared, serialization = "skip", eq = "manual")]
 pub struct EndpointIssuesAndDiags {
     pub changed: Option<ReadRef<Completion>>,
     pub issues: Arc<Vec<ReadRef<PlainIssue>>>,

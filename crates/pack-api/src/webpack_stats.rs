@@ -10,6 +10,7 @@ use turbopack_browser::ecmascript::{
     EcmascriptBrowserChunk, EcmascriptBrowserEvaluateChunk, EcmascriptDevChunkList,
 };
 use turbopack_core::{
+    asset::Asset,
     chunk::{Chunk, ChunkItem, ChunkableModule},
     output::{OutputAsset, OutputAssets, OutputAssetsReference},
 };
@@ -31,7 +32,7 @@ pub async fn get_asset_intermediate_info(
     asset: ResolvedVc<Box<dyn OutputAsset>>,
     dist_root: Vc<FileSystemPath>,
 ) -> Result<Vc<AssetIntermediateInfo>> {
-    let asset_len = asset.size_bytes().await?.unwrap_or_default();
+    let asset_len = asset.content().len().await?.unwrap_or_default();
     let asset_path_full = asset.path().await?;
     let path = dist_root
         .await?
@@ -442,7 +443,7 @@ pub struct WebpackStatsEntrypoint {
     pub assets: Vec<WebpackStatsEntrypointAssets>,
 }
 
-#[turbo_tasks::value(serialization = "none")]
+#[turbo_tasks::value(serialization = "skip")]
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct WebpackStats {
