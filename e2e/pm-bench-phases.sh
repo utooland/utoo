@@ -28,6 +28,43 @@ NC='\033[0m'
 
 banner() { echo -e "${YELLOW}=== $* ===${NC}"; }
 
+# --- metrics wrapper ---
+# Wraps each benchmark iteration in /usr/bin/time and appends a one-line
+# JSON record with RSS / context switches / page faults / IO counts. One
+# file per (phase, pm); hyperfine calls it once per run.
+METRICS_WRAPPER="$RESULTS_DIR/metrics_wrapper.sh"
+cat > "$METRICS_WRAPPER" <<'METRICS_EOF'
+#!/bin/bash
+METRICS_FILE="$1"; shift
+TIME_TMP=$(mktemp)
+
+if [[ "$(uname)" == "Darwin" ]]; then
+  /usr/bin/time -l "$@" 2>"$TIME_TMP"
+  EXIT_CODE=$?
+  RSS=$(awk '/maximum resident set size/ {print $1}' "$TIME_TMP")
+  PAGE_FAULTS=$(awk '/page faults/ {print $1}' "$TIME_TMP")
+  VOL_CTX=$(awk '/ voluntary context switches/ {print $1}' "$TIME_TMP")
+  INVOL_CTX=$(awk '/involuntary context switches/ {print $1}' "$TIME_TMP")
+  IO_IN=0
+  IO_OUT=0
+else
+  /usr/bin/time -v "$@" 2>"$TIME_TMP"
+  EXIT_CODE=$?
+  RSS_KB=$(awk '/Maximum resident set size/ {print $NF}' "$TIME_TMP")
+  RSS=$(( ${RSS_KB:-0} * 1024 ))
+  PAGE_FAULTS=$(awk '/Major \(requiring I\/O\) page faults/ {print $NF}' "$TIME_TMP")
+  VOL_CTX=$(awk '/Voluntary context switches/ {print $NF}' "$TIME_TMP")
+  INVOL_CTX=$(awk '/Involuntary context switches/ {print $NF}' "$TIME_TMP")
+  IO_IN=$(awk '/File system inputs/ {print $NF}' "$TIME_TMP")
+  IO_OUT=$(awk '/File system outputs/ {print $NF}' "$TIME_TMP")
+fi
+
+echo "{\"rss\":${RSS:-0},\"page_faults\":${PAGE_FAULTS:-0},\"vol_ctx\":${VOL_CTX:-0},\"invol_ctx\":${INVOL_CTX:-0},\"io_in\":${IO_IN:-0},\"io_out\":${IO_OUT:-0}}" >> "$METRICS_FILE"
+rm -f "$TIME_TMP"
+exit $EXIT_CODE
+METRICS_EOF
+chmod +x "$METRICS_WRAPPER"
+
 # --- project ---
 banner "Preparing $PROJECT"
 cd "$BENCH_DIR"
@@ -159,10 +196,16 @@ resolve_cmd() {
 run_phase() {
   local phase=$1 pm=$2 cmd=$3
   local json="$RESULTS_DIR/${PROJECT}_${phase}_${pm}.json"
+  local metrics="$RESULTS_DIR/${PROJECT}_${phase}_${pm}_metrics.jsonl"
   local prep_script="$RESULTS_DIR/prep_${phase}_${pm}.sh"
+  local cmd_script="$RESULTS_DIR/cmd_${phase}_${pm}.sh"
 
   seed_for_phase "$phase" "$pm"
   write_prepare "$prep_script" "$phase" "$pm"
+
+  # Reset metrics file; wrap the bench command so /usr/bin/time can measure it.
+  : > "$metrics"
+  printf 'set -eo pipefail\ncd %s\n%s\n' "$PROJECT_DIR" "$cmd" > "$cmd_script"
 
   echo -e "  ${CYAN}$pm${NC} · $phase"
   if ! hyperfine \
@@ -171,7 +214,7 @@ run_phase() {
     --export-json "$json" \
     --show-output \
     -n "${pm}-${phase}" \
-    "bash -c 'cd $PROJECT_DIR && $cmd'"; then
+    "bash $METRICS_WRAPPER $metrics bash $cmd_script"; then
     echo -e "  ${RED}$pm $phase failed${NC}"
   fi
 }
@@ -200,30 +243,64 @@ RESULTS_DIR="$RESULTS_DIR" node -e "
   const fs = require('fs'), path = require('path');
   const dir = process.env.RESULTS_DIR;
   const order = ['p1_resolve', 'p3_cold_install', 'p4_warm_link'];
-  const byPhase = Object.fromEntries(order.map(p => [p, []]));
-  for (const f of fs.readdirSync(dir).filter(x => x.endsWith('.json'))) {
-    let data;
-    try { data = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); }
-    catch (_) { continue; }
-    for (const r of data.results) {
-      const phase = order.find(p => r.command.includes(p) || f.includes(p));
-      if (!phase) continue;
-      byPhase[phase].push({ name: r.command, mean: r.mean, stddev: r.stddev, min: r.min, max: r.max });
+  const timing = {};    // phase -> pm -> {mean,stddev,min,max}
+  const metrics = {};   // phase -> pm -> {rss,vol_ctx,invol_ctx,page_faults,io_in,io_out}
+
+  const parseKey = (file, suffix) => {
+    const base = file.replace(suffix, '');
+    for (const p of order) {
+      const idx = base.indexOf('_' + p + '_');
+      if (idx === -1) continue;
+      const pm = base.slice(idx + p.length + 2);
+      return { phase: p, pm };
     }
+    return null;
+  };
+
+  for (const f of fs.readdirSync(dir).filter(x => x.endsWith('.json') && !x.endsWith('_metrics.jsonl'))) {
+    const key = parseKey(f, '.json');
+    if (!key) continue;
+    let data; try { data = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch (_) { continue; }
+    const r = data.results[0];
+    if (!r) continue;
+    (timing[key.phase] ??= {})[key.pm] = { mean: r.mean, stddev: r.stddev, min: r.min, max: r.max };
   }
+
+  for (const f of fs.readdirSync(dir).filter(x => x.endsWith('_metrics.jsonl'))) {
+    const key = parseKey(f, '_metrics.jsonl');
+    if (!key) continue;
+    const lines = fs.readFileSync(path.join(dir, f), 'utf8').trim().split('\n').filter(Boolean);
+    const rows = [];
+    for (const l of lines) { try { rows.push(JSON.parse(l)); } catch (_) {} }
+    if (rows.length === 0) continue;
+    const avg = {};
+    for (const k of ['rss','page_faults','vol_ctx','invol_ctx','io_in','io_out']) {
+      avg[k] = Math.round(rows.reduce((s,e)=>s+(e[k]||0),0) / rows.length);
+    }
+    (metrics[key.phase] ??= {})[key.pm] = avg;
+  }
+
   const pad = (s, n) => String(s).padEnd(n);
   const padR = (s, n) => String(s).padStart(n);
+  const fmtB = b => b >= 1<<30 ? (b/(1<<30)).toFixed(1)+'G' : b >= 1<<20 ? Math.round(b/(1<<20))+'M' : b >= 1<<10 ? Math.round(b/(1<<10))+'K' : b+'B';
+
   for (const phase of order) {
-    if (byPhase[phase].length === 0) continue;
+    const tp = timing[phase] || {}, mp = metrics[phase] || {};
+    const pms = [...new Set([...Object.keys(tp), ...Object.keys(mp)])];
+    if (pms.length === 0) continue;
     console.log('\n## ' + phase);
-    console.log(pad('PM', 26) + ' ' + padR('mean', 9) + '   ' + padR('stddev', 7) + '   ' + padR('min', 7) + '   ' + padR('max', 7));
-    for (const r of byPhase[phase]) {
+    console.log(pad('PM', 8) + ' ' + padR('mean', 8) + ' ' + padR('stddev', 7) + '   ' + padR('RSS', 6) + '  ' + padR('vCtx', 8) + '  ' + padR('iCtx', 8) + '  ' + padR('pgFlt', 7) + '  ' + padR('ioIn', 8) + '  ' + padR('ioOut', 8));
+    for (const pm of pms) {
+      const t = tp[pm], m = mp[pm] || {};
+      const tstr = t ? padR(t.mean.toFixed(2)+'s', 8) + ' ' + padR(t.stddev.toFixed(2)+'s', 7) : padR('-', 8) + ' ' + padR('-', 7);
       console.log(
-        pad(r.name, 26) + ' ' +
-        padR(r.mean.toFixed(2) + 's', 9) + '   ' +
-        padR(r.stddev.toFixed(2) + 's', 7) + '   ' +
-        padR(r.min.toFixed(2) + 's', 7) + '   ' +
-        padR(r.max.toFixed(2) + 's', 7)
+        pad(pm, 8) + ' ' + tstr + '   ' +
+        padR(m.rss ? fmtB(m.rss) : '-', 6) + '  ' +
+        padR(m.vol_ctx ?? '-', 8) + '  ' +
+        padR(m.invol_ctx ?? '-', 8) + '  ' +
+        padR(m.page_faults ?? '-', 7) + '  ' +
+        padR(m.io_in ?? '-', 8) + '  ' +
+        padR(m.io_out ?? '-', 8)
       );
     }
   }
