@@ -32,22 +32,107 @@ if [ ! -d "$PROJECT" ]; then
 fi
 PROJECT_DIR="$BENCH_DIR/$PROJECT"
 
-# --- inline prepare snippets (passed to hyperfine --prepare via bash -c) ---
-# Each snippet is self-contained so it works in the subshell hyperfine spawns.
-snip_reset_nm="cd $PROJECT_DIR && rm -rf node_modules && find . -maxdepth 4 -type d -path '*/packages/*/node_modules' -exec rm -rf {} + 2>/dev/null || true"
-snip_reset_all="cd $PROJECT_DIR && git clean -dfx > /dev/null && rm -rf '$UTOO_CACHE' '$BUN_CACHE'"
+# --- prepare script builder ---
+# Emit a self-contained reset script that hyperfine's --prepare can re-exec.
+# The script always prints what it deleted so the CI log proves prepare ran.
+write_prepare() {
+  local path=$1 phase=$2 pm=$3
+  local cache
+  case "$pm" in utoo) cache=$UTOO_CACHE ;; bun) cache=$BUN_CACHE ;; esac
 
-prepare_cmd() {
-  local phase=$1 pm=$2
-  case "$phase:$pm" in
-    p1:*)      echo "$snip_reset_all" ;;
-    p3:utoo)   echo "$snip_reset_nm && rm -rf '$UTOO_CACHE'" ;;
-    p3:bun)    echo "$snip_reset_nm && rm -rf '$BUN_CACHE'" ;;
-    p4:utoo|p4:bun)
-      # Warm-link: keep cache, drop node_modules. Lockfile + cache are
-      # guaranteed to exist by the one-off warmup before phase 4 starts.
-      echo "$snip_reset_nm" ;;
+  cat > "$path" <<EOF
+#!/bin/bash
+set -e
+cd "$PROJECT_DIR"
+
+# Always: drop node_modules (top-level + any workspace pkg trees).
+rm -rf node_modules
+find . -maxdepth 4 -type d -path '*/packages/*/node_modules' -exec rm -rf {} + 2>/dev/null || true
+
+EOF
+
+  case "$phase" in
+    p1)
+      # Phase 1: cold resolve — wipe lockfiles AND caches so nothing can be reused.
+      cat >> "$path" <<EOF
+rm -f package-lock.json bun.lock yarn.lock pnpm-lock.yaml
+rm -rf "$UTOO_CACHE" "$BUN_CACHE"
+echo "[prep] cleaned: lockfiles + utoo/bun caches + node_modules"
+EOF
+      ;;
+    p3)
+      # Phase 3: cold install — keep THIS pm's lockfile, wipe THIS pm's cache,
+      # and delete the OTHER pm's lockfile so bun doesn't try to migrate from
+      # utoo's package-lock.json (and vice versa).
+      case "$pm" in
+        utoo) cat >> "$path" <<EOF
+rm -f bun.lock yarn.lock pnpm-lock.yaml
+rm -rf "$UTOO_CACHE"
+echo "[prep] phase 3 utoo: kept package-lock.json, wiped $UTOO_CACHE"
+EOF
+          ;;
+        bun) cat >> "$path" <<EOF
+rm -f package-lock.json yarn.lock pnpm-lock.yaml
+rm -rf "$BUN_CACHE"
+echo "[prep] phase 3 bun: kept bun.lock, wiped $BUN_CACHE"
+EOF
+          ;;
+      esac
+      ;;
+    p4)
+      # Phase 4: warm link — keep lockfile AND cache, only drop node_modules.
+      case "$pm" in
+        utoo) cat >> "$path" <<EOF
+rm -f bun.lock yarn.lock pnpm-lock.yaml
+echo "[prep] phase 4 utoo: kept package-lock.json + cache"
+EOF
+          ;;
+        bun) cat >> "$path" <<EOF
+rm -f package-lock.json yarn.lock pnpm-lock.yaml
+echo "[prep] phase 4 bun: kept bun.lock + cache"
+EOF
+          ;;
+      esac
+      ;;
   esac
+
+  chmod +x "$path"
+}
+
+# Seed PM-specific state before a phase runs (lockfile + cache where needed).
+# This runs ONCE before hyperfine starts, not per-iteration.
+seed_for_phase() {
+  local phase=$1 pm=$2
+  cd "$PROJECT_DIR"
+  case "$phase:$pm" in
+    p3:utoo|p4:utoo)
+      if [ ! -f package-lock.json ]; then
+        echo -e "  ${CYAN}seed: running \`utoo deps\` to generate package-lock.json${NC}"
+        utoo deps --registry="$REGISTRY" > "$RESULTS_DIR/seed_${phase}_${pm}.log" 2>&1
+      fi
+      ;;
+    p3:bun|p4:bun)
+      if [ ! -f bun.lock ]; then
+        echo -e "  ${CYAN}seed: running \`bun install --lockfile-only\` to generate bun.lock${NC}"
+        rm -f package-lock.json
+        bun install --lockfile-only --registry="$REGISTRY" > "$RESULTS_DIR/seed_${phase}_${pm}.log" 2>&1
+      fi
+      ;;
+  esac
+  # Phase 4 also needs a pre-warmed cache.
+  if [ "$phase" = "p4" ]; then
+    local cache
+    case "$pm" in utoo) cache=$UTOO_CACHE ;; bun) cache=$BUN_CACHE ;; esac
+    if [ ! -d "$cache" ] || [ -z "$(ls -A "$cache" 2>/dev/null)" ]; then
+      echo -e "  ${CYAN}seed: warming $pm cache via full install${NC}"
+      rm -rf node_modules
+      case "$pm" in
+        utoo) utoo install --ignore-scripts --registry="$REGISTRY" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
+        bun)  bun  install --ignore-scripts --registry="$REGISTRY" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
+      esac
+      rm -rf node_modules
+    fi
+  fi
 }
 
 install_cmd() {
@@ -64,35 +149,22 @@ resolve_cmd() {
   esac
 }
 
-warmup_cache() {
-  # Run one full install to fill cache. Idempotent: skips if cache already exists.
-  local pm=$1
-  local cache
-  case "$pm" in utoo) cache=$UTOO_CACHE ;; bun) cache=$BUN_CACHE ;; esac
-  [ -d "$cache" ] && [ -n "$(ls -A "$cache" 2>/dev/null)" ] && return
-  echo -e "  ${CYAN}one-off: populating $pm cache${NC}"
-  cd "$PROJECT_DIR"
-  eval "$(install_cmd "$pm")" > "$RESULTS_DIR/warmup_${pm}.log" 2>&1 || {
-    echo -e "  ${RED}warmup install failed for $pm (see $RESULTS_DIR/warmup_${pm}.log)${NC}"
-    return 1
-  }
-  rm -rf node_modules
-}
-
 run_phase() {
   local phase=$1 pm=$2 cmd=$3
   local json="$RESULTS_DIR/${PROJECT}_${phase}_${pm}.json"
-  local prep
-  prep=$(prepare_cmd "$phase" "$pm")
+  local prep_script="$RESULTS_DIR/prep_${phase}_${pm}.sh"
 
-  echo -e "  ${CYAN}$pm${NC} · $phase"
+  seed_for_phase "$phase" "$pm"
+  write_prepare "$prep_script" "$phase" "$pm"
+
+  echo -e "  ${CYAN}$pm${NC} · $phase · cmd: $cmd"
   if ! hyperfine \
     --runs "$RUNS" \
-    --prepare "bash -c \"$prep\"" \
+    --prepare "bash $prep_script" \
     --export-json "$json" \
     --show-output \
     -n "${pm}-${phase}" \
-    "bash -c \"cd $PROJECT_DIR && $cmd\""; then
+    "bash -c 'cd $PROJECT_DIR && $cmd'"; then
     echo -e "  ${RED}$pm $phase failed${NC}"
   fi
 }
@@ -106,15 +178,12 @@ done
 # === PHASE 3: cold install (lockfile exists, cache empty) ===
 banner "Phase 3 · cold install (lockfile present, empty cache, empty node_modules)"
 for pm in "${PACKAGE_MANAGERS[@]}"; do
-  # Lockfile was generated by phase 1, it persists in the project dir across
-  # hyperfine iterations because `snip_reset_nm` only deletes node_modules.
   run_phase "p3_cold_install" "$pm" "$(install_cmd "$pm")"
 done
 
 # === PHASE 4: warm link (cache populated, lockfile exists) ===
 banner "Phase 4 · warm link (lockfile present, populated cache, empty node_modules)"
 for pm in "${PACKAGE_MANAGERS[@]}"; do
-  warmup_cache "$pm"
   run_phase "p4_warm_link" "$pm" "$(install_cmd "$pm")"
 done
 
@@ -132,7 +201,7 @@ RESULTS_DIR="$RESULTS_DIR" node -e "
     for (const r of data.results) {
       const phase = order.find(p => r.command.includes(p) || f.includes(p));
       if (!phase) continue;
-      byPhase[phase].push({ name: r.command, mean: r.mean, stddev: r.stddev });
+      byPhase[phase].push({ name: r.command, mean: r.mean, stddev: r.stddev, min: r.min, max: r.max });
     }
   }
   const pad = (s, n) => String(s).padEnd(n);
@@ -140,9 +209,15 @@ RESULTS_DIR="$RESULTS_DIR" node -e "
   for (const phase of order) {
     if (byPhase[phase].length === 0) continue;
     console.log('\n## ' + phase);
-    console.log(pad('PM', 24) + ' ' + padR('mean', 9) + '   ' + padR('stddev', 7));
+    console.log(pad('PM', 26) + ' ' + padR('mean', 9) + '   ' + padR('stddev', 7) + '   ' + padR('min', 7) + '   ' + padR('max', 7));
     for (const r of byPhase[phase]) {
-      console.log(pad(r.name, 24) + ' ' + padR(r.mean.toFixed(2) + 's', 9) + '   ' + padR(r.stddev.toFixed(2) + 's', 7));
+      console.log(
+        pad(r.name, 26) + ' ' +
+        padR(r.mean.toFixed(2) + 's', 9) + '   ' +
+        padR(r.stddev.toFixed(2) + 's', 7) + '   ' +
+        padR(r.min.toFixed(2) + 's', 7) + '   ' +
+        padR(r.max.toFixed(2) + 's', 7)
+      );
     }
   }
 "
