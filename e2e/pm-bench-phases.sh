@@ -160,42 +160,20 @@ run_phase() {
   local phase=$1 pm=$2 cmd=$3
   local json="$RESULTS_DIR/${PROJECT}_${phase}_${pm}.json"
   local prep_script="$RESULTS_DIR/prep_${phase}_${pm}.sh"
-  local prep_log="$RESULTS_DIR/prep_${phase}_${pm}.log"
 
   seed_for_phase "$phase" "$pm"
   write_prepare "$prep_script" "$phase" "$pm"
 
-  echo -e "  ${CYAN}$pm${NC} · $phase · cmd: $cmd"
-  echo "--- generated prepare script for $phase/$pm ---"
-  cat "$prep_script"
-  echo "--- end prepare ---"
-
-  # Wrap prepare so each run logs cache state before/after to $prep_log.
-  # The log survives across iterations; we tail it at the end for CI debug.
-  local prep_wrapper="$RESULTS_DIR/prep_wrap_${phase}_${pm}.sh"
-  cat > "$prep_wrapper" <<EOF
-#!/bin/bash
-echo "=== prep run @ \$(date -u +%H:%M:%S.%3N) for $phase/$pm ===" >> "$prep_log"
-echo "before utoo=\$(du -sh $UTOO_CACHE 2>/dev/null | cut -f1) bun=\$(du -sh $BUN_CACHE 2>/dev/null | cut -f1)" >> "$prep_log"
-bash "$prep_script" >> "$prep_log" 2>&1
-echo "after  utoo=\$(du -sh $UTOO_CACHE 2>/dev/null | cut -f1) bun=\$(du -sh $BUN_CACHE 2>/dev/null | cut -f1)" >> "$prep_log"
-EOF
-  chmod +x "$prep_wrapper"
-  : > "$prep_log"
-
+  echo -e "  ${CYAN}$pm${NC} · $phase"
   if ! hyperfine \
     --runs "$RUNS" \
-    --prepare "bash $prep_wrapper" \
+    --prepare "bash $prep_script" \
     --export-json "$json" \
     --show-output \
     -n "${pm}-${phase}" \
     "bash -c 'cd $PROJECT_DIR && $cmd'"; then
     echo -e "  ${RED}$pm $phase failed${NC}"
   fi
-
-  echo "--- prepare log ($prep_log) ---"
-  cat "$prep_log"
-  echo "--- end prepare log ---"
 }
 
 # === PHASE 1: resolve only (clean slate) ===
