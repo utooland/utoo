@@ -59,7 +59,7 @@ EOF
   # `utoo clean` / `bun pm cache rm` didn't actually empty the cache on the CI
   # runner, leading to cache-hit runs masquerading as cold installs.
   case "$phase" in
-    p1)
+    p1_*)
       # Phase 1: cold resolve — wipe lockfiles AND caches so nothing can be reused.
       cat >> "$path" <<EOF
 rm -f package-lock.json bun.lock yarn.lock pnpm-lock.yaml
@@ -67,7 +67,7 @@ rm -rf "$UTOO_CACHE" "$BUN_CACHE"
 echo "[prep] phase 1 $pm: cleaned lockfiles + caches + node_modules"
 EOF
       ;;
-    p3)
+    p3_*)
       # Phase 3: cold install — keep THIS pm's lockfile, wipe THIS pm's cache.
       # Delete the other pm's lockfile so bun doesn't try to migrate utoo's
       # package-lock.json (and vice versa).
@@ -86,7 +86,7 @@ EOF
           ;;
       esac
       ;;
-    p4)
+    p4_*)
       # Phase 4: warm link — keep lockfile AND cache, only drop node_modules.
       case "$pm" in
         utoo) cat >> "$path" <<EOF
@@ -112,13 +112,13 @@ seed_for_phase() {
   local phase=$1 pm=$2
   cd "$PROJECT_DIR"
   case "$phase:$pm" in
-    p3:utoo|p4:utoo)
+    p3_*:utoo|p4_*:utoo)
       if [ ! -f package-lock.json ]; then
         echo -e "  ${CYAN}seed: running \`utoo deps\` to generate package-lock.json${NC}"
         utoo deps --registry="$REGISTRY" --cache-dir="$UTOO_CACHE" > "$RESULTS_DIR/seed_${phase}_${pm}.log" 2>&1
       fi
       ;;
-    p3:bun|p4:bun)
+    p3_*:bun|p4_*:bun)
       if [ ! -f bun.lock ]; then
         echo -e "  ${CYAN}seed: running \`bun install --lockfile-only\` to generate bun.lock${NC}"
         rm -f package-lock.json
@@ -127,7 +127,7 @@ seed_for_phase() {
       ;;
   esac
   # Phase 4 also needs a pre-warmed cache.
-  if [ "$phase" = "p4" ]; then
+  if [[ "$phase" == p4_* ]]; then
     local cache
     case "$pm" in utoo) cache=$UTOO_CACHE ;; bun) cache=$BUN_CACHE ;; esac
     if [ ! -d "$cache" ] || [ -z "$(ls -A "$cache" 2>/dev/null)" ]; then
