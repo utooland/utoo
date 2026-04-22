@@ -1,0 +1,95 @@
+name: utoopm-benchmark-phases
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: 'Project to benchmark (under github.com/ant-design/<project>)'
+        required: false
+        default: 'ant-design'
+        type: string
+      registry:
+        description: 'Registry URL'
+        required: false
+        default: 'https://registry.npmjs.org'
+        type: string
+      runs:
+        description: 'Runs per phase'
+        required: false
+        default: '3'
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:20.04
+    steps:
+      - name: Install dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: apt-get update && apt-get install -y build-essential curl pkg-config libssl-dev git
+      - uses: actions/checkout@v4
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory /__w/utoo/utoo
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-02
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pm-bench-linux
+      - name: Build current branch utoo
+        run: cargo build --release --bin utoo -p utoo-pm
+      - name: Upload utoo binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: utoo-linux-bench-phases
+          path: target/release/utoo
+          retention-days: 1
+
+  bench:
+    needs: [build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download utoo binary
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-linux-bench-phases
+          path: dist
+      - name: Install utoo
+        run: |
+          chmod +x dist/utoo
+          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install hyperfine and GNU time
+        run: sudo apt-get update && sudo apt-get install -y hyperfine time
+      - name: Verify tools
+        run: |
+          hyperfine --version
+          utoo --version
+          bun --version
+      - name: Run phase-isolated benchmark
+        env:
+          PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
+          REGISTRY: ${{ github.event.inputs.registry || 'https://registry.npmjs.org' }}
+          BENCH_RUNS: ${{ github.event.inputs.runs || '3' }}
+          PM_LIST: 'utoo,bun'
+        run: |
+          chmod +x e2e/pm-bench-phases.sh
+          bash e2e/pm-bench-phases.sh
