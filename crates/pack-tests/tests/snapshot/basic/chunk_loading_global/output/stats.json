@@ -57,18 +57,6 @@
     },
     {
       "type": "asset",
-      "name": "main.js",
-      "info": {},
-      "size": 316,
-      "emitted": false,
-      "comparedForEmit": false,
-      "cached": false,
-      "chunks": [
-        "main.js"
-      ]
-    },
-    {
-      "type": "asset",
       "name": "input_index_eff851b8.js.map",
       "info": {},
       "size": 321,
@@ -77,6 +65,18 @@
       "cached": false,
       "chunks": [
         "input_index_eff851b8.js.map"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "main.js",
+      "info": {},
+      "size": 316,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "main.js"
       ]
     },
     {

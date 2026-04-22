@@ -332,6 +332,7 @@ pub async fn generate_webpack_stats(
     }
 
     // Add dev chunk lists to all entrypoints
+    sort_dev_chunk_lists_for_tests(&mut dev_chunk_lists);
     for dev_chunk_list in dev_chunk_lists {
         for entrypoint in entrypoints.values_mut() {
             entrypoint.chunks.push(dev_chunk_list.clone());
@@ -341,7 +342,7 @@ pub async fn generate_webpack_stats(
         }
     }
 
-    let modules = chunk_items
+    let mut modules = chunk_items
         .into_iter()
         .map(|(chunk_item, chunk_ids)| async move {
             let content_ident = chunk_item.content_ident().await?;
@@ -355,15 +356,19 @@ pub async fn generate_webpack_stats(
                     file_content.as_content().map(|f| f.content().len() as u64)
                 });
             let path = asset_path.path.clone();
+            let mut chunks = chunk_ids.into_iter().collect::<Vec<_>>();
+            chunks.sort();
             Ok::<_, anyhow::Error>(WebpackStatsModule {
                 name: path.clone(),
                 id: path.clone(),
-                chunks: chunk_ids.into_iter().collect(),
+                chunks,
                 size,
             })
         })
         .try_join()
         .await?;
+
+    sort_stats_for_tests(&mut assets, &mut chunks, &mut modules, &mut entrypoints);
 
     Ok(WebpackStats {
         assets,
@@ -381,6 +386,43 @@ fn remove_extension_from_str(filename: &str) -> &str {
         return &filename[..dot_index];
     }
     filename
+}
+
+#[cfg(feature = "test")]
+fn sort_dev_chunk_lists_for_tests(dev_chunk_lists: &mut [RcStr]) {
+    dev_chunk_lists.sort();
+}
+
+#[cfg(not(feature = "test"))]
+fn sort_dev_chunk_lists_for_tests(_dev_chunk_lists: &mut [RcStr]) {}
+
+#[cfg(feature = "test")]
+fn sort_stats_for_tests(
+    assets: &mut [WebpackStatsAsset],
+    chunks: &mut [WebpackStatsChunk],
+    modules: &mut [WebpackStatsModule],
+    entrypoints: &mut FxIndexMap<RcStr, WebpackStatsEntrypoint>,
+) {
+    assets.sort_by(|a, b| a.name.cmp(&b.name));
+    chunks.sort_by(|a, b| a.id.cmp(&b.id));
+    modules.sort_by(|a, b| a.id.cmp(&b.id));
+
+    let mut entrypoint_pairs = std::mem::take(entrypoints).into_iter().collect::<Vec<_>>();
+    entrypoint_pairs.sort_by(|a, b| a.0.cmp(&b.0));
+    for (name, mut entrypoint) in entrypoint_pairs {
+        entrypoint.chunks.sort();
+        entrypoint.assets.sort_by(|a, b| a.name.cmp(&b.name));
+        entrypoints.insert(name, entrypoint);
+    }
+}
+
+#[cfg(not(feature = "test"))]
+fn sort_stats_for_tests(
+    _assets: &mut [WebpackStatsAsset],
+    _chunks: &mut [WebpackStatsChunk],
+    _modules: &mut [WebpackStatsModule],
+    _entrypoints: &mut FxIndexMap<RcStr, WebpackStatsEntrypoint>,
+) {
 }
 
 #[turbo_tasks::value]
