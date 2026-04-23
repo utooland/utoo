@@ -319,31 +319,37 @@ impl PackageCache {
         }
     }
 
-    /// Save versions info to disk cache.
-    pub async fn set_versions_to_disk(&self, name: &str, info: &VersionsInfo) {
-        let Some(cache_dir) = &self.cache_dir else {
+    /// Save versions info to disk cache (fire-and-forget).
+    ///
+    /// Spawns the serialisation + write onto the tokio runtime so the caller
+    /// returns immediately. The resolve pipeline doesn't depend on the write
+    /// completing — disk cache is best-effort for the *next* run. pcap-driven
+    /// tuning showed the previous inline `.await` + `serde_json::to_string_pretty`
+    /// burned ~1–3 ms per call on the hot path, stalling the main preload
+    /// task and causing the 24..62 active-stream dip observed on CI.
+    pub fn set_versions_to_disk(&self, name: &str, info: &VersionsInfo) {
+        let Some(cache_dir) = self.cache_dir.clone() else {
             return;
         };
+        let name = name.to_string();
+        let info = info.clone();
 
-        let path = get_versions_cache_path(cache_dir, name);
-
-        // Ensure parent directory exists
-        if let Some(parent) = path.parent() {
-            let _ = tokio_fs_ext::create_dir_all(parent).await;
-        }
-
-        match serde_json::to_string_pretty(info) {
-            Ok(content) => {
-                if let Err(e) = tokio_fs_ext::write(&path, content.as_bytes()).await {
-                    tracing::debug!("Failed to write versions cache for {name}: {e}");
-                } else {
-                    tracing::debug!("Wrote versions to disk cache: {name}");
+        tokio::spawn(async move {
+            let path = get_versions_cache_path(&cache_dir, &name);
+            if let Some(parent) = path.parent() {
+                let _ = tokio_fs_ext::create_dir_all(parent).await;
+            }
+            match serde_json::to_vec(&info) {
+                Ok(bytes) => {
+                    if let Err(e) = tokio_fs_ext::write(&path, bytes).await {
+                        tracing::debug!("Failed to write versions cache for {name}: {e}");
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!("Failed to serialize versions for {name}: {e}");
                 }
             }
-            Err(e) => {
-                tracing::debug!("Failed to serialize versions for {name}: {e}");
-            }
-        }
+        });
     }
 
     /// Load version manifest from disk cache.
@@ -378,36 +384,40 @@ impl PackageCache {
         }
     }
 
-    /// Save version manifest to disk cache.
-    pub async fn set_version_manifest_to_disk(
+    /// Save version manifest to disk cache (fire-and-forget).
+    ///
+    /// Takes `Arc<CoreVersionManifest>` so the shared reference moves into the
+    /// spawned task without deep-cloning the manifest (they can be 10–50 KB
+    /// each). Same rationale as [`Self::set_versions_to_disk`]: the resolve
+    /// pipeline was stalling on inline `.await` + pretty JSON serialisation.
+    pub fn set_version_manifest_to_disk(
         &self,
         name: &str,
         version: &str,
-        manifest: &CoreVersionManifest,
+        manifest: Arc<CoreVersionManifest>,
     ) {
-        let Some(cache_dir) = &self.cache_dir else {
+        let Some(cache_dir) = self.cache_dir.clone() else {
             return;
         };
+        let name = name.to_string();
+        let version = version.to_string();
 
-        let path = get_manifest_cache_path(cache_dir, name, version);
-
-        // Ensure parent directory exists
-        if let Some(parent) = path.parent() {
-            let _ = tokio_fs_ext::create_dir_all(parent).await;
-        }
-
-        match serde_json::to_string_pretty(manifest) {
-            Ok(content) => {
-                if let Err(e) = tokio_fs_ext::write(&path, content.as_bytes()).await {
-                    tracing::debug!("Failed to write manifest cache for {name}@{version}: {e}");
-                } else {
-                    tracing::debug!("Wrote manifest to disk cache: {name}@{version}");
+        tokio::spawn(async move {
+            let path = get_manifest_cache_path(&cache_dir, &name, &version);
+            if let Some(parent) = path.parent() {
+                let _ = tokio_fs_ext::create_dir_all(parent).await;
+            }
+            match serde_json::to_vec(&*manifest) {
+                Ok(bytes) => {
+                    if let Err(e) = tokio_fs_ext::write(&path, bytes).await {
+                        tracing::debug!("Failed to write manifest cache for {name}@{version}: {e}");
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!("Failed to serialize manifest for {name}@{version}: {e}");
                 }
             }
-            Err(e) => {
-                tracing::debug!("Failed to serialize manifest for {name}@{version}: {e}");
-            }
-        }
+        });
     }
 
     /// Export all version manifests for persistence.

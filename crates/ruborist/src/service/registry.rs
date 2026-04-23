@@ -292,8 +292,10 @@ impl UnifiedRegistry {
                 self.cache
                     .set_versions(name.to_string(), versions_info.clone());
 
-                // 6. Write versions to disk (non-blocking for native, blocking for WASM)
-                self.cache.set_versions_to_disk(name, &versions_info).await;
+                // 6. Fire-and-forget disk cache write — no `.await` so the
+                // resolve future returns immediately while tokio::spawn
+                // handles serialisation + FS on a background task.
+                self.cache.set_versions_to_disk(name, &versions_info);
 
                 Ok(FullManifestResult::Full(manifest))
             }
@@ -330,7 +332,7 @@ impl UnifiedRegistry {
                     };
                     self.cache
                         .set_versions(name.to_string(), versions_info.clone());
-                    self.cache.set_versions_to_disk(name, &versions_info).await;
+                    self.cache.set_versions_to_disk(name, &versions_info);
 
                     Ok(FullManifestResult::Full(manifest))
                 }
@@ -394,8 +396,7 @@ impl UnifiedRegistry {
         // 5. Write to disk cache (only for non-semver registries)
         if !self.supports_semver {
             self.cache
-                .set_version_manifest_to_disk(name, spec, &manifest)
-                .await;
+                .set_version_manifest_to_disk(name, spec, manifest.clone());
         }
 
         Ok(manifest)
@@ -488,8 +489,7 @@ impl RegistryClient for UnifiedRegistry {
         // 5. Write to disk cache (only for non-semver registries)
         if !self.supports_semver {
             self.cache
-                .set_version_manifest_to_disk(name, spec, &manifest)
-                .await;
+                .set_version_manifest_to_disk(name, spec, manifest.clone());
         }
 
         Ok(manifest)
@@ -561,9 +561,11 @@ impl RegistryClient for UnifiedRegistry {
             );
             // Write to disk cache for non-semver registries
             if !self.supports_semver {
-                self.cache
-                    .set_version_manifest_to_disk(&fetch_name, &resolved_version, &version_manifest)
-                    .await;
+                self.cache.set_version_manifest_to_disk(
+                    &fetch_name,
+                    &resolved_version,
+                    version_manifest.clone(),
+                );
             }
             return Ok(ResolvedPackage {
                 name: name.to_string(),
@@ -703,9 +705,11 @@ impl RegistryClient for UnifiedRegistry {
 
             // Write to disk cache (only for non-semver registries)
             if !self.supports_semver {
-                self.cache
-                    .set_version_manifest_to_disk(&fetch_name, &resolved_version, &version_manifest)
-                    .await;
+                self.cache.set_version_manifest_to_disk(
+                    &fetch_name,
+                    &resolved_version,
+                    version_manifest.clone(),
+                );
             }
 
             Ok(ResolvedPackage {
