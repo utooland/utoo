@@ -772,19 +772,16 @@ pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
         config.skip_preload
     );
 
-    // Phase 0: Warm all connection pools. With `HTTP_CLIENT_COUNT` clients,
-    // firing `concurrency` parallel HEADs per client opens a total of
-    // `HTTP_CLIENT_COUNT × concurrency` TCPs up front. This is the amount
-    // of pool headroom that lets the resolver phase keep `concurrency`
-    // streams flat-active instead of phase-locking into dips when a batch
-    // of responses lands together. `per_client = concurrency` overshoots
-    // the 64-concurrent-request cap by 4×, matching bun's observed
-    // pool-to-working-set ratio.
+    // Phase 0: Warm both connection pools. With 2 clients, `per_client` =
+    // `concurrency / 2` opens `concurrency` total warm TCPs — same
+    // working-set size as a single burst, but split across two isolated
+    // pools so the resolver alternates pools and breaks the phase-lock
+    // pattern that kept active-stream count oscillating in pcap.
     let preheat_start = tokio::time::Instant::now();
-    registry.preheat(config.concurrency).await;
+    registry.preheat(config.concurrency / 2).await;
     tracing::debug!(
         "Connection preheat ({} per client): {:?}",
-        config.concurrency,
+        config.concurrency / 2,
         preheat_start.elapsed()
     );
 
