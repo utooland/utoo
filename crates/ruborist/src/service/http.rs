@@ -115,7 +115,14 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
         let mut builder = builder
             .use_rustls_tls()
             .no_proxy()
-            .dns_resolver(shared_resolver());
+            .dns_resolver(shared_resolver())
+            // Force HTTP/1.1 with a connection pool. reqwest multiplexes all
+            // requests over a single HTTP/2 connection by default, which
+            // makes head-of-line blocking on one slow response stall the
+            // whole manifest fetch phase. An H1 pool lets concurrent
+            // manifest requests open independent TCP streams instead.
+            .http1_only()
+            .pool_max_idle_per_host(64);
 
         match env_var("ALL_PROXY") {
             Some(url) => {
