@@ -50,7 +50,7 @@ fn record_sample(send_us: u32, body_us: u32, bytes: u32) {
         let mut send = s.send.clone();
         let mut body = s.body.clone();
         let mut bytes = s.bytes.clone();
-        eprintln!(
+        println!(
             "  [histo #{}] send p50={}ms p90={}ms p99={}ms max={}ms | body p50={}ms p90={}ms p99={}ms max={}ms | bytes p50={}KB p90={}KB max={}KB",
             n,
             pct(&mut send, 0.50) / 1000,
