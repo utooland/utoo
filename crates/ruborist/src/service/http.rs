@@ -126,11 +126,25 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
             // makes head-of-line blocking on one slow response stall the
             // whole manifest fetch phase. An H1 pool lets concurrent
             // manifest requests open independent TCP streams instead.
-            // Pool size matches `preload::DEFAULT_CONCURRENCY` so the
-            // per-host idle pool can absorb every in-flight fetch without
-            // churning connections.
+            //
+            // `pool_idle_timeout(None)`: never close idle connections
+            // mid-run. At preload concurrency 128 with DNS round-robin
+            // across ~12 IPv6 addresses, each host-IP pair holds ~11
+            // hot conns; letting reqwest's default 90s idle timeout
+            // kill them between BFS waves forces TLS re-handshakes
+            // that show up in `send_us` tail.
+            //
+            // `pool_max_idle_per_host(1024)`: oversized vs current
+            // 128-cap to ensure reqwest never evicts a hot conn just
+            // because capacity is tight.
+            //
+            // `tcp_keepalive(Some(30s))`: keep the kernel socket alive
+            // across idle gaps so intermediate NAT/stateful-firewalls
+            // don't silently drop the TCP state between requests.
             .http1_only()
-            .pool_max_idle_per_host(256);
+            .pool_max_idle_per_host(1024)
+            .pool_idle_timeout(None)
+            .tcp_keepalive(Some(std::time::Duration::from_secs(30)));
 
         match env_var("ALL_PROXY") {
             Some(url) => {
