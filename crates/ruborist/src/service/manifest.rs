@@ -13,61 +13,6 @@ use super::fetch::{
 use super::http::get_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 
-/// Collect per-request timing samples for percentile reporting.
-/// Prints a histogram every [`HISTO_REPORT_EVERY`] calls so the final
-/// output reflects the full distribution of the run.
-fn record_sample(send_us: u32, body_us: u32, bytes: u32) {
-    use std::sync::Mutex;
-    use std::sync::OnceLock;
-    struct Samples {
-        send: Vec<u32>,
-        body: Vec<u32>,
-        bytes: Vec<u32>,
-    }
-    static STORE: OnceLock<Mutex<Samples>> = OnceLock::new();
-    const HISTO_REPORT_EVERY: usize = 500;
-    let store = STORE.get_or_init(|| {
-        Mutex::new(Samples {
-            send: Vec::new(),
-            body: Vec::new(),
-            bytes: Vec::new(),
-        })
-    });
-    let mut s = store.lock().unwrap();
-    s.send.push(send_us);
-    s.body.push(body_us);
-    s.bytes.push(bytes);
-    let n = s.send.len();
-    if n % HISTO_REPORT_EVERY == 0 || n == 1 {
-        fn pct(v: &mut [u32], p: f64) -> u32 {
-            if v.is_empty() {
-                return 0;
-            }
-            v.sort_unstable();
-            let idx = ((p * v.len() as f64) as usize).min(v.len() - 1);
-            v[idx]
-        }
-        let mut send = s.send.clone();
-        let mut body = s.body.clone();
-        let mut bytes = s.bytes.clone();
-        println!(
-            "  [histo #{}] send p50={}ms p90={}ms p99={}ms max={}ms | body p50={}ms p90={}ms p99={}ms max={}ms | bytes p50={}KB p90={}KB max={}KB",
-            n,
-            pct(&mut send, 0.50) / 1000,
-            pct(&mut send, 0.90) / 1000,
-            pct(&mut send, 0.99) / 1000,
-            pct(&mut send, 1.0) / 1000,
-            pct(&mut body, 0.50) / 1000,
-            pct(&mut body, 0.90) / 1000,
-            pct(&mut body, 0.99) / 1000,
-            pct(&mut body, 1.0) / 1000,
-            pct(&mut bytes, 0.50) / 1024,
-            pct(&mut bytes, 0.90) / 1024,
-            pct(&mut bytes, 1.0) / 1024,
-        );
-    }
-}
-
 /// Result of a full manifest fetch with ETag support.
 /// Transient return value, immediately destructured — Box not needed.
 #[allow(clippy::large_enum_variant)]
@@ -123,10 +68,7 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                     request = request.header("If-None-Match", etag_value);
                 }
 
-                use std::time::Instant;
-                let t_send = Instant::now();
                 let response = request.send().await.map_err(classify_reqwest_error)?;
-                let send_us = t_send.elapsed().as_micros() as u32;
                 let status = response.status();
 
                 if status == reqwest::StatusCode::NOT_MODIFIED {
@@ -144,14 +86,11 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                         .and_then(|v| v.to_str().ok())
                         .map(|s| s.to_string());
 
-                    let t_body = Instant::now();
                     let raw_bytes = response
                         .bytes()
                         .await
                         .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
                         .to_vec();
-                    let body_us = t_body.elapsed().as_micros() as u32;
-                    record_sample(send_us, body_us, raw_bytes.len() as u32);
 
                     // Save raw bytes before simd_json mutates the parse buffer
                     let mut parse_buf = raw_bytes.clone();
