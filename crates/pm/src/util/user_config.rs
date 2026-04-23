@@ -134,13 +134,14 @@ pub fn get_install_scope() -> InstallScope {
 
 // Manifest fetch concurrency configuration.
 //
-// pcap comparison against bun showed bun maintains ~256 parallel TCP
-// connections during a cold install; utoo was pinned at 64 here, giving
-// each connection 4× the serial request depth and roughly matching the
-// observed wall-time gap. Raise the default so the resolver pipeline
-// can actually fill the pool bumped in `ruborist/service/http.rs`.
+// bun's `max_simultaneous_requests_for_bun_install` also defaults to 64,
+// and pcap shows bun holds a flat 64 active TCP streams during resolve.
+// Raising our cap to 256 added ~28 % more ctx switches without shortening
+// p1_resolve, because the preload pipeline never actually hit the 64
+// ceiling — the stalls come from main-task post-processing, not from
+// the cap. Keep 64 and chase the saturation gap elsewhere.
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 256));
+    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 64));
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
     MANIFESTS_CONCURRENCY_LIMIT.set(value);
