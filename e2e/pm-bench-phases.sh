@@ -311,7 +311,7 @@ RESULTS_DIR="$RESULTS_DIR" node -e "
     return null;
   };
 
-  for (const f of fs.readdirSync(dir).filter(x => x.endsWith('.json') && !x.endsWith('_metrics.jsonl'))) {
+  for (const f of fs.readdirSync(dir).filter(x => x.endsWith('.json') && !x.endsWith('_metrics.jsonl') && !x.endsWith('_footprint.json'))) {
     const key = parseKey(f, '.json');
     if (!key) continue;
     let data; try { data = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch (_) { continue; }
