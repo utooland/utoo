@@ -37,10 +37,24 @@ pub struct FullManifest {
     #[serde(rename = "dist-tags")]
     pub dist_tags: HashMap<String, String>,
 
-    #[serde(default, deserialize_with = "deserialize_version_keys")]
-    pub versions: Vec<String>,
+    /// Version keys (preserved order) and pre-parsed `CoreVersionManifest`s,
+    /// populated in a single pass by [`Versions`]'s custom `Deserialize`.
+    ///
+    /// Replaces the previous `versions: Vec<String>` (populated by
+    /// `IgnoredAny` visitor) + per-resolve `extract_version` that
+    /// re-parsed the full raw JSON via `simd_json::to_borrowed_value`
+    /// for every `resolve_package` call. That re-parse was uninstrumented
+    /// CPU on the async worker — ~0.4ms avg × 4567 resolves = 1.85s
+    /// serial load on the 4-core tokio runtime, preventing the pipeline
+    /// from maintaining 64 in-flight fetches (observed ~38 effective).
+    ///
+    /// With eager parse, `get_core_version` becomes an O(1) map lookup.
+    pub versions: Versions,
 
-    /// Raw HTTP response bytes. Injected post-parse; used for on-demand version extraction.
+    /// Raw HTTP response bytes. Retained only for `get_full_version`
+    /// (cold path — `ut view` command) which still needs on-demand
+    /// extraction of the full `VersionManifest`. Hot-path resolve uses
+    /// [`Self::versions`] which is pre-parsed.
     #[serde(skip)]
     pub raw: Arc<[u8]>,
 
@@ -76,11 +90,20 @@ pub struct FullManifest {
 }
 
 impl FullManifest {
-    /// Extract a single version from raw bytes on demand.
-    ///
-    /// Copies raw bytes, parses with `simd_json::to_borrowed_value`, navigates
-    /// to `versions[ver]`, then converts to the target type via `serde_json::Value`.
-    fn extract_version<T: for<'de> Deserialize<'de>>(&self, version: &str) -> Option<T> {
+    /// O(1) lookup of a pre-parsed `CoreVersionManifest` by version
+    /// string. Returns `None` if the version is absent or (rarely) if
+    /// its entry was malformed enough to fail strict deserialization
+    /// during the initial fetch parse — matches the previous on-demand
+    /// `extract_version` behavior of silently returning `None`.
+    pub fn get_core_version(&self, version: &str) -> Option<Arc<CoreVersionManifest>> {
+        self.versions.cores.get(version).cloned()
+    }
+
+    /// Parse a single version on demand into full `VersionManifest`
+    /// (cold path — `ut view`). Still re-parses raw bytes because
+    /// `VersionManifest` carries display fields that `CoreVersionManifest`
+    /// drops, and `ut view` is infrequent.
+    pub fn get_full_version(&self, version: &str) -> Option<VersionManifest> {
         use simd_json::prelude::ValueObjectAccess;
         let mut buf = self.raw.to_vec();
         let parsed = simd_json::to_borrowed_value(&mut buf).ok()?;
@@ -88,45 +111,87 @@ impl FullManifest {
         let value = serde_json::to_value(version_obj).ok()?;
         serde_json::from_value(value).ok()
     }
+}
 
-    /// Parse a single version on demand into CoreVersionManifest (hot path).
-    pub fn get_core_version(&self, version: &str) -> Option<CoreVersionManifest> {
-        self.extract_version(version)
-    }
+/// Version entries of a `FullManifest`: preserves key insertion order
+/// (for `VersionsInfo`/semver callers that iterate the list) alongside
+/// an `Arc`-shared map for O(1) lookup.
+///
+/// Implemented as a single-pass custom `Deserialize` so the entire
+/// `"versions"` map is parsed into strongly-typed `CoreVersionManifest`s
+/// during the fetch-time `spawn_blocking` rather than lazily re-parsed
+/// on the async preload worker for every resolve.
+#[derive(Debug, Clone, Default)]
+pub struct Versions {
+    /// Version strings in insertion order — used by
+    /// `resolve_target_version` and cached into `VersionsInfo`.
+    pub keys: Vec<String>,
+    /// Parsed core manifests keyed by version string.
+    pub cores: HashMap<String, Arc<CoreVersionManifest>>,
+}
 
-    /// Parse a single version on demand into full VersionManifest (cold path, e.g. `ut view`).
-    pub fn get_full_version(&self, version: &str) -> Option<VersionManifest> {
-        self.extract_version(version)
+impl Versions {
+    pub fn is_empty(&self) -> bool {
+        self.keys.is_empty()
     }
 }
 
-/// Deserialize a versions map by extracting only the keys, skipping all values.
-///
-/// Uses `IgnoredAny` to skip over version manifest JSON objects without allocating,
-/// only collecting the version number strings.
-fn deserialize_version_keys<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    struct VersionKeysVisitor;
-    impl<'de> serde::de::Visitor<'de> for VersionKeysVisitor {
-        type Value = Vec<String>;
-        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-            f.write_str("a map of version strings to objects")
-        }
-        fn visit_map<M: serde::de::MapAccess<'de>>(
-            self,
-            mut map: M,
-        ) -> Result<Vec<String>, M::Error> {
-            let mut keys = Vec::with_capacity(map.size_hint().unwrap_or(0));
-            while let Some(key) = map.next_key::<String>()? {
-                map.next_value::<serde::de::IgnoredAny>()?;
-                keys.push(key);
+impl Serialize for Versions {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // Serialize the same shape the registry returns: a JSON object
+        // mapping version string -> manifest. Order follows `keys` for
+        // determinism (HashMap iteration order is arbitrary otherwise).
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(self.keys.len()))?;
+        for k in &self.keys {
+            if let Some(v) = self.cores.get(k) {
+                map.serialize_entry(k, v.as_ref())?;
             }
-            Ok(keys)
         }
+        map.end()
     }
-    deserializer.deserialize_map(VersionKeysVisitor)
+}
+
+impl<'de> Deserialize<'de> for Versions {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct VersionsVisitor;
+        impl<'de> serde::de::Visitor<'de> for VersionsVisitor {
+            type Value = Versions;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a map of version strings to manifest objects")
+            }
+            fn visit_map<M: serde::de::MapAccess<'de>>(
+                self,
+                mut map: M,
+            ) -> Result<Versions, M::Error> {
+                let cap = map.size_hint().unwrap_or(0);
+                let mut keys = Vec::with_capacity(cap);
+                let mut cores = HashMap::with_capacity(cap);
+                while let Some(key) = map.next_key::<String>()? {
+                    // Buffer each value as `serde_json::Value` first,
+                    // then try to convert into `CoreVersionManifest`.
+                    // Preserves the previous "silently skip malformed
+                    // version entries" behavior (old path relied on
+                    // `serde_json::from_value(..).ok()` in
+                    // `extract_version`). Most entries convert cleanly;
+                    // the minority of malformed ones still appear in
+                    // `keys` so the version list stays complete.
+                    let raw: Value = map.next_value()?;
+                    match serde_json::from_value::<CoreVersionManifest>(raw) {
+                        Ok(core) => {
+                            cores.insert(key.clone(), Arc::new(core));
+                        }
+                        Err(err) => {
+                            tracing::debug!("Skipping malformed version entry {}: {}", key, err);
+                        }
+                    }
+                    keys.push(key);
+                }
+                Ok(Versions { keys, cores })
+            }
+        }
+        deserializer.deserialize_map(VersionsVisitor)
+    }
 }
 
 /// Version-specific manifest from npm registry.

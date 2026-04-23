@@ -7,8 +7,6 @@
 //! - For semver-supporting registries: directly fetches specific version
 //! - For traditional registries: fetches full manifest and resolves locally
 
-use std::sync::Arc;
-
 use crate::model::manifest::FullManifest;
 use crate::model::node::EdgeType;
 use crate::resolver::semver::normalize_spec;
@@ -137,7 +135,7 @@ pub fn resolve_from_manifest<E: std::error::Error + 'static>(
     manifest: &FullManifest,
     spec: &str,
 ) -> Result<ResolvedPackage, ResolveError<E>> {
-    let version_list: Vec<String> = manifest.versions.clone();
+    let version_list: Vec<String> = manifest.versions.keys.clone();
 
     if version_list.is_empty() {
         return Err(ResolveError::NoVersions(manifest.name.clone()));
@@ -147,10 +145,9 @@ pub fn resolve_from_manifest<E: std::error::Error + 'static>(
     let resolved_version = resolve_target_version(&manifest.dist_tags, &version_list, spec)
         .map_err(|e| ResolveError::Version(format!("{}@{}: {}", manifest.name, spec, e)))?;
 
-    // Get manifest for resolved version (lazy: parse from Value on demand)
+    // O(1) lookup from pre-parsed `Versions` map.
     let version_manifest = manifest
         .get_core_version(&resolved_version)
-        .map(Arc::new)
         .ok_or_else(|| ResolveError::ManifestNotFound {
             name: manifest.name.clone(),
             version: resolved_version.clone(),
