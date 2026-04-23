@@ -242,6 +242,13 @@ where
         );
     }
 
+    // Dump per-request send/body/parse histograms accumulated by
+    // `service::manifest::fetch_full_manifest`. Together with `proc_us`
+    // this locates whether remaining wall time hides in network wait
+    // (send), body download (body), or JSON parse / spawn_blocking
+    // scheduling (parse).
+    crate::service::dump_fetch_histograms();
+
     receiver.on_event(BuildEvent::PreloadComplete {
         success: stats.success_count,
         failed: stats.failed_count,
