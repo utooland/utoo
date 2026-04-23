@@ -121,8 +121,11 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
             // makes head-of-line blocking on one slow response stall the
             // whole manifest fetch phase. An H1 pool lets concurrent
             // manifest requests open independent TCP streams instead.
+            // Pool size matches `preload::DEFAULT_CONCURRENCY` so the
+            // per-host idle pool can absorb every in-flight fetch without
+            // churning connections.
             .http1_only()
-            .pool_max_idle_per_host(64);
+            .pool_max_idle_per_host(256);
 
         match env_var("ALL_PROXY") {
             Some(url) => {
