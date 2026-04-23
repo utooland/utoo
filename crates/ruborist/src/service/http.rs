@@ -85,6 +85,18 @@ use anyhow::{Context, Result, anyhow};
 /// surfaced to callers instead of panicking or calling `process::exit`.
 static HTTP_CLIENT: LazyLock<Result<reqwest::Client, String>> = LazyLock::new(|| {
     client_builder()
+        .map(|b| {
+            // Force HTTP/1.1 + large keep-alive pool. reqwest's HTTP/2 default
+            // multiplexes every request over a SINGLE TCP connection per host,
+            // which bottlenecks on the server's SETTINGS_MAX_CONCURRENT_STREAMS
+            // (bun opens ~10 parallel HTTP/2 connections to the same host — we
+            // can't do the same through reqwest without custom pooling). Falling
+            // back to HTTP/1.1 lets the pool open N independent connections
+            // and each one runs one request at a time.
+            b.http1_only()
+                .pool_max_idle_per_host(64)
+                .pool_idle_timeout(std::time::Duration::from_secs(60))
+        })
         .and_then(|b| b.build().context("Failed to build reqwest client"))
         .map_err(|e| e.to_string())
 });
