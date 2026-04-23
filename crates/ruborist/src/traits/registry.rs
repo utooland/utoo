@@ -133,6 +133,16 @@ pub trait RegistryClient {
         false
     }
 
+    /// Warm the underlying HTTP connection pool with `count` parallel
+    /// dummy requests to this registry, so the first real manifest fetch
+    /// doesn't pay TLS-handshake latency inline.
+    ///
+    /// Default: no-op. Registries backed by a shared HTTP client
+    /// (`UnifiedRegistry`) override this to actually open connections.
+    fn preheat(&self, _count: usize) -> impl Future<Output = ()> + Send {
+        async {}
+    }
+
     /// Fetch full package manifest from registry.
     ///
     /// Returns the complete package manifest with all versions.

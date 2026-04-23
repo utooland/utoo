@@ -93,6 +93,36 @@ pub(crate) fn get_client() -> Result<&'static reqwest::Client> {
     HTTP_CLIENT.as_ref().map_err(|e| anyhow!("{e}"))
 }
 
+/// Warm the HTTP connection pool by firing `count` parallel HEAD requests
+/// at `url`. Each request opens one TCP connection, completes the TLS
+/// handshake, and lands in reqwest's keep-alive pool — ready to serve the
+/// first real manifest fetch without paying handshake latency.
+///
+/// This matches bun's observed pre-install network pattern (pcap shows
+/// bun firing ~256 SYNs at t≈0.6s before any manifest fetch). Without
+/// preheat, utoo's resolver opens connections on demand, serialising the
+/// first ~64 TLS handshakes inside the measured resolve phase.
+///
+/// Combined with the DNS round-robin resolver, the `count` connections
+/// are spread across every A record returned for the host, so each CDN
+/// edge ends up with roughly `count / N_ips` warm sockets.
+///
+/// Errors are intentionally swallowed: a failed HEAD (403, timeout, etc.)
+/// simply means one less warm connection — functionally equivalent to
+/// no preheat for that slot. Never reports to the caller.
+pub async fn preheat(url: &str, count: usize) {
+    use futures::future::join_all;
+
+    let Ok(client) = get_client() else {
+        return;
+    };
+
+    let tasks = (0..count).map(|_| async move {
+        let _ = client.head(url).send().await;
+    });
+    join_all(tasks).await;
+}
+
 /// Create a [`reqwest::ClientBuilder`] with TLS, DNS caching, and proxy
 /// from environment variables.
 ///

@@ -772,6 +772,19 @@ pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
         config.skip_preload
     );
 
+    // Phase 0: Warm the connection pool. Fires `concurrency` parallel HEAD
+    // requests against the registry so the TLS handshakes happen up-front
+    // in a single ~200ms parallel burst instead of being amortised into
+    // the first `concurrency` manifest fetches of the preload / BFS phase.
+    // No-op for registry clients that don't share a global HTTP pool.
+    let preheat_start = tokio::time::Instant::now();
+    registry.preheat(config.concurrency).await;
+    tracing::debug!(
+        "Connection preheat ({} conn): {:?}",
+        config.concurrency,
+        preheat_start.elapsed()
+    );
+
     // Phase 1: Preload manifests in parallel (unless skipped)
     run_preload_phase(graph, registry, &config, receiver).await;
 
