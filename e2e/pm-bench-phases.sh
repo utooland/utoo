@@ -29,49 +29,21 @@ NC='\033[0m'
 banner() { echo -e "${YELLOW}=== $* ===${NC}"; }
 
 # --- metrics wrapper ---
-# Wraps each benchmark iteration to capture:
-#   - CPU / memory via /usr/bin/time -v (user/sys, RSS, ctx, page faults)
-#   - Network via /proc/net/dev delta (system-wide, CI is dedicated → ≈ process)
-#   - File-space growth in the paths we actually care about (cache, node_modules,
-#     lockfile). `du` after - before gives net bytes written to those paths,
-#     isolating the PM's work from system-wide kernel flush noise. /proc/vmstat
-#     pgpg* is intentionally NOT used: it counted ~500MB of journal / page-cache
-#     flush that had nothing to do with the benchmarked process.
+# Keeps the hot path fast: only /usr/bin/time + counter snapshots inside the
+# measured window. Disk-footprint measurement (du on node_modules / cache)
+# happens once per phase AFTER hyperfine exits — see capture_footprint in
+# run_phase — so 1-2s of `du` traversal doesn't bleed into wall-clock.
 METRICS_WRAPPER="$RESULTS_DIR/metrics_wrapper.sh"
 cat > "$METRICS_WRAPPER" <<'METRICS_EOF'
 #!/bin/bash
 METRICS_FILE="$1"; shift
 TIME_TMP=$(mktemp)
 
-# Tracked paths (all optional — missing ones contribute 0).
-UTOO_CACHE="${UTOO_CACHE:-/tmp/utoo-bench-cache}"
-BUN_CACHE="${BUN_CACHE:-/tmp/bun-bench-cache}"
-PROJECT_DIR="${PROJECT_DIR:-$PWD}"
-
-du_bytes() {
-  # du -sb is GNU-only (bytes); fall back to -sk * 1024 on macOS.
-  for p in "$@"; do
-    if [ -e "$p" ]; then
-      if [[ "$(uname)" == "Darwin" ]]; then
-        du -sk "$p" 2>/dev/null | awk '{print $1 * 1024}'
-      else
-        du -sb "$p" 2>/dev/null | awk '{print $1}'
-      fi
-    else
-      echo 0
-    fi
-  done | awk '{s += $1} END {print s+0}'
-}
-
-# --- snapshot network counters + disk usage BEFORE the command ---
+# --- snapshot network BEFORE the command (cheap: one read of /proc/net/dev) ---
 snap_net_rx=0; snap_net_tx=0
 if [ -r /proc/net/dev ]; then
   read snap_net_rx snap_net_tx < <(awk '/:/ && $1 !~ /^lo:/ {rx += $2; tx += $10} END {print rx+0, tx+0}' /proc/net/dev)
 fi
-snap_cache_utoo=$(du_bytes "$UTOO_CACHE")
-snap_cache_bun=$(du_bytes  "$BUN_CACHE")
-snap_nm=$(du_bytes "$PROJECT_DIR/node_modules")
-snap_lock=$(du_bytes "$PROJECT_DIR/package-lock.json" "$PROJECT_DIR/bun.lock")
 
 if [[ "$(uname)" == "Darwin" ]]; then
   /usr/bin/time -l "$@" 2>"$TIME_TMP"
@@ -96,27 +68,50 @@ else
   SYS_S=$(awk -F': ' '/System time \(seconds\)/  {print $2}' "$TIME_TMP")
 fi
 
-# --- snapshot network + disk usage AFTER ---
+# --- snapshot network AFTER, compute delta ---
 net_rx=0; net_tx=0
 if [ -r /proc/net/dev ]; then
   read cur_net_rx cur_net_tx < <(awk '/:/ && $1 !~ /^lo:/ {rx += $2; tx += $10} END {print rx+0, tx+0}' /proc/net/dev)
   net_rx=$(( cur_net_rx - snap_net_rx ))
   net_tx=$(( cur_net_tx - snap_net_tx ))
 fi
-delta_cache_utoo=$(( $(du_bytes "$UTOO_CACHE") - snap_cache_utoo ))
-delta_cache_bun=$((  $(du_bytes "$BUN_CACHE")  - snap_cache_bun ))
-delta_nm=$((   $(du_bytes "$PROJECT_DIR/node_modules") - snap_nm ))
-delta_lock=$(( $(du_bytes "$PROJECT_DIR/package-lock.json" "$PROJECT_DIR/bun.lock") - snap_lock ))
 
-printf '{"rss":%d,"user_s":%s,"sys_s":%s,"page_major":%d,"page_minor":%d,"vol_ctx":%d,"invol_ctx":%d,"net_rx":%d,"net_tx":%d,"cache_utoo_delta":%d,"cache_bun_delta":%d,"nm_delta":%d,"lock_delta":%d}\n' \
+printf '{"rss":%d,"user_s":%s,"sys_s":%s,"page_major":%d,"page_minor":%d,"vol_ctx":%d,"invol_ctx":%d,"net_rx":%d,"net_tx":%d}\n' \
   "${RSS:-0}" "${USER_S:-0}" "${SYS_S:-0}" "${PG_MAJOR:-0}" "${PG_MINOR:-0}" \
   "${VOL_CTX:-0}" "${INVOL_CTX:-0}" \
-  "${net_rx:-0}" "${net_tx:-0}" \
-  "${delta_cache_utoo:-0}" "${delta_cache_bun:-0}" "${delta_nm:-0}" "${delta_lock:-0}" >> "$METRICS_FILE"
+  "${net_rx:-0}" "${net_tx:-0}" >> "$METRICS_FILE"
 rm -f "$TIME_TMP"
 exit $EXIT_CODE
 METRICS_EOF
 chmod +x "$METRICS_WRAPPER"
+
+# Post-phase footprint helper: records final on-disk size of the paths each
+# phase should have touched. Called ONCE after hyperfine finishes, so the
+# (slow) du traversal is not part of any timed window.
+du_bytes() {
+  for p in "$@"; do
+    if [ -e "$p" ]; then
+      if [[ "$(uname)" == "Darwin" ]]; then
+        du -sk "$p" 2>/dev/null | awk '{print $1 * 1024}'
+      else
+        du -sb "$p" 2>/dev/null | awk '{print $1}'
+      fi
+    else
+      echo 0
+    fi
+  done | awk '{s += $1} END {print s+0}'
+}
+
+capture_footprint() {
+  local phase=$1 pm=$2 out=$3
+  local cache
+  case "$pm" in utoo) cache=$UTOO_CACHE ;; bun) cache=$BUN_CACHE ;; esac
+  printf '{"cache":%d,"node_modules":%d,"lockfile":%d}\n' \
+    "$(du_bytes "$cache")" \
+    "$(du_bytes "$PROJECT_DIR/node_modules")" \
+    "$(du_bytes "$PROJECT_DIR/package-lock.json" "$PROJECT_DIR/bun.lock")" \
+    > "$out"
+}
 
 # --- project ---
 banner "Preparing $PROJECT"
@@ -272,6 +267,10 @@ run_phase() {
     "bash $METRICS_WRAPPER $metrics bash $cmd_script"; then
     echo -e "  ${RED}$pm $phase failed${NC}"
   fi
+
+  # After the timed runs: capture the state left on disk by the last run.
+  # Done outside hyperfine so du's traversal doesn't pollute wall-clock.
+  capture_footprint "$phase" "$pm" "$RESULTS_DIR/${PROJECT}_${phase}_${pm}_footprint.json"
 }
 
 # === PHASE 1: resolve only (clean slate) ===
@@ -321,7 +320,7 @@ RESULTS_DIR="$RESULTS_DIR" node -e "
     (timing[key.phase] ??= {})[key.pm] = { mean: r.mean, stddev: r.stddev, min: r.min, max: r.max };
   }
 
-  const metricKeys = ['rss','user_s','sys_s','page_major','page_minor','vol_ctx','invol_ctx','net_rx','net_tx','cache_utoo_delta','cache_bun_delta','nm_delta','lock_delta'];
+  const metricKeys = ['rss','user_s','sys_s','page_major','page_minor','vol_ctx','invol_ctx','net_rx','net_tx'];
   for (const f of fs.readdirSync(dir).filter(x => x.endsWith('_metrics.jsonl'))) {
     const key = parseKey(f, '_metrics.jsonl');
     if (!key) continue;
@@ -335,6 +334,18 @@ RESULTS_DIR="$RESULTS_DIR" node -e "
       avg[k] = rows.reduce((s,e) => s + Number(e[k] || 0), 0) / rows.length;
     }
     (metrics[key.phase] ??= {})[key.pm] = avg;
+  }
+
+  // Footprint is a post-phase single sample (not averaged): final on-disk size
+  // of the paths the phase should have touched.
+  for (const f of fs.readdirSync(dir).filter(x => x.endsWith('_footprint.json'))) {
+    const key = parseKey(f, '_footprint.json');
+    if (!key) continue;
+    let data; try { data = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch (_) { continue; }
+    const slot = (metrics[key.phase] ??= {})[key.pm] ??= {};
+    slot.foot_cache = data.cache || 0;
+    slot.foot_nm    = data.node_modules || 0;
+    slot.foot_lock  = data.lockfile || 0;
   }
 
   const pad = (s, n) => String(s).padEnd(n);
@@ -364,20 +375,19 @@ RESULTS_DIR="$RESULTS_DIR" node -e "
       );
     }
 
-    // Table B: context switches + network + per-path disk deltas
-    console.log(pad('PM', 6) + ' ' + padR('vCtx', 8) + ' ' + padR('iCtx', 8) + '   ' + padR('net RX', 8) + ' ' + padR('net TX', 8) + '   ' + padR('Δcache', 8) + ' ' + padR('Δnode_mod', 10) + ' ' + padR('Δlock', 7));
+    // Table B: context switches + network + final on-disk footprint
+    console.log(pad('PM', 6) + ' ' + padR('vCtx', 8) + ' ' + padR('iCtx', 8) + '   ' + padR('net RX', 8) + ' ' + padR('net TX', 8) + '   ' + padR('cache', 8) + ' ' + padR('node_mod', 9) + ' ' + padR('lock', 7));
     for (const pm of pms) {
       const m = mp[pm] || {};
-      const cacheDelta = (m.cache_utoo_delta || 0) + (m.cache_bun_delta || 0);
       console.log(
         pad(pm, 6) + ' ' +
         padR(m.vol_ctx   ? fmtN(m.vol_ctx)   : '-', 8) + ' ' +
         padR(m.invol_ctx ? fmtN(m.invol_ctx) : '-', 8) + '   ' +
         padR(m.net_rx    ? fmtB(m.net_rx)    : '-', 8) + ' ' +
         padR(m.net_tx    ? fmtB(m.net_tx)    : '-', 8) + '   ' +
-        padR(cacheDelta  ? fmtB(cacheDelta)  : '-', 8) + ' ' +
-        padR(m.nm_delta  ? fmtB(m.nm_delta)  : '-', 10) + ' ' +
-        padR(m.lock_delta ? fmtB(m.lock_delta) : '-', 7)
+        padR(m.foot_cache ? fmtB(m.foot_cache) : '-', 8) + ' ' +
+        padR(m.foot_nm    ? fmtB(m.foot_nm)    : '-', 9) + ' ' +
+        padR(m.foot_lock  ? fmtB(m.foot_lock)  : '-', 7)
       );
     }
   }
