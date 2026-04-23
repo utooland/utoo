@@ -24,6 +24,8 @@ tokio-retry  = "0.3"
 tracing      = { workspace = true }
 # HTTP client - works on both native and WASM
 reqwest      = { version = "0.12", default-features = false, features = [
+  "brotli",
+  "gzip",
   "http2",
   "json",
   "rustls-tls",
