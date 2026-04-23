@@ -14,6 +14,7 @@
 mod native {
     use std::collections::HashMap;
     use std::net::SocketAddr;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, LazyLock};
     use std::time::{Duration, Instant};
 
@@ -70,6 +71,12 @@ mod native {
         cache: Arc<Mutex<HashMap<String, CacheEntry>>>,
         inflight: Arc<Mutex<HashMap<String, Arc<InflightEntry>>>>,
         ttl: Duration,
+        /// Round-robin counter used to rotate the returned address order
+        /// on every `resolve` call. Spreads concurrent pool connections
+        /// across all DNS A records (e.g. antgroup registry returns 8
+        /// IPs) instead of pinning every new connection to the first IP
+        /// like reqwest does by default.
+        rr_counter: AtomicUsize,
     }
 
     impl CachingResolver {
@@ -79,8 +86,26 @@ mod native {
                 cache: Arc::new(Mutex::new(HashMap::new())),
                 inflight: Arc::new(Mutex::new(HashMap::new())),
                 ttl,
+                rr_counter: AtomicUsize::new(0),
             }
         }
+    }
+
+    /// Rotate `addrs` left by `offset` positions, producing a fresh Vec so
+    /// reqwest's connect loop tries a different IP on every new connection.
+    ///
+    /// e.g. `[A, B, C, D]` with offset 2 → `[C, D, A, B]`.
+    fn rotate_addrs(addrs: &[SocketAddr], offset: usize) -> Vec<SocketAddr> {
+        if addrs.is_empty() {
+            return Vec::new();
+        }
+        let n = addrs.len();
+        let start = offset % n;
+        addrs[start..]
+            .iter()
+            .chain(&addrs[..start])
+            .copied()
+            .collect()
     }
 
     /// Perform a system DNS lookup and cache the result.
@@ -132,10 +157,11 @@ mod native {
                 if let Some(entry) = cache.get(&hostname)
                     && entry.expires_at > Instant::now()
                 {
-                    let cached = entry.addrs.to_vec();
-                    return Box::pin(std::future::ready(
-                        Ok(Box::new(cached.into_iter()) as Addrs),
-                    ));
+                    let offset = self.rr_counter.fetch_add(1, Ordering::Relaxed);
+                    let rotated = rotate_addrs(&entry.addrs, offset);
+                    return Box::pin(std::future::ready(Ok(
+                        Box::new(rotated.into_iter()) as Addrs
+                    )));
                 }
             }
 
@@ -155,6 +181,7 @@ mod native {
             // Clone Arcs for the 'static async block (required by Resolve trait).
             let cache = Arc::clone(&self.cache);
             let inflight_map = Arc::clone(&self.inflight);
+            let offset = self.rr_counter.fetch_add(1, Ordering::Relaxed);
 
             Box::pin(async move {
                 let result = inflight
@@ -167,13 +194,8 @@ mod native {
                 inflight_map.lock().remove(&hostname);
 
                 let resolved = result?;
-
-                // resolved is a &Arc<Vec<SocketAddr>> borrowed from the OnceCell,
-                // but Addrs requires a 'static owned iterator.
-                // to_vec() + into_iter() creates an owned copy; iter().copied()
-                // would borrow from the local reference and fail lifetime checks.
-                #[allow(clippy::unnecessary_to_owned)]
-                let addrs: Addrs = Box::new(resolved.to_vec().into_iter());
+                let rotated = rotate_addrs(resolved.as_ref(), offset);
+                let addrs: Addrs = Box::new(rotated.into_iter());
                 Ok(addrs)
             })
         }
