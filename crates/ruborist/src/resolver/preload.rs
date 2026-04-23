@@ -14,8 +14,14 @@ use crate::resolver::registry::resolve_package;
 use crate::traits::progress::{BuildEvent, EventReceiver};
 use crate::traits::registry::RegistryClient;
 
-/// Default concurrency limit for manifest fetching
-pub const DEFAULT_CONCURRENCY: usize = 64;
+/// Default concurrency limit for manifest fetching.
+///
+/// Raised from 64 to 256 after pcap comparison against bun showed bun opens
+/// ~256 parallel TCP connections during a cold install (typically 4 IPs × 64
+/// conn each), while utoo's 64-cap kept us at roughly 1/4 the effective
+/// parallelism even after the DNS round-robin fix. Overridable via
+/// `--manifests-concurrency-limit`.
+pub const DEFAULT_CONCURRENCY: usize = 256;
 
 /// A dependency spec: (name, version_spec)
 pub type Dep = (String, String);
