@@ -82,14 +82,17 @@ use anyhow::{Context, Result, anyhow};
 
 /// Number of parallel reqwest clients fronting the registry.
 ///
-/// Each client keeps its own connection pool. Fanning requests across N
-/// clients means the aggregate in-flight TCP count can reach `N ×
-/// pool_max_idle_per_host` — matching bun's observed ~256 connection
-/// footprint on npmjs with just 64-wide resolver concurrency.
+/// Each client keeps its own connection pool. The real benefit of splitting
+/// across multiple clients isn't extra parallelism (the resolver is still
+/// 64-concurrent) — it's breaking the phase-lock where 64 synchronous
+/// responses leave 64 connections idle in lockstep. Two clients let one
+/// pool be mid-transfer while the other is in the handoff gap.
 ///
-/// 4 mirrors bun's empirical per-install IP-fanout on CI (pcap showed
-/// 4 "hot" Cloudflare edges serving 64 conn each).
-const HTTP_CLIENT_COUNT: usize = 4;
+/// 4 clients × 64 pre-warm handshakes was measurably slower in CI runs
+/// because the 256 concurrent TLS handshakes ate too much of the 4-core
+/// runner before resolve work started. 2 keeps the stagger benefit and
+/// halves the preheat startup cost.
+const HTTP_CLIENT_COUNT: usize = 2;
 
 /// Global pool of reqwest clients with connection pooling and DNS caching.
 ///
