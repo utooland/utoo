@@ -159,7 +159,17 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
         let mut builder = builder
             .use_preconfigured_tls(tls_config)
             .no_proxy()
-            .dns_resolver(shared_resolver());
+            .dns_resolver(shared_resolver())
+            // Force HTTP/1.1 with a hot connection pool. reqwest defaults
+            // to multiplexing over one HTTP/2 connection; HoL blocking on
+            // one slow response stalls all concurrent manifest fetches.
+            // An H1 pool lets concurrent fetches open independent TCP
+            // streams. Idle-timeout disabled + tcp_keepalive(30s) keeps
+            // hot conns alive across BFS waves so TLS isn't re-negotiated.
+            .http1_only()
+            .pool_max_idle_per_host(1024)
+            .pool_idle_timeout(None)
+            .tcp_keepalive(Some(std::time::Duration::from_secs(30)));
 
         match env_var("ALL_PROXY") {
             Some(url) => {
