@@ -4,7 +4,7 @@
 //! its transitive dependencies are immediately added to the queue.
 
 use std::collections::{HashSet, VecDeque};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use futures::stream::{FuturesUnordered, StreamExt};
 
@@ -92,12 +92,18 @@ where
 {
     let mut stats = PreloadStats::default();
     let mut processed: HashSet<String> = HashSet::new();
-    let mut pending: VecDeque<Dep> = initial_deps.into();
+    // Shared pending queue: each in-flight future extracts its own
+    // transitive deps on the blocking pool and pushes them here, so the
+    // main loop never does CPU-bound dep-graph walking between `await`
+    // points. pcap showed utoo's active-stream count oscillating
+    // 11..64 — those dips correspond to bursts of post-processing CPU
+    // on the single-task main loop; bun stays flat at 64.
+    let pending = Arc::new(Mutex::new(VecDeque::<Dep>::from(initial_deps)));
     let concurrency = config.concurrency;
 
     tracing::debug!(
         "Preload: {} initial deps, concurrency={}",
-        pending.len(),
+        pending.lock().unwrap().len(),
         concurrency
     );
 
@@ -109,9 +115,11 @@ where
         // Fill up to concurrency limit
         while in_flight < concurrency {
             let item = loop {
-                let Some((name, spec)) = pending.pop_front() else {
+                let mut queue = pending.lock().unwrap();
+                let Some((name, spec)) = queue.pop_front() else {
                     break None;
                 };
+                drop(queue);
                 let key = format!("{}@{}", name, spec);
                 if !processed.contains(&key) {
                     processed.insert(key);
@@ -132,10 +140,28 @@ where
 
             receiver.on_event(BuildEvent::PreloadFetching { name: &name });
 
+            let pending_for_task = Arc::clone(&pending);
+            let config_for_task = config.clone();
             futures.push(async move {
                 let start = tokio::time::Instant::now();
                 let result = resolve_package(registry, &name, &spec).await;
                 let elapsed_ms = start.elapsed().as_millis() as u64;
+
+                // Off the hot async path: extract the transitive dep list
+                // (iterates + clones strings for ~10 deps per manifest) on
+                // the blocking pool, so the single main task can keep
+                // dispatching new network requests without this CPU stall.
+                if let Ok(resolved) = &result {
+                    let manifest = Arc::clone(&resolved.manifest);
+                    let _ = tokio::task::spawn_blocking(move || {
+                        let deps = extract_transitive_deps(&manifest, &config_for_task);
+                        if let Ok(mut queue) = pending_for_task.lock() {
+                            queue.extend(deps);
+                        }
+                    })
+                    .await;
+                }
+
                 (name, result, elapsed_ms)
             });
             in_flight += 1;
@@ -173,7 +199,6 @@ where
                 // Send PackageResolved event for pipeline downloading
                 receiver.on_event(BuildEvent::PackageResolved((&*resolved.manifest).into()));
 
-                pending.extend(extract_transitive_deps(&resolved.manifest, &config));
                 on_manifest(&name, resolved.manifest);
             }
             Err(e) => {
