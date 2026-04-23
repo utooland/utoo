@@ -86,18 +86,32 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                         .and_then(|v| v.to_str().ok())
                         .map(|s| s.to_string());
 
-                    let raw_bytes = response
+                    let raw_bytes: Vec<u8> = response
                         .bytes()
                         .await
                         .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
-                        .to_vec();
+                        .into();
 
-                    // Save raw bytes before simd_json mutates the parse buffer
-                    let mut parse_buf = raw_bytes.clone();
-                    let mut manifest: FullManifest =
-                        simd_json::serde::from_slice(&mut parse_buf)
-                            .map_err(|e| FetchError::Permanent(anyhow!("JSON parse error: {e}")))?;
-                    manifest.raw = std::sync::Arc::from(raw_bytes);
+                    // Offload JSON parse to the blocking pool. Manifests are
+                    // 5–50KB and simd_json is CPU-bound (~1–5ms per call);
+                    // keeping this on the async main task serialises it with
+                    // every other manifest response across the ~3550
+                    // concurrent fetches, creating the dips we saw in the
+                    // active-stream pcap. spawn_blocking lets the main task
+                    // keep dispatching while the worker pool parses.
+                    let manifest = tokio::task::spawn_blocking(move || {
+                        // simd_json mutates the parse buffer in place
+                        // (in-place unicode unescaping etc.), so we keep a
+                        // separate copy for `manifest.raw`.
+                        let mut parse_buf = raw_bytes.clone();
+                        let mut m: FullManifest = simd_json::serde::from_slice(&mut parse_buf)
+                            .map_err(|e| anyhow!("JSON parse error: {e}"))?;
+                        m.raw = std::sync::Arc::from(raw_bytes);
+                        Ok::<_, anyhow::Error>(m)
+                    })
+                    .await
+                    .map_err(|e| FetchError::Permanent(anyhow!("Parse task panicked: {e}")))?
+                    .map_err(FetchError::Permanent)?;
 
                     Ok(FetchManifestResult::Ok(manifest, new_etag))
                 } else {
@@ -183,13 +197,19 @@ pub async fn fetch_version_manifest(
                     .map_err(classify_reqwest_error)?;
 
                 if response.status().is_success() {
-                    let mut bytes = response
+                    let bytes: Vec<u8> = response
                         .bytes()
                         .await
                         .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
-                        .to_vec();
-                    simd_json::serde::from_slice(&mut bytes)
-                        .map_err(|e| FetchError::Permanent(anyhow!("JSON parse error: {e}")))
+                        .into();
+                    tokio::task::spawn_blocking(move || {
+                        let mut buf = bytes;
+                        simd_json::serde::from_slice::<CoreVersionManifest>(&mut buf)
+                            .map_err(|e| anyhow!("JSON parse error: {e}"))
+                    })
+                    .await
+                    .map_err(|e| FetchError::Permanent(anyhow!("Parse task panicked: {e}")))?
+                    .map_err(FetchError::Permanent)
                 } else {
                     Err(classify_status(response.status(), &url))
                 }
