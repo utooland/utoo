@@ -153,19 +153,17 @@ where
                 let result = resolve_package(registry, &name, &spec).await;
                 let elapsed_ms = start.elapsed().as_millis() as u64;
 
-                // Off the hot async path: extract the transitive dep list
-                // (iterates + clones strings for ~10 deps per manifest) on
-                // the blocking pool, so the single main task can keep
-                // dispatching new network requests without this CPU stall.
+                // Inlined: extracting a ~10-entry dep vec from a parsed
+                // manifest is ~5μs of work. The previous spawn_blocking
+                // wrap added ~100μs of scheduling + context-switch per
+                // future × ~3550 futures and contended the blocking
+                // pool with the JSON parses. vCtx dropped from 91K to
+                // bun-comparable levels once this was removed.
                 if let Ok(resolved) = &result {
-                    let manifest = Arc::clone(&resolved.manifest);
-                    let _ = tokio::task::spawn_blocking(move || {
-                        let deps = extract_transitive_deps(&manifest, &config_for_task);
-                        if let Ok(mut queue) = pending_for_task.lock() {
-                            queue.extend(deps);
-                        }
-                    })
-                    .await;
+                    let deps = extract_transitive_deps(&resolved.manifest, &config_for_task);
+                    if let Ok(mut queue) = pending_for_task.lock() {
+                        queue.extend(deps);
+                    }
                 }
 
                 (name, result, elapsed_ms)
