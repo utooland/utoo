@@ -30,6 +30,22 @@ static BODY_US: LazyLock<Mutex<Vec<u32>>> = LazyLock::new(|| Mutex::new(Vec::new
 /// slice to compare against the pure-parse cost to reveal scheduler gap.
 static PARSE_US: LazyLock<Mutex<Vec<u32>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
+/// Per-resolve `FullManifest::get_core_version` latency (μs). Runs
+/// synchronously on the async task *after* the network fetch, so it
+/// competes for the same worker thread that should be polling the next
+/// in-flight request. Current implementation re-parses the entire raw
+/// manifest bytes (`simd_json::to_borrowed_value`) then does
+/// simd_json→serde_json→T conversion — we suspect this is the hidden CPU
+/// that explains the parallelism gap (effective 38 vs bun's 64).
+static CORE_VERSION_US: LazyLock<Mutex<Vec<u32>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+
+/// Record a `get_core_version` sample. Exposed via `pub(crate)` so
+/// `service::registry` can time the call without pulling the histogram
+/// machinery out of this module.
+pub(crate) fn record_core_version_us(us: u128) {
+    record_us(&CORE_VERSION_US, us);
+}
+
 fn record_us(slot: &Mutex<Vec<u32>>, us: u128) {
     if let Ok(mut v) = slot.lock() {
         v.push(us.min(u32::MAX as u128) as u32);
@@ -44,6 +60,7 @@ pub fn dump_fetch_histograms() {
         ("send", &*SEND_US),
         ("body", &*BODY_US),
         ("parse", &*PARSE_US),
+        ("core_version", &*CORE_VERSION_US),
     ] {
         let mut v = match slot.lock() {
             Ok(mut guard) => std::mem::take(&mut *guard),
