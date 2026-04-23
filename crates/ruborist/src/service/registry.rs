@@ -276,7 +276,7 @@ impl UnifiedRegistry {
 
                 let versions_info = VersionsInfo {
                     versions: Versions {
-                        version_list: manifest.versions.clone(),
+                        version_list: manifest.versions.keys.clone(),
                         dist_tags: manifest.dist_tags.clone(),
                     },
                     etag: new_etag.clone(),
@@ -311,7 +311,7 @@ impl UnifiedRegistry {
 
                     let versions_info = VersionsInfo {
                         versions: Versions {
-                            version_list: manifest.versions.clone(),
+                            version_list: manifest.versions.keys.clone(),
                             dist_tags: manifest.dist_tags.clone(),
                         },
                         etag: new_etag.clone(),
@@ -526,14 +526,13 @@ impl RegistryClient for UnifiedRegistry {
                 fetch_name,
                 fetch_spec
             );
-            let version_list: Vec<String> = full_manifest.versions.clone();
+            let version_list: Vec<String> = full_manifest.versions.keys.clone();
             let resolved_version =
                 resolve_target_version(&full_manifest.dist_tags, &version_list, &fetch_spec)
                     .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
             let cv_start = tokio::time::Instant::now();
             let version_manifest = full_manifest
                 .get_core_version(&resolved_version)
-                .map(Arc::new)
                 .ok_or_else(|| {
                     RegistryError(anyhow!(
                         "Version {} not found in manifest for {}",
@@ -630,7 +629,7 @@ impl RegistryClient for UnifiedRegistry {
             let resolve_result = match self.resolve_full_manifest(&fetch_name).await? {
                 FullManifestResult::Full(full_manifest) => {
                     // Got full manifest, resolve from it
-                    let version_list: Vec<String> = full_manifest.versions.clone();
+                    let version_list: Vec<String> = full_manifest.versions.keys.clone();
 
                     if version_list.is_empty() {
                         return Err(RegistryError(anyhow!(
@@ -649,7 +648,6 @@ impl RegistryClient for UnifiedRegistry {
                     let cv_start = tokio::time::Instant::now();
                     let version_manifest = full_manifest
                         .get_core_version(&resolved_version)
-                        .map(Arc::new)
                         .ok_or_else(|| {
                             RegistryError(anyhow!(
                                 "Version {} not found in manifest for {}",
