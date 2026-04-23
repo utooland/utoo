@@ -85,8 +85,8 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - name: Install hyperfine and GNU time
-        run: sudo apt-get update && sudo apt-get install -y hyperfine time
+      - name: Install hyperfine, GNU time, tcpdump and dnsutils
+        run: sudo apt-get update && sudo apt-get install -y hyperfine time tcpdump dnsutils
       - name: Verify tools
         run: |
           hyperfine --version
@@ -101,3 +101,19 @@ jobs:
         run: |
           chmod +x e2e/pm-bench-phases.sh
           bash e2e/pm-bench-phases.sh
+
+      - name: Capture pcap (resolve phase, single run per PM)
+        env:
+          PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
+          REGISTRY: ${{ github.event.inputs.registry || 'https://registry.npmjs.org' }}
+        run: |
+          chmod +x e2e/pm-bench-pcap.sh
+          bash e2e/pm-bench-pcap.sh
+
+      - name: Upload pcap artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pm-bench-pcap
+          path: /tmp/pm-bench-pcap
+          retention-days: 3
