@@ -530,6 +530,7 @@ impl RegistryClient for UnifiedRegistry {
             let resolved_version =
                 resolve_target_version(&full_manifest.dist_tags, &version_list, &fetch_spec)
                     .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
+            let cv_start = tokio::time::Instant::now();
             let version_manifest = full_manifest
                 .get_core_version(&resolved_version)
                 .map(Arc::new)
@@ -540,6 +541,7 @@ impl RegistryClient for UnifiedRegistry {
                         fetch_name
                     ))
                 })?;
+            super::manifest::record_core_version_us(cv_start.elapsed().as_micros());
             // Cache version_manifest for project cache export
             self.cache.set_version_manifest(
                 fetch_name.to_string(),
@@ -644,6 +646,7 @@ impl RegistryClient for UnifiedRegistry {
                     )
                     .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
 
+                    let cv_start = tokio::time::Instant::now();
                     let version_manifest = full_manifest
                         .get_core_version(&resolved_version)
                         .map(Arc::new)
@@ -654,6 +657,7 @@ impl RegistryClient for UnifiedRegistry {
                                 fetch_name
                             ))
                         })?;
+                    super::manifest::record_core_version_us(cv_start.elapsed().as_micros());
 
                     (resolved_version, version_manifest)
                 }
