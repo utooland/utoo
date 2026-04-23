@@ -144,6 +144,14 @@ EOF
   # `utoo clean` / `bun pm cache rm` didn't actually empty the cache on the CI
   # runner, leading to cache-hit runs masquerading as cold installs.
   case "$phase" in
+    p0_*)
+      # Phase 0: full cold install — nothing reused. Lockfile + all caches wiped.
+      cat >> "$path" <<EOF
+rm -f package-lock.json bun.lock yarn.lock pnpm-lock.yaml
+rm -rf "$UTOO_CACHE" "$BUN_CACHE"
+echo "[prep] phase 0 $pm: full cold (lockfile + caches + node_modules wiped)"
+EOF
+      ;;
     p1_*)
       # Phase 1: cold resolve — wipe lockfiles AND caches so nothing can be reused.
       cat >> "$path" <<EOF
@@ -273,6 +281,14 @@ run_phase() {
   capture_footprint "$phase" "$pm" "$RESULTS_DIR/${PROJECT}_${phase}_${pm}_footprint.json"
 }
 
+# === PHASE 0: full cold install (clean slate + full install) ===
+# Matches the end-to-end user scenario: no lockfile, no cache, no node_modules.
+# Directly comparable to `bun install` / `utoo install` on a freshly cloned repo.
+banner "Phase 0 · full cold install (lockfile + cache + node_modules all wiped)"
+for pm in "${PACKAGE_MANAGERS[@]}"; do
+  run_phase "p0_full_cold" "$pm" "$(install_cmd "$pm")"
+done
+
 # === PHASE 1: resolve only (clean slate) ===
 banner "Phase 1 · resolve (lockfile only, cold cache)"
 for pm in "${PACKAGE_MANAGERS[@]}"; do
@@ -296,7 +312,7 @@ banner "Summary"
 RESULTS_DIR="$RESULTS_DIR" node -e "
   const fs = require('fs'), path = require('path');
   const dir = process.env.RESULTS_DIR;
-  const order = ['p1_resolve', 'p3_cold_install', 'p4_warm_link'];
+  const order = ['p0_full_cold', 'p1_resolve', 'p3_cold_install', 'p4_warm_link'];
   const timing = {};    // phase -> pm -> {mean,stddev,min,max}
   const metrics = {};   // phase -> pm -> averaged resource fields
 
