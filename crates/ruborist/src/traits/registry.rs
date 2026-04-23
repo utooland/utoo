@@ -133,6 +133,17 @@ pub trait RegistryClient {
         false
     }
 
+    /// Warm the HTTP connection pools by firing `per_client` parallel HEAD
+    /// requests against this registry from *each* client. Matches bun's
+    /// pre-install network pattern (pcap shows bun opening ~256 SYNs up
+    /// front, distributed across multiple connection pools).
+    ///
+    /// Default: no-op. Clients backed by a shared multi-pool HTTP stack
+    /// override this to actually open connections.
+    fn preheat(&self, _per_client: usize) -> impl Future<Output = ()> + Send {
+        async {}
+    }
+
     /// Fetch full package manifest from registry.
     ///
     /// Returns the complete package manifest with all versions.

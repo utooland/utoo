@@ -381,6 +381,10 @@ impl RegistryClient for UnifiedRegistry {
         self.supports_semver
     }
 
+    async fn preheat(&self, per_client: usize) {
+        super::http::preheat(&self.registry_url, per_client).await;
+    }
+
     fn get_cached_full_manifest(&self, name: &str) -> Option<FullManifest> {
         self.cache.get_full_manifest(name)
     }
