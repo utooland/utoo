@@ -10,7 +10,7 @@ use tokio_retry::RetryIf;
 use super::fetch::{
     FetchError, classify_reqwest_error, classify_status, is_retryable, retry_strategy,
 };
-use super::http::get_client;
+use super::http::pick_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 
 /// Result of a full manifest fetch with ETag support.
@@ -60,7 +60,7 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
             let url = url.clone();
             let etag = etag_owned.clone();
             async move {
-                let mut request = get_client()
+                let mut request = pick_client()
                     .map_err(FetchError::Permanent)?
                     .get(&url)
                     .header("Accept", accept);
@@ -188,7 +188,7 @@ pub async fn fetch_version_manifest(
         || {
             let url = url.clone();
             async move {
-                let response = get_client()
+                let response = pick_client()
                     .map_err(FetchError::Permanent)?
                     .get(&url)
                     .header("Accept", accept)

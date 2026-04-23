@@ -76,21 +76,70 @@
 //! WASM targets skip DNS entirely (browser handles it).
 
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result, anyhow};
 
-/// Global HTTP client with connection pooling and DNS caching.
+/// Number of parallel reqwest clients fronting the registry.
 ///
-/// Stores `Result<Client, String>` so that proxy-configuration errors are
+/// Each client keeps its own connection pool. Fanning requests across N
+/// clients means the aggregate in-flight TCP count can reach `N ×
+/// pool_max_idle_per_host` — matching bun's observed ~256 connection
+/// footprint on npmjs with just 64-wide resolver concurrency.
+///
+/// 4 mirrors bun's empirical per-install IP-fanout on CI (pcap showed
+/// 4 "hot" Cloudflare edges serving 64 conn each).
+const HTTP_CLIENT_COUNT: usize = 4;
+
+/// Global pool of reqwest clients with connection pooling and DNS caching.
+///
+/// Stores `Result<Vec<Client>, String>` so proxy-configuration errors are
 /// surfaced to callers instead of panicking or calling `process::exit`.
-static HTTP_CLIENT: LazyLock<Result<reqwest::Client, String>> = LazyLock::new(|| {
-    client_builder()
-        .and_then(|b| b.build().context("Failed to build reqwest client"))
+static HTTP_CLIENTS: LazyLock<Result<Vec<reqwest::Client>, String>> = LazyLock::new(|| {
+    (0..HTTP_CLIENT_COUNT)
+        .map(|_| client_builder().and_then(|b| b.build().context("Failed to build reqwest client")))
+        .collect::<Result<Vec<_>>>()
         .map_err(|e| e.to_string())
 });
 
-pub(crate) fn get_client() -> Result<&'static reqwest::Client> {
-    HTTP_CLIENT.as_ref().map_err(|e| anyhow!("{e}"))
+/// Round-robin cursor for `pick_client()`.
+static CLIENT_RR: AtomicUsize = AtomicUsize::new(0);
+
+/// Hand out one of the global clients, cycling through them in round-robin
+/// order. Each call advances the cursor by 1 so consecutive manifest
+/// fetches land on different pools, spreading TCP connections across all
+/// `HTTP_CLIENT_COUNT` clients.
+pub(crate) fn pick_client() -> Result<&'static reqwest::Client> {
+    let clients = HTTP_CLIENTS.as_ref().map_err(|e| anyhow!("{e}"))?;
+    let idx = CLIENT_RR.fetch_add(1, Ordering::Relaxed) % clients.len();
+    Ok(&clients[idx])
+}
+
+/// Warm every client's connection pool by firing `per_client` parallel HEAD
+/// requests at `url` from **each** client concurrently.
+///
+/// Why multi-client matters: a single reqwest Client dedupes via its pool,
+/// so 256 concurrent HEADs on one client all race into the same pool — the
+/// first ~64 open TCPs, the rest reuse as soon as the first responses land.
+/// 4 isolated clients × 64 HEADs each force 4 × 64 = 256 truly parallel
+/// TCP connects, because the pools don't share state.
+///
+/// Errors are intentionally swallowed: a failed HEAD simply leaves that
+/// slot "cold" — functionally equivalent to no preheat for that slot.
+pub async fn preheat(url: &str, per_client: usize) {
+    use futures::future::join_all;
+
+    let Ok(clients) = HTTP_CLIENTS.as_ref() else {
+        return;
+    };
+
+    let tasks = clients
+        .iter()
+        .flat_map(|client| (0..per_client).map(move |_| client.head(url).send()))
+        .map(|fut| async move {
+            let _ = fut.await;
+        });
+    join_all(tasks).await;
 }
 
 /// Create a [`reqwest::ClientBuilder`] with TLS, DNS caching, and proxy
