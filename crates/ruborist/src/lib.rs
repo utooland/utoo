@@ -101,6 +101,4 @@ pub mod http {
 }
 
 /// Utility functions.
-pub mod util {
-    pub use crate::model::util::{PackageNameStr, parse_package_spec, read_package_json};
-}
+pub mod util;

@@ -11010,6 +11010,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "dashmap 6.1.0",
  "deno_semver",
  "dirs 5.0.1",
  "futures",
