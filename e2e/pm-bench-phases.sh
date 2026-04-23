@@ -31,27 +31,47 @@ banner() { echo -e "${YELLOW}=== $* ===${NC}"; }
 # --- metrics wrapper ---
 # Wraps each benchmark iteration to capture:
 #   - CPU / memory via /usr/bin/time -v (user/sys, RSS, ctx, page faults)
-#   - Network via /proc/net/dev delta (system-wide RX/TX bytes)
-#   - Disk via /proc/vmstat pgpgin/pgpgout delta (pages in/out to block dev)
-# All bench runners are dedicated CI machines, so system-wide deltas
-# effectively reflect the benchmarked process.
+#   - Network via /proc/net/dev delta (system-wide, CI is dedicated → ≈ process)
+#   - File-space growth in the paths we actually care about (cache, node_modules,
+#     lockfile). `du` after - before gives net bytes written to those paths,
+#     isolating the PM's work from system-wide kernel flush noise. /proc/vmstat
+#     pgpg* is intentionally NOT used: it counted ~500MB of journal / page-cache
+#     flush that had nothing to do with the benchmarked process.
 METRICS_WRAPPER="$RESULTS_DIR/metrics_wrapper.sh"
 cat > "$METRICS_WRAPPER" <<'METRICS_EOF'
 #!/bin/bash
 METRICS_FILE="$1"; shift
 TIME_TMP=$(mktemp)
 
-# --- snapshot network + disk counters BEFORE the command ---
+# Tracked paths (all optional — missing ones contribute 0).
+UTOO_CACHE="${UTOO_CACHE:-/tmp/utoo-bench-cache}"
+BUN_CACHE="${BUN_CACHE:-/tmp/bun-bench-cache}"
+PROJECT_DIR="${PROJECT_DIR:-$PWD}"
+
+du_bytes() {
+  # du -sb is GNU-only (bytes); fall back to -sk * 1024 on macOS.
+  for p in "$@"; do
+    if [ -e "$p" ]; then
+      if [[ "$(uname)" == "Darwin" ]]; then
+        du -sk "$p" 2>/dev/null | awk '{print $1 * 1024}'
+      else
+        du -sb "$p" 2>/dev/null | awk '{print $1}'
+      fi
+    else
+      echo 0
+    fi
+  done | awk '{s += $1} END {print s+0}'
+}
+
+# --- snapshot network counters + disk usage BEFORE the command ---
 snap_net_rx=0; snap_net_tx=0
 if [ -r /proc/net/dev ]; then
-  # Skip loopback; sum across remaining interfaces for RX bytes (col 2) and TX bytes (col 10).
   read snap_net_rx snap_net_tx < <(awk '/:/ && $1 !~ /^lo:/ {rx += $2; tx += $10} END {print rx+0, tx+0}' /proc/net/dev)
 fi
-snap_pgpgin=0; snap_pgpgout=0
-if [ -r /proc/vmstat ]; then
-  snap_pgpgin=$(awk '/^pgpgin /  {print $2}' /proc/vmstat)
-  snap_pgpgout=$(awk '/^pgpgout / {print $2}' /proc/vmstat)
-fi
+snap_cache_utoo=$(du_bytes "$UTOO_CACHE")
+snap_cache_bun=$(du_bytes  "$BUN_CACHE")
+snap_nm=$(du_bytes "$PROJECT_DIR/node_modules")
+snap_lock=$(du_bytes "$PROJECT_DIR/package-lock.json" "$PROJECT_DIR/bun.lock")
 
 if [[ "$(uname)" == "Darwin" ]]; then
   /usr/bin/time -l "$@" 2>"$TIME_TMP"
@@ -72,30 +92,27 @@ else
   PG_MINOR=$(awk '/Minor \(reclaiming a frame\) page faults/ {print $NF}' "$TIME_TMP")
   VOL_CTX=$(awk '/Voluntary context switches/ {print $NF}' "$TIME_TMP")
   INVOL_CTX=$(awk '/Involuntary context switches/ {print $NF}' "$TIME_TMP")
-  # GNU time prints user/sys as "X.YZ", extract with awk.
   USER_S=$(awk -F': ' '/User time \(seconds\)/ {print $2}' "$TIME_TMP")
   SYS_S=$(awk -F': ' '/System time \(seconds\)/  {print $2}' "$TIME_TMP")
 fi
 
-# --- snapshot network + disk counters AFTER the command, compute deltas ---
+# --- snapshot network + disk usage AFTER ---
 net_rx=0; net_tx=0
 if [ -r /proc/net/dev ]; then
   read cur_net_rx cur_net_tx < <(awk '/:/ && $1 !~ /^lo:/ {rx += $2; tx += $10} END {print rx+0, tx+0}' /proc/net/dev)
   net_rx=$(( cur_net_rx - snap_net_rx ))
   net_tx=$(( cur_net_tx - snap_net_tx ))
 fi
-disk_pg_in=0; disk_pg_out=0
-if [ -r /proc/vmstat ]; then
-  cur_pgpgin=$(awk '/^pgpgin /  {print $2}' /proc/vmstat)
-  cur_pgpgout=$(awk '/^pgpgout / {print $2}' /proc/vmstat)
-  disk_pg_in=$((  cur_pgpgin  - snap_pgpgin  ))
-  disk_pg_out=$(( cur_pgpgout - snap_pgpgout ))
-fi
+delta_cache_utoo=$(( $(du_bytes "$UTOO_CACHE") - snap_cache_utoo ))
+delta_cache_bun=$((  $(du_bytes "$BUN_CACHE")  - snap_cache_bun ))
+delta_nm=$((   $(du_bytes "$PROJECT_DIR/node_modules") - snap_nm ))
+delta_lock=$(( $(du_bytes "$PROJECT_DIR/package-lock.json" "$PROJECT_DIR/bun.lock") - snap_lock ))
 
-printf '{"rss":%d,"user_s":%s,"sys_s":%s,"page_major":%d,"page_minor":%d,"vol_ctx":%d,"invol_ctx":%d,"net_rx":%d,"net_tx":%d,"disk_pg_in":%d,"disk_pg_out":%d}\n' \
+printf '{"rss":%d,"user_s":%s,"sys_s":%s,"page_major":%d,"page_minor":%d,"vol_ctx":%d,"invol_ctx":%d,"net_rx":%d,"net_tx":%d,"cache_utoo_delta":%d,"cache_bun_delta":%d,"nm_delta":%d,"lock_delta":%d}\n' \
   "${RSS:-0}" "${USER_S:-0}" "${SYS_S:-0}" "${PG_MAJOR:-0}" "${PG_MINOR:-0}" \
   "${VOL_CTX:-0}" "${INVOL_CTX:-0}" \
-  "${net_rx:-0}" "${net_tx:-0}" "${disk_pg_in:-0}" "${disk_pg_out:-0}" >> "$METRICS_FILE"
+  "${net_rx:-0}" "${net_tx:-0}" \
+  "${delta_cache_utoo:-0}" "${delta_cache_bun:-0}" "${delta_nm:-0}" "${delta_lock:-0}" >> "$METRICS_FILE"
 rm -f "$TIME_TMP"
 exit $EXIT_CODE
 METRICS_EOF
@@ -240,10 +257,12 @@ run_phase() {
   write_prepare "$prep_script" "$phase" "$pm"
 
   # Reset metrics file; wrap the bench command so /usr/bin/time can measure it.
+  # The wrapper reads PROJECT_DIR / UTOO_CACHE / BUN_CACHE from env to scope du.
   : > "$metrics"
   printf 'set -eo pipefail\ncd %s\n%s\n' "$PROJECT_DIR" "$cmd" > "$cmd_script"
 
   echo -e "  ${CYAN}$pm${NC} · $phase"
+  export PROJECT_DIR UTOO_CACHE BUN_CACHE
   if ! hyperfine \
     --runs "$RUNS" \
     --prepare "bash $prep_script" \
@@ -302,7 +321,7 @@ RESULTS_DIR="$RESULTS_DIR" node -e "
     (timing[key.phase] ??= {})[key.pm] = { mean: r.mean, stddev: r.stddev, min: r.min, max: r.max };
   }
 
-  const metricKeys = ['rss','user_s','sys_s','page_major','page_minor','vol_ctx','invol_ctx','net_rx','net_tx','disk_pg_in','disk_pg_out'];
+  const metricKeys = ['rss','user_s','sys_s','page_major','page_minor','vol_ctx','invol_ctx','net_rx','net_tx','cache_utoo_delta','cache_bun_delta','nm_delta','lock_delta'];
   for (const f of fs.readdirSync(dir).filter(x => x.endsWith('_metrics.jsonl'))) {
     const key = parseKey(f, '_metrics.jsonl');
     if (!key) continue;
@@ -322,7 +341,6 @@ RESULTS_DIR="$RESULTS_DIR" node -e "
   const padR = (s, n) => String(s).padStart(n);
   const fmtB = b => b >= 1<<30 ? (b/(1<<30)).toFixed(2)+'G' : b >= 1<<20 ? (b/(1<<20)).toFixed(0)+'M' : b >= 1<<10 ? (b/(1<<10)).toFixed(0)+'K' : Math.round(b)+'B';
   const fmtN = n => n >= 1e6 ? (n/1e6).toFixed(2)+'M' : n >= 1e3 ? (n/1e3).toFixed(1)+'K' : String(Math.round(n));
-  const PAGE_BYTES = 4096;  // Linux x86_64 / arm64 default.
 
   for (const phase of order) {
     const tp = timing[phase] || {}, mp = metrics[phase] || {};
@@ -346,18 +364,20 @@ RESULTS_DIR="$RESULTS_DIR" node -e "
       );
     }
 
-    // Table B: context switches + network + disk
-    console.log(pad('PM', 6) + ' ' + padR('vCtx', 8) + ' ' + padR('iCtx', 8) + '   ' + padR('net RX', 8) + ' ' + padR('net TX', 8) + '   ' + padR('disk R', 8) + ' ' + padR('disk W', 8));
+    // Table B: context switches + network + per-path disk deltas
+    console.log(pad('PM', 6) + ' ' + padR('vCtx', 8) + ' ' + padR('iCtx', 8) + '   ' + padR('net RX', 8) + ' ' + padR('net TX', 8) + '   ' + padR('Δcache', 8) + ' ' + padR('Δnode_mod', 10) + ' ' + padR('Δlock', 7));
     for (const pm of pms) {
       const m = mp[pm] || {};
+      const cacheDelta = (m.cache_utoo_delta || 0) + (m.cache_bun_delta || 0);
       console.log(
         pad(pm, 6) + ' ' +
         padR(m.vol_ctx   ? fmtN(m.vol_ctx)   : '-', 8) + ' ' +
         padR(m.invol_ctx ? fmtN(m.invol_ctx) : '-', 8) + '   ' +
         padR(m.net_rx    ? fmtB(m.net_rx)    : '-', 8) + ' ' +
         padR(m.net_tx    ? fmtB(m.net_tx)    : '-', 8) + '   ' +
-        padR(m.disk_pg_in  ? fmtB(m.disk_pg_in  * PAGE_BYTES) : '-', 8) + ' ' +
-        padR(m.disk_pg_out ? fmtB(m.disk_pg_out * PAGE_BYTES) : '-', 8)
+        padR(cacheDelta  ? fmtB(cacheDelta)  : '-', 8) + ' ' +
+        padR(m.nm_delta  ? fmtB(m.nm_delta)  : '-', 10) + ' ' +
+        padR(m.lock_delta ? fmtB(m.lock_delta) : '-', 7)
       );
     }
   }
