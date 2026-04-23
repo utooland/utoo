@@ -68,6 +68,11 @@ pub struct UnifiedRegistry {
     registry_url: String,
     cache: Arc<PackageCache>,
     supports_semver: bool,
+    /// Per-name single-flight gate. The outer mutex guards the map; each
+    /// entry is a per-name mutex that serializes concurrent fetches for the
+    /// same package so only the first caller hits the network.
+    inflight:
+        Arc<tokio::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
 }
 
 /// Builder for `UnifiedRegistry`.
@@ -137,6 +142,7 @@ impl UnifiedRegistryBuilder {
             registry_url,
             cache,
             supports_semver,
+            inflight: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         }
     }
 }
@@ -153,6 +159,7 @@ impl Clone for UnifiedRegistry {
             registry_url: self.registry_url.clone(),
             cache: Arc::clone(&self.cache),
             supports_semver: self.supports_semver,
+            inflight: Arc::clone(&self.inflight),
         }
     }
 }
@@ -202,9 +209,26 @@ impl UnifiedRegistry {
     /// 4. On 304: use disk cache data
     /// 5. On 200: update memory + disk cache
     async fn resolve_full_manifest(&self, name: &str) -> Result<FullManifestResult, RegistryError> {
-        // 1. Check memory cache first
+        // 1. Check memory cache first (fast path — no lock).
         if let Some(manifest) = self.cache.get_full_manifest(name) {
             tracing::debug!("Memory cache hit for full manifest: {}", name);
+            return Ok(FullManifestResult::Full(manifest));
+        }
+
+        // 1b. Single-flight gate: serialize concurrent fetches for the same
+        // package name so only the first caller hits the network. Others
+        // wait on the per-name mutex, then re-check the memory cache on the
+        // other side — by construction the first caller has populated it.
+        let gate = {
+            let mut map = self.inflight.lock().await;
+            map.entry(name.to_string())
+                .or_insert_with(|| std::sync::Arc::new(tokio::sync::Mutex::new(())))
+                .clone()
+        };
+        let _guard = gate.lock().await;
+
+        // Re-check memory cache after acquiring the gate.
+        if let Some(manifest) = self.cache.get_full_manifest(name) {
             return Ok(FullManifestResult::Full(manifest));
         }
 
