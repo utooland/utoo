@@ -364,32 +364,47 @@ pub struct VersionManifest {
 /// and lockfile serialization. Display-only fields (description, author, homepage,
 /// keywords, bugs, repository, npm_user, etc.) are omitted.
 ///
-/// `skip_on_error` wrappers were dropped from fields that are either
-/// (a) typed as `Option<Value>` — where `Value` absorbs any JSON so the
-/// wrapper was pure Value-round-trip overhead, or (b) typed as
-/// `Option<HashMap<String, String>>` dependency maps which npm writes
-/// in a well-defined shape. `license` keeps `skip_on_error` because
-/// legacy packages sometimes publish it as an array-of-object rather
-/// than a string (see `test_license_array_does_not_break_parsing`).
-/// This cut ~30 % off per-version parse on `Versions::deserialize`,
-/// which is on the blocking pool's critical path at cap=128.
+/// `skip_on_error` is kept on every field that's typed as `HashMap`,
+/// `String`, or `bool` — real registry data regularly ships values
+/// that don't match the expected shape (e.g. `engines` with a null
+/// value, `hasInstallScript` as a string, legacy `license` as an
+/// array-of-object). Dropping the wrapper on those fields broke the
+/// lodash fetch at `"ExpectedMap at character 0"` in CI.
+///
+/// The three `Option<Value>` fields (`bin`, `os`, `cpu`) are the only
+/// safe cases: `Value` absorbs any JSON, so the `Value::deserialize`
+/// round-trip in `skip_on_error` provides zero robustness. Dropping
+/// it there saves one allocation + recursive walk per occurrence
+/// without correctness risk.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CoreVersionManifest {
     pub name: String,
     pub version: String,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub dependencies: Option<HashMap<String, String>>,
 
-    #[serde(rename = "devDependencies", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "devDependencies")]
+    #[serde(
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub dev_dependencies: Option<HashMap<String, String>>,
 
-    #[serde(rename = "peerDependencies", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "peerDependencies")]
+    #[serde(
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub peer_dependencies: Option<HashMap<String, String>>,
 
+    #[serde(rename = "optionalDependencies")]
     #[serde(
-        rename = "optionalDependencies",
+        deserialize_with = "skip_on_error",
         skip_serializing_if = "Option::is_none"
     )]
     pub optional_dependencies: Option<HashMap<String, String>>,
@@ -399,7 +414,10 @@ pub struct CoreVersionManifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bin: Option<Value>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub engines: Option<HashMap<String, String>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -408,10 +426,17 @@ pub struct CoreVersionManifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cpu: Option<Value>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub scripts: Option<HashMap<String, String>>,
 
-    #[serde(rename = "hasInstallScript", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "hasInstallScript")]
+    #[serde(
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub has_install_script: Option<bool>,
 
     #[serde(
