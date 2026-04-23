@@ -12,7 +12,6 @@ pub mod integrity;
 pub mod json;
 pub mod linker;
 pub mod logger;
-pub mod oncemap;
 pub mod platform_const;
 pub mod registry;
 pub mod retry;

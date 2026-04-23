@@ -772,19 +772,6 @@ pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
         config.skip_preload
     );
 
-    // Phase 0: Warm both connection pools. With 2 clients, `per_client` =
-    // `concurrency / 2` opens `concurrency` total warm TCPs — same
-    // working-set size as a single burst, but split across two isolated
-    // pools so the resolver alternates pools and breaks the phase-lock
-    // pattern that kept active-stream count oscillating in pcap.
-    let preheat_start = tokio::time::Instant::now();
-    registry.preheat(config.concurrency / 2).await;
-    tracing::debug!(
-        "Connection preheat ({} per client): {:?}",
-        config.concurrency / 2,
-        preheat_start.elapsed()
-    );
-
     // Phase 1: Preload manifests in parallel (unless skipped)
     run_preload_phase(graph, registry, &config, receiver).await;
 

@@ -44,6 +44,8 @@ use crate::model::manifest::{CoreVersionManifest, FullManifest};
 use crate::resolver::semver::normalize_spec;
 use crate::resolver::version::resolve_target_version;
 use crate::traits::registry::{RegistryClient, RegistryError, ResolvedPackage, is_npm_registry};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::util::oncemap::OnceMap;
 
 /// Unified registry client that works on both native and WASM.
 ///
@@ -68,11 +70,14 @@ pub struct UnifiedRegistry {
     registry_url: String,
     cache: Arc<PackageCache>,
     supports_semver: bool,
-    /// Per-name single-flight gate. The outer mutex guards the map; each
-    /// entry is a per-name mutex that serializes concurrent fetches for the
-    /// same package so only the first caller hits the network.
-    inflight:
-        Arc<tokio::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
+    /// Dedupes concurrent `resolve_full_manifest` fetches for the same
+    /// package name. First caller hits the network and stores the result;
+    /// other callers wait on `Notify` and read the shared `Arc`. Built on
+    /// `DashMap` + `tokio::sync::Notify` so the fast path (cache hit) is
+    /// lock-free, avoiding the serialisation the previous per-name
+    /// `tokio::sync::Mutex<()>` gate imposed on the hot dispatch path.
+    #[cfg(not(target_arch = "wasm32"))]
+    inflight: Arc<OnceMap<String, FullManifestResult>>,
 }
 
 /// Builder for `UnifiedRegistry`.
@@ -142,7 +147,8 @@ impl UnifiedRegistryBuilder {
             registry_url,
             cache,
             supports_semver,
-            inflight: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            #[cfg(not(target_arch = "wasm32"))]
+            inflight: Arc::new(OnceMap::new()),
         }
     }
 }
@@ -159,6 +165,7 @@ impl Clone for UnifiedRegistry {
             registry_url: self.registry_url.clone(),
             cache: Arc::clone(&self.cache),
             supports_semver: self.supports_semver,
+            #[cfg(not(target_arch = "wasm32"))]
             inflight: Arc::clone(&self.inflight),
         }
     }
@@ -169,7 +176,13 @@ impl Clone for UnifiedRegistry {
 /// Separates the 200 (full data) and 304 (use cache) cases at the type level,
 /// so callers can pattern-match instead of string-matching error messages.
 /// Transient return value, immediately destructured — Box not needed.
+///
+/// `Clone` is required so multiple `resolve_full_manifest` callers that
+/// coalesce through `OnceMap` can each take an owned copy of the shared
+/// `Arc<FullManifestResult>`. `FullManifest` clones cheaply via
+/// `Arc<[u8]>` for its raw bytes, and the other fields are small.
 #[allow(clippy::large_enum_variant)]
+#[derive(Clone)]
 enum FullManifestResult {
     /// Fresh manifest fetched from the network (HTTP 200).
     Full(FullManifest),
@@ -209,29 +222,40 @@ impl UnifiedRegistry {
     /// 4. On 304: use disk cache data
     /// 5. On 200: update memory + disk cache
     async fn resolve_full_manifest(&self, name: &str) -> Result<FullManifestResult, RegistryError> {
-        // 1. Check memory cache first (fast path — no lock).
+        // Fast path: memory cache hit — lock-free read from parking_lot::RwLock.
         if let Some(manifest) = self.cache.get_full_manifest(name) {
             tracing::debug!("Memory cache hit for full manifest: {}", name);
             return Ok(FullManifestResult::Full(manifest));
         }
 
-        // 1b. Single-flight gate: serialize concurrent fetches for the same
-        // package name so only the first caller hits the network. Others
-        // wait on the per-name mutex, then re-check the memory cache on the
-        // other side — by construction the first caller has populated it.
-        let gate = {
-            let mut map = self.inflight.lock().await;
-            map.entry(name.to_string())
-                .or_insert_with(|| std::sync::Arc::new(tokio::sync::Mutex::new(())))
-                .clone()
-        };
-        let _guard = gate.lock().await;
+        // Coalesce concurrent callers for the same name via OnceMap.
+        // First caller runs the fetch closure; others await the shared
+        // result on the OnceMap's `Notify` and clone the cached value.
+        let shared = self
+            .inflight
+            .get_or_init(name.to_string(), || async {
+                self.fetch_full_manifest_network(name).await.ok()
+            })
+            .await;
 
-        // Re-check memory cache after acquiring the gate.
-        if let Some(manifest) = self.cache.get_full_manifest(name) {
-            return Ok(FullManifestResult::Full(manifest));
+        match shared {
+            Some(arc) => Ok((*arc).clone()),
+            None => {
+                // OnceMap clears the key on None, so the next caller
+                // retries the fetch. Retry once here with a fresh error
+                // so we surface a useful message to this caller.
+                self.fetch_full_manifest_network(name).await
+            }
         }
+    }
 
+    /// Perform the actual network fetch + cache update. Separated from
+    /// `resolve_full_manifest` so the OnceMap closure can invoke it
+    /// without re-entering the dedup layer.
+    async fn fetch_full_manifest_network(
+        &self,
+        name: &str,
+    ) -> Result<FullManifestResult, RegistryError> {
         // 2. Load etag from disk cache (if available)
         let disk_versions = self.cache.get_versions_from_disk(name).await;
         let etag = disk_versions.as_ref().and_then(|v| v.etag.clone());
@@ -247,11 +271,9 @@ impl UnifiedRegistry {
         .map_err(RegistryError)?
         {
             manifest::FetchManifestResult::Ok(manifest, new_etag) => {
-                // 4. Cache full manifest in memory
                 self.cache
                     .set_full_manifest(name.to_string(), manifest.clone());
 
-                // 5. Extract and cache versions info (lightweight)
                 let versions_info = VersionsInfo {
                     versions: Versions {
                         version_list: manifest.versions.clone(),
@@ -262,26 +284,20 @@ impl UnifiedRegistry {
                 };
                 self.cache
                     .set_versions(name.to_string(), versions_info.clone());
-
-                // 6. Fire-and-forget disk cache write — no `.await` so the
-                // resolve future returns immediately while tokio::spawn
-                // handles serialisation + FS on a background task.
+                // Fire-and-forget disk cache write.
                 self.cache.set_versions_to_disk(name, &versions_info);
 
                 Ok(FullManifestResult::Full(manifest))
             }
             manifest::FetchManifestResult::NotModified => {
-                // 304 Not Modified - use disk cache versions info
                 tracing::debug!("ETag cache hit (304) for: {}", name);
 
                 if let Some(versions_info) = disk_versions {
-                    // Cache versions in memory for later use
                     self.cache
                         .set_versions(name.to_string(), versions_info.clone());
-
                     Ok(FullManifestResult::NotModified)
                 } else {
-                    // Disk cache corrupted, fetch fresh (without etag)
+                    // Disk cache corrupted, fetch fresh (without etag).
                     let (manifest, new_etag) = manifest::fetch_full_manifest_fresh(
                         &self.registry_url,
                         name,
@@ -379,10 +395,6 @@ impl RegistryClient for UnifiedRegistry {
 
     fn supports_semver_resolution(&self) -> bool {
         self.supports_semver
-    }
-
-    async fn preheat(&self, per_client: usize) {
-        super::http::preheat(&self.registry_url, per_client).await;
     }
 
     fn get_cached_full_manifest(&self, name: &str) -> Option<FullManifest> {
