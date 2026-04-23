@@ -97,6 +97,12 @@ where
     // serial CPU cost for stats + event emission + callback + refill-loop
     // + next iteration setup. Printed as a histogram at shutdown.
     let mut proc_us: Vec<u32> = Vec::new();
+    // Snapshot of `in_flight` sampled *after* each refill attempt (i.e.
+    // after we've tried to backfill to the concurrency cap) but *before*
+    // the `futures.next().await` on the next completion. This is the
+    // steady-state saturation level — we want it pinned at `concurrency`
+    // during the body of the phase and only tapering at start/end.
+    let mut in_flight_samples: Vec<u32> = Vec::new();
     let mut processed: HashSet<String> = HashSet::new();
     // Shared pending queue: each in-flight future extracts its own
     // transitive deps on the blocking pool and pushes them here, so the
@@ -175,6 +181,8 @@ where
             break;
         }
 
+        in_flight_samples.push(in_flight as u32);
+
         let Some((name, result, elapsed_ms)) = futures.next().await else {
             break;
         };
@@ -237,6 +245,31 @@ where
             pct(1.0),
             sum,
             sum / v.len() as u64
+        );
+    }
+
+    if !in_flight_samples.is_empty() {
+        let mut v = in_flight_samples.clone();
+        v.sort_unstable();
+        let pct = |p: f64| -> u32 {
+            let idx = ((p * v.len() as f64) as usize).min(v.len() - 1);
+            v[idx]
+        };
+        let sum: u64 = v.iter().map(|&x| x as u64).sum();
+        let cap_hits = v.iter().filter(|&&x| x as usize >= concurrency).count();
+        tracing::info!(
+            "preload in_flight (n={}): p5={} p25={} p50={} p75={} p95={} max={} avg={} cap_hits={}% ({}/{})",
+            v.len(),
+            pct(0.05),
+            pct(0.25),
+            pct(0.50),
+            pct(0.75),
+            pct(0.95),
+            pct(1.0),
+            sum / v.len() as u64,
+            cap_hits * 100 / v.len(),
+            cap_hits,
+            v.len(),
         );
     }
 
