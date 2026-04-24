@@ -7,6 +7,7 @@ license.workspace = true
 # tombi: format.rules.table-keys-order.disabled = true
 [dependencies]
 anyhow              = { workspace = true, features = ["backtrace"] }
+async-trait         = { workspace = true }
 bincode             = { workspace = true }
 either              = { workspace = true }
 futures             = { workspace = true }
@@ -44,6 +45,7 @@ vergen = { version = "9.0.6", features = ["cargo"] }
 [features]
 default          = ["process_pool"]
 process_pool     = ["pack-core/process_pool", "turbopack-node/process_pool"]
+test             = ["pack-core/test"]
 worker_pool      = ["pack-core/worker_pool", "turbopack-node/worker_pool"]
 worker_pool_napi = ["pack-core/worker_pool_napi", "turbopack-node/worker_pool_napi", "worker_pool"]
 

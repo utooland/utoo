@@ -11,7 +11,7 @@ var CHUNK_BASE_PATH = "__RUNTIME_PUBLIC_PATH__";
 var RELATIVE_ROOT_PATH = "/ROOT";
 var RUNTIME_PUBLIC_PATH = "__RUNTIME_PUBLIC_PATH__";
 var ASSET_SUFFIX = "";
-const CROSS_ORIGIN_LOADING = "";
+var CROSS_ORIGIN = null;
 var WORKER_FORWARDED_GLOBALS = [];
 /**
  * This file contains runtime types and functions that are shared between all
@@ -1099,9 +1099,7 @@ let BACKEND;
                 } else {
                     const link = document.createElement('link');
                     link.rel = 'stylesheet';
-                    if (CROSS_ORIGIN_LOADING) {
-                        link.crossOrigin = CROSS_ORIGIN_LOADING;
-                    }
+                    link.crossOrigin = CROSS_ORIGIN;
                     link.href = chunkUrl;
                     link.onerror = ()=>{
                         resolver.reject();
@@ -1126,9 +1124,7 @@ let BACKEND;
                     }
                 } else {
                     const script = document.createElement('script');
-                    if (CROSS_ORIGIN_LOADING) {
-                        script.crossOrigin = CROSS_ORIGIN_LOADING;
-                    }
+                    script.crossOrigin = CROSS_ORIGIN;
                     script.src = chunkUrl;
                     // We'll only mark the chunk as loaded once the script has been executed,
                     // which happens in `registerChunk`. Hence the absence of `resolve()` in

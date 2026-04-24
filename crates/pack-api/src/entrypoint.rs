@@ -75,7 +75,7 @@ pub async fn all_output_assets_operation(
     Ok(Vc::cell(output_assets.into_iter().collect()))
 }
 
-#[turbo_tasks::value(shared, serialization = "none")]
+#[turbo_tasks::value(shared, serialization = "skip")]
 pub struct EntrypointsWithIssues {
     pub entrypoints: ReadRef<EntrypointsOperation>,
     pub issues: Arc<Vec<ReadRef<PlainIssue>>>,

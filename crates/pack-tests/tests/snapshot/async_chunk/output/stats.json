@@ -34,11 +34,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "main.js",
-      "size": 0,
+      "id": "input_97190704.js",
+      "size": 795,
       "hash": "",
       "files": [
-        "main.js"
+        "input_97190704.js"
       ]
     },
     {
@@ -46,11 +46,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "input_97190704.js",
-      "size": 795,
+      "id": "main.js",
+      "size": 260,
       "hash": "",
       "files": [
-        "input_97190704.js"
+        "main.js"
       ]
     }
   ],
@@ -69,14 +69,14 @@
     },
     {
       "type": "asset",
-      "name": "main.js",
+      "name": "input_86dfc83f.js.map",
       "info": {},
-      "size": 0,
+      "size": 1010,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "main.js"
+        "input_86dfc83f.js.map"
       ]
     },
     {
@@ -93,38 +93,38 @@
     },
     {
       "type": "asset",
-      "name": "input_86dfc83f.js.map",
+      "name": "input_97190704.js.map",
       "info": {},
-      "size": 0,
+      "size": 736,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "input_86dfc83f.js.map"
+        "input_97190704.js.map"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "main.js",
+      "info": {},
+      "size": 260,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "main.js"
       ]
     },
     {
       "type": "asset",
       "name": "main.js.map",
       "info": {},
-      "size": 0,
+      "size": 53,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
         "main.js.map"
-      ]
-    },
-    {
-      "type": "asset",
-      "name": "input_97190704.js.map",
-      "info": {},
-      "size": 0,
-      "emitted": false,
-      "comparedForEmit": false,
-      "cached": false,
-      "chunks": [
-        "input_97190704.js.map"
       ]
     }
   ],
@@ -138,12 +138,12 @@
       "size": 91
     },
     {
-      "name": "async_chunk/input/node_modules/bar/index.js",
-      "id": "async_chunk/input/node_modules/bar/index.js",
+      "name": "async_chunk/input/import.js",
+      "id": "async_chunk/input/import.js",
       "chunks": [
-        "input_86dfc83f.js"
+        "input_97190704.js"
       ],
-      "size": 56
+      "size": 91
     },
     {
       "name": "async_chunk/input/index.js",
@@ -155,20 +155,12 @@
       "size": 110
     },
     {
-      "name": "async_chunk/input/shared.js",
-      "id": "async_chunk/input/shared.js",
+      "name": "async_chunk/input/node_modules/bar/index.js",
+      "id": "async_chunk/input/node_modules/bar/index.js",
       "chunks": [
         "input_86dfc83f.js"
       ],
-      "size": 18
-    },
-    {
-      "name": "async_chunk/input/import.js",
-      "id": "async_chunk/input/import.js",
-      "chunks": [
-        "input_97190704.js"
-      ],
-      "size": 91
+      "size": 56
     },
     {
       "name": "async_chunk/input/node_modules/foo/index.js",
@@ -177,6 +169,14 @@
         "input_97190704.js"
       ],
       "size": 56
+    },
+    {
+      "name": "async_chunk/input/shared.js",
+      "id": "async_chunk/input/shared.js",
+      "chunks": [
+        "input_86dfc83f.js"
+      ],
+      "size": 18
     }
   ]
 }

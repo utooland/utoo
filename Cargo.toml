@@ -132,6 +132,7 @@ too_many_arguments = "allow"
 [patch.crates-io]
 bincode          = { git = "https://github.com/bgw/bincode.git", branch = "bgw/patches" }
 include_dir      = { git = "https://github.com/vercel-labs/include_dir", branch = "turbopack" }
+libmimalloc-sys  = { git = "https://github.com/utooland/mimalloc_rust.git" }
 lightningcss     = { git = "https://github.com/utooland/lightningcss", branch = "support-css-module-global" }
 mdxjs            = { git = "https://github.com/vercel-labs/mdxjs-rs-turbopack.git", branch = "turbopack" }
 mimalloc         = { git = "https://github.com/utooland/mimalloc_rust.git" }
