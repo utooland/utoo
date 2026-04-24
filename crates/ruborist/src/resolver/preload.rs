@@ -142,8 +142,17 @@ where
 
             let pending_for_task = Arc::clone(&pending);
             let config_for_task = config.clone();
+            // Capture the moment we decided to dispatch this future.
+            // The inner `start` timer fires on first poll, so the gap
+            // between `push_time` and `start` tells us how long the
+            // future sat in FuturesUnordered before the scheduler
+            // polled it. `future_total` is the push→complete wall
+            // including first-poll latency + resolve_package +
+            // inline extract + the tokio ready-queue wait.
+            let push_time = tokio::time::Instant::now();
             futures.push(async move {
                 let start = tokio::time::Instant::now();
+                crate::service::record_first_poll_gap_us((start - push_time).as_micros());
                 let result = resolve_package(registry, &name, &spec).await;
                 let elapsed = start.elapsed();
                 let elapsed_ms = elapsed.as_millis() as u64;
@@ -162,6 +171,7 @@ where
                     }
                 }
 
+                crate::service::record_future_total_us(push_time.elapsed().as_micros());
                 (name, result, elapsed_ms)
             });
             in_flight += 1;

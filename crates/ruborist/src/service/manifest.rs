@@ -15,12 +15,21 @@ use super::fetch::{
 use super::http::pick_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 
-/// Wall time measured around `resolve_package` — includes all sub-
-/// steps (cache lookups, OnceMap coalescing, `fetch_full_manifest`
-/// network + parse, `get_core_version` map lookup). Used to validate
-/// that optimisations in any sub-step actually reduce the per-future
-/// budget the preload pipeline runs on.
+/// Full breakdown of where each preload future's wall time goes.
+///
+/// The sum of `send + body + parse + core_version` should equal the
+/// `resolve_pkg` wall (modulo microseconds of cache-lookup overhead).
+/// Comparing `resolve_pkg` against `future_total` reveals how much
+/// per-future time sits outside `resolve_package` — in the pending
+/// queue, in FuturesUnordered scheduling, or in main-loop refill.
+/// `next_gap` samples the cadence of `futures.next().await` returns
+/// to expose main-loop throughput.
+static SEND_US: LazyLock<Mutex<Vec<u32>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+static BODY_US: LazyLock<Mutex<Vec<u32>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+static PARSE_US: LazyLock<Mutex<Vec<u32>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 static RESOLVE_PKG_US: LazyLock<Mutex<Vec<u32>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+static FUTURE_TOTAL_US: LazyLock<Mutex<Vec<u32>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+static FIRST_POLL_GAP_US: LazyLock<Mutex<Vec<u32>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
 fn record(slot: &Mutex<Vec<u32>>, us: u128) {
     if let Ok(mut v) = slot.lock() {
@@ -28,12 +37,34 @@ fn record(slot: &Mutex<Vec<u32>>, us: u128) {
     }
 }
 
+pub(crate) fn record_send_us(us: u128) {
+    record(&SEND_US, us);
+}
+pub(crate) fn record_body_us(us: u128) {
+    record(&BODY_US, us);
+}
+pub(crate) fn record_parse_us(us: u128) {
+    record(&PARSE_US, us);
+}
 pub fn record_resolve_pkg_us(us: u128) {
     record(&RESOLVE_PKG_US, us);
 }
+pub fn record_future_total_us(us: u128) {
+    record(&FUTURE_TOTAL_US, us);
+}
+pub fn record_first_poll_gap_us(us: u128) {
+    record(&FIRST_POLL_GAP_US, us);
+}
 
 pub fn dump_timing_histograms() {
-    for (label, slot) in [("resolve_pkg", &*RESOLVE_PKG_US)] {
+    for (label, slot) in [
+        ("send", &*SEND_US),
+        ("body", &*BODY_US),
+        ("parse", &*PARSE_US),
+        ("resolve_pkg", &*RESOLVE_PKG_US),
+        ("first_poll_gap", &*FIRST_POLL_GAP_US),
+        ("future_total", &*FUTURE_TOTAL_US),
+    ] {
         let mut v = match slot.lock() {
             Ok(mut g) => std::mem::take(&mut *g),
             Err(_) => continue,
@@ -116,7 +147,9 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                     request = request.header("If-None-Match", etag_value);
                 }
 
+                let send_start = tokio::time::Instant::now();
                 let response = request.send().await.map_err(classify_reqwest_error)?;
+                record_send_us(send_start.elapsed().as_micros());
                 let status = response.status();
 
                 if status == reqwest::StatusCode::NOT_MODIFIED {
@@ -134,11 +167,13 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                         .and_then(|v| v.to_str().ok())
                         .map(|s| s.to_string());
 
+                    let body_start = tokio::time::Instant::now();
                     let raw_bytes: Vec<u8> = response
                         .bytes()
                         .await
                         .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
                         .into();
+                    record_body_us(body_start.elapsed().as_micros());
 
                     // Offload JSON parse to the blocking pool. Manifests are
                     // 5–50KB and simd_json is CPU-bound (~1–5ms per call);
@@ -147,6 +182,7 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                     // concurrent fetches, creating the dips we saw in the
                     // active-stream pcap. spawn_blocking lets the main task
                     // keep dispatching while the worker pool parses.
+                    let parse_start = tokio::time::Instant::now();
                     let manifest = tokio::task::spawn_blocking(move || {
                         // simd_json mutates the parse buffer in place
                         // (in-place unicode unescaping etc.), so we keep a
@@ -160,6 +196,7 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                     .await
                     .map_err(|e| FetchError::Permanent(anyhow!("Parse task panicked: {e}")))?
                     .map_err(FetchError::Permanent)?;
+                    record_parse_us(parse_start.elapsed().as_micros());
 
                     Ok(FetchManifestResult::Ok(manifest, new_etag))
                 } else {
