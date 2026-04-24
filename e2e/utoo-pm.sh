@@ -1078,4 +1078,108 @@ echo -e "${GREEN}PASS: tarball permissions normalized to 0o644${NC}"
 popd
 rm -rf "$PERM_DIR"
 
+# ═══════════════════════════════════════════════════════════════
+# Case: Test 'utoo add' alias works the same as 'utoo install'
+# ═══════════════════════════════════════════════════════════════
+echo -e "${YELLOW}Case: Test 'utoo add' alias (Issue #2608)${NC}"
+ADD_TEST_DIR=$(mktemp -d)
+pushd "$ADD_TEST_DIR"
+
+cat > package.json << 'PKGJSON'
+{
+  "name": "test-add-alias",
+  "version": "1.0.0",
+  "dependencies": {}
+}
+PKGJSON
+
+# Test 1: Basic add command
+echo -e "${YELLOW}  Subtest 1.1: utoo add react${NC}"
+utoo add react --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: utoo add react${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+[ -d "node_modules/react" ] || { echo -e "${RED}FAIL: react not installed${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+echo -e "${GREEN}  ✓ PASS: utoo add react${NC}"
+
+# Test 2: Add with -D flag (dev dependency)
+echo -e "${YELLOW}  Subtest 1.2: utoo add lodash -D${NC}"
+utoo add lodash -D --ignore-scripts \
+  || { echo -e "${RED}FAIL: utoo add -D${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+grep -q '"devDependencies"' package.json || { echo -e "${RED}FAIL: -D flag not working${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+grep -q '"lodash"' package.json || { echo -e "${RED}FAIL: lodash not in devDependencies${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+echo -e "${GREEN}  ✓ PASS: utoo add lodash -D${NC}"
+
+# Test 3: Short alias ut add
+echo -e "${YELLOW}  Subtest 1.3: ut add express${NC}"
+ut add express --ignore-scripts \
+  || { echo -e "${RED}FAIL: ut add express${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+[ -d "node_modules/express" ] || { echo -e "${RED}FAIL: express not installed${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+echo -e "${GREEN}  ✓ PASS: ut add express${NC}"
+
+# Test 4: Add with -O flag (optional dependency)
+echo -e "${YELLOW}  Subtest 1.4: utoo add debug -O${NC}"
+utoo add debug@4.3.4 -O --ignore-scripts \
+  || { echo -e "${RED}FAIL: utoo add -O${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+grep -q '"optionalDependencies"' package.json || { echo -e "${RED}FAIL: -O flag not working${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+echo -e "${GREEN}  ✓ PASS: utoo add debug -O${NC}"
+
+# Test 5: Add with --save-peer flag (peer dependency)
+echo -e "${YELLOW}  Subtest 1.5: utoo add typescript --save-peer${NC}"
+utoo add typescript@5.0.4 --save-peer --ignore-scripts \
+  || { echo -e "${RED}FAIL: utoo add --save-peer${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+grep -q '"peerDependencies"' package.json || { echo -e "${RED}FAIL: --save-peer flag not working${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+echo -e "${GREEN}  ✓ PASS: utoo add typescript --save-peer${NC}"
+
+# Test 6: Help text verification
+echo -e "${YELLOW}  Subtest 1.6: Help text shows add alias${NC}"
+utoo --help | grep -i "add" > /dev/null || { echo -e "${RED}FAIL: 'add' not in help${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+utoo add --help > /dev/null || { echo -e "${RED}FAIL: utoo add --help failed${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+echo -e "${GREEN}  ✓ PASS: Help text includes add alias${NC}"
+
+# Test 7: Backward compatibility - install still works
+echo -e "${YELLOW}  Subtest 1.7: Backward compatibility - utoo install${NC}"
+rm -rf node_modules package-lock.json
+utoo install react --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: utoo install still required${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+[ -d "node_modules/react" ] || { echo -e "${RED}FAIL: react not installed via install${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+echo -e "${GREEN}  ✓ PASS: utoo install still works${NC}"
+
+# Test 8: Backward compatibility - 'i' alias still works
+echo -e "${YELLOW}  Subtest 1.8: Backward compatibility - ut i${NC}"
+rm -rf node_modules package-lock.json
+ut i lodash --ignore-scripts \
+  || { echo -e "${RED}FAIL: ut i still required${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+[ -d "node_modules/lodash" ] || { echo -e "${RED}FAIL: lodash not installed via 'i'${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+echo -e "${GREEN}  ✓ PASS: ut i still works${NC}"
+
+# Test 9: Add multiple packages at once
+echo -e "${YELLOW}  Subtest 1.9: Add multiple packages${NC}"
+rm -rf node_modules package-lock.json
+utoo add is-array is-object --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: utoo add multiple packages${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+[ -d "node_modules/is-array" ] || { echo -e "${RED}FAIL: is-array not installed${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+[ -d "node_modules/is-object" ] || { echo -e "${RED}FAIL: is-object not installed${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+echo -e "${GREEN}  ✓ PASS: Add multiple packages${NC}"
+
+# Test 10: Add with version spec
+echo -e "${YELLOW}  Subtest 1.10: Add with version spec${NC}"
+rm -rf node_modules package-lock.json
+utoo add 'semver@^7.0.0' --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: utoo add with version spec${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+[ -d "node_modules/semver" ] || { echo -e "${RED}FAIL: semver not installed${NC}"; popd; rm -rf "$ADD_TEST_DIR"; exit 1; }
+echo -e "${GREEN}  ✓ PASS: Add with version spec${NC}"
+
+popd
+rm -rf "$ADD_TEST_DIR"
+echo -e "${GREEN}PASS: All 'utoo add' alias tests successful${NC}"
+
+# ═══════════════════════════════════════════════════════════════
+# Case: Test 'utoo add' global install
+# ═══════════════════════════════════════════════════════════════
+echo -e "${YELLOW}Case: Test 'utoo add' global install (Issue #2608)${NC}"
+echo -e "${YELLOW}  Subtest 2.1: utoo add -g cowsay${NC}"
+utoo add -g cowsay --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: utoo add -g cowsay${NC}"; exit 1; }
+which cowsay >/dev/null 2>&1 || { echo -e "${RED}FAIL: cowsay not in PATH after global add${NC}"; exit 1; }
+echo -e "${GREEN}  ✓ PASS: utoo add -g works${NC}"
+
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"

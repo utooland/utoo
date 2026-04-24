@@ -140,7 +140,7 @@ enum ConfigCommands {
 #[derive(Subcommand)]
 enum Commands {
     /// Install dependencies
-    #[command(name = INSTALL_NAME, alias = INSTALL_ALIAS, about = INSTALL_ABOUT)]
+    #[command(name = INSTALL_NAME, alias = INSTALL_ALIAS, aliases = ["add"], about = INSTALL_ABOUT)]
     Install {
         /// Package specifications (e.g. "lodash@4.17.21" "react@18.0.0")
         specs: Vec<String>,
@@ -724,5 +724,52 @@ mod tests {
                 "{shell} completion should contain subcommands"
             );
         }
+    }
+
+    #[test]
+    fn test_install_add_alias_recognized() {
+        // Verify clap correctly recognizes "add" as an alias for install
+        let cmd = Cli::command();
+
+        // Test "add" is recognized as install command
+        let result = cmd.clone().try_get_matches_from(&["utoo", "add", "lodash"]);
+        assert!(
+            result.is_ok(),
+            "Should parse 'utoo add' as valid Install command"
+        );
+
+        let matches = result.unwrap();
+        assert_eq!(
+            matches.subcommand_name(),
+            Some("install"),
+            "add alias should map to install subcommand"
+        );
+    }
+
+    #[test]
+    fn test_install_alias_still_works() {
+        // Verify old alias "i" still works
+        let cmd = Cli::command();
+
+        let result = cmd.clone().try_get_matches_from(&["utoo", "i", "lodash"]);
+        assert!(
+            result.is_ok(),
+            "Should parse 'utoo i' as valid Install command"
+        );
+
+        let matches = result.unwrap();
+        assert_eq!(matches.subcommand_name(), Some("install"));
+    }
+
+    #[test]
+    fn test_install_full_command_still_works() {
+        // Verify full command name still works
+        let cmd = Cli::command();
+
+        let result = cmd.try_get_matches_from(&["utoo", "install", "lodash"]);
+        assert!(
+            result.is_ok(),
+            "Should parse 'utoo install' as valid Install command"
+        );
     }
 }
