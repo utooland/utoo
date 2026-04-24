@@ -256,15 +256,7 @@ pub fn init_client_pool(registry_url: &str) {
         selected
             .into_iter()
             .map(|addr| {
-                // Per-IP pinned clients negotiate HTTP/2 when the server
-                // supports it (npmjs advertises h2 via ALPN). 4 separate
-                // H2 connections avoid the single-H2 HoL trap from an
-                // earlier revert: a slow response only stalls streams on
-                // its own conn, not the whole phase. H2 stream
-                // multiplexing also scales concurrency without bumping
-                // TCP conn count, bypassing whatever per-TCP-conn rate
-                // policing npmjs applies.
-                client_builder_ext(HttpVersion::Negotiate)
+                client_builder()
                     .and_then(|b| {
                         b.resolve_to_addrs(&host, &[addr])
                             .build()
@@ -337,25 +329,6 @@ fn build_rustls_config() -> Result<rustls::ClientConfig> {
 ///
 /// Returns `Err` if a proxy URL from the environment is malformed.
 pub fn client_builder() -> Result<reqwest::ClientBuilder> {
-    client_builder_ext(HttpVersion::Http1Only)
-}
-
-/// HTTP protocol negotiation mode for [`client_builder_ext`].
-#[derive(Copy, Clone, Debug)]
-pub(crate) enum HttpVersion {
-    /// Force HTTP/1.1 — a new TCP connection per in-flight request.
-    /// Pcap comparison showed single-H2 reqwest (default) serialises
-    /// all manifest requests through one multiplexed conn and hits
-    /// HoL blocking on slow responses.
-    Http1Only,
-    /// Negotiate via ALPN — prefer HTTP/2 if server supports, fall
-    /// back to HTTP/1.1. Intended for multi-client pool where each
-    /// pinned client gets its own H2 conn, so HoL scope is
-    /// 1/N-of-the-phase instead of whole-phase.
-    Negotiate,
-}
-
-pub(crate) fn client_builder_ext(version: HttpVersion) -> Result<reqwest::ClientBuilder> {
     let builder = reqwest::Client::builder();
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -367,11 +340,16 @@ pub(crate) fn client_builder_ext(version: HttpVersion) -> Result<reqwest::Client
             .use_preconfigured_tls(tls_config)
             .no_proxy()
             .dns_resolver(shared_resolver())
+            // Force HTTP/1.1 with a connection pool. reqwest multiplexes all
+            // requests over a single HTTP/2 connection by default, which
+            // makes head-of-line blocking on one slow response stall the
+            // whole manifest fetch phase. An H1 pool lets concurrent
+            // manifest requests open independent TCP streams instead.
+            // Pool size matches `preload::DEFAULT_CONCURRENCY` so the
+            // per-host idle pool can absorb every in-flight fetch without
+            // churning connections.
+            .http1_only()
             .pool_max_idle_per_host(256);
-        builder = match version {
-            HttpVersion::Http1Only => builder.http1_only(),
-            HttpVersion::Negotiate => builder,
-        };
 
         match env_var("ALL_PROXY") {
             Some(url) => {
