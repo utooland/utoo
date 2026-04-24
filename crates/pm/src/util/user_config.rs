@@ -134,21 +134,22 @@ pub fn get_install_scope() -> InstallScope {
 
 // Manifest fetch concurrency configuration.
 //
-// CI HTTP diag on p1_resolve (ant-design, npmjs.org): `sum=264s` over
-// 2730 requests, `wall=3316ms`, `avg_conc=79.6` at cap=128. That's
-// 63% utilisation — `sum / 128 = 2.06s` is the theoretical floor; we
-// leave 40% of the concurrency budget unused. Meanwhile bun's pcap
-// shows 256 concurrent TCP streams on the same workload and lands at
-// 1.92s. Raising the cap from 128 to 256 gives the pipeline room to
-// run more connections in parallel; the tail where individual
-// requests slowly drain (p95=267 ms, max=1113 ms) becomes a smaller
-// fraction of total wall when the body of the phase is wider.
+// CI HTTP diag sweep on npmjs.org (ant-design p1_resolve):
+//   cap=128: wall=3.33s  avg_conc=76  p50=70ms  p95=250ms  sum=227s
+//   cap=256: wall=3.95s  avg_conc=115 p50=115ms p95=450ms  sum=449s
 //
-// Parse diag on the same run shows `queue p95=1-6 ms` on p1_resolve,
-// so the blocking pool is no longer serialising parses — we really
-// are cap-bound at the HTTP level, not behind spawn_blocking.
+// Higher concurrency drops each request's wall linearly — npmjs.org
+// serves us slower when we hammer with more parallel streams. sum
+// doubles from 227s to 449s under cap=256, so avg_conc doesn't
+// translate to wall improvement (it regresses +0.65s).
+//
+// bun's 256 concurrent on the same workload is 4 IPs × 64 per-IP
+// (pcap-verified). Reqwest's pool is per-host, not per-IP, so our
+// 256 may all stack on one or two of npmjs's anycast addresses.
+// Without a custom connector enforcing per-IP distribution, 128 is
+// the sweet spot on CI.
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 256));
+    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 128));
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
     MANIFESTS_CONCURRENCY_LIMIT.set(value);
