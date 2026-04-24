@@ -15,13 +15,12 @@ use super::fetch::{
 use super::http::pick_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 
-/// Diagnostic histograms to locate the 40-50 ms per-future gap that
-/// histograms of `send_us` + `body_us` + `parse_us` don't explain.
-/// The async fetch function itself is a small async block; the rest
-/// of the per-future budget has to live in `resolve_full_manifest`'s
-/// disk precheck or outside `fetch_full_manifest_network` entirely.
+/// Wall time measured around `resolve_package` — includes all sub-
+/// steps (cache lookups, OnceMap coalescing, `fetch_full_manifest`
+/// network + parse, `get_core_version` map lookup). Used to validate
+/// that optimisations in any sub-step actually reduce the per-future
+/// budget the preload pipeline runs on.
 static RESOLVE_PKG_US: LazyLock<Mutex<Vec<u32>>> = LazyLock::new(|| Mutex::new(Vec::new()));
-static DISK_PRECHECK_US: LazyLock<Mutex<Vec<u32>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
 fn record(slot: &Mutex<Vec<u32>>, us: u128) {
     if let Ok(mut v) = slot.lock() {
@@ -33,15 +32,8 @@ pub fn record_resolve_pkg_us(us: u128) {
     record(&RESOLVE_PKG_US, us);
 }
 
-pub(crate) fn record_disk_precheck_us(us: u128) {
-    record(&DISK_PRECHECK_US, us);
-}
-
 pub fn dump_timing_histograms() {
-    for (label, slot) in [
-        ("resolve_pkg", &*RESOLVE_PKG_US),
-        ("disk_precheck", &*DISK_PRECHECK_US),
-    ] {
+    for (label, slot) in [("resolve_pkg", &*RESOLVE_PKG_US)] {
         let mut v = match slot.lock() {
             Ok(mut g) => std::mem::take(&mut *g),
             Err(_) => continue,
