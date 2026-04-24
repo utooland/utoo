@@ -53,7 +53,7 @@
 //!  It pre-populates memory cache to skip network on subsequent runs.
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -214,6 +214,22 @@ pub struct PackageCache {
     memory: MemoryCache,
     /// Disk cache directory (None = no disk cache)
     cache_dir: Option<PathBuf>,
+    /// Lazily-populated set of package names with existing disk cache.
+    ///
+    /// Built once per process from a single `read_dir(cache_dir)` +
+    /// per-scope `read_dir` for `@scope/pkg` entries. `get_versions_from_disk`
+    /// checks this set first and short-circuits to `None` when the package
+    /// isn't on disk — avoiding the 2730 per-package `try_exists`
+    /// spawn_blocking calls that dominated cold-preload critical path
+    /// (avg 16 ms per call × 128 parallel futures = measurable wall drag).
+    ///
+    /// Mid-run writes via `set_versions_to_disk` are not reflected in this
+    /// index — that's intentional. Any package we wrote in the current run
+    /// has already been populated into the memory cache, which takes
+    /// precedence over disk; the disk path is only consulted for packages
+    /// *not yet seen this run* with *existing disk cache from a prior run*.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    disk_index: Arc<tokio::sync::OnceCell<HashSet<String>>>,
 }
 
 impl PackageCache {
@@ -222,6 +238,7 @@ impl PackageCache {
         Self {
             memory: MemoryCache::global(),
             cache_dir: None,
+            disk_index: Arc::new(tokio::sync::OnceCell::new()),
         }
     }
 
@@ -230,7 +247,25 @@ impl PackageCache {
         Self {
             memory: MemoryCache::global(),
             cache_dir: Some(cache_dir),
+            disk_index: Arc::new(tokio::sync::OnceCell::new()),
         }
+    }
+
+    /// Return `true` if the package has a disk cache entry (based on the
+    /// lazily-populated bulk-readdir index). Returns `false` if no
+    /// cache_dir is configured or the index says the package isn't
+    /// present. First call per process does a single directory scan.
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn has_disk_entry(&self, name: &str) -> bool {
+        let Some(cache_dir) = self.cache_dir.as_ref() else {
+            return false;
+        };
+        let cache_dir = cache_dir.clone();
+        let index = self
+            .disk_index
+            .get_or_init(|| async move { build_disk_index(&cache_dir).await })
+            .await;
+        index.contains(name)
     }
 
     /// Get the cache directory.
@@ -297,18 +332,21 @@ impl PackageCache {
     // === Disk cache operations (async, uses tokio-fs-ext) ===
 
     /// Load versions info from disk cache.
+    ///
+    /// Short-circuits via the bulk-readdir index when the package isn't
+    /// present on disk — avoids the per-package `try_exists` syscall
+    /// that was 16 ms avg / 230 ms max on CI's blocking pool under load.
     pub async fn get_versions_from_disk(&self, name: &str) -> Option<VersionsInfo> {
         let cache_dir = self.cache_dir.as_ref()?;
-        let path = get_versions_cache_path(cache_dir, name);
-
-        if !super::fs::exists(&path).await {
+        #[cfg(not(target_arch = "wasm32"))]
+        if !self.has_disk_entry(name).await {
             return None;
         }
+        let path = get_versions_cache_path(cache_dir, name);
 
         match super::fs::read_json::<VersionsInfo>(&path).await {
             Ok(info) => {
                 tracing::debug!("Disk cache hit for versions: {name}");
-                // Also cache in memory
                 self.memory.set_versions(name.to_string(), info.clone());
                 Some(info)
             }
@@ -359,6 +397,10 @@ impl PackageCache {
         version: &str,
     ) -> Option<Arc<CoreVersionManifest>> {
         let cache_dir = self.cache_dir.as_ref()?;
+        #[cfg(not(target_arch = "wasm32"))]
+        if !self.has_disk_entry(name).await {
+            return None;
+        }
         let path = get_manifest_cache_path(cache_dir, name, version);
 
         if !super::fs::exists(&path).await {
@@ -437,6 +479,51 @@ impl PackageCache {
             has_disk_cache: self.cache_dir.is_some(),
         }
     }
+}
+
+/// Scan `cache_dir` once to build a set of package names with existing
+/// disk cache entries.
+///
+/// Layout: `{cache_dir}/<name>/versions.json` for bare packages,
+/// `{cache_dir}/@scope/<pkg>/versions.json` for scoped packages. One
+/// top-level `read_dir` plus one `read_dir` per scope directory is
+/// enough to enumerate every possible name. Unreadable entries are
+/// silently skipped (cache dir doesn't exist on cold runs → empty
+/// index → every lookup short-circuits to `None`).
+#[cfg(not(target_arch = "wasm32"))]
+async fn build_disk_index(cache_dir: &Path) -> HashSet<String> {
+    let mut set = HashSet::new();
+    let Ok(mut entries) = tokio_fs_ext::read_dir(cache_dir).await else {
+        return set;
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let raw_name = entry.file_name();
+        let Some(name) = raw_name.to_str() else {
+            continue;
+        };
+        if let Some(stripped) = name.strip_prefix('@') {
+            // Scoped: read one level deeper. The `@` prefix distinguishes
+            // scopes from bare package names unambiguously (npm package
+            // names cannot start with `@` unless scoped).
+            let scope_path = entry.path();
+            let Ok(mut sub) = tokio_fs_ext::read_dir(&scope_path).await else {
+                continue;
+            };
+            while let Ok(Some(sub_entry)) = sub.next_entry().await {
+                if let Some(pkg) = sub_entry.file_name().to_str() {
+                    set.insert(format!("@{stripped}/{pkg}"));
+                }
+            }
+        } else {
+            set.insert(name.to_string());
+        }
+    }
+    tracing::debug!(
+        "Built disk cache index: {} package(s) at {}",
+        set.len(),
+        cache_dir.display()
+    );
+    set
 }
 
 /// Cache statistics.
