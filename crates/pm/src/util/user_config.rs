@@ -134,22 +134,27 @@ pub fn get_install_scope() -> InstallScope {
 
 // Manifest fetch concurrency configuration.
 //
-// After the spawn_blocking offload cleanup, the preload pipeline sits
-// saturated at the 64 ceiling 97% of the phase — `preload in_flight`
-// histogram shows p5..p95 all at 64 with avg 63. Each future's wall
-// time is ~68 ms (send 55 + body 6 + parse 4 + scheduling), so at 64
-// parallel × 4571 futures we math out to 4.86s, matching the measured
-// p1_resolve. bun, for the same workload, finishes in ~3 s; that
-// implies either its per-future wall is lower *or* it dispatches
-// more than 64 in parallel. We can't shrink per-future below the
-// server's RTT, but we can raise the cap to lift the ceiling the
-// pipeline is stuck against.
+// Default 64 — matches bun's `max_simultaneous_requests_for_bun_install`.
 //
-// Prior 256 experiments regressed because the pipeline wasn't
-// actually hitting 64 (main-task spawn_blocking stalls) — that's
-// no longer true; the cap is the binding constraint now.
+// History: we bumped 64 → 128 (392fbf74) after in_flight saturation
+// at cap=64 suggested the cap was the binding constraint. Wall
+// dropped 4.86 → 4.24s on CI at the time. Later pcap analysis
+// (82bed6ee follow-up) revealed per-stream throughput was the real
+// story: on CI against npmjs.org the 128-conn run averaged 5.9
+// req/s per stream vs bun's 20.3 req/s per stream — utoo was
+// spreading 2730 requests across 128 half-warm conns (~23 req/conn)
+// while bun concentrated them on 64 fully-warm conns (~45 req/conn),
+// amortising TCP slow-start and TLS handshake cost over more
+// requests per conn.
+//
+// Returning to 64 after the other preload optimisations (lazy
+// per-version parse, lock-free pending queue, blocking pool cap)
+// lets each conn serve ~45 requests and compete with bun on
+// per-stream efficiency. Locally against npmmirror (low RTT) the
+// optimum is actually cap=128; the trade-off is network-dependent.
+// We pick 64 to optimise the published benchmark (npmjs.org on CI).
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 128));
+    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 64));
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
     MANIFESTS_CONCURRENCY_LIMIT.set(value);
