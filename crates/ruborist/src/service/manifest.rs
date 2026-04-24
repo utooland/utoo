@@ -10,7 +10,7 @@ use tokio_retry::RetryIf;
 use super::fetch::{
     FetchError, classify_reqwest_error, classify_status, is_retryable, retry_strategy,
 };
-use super::http::{pick_client, record_http_interval};
+use super::http::{parse_trace_enabled, pick_client, record_http_interval, record_parse_interval};
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 
 /// Result of a full manifest fetch with ETag support.
@@ -104,7 +104,14 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                     // concurrent fetches, creating the dips we saw in the
                     // active-stream pcap. spawn_blocking lets the main task
                     // keep dispatching while the worker pool parses.
+                    let traced = parse_trace_enabled();
+                    let queued_at = if traced {
+                        Some(std::time::Instant::now())
+                    } else {
+                        None
+                    };
                     let manifest = tokio::task::spawn_blocking(move || {
+                        let exec_start = queued_at.map(|_| std::time::Instant::now());
                         // simd_json mutates the parse buffer in place
                         // (in-place unicode unescaping etc.), so we keep a
                         // separate copy for `manifest.raw`.
@@ -112,6 +119,9 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                         let mut m: FullManifest = simd_json::serde::from_slice(&mut parse_buf)
                             .map_err(|e| anyhow!("JSON parse error: {e}"))?;
                         m.raw = std::sync::Arc::from(raw_bytes);
+                        if let (Some(q), Some(s)) = (queued_at, exec_start) {
+                            record_parse_interval(q, s, std::time::Instant::now());
+                        }
                         Ok::<_, anyhow::Error>(m)
                     })
                     .await
@@ -209,10 +219,21 @@ pub async fn fetch_version_manifest(
                         .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
                         .into();
                     record_http_interval(send_start, std::time::Instant::now());
+                    let traced = parse_trace_enabled();
+                    let queued_at = if traced {
+                        Some(std::time::Instant::now())
+                    } else {
+                        None
+                    };
                     tokio::task::spawn_blocking(move || {
+                        let exec_start = queued_at.map(|_| std::time::Instant::now());
                         let mut buf = bytes;
-                        simd_json::serde::from_slice::<CoreVersionManifest>(&mut buf)
-                            .map_err(|e| anyhow!("JSON parse error: {e}"))
+                        let result = simd_json::serde::from_slice::<CoreVersionManifest>(&mut buf)
+                            .map_err(|e| anyhow!("JSON parse error: {e}"));
+                        if let (Some(q), Some(s)) = (queued_at, exec_start) {
+                            record_parse_interval(q, s, std::time::Instant::now());
+                        }
+                        result
                     })
                     .await
                     .map_err(|e| FetchError::Permanent(anyhow!("Parse task panicked: {e}")))?

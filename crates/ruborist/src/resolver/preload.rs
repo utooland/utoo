@@ -13,7 +13,9 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use crate::model::manifest::CoreVersionManifest;
 use crate::model::node::PeerDeps;
 use crate::resolver::registry::resolve_package;
-use crate::service::http::{finish_http_trace, start_http_trace};
+use crate::service::http::{
+    finish_http_trace, finish_parse_trace, start_http_trace, start_parse_trace,
+};
 use crate::traits::progress::{BuildEvent, EventReceiver};
 use crate::traits::registry::RegistryClient;
 
@@ -97,6 +99,7 @@ where
     let mut processed: HashSet<String> = HashSet::new();
     let preload_wall_start = Instant::now();
     start_http_trace();
+    start_parse_trace();
     // Shared pending queue: each in-flight future pushes its transitive
     // deps here when it completes, and the main task pops from here to
     // refill the concurrency window.
@@ -230,6 +233,8 @@ where
     let preload_wall_ms = preload_wall_start.elapsed().as_millis();
     let intervals = finish_http_trace();
     log_http_diagnostics(&intervals, preload_wall_ms);
+    let parses = finish_parse_trace();
+    log_parse_diagnostics(&parses);
 
     let total = stats.success_count + stats.failed_count;
     let avg = if total > 0 {
@@ -332,6 +337,76 @@ fn log_http_diagnostics(intervals: &[(Instant, Instant)], preload_wall_ms: u128)
         p95 / 1000,
         max / 1000,
         cpu_tail_ms,
+    );
+}
+
+/// Summarise parse timing. Splits each parse into:
+///
+/// - `queue_wait` — `spawn_blocking` dispatch → closure exec_start
+///   (blocking-pool queue time)
+/// - `exec`       — exec_start → exec_end (actual simd_json work)
+///
+/// If `queue_wait p50 ≫ exec p50`, the blocking pool is the bottleneck —
+/// parses are stacking up behind 4-thread capacity (on CI) and dragging
+/// `resolve_package` awaits, which caps the outer concurrency.
+fn log_parse_diagnostics(parses: &[(Instant, Instant, Instant)]) {
+    if parses.is_empty() {
+        return;
+    }
+
+    let mut queue_us: Vec<u128> = parses
+        .iter()
+        .map(|(q, s, _)| s.duration_since(*q).as_micros())
+        .collect();
+    let mut exec_us: Vec<u128> = parses
+        .iter()
+        .map(|(_, s, e)| e.duration_since(*s).as_micros())
+        .collect();
+    queue_us.sort_unstable();
+    exec_us.sort_unstable();
+
+    let n = parses.len();
+    let pct = |v: &[u128], p: usize| v[(n * p).div_ceil(100).saturating_sub(1)];
+    let sum_queue: u128 = queue_us.iter().sum();
+    let sum_exec: u128 = exec_us.iter().sum();
+
+    // Exec wall via interval union over (exec_start, exec_end) — time
+    // when ≥1 blocking worker was actively parsing.
+    let mut spans: Vec<(Instant, Instant)> = parses.iter().map(|(_, s, e)| (*s, *e)).collect();
+    spans.sort_by_key(|(s, _)| *s);
+    let (mut cur_s, mut cur_e) = spans[0];
+    let mut exec_busy_us: u128 = 0;
+    for &(s, e) in &spans[1..] {
+        if s <= cur_e {
+            if e > cur_e {
+                cur_e = e;
+            }
+        } else {
+            exec_busy_us += cur_e.duration_since(cur_s).as_micros();
+            cur_s = s;
+            cur_e = e;
+        }
+    }
+    exec_busy_us += cur_e.duration_since(cur_s).as_micros();
+    let avg_exec_parallelism = if exec_busy_us > 0 {
+        sum_exec as f64 / exec_busy_us as f64
+    } else {
+        0.0
+    };
+
+    tracing::info!(
+        "Preload parse diag: n={} queue(p50={}ms p95={}ms max={}ms sum={}ms) exec(p50={}ms p95={}ms max={}ms sum={}ms) exec_busy={}ms avg_parallel={:.1}",
+        n,
+        queue_us[n / 2] / 1000,
+        pct(&queue_us, 95) / 1000,
+        queue_us.last().unwrap() / 1000,
+        sum_queue / 1000,
+        exec_us[n / 2] / 1000,
+        pct(&exec_us, 95) / 1000,
+        exec_us.last().unwrap() / 1000,
+        sum_exec / 1000,
+        exec_busy_us / 1000,
+        avg_exec_parallelism,
     );
 }
 

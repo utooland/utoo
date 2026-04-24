@@ -121,6 +121,43 @@ pub fn record_http_interval(start: Instant, end: Instant) {
     }
 }
 
+/// Diagnostic: per-parse `(queued_at, exec_start, exec_end)` timestamps.
+///
+/// `queued_at` is captured right before `spawn_blocking` is called;
+/// `exec_start` is captured inside the closure (i.e. once the blocking
+/// pool actually picks the task up). `queue_wait = exec_start − queued_at`
+/// measures how long each parse sat idle in the blocking-pool queue.
+/// When `queue_wait p50 ≫ exec p50` the pool is the bottleneck, and
+/// `resolve_package` awaits stall the `FuturesUnordered` pipeline.
+static PARSE_TRACE_ACTIVE: AtomicBool = AtomicBool::new(false);
+static PARSE_TRACE: LazyLock<SegQueue<(Instant, Instant, Instant)>> = LazyLock::new(SegQueue::new);
+
+pub fn start_parse_trace() {
+    while PARSE_TRACE.pop().is_some() {}
+    PARSE_TRACE_ACTIVE.store(true, Ordering::Relaxed);
+}
+
+pub fn finish_parse_trace() -> Vec<(Instant, Instant, Instant)> {
+    PARSE_TRACE_ACTIVE.store(false, Ordering::Relaxed);
+    let mut out = Vec::new();
+    while let Some(v) = PARSE_TRACE.pop() {
+        out.push(v);
+    }
+    out
+}
+
+#[inline]
+pub fn parse_trace_enabled() -> bool {
+    PARSE_TRACE_ACTIVE.load(Ordering::Relaxed)
+}
+
+#[inline]
+pub fn record_parse_interval(queued_at: Instant, exec_start: Instant, exec_end: Instant) {
+    if PARSE_TRACE_ACTIVE.load(Ordering::Relaxed) {
+        PARSE_TRACE.push((queued_at, exec_start, exec_end));
+    }
+}
+
 /// Global HTTP client with connection pooling and DNS caching.
 ///
 /// Stores `Result<Client, String>` so that proxy-configuration errors are
