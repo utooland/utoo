@@ -824,17 +824,18 @@ async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
     )
     .await;
 
-    tracing::debug!(
-        "Preload phase completed: {} success, {} failed",
+    let elapsed = start.elapsed();
+    tracing::info!(
+        "Preload phase: {:.2?} ({} success, {} failed, {} initial deps)",
+        elapsed,
         stats.success_count,
-        stats.failed_count
+        stats.failed_count,
+        stats.total_processed,
     );
     receiver.on_event(BuildEvent::PreloadComplete {
         success: stats.success_count,
         failed: stats.failed_count,
     });
-
-    tracing::debug!("Preload phase: {:?}", start.elapsed());
 }
 
 /// Run the BFS traversal phase to build the dependency tree.
