@@ -189,16 +189,6 @@ enum FullManifestResult {
     /// ETag matched, versions cache is valid (HTTP 304).
     /// Caller should resolve from the in-memory versions cache and
     /// fetch individual version manifests as needed.
-    ///
-    /// Currently never constructed — the disk ETag probe was removed
-    /// from `fetch_full_manifest_network` because its per-package
-    /// `spawn_blocking` stat dominated the cold-preload critical path
-    /// (see commit message). The variant is retained so the match
-    /// arms in `fetch_full_manifest` and the non-semver
-    /// `resolve_package` branch keep their structure for a future
-    /// design that reintroduces ETag validation via a bulk-index
-    /// read (one readdir at startup) instead of per-package stats.
-    #[allow(dead_code)]
     NotModified,
 }
 
@@ -266,50 +256,84 @@ impl UnifiedRegistry {
         &self,
         name: &str,
     ) -> Result<FullManifestResult, RegistryError> {
-        // Skip the per-package disk ETag probe. Histogram showed
-        // `disk_precheck_us` avg 16 ms / max 233 ms per call — a
-        // `tokio_fs_ext::try_exists` spawn_blocking dispatch that on
-        // a cleared cache always returns None. Across 2730 cold
-        // resolves at preload cap=128 that single await was contributing
-        // ~20 % of `resolve_pkg_us` and sat on the critical path before
-        // the network request was even sent.
-        //
-        // The trade-off is losing the ETag-based 304 optimisation for
-        // cross-process warm runs where disk cache survives but memory
-        // cache is empty. In practice the memory cache short-circuits
-        // before this code path whenever the same process has already
-        // fetched the manifest; the only scenario that regresses is a
-        // fresh process with pre-populated disk cache, which would now
-        // re-download manifests instead of validating via 304. We
-        // accept that trade-off — the benchmark workload is always
-        // cold, and the disk write side (`set_versions_to_disk`) still
-        // runs so subsequent invocations could reintroduce a read path
-        // under a different design (e.g. bulk-index at startup).
-        let (manifest, new_etag) = manifest::fetch_full_manifest_fresh(
-            &self.registry_url,
+        // Disk ETag probe. The `PackageCache::get_versions_from_disk`
+        // call first consults a bulk-readdir index built lazily on
+        // first access — cold runs with an empty (or nonexistent)
+        // cache_dir short-circuit without per-package syscalls, which
+        // was the cold-path regression the earlier temporary removal
+        // (46cb8031) was meant to avoid. Warm runs pay the read +
+        // JSON parse once per previously-cached manifest and reuse
+        // its ETag to get a 1-packet `304 Not Modified` instead of
+        // re-downloading the full manifest body.
+        let disk_versions = self.cache.get_versions_from_disk(name).await;
+        let etag = disk_versions.as_ref().and_then(|v| v.etag.clone());
+
+        match manifest::fetch_full_manifest(manifest::FetchManifestOptions {
+            registry_url: &self.registry_url,
             name,
-            manifest::MetadataFormat::Abbreviated,
-        )
+            format: manifest::MetadataFormat::Abbreviated,
+            etag: etag.as_deref(),
+        })
         .await
-        .map_err(RegistryError)?;
+        .map_err(RegistryError)?
+        {
+            manifest::FetchManifestResult::Ok(manifest, new_etag) => {
+                self.cache
+                    .set_full_manifest(name.to_string(), manifest.clone());
 
-        self.cache
-            .set_full_manifest(name.to_string(), manifest.clone());
+                let versions_info = VersionsInfo {
+                    versions: Versions {
+                        version_list: manifest.versions.keys.clone(),
+                        dist_tags: manifest.dist_tags.clone(),
+                    },
+                    etag: new_etag.clone(),
+                    last_updated: current_timestamp_secs(),
+                };
+                self.cache
+                    .set_versions(name.to_string(), versions_info.clone());
+                // Fire-and-forget disk cache write.
+                self.cache.set_versions_to_disk(name, &versions_info);
 
-        let versions_info = VersionsInfo {
-            versions: Versions {
-                version_list: manifest.versions.keys.clone(),
-                dist_tags: manifest.dist_tags.clone(),
-            },
-            etag: new_etag.clone(),
-            last_updated: current_timestamp_secs(),
-        };
-        self.cache
-            .set_versions(name.to_string(), versions_info.clone());
-        // Fire-and-forget disk cache write.
-        self.cache.set_versions_to_disk(name, &versions_info);
+                Ok(FullManifestResult::Full(manifest))
+            }
+            manifest::FetchManifestResult::NotModified => {
+                tracing::debug!("ETag cache hit (304) for: {}", name);
 
-        Ok(FullManifestResult::Full(manifest))
+                if let Some(versions_info) = disk_versions {
+                    self.cache
+                        .set_versions(name.to_string(), versions_info.clone());
+                    Ok(FullManifestResult::NotModified)
+                } else {
+                    // Disk cache disappeared between index build and now
+                    // (mid-run eviction or concurrent cleanup). Fall
+                    // back to a fresh fetch without etag.
+                    let (manifest, new_etag) = manifest::fetch_full_manifest_fresh(
+                        &self.registry_url,
+                        name,
+                        manifest::MetadataFormat::Abbreviated,
+                    )
+                    .await
+                    .map_err(RegistryError)?;
+
+                    self.cache
+                        .set_full_manifest(name.to_string(), manifest.clone());
+
+                    let versions_info = VersionsInfo {
+                        versions: Versions {
+                            version_list: manifest.versions.keys.clone(),
+                            dist_tags: manifest.dist_tags.clone(),
+                        },
+                        etag: new_etag.clone(),
+                        last_updated: current_timestamp_secs(),
+                    };
+                    self.cache
+                        .set_versions(name.to_string(), versions_info.clone());
+                    self.cache.set_versions_to_disk(name, &versions_info);
+
+                    Ok(FullManifestResult::Full(manifest))
+                }
+            }
+        }
     }
 
     /// Resolve version manifest with three-tier caching.
