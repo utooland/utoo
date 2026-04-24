@@ -10,7 +10,7 @@ use tokio_retry::RetryIf;
 use super::fetch::{
     FetchError, classify_reqwest_error, classify_status, is_retryable, retry_strategy,
 };
-use super::http::pick_client;
+use super::http::{pick_client, record_http_interval};
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 
 /// Result of a full manifest fetch with ETag support.
@@ -68,10 +68,14 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                     request = request.header("If-None-Match", etag_value);
                 }
 
+                let send_start = std::time::Instant::now();
                 let response = request.send().await.map_err(classify_reqwest_error)?;
                 let status = response.status();
 
                 if status == reqwest::StatusCode::NOT_MODIFIED {
+                    // 304 has no body but the round-trip still uses the wire;
+                    // record the headers-only window so `busy` doesn't lose it.
+                    record_http_interval(send_start, std::time::Instant::now());
                     if etag.is_some() {
                         return Ok(FetchManifestResult::NotModified);
                     }
@@ -91,6 +95,7 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                         .await
                         .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
                         .into();
+                    record_http_interval(send_start, std::time::Instant::now());
 
                     // Offload JSON parse to the blocking pool. Manifests are
                     // 5–50KB and simd_json is CPU-bound (~1–5ms per call);
@@ -188,6 +193,7 @@ pub async fn fetch_version_manifest(
         || {
             let url = url.clone();
             async move {
+                let send_start = std::time::Instant::now();
                 let response = pick_client()
                     .map_err(FetchError::Permanent)?
                     .get(&url)
@@ -202,6 +208,7 @@ pub async fn fetch_version_manifest(
                         .await
                         .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
                         .into();
+                    record_http_interval(send_start, std::time::Instant::now());
                     tokio::task::spawn_blocking(move || {
                         let mut buf = bytes;
                         simd_json::serde::from_slice::<CoreVersionManifest>(&mut buf)

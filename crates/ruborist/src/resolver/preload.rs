@@ -5,6 +5,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Instant;
 
 use crossbeam_queue::SegQueue;
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -12,6 +13,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use crate::model::manifest::CoreVersionManifest;
 use crate::model::node::PeerDeps;
 use crate::resolver::registry::resolve_package;
+use crate::service::http::{finish_http_trace, start_http_trace};
 use crate::traits::progress::{BuildEvent, EventReceiver};
 use crate::traits::registry::RegistryClient;
 
@@ -93,6 +95,8 @@ where
 {
     let mut stats = PreloadStats::default();
     let mut processed: HashSet<String> = HashSet::new();
+    let preload_wall_start = Instant::now();
+    start_http_trace();
     // Shared pending queue: each in-flight future pushes its transitive
     // deps here when it completes, and the main task pops from here to
     // refill the concurrency window.
@@ -223,6 +227,10 @@ where
         failed: stats.failed_count,
     });
 
+    let preload_wall_ms = preload_wall_start.elapsed().as_millis();
+    let intervals = finish_http_trace();
+    log_http_diagnostics(&intervals, preload_wall_ms);
+
     let total = stats.success_count + stats.failed_count;
     let avg = if total > 0 {
         stats.total_request_ms / total as u64
@@ -239,6 +247,92 @@ where
     );
 
     stats
+}
+
+/// Summarise captured HTTP intervals from the preload phase and log one
+/// info-level line. Splits total preload wall into:
+///
+/// - `wall` — first HTTP send → last HTTP body end (pure network window)
+/// - `busy` — interval union (time at least one request was in-flight)
+/// - `sum`  — Σ per-request `(end − start)` (total req-level time)
+/// - `cpu_tail` = preload_total − wall (our CPU work after last body)
+/// - `avg_conc` = sum / busy (effective parallelism over busy window)
+/// - percentiles of per-request latency
+///
+/// If `wall ≫ bun_equivalent` the bottleneck is network. If `cpu_tail` is
+/// large the resolver is blocking after HTTP completes. If `avg_conc` is
+/// well below the configured limit the pipeline isn't actually filling.
+fn log_http_diagnostics(intervals: &[(Instant, Instant)], preload_wall_ms: u128) {
+    if intervals.is_empty() {
+        tracing::info!(
+            "Preload HTTP diag: no requests captured (total wall {}ms)",
+            preload_wall_ms
+        );
+        return;
+    }
+
+    let mut spans: Vec<(Instant, Instant)> = intervals.to_vec();
+    spans.sort_by_key(|(s, _)| *s);
+
+    let first_start = spans.first().unwrap().0;
+    let last_end = spans.iter().map(|(_, e)| *e).max().unwrap();
+    let wall = last_end.duration_since(first_start).as_millis();
+
+    let sum: u128 = spans
+        .iter()
+        .map(|(s, e)| e.duration_since(*s).as_micros())
+        .sum();
+
+    // Interval union: sweep sorted spans, merging overlaps.
+    let mut busy_us: u128 = 0;
+    let (mut cur_s, mut cur_e) = spans[0];
+    for &(s, e) in &spans[1..] {
+        if s <= cur_e {
+            if e > cur_e {
+                cur_e = e;
+            }
+        } else {
+            busy_us += cur_e.duration_since(cur_s).as_micros();
+            cur_s = s;
+            cur_e = e;
+        }
+    }
+    busy_us += cur_e.duration_since(cur_s).as_micros();
+
+    let mut per_req_us: Vec<u128> = spans
+        .iter()
+        .map(|(s, e)| e.duration_since(*s).as_micros())
+        .collect();
+    per_req_us.sort_unstable();
+    let n = per_req_us.len();
+    let p50 = per_req_us[n / 2];
+    let p95 = per_req_us[(n * 95).div_ceil(100).saturating_sub(1)];
+    let max = *per_req_us.last().unwrap();
+
+    let cpu_tail_ms = preload_wall_ms.saturating_sub(wall);
+    let avg_conc = if busy_us > 0 {
+        sum as f64 / busy_us as f64
+    } else {
+        0.0
+    };
+
+    tracing::info!(
+        "Preload HTTP diag: n={} wall={}ms busy={}ms ({:.0}% of wall) sum={}ms avg_conc={:.1} p50={}ms p95={}ms max={}ms cpu_tail={}ms",
+        n,
+        wall,
+        busy_us / 1000,
+        if wall > 0 {
+            100.0 * (busy_us as f64 / 1000.0) / wall as f64
+        } else {
+            0.0
+        },
+        sum / 1000,
+        avg_conc,
+        p50 / 1000,
+        p95 / 1000,
+        max / 1000,
+        cpu_tail_ms,
+    );
 }
 
 #[cfg(test)]
