@@ -340,7 +340,7 @@ pub async fn generate_webpack_stats(
         }
     }
 
-    let mut modules = chunk_items
+    let modules = chunk_items
         .into_iter()
         .map(|(chunk_item, chunk_ids)| async move {
             let content_ident = chunk_item.content_ident().await?;
@@ -357,14 +357,19 @@ pub async fn generate_webpack_stats(
             Ok::<_, anyhow::Error>(WebpackStatsModule {
                 name: path.clone(),
                 id: path.clone(),
-                chunks: chunk_ids.into_iter().collect::<Vec<_>>(),
+                chunks: chunk_ids.into_iter().collect(),
                 size,
             })
         })
         .try_join()
         .await?;
 
-    sort_stats_for_tests(&mut assets, &mut chunks, &mut modules, &mut entrypoints);
+    #[cfg(feature = "test")]
+    let modules = {
+        let mut modules = modules;
+        sort_stats_for_tests(&mut assets, &mut chunks, &mut modules, &mut entrypoints);
+        modules
+    };
 
     Ok(WebpackStats {
         assets,
@@ -384,24 +389,23 @@ fn remove_extension_from_str(filename: &str) -> &str {
     filename
 }
 
+#[cfg(feature = "test")]
 fn sort_stats_for_tests(
     assets: &mut [WebpackStatsAsset],
     chunks: &mut [WebpackStatsChunk],
     modules: &mut [WebpackStatsModule],
     entrypoints: &mut FxIndexMap<RcStr, WebpackStatsEntrypoint>,
 ) {
-    if cfg!(feature = "test") {
-        assets.sort_by(|a, b| a.name.cmp(&b.name));
-        chunks.sort_by(|a, b| a.id.cmp(&b.id));
-        modules.sort_by(|a, b| a.id.cmp(&b.id));
+    assets.sort_by(|a, b| a.name.cmp(&b.name));
+    chunks.sort_by(|a, b| a.id.cmp(&b.id));
+    modules.sort_by(|a, b| a.id.cmp(&b.id));
 
-        let mut entrypoint_pairs = std::mem::take(entrypoints).into_iter().collect::<Vec<_>>();
-        entrypoint_pairs.sort_by(|a, b| a.0.cmp(&b.0));
-        for (name, mut entrypoint) in entrypoint_pairs {
-            entrypoint.chunks.sort();
-            entrypoint.assets.sort_by(|a, b| a.name.cmp(&b.name));
-            entrypoints.insert(name, entrypoint);
-        }
+    let mut entrypoint_pairs = std::mem::take(entrypoints).into_iter().collect::<Vec<_>>();
+    entrypoint_pairs.sort_by(|a, b| a.0.cmp(&b.0));
+    for (name, mut entrypoint) in entrypoint_pairs {
+        entrypoint.chunks.sort();
+        entrypoint.assets.sort_by(|a, b| a.name.cmp(&b.name));
+        entrypoints.insert(name, entrypoint);
     }
 }
 
