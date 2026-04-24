@@ -93,6 +93,49 @@ pub(crate) fn get_client() -> Result<&'static reqwest::Client> {
     HTTP_CLIENT.as_ref().map_err(|e| anyhow!("{e}"))
 }
 
+/// Build a `rustls::ClientConfig` using the `aws-lc-rs` crypto provider
+/// instead of reqwest's default `ring`. Measured on CI (4-core runner)
+/// against npmjs.org, ring's per-TLS-handshake client-side CPU cost
+/// (ECDHE key derivation + cert verification + Finished MAC) serialised
+/// across 128 parallel handshakes into a 154 ms "CCS → first AppData"
+/// span — the HTTP requests couldn't fire until all TLS crypto drained
+/// through 4 async workers. aws-lc-rs uses BoringSSL's assembly-optimised
+/// primitives and is roughly 3× faster at handshake work.
+#[cfg(not(target_arch = "wasm32"))]
+fn build_rustls_config() -> Result<rustls::ClientConfig> {
+    // Install aws-lc-rs as the default for any other rustls consumer in
+    // the process. Idempotent — only the first call per process wins.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+    // Load OS root certs. On Linux this hits /etc/ssl/certs/,
+    // on macOS it queries the Security framework keychain. Called once
+    // per process via `HTTP_CLIENT`'s `LazyLock`.
+    let roots = rustls_native_certs::load_native_certs();
+    let mut root_store = rustls::RootCertStore::empty();
+    for cert in roots.certs {
+        // Best-effort: skip any cert rustls refuses (same tolerance
+        // native-tls shows). A hard fail here would brick every
+        // request on a box with one bad root in its trust store.
+        let _ = root_store.add(cert);
+    }
+    if !roots.errors.is_empty() {
+        tracing::debug!(
+            "rustls-native-certs reported {} non-fatal load issues",
+            roots.errors.len()
+        );
+    }
+
+    let config = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+        rustls::crypto::aws_lc_rs::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .map_err(|e| anyhow!("rustls safe_default_protocol_versions: {e}"))?
+    .with_root_certificates(root_store)
+    .with_no_client_auth();
+
+    Ok(config)
+}
+
 /// Create a [`reqwest::ClientBuilder`] with TLS, DNS caching, and proxy
 /// from environment variables.
 ///
@@ -112,8 +155,9 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
     let builder = {
         use crate::service::dns::shared_resolver;
 
+        let tls_config = build_rustls_config()?;
         let mut builder = builder
-            .use_rustls_tls()
+            .use_preconfigured_tls(tls_config)
             .no_proxy()
             .dns_resolver(shared_resolver());
 
