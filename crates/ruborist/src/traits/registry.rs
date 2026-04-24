@@ -162,14 +162,17 @@ pub trait RegistryClient {
             let resolved_version = resolve_target_version(&manifest.dist_tags, &version_list, spec)
                 .map_err(|e| RegistryError(anyhow::anyhow!("{}@{}: {}", name, spec, e)))?;
 
-            manifest.get_core_version(&resolved_version).ok_or_else(|| {
-                RegistryError(anyhow::anyhow!(
-                    "Version {} not found in manifest for {}",
-                    resolved_version,
-                    name
-                ))
-                .into()
-            })
+            manifest
+                .get_core_version(&resolved_version)
+                .await
+                .ok_or_else(|| {
+                    RegistryError(anyhow::anyhow!(
+                        "Version {} not found in manifest for {}",
+                        resolved_version,
+                        name
+                    ))
+                    .into()
+                })
         }
     }
 
@@ -239,6 +242,7 @@ pub trait RegistryClient {
 
                 let version_manifest = full_manifest
                     .get_core_version(&resolved_version)
+                    .await
                     .ok_or_else(|| {
                         RegistryError(anyhow::anyhow!(
                             "Version {} not found in manifest for {}",
