@@ -3,9 +3,10 @@
 //! Uses FuturesUnordered for true streaming concurrency: when a package resolves,
 //! its transitive dependencies are immediately added to the queue.
 
-use std::collections::{HashSet, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::collections::HashSet;
+use std::sync::Arc;
 
+use crossbeam_queue::SegQueue;
 use futures::stream::{FuturesUnordered, StreamExt};
 
 use crate::model::manifest::CoreVersionManifest;
@@ -92,18 +93,32 @@ where
 {
     let mut stats = PreloadStats::default();
     let mut processed: HashSet<String> = HashSet::new();
-    // Shared pending queue: each in-flight future extracts its own
-    // transitive deps on the blocking pool and pushes them here, so the
-    // main loop never does CPU-bound dep-graph walking between `await`
-    // points. pcap showed utoo's active-stream count oscillating
-    // 11..64 — those dips correspond to bursts of post-processing CPU
-    // on the single-task main loop; bun stays flat at 64.
-    let pending = Arc::new(Mutex::new(VecDeque::<Dep>::from(initial_deps)));
+    // Shared pending queue: each in-flight future pushes its transitive
+    // deps here when it completes, and the main task pops from here to
+    // refill the concurrency window.
+    //
+    // Was `Arc<Mutex<VecDeque<Dep>>>`. Timer histogram on the preload
+    // pipeline (aca2c337) showed `first_poll_gap_us` avg 18.7 ms per
+    // future — the time between `futures.push()` and the future's
+    // actual first poll. With 128 completing futures all holding the
+    // pending mutex to append transitives while the main task is trying
+    // to acquire the same lock to pop and refill, the fill phase
+    // serialised at ~100 μs per iteration × 128 refills ≈ 13-19 ms of
+    // lock contention per batch. That's exactly the observed gap.
+    //
+    // `crossbeam_queue::SegQueue` is a lock-free MPMC queue. Push and
+    // pop are wait-free; producers and consumers never block each
+    // other. Eliminates the entire contention pocket.
+    let pending: Arc<SegQueue<Dep>> = Arc::new(SegQueue::new());
+    let initial_count = initial_deps.len();
+    for dep in initial_deps {
+        pending.push(dep);
+    }
     let concurrency = config.concurrency;
 
     tracing::debug!(
         "Preload: {} initial deps, concurrency={}",
-        pending.lock().unwrap().len(),
+        initial_count,
         concurrency
     );
 
@@ -115,11 +130,9 @@ where
         // Fill up to concurrency limit
         while in_flight < concurrency {
             let item = loop {
-                let mut queue = pending.lock().unwrap();
-                let Some((name, spec)) = queue.pop_front() else {
+                let Some((name, spec)) = pending.pop() else {
                     break None;
                 };
-                drop(queue);
                 let key = format!("{}@{}", name, spec);
                 if !processed.contains(&key) {
                     processed.insert(key);
@@ -158,16 +171,13 @@ where
                 let elapsed_ms = elapsed.as_millis() as u64;
                 crate::service::record_resolve_pkg_us(elapsed.as_micros());
 
-                // Inlined: extracting a ~10-entry dep vec from a parsed
-                // manifest is ~5μs of work. The previous spawn_blocking
-                // wrap added ~100μs of scheduling + context-switch per
-                // future × ~3550 futures and contended the blocking
-                // pool with the JSON parses. vCtx dropped from 91K to
-                // bun-comparable levels once this was removed.
+                // Push transitives directly into the lock-free SegQueue.
+                // Each `push` is a wait-free O(1) operation; no
+                // contention with either other completing futures or
+                // the main task's fill-phase pops.
                 if let Ok(resolved) = &result {
-                    let deps = extract_transitive_deps(&resolved.manifest, &config_for_task);
-                    if let Ok(mut queue) = pending_for_task.lock() {
-                        queue.extend(deps);
+                    for dep in extract_transitive_deps(&resolved.manifest, &config_for_task) {
+                        pending_for_task.push(dep);
                     }
                 }
 
