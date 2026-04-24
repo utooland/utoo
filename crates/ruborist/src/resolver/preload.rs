@@ -145,7 +145,9 @@ where
             futures.push(async move {
                 let start = tokio::time::Instant::now();
                 let result = resolve_package(registry, &name, &spec).await;
-                let elapsed_ms = start.elapsed().as_millis() as u64;
+                let elapsed = start.elapsed();
+                let elapsed_ms = elapsed.as_millis() as u64;
+                crate::service::record_resolve_pkg_us(elapsed.as_micros());
 
                 // Inlined: extracting a ~10-entry dep vec from a parsed
                 // manifest is ~5μs of work. The previous spawn_blocking
@@ -207,6 +209,8 @@ where
     }
 
     stats.total_processed = processed.len();
+
+    crate::service::dump_timing_histograms();
 
     receiver.on_event(BuildEvent::PreloadComplete {
         success: stats.success_count,
