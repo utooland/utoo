@@ -61,6 +61,7 @@ pub use fs::{Glob, NoopGlob, exists, read_to_string};
 pub use http::client_builder;
 pub use manifest::{
     FetchManifestOptions, FetchManifestResult, FetchVersionManifestOptions, MetadataFormat,
-    fetch_full_manifest, fetch_full_manifest_fresh, fetch_version_manifest,
+    dump_timing_histograms, fetch_full_manifest, fetch_full_manifest_fresh, fetch_version_manifest,
+    record_resolve_pkg_us,
 };
 pub use registry::UnifiedRegistry;

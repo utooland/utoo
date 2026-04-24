@@ -257,7 +257,9 @@ impl UnifiedRegistry {
         name: &str,
     ) -> Result<FullManifestResult, RegistryError> {
         // 2. Load etag from disk cache (if available)
+        let disk_start = tokio::time::Instant::now();
         let disk_versions = self.cache.get_versions_from_disk(name).await;
+        super::manifest::record_disk_precheck_us(disk_start.elapsed().as_micros());
         let etag = disk_versions.as_ref().and_then(|v| v.etag.clone());
 
         // 3. Fetch from network with ETag for validation

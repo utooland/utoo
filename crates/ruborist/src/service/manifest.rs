@@ -4,6 +4,8 @@
 //! [`crate::service::fetch`] so retry policy stays uniform across registry
 //! manifest fetches and non-registry resolvers (git, http tarball).
 
+use std::sync::{LazyLock, Mutex};
+
 use anyhow::{Result, anyhow};
 use tokio_retry::RetryIf;
 
@@ -12,6 +14,60 @@ use super::fetch::{
 };
 use super::http::pick_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
+
+/// Diagnostic histograms to locate the 40-50 ms per-future gap that
+/// histograms of `send_us` + `body_us` + `parse_us` don't explain.
+/// The async fetch function itself is a small async block; the rest
+/// of the per-future budget has to live in `resolve_full_manifest`'s
+/// disk precheck or outside `fetch_full_manifest_network` entirely.
+static RESOLVE_PKG_US: LazyLock<Mutex<Vec<u32>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+static DISK_PRECHECK_US: LazyLock<Mutex<Vec<u32>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+
+fn record(slot: &Mutex<Vec<u32>>, us: u128) {
+    if let Ok(mut v) = slot.lock() {
+        v.push(us.min(u32::MAX as u128) as u32);
+    }
+}
+
+pub fn record_resolve_pkg_us(us: u128) {
+    record(&RESOLVE_PKG_US, us);
+}
+
+pub(crate) fn record_disk_precheck_us(us: u128) {
+    record(&DISK_PRECHECK_US, us);
+}
+
+pub fn dump_timing_histograms() {
+    for (label, slot) in [
+        ("resolve_pkg", &*RESOLVE_PKG_US),
+        ("disk_precheck", &*DISK_PRECHECK_US),
+    ] {
+        let mut v = match slot.lock() {
+            Ok(mut g) => std::mem::take(&mut *g),
+            Err(_) => continue,
+        };
+        if v.is_empty() {
+            continue;
+        }
+        v.sort_unstable();
+        let pct = |p: f64| -> u32 {
+            let idx = ((p * v.len() as f64) as usize).min(v.len() - 1);
+            v[idx]
+        };
+        let sum: u64 = v.iter().map(|&x| x as u64).sum();
+        tracing::info!(
+            "manifest {}_us (n={}): p50={} p90={} p99={} max={} sum={}us avg={}us",
+            label,
+            v.len(),
+            pct(0.50),
+            pct(0.90),
+            pct(0.99),
+            pct(1.0),
+            sum,
+            sum / v.len() as u64
+        );
+    }
+}
 
 /// Result of a full manifest fetch with ETag support.
 /// Transient return value, immediately destructured — Box not needed.
