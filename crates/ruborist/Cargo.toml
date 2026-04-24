@@ -7,9 +7,10 @@ license     = "MIT"
 
 # tombi: format.rules.table-keys-order.disabled = true
 [dependencies]
-anyhow       = { workspace = true }
-bytes        = "1"
-dashmap      = "6.1.0"
+anyhow          = { workspace = true }
+bytes           = "1"
+crossbeam-queue = "0.3"
+dashmap         = "6.1.0"
 pathdiff     = { workspace = true }
 deno_semver  = "0.7"
 dirs         = { workspace = true }
