@@ -145,9 +145,10 @@ pub fn resolve_from_manifest<E: std::error::Error + 'static>(
     let resolved_version = resolve_target_version(&manifest.dist_tags, &version_list, spec)
         .map_err(|e| ResolveError::Version(format!("{}@{}: {}", manifest.name, spec, e)))?;
 
-    // O(1) lookup from pre-parsed `Versions` map.
+    // Sync context (no async runtime available here), so use the
+    // blocking variant that performs the `from_value` walk inline.
     let version_manifest = manifest
-        .get_core_version(&resolved_version)
+        .get_core_version_blocking(&resolved_version)
         .ok_or_else(|| ResolveError::ManifestNotFound {
             name: manifest.name.clone(),
             version: resolved_version.clone(),

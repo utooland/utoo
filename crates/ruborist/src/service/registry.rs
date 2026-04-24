@@ -533,6 +533,7 @@ impl RegistryClient for UnifiedRegistry {
             let cv_start = tokio::time::Instant::now();
             let version_manifest = full_manifest
                 .get_core_version(&resolved_version)
+                .await
                 .ok_or_else(|| {
                     RegistryError(anyhow!(
                         "Version {} not found in manifest for {}",
@@ -648,6 +649,7 @@ impl RegistryClient for UnifiedRegistry {
                     let cv_start = tokio::time::Instant::now();
                     let version_manifest = full_manifest
                         .get_core_version(&resolved_version)
+                        .await
                         .ok_or_else(|| {
                             RegistryError(anyhow!(
                                 "Version {} not found in manifest for {}",

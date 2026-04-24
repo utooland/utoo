@@ -90,17 +90,51 @@ pub struct FullManifest {
 }
 
 impl FullManifest {
-    /// O(1) lookup of a pre-parsed `CoreVersionManifest` by version
-    /// string. Returns `None` if the version is absent or (rarely) if
-    /// its entry was malformed enough to fail strict deserialization
-    /// during the initial fetch parse — matches the previous on-demand
-    /// `extract_version` behavior of silently returning `None`.
-    pub fn get_core_version(&self, version: &str) -> Option<Arc<CoreVersionManifest>> {
-        self.versions.cores.get(version).cloned()
+    /// Parse the requested version's `CoreVersionManifest` on demand.
+    ///
+    /// Offloaded to `spawn_blocking` because the conversion walks the
+    /// pre-parsed JSON tree + runs `skip_on_error` Value round-trips
+    /// on every field, totalling ~0.1–0.5 ms of CPU per version. At
+    /// preload cap=128 a purely-inline conversion would re-serialise
+    /// the async worker — core_version_us was exactly this problem
+    /// before eager parse. Lazy-via-blocking-pool gives us the best
+    /// of both: per-resolve CPU is paid once per resolve (not 500x
+    /// per manifest fetch as in the previous eager-parse design),
+    /// and it runs off the main runtime so network polling keeps
+    /// flowing.
+    ///
+    /// Returns `None` if the version isn't in the manifest or if
+    /// `from_value` fails (matches the legacy "silently skip
+    /// malformed entries" behaviour).
+    pub async fn get_core_version(&self, version: &str) -> Option<Arc<CoreVersionManifest>> {
+        let value = self.versions.values.get(version)?.clone();
+        tokio::task::spawn_blocking(move || {
+            // `from_value` consumes Value, so we clone the tree off
+            // the Arc. The deep clone is O(tree_size) but runs on the
+            // blocking pool and is cheap (~tens of μs for a typical
+            // version entry).
+            serde_json::from_value::<CoreVersionManifest>((*value).clone())
+                .ok()
+                .map(Arc::new)
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+
+    /// Synchronous variant for callers that cannot await (the dead
+    /// `resolve_from_manifest` helper and test code). Does the
+    /// `from_value` walk inline on the calling thread — only safe on
+    /// sync code paths that aren't on the preload main runtime.
+    pub fn get_core_version_blocking(&self, version: &str) -> Option<Arc<CoreVersionManifest>> {
+        let value = self.versions.values.get(version)?;
+        serde_json::from_value::<CoreVersionManifest>((**value).clone())
+            .ok()
+            .map(Arc::new)
     }
 
     /// Parse a single version on demand into full `VersionManifest`
-    /// (cold path — `ut view`). Still re-parses raw bytes because
+    /// (cold path — `ut view`). Uses the retained raw bytes because
     /// `VersionManifest` carries display fields that `CoreVersionManifest`
     /// drops, and `ut view` is infrequent.
     pub fn get_full_version(&self, version: &str) -> Option<VersionManifest> {
@@ -114,20 +148,25 @@ impl FullManifest {
 }
 
 /// Version entries of a `FullManifest`: preserves key insertion order
-/// (for `VersionsInfo`/semver callers that iterate the list) alongside
-/// an `Arc`-shared map for O(1) lookup.
+/// (for semver resolution that iterates the list) alongside an
+/// `Arc`-shared JSON value map for lazy per-version
+/// `CoreVersionManifest` conversion.
 ///
-/// Implemented as a single-pass custom `Deserialize` so the entire
-/// `"versions"` map is parsed into strongly-typed `CoreVersionManifest`s
-/// during the fetch-time `spawn_blocking` rather than lazily re-parsed
-/// on the async preload worker for every resolve.
+/// The custom `Deserialize` parses each version entry into a
+/// `serde_json::Value` tree (cheap — no field-level validation, no
+/// `skip_on_error` Value-round-trips), but does **not** eagerly
+/// convert to `CoreVersionManifest`. A typical resolve touches 1–3
+/// of a manifest's ~500 versions; eager conversion was doing 500×
+/// more work than needed and saturating the 4-core blocking pool
+/// at preload cap=128. See `get_core_version` for the lazy path.
 #[derive(Debug, Clone, Default)]
 pub struct Versions {
     /// Version strings in insertion order — used by
     /// `resolve_target_version` and cached into `VersionsInfo`.
     pub keys: Vec<String>,
-    /// Parsed core manifests keyed by version string.
-    pub cores: HashMap<String, Arc<CoreVersionManifest>>,
+    /// Raw parsed JSON values keyed by version string. Converted to
+    /// `CoreVersionManifest` on demand by `get_core_version`.
+    pub values: HashMap<String, Arc<Value>>,
 }
 
 impl Versions {
@@ -139,12 +178,13 @@ impl Versions {
 impl Serialize for Versions {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         // Serialize the same shape the registry returns: a JSON object
-        // mapping version string -> manifest. Order follows `keys` for
-        // determinism (HashMap iteration order is arbitrary otherwise).
+        // mapping version string -> raw version JSON. Order follows
+        // `keys` for determinism (HashMap iteration order is arbitrary
+        // otherwise).
         use serde::ser::SerializeMap;
         let mut map = serializer.serialize_map(Some(self.keys.len()))?;
         for k in &self.keys {
-            if let Some(v) = self.cores.get(k) {
+            if let Some(v) = self.values.get(k) {
                 map.serialize_entry(k, v.as_ref())?;
             }
         }
@@ -166,24 +206,20 @@ impl<'de> Deserialize<'de> for Versions {
             ) -> Result<Versions, M::Error> {
                 let cap = map.size_hint().unwrap_or(0);
                 let mut keys = Vec::with_capacity(cap);
-                let mut cores = HashMap::with_capacity(cap);
+                let mut values = HashMap::with_capacity(cap);
                 while let Some(key) = map.next_key::<String>()? {
-                    // Deserialize directly into `CoreVersionManifest`
-                    // rather than buffering through `serde_json::Value`
-                    // first. The buffer approach doubled parse work and
-                    // showed up in `parse_us` as ~9ms avg per manifest
-                    // fetch. `CoreVersionManifest` uses
-                    // `#[serde(default)]` + per-field `skip_on_error`
-                    // so malformed individual fields are already
-                    // tolerated; only a completely unreadable entry
-                    // (essentially unheard of on real registry data)
-                    // would fail here, and that would correctly fail
-                    // the whole manifest fetch.
-                    let core: CoreVersionManifest = map.next_value()?;
-                    cores.insert(key.clone(), Arc::new(core));
+                    // Deserialize each version's body into a raw
+                    // `serde_json::Value` tree. No field validation
+                    // happens here, so this is much cheaper than
+                    // constructing a full `CoreVersionManifest`. The
+                    // conversion is deferred to `get_core_version`,
+                    // which only pays it for versions actually needed
+                    // by a resolve (1–3 out of ~500 per manifest).
+                    let value: Value = map.next_value()?;
+                    values.insert(key.clone(), Arc::new(value));
                     keys.push(key);
                 }
-                Ok(Versions { keys, cores })
+                Ok(Versions { keys, values })
             }
         }
         deserializer.deserialize_map(VersionsVisitor)
