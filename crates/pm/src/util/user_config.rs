@@ -134,22 +134,21 @@ pub fn get_install_scope() -> InstallScope {
 
 // Manifest fetch concurrency configuration.
 //
-// After the spawn_blocking offload cleanup, the preload pipeline sits
-// saturated at the 64 ceiling 97% of the phase — `preload in_flight`
-// histogram shows p5..p95 all at 64 with avg 63. Each future's wall
-// time is ~68 ms (send 55 + body 6 + parse 4 + scheduling), so at 64
-// parallel × 4571 futures we math out to 4.86s, matching the measured
-// p1_resolve. bun, for the same workload, finishes in ~3 s; that
-// implies either its per-future wall is lower *or* it dispatches
-// more than 64 in parallel. We can't shrink per-future below the
-// server's RTT, but we can raise the cap to lift the ceiling the
-// pipeline is stuck against.
+// CI HTTP diag on p1_resolve (ant-design, npmjs.org): `sum=264s` over
+// 2730 requests, `wall=3316ms`, `avg_conc=79.6` at cap=128. That's
+// 63% utilisation — `sum / 128 = 2.06s` is the theoretical floor; we
+// leave 40% of the concurrency budget unused. Meanwhile bun's pcap
+// shows 256 concurrent TCP streams on the same workload and lands at
+// 1.92s. Raising the cap from 128 to 256 gives the pipeline room to
+// run more connections in parallel; the tail where individual
+// requests slowly drain (p95=267 ms, max=1113 ms) becomes a smaller
+// fraction of total wall when the body of the phase is wider.
 //
-// Prior 256 experiments regressed because the pipeline wasn't
-// actually hitting 64 (main-task spawn_blocking stalls) — that's
-// no longer true; the cap is the binding constraint now.
+// Parse diag on the same run shows `queue p95=1-6 ms` on p1_resolve,
+// so the blocking pool is no longer serialising parses — we really
+// are cap-bound at the HTTP level, not behind spawn_blocking.
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 128));
+    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 256));
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
     MANIFESTS_CONCURRENCY_LIMIT.set(value);
