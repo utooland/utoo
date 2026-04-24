@@ -4,8 +4,6 @@
 //! [`crate::service::fetch`] so retry policy stays uniform across registry
 //! manifest fetches and non-registry resolvers (git, http tarball).
 
-use std::sync::{LazyLock, Mutex};
-
 use anyhow::{Result, anyhow};
 use tokio_retry::RetryIf;
 
@@ -14,80 +12,6 @@ use super::fetch::{
 };
 use super::http::pick_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
-
-/// Per-request send latency — from `request.send().await` entry to response
-/// headers available (μs). Isolates "waiting for server to respond" from
-/// body download and JSON parse.
-static SEND_US: LazyLock<Mutex<Vec<u32>>> = LazyLock::new(|| Mutex::new(Vec::new()));
-
-/// Per-request body download latency — from response headers to full body
-/// bytes in memory (μs). Isolates network throughput cost.
-static BODY_US: LazyLock<Mutex<Vec<u32>>> = LazyLock::new(|| Mutex::new(Vec::new()));
-
-/// Per-request JSON parse latency (μs), measured end-to-end on the main
-/// task: includes `spawn_blocking` dispatch + parse work + await overhead.
-/// This is what the async preload loop actually waits on, so it's the right
-/// slice to compare against the pure-parse cost to reveal scheduler gap.
-static PARSE_US: LazyLock<Mutex<Vec<u32>>> = LazyLock::new(|| Mutex::new(Vec::new()));
-
-/// Per-resolve `FullManifest::get_core_version` latency (μs). Runs
-/// synchronously on the async task *after* the network fetch, so it
-/// competes for the same worker thread that should be polling the next
-/// in-flight request. Current implementation re-parses the entire raw
-/// manifest bytes (`simd_json::to_borrowed_value`) then does
-/// simd_json→serde_json→T conversion — we suspect this is the hidden CPU
-/// that explains the parallelism gap (effective 38 vs bun's 64).
-static CORE_VERSION_US: LazyLock<Mutex<Vec<u32>>> = LazyLock::new(|| Mutex::new(Vec::new()));
-
-/// Record a `get_core_version` sample. Exposed via `pub(crate)` so
-/// `service::registry` can time the call without pulling the histogram
-/// machinery out of this module.
-pub(crate) fn record_core_version_us(us: u128) {
-    record_us(&CORE_VERSION_US, us);
-}
-
-fn record_us(slot: &Mutex<Vec<u32>>, us: u128) {
-    if let Ok(mut v) = slot.lock() {
-        v.push(us.min(u32::MAX as u128) as u32);
-    }
-}
-
-/// Dump send/body/parse histograms collected during manifest fetching and
-/// clear the buffers. Called from `preload_manifests` after its `proc_us`
-/// dump so the three numbers are printed in one place per run.
-pub fn dump_fetch_histograms() {
-    for (label, slot) in [
-        ("send", &*SEND_US),
-        ("body", &*BODY_US),
-        ("parse", &*PARSE_US),
-        ("core_version", &*CORE_VERSION_US),
-    ] {
-        let mut v = match slot.lock() {
-            Ok(mut guard) => std::mem::take(&mut *guard),
-            Err(_) => continue,
-        };
-        if v.is_empty() {
-            continue;
-        }
-        v.sort_unstable();
-        let pct = |p: f64| -> u32 {
-            let idx = ((p * v.len() as f64) as usize).min(v.len() - 1);
-            v[idx]
-        };
-        let sum: u64 = v.iter().map(|&x| x as u64).sum();
-        tracing::info!(
-            "manifest {}_us (n={}): p50={} p90={} p99={} max={} sum={}us avg={}us",
-            label,
-            v.len(),
-            pct(0.50),
-            pct(0.90),
-            pct(0.99),
-            pct(1.0),
-            sum,
-            sum / v.len() as u64
-        );
-    }
-}
 
 /// Result of a full manifest fetch with ETag support.
 /// Transient return value, immediately destructured — Box not needed.
@@ -144,9 +68,7 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                     request = request.header("If-None-Match", etag_value);
                 }
 
-                let send_start = tokio::time::Instant::now();
                 let response = request.send().await.map_err(classify_reqwest_error)?;
-                record_us(&SEND_US, send_start.elapsed().as_micros());
                 let status = response.status();
 
                 if status == reqwest::StatusCode::NOT_MODIFIED {
@@ -164,13 +86,11 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                         .and_then(|v| v.to_str().ok())
                         .map(|s| s.to_string());
 
-                    let body_start = tokio::time::Instant::now();
                     let raw_bytes: Vec<u8> = response
                         .bytes()
                         .await
                         .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
                         .into();
-                    record_us(&BODY_US, body_start.elapsed().as_micros());
 
                     // Offload JSON parse to the blocking pool. Manifests are
                     // 5–50KB and simd_json is CPU-bound (~1–5ms per call);
@@ -179,7 +99,6 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                     // concurrent fetches, creating the dips we saw in the
                     // active-stream pcap. spawn_blocking lets the main task
                     // keep dispatching while the worker pool parses.
-                    let parse_start = tokio::time::Instant::now();
                     let manifest = tokio::task::spawn_blocking(move || {
                         // simd_json mutates the parse buffer in place
                         // (in-place unicode unescaping etc.), so we keep a
@@ -193,7 +112,6 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                     .await
                     .map_err(|e| FetchError::Permanent(anyhow!("Parse task panicked: {e}")))?
                     .map_err(FetchError::Permanent)?;
-                    record_us(&PARSE_US, parse_start.elapsed().as_micros());
 
                     Ok(FetchManifestResult::Ok(manifest, new_etag))
                 } else {

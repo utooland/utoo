@@ -91,18 +91,6 @@ where
     F: FnMut(&str, Arc<CoreVersionManifest>),
 {
     let mut stats = PreloadStats::default();
-    // Per-iteration processing time on the main task (in μs). Each sample
-    // covers the window from `futures.next().await` returning to the next
-    // iteration's `futures.next().await` being re-entered — i.e. the
-    // serial CPU cost for stats + event emission + callback + refill-loop
-    // + next iteration setup. Printed as a histogram at shutdown.
-    let mut proc_us: Vec<u32> = Vec::new();
-    // Snapshot of `in_flight` sampled *after* each refill attempt (i.e.
-    // after we've tried to backfill to the concurrency cap) but *before*
-    // the `futures.next().await` on the next completion. This is the
-    // steady-state saturation level — we want it pinned at `concurrency`
-    // during the body of the phase and only tapering at start/end.
-    let mut in_flight_samples: Vec<u32> = Vec::new();
     let mut processed: HashSet<String> = HashSet::new();
     // Shared pending queue: each in-flight future extracts its own
     // transitive deps on the blocking pool and pushes them here, so the
@@ -181,12 +169,9 @@ where
             break;
         }
 
-        in_flight_samples.push(in_flight as u32);
-
         let Some((name, result, elapsed_ms)) = futures.next().await else {
             break;
         };
-        let iter_start = tokio::time::Instant::now();
         in_flight -= 1;
 
         if stats.success_count == 0 && stats.failed_count == 0 {
@@ -219,66 +204,9 @@ where
                 tracing::debug!("Failed to preload {}: {}", name, e);
             }
         }
-        proc_us.push(iter_start.elapsed().as_micros().min(u32::MAX as u128) as u32);
     }
 
     stats.total_processed = processed.len();
-
-    // Dump the per-iteration processing-time histogram. This is the
-    // serial main-task cost that competes with the async poll of the
-    // in-flight request pool; dips in active-stream count correlate
-    // with spikes in these samples.
-    if !proc_us.is_empty() {
-        let mut v = proc_us.clone();
-        v.sort_unstable();
-        let pct = |p: f64| -> u32 {
-            let idx = ((p * v.len() as f64) as usize).min(v.len() - 1);
-            v[idx]
-        };
-        let sum: u64 = v.iter().map(|&x| x as u64).sum();
-        tracing::info!(
-            "preload proc_us (n={}): p50={} p90={} p99={} max={} sum={}us avg={}us",
-            v.len(),
-            pct(0.50),
-            pct(0.90),
-            pct(0.99),
-            pct(1.0),
-            sum,
-            sum / v.len() as u64
-        );
-    }
-
-    if !in_flight_samples.is_empty() {
-        let mut v = in_flight_samples.clone();
-        v.sort_unstable();
-        let pct = |p: f64| -> u32 {
-            let idx = ((p * v.len() as f64) as usize).min(v.len() - 1);
-            v[idx]
-        };
-        let sum: u64 = v.iter().map(|&x| x as u64).sum();
-        let cap_hits = v.iter().filter(|&&x| x as usize >= concurrency).count();
-        tracing::info!(
-            "preload in_flight (n={}): p5={} p25={} p50={} p75={} p95={} max={} avg={} cap_hits={}% ({}/{})",
-            v.len(),
-            pct(0.05),
-            pct(0.25),
-            pct(0.50),
-            pct(0.75),
-            pct(0.95),
-            pct(1.0),
-            sum / v.len() as u64,
-            cap_hits * 100 / v.len(),
-            cap_hits,
-            v.len(),
-        );
-    }
-
-    // Dump per-request send/body/parse histograms accumulated by
-    // `service::manifest::fetch_full_manifest`. Together with `proc_us`
-    // this locates whether remaining wall time hides in network wait
-    // (send), body download (body), or JSON parse / spawn_blocking
-    // scheduling (parse).
-    crate::service::dump_fetch_histograms();
 
     receiver.on_event(BuildEvent::PreloadComplete {
         success: stats.success_count,
