@@ -230,12 +230,16 @@ pub fn init_client_pool(registry_url: &str) {
             .map_err(|e| format!("DNS lookup {host}:{port}: {e}"))?
             .collect();
 
-        // Prefer IPv6 (anycast edges usually v6-first), then v4. Limit
-        // to CLIENT_POOL_MAX so we don't explode the pool for hosts
-        // with dozens of addresses.
-        let v6: Vec<SocketAddr> = addrs.iter().filter(|a| a.is_ipv6()).copied().collect();
+        // Prefer IPv4 — each client is pinned to a single IP without
+        // Happy Eyeballs fallback, so we must pick a family that's
+        // universally reachable. GitHub Actions ubuntu runners have
+        // working v4 to Cloudflare edges but v6 routing is blocked
+        // (first attempt returned `os error 101 Network is unreachable`
+        // on every pinned v6 client, wiping out the whole preload).
+        // v4 works on CI, local dev, and everywhere we've tested.
         let v4: Vec<SocketAddr> = addrs.iter().filter(|a| a.is_ipv4()).copied().collect();
-        let selected: Vec<SocketAddr> = v6.into_iter().chain(v4).take(CLIENT_POOL_MAX).collect();
+        let v6: Vec<SocketAddr> = addrs.iter().filter(|a| a.is_ipv6()).copied().collect();
+        let selected: Vec<SocketAddr> = v4.into_iter().chain(v6).take(CLIENT_POOL_MAX).collect();
 
         if selected.is_empty() {
             return Err(format!("no addresses resolved for {host}"));
