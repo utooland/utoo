@@ -25,13 +25,29 @@ tokio-fs-ext    = { workspace = true }
 tokio-retry     = "0.3"
 tracing         = { workspace = true }
 # HTTP client - works on both native and WASM
+#
+# We use `rustls-tls-native-roots-no-provider` (instead of the default
+# `rustls-tls-native-roots`) so reqwest doesn't pin the crypto provider
+# to `ring`. We then build our own `rustls::ClientConfig` with
+# `aws-lc-rs` (BoringSSL's crypto primitives) in `service/http.rs` and
+# pass it via `Client::use_preconfigured_tls`. Measured on CI against
+# npmjs.org: `ring` took 78 ms p50 / 154 ms max from CCS → first
+# AppData per handshake (CPU-bound; 128 parallel handshakes serialise
+# across 4 cores). aws-lc-rs's per-handshake CPU is roughly 3× faster.
 reqwest      = { version = "0.12", default-features = false, features = [
   "http2",
   "json",
-  "rustls-tls",
-  "rustls-tls-native-roots",
+  "rustls-tls-native-roots-no-provider",
   "socks"
 ] }
+# Our own rustls + aws-lc-rs crypto provider.
+rustls             = { version = "0.23", default-features = false, features = [
+  "aws-lc-rs",
+  "logging",
+  "std",
+  "tls12"
+] }
+rustls-native-certs = "0.8"
 # Shared URL-hash + staging helpers for native-only resolvers (git / http)
 sha2         = { workspace = true, optional = true }
 tempfile     = { workspace = true, optional = true }
