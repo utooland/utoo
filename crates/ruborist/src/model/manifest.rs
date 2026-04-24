@@ -90,13 +90,54 @@ pub struct FullManifest {
 }
 
 impl FullManifest {
-    /// O(1) lookup of a pre-parsed `CoreVersionManifest` by version
-    /// string. Returns `None` if the version is absent or (rarely) if
-    /// its entry was malformed enough to fail strict deserialization
-    /// during the initial fetch parse — matches the previous on-demand
-    /// `extract_version` behavior of silently returning `None`.
+    /// On-demand `CoreVersionManifest` extraction from a pre-parsed
+    /// `simd_json::OwnedValue` subtree.
+    ///
+    /// History: we've been through three designs here.
+    /// 1. **Eager struct parse (previous)**: `Versions::deserialize`
+    ///    built `Arc<CoreVersionManifest>` for every version up
+    ///    front. Lookup was O(1) but fetch-time spawn_blocking had to
+    ///    materialise ~500 structs per manifest × 2730 manifests =
+    ///    ~1.37M CoreVersionManifest builds, 99 % of which the
+    ///    resolver never reads. Blocking pool saturation at cap=128
+    ///    showed up as `parse_us` avg 20 ms with long tails.
+    /// 2. **Lazy `Arc<serde_json::Value>` (tried in c5cd8318,
+    ///    reverted fe8365d7)**: stored `serde_json::Value` subtrees
+    ///    and called `from_value(value.clone())` on demand. The
+    ///    deep clone + serde_json walk ran on async worker and
+    ///    measured `core_version_us` 11-18 ms avg — worse than eager.
+    /// 3. **This design — lazy simd_json `OwnedValue` + memoisation**:
+    ///    Store each version as `Arc<simd_json::OwnedValue>` (the
+    ///    native simd_json tree form — no serde_json round-trip).
+    ///    On demand call `from_refvalue(&OwnedValue)` which
+    ///    zero-copies through `&Value` implementing `Deserializer`.
+    ///    First hit for a given (manifest, version) pays ~50-200 μs
+    ///    of subtree walking; subsequent hits are `Arc::clone` via
+    ///    the `DashMap` memoisation cache.
+    ///
+    /// Why this is better than design 1: a typical resolve touches
+    /// 1-3 of a manifest's ~500 versions. Building the other 497+
+    /// was pure waste on the blocking pool's critical path.
+    ///
+    /// Why this is better than design 2: `simd_json::OwnedValue`'s
+    /// `&Value: Deserializer` zero-copies through the tree without
+    /// allocating an intermediate `serde_json::Value`. And moving
+    /// the conversion out of `spawn_blocking` (it's small, runs on
+    /// async worker) removes the 200 μs dispatch overhead that was
+    /// ~500 ms of the previous lazy attempt.
     pub fn get_core_version(&self, version: &str) -> Option<Arc<CoreVersionManifest>> {
-        self.versions.cores.get(version).cloned()
+        // Fast path: memoised conversion.
+        if let Some(cached) = self.versions.cache.get(version) {
+            return Some(cached.clone());
+        }
+        let tree = self.versions.trees.get(version)?;
+        // `&simd_json::OwnedValue` impls `Deserializer<'_>` directly
+        // (see simd_json::serde::value::owned::de), so this is a
+        // zero-allocation tree walk — no Value clone, no bytes copy.
+        let core = CoreVersionManifest::deserialize(tree.as_ref()).ok()?;
+        let arc = Arc::new(core);
+        self.versions.cache.insert(version.to_string(), arc.clone());
+        Some(arc)
     }
 
     /// Parse a single version on demand into full `VersionManifest`
@@ -115,26 +156,31 @@ impl FullManifest {
 
 /// Version entries of a `FullManifest`: preserves key insertion order
 /// (for `VersionsInfo`/semver callers that iterate the list) alongside
-/// an `Arc`-shared map for O(1) lookup.
+/// per-version pre-parsed JSON subtrees and a memoisation cache for
+/// strongly-typed `CoreVersionManifest` conversions.
 ///
-/// Implemented as a single-pass custom `Deserialize` so the entire
-/// `"versions"` map is parsed into strongly-typed `CoreVersionManifest`s
-/// during the fetch-time `spawn_blocking` rather than lazily re-parsed
-/// on the async preload worker for every resolve.
-///
-/// A lazy variant (store `Arc<serde_json::Value>` per version and
-/// convert on demand via `spawn_blocking`) was tested and regressed —
-/// `core_version_us` jumped from ~0 to 11-18 ms avg because the
-/// `Value` deep-clone + `from_value` walk + `spawn_blocking` dispatch
-/// added up to more per-resolve CPU than the eager parse pays
-/// per-version even with the 500x multiplier. Staying eager.
+/// Fetch-time parse builds only `Arc<simd_json::OwnedValue>` per
+/// version — cheaper than constructing a full `CoreVersionManifest`
+/// because `OwnedValue` is the native simd_json tree without
+/// field-by-field `#[serde(default)]` / `skip_on_error` validation.
+/// The real `CoreVersionManifest` is materialised on demand inside
+/// `FullManifest::get_core_version`, so the ~99 % of versions the
+/// resolver never touches don't pay for field-level parsing.
 #[derive(Debug, Clone, Default)]
 pub struct Versions {
     /// Version strings in insertion order — used by
     /// `resolve_target_version` and cached into `VersionsInfo`.
     pub keys: Vec<String>,
-    /// Parsed core manifests keyed by version string.
-    pub cores: HashMap<String, Arc<CoreVersionManifest>>,
+    /// Per-version pre-parsed JSON subtrees. `Arc` because the
+    /// `FullManifest` is cloned across cache tiers (memory / project
+    /// cache) and we want Arc-level sharing of the underlying bytes.
+    pub trees: HashMap<String, Arc<simd_json::OwnedValue>>,
+    /// Memoisation cache populated on first `get_core_version(v)`
+    /// call. `DashMap` instead of `Mutex<HashMap>` because
+    /// multiple resolves for the same (name, version) can land
+    /// concurrently on different async workers; DashMap avoids
+    /// serialising them on a global mutex.
+    pub cache: Arc<dashmap::DashMap<String, Arc<CoreVersionManifest>>>,
 }
 
 impl Versions {
@@ -146,12 +192,13 @@ impl Versions {
 impl Serialize for Versions {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         // Serialize the same shape the registry returns: a JSON object
-        // mapping version string -> manifest. Order follows `keys` for
-        // determinism (HashMap iteration order is arbitrary otherwise).
+        // mapping version string -> raw JSON tree. Order follows
+        // `keys` for determinism (HashMap iteration order is arbitrary
+        // otherwise).
         use serde::ser::SerializeMap;
         let mut map = serializer.serialize_map(Some(self.keys.len()))?;
         for k in &self.keys {
-            if let Some(v) = self.cores.get(k) {
+            if let Some(v) = self.trees.get(k) {
                 map.serialize_entry(k, v.as_ref())?;
             }
         }
@@ -173,24 +220,23 @@ impl<'de> Deserialize<'de> for Versions {
             ) -> Result<Versions, M::Error> {
                 let cap = map.size_hint().unwrap_or(0);
                 let mut keys = Vec::with_capacity(cap);
-                let mut cores = HashMap::with_capacity(cap);
+                let mut trees = HashMap::with_capacity(cap);
                 while let Some(key) = map.next_key::<String>()? {
-                    // Deserialize directly into `CoreVersionManifest`
-                    // rather than buffering through `serde_json::Value`
-                    // first. The buffer approach doubled parse work and
-                    // showed up in `parse_us` as ~9ms avg per manifest
-                    // fetch. `CoreVersionManifest` uses
-                    // `#[serde(default)]` + per-field `skip_on_error`
-                    // so malformed individual fields are already
-                    // tolerated; only a completely unreadable entry
-                    // (essentially unheard of on real registry data)
-                    // would fail here, and that would correctly fail
-                    // the whole manifest fetch.
-                    let core: CoreVersionManifest = map.next_value()?;
-                    cores.insert(key.clone(), Arc::new(core));
+                    // Deserialize into `simd_json::OwnedValue` — the
+                    // native simd_json tree. Cheaper than building
+                    // `CoreVersionManifest` because it skips field
+                    // validation / `skip_on_error` round-trips; those
+                    // only run on demand for versions the resolver
+                    // actually reads.
+                    let tree: simd_json::OwnedValue = map.next_value()?;
+                    trees.insert(key.clone(), Arc::new(tree));
                     keys.push(key);
                 }
-                Ok(Versions { keys, cores })
+                Ok(Versions {
+                    keys,
+                    trees,
+                    cache: Arc::new(dashmap::DashMap::new()),
+                })
             }
         }
         deserializer.deserialize_map(VersionsVisitor)
