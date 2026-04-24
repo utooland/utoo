@@ -134,13 +134,6 @@ impl UnifiedRegistryBuilder {
             .supports_semver
             .unwrap_or_else(|| !is_npm_registry(&registry_url));
 
-        // Resolve registry host and build one reqwest client per IP. The
-        // round-robin dispatch at `pick_client()` then spreads in-flight
-        // connections evenly across IPs, matching bun's per-IP pool
-        // pattern. See `http::init_client_pool` for rationale.
-        #[cfg(not(target_arch = "wasm32"))]
-        super::http::init_client_pool(&registry_url);
-
         // Priority: shared cache > cache_dir > new cache
         let cache = self.cache.unwrap_or_else(|| {
             if let Some(dir) = self.cache_dir {

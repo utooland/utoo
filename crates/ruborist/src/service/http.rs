@@ -76,8 +76,7 @@
 //! WASM targets skip DNS entirely (browser handles it).
 
 use std::sync::LazyLock;
-use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow};
@@ -175,99 +174,8 @@ static HTTP_CLIENT: LazyLock<Result<reqwest::Client, String>> = LazyLock::new(||
 });
 
 pub(crate) fn pick_client() -> Result<&'static reqwest::Client> {
-    // Multi-client pool: round-robin across N clients, each pinned to a
-    // distinct resolved IP of the registry host via `resolve_to_addrs`.
-    // Forces per-IP connection distribution, replicating bun's 4×64 pcap
-    // pattern instead of relying on Happy Eyeballs alone.
-    if let Some(Ok(clients)) = CLIENT_POOL.get()
-        && !clients.is_empty()
-    {
-        let idx = CLIENT_RR.fetch_add(1, Ordering::Relaxed) % clients.len();
-        return Ok(&clients[idx]);
-    }
     HTTP_CLIENT.as_ref().map_err(|e| anyhow!("{e}"))
 }
-
-/// Per-IP client pool. Populated lazily by [`init_client_pool`] at
-/// [`UnifiedRegistry::build`] time. Result wraps errors so the init
-/// failure doesn't panic — callers fall back to the shared-resolver
-/// single client.
-static CLIENT_POOL: OnceLock<Result<Vec<reqwest::Client>, String>> = OnceLock::new();
-static CLIENT_RR: AtomicUsize = AtomicUsize::new(0);
-
-/// Build one client per resolved registry IP (up to `CLIENT_POOL_MAX`).
-///
-/// npmjs.org anycasts to ~4 Cloudflare edges. Single-client + DNS
-/// rotation lets Happy Eyeballs pick among them, but in practice CI's
-/// reachable-IPv6 ordering biases >50 % of connections onto one IP
-/// (observed in pcap). Explicit `resolve_to_addrs` per client pins each
-/// client to one IP, guaranteeing that round-robin dispatch
-/// distributes connections evenly: N=4 clients × 32 conns/client at
-/// cap=128 matches bun's observed 4×64 at cap=256, scaled for our
-/// lower cap.
-///
-/// Sync DNS via `ToSocketAddrs::to_socket_addrs` — blocks the calling
-/// thread for one getaddrinfo lookup (~10-50 ms once per process). OK
-/// because it's called from [`UnifiedRegistry::build`] which is sync
-/// and runs once at startup.
-#[cfg(not(target_arch = "wasm32"))]
-pub fn init_client_pool(registry_url: &str) {
-    use std::net::{SocketAddr, ToSocketAddrs};
-
-    const CLIENT_POOL_MAX: usize = 4;
-
-    let init = || -> Result<Vec<reqwest::Client>, String> {
-        let url =
-            reqwest::Url::parse(registry_url).map_err(|e| format!("parse registry url: {e}"))?;
-        let host = url
-            .host_str()
-            .ok_or_else(|| "registry URL has no host".to_string())?
-            .to_string();
-        let port = url.port_or_known_default().unwrap_or(443);
-
-        let addrs: Vec<SocketAddr> = (host.as_str(), port)
-            .to_socket_addrs()
-            .map_err(|e| format!("DNS lookup {host}:{port}: {e}"))?
-            .collect();
-
-        // Prefer IPv6 (anycast edges usually v6-first), then v4. Limit
-        // to CLIENT_POOL_MAX so we don't explode the pool for hosts
-        // with dozens of addresses.
-        let v6: Vec<SocketAddr> = addrs.iter().filter(|a| a.is_ipv6()).copied().collect();
-        let v4: Vec<SocketAddr> = addrs.iter().filter(|a| a.is_ipv4()).copied().collect();
-        let selected: Vec<SocketAddr> = v6.into_iter().chain(v4).take(CLIENT_POOL_MAX).collect();
-
-        if selected.is_empty() {
-            return Err(format!("no addresses resolved for {host}"));
-        }
-
-        tracing::info!(
-            "HTTP client pool: {} clients for {} ({} addrs resolved, {} selected)",
-            selected.len(),
-            host,
-            addrs.len(),
-            selected.len()
-        );
-
-        selected
-            .into_iter()
-            .map(|addr| {
-                client_builder()
-                    .and_then(|b| {
-                        b.resolve_to_addrs(&host, &[addr])
-                            .build()
-                            .context("build pinned reqwest client")
-                    })
-                    .map_err(|e| e.to_string())
-            })
-            .collect::<Result<Vec<_>, _>>()
-    };
-
-    let _ = CLIENT_POOL.set(init());
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn init_client_pool(_registry_url: &str) {}
 
 /// Build a `rustls::ClientConfig` using the `aws-lc-rs` crypto provider
 /// instead of reqwest's default `ring`. Measured on CI (4-core runner)
