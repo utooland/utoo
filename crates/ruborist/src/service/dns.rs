@@ -91,21 +91,52 @@ mod native {
         }
     }
 
-    /// Rotate `addrs` left by `offset` positions, producing a fresh Vec so
-    /// reqwest's connect loop tries a different IP on every new connection.
+    /// Rotate `addrs` left by `offset` positions, keeping each address
+    /// family (IPv4 / IPv6) rotated independently and preserving the
+    /// system resolver's original family ordering between them.
     ///
-    /// e.g. `[A, B, C, D]` with offset 2 → `[C, D, A, B]`.
+    /// Why per-family: `getaddrinfo` typically returns IPv6 first
+    /// (e.g. 10 v6 + 12 v4 = 22 entries for `registry.npmjs.org`). A
+    /// flat rotation by `offset % 22` means offsets 0..10 all start
+    /// inside the IPv6 range and — on hosts without usable IPv6
+    /// routing like GitHub Actions runners — every single one of them
+    /// falls through to the *same* first IPv4 address once Happy
+    /// Eyeballs gives up on v6. Pcap comparison with bun confirmed
+    /// this bug: 66 of utoo's 128 connections (51 %) were landing on
+    /// a single Cloudflare edge IP while the other 11 IPs saw only
+    /// 5-6 connections each. bun distributes cleanly 64 per IP across
+    /// 4 IPs, which is the behaviour we want.
+    ///
+    /// With per-family rotation, every new connection's first-reachable
+    /// IPv4 cycles through all v4 addresses (and same for v6 if it
+    /// works), giving ~11 conns per IP instead of 66 on one.
     fn rotate_addrs(addrs: &[SocketAddr], offset: usize) -> Vec<SocketAddr> {
         if addrs.is_empty() {
             return Vec::new();
         }
-        let n = addrs.len();
-        let start = offset % n;
-        addrs[start..]
-            .iter()
-            .chain(&addrs[..start])
-            .copied()
-            .collect()
+        let rotate = |slice: &[SocketAddr]| -> Vec<SocketAddr> {
+            if slice.is_empty() {
+                return Vec::new();
+            }
+            let start = offset % slice.len();
+            slice[start..]
+                .iter()
+                .chain(&slice[..start])
+                .copied()
+                .collect()
+        };
+        let v6: Vec<SocketAddr> = addrs.iter().filter(|a| a.is_ipv6()).copied().collect();
+        let v4: Vec<SocketAddr> = addrs.iter().filter(|a| a.is_ipv4()).copied().collect();
+        let v6_rot = rotate(&v6);
+        let v4_rot = rotate(&v4);
+        // Preserve v6-first ordering if that's what the resolver gave us;
+        // Happy Eyeballs will still prefer v6 when it's reachable.
+        let v6_first = addrs.first().map(|a| a.is_ipv6()).unwrap_or(true);
+        if v6_first {
+            v6_rot.into_iter().chain(v4_rot).collect()
+        } else {
+            v4_rot.into_iter().chain(v6_rot).collect()
+        }
     }
 
     /// Perform a system DNS lookup and cache the result.
