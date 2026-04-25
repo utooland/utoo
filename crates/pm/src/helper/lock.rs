@@ -481,17 +481,35 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
 
 /// Save PackageLock to disk synchronously
 pub async fn save_package_lock(path: &Path, package_lock: &PackageLock) -> Result<()> {
+    let t_total = std::time::Instant::now();
     let temp_path = path.join("package-lock.json.tmp");
     let target_path = path.join("package-lock.json");
 
-    // PackageLock now has all required fields (name, version, lockfile_version, requires, packages)
+    let t_serialize = std::time::Instant::now();
     let content = serde_json::to_string_pretty(package_lock)?;
+    let serialize_ms = t_serialize.elapsed().as_millis();
+    let bytes = content.len();
+
+    let t_write = std::time::Instant::now();
     fs::write(&temp_path, content)
         .await
         .context("Failed to write temporary package-lock.json")?;
+    let write_ms = t_write.elapsed().as_millis();
+
+    let t_rename = std::time::Instant::now();
     fs::rename(temp_path, target_path)
         .await
         .context("Failed to rename package-lock.json")?;
+    let rename_ms = t_rename.elapsed().as_millis();
+
+    tracing::info!(
+        "Save package-lock.json: total={}ms (serialize={}ms write={}ms rename={}ms, size={}KB)",
+        t_total.elapsed().as_millis(),
+        serialize_ms,
+        write_ms,
+        rename_ms,
+        bytes / 1024,
+    );
 
     Ok(())
 }
