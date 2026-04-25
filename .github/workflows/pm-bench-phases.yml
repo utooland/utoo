@@ -8,11 +8,6 @@ on:
         required: false
         default: 'ant-design'
         type: string
-      registry:
-        description: 'Registry URL'
-        required: false
-        default: 'https://registry.npmjs.org'
-        type: string
       runs:
         description: 'Runs per phase'
         required: false
@@ -28,7 +23,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-linux:
+  build:
     # Mirrors `pack-perf.yml` auto-trigger pattern: only run on
     # PRs / pushes whose title or commit message references the pm
     # scope. Manual workflow_dispatch always runs.
@@ -36,17 +31,17 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm')) ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm'))
-    runs-on: ubuntu-latest
-    container:
-      image: ubuntu:20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+          - os: macos-latest
+            platform: mac
+    runs-on: ${{ matrix.os }}
     steps:
-      - name: Install dependencies
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: apt-get update && apt-get install -y build-essential curl pkg-config libssl-dev git
       - uses: actions/checkout@v4
-      - name: Configure git safe directory
-        run: git config --global --add safe.directory /__w/utoo/utoo
       - name: Init git submodules
         run: git submodule update --init --recursive --depth 1
       - name: Install Rust
@@ -56,7 +51,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: pm-bench-linux
+          shared-key: pm-bench-${{ matrix.platform }}
       - name: Build current branch utoo + manifest-bench
         run: |
           cargo build --release --bin utoo -p utoo-pm
@@ -64,23 +59,33 @@ jobs:
       - name: Upload utoo binary
         uses: actions/upload-artifact@v4
         with:
-          name: utoo-linux-bench-phases
+          name: utoo-${{ matrix.platform }}-bench-phases
           path: target/release/utoo
           retention-days: 1
       - name: Upload manifest-bench binary
         uses: actions/upload-artifact@v4
         with:
-          name: manifest-bench-linux
+          name: manifest-bench-${{ matrix.platform }}
           path: target/release/manifest-bench
           retention-days: 1
 
   bench:
-    needs: [build-linux]
+    needs: [build]
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm')) ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm'))
-    runs-on: ubuntu-latest
+    strategy:
+      # Don't cancel mac if linux fails (or vice versa) — each platform's
+      # comment is independent and useful on its own.
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+          - os: macos-latest
+            platform: mac
+    runs-on: ${{ matrix.os }}
     # Comment-writing on PRs needs `pull-requests: write`. Other tokens
     # default to read-only on this workflow's events. Granular instead
     # of `write-all` to keep the workflow's blast radius minimal.
@@ -96,12 +101,12 @@ jobs:
       - name: Download utoo binary
         uses: actions/download-artifact@v4
         with:
-          name: utoo-linux-bench-phases
+          name: utoo-${{ matrix.platform }}-bench-phases
           path: dist
       - name: Download manifest-bench binary
         uses: actions/download-artifact@v4
         with:
-          name: manifest-bench-linux
+          name: manifest-bench-${{ matrix.platform }}
           path: dist
       - name: Install utoo
         run: |
@@ -111,145 +116,201 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - name: Install hyperfine, GNU time, tcpdump and dnsutils
+      # hyperfine + GNU time available via OS package manager. tcpdump
+      # only needed for pcap step (linux only — sudo + raw sockets not
+      # generally available on macos GH runners).
+      - name: Install bench tools (linux)
+        if: matrix.platform == 'linux'
         run: sudo apt-get update && sudo apt-get install -y hyperfine time tcpdump dnsutils
+      - name: Install bench tools (mac)
+        if: matrix.platform == 'mac'
+        run: |
+          brew install hyperfine
+          # macOS has /usr/bin/time built-in; pm-bench-phases.sh's metrics
+          # wrapper uses `time -v` (GNU). Install gnu-time and alias.
+          brew install gnu-time
+          # symlink so `time` in scripts hits gnu-time
+          mkdir -p "$HOME/bin"
+          ln -sf "$(brew --prefix gnu-time)/bin/gtime" "$HOME/bin/time"
+          echo "$HOME/bin" >> $GITHUB_PATH
       - name: Verify tools
         run: |
           hyperfine --version
           utoo --version
           bun --version
-      - name: Run phase-isolated benchmark
+
+      # ============================================================
+      # Helper: wipe everything between registry runs so cache + state
+      # from the previous registry doesn't leak into the next one.
+      # The PROJECT clone is removed too — the bench script re-clones.
+      # ============================================================
+      - name: Define cache wipe function
+        run: |
+          cat > /tmp/wipe-bench-state.sh <<'WIPE'
+          #!/usr/bin/env bash
+          # Wipe ALL bench state — caches, project clone, results, lockfiles.
+          # Used between registry runs so the second one starts truly cold.
+          rm -rf /tmp/pm-bench /tmp/pm-bench-results /tmp/pm-bench-output \
+                 /tmp/utoo-bench-cache /tmp/bun-bench-cache \
+                 ~/.bun/install/cache ~/.cache/nm 2>/dev/null || true
+          mkdir -p /tmp/pm-bench-output
+          WIPE
+          chmod +x /tmp/wipe-bench-state.sh
+
+      # ------------------------------------------------------------
+      # Run 1: npmjs.org (the primary upstream)
+      # ------------------------------------------------------------
+      - name: Wipe bench state before npmjs
+        run: bash /tmp/wipe-bench-state.sh
+
+      - name: Run phase-isolated benchmark · npmjs
         env:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
-          REGISTRY: ${{ github.event.inputs.registry || 'https://registry.npmjs.org' }}
+          REGISTRY: 'https://registry.npmjs.org'
           BENCH_RUNS: ${{ github.event.inputs.runs || '3' }}
           PM_LIST: 'utoo,bun'
         run: |
           chmod +x e2e/pm-bench-phases.sh
-          # Capture full output to a file so the PR comment step can
-          # extract the per-phase summary tables. `tee` keeps live
-          # progress visible in the workflow log.
-          mkdir -p /tmp/pm-bench-output
-          bash e2e/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases.log
+          bash e2e/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmjs.log
 
-      - name: Standalone manifest-bench (HTTP-only fetch sweep)
+      - name: Standalone manifest-bench · npmjs
         env:
-          REGISTRY: ${{ github.event.inputs.registry || 'https://registry.npmjs.org' }}
+          REGISTRY: 'https://registry.npmjs.org'
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
+        run: bash .github/scripts/run-manifest-bench.sh 2>&1 | tee /tmp/pm-bench-output/manifest-bench-npmjs.log
+
+      # ------------------------------------------------------------
+      # Run 2: npmmirror.com (Asia-Pacific, semver-supporting registry)
+      # ------------------------------------------------------------
+      # Save the npmjs logs out of /tmp/pm-bench-output before wipe
+      # (the wipe also clears the output dir for cleanliness).
+      - name: Stash npmjs logs and wipe state before npmmirror
         run: |
-          set -eu
-          # Generate a project lockfile to source the manifest names from.
-          # Use bun (which we already have) to do a quick lockfile-only
-          # install so manifest-bench has a real workload to fire against.
-          PROJECT_DIR="/tmp/pm-bench/$PROJECT"
-          if [ ! -d "$PROJECT_DIR" ]; then
-            mkdir -p /tmp/pm-bench
-            git clone --depth 1 "https://github.com/ant-design/$PROJECT" "$PROJECT_DIR"
-          fi
-          cd "$PROJECT_DIR"
-          if [ ! -f package-lock.json ]; then
-            echo "==> generating lockfile via utoo"
-            utoo deps --registry "$REGISTRY" || true
-          fi
-          ls -la package-lock.json || { echo "no lockfile, skip"; exit 0; }
+          mkdir -p /tmp/bench-logs-stash
+          cp -r /tmp/pm-bench-output/. /tmp/bench-logs-stash/ 2>/dev/null || true
+          bash /tmp/wipe-bench-state.sh
+          mkdir -p /tmp/pm-bench-output
+          cp -r /tmp/bench-logs-stash/. /tmp/pm-bench-output/ 2>/dev/null || true
 
-          echo
-          echo "============================================================"
-          echo "manifest-bench: HTTP-only fetch (no parse, no resolver)"
-          echo "  Goal: isolate reqwest/rustls/tokio behaviour from"
-          echo "  ruborist's resolver pipeline. Same numbers (wall, busy,"
-          echo "  avg_conc, p50/p95/max) as ruborist's Preload HTTP diag."
-          echo "============================================================"
-          for CAP in 32 64 96 128 192 256; do
-            echo
-            echo "--- concurrency=$CAP, h1, full manifest, default UA ---"
-            manifest-bench --lockfile package-lock.json --registry "$REGISTRY" \
-              --concurrency "$CAP" --reps 2 --http1-only || true
-          done
-
-          echo
-          echo "--- concurrency=128, h2 negotiate, full manifest, default UA ---"
-          manifest-bench --lockfile package-lock.json --registry "$REGISTRY" \
-            --concurrency 128 --reps 2 || true
-
-          echo
-          echo "--- concurrency=128, h1, single-version endpoint ---"
-          manifest-bench --lockfile package-lock.json --registry "$REGISTRY" \
-            --concurrency 128 --reps 2 --http1-only --single-version || true
-
-          echo
-          echo "--- concurrency=128, h1, UA=Bun/1.2.21 ---"
-          manifest-bench --lockfile package-lock.json --registry "$REGISTRY" \
-            --concurrency 128 --reps 2 --http1-only --user-agent "Bun/1.2.21" || true
-
-      - name: Capture pcap (resolve phase, single run per PM)
+      - name: Run phase-isolated benchmark · npmmirror
         env:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
-          REGISTRY: ${{ github.event.inputs.registry || 'https://registry.npmjs.org' }}
+          REGISTRY: 'https://registry.npmmirror.com'
+          BENCH_RUNS: ${{ github.event.inputs.runs || '3' }}
+          PM_LIST: 'utoo,bun'
+        run: |
+          mkdir -p /tmp/pm-bench-output
+          bash e2e/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmmirror.log
+
+      - name: Standalone manifest-bench · npmmirror
+        env:
+          REGISTRY: 'https://registry.npmmirror.com'
+          PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
+        run: bash .github/scripts/run-manifest-bench.sh 2>&1 | tee /tmp/pm-bench-output/manifest-bench-npmmirror.log
+
+      # PCAP only on linux (mac runners lack tcpdump + raw socket perms).
+      - name: Capture pcap (resolve phase, single run per PM)
+        if: matrix.platform == 'linux'
+        env:
+          PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
+          REGISTRY: 'https://registry.npmjs.org'
         run: |
           chmod +x e2e/pm-bench-pcap.sh
           bash e2e/pm-bench-pcap.sh
 
       - name: Upload pcap artifact
-        if: always()
+        if: always() && matrix.platform == 'linux'
         uses: actions/upload-artifact@v4
         with:
           name: pm-bench-pcap
           path: /tmp/pm-bench-pcap
           retention-days: 3
 
-      # Build the comment body from the bench output. Strips ANSI escape
-      # codes and pulls out the `## p<N>_<name>` summary tables; bun vs
-      # utoo wall / RSS / IO / context-switch / network / cache /
-      # lockfile rows are wrapped as fenced blocks for readability.
+      - name: Upload bench logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pm-bench-logs-${{ matrix.platform }}
+          path: /tmp/pm-bench-output
+          retention-days: 7
+
+      # Build the comment body from BOTH registry runs and BOTH phases'
+      # output. Strips ANSI escape codes; pulls out per-phase summary
+      # tables for each registry under a labeled section.
       - name: Build PR comment body
         if: always()
         run: |
           set -eu
-          mkdir -p /tmp/pm-bench-output
           OUT=/tmp/pm-bench-output/pr_comment.md
-          LOG=/tmp/pm-bench-output/bench-phases.log
-          if [ ! -f "$LOG" ]; then
-            echo "_No bench output produced — see [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})._" > "$OUT"
-            exit 0
-          fi
-          # Strip ANSI escapes
-          CLEANED=$(mktemp)
-          sed -E 's/\x1B\[[0-9;]*[a-zA-Z]//g' "$LOG" > "$CLEANED"
 
           SHA="${GITHUB_SHA:0:7}"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          PLATFORM='${{ matrix.platform }}'
+          OS='${{ matrix.os }}'
 
           {
-            echo "## 📊 pm-bench-phases · \`$SHA\`"
+            echo "## 📊 pm-bench-phases · \`$SHA\` · ${PLATFORM} (\`${OS}\`)"
             echo ""
-            echo "[Workflow run]($RUN_URL) — ant-design / npmjs.org / ubuntu-latest"
+            echo "[Workflow run]($RUN_URL) — ant-design"
             echo ""
           } > "$OUT"
 
-          # Extract each `## p<N>_<name>` section (up to but not including
-          # the next `## ` or EOF) and wrap as code fence.
-          awk '
-            /^## p[0-9]+_[a-z0-9_]+/ {
-              if (in_section) print "```\n";
-              in_section = 1;
-              print "```";
-              print $0;
-              next;
-            }
-            /^## / && in_section {
-              print "```\n";
-              in_section = 0;
-            }
-            in_section { print }
-            END { if (in_section) print "```" }
-          ' "$CLEANED" >> "$OUT"
+          # Helper to extract `## p<N>_<name>` sections from a log file
+          # and emit them under a labeled heading.
+          render_log() {
+            local label="$1"
+            local file="$2"
+            if [ ! -f "$file" ]; then
+              echo "_${label}: no output captured._"
+              echo ""
+              return
+            fi
+            echo "### ${label}"
+            echo ""
+            local cleaned
+            cleaned=$(mktemp)
+            sed -E 's/\x1B\[[0-9;]*[a-zA-Z]//g' "$file" > "$cleaned"
+            awk '
+              /^## p[0-9]+_[a-z0-9_]+/ {
+                if (in_section) print "```\n";
+                in_section = 1;
+                print "```";
+                print $0;
+                next;
+              }
+              /^## / && in_section {
+                print "```\n";
+                in_section = 0;
+              }
+              in_section { print }
+              END { if (in_section) print "```" }
+            ' "$cleaned"
+            echo ""
+            rm -f "$cleaned"
+          }
 
-      # Find the PR number that owns this run. On `pull_request` events
-      # the number is on the event payload directly; on `push` events
-      # we look it up by branch name (then by commit SHA as a fallback).
-      # Mirrors pack-perf.yml so behaviour stays consistent across the
-      # two perf workflows.
+          render_log "npmjs.org" /tmp/pm-bench-output/bench-phases-npmjs.log >> "$OUT"
+          render_log "npmmirror.com" /tmp/pm-bench-output/bench-phases-npmmirror.log >> "$OUT"
+
+          # Manifest-bench: include only the section markers + rep
+          # summary lines so the comment doesn't balloon.
+          {
+            echo "### manifest-bench (HTTP-only fetch sweep)"
+            echo ""
+            for label in npmjs npmmirror; do
+              mb_log="/tmp/pm-bench-output/manifest-bench-${label}.log"
+              if [ -f "$mb_log" ]; then
+                echo "**${label}**"
+                echo ""
+                echo '```'
+                sed -E 's/\x1B\[[0-9;]*[a-zA-Z]//g' "$mb_log" \
+                  | grep -E '^---|rep [12]\] n=' || echo '(no manifest-bench output)'
+                echo '```'
+                echo ""
+              fi
+            done
+          } >> "$OUT"
+
       - name: Find Current PR
         id: findPr
         if: always()
@@ -270,11 +331,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
 
+      # Each platform posts its own sticky comment (different `header`)
+      # so linux + mac results live as two separate comments and don't
+      # race / overwrite each other.
       - name: Post PR Comment
         if: always() && steps.findPr.outputs.number
         uses: marocchino/sticky-pull-request-comment@v2
         with:
-          header: pm-bench-phases-report
+          header: pm-bench-phases-${{ matrix.platform }}
           path: /tmp/pm-bench-output/pr_comment.md
           number: ${{ steps.findPr.outputs.number }}
           recreate: true
