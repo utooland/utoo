@@ -177,77 +177,110 @@ mod hardlink_clone {
         Ok(())
     }
 
-    /// Clone directory using spawn_blocking for sync I/O.
-    /// Uses hardlink when possible, falls back to copy.
+    /// Clone directory using rayon for parallel sync I/O.
+    ///
+    /// Mirrors `extractor.rs`'s pattern: `rayon::spawn` per package
+    /// (cross-package parallelism via rayon work-stealing instead of
+    /// tokio's bounded blocking pool) + `par_chunks` for the file
+    /// hardlink/copy loop (intra-package fan-out across cores).
+    ///
+    /// Why rayon over `tokio::task::spawn_blocking`: per-install we
+    /// dispatch ~3500 clone_dir calls (one per resolved package).
+    /// Default `tokio` blocking pool capped at `worker_threads`
+    /// (4 on CI runners) means at most 4 packages cloning at once,
+    /// each running ALL its file hardlinks sequentially. rayon's
+    /// global pool was already warm from tarball extraction —
+    /// reusing it here cuts inter-pool fragmentation (3 pools →
+    /// effectively 2: tokio async + rayon).
     pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
+        use rayon::prelude::*;
+
+        /// Files per rayon task when fanning out hardlinks within a
+        /// package. Same chunk size as `extractor.rs` — amortises
+        /// work-stealing futex overhead while keeping enough tasks
+        /// to saturate cores on large packages.
+        const CLONE_CHUNK_SIZE: usize = 32;
+
         let err_msg = format!("Failed to clone {} to {}", src.display(), dst.display());
         let src = src.to_path_buf();
         let dst = dst.to_path_buf();
 
-        tokio::task::spawn_blocking(move || {
-            if !fs::metadata(&src)?.is_dir() {
-                return Err(io::Error::new(
-                    io::ErrorKind::NotADirectory,
-                    "Source is not a directory",
-                ));
-            }
+        let (tx, rx) = tokio::sync::oneshot::channel();
 
-            let mut force_copy = has_install_script_sync(&src);
-
-            // Phase 1: Collect all files and directories
-            let mut files = Vec::new();
-            let mut dirs = Vec::new();
-            collect_entries(&src, &dst, &mut files, &mut dirs)?;
-
-            // Phase 2: Create all directories
-            let mut created_dirs = HashSet::new();
-            for dir in &dirs {
-                if created_dirs.insert(dir.clone())
-                    && let Err(e) = fs::create_dir_all(dir)
-                    && e.kind() != io::ErrorKind::AlreadyExists
-                {
-                    return Err(e);
+        rayon::spawn(move || {
+            let result = (|| -> io::Result<()> {
+                if !fs::metadata(&src)?.is_dir() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::NotADirectory,
+                        "Source is not a directory",
+                    ));
                 }
-            }
 
-            // Phase 3: Clone files (hardlink, fall back to copy on error).
-            //
-            // EXDEV (src cache and dst on different filesystems, e.g. a
-            // global install where ~/.cache/nm lives on a different volume
-            // than /usr/local) is a property of the src/dst pair — every
-            // remaining file would fail the same way, so latch `force_copy`
-            // and skip hardlink for the rest of this clone.
-            //
-            // Any other hardlink error (EMLINK on a single inode whose link
-            // count is exhausted, EPERM on a specific file, etc.) is
-            // per-file: copy this one and keep trying hardlink on the next.
-            for entry in &files {
-                if force_copy {
-                    copy_file_sync(&entry.src, &entry.dst)?;
-                } else if let Err(e) = fs::hard_link(&entry.src, &entry.dst) {
-                    if e.kind() == io::ErrorKind::CrossesDevices {
-                        tracing::warn!(
-                            "cross-device hardlink {} -> {}: {}; falling back to copy for remaining files",
-                            src.display(),
-                            dst.display(),
-                            e
-                        );
-                        force_copy = true;
-                    } else {
-                        tracing::warn!(
-                            "hardlink failed for {} -> {}: {}; falling back to copy for this file",
-                            entry.src.display(),
-                            entry.dst.display(),
-                            e
-                        );
+                let force_copy_initial = has_install_script_sync(&src);
+
+                // Phase 1: Collect all files and directories
+                let mut files = Vec::new();
+                let mut dirs = Vec::new();
+                collect_entries(&src, &dst, &mut files, &mut dirs)?;
+
+                // Phase 2: Create all directories (sequential — typical
+                // package has <50 dirs, parallel mkdir wastes overhead).
+                let mut created_dirs = HashSet::new();
+                for dir in &dirs {
+                    if created_dirs.insert(dir.clone())
+                        && let Err(e) = fs::create_dir_all(dir)
+                        && e.kind() != io::ErrorKind::AlreadyExists
+                    {
+                        return Err(e);
                     }
-                    copy_file_sync(&entry.src, &entry.dst)?;
                 }
-            }
-            Ok(())
-        })
-        .await?
-        .with_context(|| err_msg)
+
+                // Phase 3: Parallel clone files (hardlink, fall back to copy).
+                //
+                // EXDEV detection differs from the sequential version:
+                // each chunk independently discovers cross-device errors
+                // and falls back to copy locally, so a few extra
+                // hardlink-then-copy round-trips happen at chunk
+                // boundaries (vs the prior single force_copy latch).
+                // For packages where install_script forces copy from the
+                // start, that's pre-decided.
+                let src_for_par = src.clone();
+                let dst_for_par = dst.clone();
+                files.par_chunks(CLONE_CHUNK_SIZE).try_for_each(|chunk| {
+                    let mut chunk_force_copy = force_copy_initial;
+                    for entry in chunk {
+                        if chunk_force_copy {
+                            copy_file_sync(&entry.src, &entry.dst)?;
+                        } else if let Err(e) = fs::hard_link(&entry.src, &entry.dst) {
+                            if e.kind() == io::ErrorKind::CrossesDevices {
+                                tracing::warn!(
+                                    "cross-device hardlink {} -> {}: {}; falling back to copy for remaining files in chunk",
+                                    src_for_par.display(),
+                                    dst_for_par.display(),
+                                    e
+                                );
+                                chunk_force_copy = true;
+                            } else {
+                                tracing::warn!(
+                                    "hardlink failed for {} -> {}: {}; falling back to copy for this file",
+                                    entry.src.display(),
+                                    entry.dst.display(),
+                                    e
+                                );
+                            }
+                            copy_file_sync(&entry.src, &entry.dst)?;
+                        }
+                    }
+                    Ok::<(), io::Error>(())
+                })?;
+                Ok(())
+            })();
+            let _ = tx.send(result);
+        });
+
+        rx.await
+            .map_err(|_| anyhow::anyhow!("clone_dir rayon task panicked"))?
+            .with_context(|| err_msg)
     }
 }
 
