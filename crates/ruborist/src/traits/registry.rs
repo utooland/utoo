@@ -140,7 +140,7 @@ pub trait RegistryClient {
     fn fetch_full_manifest(
         &self,
         name: &str,
-    ) -> impl Future<Output = Result<FullManifest, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<FullManifest, Self::Error>> + crate::util::maybe_send::MaybeSend;
 
     /// Fetch specific version manifest from registry.
     ///
@@ -153,9 +153,10 @@ pub trait RegistryClient {
         &self,
         name: &str,
         spec: &str,
-    ) -> impl Future<Output = Result<Arc<CoreVersionManifest>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<Arc<CoreVersionManifest>, Self::Error>>
+    + crate::util::maybe_send::MaybeSend
     where
-        Self: Sync,
+        Self: crate::util::maybe_send::MaybeSync,
     {
         async move {
             let manifest = self.fetch_full_manifest(name).await?;
@@ -193,9 +194,9 @@ pub trait RegistryClient {
         &self,
         name: &str,
         spec: &str,
-    ) -> impl Future<Output = Result<ResolvedPackage, Self::Error>> + Send
+    ) -> impl Future<Output = Result<ResolvedPackage, Self::Error>> + crate::util::maybe_send::MaybeSend
     where
-        Self: Sync,
+        Self: crate::util::maybe_send::MaybeSync,
     {
         async move {
             // Normalize spec (handles npm: alias and workspace: prefix)

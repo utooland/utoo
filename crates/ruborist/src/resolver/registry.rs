@@ -112,7 +112,7 @@ impl<E: std::error::Error + 'static> std::error::Error for ResolveError<E> {
 /// let resolved = resolve_package(&registry, "lodash", "^4.0.0").await?;
 /// println!("Resolved to {}@{}", resolved.name, resolved.version);
 /// ```
-pub async fn resolve_package<R: RegistryClient + Sync>(
+pub async fn resolve_package<R: RegistryClient + crate::util::maybe_send::MaybeSync>(
     registry: &R,
     name: &str,
     spec: &str,
@@ -164,7 +164,7 @@ pub fn resolve_from_manifest<E: std::error::Error + 'static>(
 ///
 /// For optional dependencies, returns `Ok(None)` on resolution failure
 /// instead of propagating the error.
-pub async fn resolve_registry_dep<R: RegistryClient + Sync>(
+pub async fn resolve_registry_dep<R: RegistryClient + crate::util::maybe_send::MaybeSync>(
     registry: &R,
     name: &str,
     spec: &str,

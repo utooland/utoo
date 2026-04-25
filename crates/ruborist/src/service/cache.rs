@@ -385,6 +385,11 @@ impl PackageCache {
         let name = name.to_string();
         let info = info.clone();
 
+        // Fire-and-forget on native via `tokio::spawn`. wasm-bindgen-
+        // futures' `JsFuture` is `!Send` so `tokio::spawn` won't compile
+        // on wasm32; the wasm OPFS path is structurally serial anyway,
+        // so just await inline (best-effort, errors logged).
+        #[cfg(not(target_arch = "wasm32"))]
         tokio::spawn(async move {
             let path = get_versions_cache_path(&cache_dir, &name);
             if let Some(parent) = path.parent() {
@@ -401,6 +406,21 @@ impl PackageCache {
                 }
             }
         });
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Single-threaded wasm path — caller awaits via the next
+            // .await point in the resolver loop. Drop into a local
+            // future via wasm_bindgen_futures::spawn_local.
+            wasm_bindgen_futures::spawn_local(async move {
+                let path = get_versions_cache_path(&cache_dir, &name);
+                if let Some(parent) = path.parent() {
+                    let _ = tokio_fs_ext::create_dir_all(parent).await;
+                }
+                if let Ok(bytes) = serde_json::to_vec(&info) {
+                    let _ = tokio_fs_ext::write(&path, bytes).await;
+                }
+            });
+        }
     }
 
     /// Load version manifest from disk cache.
@@ -457,6 +477,8 @@ impl PackageCache {
         let name = name.to_string();
         let version = version.to_string();
 
+        // See `set_versions_to_disk` above for the cfg-split rationale.
+        #[cfg(not(target_arch = "wasm32"))]
         tokio::spawn(async move {
             let path = get_manifest_cache_path(&cache_dir, &name, &version);
             if let Some(parent) = path.parent() {
@@ -473,6 +495,18 @@ impl PackageCache {
                 }
             }
         });
+        #[cfg(target_arch = "wasm32")]
+        {
+            wasm_bindgen_futures::spawn_local(async move {
+                let path = get_manifest_cache_path(&cache_dir, &name, &version);
+                if let Some(parent) = path.parent() {
+                    let _ = tokio_fs_ext::create_dir_all(parent).await;
+                }
+                if let Ok(bytes) = serde_json::to_vec(&*manifest) {
+                    let _ = tokio_fs_ext::write(&path, bytes).await;
+                }
+            });
+        }
     }
 
     /// Export all version manifests for persistence.

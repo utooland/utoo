@@ -7,6 +7,8 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub mod oncemap;
 
+pub mod maybe_send;
+
 // Previously these lived in an inline `pub mod util { ... }` re-export
 // block in `lib.rs`; keep the same public path to avoid breaking
 // downstream consumers.

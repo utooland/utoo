@@ -42,14 +42,6 @@ reqwest      = { version = "0.12", default-features = false, features = [
   "rustls-tls-native-roots-no-provider",
   "socks"
 ] }
-# Our own rustls + aws-lc-rs crypto provider.
-rustls             = { version = "0.23", default-features = false, features = [
-  "aws-lc-rs",
-  "logging",
-  "std",
-  "tls12"
-] }
-rustls-native-certs = "0.8"
 # Shared URL-hash + staging helpers for native-only resolvers (git / http)
 sha2         = { workspace = true, optional = true }
 tempfile     = { workspace = true, optional = true }
@@ -74,10 +66,22 @@ tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 # Native-only dependencies (not compiled for WASM)
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 libc = "0.2"
+# Our own rustls + aws-lc-rs crypto provider — native-only because
+# `aws-lc-sys` builds BoringSSL via a `cc` C build that doesn't
+# support `wasm32-unknown-unknown`. The wasm reqwest path uses the
+# browser fetch API which ignores rustls anyway.
+rustls       = { version = "0.23", default-features = false, features = [
+  "aws-lc-rs",
+  "logging",
+  "std",
+  "tls12"
+] }
+rustls-native-certs = "0.8"
 
 # WASM-only dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = "0.3"  # For time in WASM
+js-sys                = "0.3"  # For time in WASM
+wasm-bindgen-futures  = "0.4"  # spawn_local for fire-and-forget disk writes
 
 [features]
 default      = []

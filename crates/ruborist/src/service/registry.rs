@@ -231,21 +231,30 @@ impl UnifiedRegistry {
         // Coalesce concurrent callers for the same name via OnceMap.
         // First caller runs the fetch closure; others await the shared
         // result on the OnceMap's `Notify` and clone the cached value.
-        let shared = self
-            .inflight
-            .get_or_init(name.to_string(), || async {
-                self.fetch_full_manifest_network(name).await.ok()
-            })
-            .await;
+        // Wasm runs single-threaded so coalescing is unnecessary;
+        // skip OnceMap and call the network path directly.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let shared = self
+                .inflight
+                .get_or_init(name.to_string(), || async {
+                    self.fetch_full_manifest_network(name).await.ok()
+                })
+                .await;
 
-        match shared {
-            Some(arc) => Ok((*arc).clone()),
-            None => {
-                // OnceMap clears the key on None, so the next caller
-                // retries the fetch. Retry once here with a fresh error
-                // so we surface a useful message to this caller.
-                self.fetch_full_manifest_network(name).await
+            match shared {
+                Some(arc) => Ok((*arc).clone()),
+                None => {
+                    // OnceMap clears the key on None, so the next caller
+                    // retries the fetch. Retry once here with a fresh
+                    // error so we surface a useful message to this caller.
+                    self.fetch_full_manifest_network(name).await
+                }
             }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.fetch_full_manifest_network(name).await
         }
     }
 
