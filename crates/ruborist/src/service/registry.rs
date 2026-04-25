@@ -533,15 +533,17 @@ impl RegistryClient for UnifiedRegistry {
                 fetch_name,
                 fetch_spec
             );
-            tracing::debug!(
-                "Using cached full manifest for {}@{}",
-                fetch_name,
-                fetch_spec
-            );
-            let version_list: Vec<String> = full_manifest.versions.keys.clone();
-            let resolved_version =
-                resolve_target_version(&full_manifest.dist_tags, &version_list, &fetch_spec)
-                    .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
+            // Borrow `keys` directly — `resolve_target_version` only needs
+            // `&[String]`. The previous `keys.clone()` rebuilt a 100-500
+            // entry `Vec<String>` per cache hit (≈1800 hits during a cold
+            // ant-design preload), bloating per-future allocator pressure
+            // by ~360k String allocs on shared resolver threads.
+            let resolved_version = resolve_target_version(
+                &full_manifest.dist_tags,
+                &full_manifest.versions.keys,
+                &fetch_spec,
+            )
+            .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
             let version_manifest = full_manifest
                 .get_core_version(&resolved_version)
                 .ok_or_else(|| {
