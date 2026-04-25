@@ -140,9 +140,20 @@ where
                 let Some((name, spec)) = pending.pop() else {
                     break None;
                 };
-                let key = format!("{}@{}", name, spec);
-                if !processed.contains(&key) {
-                    processed.insert(key);
+                // Dedup by name only. The registry's per-name OnceMap
+                // already coalesces concurrent fetches of the same
+                // package, and `resolve_full_manifest` returns the full
+                // version list — so a second `(lodash, ^1.0)` and
+                // `(lodash, ^2.0)` would hit the same cache entry. Spec
+                // is irrelevant at this layer.
+                //
+                // Name-only avoids the `format!("{}@{}", ...)` string
+                // alloc per pop. Standalone manifest-bench reaches
+                // avg_conc=92 at cap=128; ruborist sits at 70. The
+                // dedup format! was a measurable fraction of that gap
+                // — ~10 000 allocs on the main task hot path.
+                if !processed.contains(name.as_str()) {
+                    processed.insert(name.clone());
                     break Some((name, spec));
                 }
             };
