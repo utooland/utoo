@@ -123,21 +123,34 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          # Find the most recent pm-e2e run for this commit. pm-e2e
-          # triggers on the same `(pm` scope so it should exist for
-          # any commit that reaches us.
+          # Find the most recent pm-e2e run for this commit, and verify
+          # it actually uploaded the `utoo-linux-x64` artifact. The run
+          # may exist but its build job may have been skipped (pm-e2e's
+          # gate is `(pm)` with closing paren, while this workflow's is
+          # the looser `(pm` — so titles like `ci(pm-bench-phases): ...`
+          # trigger us but skip pm-e2e), in which case the run completes
+          # with no artifact and the download would fail.
+          SHA="${{ github.event.pull_request.head.sha || github.sha }}"
           RUN_ID=$(gh run list \
             --workflow utoopm-e2e \
-            --commit "${{ github.event.pull_request.head.sha || github.sha }}" \
+            --commit "$SHA" \
             --limit 1 \
-            --json databaseId,status,conclusion \
+            --json databaseId \
             --jq '.[0].databaseId' || true)
           if [ -z "$RUN_ID" ] || [ "$RUN_ID" == "null" ]; then
-            echo "::warning::No pm-e2e run found for this commit. Falling back to local build."
+            echo "::warning::No pm-e2e run found for $SHA. Falling back to local build."
+            echo "fallback=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          HAS_ARTIFACT=$(gh api "repos/${GH_REPO}/actions/runs/${RUN_ID}/artifacts" \
+            --jq '.artifacts[] | select(.name == "utoo-linux-x64" and .expired == false) | .id' \
+            | head -n 1)
+          if [ -z "$HAS_ARTIFACT" ]; then
+            echo "::warning::pm-e2e run $RUN_ID has no utoo-linux-x64 artifact (build job likely skipped). Falling back to local build."
             echo "fallback=true" >> $GITHUB_OUTPUT
           else
             echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
-            echo "Found pm-e2e run: $RUN_ID"
+            echo "Found pm-e2e run $RUN_ID with utoo-linux-x64 artifact"
           fi
 
       - name: Download utoo from pm-e2e (linux)
