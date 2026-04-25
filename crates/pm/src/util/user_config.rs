@@ -134,21 +134,18 @@ pub fn get_install_scope() -> InstallScope {
 
 // Manifest fetch concurrency configuration.
 //
-// After the worker-pool rewrite (ruborist commit ed7b551e), preload
-// stops being capped by main task's cooperative `FuturesUnordered`
-// polling — workers run on tokio's global executor independently.
-// CI ant-design p1_resolve at cap=96 went from wall=3.10s
-// avg_conc=58 (FuturesUnordered) → wall=2.23s avg_conc=66
-// (worker-pool). Same-run standalone manifest-bench cap=128 hit
-// avg_conc=93 / wall=2.14s, so there's still headroom.
+// Worker-pool era cap sweep on CI ant-design p1_resolve:
+//   cap=96  (worker-pool): wall=2.23s avg_conc=66 per-req=53ms
+//   cap=128 (worker-pool): wall=2.15s avg_conc=84 per-req=66ms
 //
-// Bump cap from 96 to 128: each new slot is a separate worker task
-// that can immediately start a new connection in parallel. With the
-// resolver no longer serialised through a single-task poller, the
-// server-throttle curve we measured under the old architecture (per-
-// req wall doubled cap 128→256) needs re-validation.
+// per-req at cap=128 (66ms) is *lower* than at cap=96 (75ms in the
+// FuturesUnordered era), refuting the old "Cloudflare per-req
+// throttle past ~70 conc" reading — that was an artefact of main
+// task saturation. Standalone manifest-bench cap=192 = 130 conc /
+// 2.10s on the same CI runner, so try cap=160 to chase another
+// 0.1-0.2s out of preload.
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 128));
+    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 160));
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
     MANIFESTS_CONCURRENCY_LIMIT.set(value);
