@@ -191,12 +191,17 @@ impl utoo_ruborist::progress::EventReceiver for ProgressReceiver {
             BuildEvent::PreloadStart { count } | BuildEvent::PreloadQueued { count } => {
                 PROGRESS_BAR.inc_length(count as u64);
             }
-            BuildEvent::PreloadFetching { name } => {
-                log_progress(&format!("fetching {}", name));
+            BuildEvent::PreloadFetching { .. } => {
+                // Skip per-package message updates: with 2730 completions
+                // racing through the main task at peak concurrency, each
+                // `format!() + set_message()` (indicatif lock + alloc)
+                // shows up as ~22 effective concurrency loss vs the
+                // standalone reqwest sweep (manifest-bench: 92, ruborist:
+                // 70 at the same cap=128). The user can't visually read
+                // 5460 message swaps in 3 seconds anyway.
             }
-            BuildEvent::PreloadProgress { name, .. } => {
+            BuildEvent::PreloadProgress { .. } => {
                 PROGRESS_BAR.inc(1);
-                log_progress(&format!("resolved {}", name));
             }
             BuildEvent::PreloadComplete { success, failed } => {
                 PROGRESS_BAR.set_position(0);
