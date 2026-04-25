@@ -19,17 +19,23 @@ on:
         default: '3'
         type: string
   pull_request:
-    types: [labeled]
+    branches: [main, next]
+  push:
+    branches: [main, next]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-linux:
+    # Mirrors `pack-perf.yml` auto-trigger pattern: only run on
+    # PRs / pushes whose title or commit message references the pm
+    # scope. Manual workflow_dispatch always runs.
     if: >
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && github.event.label.name == 'bench-phases')
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm')) ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm'))
     runs-on: ubuntu-latest
     container:
       image: ubuntu:20.04
@@ -72,7 +78,8 @@ jobs:
     needs: [build-linux]
     if: >
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && github.event.label.name == 'bench-phases')
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm')) ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm'))
     runs-on: ubuntu-latest
     # Comment-writing on PRs needs `pull-requests: write`. Other tokens
     # default to read-only on this workflow's events. Granular instead
@@ -191,98 +198,84 @@ jobs:
           path: /tmp/pm-bench-pcap
           retention-days: 3
 
-      # Post bench results as a PR comment. Triggers only on
-      # `bench-phases`-labeled PRs (the existing label trigger above), so
-      # workflow_dispatch + push runs do not spam comments. The comment
-      # body is the per-phase summary tables (plain text, kept compact).
-      # The action upserts a single sticky comment per PR keyed by an
-      # HTML marker so re-runs replace rather than append.
-      - name: Post bench results to PR comment
-        if: >
-          always() &&
-          github.event_name == 'pull_request' &&
-          github.event.label.name == 'bench-phases'
-        uses: actions/github-script@v7
+      # Build the comment body from the bench output. Strips ANSI escape
+      # codes and pulls out the `## p<N>_<name>` summary tables; bun vs
+      # utoo wall / RSS / IO / context-switch / network / cache /
+      # lockfile rows are wrapped as fenced blocks for readability.
+      - name: Build PR comment body
+        if: always()
+        run: |
+          set -eu
+          mkdir -p /tmp/pm-bench-output
+          OUT=/tmp/pm-bench-output/pr_comment.md
+          LOG=/tmp/pm-bench-output/bench-phases.log
+          if [ ! -f "$LOG" ]; then
+            echo "_No bench output produced — see [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})._" > "$OUT"
+            exit 0
+          fi
+          # Strip ANSI escapes
+          CLEANED=$(mktemp)
+          sed -E 's/\x1B\[[0-9;]*[a-zA-Z]//g' "$LOG" > "$CLEANED"
+
+          SHA="${GITHUB_SHA:0:7}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          {
+            echo "## 📊 pm-bench-phases · \`$SHA\`"
+            echo ""
+            echo "[Workflow run]($RUN_URL) — ant-design / npmjs.org / ubuntu-latest"
+            echo ""
+          } > "$OUT"
+
+          # Extract each `## p<N>_<name>` section (up to but not including
+          # the next `## ` or EOF) and wrap as code fence.
+          awk '
+            /^## p[0-9]+_[a-z0-9_]+/ {
+              if (in_section) print "```\n";
+              in_section = 1;
+              print "```";
+              print $0;
+              next;
+            }
+            /^## / && in_section {
+              print "```\n";
+              in_section = 0;
+            }
+            in_section { print }
+            END { if (in_section) print "```" }
+          ' "$CLEANED" >> "$OUT"
+
+      # Find the PR number that owns this run. On `pull_request` events
+      # the number is on the event payload directly; on `push` events
+      # we look it up by branch name (then by commit SHA as a fallback).
+      # Mirrors pack-perf.yml so behaviour stays consistent across the
+      # two perf workflows.
+      - name: Find Current PR
+        id: findPr
+        if: always()
+        run: |
+          PR_NUMBER=""
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          else
+            PR_NUMBER=$(gh pr list --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number' || true)
+            if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" == "null" ]; then
+              PR_NUMBER=$(gh pr list --search "${{ github.sha }}" --state open --json number --jq '.[0].number' || true)
+            fi
+          fi
+          if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+            echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+
+      - name: Post PR Comment
+        if: always() && steps.findPr.outputs.number
+        uses: marocchino/sticky-pull-request-comment@v2
         with:
-          script: |
-            const fs = require('fs');
-            const path = '/tmp/pm-bench-output/bench-phases.log';
-            if (!fs.existsSync(path)) {
-              core.warning(`No bench output at ${path}`);
-              return;
-            }
-            const raw = fs.readFileSync(path, 'utf8');
-
-            // Strip ANSI color escape codes
-            const stripAnsi = s => s.replace(/\x1b\[[0-9;]*m/g, '');
-            const cleaned = stripAnsi(raw);
-
-            // Pull out the per-phase summary tables. The pm-bench-phases.sh
-            // script prints sections delimited by `## p<N>_<name>` headers
-            // followed by tab-separated wall / RSS / IO / context-switch /
-            // network / cache / lockfile rows. Capture from each `## ` to
-            // the next `## ` (or end).
-            const sections = [];
-            const re = /^## p\d+_[a-z0-9_]+.*$/gm;
-            const headers = [];
-            let m;
-            while ((m = re.exec(cleaned)) !== null) {
-              headers.push({ idx: m.index, name: m[0].trim() });
-            }
-            for (let i = 0; i < headers.length; i++) {
-              const start = headers[i].idx;
-              const end = i + 1 < headers.length ? headers[i + 1].idx : cleaned.length;
-              const body = cleaned.slice(start, end).trim();
-              sections.push(body);
-            }
-
-            const marker = '<!-- pm-bench-phases-comment -->';
-            const sha = context.sha.slice(0, 7);
-            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-
-            let bodyParts = [
-              marker,
-              `## pm-bench-phases · \`${sha}\``,
-              '',
-              `[Workflow run](${runUrl}) — ant-design / npmjs.org / ubuntu-latest`,
-              '',
-            ];
-
-            if (sections.length === 0) {
-              bodyParts.push('_No phase summary tables found in bench output. See workflow log._');
-            } else {
-              for (const sec of sections) {
-                bodyParts.push('```');
-                bodyParts.push(sec);
-                bodyParts.push('```');
-                bodyParts.push('');
-              }
-            }
-
-            const body = bodyParts.join('\n');
-
-            // Upsert: find an existing comment with our marker, edit it;
-            // otherwise create a new one.
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const existing = comments.find(c => c.body && c.body.includes(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-              core.info(`Updated existing bench comment ${existing.id}`);
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-              core.info('Created new bench comment');
-            }
+          header: pm-bench-phases-report
+          path: /tmp/pm-bench-output/pr_comment.md
+          number: ${{ steps.findPr.outputs.number }}
+          recreate: true
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
