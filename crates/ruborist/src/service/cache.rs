@@ -91,7 +91,16 @@ use parking_lot::RwLock;
 pub struct MemoryCache(Arc<MemoryCacheInner>);
 
 struct MemoryCacheInner {
-    full_manifests: RwLock<HashMap<String, FullManifest>>,
+    /// `Arc<FullManifest>` so `get` returns a cheap atomic-bump clone
+    /// instead of deep-cloning the full versions HashMap (~100-500
+    /// `simd_json::OwnedValue` entries per package). The deep clone
+    /// was running synchronously on the main task during preload —
+    /// `FuturesUnordered` polls each future on the owning task, and
+    /// `resolve_package`'s cache check (line 226 of registry.rs) is
+    /// the first thing every future does. Standalone manifest-bench
+    /// hit avg_conc=95 at cap=128; ruborist stalled at avg_conc=56
+    /// because the per-future deep clone serialised the main loop.
+    full_manifests: RwLock<HashMap<String, Arc<FullManifest>>>,
     versions_info: RwLock<HashMap<String, VersionsInfo>>,
     version_manifests: RwLock<HashMap<String, Arc<CoreVersionManifest>>>,
 }
@@ -119,11 +128,11 @@ impl MemoryCache {
     }
 
     // Full manifests
-    pub fn get_full_manifest(&self, name: &str) -> Option<FullManifest> {
+    pub fn get_full_manifest(&self, name: &str) -> Option<Arc<FullManifest>> {
         self.0.full_manifests.read().get(name).cloned()
     }
 
-    pub fn set_full_manifest(&self, name: String, manifest: FullManifest) {
+    pub fn set_full_manifest(&self, name: String, manifest: Arc<FullManifest>) {
         self.0.full_manifests.write().insert(name, manifest);
     }
 
@@ -275,8 +284,10 @@ impl PackageCache {
 
     // === Memory cache operations (sync) ===
 
-    /// Get full manifest from memory cache.
-    pub fn get_full_manifest(&self, name: &str) -> Option<FullManifest> {
+    /// Get full manifest from memory cache. Returns `Arc` so callers
+    /// pay an atomic-bump clone instead of deep-cloning the full
+    /// versions HashMap.
+    pub fn get_full_manifest(&self, name: &str) -> Option<Arc<FullManifest>> {
         let result = self.memory.get_full_manifest(name);
         if result.is_some() {
             tracing::debug!("Memory cache hit for full manifest: {name}");
@@ -284,8 +295,10 @@ impl PackageCache {
         result
     }
 
-    /// Set full manifest in memory cache.
-    pub fn set_full_manifest(&self, name: String, manifest: FullManifest) {
+    /// Set full manifest in memory cache. Takes `Arc` so callers can
+    /// share ownership with their own copy without paying for a
+    /// deep clone at the boundary.
+    pub fn set_full_manifest(&self, name: String, manifest: Arc<FullManifest>) {
         tracing::debug!("Caching full manifest in memory: {name}");
         self.memory.set_full_manifest(name, manifest);
     }
@@ -675,7 +688,7 @@ mod tests {
             ..Default::default()
         };
 
-        cache.set_full_manifest("test".to_string(), manifest.clone());
+        cache.set_full_manifest("test".to_string(), Arc::new(manifest));
 
         let retrieved = cache.get_full_manifest("test").unwrap();
         assert_eq!(retrieved.name, "test");
