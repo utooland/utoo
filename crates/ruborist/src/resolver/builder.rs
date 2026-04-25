@@ -707,11 +707,20 @@ pub async fn process_dependency<R: RegistryClient + crate::util::maybe_send::May
 /// // Add initial dependency edges to root...
 /// build_deps(&mut graph, &registry, PeerDeps::Include).await?;
 /// ```
-pub async fn build_deps<R: RegistryClient + crate::util::maybe_send::MaybeSync>(
+pub async fn build_deps<
+    R: RegistryClient
+        + Clone
+        + crate::util::maybe_send::MaybeSend
+        + crate::util::maybe_send::MaybeSync
+        + 'static,
+>(
     graph: &mut DependencyGraph,
     registry: &R,
     peer_deps: PeerDeps,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R::Error: crate::util::maybe_send::MaybeSend,
+{
     let config = BuildDepsConfig::default().with_peer_deps(peer_deps);
     build_deps_with_config(graph, registry, config, &NoopReceiver).await
 }
@@ -730,14 +739,21 @@ pub async fn build_deps<R: RegistryClient + crate::util::maybe_send::MaybeSync>(
 /// * `peer_deps` - How to handle peer dependencies
 /// * `receiver` - Event receiver for handling build events
 pub async fn build_deps_with_receiver<
-    R: RegistryClient + crate::util::maybe_send::MaybeSync,
+    R: RegistryClient
+        + Clone
+        + crate::util::maybe_send::MaybeSend
+        + crate::util::maybe_send::MaybeSync
+        + 'static,
     E: EventReceiver,
 >(
     graph: &mut DependencyGraph,
     registry: &R,
     peer_deps: PeerDeps,
     receiver: &E,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R::Error: crate::util::maybe_send::MaybeSend,
+{
     let config = BuildDepsConfig::default().with_peer_deps(peer_deps);
     build_deps_with_config(graph, registry, config, receiver).await
 }
@@ -763,14 +779,21 @@ pub async fn build_deps_with_receiver<
 /// build_deps_with_config(&mut graph, &registry, config, &receiver).await?;
 /// ```
 pub async fn build_deps_with_config<
-    R: RegistryClient + crate::util::maybe_send::MaybeSync,
+    R: RegistryClient
+        + Clone
+        + crate::util::maybe_send::MaybeSend
+        + crate::util::maybe_send::MaybeSync
+        + 'static,
     E: EventReceiver,
 >(
     graph: &mut DependencyGraph,
     registry: &R,
     config: BuildDepsConfig,
     receiver: &E,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R::Error: crate::util::maybe_send::MaybeSend,
+{
     tracing::debug!(
         "Starting dependency tree build, peer_deps: {:?}, concurrency: {}, skip_preload: {}",
         config.peer_deps,
@@ -793,14 +816,20 @@ pub async fn build_deps_with_config<
 
 /// Run the preload phase to warm up the cache with manifests.
 async fn run_preload_phase<
-    R: RegistryClient + crate::util::maybe_send::MaybeSync,
+    R: RegistryClient
+        + Clone
+        + crate::util::maybe_send::MaybeSend
+        + crate::util::maybe_send::MaybeSync
+        + 'static,
     E: EventReceiver,
 >(
     graph: &DependencyGraph,
     registry: &R,
     config: &BuildDepsConfig,
     receiver: &E,
-) {
+) where
+    R::Error: crate::util::maybe_send::MaybeSend,
+{
     if config.skip_preload {
         return;
     }
@@ -813,18 +842,21 @@ async fn run_preload_phase<
     }
 
     tracing::debug!("Preload phase: {} initial dependencies", initial_deps.len());
-    receiver.on_event(BuildEvent::PreloadStart {
-        count: initial_deps.len(),
-    });
+    // Note: PreloadStart is emitted inside `preload_manifests` itself now.
 
     let preload_config = PreloadConfig {
         peer_deps: config.peer_deps,
         concurrency: config.concurrency,
     };
 
+    // Wrap registry in Arc for the worker pool. Each worker holds an
+    // Arc<R> so resolution runs on tokio's global executor independently
+    // of the main task driving result aggregation.
+    let registry_arc = std::sync::Arc::new(registry.clone());
+
     let stats = preload_manifests(
         initial_deps,
-        registry,
+        registry_arc,
         preload_config,
         receiver,
         |_name, _manifest| {
@@ -833,17 +865,18 @@ async fn run_preload_phase<
     )
     .await;
 
-    tracing::debug!(
-        "Preload phase completed: {} success, {} failed",
+    let elapsed = start.elapsed();
+    tracing::info!(
+        "Preload phase: {:.2?} ({} success, {} failed, {} initial deps)",
+        elapsed,
         stats.success_count,
-        stats.failed_count
+        stats.failed_count,
+        stats.total_processed,
     );
     receiver.on_event(BuildEvent::PreloadComplete {
         success: stats.success_count,
         failed: stats.failed_count,
     });
-
-    tracing::debug!("Preload phase: {:?}", start.elapsed());
 }
 
 /// Run the BFS traversal phase to build the dependency tree.
@@ -970,10 +1003,19 @@ use std::path::Path;
 /// let pkg: PackageJson = serde_json::from_str(&pkg_content)?;
 /// let lock = resolve(&pkg, &registry).await?;
 /// ```
-pub async fn resolve<R: RegistryClient + crate::util::maybe_send::MaybeSync>(
+pub async fn resolve<
+    R: RegistryClient
+        + Clone
+        + crate::util::maybe_send::MaybeSend
+        + crate::util::maybe_send::MaybeSync
+        + 'static,
+>(
     pkg: &PackageJson,
     registry: &R,
-) -> Result<PackageLock, ResolveError<R::Error>> {
+) -> Result<PackageLock, ResolveError<R::Error>>
+where
+    R::Error: crate::util::maybe_send::MaybeSend,
+{
     resolve_with_options(pkg, registry, PeerDeps::Include, &NoopReceiver).await
 }
 
@@ -985,14 +1027,21 @@ pub async fn resolve<R: RegistryClient + crate::util::maybe_send::MaybeSync>(
 /// * `peer_deps` - How to handle peer dependencies
 /// * `receiver` - Event receiver for progress tracking
 pub async fn resolve_with_options<
-    R: RegistryClient + crate::util::maybe_send::MaybeSync,
+    R: RegistryClient
+        + Clone
+        + crate::util::maybe_send::MaybeSend
+        + crate::util::maybe_send::MaybeSync
+        + 'static,
     E: EventReceiver,
 >(
     pkg: &PackageJson,
     registry: &R,
     peer_deps: PeerDeps,
     receiver: &E,
-) -> Result<PackageLock, ResolveError<R::Error>> {
+) -> Result<PackageLock, ResolveError<R::Error>>
+where
+    R::Error: crate::util::maybe_send::MaybeSend,
+{
     // Create graph with root node
     let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg.clone());
 

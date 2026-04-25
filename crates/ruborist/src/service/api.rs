@@ -135,6 +135,8 @@ where
         catalogs,
     } = options;
 
+    let t_setup = std::time::Instant::now();
+
     // 1. Find root path (workspace root if applicable)
     let discovery = WorkspaceDiscovery::new(glob.clone());
     let root_path = discovery.find_root_path(&cwd).await?;
@@ -290,17 +292,34 @@ where
         );
     }
 
+    tracing::info!(
+        "Setup phase (workspace + graph init): {:.2?}",
+        t_setup.elapsed()
+    );
+
     // Preserve the typed error via `Error::new` + `.context(...)` so CLI
     // renderers (e.g. pm's format_print) can downcast and pretty-print the
     // dependency chain carried by `ResolveError::WithChain`.
+    let t_build = std::time::Instant::now();
     build_deps_with_config(&mut graph, &registry, config, &receiver)
         .await
         .map_err(|e| anyhow::Error::new(e).context("Dependency resolution failed"))?;
+    tracing::info!(
+        "Build deps (preload + BFS resolve): {:.2?}",
+        t_build.elapsed()
+    );
 
     // 11. Serialize to PackageLock
+    let t_serialize = std::time::Instant::now();
     let (packages, _total) = graph.serialize_to_packages(&root_path);
+    tracing::info!(
+        "Serialize graph to lockfile: {:.2?} ({} packages)",
+        t_serialize.elapsed(),
+        packages.len(),
+    );
 
     // 12. Save project cache (export from memory cache)
+    let t_cache_save = std::time::Instant::now();
     let mut new_cache_data = super::cache::ProjectCacheData::default();
     // Export version manifests from memory cache to project cache
     // Memory cache key format: "name@spec", manifest contains resolved version
@@ -321,6 +340,11 @@ where
     {
         tracing::warn!("Failed to save project cache: {}", e);
     }
+    tracing::info!(
+        "Project cache export + save: {:.2?} ({} entries)",
+        t_cache_save.elapsed(),
+        new_cache_data.cache.len(),
+    );
 
     Ok(PackageLock::new(&pkg.name, &pkg.version, packages))
 }
