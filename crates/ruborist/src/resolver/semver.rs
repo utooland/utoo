@@ -39,7 +39,12 @@ use deno_semver::{Version, VersionReq};
 /// assert_eq!(name, "lodash");
 /// assert_eq!(spec, "^4.0.0");
 /// ```
-pub fn normalize_spec(name: &str, spec: &str) -> (String, String) {
+pub fn normalize_spec<'a>(
+    name: &'a str,
+    spec: &'a str,
+) -> (std::borrow::Cow<'a, str>, std::borrow::Cow<'a, str>) {
+    use std::borrow::Cow;
+
     // Handle npm: alias - fetch the aliased package instead
     if let Some(npm_spec) = spec.strip_prefix("npm:") {
         // Skip "npm:"
@@ -48,21 +53,26 @@ pub fn normalize_spec(name: &str, spec: &str) -> (String, String) {
             // Make sure we don't split on the @ of a scoped package
             if last_at_index > 0 {
                 let (pkg_name, version) = npm_spec.split_at(last_at_index);
-                return (pkg_name.to_string(), version[1..].to_string());
+                return (Cow::Borrowed(pkg_name), Cow::Borrowed(&version[1..]));
             }
         }
         // No version specified
-        return (npm_spec.to_string(), "*".to_string());
+        return (Cow::Borrowed(npm_spec), Cow::Borrowed("*"));
     }
 
     // Handle workspace: prefix - keep original name, extract version
     if let Some(workspace_spec) = spec.strip_prefix("workspace:") {
         // Skip "workspace:"
-        return (name.to_string(), workspace_spec.to_string());
+        return (Cow::Borrowed(name), Cow::Borrowed(workspace_spec));
     }
 
-    // No special prefix, return as-is
-    (name.to_string(), spec.to_string())
+    // No special prefix, return borrowed — the common case (~99 % of
+    // deps in a typical npm workload). Previously returned
+    // `(name.to_string(), spec.to_string())` which allocated two
+    // Strings per `resolve_package` call on the resolver hot path
+    // (~5460 allocs on ant-design preload, all from cooperative-poll
+    // future bodies that the main task drives).
+    (Cow::Borrowed(name), Cow::Borrowed(spec))
 }
 
 /// Check if a version matches a semver range.
@@ -208,51 +218,34 @@ mod tests {
 
     #[test]
     fn test_normalize_spec() {
-        // npm alias
-        assert_eq!(
+        let assert_eq_norm = |actual: (std::borrow::Cow<'_, str>, std::borrow::Cow<'_, str>),
+                              expected: (&str, &str)| {
+            assert_eq!(actual.0.as_ref(), expected.0);
+            assert_eq!(actual.1.as_ref(), expected.1);
+        };
+
+        assert_eq_norm(
             normalize_spec("string-width-cjs", "npm:string-width@^4.2.0"),
-            ("string-width".to_string(), "^4.2.0".to_string())
+            ("string-width", "^4.2.0"),
         );
-
-        // npm alias without version
-        assert_eq!(
-            normalize_spec("lodash-cjs", "npm:lodash"),
-            ("lodash".to_string(), "*".to_string())
-        );
-
-        // scoped npm alias
-        assert_eq!(
+        assert_eq_norm(normalize_spec("lodash-cjs", "npm:lodash"), ("lodash", "*"));
+        assert_eq_norm(
             normalize_spec("my-pkg", "npm:@scope/pkg@^1.0.0"),
-            ("@scope/pkg".to_string(), "^1.0.0".to_string())
+            ("@scope/pkg", "^1.0.0"),
         );
-
-        // scoped npm alias without version
-        assert_eq!(
+        assert_eq_norm(
             normalize_spec("my-pkg", "npm:@scope/pkg"),
-            ("@scope/pkg".to_string(), "*".to_string())
+            ("@scope/pkg", "*"),
         );
-
-        // workspace reference
-        assert_eq!(
-            normalize_spec("my-lib", "workspace:*"),
-            ("my-lib".to_string(), "*".to_string())
-        );
-
-        assert_eq!(
+        assert_eq_norm(normalize_spec("my-lib", "workspace:*"), ("my-lib", "*"));
+        assert_eq_norm(
             normalize_spec("my-lib", "workspace:^1.0.0"),
-            ("my-lib".to_string(), "^1.0.0".to_string())
+            ("my-lib", "^1.0.0"),
         );
-
-        // regular spec (unchanged)
-        assert_eq!(
-            normalize_spec("lodash", "^4.0.0"),
-            ("lodash".to_string(), "^4.0.0".to_string())
-        );
-
-        // scoped package regular spec
-        assert_eq!(
+        assert_eq_norm(normalize_spec("lodash", "^4.0.0"), ("lodash", "^4.0.0"));
+        assert_eq_norm(
             normalize_spec("@types/node", "^18.0.0"),
-            ("@types/node".to_string(), "^18.0.0".to_string())
+            ("@types/node", "^18.0.0"),
         );
     }
 }
