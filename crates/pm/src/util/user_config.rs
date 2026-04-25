@@ -135,24 +135,26 @@ pub fn get_install_scope() -> InstallScope {
 // Manifest fetch concurrency configuration.
 //
 // CI HTTP diag sweep on npmjs.org (ant-design p1_resolve):
+//   cap=64:  wall=3.18s  avg_conc=40  sum=121s  per-req=44ms
 //   cap=128: wall=3.33s  avg_conc=70  sum=227s  per-req=83ms
 //   cap=256: wall=3.95s  avg_conc=115 sum=449s  per-req=164ms
 //
-// Doubling the cap *doubled* per-request wall — Cloudflare slows
-// each request when we exceed its per-source budget (~70 req/s
-// observed). avg_conc rises but sum rises faster, so wall regresses.
+// Per-request wall doubles between cap=64 and cap=128, then doubles
+// again at cap=256 — Cloudflare queues us past ~70 concurrent and
+// each queued req pays the queue time. So `sum` grows faster than
+// linear with cap.
+//
+// At cap=64 every request is fast (no queue) but we leave parallelism
+// on the table (avg_conc=40 of 64). cap=96 should keep per-req under
+// the queue threshold (~55-60 ms expected) while raising effective
+// parallelism, taking wall toward the ~1.88s throughput floor
+// implied by 64 conn × (1/0.044 s) = 1454 req/s.
 //
 // Multi-IP / H2 experiments (commits 4e125908, ae2a6088, 1a16d25e —
-// all reverted) failed to break the avg_conc=70 ceiling: it isn't
-// per-destination-IP throttle. It's per-source policing on the CI
-// runner's egress.
-//
-// Hypothesis being tested at cap=64: if the server queues requests
-// past ~70 concurrent and queue time inflates per-req latency, then
-// staying *under* the queue threshold could lower per-req enough
-// that wall drops despite halved parallelism.
+// all reverted) failed to break the ceiling: it isn't per-destination
+// throttle. It's per-source policing on the CI runner's egress.
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 64));
+    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 96));
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
     MANIFESTS_CONCURRENCY_LIMIT.set(value);
