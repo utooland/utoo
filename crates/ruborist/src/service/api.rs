@@ -135,6 +135,8 @@ where
         catalogs,
     } = options;
 
+    let t_setup = std::time::Instant::now();
+
     // 1. Find root path (workspace root if applicable)
     let discovery = WorkspaceDiscovery::new(glob.clone());
     let root_path = discovery.find_root_path(&cwd).await?;
@@ -289,6 +291,11 @@ where
             cache_count
         );
     }
+
+    tracing::info!(
+        "Setup phase (workspace + graph init): {:.2?}",
+        t_setup.elapsed()
+    );
 
     // Preserve the typed error via `Error::new` + `.context(...)` so CLI
     // renderers (e.g. pm's format_print) can downcast and pretty-print the
