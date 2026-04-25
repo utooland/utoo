@@ -73,7 +73,6 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
 /// futex park/unpark pressure) by the chunk factor. Cross-package parallelism is
 /// preserved by the outer `rayon::spawn` in `extract_tarball`.
 fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -> Result<()> {
-    use rayon::prelude::*;
     use std::collections::HashSet;
     use std::fs;
     use std::io::{Cursor, Read, Write};
@@ -163,27 +162,25 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
         fs::create_dir(dir).ok();
     }
 
-    // Chunked parallel writes: N files per rayon task. Retains IO-overlap
-    // parallelism across cores while cutting the rayon task count (and the
-    // associated work-stealing futex traffic) relative to per-file par_iter.
-    entries
-        .par_chunks(WRITE_CHUNK_SIZE)
-        .try_for_each(|chunk| -> Result<()> {
-            for entry in chunk {
-                let mut file = fs::File::create(&entry.path)
-                    .with_context(|| format!("Failed to create: {}", entry.path.display()))?;
-                file.write_all(&entry.content)
-                    .with_context(|| format!("Failed to write: {}", entry.path.display()))?;
+    // Sequential writes within this package — testing whether
+    // intra-package rayon parallelism is still earning its keep
+    // after the worker-pool preload rewrite. Cross-package
+    // parallelism is preserved by the outer `rayon::spawn` in
+    // `extract_tarball` (each tarball gets its own rayon task).
+    let _ = WRITE_CHUNK_SIZE; // silence unused-const lint for now
+    for entry in &entries {
+        let mut file = fs::File::create(&entry.path)
+            .with_context(|| format!("Failed to create: {}", entry.path.display()))?;
+        file.write_all(&entry.content)
+            .with_context(|| format!("Failed to write: {}", entry.path.display()))?;
 
-                // Skip chmod for 0o644 (most files) — File::create() already
-                // produces this via umask (0o666 & ~0o022 = 0o644).
-                #[cfg(unix)]
-                if entry.mode != 0o644 {
-                    fs::set_permissions(&entry.path, fs::Permissions::from_mode(entry.mode)).ok();
-                }
-            }
-            Ok(())
-        })?;
+        // Skip chmod for 0o644 (most files) — File::create() already
+        // produces this via umask (0o666 & ~0o022 = 0o644).
+        #[cfg(unix)]
+        if entry.mode != 0o644 {
+            fs::set_permissions(&entry.path, fs::Permissions::from_mode(entry.mode)).ok();
+        }
+    }
 
     // Set directory permissions
     #[cfg(unix)]
