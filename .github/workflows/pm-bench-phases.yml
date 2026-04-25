@@ -23,10 +23,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    # Mirrors `pack-perf.yml` auto-trigger pattern: only run on
-    # PRs / pushes whose title or commit message references the pm
-    # scope. Manual workflow_dispatch always runs.
+  # Build manifest-bench only — `utoo` itself is built by `pm-e2e.yml`'s
+  # `build-linux-x64` job (linux artifact `utoo-linux-x64`) and the
+  # `bench` job below downloads it from there. We avoid the duplicate
+  # cargo build of utoo across the two workflows.
+  #
+  # `utoo-pm` builds for mac inside the bench job itself (pm-e2e
+  # builds mac in its e2e matrix but doesn't upload an artifact for it).
+  build-manifest-bench:
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm')) ||
@@ -52,25 +56,34 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: pm-bench-${{ matrix.platform }}
-      - name: Build current branch utoo + manifest-bench
-        run: |
-          cargo build --release --bin utoo -p utoo-pm
-          cargo build --release -p manifest-bench
-      - name: Upload utoo binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: utoo-${{ matrix.platform }}-bench-phases
-          path: target/release/utoo
-          retention-days: 1
+      - name: Build manifest-bench
+        run: cargo build --release -p manifest-bench
+      # On mac we also need utoo here — pm-e2e builds it for mac in
+      # its e2e job but doesn't upload. On linux we download utoo from
+      # pm-e2e instead.
+      - name: Build utoo (mac only)
+        if: matrix.platform == 'mac'
+        run: cargo build --release --bin utoo -p utoo-pm
       - name: Upload manifest-bench binary
         uses: actions/upload-artifact@v4
         with:
           name: manifest-bench-${{ matrix.platform }}
           path: target/release/manifest-bench
           retention-days: 1
+      - name: Upload utoo binary (mac only)
+        if: matrix.platform == 'mac'
+        uses: actions/upload-artifact@v4
+        with:
+          name: utoo-mac-bench-phases
+          path: target/release/utoo
+          retention-days: 1
 
   bench:
-    needs: [build]
+    # Wait for both manifest-bench (this workflow) and pm-e2e's linux
+    # build (separate workflow) to finish. Linux uses pm-e2e's
+    # `utoo-linux-x64` artifact downloaded from the same commit's
+    # pm-e2e run.
+    needs: [build-manifest-bench]
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm')) ||
@@ -86,28 +99,79 @@ jobs:
           - os: macos-latest
             platform: mac
     runs-on: ${{ matrix.os }}
-    # Comment-writing on PRs needs `pull-requests: write`. Other tokens
-    # default to read-only on this workflow's events. Granular instead
-    # of `write-all` to keep the workflow's blast radius minimal.
+    # `pull-requests: write` for sticky comment posting.
+    # `actions: read` for `gh run list` to find pm-e2e's run id and
+    #   for `download-artifact` cross-run via run-id.
     permissions:
       contents: read
       pull-requests: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Download utoo binary
+
+      # Linux: download utoo from pm-e2e's `build-linux-x64` job in
+      # the matching workflow run for this commit/PR. Avoids building
+      # utoo twice (once in pm-e2e, once here).
+      - name: Resolve pm-e2e run id (linux only)
+        if: matrix.platform == 'linux'
+        id: pme2e
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Find the most recent pm-e2e run for this commit. pm-e2e
+          # triggers on the same `(pm` scope so it should exist for
+          # any commit that reaches us.
+          RUN_ID=$(gh run list \
+            --workflow utoopm-e2e \
+            --commit "${{ github.event.pull_request.head.sha || github.sha }}" \
+            --limit 1 \
+            --json databaseId,status,conclusion \
+            --jq '.[0].databaseId' || true)
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" == "null" ]; then
+            echo "::warning::No pm-e2e run found for this commit. Falling back to local build."
+            echo "fallback=true" >> $GITHUB_OUTPUT
+          else
+            echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+            echo "Found pm-e2e run: $RUN_ID"
+          fi
+
+      - name: Download utoo from pm-e2e (linux)
+        if: matrix.platform == 'linux' && steps.pme2e.outputs.fallback != 'true'
         uses: actions/download-artifact@v4
         with:
-          name: utoo-${{ matrix.platform }}-bench-phases
+          name: utoo-linux-x64
           path: dist
+          run-id: ${{ steps.pme2e.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Fallback: pm-e2e didn't run for this commit (e.g. workflow_dispatch
+      # without a PR / commit message scope mismatch) — build utoo locally.
+      - name: Build utoo locally (linux fallback)
+        if: matrix.platform == 'linux' && steps.pme2e.outputs.fallback == 'true'
+        run: |
+          mkdir -p dist
+          cargo build --release --bin utoo -p utoo-pm
+          cp target/release/utoo dist/utoo
+
+      # Mac: utoo built by build-manifest-bench job in this workflow.
+      - name: Download utoo binary (mac)
+        if: matrix.platform == 'mac'
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-mac-bench-phases
+          path: dist
+
       - name: Download manifest-bench binary
         uses: actions/download-artifact@v4
         with:
           name: manifest-bench-${{ matrix.platform }}
           path: dist
+
       - name: Install utoo
         run: |
           chmod +x dist/utoo dist/manifest-bench
