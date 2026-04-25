@@ -135,21 +135,24 @@ pub fn get_install_scope() -> InstallScope {
 // Manifest fetch concurrency configuration.
 //
 // CI HTTP diag sweep on npmjs.org (ant-design p1_resolve):
-//   cap=128: wall=3.33s  avg_conc=76  p50=70ms  p95=250ms  sum=227s
-//   cap=256: wall=3.95s  avg_conc=115 p50=115ms p95=450ms  sum=449s
+//   cap=128: wall=3.33s  avg_conc=70  sum=227s  per-req=83ms
+//   cap=256: wall=3.95s  avg_conc=115 sum=449s  per-req=164ms
 //
-// Higher concurrency drops each request's wall linearly — npmjs.org
-// serves us slower when we hammer with more parallel streams. sum
-// doubles from 227s to 449s under cap=256, so avg_conc doesn't
-// translate to wall improvement (it regresses +0.65s).
+// Doubling the cap *doubled* per-request wall — Cloudflare slows
+// each request when we exceed its per-source budget (~70 req/s
+// observed). avg_conc rises but sum rises faster, so wall regresses.
 //
-// bun's 256 concurrent on the same workload is 4 IPs × 64 per-IP
-// (pcap-verified). Reqwest's pool is per-host, not per-IP, so our
-// 256 may all stack on one or two of npmjs's anycast addresses.
-// Without a custom connector enforcing per-IP distribution, 128 is
-// the sweet spot on CI.
+// Multi-IP / H2 experiments (commits 4e125908, ae2a6088, 1a16d25e —
+// all reverted) failed to break the avg_conc=70 ceiling: it isn't
+// per-destination-IP throttle. It's per-source policing on the CI
+// runner's egress.
+//
+// Hypothesis being tested at cap=64: if the server queues requests
+// past ~70 concurrent and queue time inflates per-req latency, then
+// staying *under* the queue threshold could lower per-req enough
+// that wall drops despite halved parallelism.
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 128));
+    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 64));
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
     MANIFESTS_CONCURRENCY_LIMIT.set(value);
