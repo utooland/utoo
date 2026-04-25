@@ -1,0 +1,288 @@
+name: utoopm-benchmark-phases
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: 'Project to benchmark (under github.com/ant-design/<project>)'
+        required: false
+        default: 'ant-design'
+        type: string
+      registry:
+        description: 'Registry URL'
+        required: false
+        default: 'https://registry.npmjs.org'
+        type: string
+      runs:
+        description: 'Runs per phase'
+        required: false
+        default: '3'
+        type: string
+  pull_request:
+    types: [labeled]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-linux:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'bench-phases')
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:20.04
+    steps:
+      - name: Install dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: apt-get update && apt-get install -y build-essential curl pkg-config libssl-dev git
+      - uses: actions/checkout@v4
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory /__w/utoo/utoo
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-02
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pm-bench-linux
+      - name: Build current branch utoo + manifest-bench
+        run: |
+          cargo build --release --bin utoo -p utoo-pm
+          cargo build --release -p manifest-bench
+      - name: Upload utoo binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: utoo-linux-bench-phases
+          path: target/release/utoo
+          retention-days: 1
+      - name: Upload manifest-bench binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-bench-linux
+          path: target/release/manifest-bench
+          retention-days: 1
+
+  bench:
+    needs: [build-linux]
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'bench-phases')
+    runs-on: ubuntu-latest
+    # Comment-writing on PRs needs `pull-requests: write`. Other tokens
+    # default to read-only on this workflow's events. Granular instead
+    # of `write-all` to keep the workflow's blast radius minimal.
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download utoo binary
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-linux-bench-phases
+          path: dist
+      - name: Download manifest-bench binary
+        uses: actions/download-artifact@v4
+        with:
+          name: manifest-bench-linux
+          path: dist
+      - name: Install utoo
+        run: |
+          chmod +x dist/utoo dist/manifest-bench
+          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install hyperfine, GNU time, tcpdump and dnsutils
+        run: sudo apt-get update && sudo apt-get install -y hyperfine time tcpdump dnsutils
+      - name: Verify tools
+        run: |
+          hyperfine --version
+          utoo --version
+          bun --version
+      - name: Run phase-isolated benchmark
+        env:
+          PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
+          REGISTRY: ${{ github.event.inputs.registry || 'https://registry.npmjs.org' }}
+          BENCH_RUNS: ${{ github.event.inputs.runs || '3' }}
+          PM_LIST: 'utoo,bun'
+        run: |
+          chmod +x e2e/pm-bench-phases.sh
+          # Capture full output to a file so the PR comment step can
+          # extract the per-phase summary tables. `tee` keeps live
+          # progress visible in the workflow log.
+          mkdir -p /tmp/pm-bench-output
+          bash e2e/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases.log
+
+      - name: Standalone manifest-bench (HTTP-only fetch sweep)
+        env:
+          REGISTRY: ${{ github.event.inputs.registry || 'https://registry.npmjs.org' }}
+          PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
+        run: |
+          set -eu
+          # Generate a project lockfile to source the manifest names from.
+          # Use bun (which we already have) to do a quick lockfile-only
+          # install so manifest-bench has a real workload to fire against.
+          PROJECT_DIR="/tmp/pm-bench/$PROJECT"
+          if [ ! -d "$PROJECT_DIR" ]; then
+            mkdir -p /tmp/pm-bench
+            git clone --depth 1 "https://github.com/ant-design/$PROJECT" "$PROJECT_DIR"
+          fi
+          cd "$PROJECT_DIR"
+          if [ ! -f package-lock.json ]; then
+            echo "==> generating lockfile via utoo"
+            utoo deps --registry "$REGISTRY" || true
+          fi
+          ls -la package-lock.json || { echo "no lockfile, skip"; exit 0; }
+
+          echo
+          echo "============================================================"
+          echo "manifest-bench: HTTP-only fetch (no parse, no resolver)"
+          echo "  Goal: isolate reqwest/rustls/tokio behaviour from"
+          echo "  ruborist's resolver pipeline. Same numbers (wall, busy,"
+          echo "  avg_conc, p50/p95/max) as ruborist's Preload HTTP diag."
+          echo "============================================================"
+          for CAP in 32 64 96 128 192 256; do
+            echo
+            echo "--- concurrency=$CAP, h1, full manifest, default UA ---"
+            manifest-bench --lockfile package-lock.json --registry "$REGISTRY" \
+              --concurrency "$CAP" --reps 2 --http1-only || true
+          done
+
+          echo
+          echo "--- concurrency=128, h2 negotiate, full manifest, default UA ---"
+          manifest-bench --lockfile package-lock.json --registry "$REGISTRY" \
+            --concurrency 128 --reps 2 || true
+
+          echo
+          echo "--- concurrency=128, h1, single-version endpoint ---"
+          manifest-bench --lockfile package-lock.json --registry "$REGISTRY" \
+            --concurrency 128 --reps 2 --http1-only --single-version || true
+
+          echo
+          echo "--- concurrency=128, h1, UA=Bun/1.2.21 ---"
+          manifest-bench --lockfile package-lock.json --registry "$REGISTRY" \
+            --concurrency 128 --reps 2 --http1-only --user-agent "Bun/1.2.21" || true
+
+      - name: Capture pcap (resolve phase, single run per PM)
+        env:
+          PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
+          REGISTRY: ${{ github.event.inputs.registry || 'https://registry.npmjs.org' }}
+        run: |
+          chmod +x e2e/pm-bench-pcap.sh
+          bash e2e/pm-bench-pcap.sh
+
+      - name: Upload pcap artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pm-bench-pcap
+          path: /tmp/pm-bench-pcap
+          retention-days: 3
+
+      # Post bench results as a PR comment. Triggers only on
+      # `bench-phases`-labeled PRs (the existing label trigger above), so
+      # workflow_dispatch + push runs do not spam comments. The comment
+      # body is the per-phase summary tables (plain text, kept compact).
+      # The action upserts a single sticky comment per PR keyed by an
+      # HTML marker so re-runs replace rather than append.
+      - name: Post bench results to PR comment
+        if: >
+          always() &&
+          github.event_name == 'pull_request' &&
+          github.event.label.name == 'bench-phases'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = '/tmp/pm-bench-output/bench-phases.log';
+            if (!fs.existsSync(path)) {
+              core.warning(`No bench output at ${path}`);
+              return;
+            }
+            const raw = fs.readFileSync(path, 'utf8');
+
+            // Strip ANSI color escape codes
+            const stripAnsi = s => s.replace(/\x1b\[[0-9;]*m/g, '');
+            const cleaned = stripAnsi(raw);
+
+            // Pull out the per-phase summary tables. The pm-bench-phases.sh
+            // script prints sections delimited by `## p<N>_<name>` headers
+            // followed by tab-separated wall / RSS / IO / context-switch /
+            // network / cache / lockfile rows. Capture from each `## ` to
+            // the next `## ` (or end).
+            const sections = [];
+            const re = /^## p\d+_[a-z0-9_]+.*$/gm;
+            const headers = [];
+            let m;
+            while ((m = re.exec(cleaned)) !== null) {
+              headers.push({ idx: m.index, name: m[0].trim() });
+            }
+            for (let i = 0; i < headers.length; i++) {
+              const start = headers[i].idx;
+              const end = i + 1 < headers.length ? headers[i + 1].idx : cleaned.length;
+              const body = cleaned.slice(start, end).trim();
+              sections.push(body);
+            }
+
+            const marker = '<!-- pm-bench-phases-comment -->';
+            const sha = context.sha.slice(0, 7);
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            let bodyParts = [
+              marker,
+              `## pm-bench-phases · \`${sha}\``,
+              '',
+              `[Workflow run](${runUrl}) — ant-design / npmjs.org / ubuntu-latest`,
+              '',
+            ];
+
+            if (sections.length === 0) {
+              bodyParts.push('_No phase summary tables found in bench output. See workflow log._');
+            } else {
+              for (const sec of sections) {
+                bodyParts.push('```');
+                bodyParts.push(sec);
+                bodyParts.push('```');
+                bodyParts.push('');
+              }
+            }
+
+            const body = bodyParts.join('\n');
+
+            // Upsert: find an existing comment with our marker, edit it;
+            // otherwise create a new one.
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+              core.info(`Updated existing bench comment ${existing.id}`);
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+              core.info('Created new bench comment');
+            }
