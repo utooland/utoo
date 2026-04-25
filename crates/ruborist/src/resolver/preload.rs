@@ -1,17 +1,28 @@
-//! Parallel manifest preloading for dependency resolution.
+//! Parallel manifest preloading via worker pool.
 //!
-//! Uses FuturesUnordered for true streaming concurrency: when a package resolves,
-//! its transitive dependencies are immediately added to the queue.
+//! Architecture: N long-lived `tokio::spawn` workers pulling work from a
+//! shared `SegQueue`. Replaces the prior `FuturesUnordered` design that
+//! had main task own the futures and poll them cooperatively, which
+//! capped effective parallelism at ~55-60 even when standalone
+//! manifest-bench (same reqwest stack, no resolver overhead) sustained
+//! 90+ concurrent at the same cap. The deeper `await` chain inside
+//! `resolve_package` (registry cache check + `OnceMap::get_or_init` +
+//! `RetryIf` + `request.send()` + `bytes()` + parse-spawn_blocking)
+//! made every yielded poll round-trip through the main task —
+//! starving the dispatch refill. Worker tasks run on tokio's global
+//! pool so each future progresses independently.
 
-use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Instant;
 
 use crossbeam_queue::SegQueue;
-use futures::stream::{FuturesUnordered, StreamExt};
+use dashmap::DashSet;
+use tokio::sync::{Notify, mpsc};
 
 use crate::model::manifest::CoreVersionManifest;
 use crate::model::node::PeerDeps;
+use crate::resolver::registry::ResolveError;
 use crate::resolver::registry::resolve_package;
 use crate::service::http::{
     finish_http_trace, finish_parse_trace, start_http_trace, start_parse_trace,
@@ -21,11 +32,8 @@ use crate::traits::registry::RegistryClient;
 
 /// Default concurrency limit for manifest fetching.
 ///
-/// Raised from 64 to 256 after pcap comparison against bun showed bun opens
-/// ~256 parallel TCP connections during a cold install (typically 4 IPs × 64
-/// conn each), while utoo's 64-cap kept us at roughly 1/4 the effective
-/// parallelism even after the DNS round-robin fix. Overridable via
-/// `--manifests-concurrency-limit`.
+/// Preload now runs N long-lived worker tasks; this is N. Each worker
+/// processes one resolve_package at a time on tokio's global pool.
 pub const DEFAULT_CONCURRENCY: usize = 256;
 
 /// A dependency spec: (name, version_spec)
@@ -82,115 +90,163 @@ fn extract_transitive_deps(manifest: &CoreVersionManifest, config: &PreloadConfi
     deps
 }
 
-/// Preload all package manifests in parallel with streaming concurrency.
+/// Result message sent from worker to main task.
+type Completion<E> = (
+    String,
+    Result<crate::traits::registry::ResolvedPackage, ResolveError<E>>,
+    u64,
+);
+
+/// Preload all package manifests in parallel via a tokio worker pool.
+///
+/// `registry` is moved in and shared across workers via `Arc`. Each
+/// worker is a long-lived spawned task that pulls work items from a
+/// shared lock-free `SegQueue` until both the queue and the in-flight
+/// counter reach zero, signalling end-of-phase.
+///
+/// `receiver` and `on_manifest` run on the main task only — they do
+/// not need to be `Send`/`Sync`.
 pub async fn preload_manifests<R, E, F>(
     initial_deps: Vec<Dep>,
-    registry: &R,
+    registry: Arc<R>,
     config: PreloadConfig,
     receiver: &E,
     mut on_manifest: F,
 ) -> PreloadStats
 where
-    R: RegistryClient,
+    R: RegistryClient + Send + Sync + 'static,
+    R::Error: Send,
     E: EventReceiver,
     F: FnMut(&str, Arc<CoreVersionManifest>),
 {
     let mut stats = PreloadStats::default();
-    let mut processed: HashSet<String> = HashSet::new();
     let preload_wall_start = Instant::now();
     start_http_trace();
     start_parse_trace();
-    // Shared pending queue: each in-flight future pushes its transitive
-    // deps here when it completes, and the main task pops from here to
-    // refill the concurrency window.
-    //
-    // Was `Arc<Mutex<VecDeque<Dep>>>`. Timer histogram on the preload
-    // pipeline (aca2c337) showed `first_poll_gap_us` avg 18.7 ms per
-    // future — the time between `futures.push()` and the future's
-    // actual first poll. With 128 completing futures all holding the
-    // pending mutex to append transitives while the main task is trying
-    // to acquire the same lock to pop and refill, the fill phase
-    // serialised at ~100 μs per iteration × 128 refills ≈ 13-19 ms of
-    // lock contention per batch. That's exactly the observed gap.
-    //
-    // `crossbeam_queue::SegQueue` is a lock-free MPMC queue. Push and
-    // pop are wait-free; producers and consumers never block each
-    // other. Eliminates the entire contention pocket.
+
+    // Shared work queue and dedup set.
     let pending: Arc<SegQueue<Dep>> = Arc::new(SegQueue::new());
-    let initial_count = initial_deps.len();
+    let processed: Arc<DashSet<String>> = Arc::new(DashSet::new());
+
+    // Counters for global termination — when `dispatched == completed`
+    // and the queue is empty, the phase is done.
+    let dispatched: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
+    let completed: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
+    let shutdown: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+
+    // Wake-up signal for workers parked on an empty queue.
+    let notify: Arc<Notify> = Arc::new(Notify::new());
+
+    // Result channel — workers send completions, main task drains.
+    let (result_tx, mut result_rx) = mpsc::unbounded_channel::<Completion<R::Error>>();
+
+    // Seed the queue with initial deps (deduped via DashSet).
     for dep in initial_deps {
-        pending.push(dep);
+        let key = format!("{}@{}", dep.0, dep.1);
+        if processed.insert(key) {
+            pending.push(dep);
+            dispatched.fetch_add(1, Ordering::Relaxed);
+        }
     }
-    let concurrency = config.concurrency;
+    let initial_count = dispatched.load(Ordering::Relaxed);
+    let concurrency = config.concurrency.max(1);
 
     tracing::debug!(
-        "Preload: {} initial deps, concurrency={}",
+        "Preload: {} initial deps, concurrency={}, mode=worker-pool",
         initial_count,
         concurrency
     );
 
-    let mut futures = FuturesUnordered::new();
-    let mut in_flight = 0usize;
-    let mut started = false;
+    // Spawn N long-lived workers. Each loops: pop -> resolve -> push transitives.
+    for _ in 0..concurrency {
+        let pending = Arc::clone(&pending);
+        let processed = Arc::clone(&processed);
+        let dispatched = Arc::clone(&dispatched);
+        let completed = Arc::clone(&completed);
+        let shutdown = Arc::clone(&shutdown);
+        let notify = Arc::clone(&notify);
+        let result_tx = result_tx.clone();
+        let registry = Arc::clone(&registry);
+        let config_for_worker = config.clone();
 
-    loop {
-        // Fill up to concurrency limit
-        while in_flight < concurrency {
-            let item = loop {
-                let Some((name, spec)) = pending.pop() else {
-                    break None;
-                };
-                let key = format!("{}@{}", name, spec);
-                if !processed.contains(&key) {
-                    processed.insert(key);
-                    break Some((name, spec));
-                }
-            };
+        tokio::spawn(async move {
+            loop {
+                // Try fetching work first — fast path when queue is hot.
+                if let Some((name, spec)) = pending.pop() {
+                    let start = Instant::now();
+                    let result = resolve_package(&*registry, &name, &spec).await;
+                    let elapsed_ms = start.elapsed().as_millis() as u64;
 
-            let Some((name, spec)) = item else {
-                break;
-            };
-
-            if !started {
-                receiver.on_event(BuildEvent::PreloadStart { count: 1 });
-                started = true;
-            } else {
-                receiver.on_event(BuildEvent::PreloadQueued { count: 1 });
-            }
-
-            receiver.on_event(BuildEvent::PreloadFetching { name: &name });
-
-            let pending_for_task = Arc::clone(&pending);
-            let config_for_task = config.clone();
-            futures.push(async move {
-                let start = tokio::time::Instant::now();
-                let result = resolve_package(registry, &name, &spec).await;
-                let elapsed_ms = start.elapsed().as_millis() as u64;
-
-                // Push transitives directly into the lock-free SegQueue.
-                // Each `push` is a wait-free O(1) operation; no
-                // contention with either other completing futures or
-                // the main task's fill-phase pops.
-                if let Ok(resolved) = &result {
-                    for dep in extract_transitive_deps(&resolved.manifest, &config_for_task) {
-                        pending_for_task.push(dep);
+                    if let Ok(resolved) = &result {
+                        let mut new_added = 0usize;
+                        for tdep in extract_transitive_deps(&resolved.manifest, &config_for_worker)
+                        {
+                            let key = format!("{}@{}", tdep.0, tdep.1);
+                            if processed.insert(key) {
+                                pending.push(tdep);
+                                new_added += 1;
+                            }
+                        }
+                        if new_added > 0 {
+                            dispatched.fetch_add(new_added, Ordering::Release);
+                            // Wake parked workers so they pick up the new work
+                            // before checking the termination condition.
+                            notify.notify_waiters();
+                        }
                     }
+
+                    if result_tx.send((name, result, elapsed_ms)).is_err() {
+                        // Main task dropped the receiver — done collecting.
+                        break;
+                    }
+                    let done = completed.fetch_add(1, Ordering::AcqRel) + 1;
+
+                    // After completion, check global done condition. The
+                    // `Acquire` on dispatched pairs with the `Release` in
+                    // the producer add above, so we won't miss late
+                    // transitives queued by a sibling worker.
+                    if done == dispatched.load(Ordering::Acquire) && pending.is_empty() {
+                        shutdown.store(true, Ordering::Release);
+                        notify.notify_waiters();
+                        break;
+                    }
+                    continue;
                 }
 
-                (name, result, elapsed_ms)
-            });
-            in_flight += 1;
-        }
+                // Queue empty — register interest before re-checking, then
+                // park. The Notify+enable() pattern guarantees we won't
+                // miss a `notify_waiters()` racing with our park.
+                if shutdown.load(Ordering::Acquire) {
+                    break;
+                }
+                let notified = notify.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                if !pending.is_empty() {
+                    continue;
+                }
+                if shutdown.load(Ordering::Acquire) {
+                    break;
+                }
+                if completed.load(Ordering::Acquire) == dispatched.load(Ordering::Acquire) {
+                    shutdown.store(true, Ordering::Release);
+                    notify.notify_waiters();
+                    break;
+                }
+                notified.await;
+            }
+        });
+    }
+    // Drop the original sender so when all worker clones drop on exit, the
+    // result channel closes and the main loop terminates.
+    drop(result_tx);
 
-        if in_flight == 0 {
-            break;
-        }
+    receiver.on_event(BuildEvent::PreloadStart {
+        count: initial_count,
+    });
 
-        let Some((name, result, elapsed_ms)) = futures.next().await else {
-            break;
-        };
-        in_flight -= 1;
-
+    // Main task: drain completions, run user callbacks.
+    while let Some((name, result, elapsed_ms)) = result_rx.recv().await {
         if stats.success_count == 0 && stats.failed_count == 0 {
             stats.min_request_ms = elapsed_ms;
             stats.max_request_ms = elapsed_ms;
@@ -210,8 +266,6 @@ where
                     version: &resolved.version,
                     current: stats.success_count,
                 });
-
-                // Send PackageResolved event for pipeline downloading
                 receiver.on_event(BuildEvent::PackageResolved((&*resolved.manifest).into()));
 
                 on_manifest(&name, resolved.manifest);
@@ -263,10 +317,6 @@ where
 /// - `cpu_tail` = preload_total − wall (our CPU work after last body)
 /// - `avg_conc` = sum / busy (effective parallelism over busy window)
 /// - percentiles of per-request latency
-///
-/// If `wall ≫ bun_equivalent` the bottleneck is network. If `cpu_tail` is
-/// large the resolver is blocking after HTTP completes. If `avg_conc` is
-/// well below the configured limit the pipeline isn't actually filling.
 fn log_http_diagnostics(intervals: &[(Instant, Instant)], preload_wall_ms: u128) {
     if intervals.is_empty() {
         tracing::info!(
@@ -340,15 +390,7 @@ fn log_http_diagnostics(intervals: &[(Instant, Instant)], preload_wall_ms: u128)
     );
 }
 
-/// Summarise parse timing. Splits each parse into:
-///
-/// - `queue_wait` — `spawn_blocking` dispatch → closure exec_start
-///   (blocking-pool queue time)
-/// - `exec`       — exec_start → exec_end (actual simd_json work)
-///
-/// If `queue_wait p50 ≫ exec p50`, the blocking pool is the bottleneck —
-/// parses are stacking up behind 4-thread capacity (on CI) and dragging
-/// `resolve_package` awaits, which caps the outer concurrency.
+/// Summarise parse timing.
 fn log_parse_diagnostics(parses: &[(Instant, Instant, Instant)]) {
     if parses.is_empty() {
         return;
@@ -370,8 +412,6 @@ fn log_parse_diagnostics(parses: &[(Instant, Instant, Instant)]) {
     let sum_queue: u128 = queue_us.iter().sum();
     let sum_exec: u128 = exec_us.iter().sum();
 
-    // Exec wall via interval union over (exec_start, exec_end) — time
-    // when ≥1 blocking worker was actively parsing.
     let mut spans: Vec<(Instant, Instant)> = parses.iter().map(|(_, s, e)| (*s, *e)).collect();
     spans.sort_by_key(|(s, _)| *s);
     let (mut cur_s, mut cur_e) = spans[0];
@@ -416,9 +456,8 @@ mod tests {
     use crate::model::manifest::CoreVersionManifest;
     use crate::traits::progress::NoopReceiver;
     use crate::traits::registry::mock::MockRegistryClient;
-    use std::cell::RefCell;
     use std::collections::HashMap;
-    use std::rc::Rc;
+    use std::sync::Mutex;
 
     fn manifest(name: &str, version: &str) -> CoreVersionManifest {
         CoreVersionManifest {
@@ -445,30 +484,30 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_preload_single() {
         let mut registry = MockRegistryClient::new();
         registry.add_package("lodash", "4.17.21", manifest("lodash", "4.17.21"));
 
-        let cache: Rc<RefCell<HashMap<String, Arc<CoreVersionManifest>>>> = Default::default();
-        let cache_clone = Rc::clone(&cache);
+        let cache: Arc<Mutex<HashMap<String, Arc<CoreVersionManifest>>>> = Default::default();
+        let cache_clone = Arc::clone(&cache);
 
         let stats = preload_manifests(
             vec![("lodash".into(), "^4.17.0".into())],
-            &registry,
+            Arc::new(registry),
             PreloadConfig::default(),
             &NoopReceiver,
-            |name, m| {
-                cache_clone.borrow_mut().insert(name.into(), m);
+            move |name, m| {
+                cache_clone.lock().unwrap().insert(name.into(), m);
             },
         )
         .await;
 
         assert_eq!(stats.success_count, 1);
-        assert!(cache.borrow().contains_key("lodash"));
+        assert!(cache.lock().unwrap().contains_key("lodash"));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_preload_transitive() {
         let mut registry = MockRegistryClient::new();
         registry.add_package(
@@ -478,44 +517,44 @@ mod tests {
         );
         registry.add_package("b", "1.0.0", manifest("b", "1.0.0"));
 
-        let cache: Rc<RefCell<HashMap<String, Arc<CoreVersionManifest>>>> = Default::default();
-        let cache_clone = Rc::clone(&cache);
+        let cache: Arc<Mutex<HashMap<String, Arc<CoreVersionManifest>>>> = Default::default();
+        let cache_clone = Arc::clone(&cache);
 
         let stats = preload_manifests(
             vec![("a".into(), "^1.0.0".into())],
-            &registry,
+            Arc::new(registry),
             PreloadConfig::default(),
             &NoopReceiver,
-            |name, m| {
-                cache_clone.borrow_mut().insert(name.into(), m);
+            move |name, m| {
+                cache_clone.lock().unwrap().insert(name.into(), m);
             },
         )
         .await;
 
         assert_eq!(stats.success_count, 2);
-        assert!(cache.borrow().contains_key("a"));
-        assert!(cache.borrow().contains_key("b"));
+        assert!(cache.lock().unwrap().contains_key("a"));
+        assert!(cache.lock().unwrap().contains_key("b"));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_preload_missing() {
         let registry = MockRegistryClient::new();
-        let cache: Rc<RefCell<HashMap<String, Arc<CoreVersionManifest>>>> = Default::default();
-        let cache_clone = Rc::clone(&cache);
+        let cache: Arc<Mutex<HashMap<String, Arc<CoreVersionManifest>>>> = Default::default();
+        let cache_clone = Arc::clone(&cache);
 
         let stats = preload_manifests(
             vec![("nonexistent".into(), "^1.0.0".into())],
-            &registry,
+            Arc::new(registry),
             PreloadConfig::default(),
             &NoopReceiver,
-            |name, m| {
-                cache_clone.borrow_mut().insert(name.into(), m);
+            move |name, m| {
+                cache_clone.lock().unwrap().insert(name.into(), m);
             },
         )
         .await;
 
         assert_eq!(stats.failed_count, 1);
-        assert!(cache.borrow().is_empty());
+        assert!(cache.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -552,3 +591,4 @@ mod tests {
         assert!("@scope/pkg@1.0.0".is_registry_spec());
     }
 }
+

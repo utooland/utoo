@@ -140,7 +140,7 @@ pub trait RegistryClient {
     fn fetch_full_manifest(
         &self,
         name: &str,
-    ) -> impl Future<Output = Result<FullManifest, Self::Error>>;
+    ) -> impl Future<Output = Result<FullManifest, Self::Error>> + Send;
 
     /// Fetch specific version manifest from registry.
     ///
@@ -153,7 +153,10 @@ pub trait RegistryClient {
         &self,
         name: &str,
         spec: &str,
-    ) -> impl Future<Output = Result<Arc<CoreVersionManifest>, Self::Error>> {
+    ) -> impl Future<Output = Result<Arc<CoreVersionManifest>, Self::Error>> + Send
+    where
+        Self: Sync,
+    {
         async move {
             let manifest = self.fetch_full_manifest(name).await?;
             let version_list: Vec<String> = manifest.versions.keys.clone();
@@ -190,7 +193,10 @@ pub trait RegistryClient {
         &self,
         name: &str,
         spec: &str,
-    ) -> impl Future<Output = Result<ResolvedPackage, Self::Error>> {
+    ) -> impl Future<Output = Result<ResolvedPackage, Self::Error>> + Send
+    where
+        Self: Sync,
+    {
         async move {
             // Normalize spec (handles npm: alias and workspace: prefix)
             let (fetch_name, fetch_spec) = normalize_spec(name, spec);
@@ -316,6 +322,7 @@ pub mod mock {
     use super::*;
 
     /// Internal package data for mock registry.
+    #[derive(Clone)]
     struct MockPackage {
         name: String,
         dist_tags: HashMap<String, String>,
@@ -323,6 +330,7 @@ pub mod mock {
     }
 
     /// Mock registry client that returns predefined packages.
+    #[derive(Clone)]
     pub struct MockRegistryClient {
         packages: HashMap<String, MockPackage>,
     }
