@@ -591,4 +591,3 @@ mod tests {
         assert!("@scope/pkg@1.0.0".is_registry_spec());
     }
 }
-
