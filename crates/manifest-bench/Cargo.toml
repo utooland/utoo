@@ -12,13 +12,12 @@ path = "src/main.rs"
 
 # tombi: format.rules.table-keys-order.disabled = true
 [dependencies]
-anyhow     = { workspace = true }
-clap       = { workspace = true }
-futures    = "0.3"
-serde      = { version = "1", features = ["derive"] }
-serde_json = { workspace = true }
-tokio      = { workspace = true, features = ["fs", "macros", "rt-multi-thread", "time"] }
-
+anyhow              = { workspace = true }
+clap                = { workspace = true }
+futures             = "0.3"
+serde               = { version = "1", features = ["derive"] }
+serde_json          = { workspace = true }
+tokio               = { workspace = true, features = ["fs", "macros", "rt-multi-thread", "time"] }
 # Identical TLS / DNS choices to ruborist so we measure the *protocol*
 # characteristics of the same stack, not a different implementation.
 reqwest             = { version = "0.12", default-features = false, features = [
