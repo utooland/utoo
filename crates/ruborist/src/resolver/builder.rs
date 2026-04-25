@@ -458,7 +458,7 @@ async fn process_file_dep<E>(
 ///
 /// # Returns
 /// The result of processing (reused, created, or skipped)
-pub async fn process_dependency<R: RegistryClient>(
+pub async fn process_dependency<R: RegistryClient + Sync>(
     graph: &mut DependencyGraph,
     registry: &R,
     node_index: NodeIndex,
@@ -707,7 +707,7 @@ pub async fn process_dependency<R: RegistryClient>(
 /// // Add initial dependency edges to root...
 /// build_deps(&mut graph, &registry, PeerDeps::Include).await?;
 /// ```
-pub async fn build_deps<R: RegistryClient>(
+pub async fn build_deps<R: RegistryClient + Sync>(
     graph: &mut DependencyGraph,
     registry: &R,
     peer_deps: PeerDeps,
@@ -729,7 +729,7 @@ pub async fn build_deps<R: RegistryClient>(
 /// * `registry` - Registry client for fetching packages
 /// * `peer_deps` - How to handle peer dependencies
 /// * `receiver` - Event receiver for handling build events
-pub async fn build_deps_with_receiver<R: RegistryClient, E: EventReceiver>(
+pub async fn build_deps_with_receiver<R: RegistryClient + Sync, E: EventReceiver>(
     graph: &mut DependencyGraph,
     registry: &R,
     peer_deps: PeerDeps,
@@ -759,7 +759,7 @@ pub async fn build_deps_with_receiver<R: RegistryClient, E: EventReceiver>(
 ///
 /// build_deps_with_config(&mut graph, &registry, config, &receiver).await?;
 /// ```
-pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
+pub async fn build_deps_with_config<R: RegistryClient + Sync, E: EventReceiver>(
     graph: &mut DependencyGraph,
     registry: &R,
     config: BuildDepsConfig,
@@ -786,7 +786,7 @@ pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
 }
 
 /// Run the preload phase to warm up the cache with manifests.
-async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
+async fn run_preload_phase<R: RegistryClient + Sync, E: EventReceiver>(
     graph: &DependencyGraph,
     registry: &R,
     config: &BuildDepsConfig,
@@ -838,7 +838,7 @@ async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
 }
 
 /// Run the BFS traversal phase to build the dependency tree.
-async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
+async fn run_bfs_phase<R: RegistryClient + Sync, E: EventReceiver>(
     graph: &mut DependencyGraph,
     registry: &R,
     config: &BuildDepsConfig,
@@ -961,7 +961,7 @@ use std::path::Path;
 /// let pkg: PackageJson = serde_json::from_str(&pkg_content)?;
 /// let lock = resolve(&pkg, &registry).await?;
 /// ```
-pub async fn resolve<R: RegistryClient>(
+pub async fn resolve<R: RegistryClient + Sync>(
     pkg: &PackageJson,
     registry: &R,
 ) -> Result<PackageLock, ResolveError<R::Error>> {
@@ -975,7 +975,7 @@ pub async fn resolve<R: RegistryClient>(
 /// * `registry` - Registry client for fetching packages
 /// * `peer_deps` - How to handle peer dependencies
 /// * `receiver` - Event receiver for progress tracking
-pub async fn resolve_with_options<R: RegistryClient, E: EventReceiver>(
+pub async fn resolve_with_options<R: RegistryClient + Sync, E: EventReceiver>(
     pkg: &PackageJson,
     registry: &R,
     peer_deps: PeerDeps,

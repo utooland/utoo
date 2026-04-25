@@ -80,7 +80,7 @@ pub async fn preload_manifests<R, E, F>(
     mut on_manifest: F,
 ) -> PreloadStats
 where
-    R: RegistryClient,
+    R: RegistryClient + Sync,
     E: EventReceiver,
     F: FnMut(&str, Arc<CoreVersionManifest>),
 {

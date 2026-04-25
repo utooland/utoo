@@ -27,7 +27,7 @@ pub async fn view(package_spec: &str) -> Result<()> {
     tracing::debug!("Fetched package info: {full_manifest:?}");
 
     // Resolve version and get full VersionManifest (with all display fields)
-    let version_list: Vec<String> = full_manifest.versions.clone();
+    let version_list: Vec<String> = full_manifest.versions.keys.clone();
     let resolved_version = utoo_ruborist::resolver::version::resolve_target_version(
         &full_manifest.dist_tags,
         &version_list,
@@ -94,7 +94,7 @@ fn print_package_header(full_manifest: &FullManifest, version_manifest: &Version
         .as_ref()
         .map(|d| d.len())
         .unwrap_or(0);
-    let versions_count = full_manifest.versions.len();
+    let versions_count = full_manifest.versions.keys.len();
 
     let deps_str = if deps_count == 0 {
         "none".to_string()

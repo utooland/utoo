@@ -44,6 +44,8 @@ use crate::model::manifest::{CoreVersionManifest, FullManifest};
 use crate::resolver::semver::normalize_spec;
 use crate::resolver::version::resolve_target_version;
 use crate::traits::registry::{RegistryClient, RegistryError, ResolvedPackage, is_npm_registry};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::util::oncemap::OnceMap;
 
 /// Unified registry client that works on both native and WASM.
 ///
@@ -68,6 +70,14 @@ pub struct UnifiedRegistry {
     registry_url: String,
     cache: Arc<PackageCache>,
     supports_semver: bool,
+    /// Dedupes concurrent `resolve_full_manifest` fetches for the same
+    /// package name. First caller hits the network and stores the result;
+    /// other callers wait on `Notify` and read the shared `Arc`. Built on
+    /// `DashMap` + `tokio::sync::Notify` so the fast path (cache hit) is
+    /// lock-free, avoiding the serialisation the previous per-name
+    /// `tokio::sync::Mutex<()>` gate imposed on the hot dispatch path.
+    #[cfg(not(target_arch = "wasm32"))]
+    inflight: Arc<OnceMap<String, FullManifestResult>>,
 }
 
 /// Builder for `UnifiedRegistry`.
@@ -137,6 +147,8 @@ impl UnifiedRegistryBuilder {
             registry_url,
             cache,
             supports_semver,
+            #[cfg(not(target_arch = "wasm32"))]
+            inflight: Arc::new(OnceMap::new()),
         }
     }
 }
@@ -153,6 +165,8 @@ impl Clone for UnifiedRegistry {
             registry_url: self.registry_url.clone(),
             cache: Arc::clone(&self.cache),
             supports_semver: self.supports_semver,
+            #[cfg(not(target_arch = "wasm32"))]
+            inflight: Arc::clone(&self.inflight),
         }
     }
 }
@@ -162,10 +176,16 @@ impl Clone for UnifiedRegistry {
 /// Separates the 200 (full data) and 304 (use cache) cases at the type level,
 /// so callers can pattern-match instead of string-matching error messages.
 /// Transient return value, immediately destructured — Box not needed.
-#[allow(clippy::large_enum_variant)]
+///
+/// `Clone` is required so multiple `resolve_full_manifest` callers that
+/// coalesce through `OnceMap` can each take an owned copy of the shared
+/// `Arc<FullManifestResult>`. `Arc<FullManifest>` keeps that clone an
+/// atomic-bump rather than a deep copy of the per-version `OwnedValue`
+/// HashMap (~100-500 entries per package).
+#[derive(Clone)]
 enum FullManifestResult {
     /// Fresh manifest fetched from the network (HTTP 200).
-    Full(FullManifest),
+    Full(Arc<FullManifest>),
     /// ETag matched, versions cache is valid (HTTP 304).
     /// Caller should resolve from the in-memory versions cache and
     /// fetch individual version manifests as needed.
@@ -202,17 +222,52 @@ impl UnifiedRegistry {
     /// 4. On 304: use disk cache data
     /// 5. On 200: update memory + disk cache
     async fn resolve_full_manifest(&self, name: &str) -> Result<FullManifestResult, RegistryError> {
-        // 1. Check memory cache first
+        // Fast path: memory cache hit — lock-free read from parking_lot::RwLock.
         if let Some(manifest) = self.cache.get_full_manifest(name) {
             tracing::debug!("Memory cache hit for full manifest: {}", name);
             return Ok(FullManifestResult::Full(manifest));
         }
 
-        // 2. Load etag from disk cache (if available)
+        // Coalesce concurrent callers for the same name via OnceMap.
+        // First caller runs the fetch closure; others await the shared
+        // result on the OnceMap's `Notify` and clone the cached value.
+        let shared = self
+            .inflight
+            .get_or_init(name.to_string(), || async {
+                self.fetch_full_manifest_network(name).await.ok()
+            })
+            .await;
+
+        match shared {
+            Some(arc) => Ok((*arc).clone()),
+            None => {
+                // OnceMap clears the key on None, so the next caller
+                // retries the fetch. Retry once here with a fresh error
+                // so we surface a useful message to this caller.
+                self.fetch_full_manifest_network(name).await
+            }
+        }
+    }
+
+    /// Perform the actual network fetch + cache update. Separated from
+    /// `resolve_full_manifest` so the OnceMap closure can invoke it
+    /// without re-entering the dedup layer.
+    async fn fetch_full_manifest_network(
+        &self,
+        name: &str,
+    ) -> Result<FullManifestResult, RegistryError> {
+        // Disk ETag probe. The `PackageCache::get_versions_from_disk`
+        // call first consults a bulk-readdir index built lazily on
+        // first access — cold runs with an empty (or nonexistent)
+        // cache_dir short-circuit without per-package syscalls, which
+        // was the cold-path regression the earlier temporary removal
+        // (46cb8031) was meant to avoid. Warm runs pay the read +
+        // JSON parse once per previously-cached manifest and reuse
+        // its ETag to get a 1-packet `304 Not Modified` instead of
+        // re-downloading the full manifest body.
         let disk_versions = self.cache.get_versions_from_disk(name).await;
         let etag = disk_versions.as_ref().and_then(|v| v.etag.clone());
 
-        // 3. Fetch from network with ETag for validation
         match manifest::fetch_full_manifest(manifest::FetchManifestOptions {
             registry_url: &self.registry_url,
             name,
@@ -223,39 +278,35 @@ impl UnifiedRegistry {
         .map_err(RegistryError)?
         {
             manifest::FetchManifestResult::Ok(manifest, new_etag) => {
-                // 4. Cache full manifest in memory
-                self.cache
-                    .set_full_manifest(name.to_string(), manifest.clone());
-
-                // 5. Extract and cache versions info (lightweight)
                 let versions_info = VersionsInfo {
                     versions: Versions {
-                        version_list: manifest.versions.clone(),
+                        version_list: manifest.versions.keys.clone(),
                         dist_tags: manifest.dist_tags.clone(),
                     },
                     etag: new_etag.clone(),
                     last_updated: current_timestamp_secs(),
                 };
+                let manifest = Arc::new(manifest);
+                self.cache
+                    .set_full_manifest(name.to_string(), Arc::clone(&manifest));
                 self.cache
                     .set_versions(name.to_string(), versions_info.clone());
-
-                // 6. Write versions to disk (non-blocking for native, blocking for WASM)
-                self.cache.set_versions_to_disk(name, &versions_info).await;
+                // Fire-and-forget disk cache write.
+                self.cache.set_versions_to_disk(name, &versions_info);
 
                 Ok(FullManifestResult::Full(manifest))
             }
             manifest::FetchManifestResult::NotModified => {
-                // 304 Not Modified - use disk cache versions info
                 tracing::debug!("ETag cache hit (304) for: {}", name);
 
                 if let Some(versions_info) = disk_versions {
-                    // Cache versions in memory for later use
                     self.cache
                         .set_versions(name.to_string(), versions_info.clone());
-
                     Ok(FullManifestResult::NotModified)
                 } else {
-                    // Disk cache corrupted, fetch fresh (without etag)
+                    // Disk cache disappeared between index build and now
+                    // (mid-run eviction or concurrent cleanup). Fall
+                    // back to a fresh fetch without etag.
                     let (manifest, new_etag) = manifest::fetch_full_manifest_fresh(
                         &self.registry_url,
                         name,
@@ -264,20 +315,20 @@ impl UnifiedRegistry {
                     .await
                     .map_err(RegistryError)?;
 
-                    self.cache
-                        .set_full_manifest(name.to_string(), manifest.clone());
-
                     let versions_info = VersionsInfo {
                         versions: Versions {
-                            version_list: manifest.versions.clone(),
+                            version_list: manifest.versions.keys.clone(),
                             dist_tags: manifest.dist_tags.clone(),
                         },
                         etag: new_etag.clone(),
                         last_updated: current_timestamp_secs(),
                     };
+                    let manifest = Arc::new(manifest);
+                    self.cache
+                        .set_full_manifest(name.to_string(), Arc::clone(&manifest));
                     self.cache
                         .set_versions(name.to_string(), versions_info.clone());
-                    self.cache.set_versions_to_disk(name, &versions_info).await;
+                    self.cache.set_versions_to_disk(name, &versions_info);
 
                     Ok(FullManifestResult::Full(manifest))
                 }
@@ -341,8 +392,7 @@ impl UnifiedRegistry {
         // 5. Write to disk cache (only for non-semver registries)
         if !self.supports_semver {
             self.cache
-                .set_version_manifest_to_disk(name, spec, &manifest)
-                .await;
+                .set_version_manifest_to_disk(name, spec, manifest.clone());
         }
 
         Ok(manifest)
@@ -357,7 +407,10 @@ impl RegistryClient for UnifiedRegistry {
     }
 
     fn get_cached_full_manifest(&self, name: &str) -> Option<FullManifest> {
-        self.cache.get_full_manifest(name)
+        // Trait still returns owned for backward compat with non-resolver
+        // callers (notably `ut view`). Resolver hot paths read the
+        // `Arc<FullManifest>` directly via `cache.get_full_manifest`.
+        self.cache.get_full_manifest(name).map(|arc| (*arc).clone())
     }
 
     fn get_cached_versions(&self, name: &str) -> Option<crate::traits::registry::VersionsInfo> {
@@ -376,7 +429,7 @@ impl RegistryClient for UnifiedRegistry {
 
     async fn fetch_full_manifest(&self, name: &str) -> Result<FullManifest, Self::Error> {
         match self.resolve_full_manifest(name).await? {
-            FullManifestResult::Full(manifest) => Ok(manifest),
+            FullManifestResult::Full(manifest) => Ok((*manifest).clone()),
             FullManifestResult::NotModified => {
                 // 304 in trait context: caller doesn't have versions cache access,
                 // so we return an error indicating the manifest is unchanged.
@@ -435,8 +488,7 @@ impl RegistryClient for UnifiedRegistry {
         // 5. Write to disk cache (only for non-semver registries)
         if !self.supports_semver {
             self.cache
-                .set_version_manifest_to_disk(name, spec, &manifest)
-                .await;
+                .set_version_manifest_to_disk(name, spec, manifest.clone());
         }
 
         Ok(manifest)
@@ -481,18 +533,19 @@ impl RegistryClient for UnifiedRegistry {
                 fetch_name,
                 fetch_spec
             );
-            tracing::debug!(
-                "Using cached full manifest for {}@{}",
-                fetch_name,
-                fetch_spec
-            );
-            let version_list: Vec<String> = full_manifest.versions.clone();
-            let resolved_version =
-                resolve_target_version(&full_manifest.dist_tags, &version_list, &fetch_spec)
-                    .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
+            // Borrow `keys` directly — `resolve_target_version` only needs
+            // `&[String]`. The previous `keys.clone()` rebuilt a 100-500
+            // entry `Vec<String>` per cache hit (≈1800 hits during a cold
+            // ant-design preload), bloating per-future allocator pressure
+            // by ~360k String allocs on shared resolver threads.
+            let resolved_version = resolve_target_version(
+                &full_manifest.dist_tags,
+                &full_manifest.versions.keys,
+                &fetch_spec,
+            )
+            .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
             let version_manifest = full_manifest
                 .get_core_version(&resolved_version)
-                .map(Arc::new)
                 .ok_or_else(|| {
                     RegistryError(anyhow!(
                         "Version {} not found in manifest for {}",
@@ -508,9 +561,11 @@ impl RegistryClient for UnifiedRegistry {
             );
             // Write to disk cache for non-semver registries
             if !self.supports_semver {
-                self.cache
-                    .set_version_manifest_to_disk(&fetch_name, &resolved_version, &version_manifest)
-                    .await;
+                self.cache.set_version_manifest_to_disk(
+                    &fetch_name,
+                    &resolved_version,
+                    version_manifest.clone(),
+                );
             }
             return Ok(ResolvedPackage {
                 name: name.to_string(),
@@ -586,7 +641,7 @@ impl RegistryClient for UnifiedRegistry {
             let resolve_result = match self.resolve_full_manifest(&fetch_name).await? {
                 FullManifestResult::Full(full_manifest) => {
                     // Got full manifest, resolve from it
-                    let version_list: Vec<String> = full_manifest.versions.clone();
+                    let version_list: Vec<String> = full_manifest.versions.keys.clone();
 
                     if version_list.is_empty() {
                         return Err(RegistryError(anyhow!(
@@ -604,7 +659,6 @@ impl RegistryClient for UnifiedRegistry {
 
                     let version_manifest = full_manifest
                         .get_core_version(&resolved_version)
-                        .map(Arc::new)
                         .ok_or_else(|| {
                             RegistryError(anyhow!(
                                 "Version {} not found in manifest for {}",
@@ -650,9 +704,11 @@ impl RegistryClient for UnifiedRegistry {
 
             // Write to disk cache (only for non-semver registries)
             if !self.supports_semver {
-                self.cache
-                    .set_version_manifest_to_disk(&fetch_name, &resolved_version, &version_manifest)
-                    .await;
+                self.cache.set_version_manifest_to_disk(
+                    &fetch_name,
+                    &resolved_version,
+                    version_manifest.clone(),
+                );
             }
 
             Ok(ResolvedPackage {

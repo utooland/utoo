@@ -11346,6 +11346,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "crossbeam-queue",
+ "dashmap 6.1.0",
  "deno_semver",
  "dirs 5.0.1",
  "futures",
@@ -11357,6 +11359,8 @@ dependencies = [
  "pathdiff",
  "petgraph 0.6.5",
  "reqwest 0.12.24",
+ "rustls",
+ "rustls-native-certs",
  "serde",
  "serde_json",
  "sha2",

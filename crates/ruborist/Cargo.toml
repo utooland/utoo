@@ -7,8 +7,10 @@ license     = "MIT"
 
 # tombi: format.rules.table-keys-order.disabled = true
 [dependencies]
-anyhow       = { workspace = true }
-bytes        = "1"
+anyhow          = { workspace = true }
+bytes           = "1"
+crossbeam-queue = "0.3"
+dashmap         = "6.1.0"
 pathdiff     = { workspace = true }
 deno_semver  = "0.7"
 dirs         = { workspace = true }
@@ -23,13 +25,31 @@ tokio-fs-ext = { workspace = true }
 tokio-retry  = "0.3"
 tracing      = { workspace = true }
 # HTTP client - works on both native and WASM
+#
+# We use `rustls-tls-native-roots-no-provider` (instead of the default
+# `rustls-tls-native-roots`) so reqwest doesn't pin the crypto provider
+# to `ring`. We then build our own `rustls::ClientConfig` with
+# `aws-lc-rs` (BoringSSL's crypto primitives) in `service/http.rs` and
+# pass it via `Client::use_preconfigured_tls`. Measured on CI against
+# npmjs.org: `ring` took 78 ms p50 / 154 ms max from CCS → first
+# AppData per handshake (CPU-bound; 128 parallel handshakes serialise
+# across 4 cores). aws-lc-rs's per-handshake CPU is roughly 3× faster.
 reqwest      = { version = "0.12", default-features = false, features = [
+  "brotli",
+  "gzip",
   "http2",
   "json",
-  "rustls-tls",
-  "rustls-tls-native-roots",
+  "rustls-tls-native-roots-no-provider",
   "socks"
 ] }
+# Our own rustls + aws-lc-rs crypto provider.
+rustls             = { version = "0.23", default-features = false, features = [
+  "aws-lc-rs",
+  "logging",
+  "std",
+  "tls12"
+] }
+rustls-native-certs = "0.8"
 # Shared URL-hash + staging helpers for native-only resolvers (git / http)
 sha2         = { workspace = true, optional = true }
 tempfile     = { workspace = true, optional = true }
@@ -49,7 +69,7 @@ tar          = { version = "0.4", optional = true }
 workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 
 # Native-only dependencies (not compiled for WASM)
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
