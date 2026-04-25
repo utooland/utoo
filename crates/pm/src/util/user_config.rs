@@ -134,18 +134,20 @@ pub fn get_install_scope() -> InstallScope {
 
 // Manifest fetch concurrency configuration.
 //
-// Worker-pool era cap sweep on CI ant-design p1_resolve:
-//   cap=96  (worker-pool): wall=2.23s avg_conc=66 per-req=53ms
-//   cap=128 (worker-pool): wall=2.15s avg_conc=84 per-req=66ms
+// Sweep history under the worker-pool architecture:
+//   cap=96  spawn_blocking parse: wall=2.23s avg_conc=66
+//   cap=128 spawn_blocking parse: wall=2.15s avg_conc=84
+//   cap=160 spawn_blocking parse: wall=1.90s avg_conc=81 (parse queue p95=200ms)
+//   cap=160 inline parse        : wall=2.14s avg_conc=119 (parse queue=0ms)
 //
-// per-req at cap=128 (66ms) is *lower* than at cap=96 (75ms in the
-// FuturesUnordered era), refuting the old "Cloudflare per-req
-// throttle past ~70 conc" reading — that was an artefact of main
-// task saturation. Standalone manifest-bench cap=192 = 130 conc /
-// 2.10s on the same CI runner, so try cap=160 to chase another
-// 0.1-0.2s out of preload.
+// Inline parse eliminated blocking-pool queue but cap=160 lifted
+// concurrency past the per-source Cloudflare throttle, inflating
+// per-req from 55 ms → 93 ms. Net wall flat. cap=128 + inline parse
+// should land near the sweet spot: enough concurrency to saturate
+// independent connections, low enough to stay under Cloudflare's
+// per-source throttle threshold.
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 160));
+    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 128));
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
     MANIFESTS_CONCURRENCY_LIMIT.set(value);
