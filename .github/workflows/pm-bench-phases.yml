@@ -51,13 +51,21 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: pm-bench-linux
-      - name: Build current branch utoo
-        run: cargo build --release --bin utoo -p utoo-pm
+      - name: Build current branch utoo + manifest-bench
+        run: |
+          cargo build --release --bin utoo -p utoo-pm
+          cargo build --release -p manifest-bench
       - name: Upload utoo binary
         uses: actions/upload-artifact@v4
         with:
           name: utoo-linux-bench-phases
           path: target/release/utoo
+          retention-days: 1
+      - name: Upload manifest-bench binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-bench-linux
+          path: target/release/manifest-bench
           retention-days: 1
 
   bench:
@@ -77,9 +85,14 @@ jobs:
         with:
           name: utoo-linux-bench-phases
           path: dist
+      - name: Download manifest-bench binary
+        uses: actions/download-artifact@v4
+        with:
+          name: manifest-bench-linux
+          path: dist
       - name: Install utoo
         run: |
-          chmod +x dist/utoo
+          chmod +x dist/utoo dist/manifest-bench
           echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
       - name: Install bun
         uses: oven-sh/setup-bun@v2
@@ -101,6 +114,56 @@ jobs:
         run: |
           chmod +x e2e/pm-bench-phases.sh
           bash e2e/pm-bench-phases.sh
+
+      - name: Standalone manifest-bench (HTTP-only fetch sweep)
+        env:
+          REGISTRY: ${{ github.event.inputs.registry || 'https://registry.npmjs.org' }}
+          PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
+        run: |
+          set -eu
+          # Generate a project lockfile to source the manifest names from.
+          # Use bun (which we already have) to do a quick lockfile-only
+          # install so manifest-bench has a real workload to fire against.
+          PROJECT_DIR="/tmp/pm-bench/$PROJECT"
+          if [ ! -d "$PROJECT_DIR" ]; then
+            mkdir -p /tmp/pm-bench
+            git clone --depth 1 "https://github.com/ant-design/$PROJECT" "$PROJECT_DIR"
+          fi
+          cd "$PROJECT_DIR"
+          if [ ! -f package-lock.json ]; then
+            echo "==> generating lockfile via utoo"
+            utoo deps --registry "$REGISTRY" || true
+          fi
+          ls -la package-lock.json || { echo "no lockfile, skip"; exit 0; }
+
+          echo
+          echo "============================================================"
+          echo "manifest-bench: HTTP-only fetch (no parse, no resolver)"
+          echo "  Goal: isolate reqwest/rustls/tokio behaviour from"
+          echo "  ruborist's resolver pipeline. Same numbers (wall, busy,"
+          echo "  avg_conc, p50/p95/max) as ruborist's Preload HTTP diag."
+          echo "============================================================"
+          for CAP in 32 64 96 128 192 256; do
+            echo
+            echo "--- concurrency=$CAP, h1, full manifest, default UA ---"
+            manifest-bench --lockfile package-lock.json --registry "$REGISTRY" \
+              --concurrency "$CAP" --reps 2 --http1-only || true
+          done
+
+          echo
+          echo "--- concurrency=128, h2 negotiate, full manifest, default UA ---"
+          manifest-bench --lockfile package-lock.json --registry "$REGISTRY" \
+            --concurrency 128 --reps 2 || true
+
+          echo
+          echo "--- concurrency=128, h1, single-version endpoint ---"
+          manifest-bench --lockfile package-lock.json --registry "$REGISTRY" \
+            --concurrency 128 --reps 2 --http1-only --single-version || true
+
+          echo
+          echo "--- concurrency=128, h1, UA=Bun/1.2.21 ---"
+          manifest-bench --lockfile package-lock.json --registry "$REGISTRY" \
+            --concurrency 128 --reps 2 --http1-only --user-agent "Bun/1.2.21" || true
 
       - name: Capture pcap (resolve phase, single run per PM)
         env:
