@@ -179,13 +179,13 @@ impl Clone for UnifiedRegistry {
 ///
 /// `Clone` is required so multiple `resolve_full_manifest` callers that
 /// coalesce through `OnceMap` can each take an owned copy of the shared
-/// `Arc<FullManifestResult>`. `FullManifest` clones cheaply via
-/// `Arc<[u8]>` for its raw bytes, and the other fields are small.
-#[allow(clippy::large_enum_variant)]
+/// `Arc<FullManifestResult>`. `Arc<FullManifest>` keeps that clone an
+/// atomic-bump rather than a deep copy of the per-version `OwnedValue`
+/// HashMap (~100-500 entries per package).
 #[derive(Clone)]
 enum FullManifestResult {
     /// Fresh manifest fetched from the network (HTTP 200).
-    Full(FullManifest),
+    Full(Arc<FullManifest>),
     /// ETag matched, versions cache is valid (HTTP 304).
     /// Caller should resolve from the in-memory versions cache and
     /// fetch individual version manifests as needed.
@@ -278,9 +278,6 @@ impl UnifiedRegistry {
         .map_err(RegistryError)?
         {
             manifest::FetchManifestResult::Ok(manifest, new_etag) => {
-                self.cache
-                    .set_full_manifest(name.to_string(), manifest.clone());
-
                 let versions_info = VersionsInfo {
                     versions: Versions {
                         version_list: manifest.versions.keys.clone(),
@@ -289,6 +286,9 @@ impl UnifiedRegistry {
                     etag: new_etag.clone(),
                     last_updated: current_timestamp_secs(),
                 };
+                let manifest = Arc::new(manifest);
+                self.cache
+                    .set_full_manifest(name.to_string(), Arc::clone(&manifest));
                 self.cache
                     .set_versions(name.to_string(), versions_info.clone());
                 // Fire-and-forget disk cache write.
@@ -315,9 +315,6 @@ impl UnifiedRegistry {
                     .await
                     .map_err(RegistryError)?;
 
-                    self.cache
-                        .set_full_manifest(name.to_string(), manifest.clone());
-
                     let versions_info = VersionsInfo {
                         versions: Versions {
                             version_list: manifest.versions.keys.clone(),
@@ -326,6 +323,9 @@ impl UnifiedRegistry {
                         etag: new_etag.clone(),
                         last_updated: current_timestamp_secs(),
                     };
+                    let manifest = Arc::new(manifest);
+                    self.cache
+                        .set_full_manifest(name.to_string(), Arc::clone(&manifest));
                     self.cache
                         .set_versions(name.to_string(), versions_info.clone());
                     self.cache.set_versions_to_disk(name, &versions_info);
@@ -407,7 +407,10 @@ impl RegistryClient for UnifiedRegistry {
     }
 
     fn get_cached_full_manifest(&self, name: &str) -> Option<FullManifest> {
-        self.cache.get_full_manifest(name)
+        // Trait still returns owned for backward compat with non-resolver
+        // callers (notably `ut view`). Resolver hot paths read the
+        // `Arc<FullManifest>` directly via `cache.get_full_manifest`.
+        self.cache.get_full_manifest(name).map(|arc| (*arc).clone())
     }
 
     fn get_cached_versions(&self, name: &str) -> Option<crate::traits::registry::VersionsInfo> {
@@ -426,7 +429,7 @@ impl RegistryClient for UnifiedRegistry {
 
     async fn fetch_full_manifest(&self, name: &str) -> Result<FullManifest, Self::Error> {
         match self.resolve_full_manifest(name).await? {
-            FullManifestResult::Full(manifest) => Ok(manifest),
+            FullManifestResult::Full(manifest) => Ok((*manifest).clone()),
             FullManifestResult::NotModified => {
                 // 304 in trait context: caller doesn't have versions cache access,
                 // so we return an error indicating the manifest is unchanged.
