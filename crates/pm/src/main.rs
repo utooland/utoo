@@ -352,15 +352,28 @@ fn main() {
     let result = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .worker_threads(worker_threads)
-        // Cap the blocking pool to reduce thread-creation thrash on
-        // runs that burst-dispatch ~128 spawn_blocking calls (JSON
-        // parse for manifest fetches). Default 512 leaves room for
-        // unbounded growth; ~32 threads is enough to saturate a 4-10
-        // core machine on short CPU-bound tasks while keeping the
-        // pool warm across runs. Observed locally: default pool gave
-        // bimodal walls (2.7s fast / 6.9s thrash on M2); capping at
-        // 32 eliminates the thrash peak.
-        .max_blocking_threads(worker_threads)
+        // Blocking pool cap — historical context: when preload used
+        // `spawn_blocking` per simd_json parse (~128 bursting at once
+        // during cold ant-design preload), tokio's default 512 cap
+        // let the OS create / destroy threads under bimodal load,
+        // producing 2.7s vs 6.9s wall variance on M2. Capping at
+        // `worker_threads` eliminated the thrash peak.
+        //
+        // After commit f3f616d8 (inline parse) preload no longer
+        // touches the blocking pool. The dominant consumer now is
+        // `cloner.rs` during the install phase: every file's
+        // hardlink / clonefile / copy goes through `spawn_blocking`,
+        // so a 5000-package install dispatches ~50000 short syscalls
+        // here. Each syscall is near-instant, so the cap rarely
+        // backpressures, but `cap = worker_threads` (4 on CI) does
+        // limit how fast we can fire them in parallel.
+        //
+        // Bump cap to `max(worker_threads * 4, 32)`: enough headroom
+        // for cloner to keep multiple syscalls in flight, low enough
+        // that the historical thrash regime (hundreds of churning
+        // threads) is still avoided. The pool is per-runtime; threads
+        // stay alive until idle for 10s, so warm runs stay warm.
+        .max_blocking_threads((worker_threads * 4).max(32))
         .build()
         .expect("failed to build tokio runtime")
         .block_on(async_main());
