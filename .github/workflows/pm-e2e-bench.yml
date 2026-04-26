@@ -1,16 +1,18 @@
 name: utoopm-e2e-bench
 
 # Single workflow that builds utoo once per target, then fans out to
-# every consumer (e2e, bench-phases, pm-bench, pm-bench-pcap). Replaces
-# the old pm-e2e.yml + pm-bench.yml + pm-bench-phases.yml trio so each
-# target builds exactly once per commit and downstream jobs reuse the
-# uploaded artifact.
+# every consumer (e2e, bench-phases, pm-bench-all, pm-bench-pcap).
+# Replaces the old pm-e2e.yml + pm-bench.yml + pm-bench-phases.yml
+# trio so each target builds exactly once per commit and downstream
+# jobs reuse the uploaded artifact.
 #
 # Triggers (event → consumers):
 #   pull_request / push with `(pm)` in title/msg → e2e jobs
-#   pull_request / push with `(pm` (loose) in title/msg → bench-phases
-#   pull_request labeled `benchmark` → pm-bench (manual perf compare)
+#   pull_request labeled `benchmark` → bench-phases (utoo / utoo-npm / bun)
 #   workflow_dispatch with `target` choice → manual one-off runs
+#     (pm-bench-all = full PM shootout vs pnpm/yarn/bun/aube;
+#      pm-bench-phases = same as the labeled trigger but ad-hoc;
+#      pm-bench-pcap = tcpdump capture for resolve phase)
 #
 # Build job gates are the union of their downstream consumers' gates.
 # Each downstream job is pure download-and-run, no `cargo build`.
@@ -26,39 +28,39 @@ on:
         required: true
         type: choice
         options:
-          - pm-bench
+          - pm-bench-all
           - pm-bench-phases
           - pm-bench-pcap
-        default: pm-bench
-      # ----- pm-bench inputs -----
+        default: pm-bench-all
+      # ----- pm-bench-all inputs -----
       registry:
-        description: '[pm-bench] Registry to test'
+        description: '[pm-bench-all] Registry to test'
         required: false
         default: 'both'
         type: choice
         options: [both, npmjs, npmmirror]
       pm_list:
-        description: '[pm-bench] Comma-separated PMs (e.g. utoo,bun); "all" → utoo,pnpm,yarn,bun,aube'
+        description: '[pm-bench-all] Comma-separated PMs (e.g. utoo,bun); "all" → utoo,pnpm,yarn,bun,aube'
         required: false
         default: 'utoo,bun'
         type: string
       baseline:
-        description: '[pm-bench] Compare with published utoo from npm'
+        description: '[pm-bench-all] Compare with published utoo from npm'
         required: false
         default: true
         type: boolean
       build_next:
-        description: '[pm-bench] Also compare with utoo built from `next` branch'
+        description: '[pm-bench-all] Also compare with utoo built from `next` branch'
         required: false
         default: false
         type: boolean
       cold_runs:
-        description: '[pm-bench] Number of cold install runs'
+        description: '[pm-bench-all] Number of cold install runs'
         required: false
         default: '3'
         type: string
       warm_runs:
-        description: '[pm-bench] Number of warm install runs'
+        description: '[pm-bench-all] Number of warm install runs'
         required: false
         default: '3'
         type: string
@@ -90,7 +92,7 @@ jobs:
   # ============================================================
 
   build-linux:
-    # Linux serves: e2e-linux, bench-phases-linux, pm-bench-linux, pm-bench-pcap-linux.
+    # Linux serves: e2e-linux, bench-phases-linux, pm-bench-all-linux, pm-bench-pcap-linux.
     # Gate is the union of all linux consumers' gates.
     if: >
       (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
@@ -143,7 +145,7 @@ jobs:
           retention-days: 1
 
   build-mac-arm64:
-    # Mac arm64 serves: e2e-mac-arm64, bench-phases-mac, pm-bench-mac.
+    # Mac arm64 serves: e2e-mac-arm64, bench-phases-mac, pm-bench-all-mac.
     if: >
       (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)')) ||
@@ -726,15 +728,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ============================================================
-  # PM-BENCH JOBS (manual perf compare)
-  # workflow_dispatch with target=pm-bench, or PR labeled `benchmark`.
-  # Compares utoo against other PMs (pnpm/yarn/bun/aube) on cold + warm
-  # installs across configurable registries.
+  # PM-BENCH-ALL (manual full PM shootout)
+  # workflow_dispatch with target=pm-bench-all only — comparing utoo
+  # against pnpm/yarn/bun/aube on cold + warm installs across
+  # configurable registries is slow, so it's never auto-triggered.
   # ============================================================
 
-  pm-bench-linux:
+  pm-bench-all-linux:
     needs: [build-linux]
-    if: github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench'
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-all'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -814,9 +816,9 @@ jobs:
           BENCH_WARM_RUNS=${{ github.event.inputs.warm_runs || '3' }} \
           bash bench/pm-bench.sh ${{ github.event.inputs.registry || 'both' }} ${{ steps.pm.outputs.list }}
 
-  pm-bench-mac:
+  pm-bench-all-mac:
     needs: [build-mac-arm64]
-    if: github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench'
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-all'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
