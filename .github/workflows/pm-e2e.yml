@@ -1,0 +1,324 @@
+name: utoopm-e2e
+
+# E2E test workflow. Triggered by `utoopm-build` completing — downloads
+# each platform's `utoo` artifact and runs the e2e suite on that
+# platform's runner. No `cargo build` here; everything reuses
+# pm-build's artifacts.
+#
+# Per-target jobs gate themselves on artifact existence (pm-build's
+# build-mac-x64 / build-windows skip for non-`(pm)` PRs, so the matching
+# e2e job no-ops in that case). The `utoopm-e2e-success` aggregator
+# always runs and reports success unless any non-skipped job failed —
+# preserving the default-trigger / always-report behaviour the old
+# pm-e2e.yml relied on for branch protection.
+on:
+  workflow_run:
+    workflows: ["utoopm-build"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  # Repo + run id of the upstream pm-build run we're consuming. Used by
+  # `gh api` artifact lookups and `actions/download-artifact@v4`'s
+  # cross-run `run-id` parameter.
+  UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id }}
+  UPSTREAM_REPO: ${{ github.repository }}
+
+jobs:
+  e2e-linux:
+    name: utoopm-e2e-ubuntu-latest-x86_64-unknown-linux-gnu
+    if: github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Check artifact exists
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          HAS=$(gh api "repos/${UPSTREAM_REPO}/actions/runs/${UPSTREAM_RUN_ID}/artifacts" \
+            --jq '[.artifacts[] | select(.name == "utoo-linux-x64" and .expired == false)] | length')
+          if [ "$HAS" -eq 0 ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::notice::No utoo-linux-x64 artifact in pm-build run ${UPSTREAM_RUN_ID} — skipping linux e2e."
+          fi
+      - name: Setup node
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download utoo binary
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-linux-x64
+          path: dist
+          run-id: ${{ env.UPSTREAM_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install utoo
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          chmod +x dist/utoo
+          ln -sf utoo dist/ut
+          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+      - name: Verify tools
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          utoo --version
+          ut --version
+      - name: Make scripts executable
+        if: steps.check.outputs.skip != 'true'
+        run: chmod +x e2e/utoo-pm.sh e2e/pm-arborist.sh
+      - name: Run e2e tests
+        if: steps.check.outputs.skip != 'true'
+        run: bash e2e/utoo-pm.sh
+      - name: Run arborist e2e tests
+        if: steps.check.outputs.skip != 'true'
+        run: bash e2e/pm-arborist.sh
+      - name: Upload e2e artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-ubuntu-latest-x86_64-unknown-linux-gnu
+          path: /tmp/utoo-*
+          if-no-files-found: ignore
+
+  e2e-mac-arm64:
+    name: utoopm-e2e-macos-latest-aarch64-apple-darwin
+    if: github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Check artifact exists
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          HAS=$(gh api "repos/${UPSTREAM_REPO}/actions/runs/${UPSTREAM_RUN_ID}/artifacts" \
+            --jq '[.artifacts[] | select(.name == "utoo-mac-arm64" and .expired == false)] | length')
+          if [ "$HAS" -eq 0 ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::notice::No utoo-mac-arm64 artifact in pm-build run ${UPSTREAM_RUN_ID} — skipping mac arm64 e2e."
+          fi
+      - name: Setup node
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download utoo binary
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-mac-arm64
+          path: dist
+          run-id: ${{ env.UPSTREAM_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install utoo
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          chmod +x dist/utoo
+          ln -sf utoo dist/ut
+          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+      - name: Verify tools
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          utoo --version
+          ut --version
+      - name: Make scripts executable
+        if: steps.check.outputs.skip != 'true'
+        run: chmod +x e2e/utoo-pm.sh e2e/pm-arborist.sh
+      - name: Run e2e tests
+        if: steps.check.outputs.skip != 'true'
+        run: bash e2e/utoo-pm.sh
+      - name: Run arborist e2e tests
+        if: steps.check.outputs.skip != 'true'
+        run: bash e2e/pm-arborist.sh
+      - name: Upload e2e artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-macos-latest-aarch64-apple-darwin
+          path: /tmp/utoo-*
+          if-no-files-found: ignore
+
+  e2e-mac-x64:
+    name: utoopm-e2e-macos-latest-x86_64-apple-darwin
+    if: github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Check artifact exists
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          HAS=$(gh api "repos/${UPSTREAM_REPO}/actions/runs/${UPSTREAM_RUN_ID}/artifacts" \
+            --jq '[.artifacts[] | select(.name == "utoo-mac-x64" and .expired == false)] | length')
+          if [ "$HAS" -eq 0 ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::notice::No utoo-mac-x64 artifact in pm-build run ${UPSTREAM_RUN_ID} — skipping mac x64 e2e."
+          fi
+      - name: Install x86_64 Node.js via nvm
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          arch -x86_64 bash -c '
+          curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+          nvm install 22
+          nvm use 22
+          nvm alias default 22
+          echo "NVM_DIR=$HOME/.nvm" >> $GITHUB_ENV
+          NODE_PATH=$(find $HOME/.nvm/versions/node -name "v22.*" -type d | head -1)
+          echo "$NODE_PATH/bin" >> $GITHUB_PATH
+          node -p process.arch
+          npm -v
+          '
+      - name: Download utoo binary
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-mac-x64
+          path: dist
+          run-id: ${{ env.UPSTREAM_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install utoo
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          chmod +x dist/utoo
+          ln -sf utoo dist/ut
+          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+      - name: Verify tools
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          utoo --version
+          ut --version
+      - name: Make scripts executable
+        if: steps.check.outputs.skip != 'true'
+        run: chmod +x e2e/utoo-pm.sh e2e/pm-arborist.sh
+      - name: Run e2e tests
+        if: steps.check.outputs.skip != 'true'
+        shell: bash
+        run: |
+          arch -x86_64 bash -c '
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+          nvm use 22
+          bash e2e/utoo-pm.sh
+          '
+      - name: Run arborist e2e tests
+        if: steps.check.outputs.skip != 'true'
+        shell: bash
+        run: |
+          arch -x86_64 bash -c '
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+          nvm use 22
+          bash e2e/pm-arborist.sh
+          '
+      - name: Upload e2e artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-macos-latest-x86_64-apple-darwin
+          path: /tmp/utoo-*
+          if-no-files-found: ignore
+
+  e2e-windows:
+    name: utoopm-e2e-windows-latest-x86_64-pc-windows-msvc
+    if: github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Disable Windows Defender
+        shell: powershell
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+      - name: Check artifact exists
+        id: check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          HAS=$(gh api "repos/${UPSTREAM_REPO}/actions/runs/${UPSTREAM_RUN_ID}/artifacts" \
+            --jq '[.artifacts[] | select(.name == "utoo-windows-x64" and .expired == false)] | length')
+          if [ "$HAS" -eq 0 ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::notice::No utoo-windows-x64 artifact in pm-build run ${UPSTREAM_RUN_ID} — skipping windows e2e."
+          fi
+      - name: Setup node
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download utoo binary
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-windows-x64
+          path: dist
+          run-id: ${{ env.UPSTREAM_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install utoo
+        if: steps.check.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $binPath = "${{ github.workspace }}\dist"
+          # ut.exe is just a copy of utoo.exe (Windows has no symlinks).
+          Copy-Item "$binPath\utoo.exe" "$binPath\ut.exe" -Force
+          echo "$binPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Verify tools
+        if: steps.check.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $binPath = "${{ github.workspace }}\dist"
+          $env:PATH = "$binPath;$env:PATH"
+          Get-Command utoo | Select-Object -ExpandProperty Source
+          Get-Command ut | Select-Object -ExpandProperty Source
+          utoo --version
+          ut --version
+      - name: Run e2e tests
+        if: steps.check.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          git config --system core.longpaths true
+          $binPath = "${{ github.workspace }}\dist"
+          $env:PATH = "$binPath;$env:PATH"
+          pwsh -File e2e/utoo-pm.ps1 --verbose
+      - name: Upload e2e artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-windows-latest-x86_64-pc-windows-msvc
+          path: ${{ runner.temp }}/utoo-*
+          if-no-files-found: ignore
+
+  e2e-success:
+    name: utoopm-e2e-success
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [e2e-linux, e2e-mac-arm64, e2e-mac-x64, e2e-windows]
+    steps:
+      - name: Check success
+        run: |
+          for result in \
+            "${{ needs.e2e-linux.result }}" \
+            "${{ needs.e2e-mac-arm64.result }}" \
+            "${{ needs.e2e-mac-x64.result }}" \
+            "${{ needs.e2e-windows.result }}"; do
+            if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+              echo "Tests failed or were cancelled"
+              exit 1
+            fi
+          done
+          echo "Tests passed or were skipped"

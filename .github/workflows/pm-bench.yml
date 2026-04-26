@@ -1,0 +1,278 @@
+name: utoopm-bench
+
+# Manual perf comparison: utoo (current branch) vs published utoo from
+# npm vs other PMs (pnpm/yarn/bun/aube) on cold + warm installs across
+# configurable registries.
+#
+# Self-contained — builds utoo inline rather than reusing pm-build's
+# artifact, so the workflow Just Works regardless of pm-build's state.
+# Triggered manually via workflow_dispatch (or by labelling a PR with
+# `benchmark`).
+on:
+  workflow_dispatch:
+    inputs:
+      registry:
+        description: 'Registry to test'
+        required: true
+        default: 'both'
+        type: choice
+        options: [both, npmjs, npmmirror]
+      pm_list:
+        description: 'Comma-separated PMs (e.g. utoo,bun); "all" → utoo,pnpm,yarn,bun,aube'
+        required: true
+        default: 'utoo,bun'
+        type: string
+      baseline:
+        description: 'Compare with published utoo from npm'
+        required: false
+        default: true
+        type: boolean
+      build_next:
+        description: 'Also compare with utoo built from `next` branch'
+        required: false
+        default: false
+        type: boolean
+      cold_runs:
+        description: 'Number of cold install runs'
+        required: false
+        default: '3'
+        type: string
+      warm_runs:
+        description: 'Number of warm install runs'
+        required: false
+        default: '3'
+        type: string
+  pull_request:
+    types: [labeled]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'benchmark')
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:20.04
+    steps:
+      - name: Install dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: apt-get update && apt-get install -y build-essential curl pkg-config libssl-dev git
+      - uses: actions/checkout@v4
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory /__w/utoo/utoo
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-02
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pm-bench-linux
+      - name: Build current branch utoo
+        run: cargo build --release --bin utoo -p utoo-pm
+      - name: Upload current binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: utoo-bench-current-linux
+          path: target/release/utoo
+          retention-days: 1
+      - name: Build next branch utoo
+        if: github.event.inputs.build_next == 'true'
+        run: |
+          git fetch origin next --depth=1
+          git checkout origin/next
+          git submodule update --init --recursive --depth 1
+          cargo build --release --bin utoo -p utoo-pm
+      - name: Upload next binary
+        if: github.event.inputs.build_next == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: utoo-bench-next-linux
+          path: target/release/utoo
+          retention-days: 1
+
+  bench-linux:
+    needs: [build-linux]
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'benchmark')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download current binary
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-bench-current-linux
+          path: dist
+      - name: Install utoo
+        run: |
+          chmod +x dist/utoo
+          ln -sf utoo dist/ut
+          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+      - name: Install baseline utoo from npm
+        if: github.event.inputs.baseline != 'false'
+        run: |
+          mkdir -p /tmp/utoo-npm-pkg && cd /tmp/utoo-npm-pkg
+          npm init -y >/dev/null
+          npm install utoo --no-audit --no-fund --no-progress
+          UTOO_NPM_BIN="$PWD/node_modules/utoo/bin/utoo"
+          chmod +x "$UTOO_NPM_BIN"
+          "$UTOO_NPM_BIN" --version
+          echo "UTOO_NPM_BIN=$UTOO_NPM_BIN" >> $GITHUB_ENV
+      - name: Download next binary
+        if: github.event.inputs.build_next == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-bench-next-linux
+          path: dist-next
+      - name: Install next binary
+        if: github.event.inputs.build_next == 'true'
+        run: |
+          chmod +x dist-next/utoo
+          cp dist-next/utoo /tmp/utoo-next
+          echo "Baseline utoo (next) version: $(/tmp/utoo-next --version)"
+          echo "UTOO_NEXT_BIN=/tmp/utoo-next" >> $GITHUB_ENV
+      - name: Resolve pm_list
+        id: pm
+        run: |
+          PM_LIST="${{ github.event.inputs.pm_list || 'utoo,bun' }}"
+          if [ "$PM_LIST" = "all" ]; then
+            PM_LIST="utoo,pnpm,yarn,bun,aube"
+          fi
+          echo "list=$PM_LIST" >> $GITHUB_OUTPUT
+      - name: Install pnpm
+        if: contains(steps.pm.outputs.list, 'pnpm')
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+      - name: Install yarn
+        if: contains(steps.pm.outputs.list, 'yarn')
+        run: npm install -g yarn
+      - name: Install bun
+        if: contains(steps.pm.outputs.list, 'bun')
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install aube
+        if: contains(steps.pm.outputs.list, 'aube')
+        run: npm install -g @endevco/aube
+      - name: Install hyperfine and GNU time
+        run: sudo apt-get update && sudo apt-get install -y hyperfine time
+      - name: Verify tools
+        run: |
+          hyperfine --version
+          IFS=',' read -ra PMS <<< "${{ steps.pm.outputs.list }}"
+          for pm in "${PMS[@]}"; do
+            echo "$pm: $($pm --version 2>&1 || echo 'not installed')"
+          done
+      - name: Run benchmark
+        run: |
+          chmod +x bench/pm-bench.sh
+          BENCH_COLD_RUNS=${{ github.event.inputs.cold_runs || '3' }} \
+          BENCH_WARM_RUNS=${{ github.event.inputs.warm_runs || '3' }} \
+          bash bench/pm-bench.sh ${{ github.event.inputs.registry || 'both' }} ${{ steps.pm.outputs.list }}
+
+  bench-mac:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'benchmark')
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-02
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pm-bench-macos-latest
+      - name: Install baseline utoo from npm
+        if: github.event.inputs.baseline != 'false'
+        run: |
+          mkdir -p /tmp/utoo-npm-pkg && cd /tmp/utoo-npm-pkg
+          npm init -y >/dev/null
+          npm install utoo --no-audit --no-fund --no-progress
+          UTOO_NPM_BIN="$PWD/node_modules/utoo/bin/utoo"
+          chmod +x "$UTOO_NPM_BIN"
+          "$UTOO_NPM_BIN" --version
+          echo "UTOO_NPM_BIN=$UTOO_NPM_BIN" >> $GITHUB_ENV
+      - name: Build baseline utoo from next branch
+        if: github.event.inputs.build_next == 'true'
+        run: |
+          CURRENT_SHA=$(git rev-parse HEAD)
+          git fetch origin next --depth=1
+          git checkout origin/next
+          git submodule update --init --recursive --depth 1
+          cargo build --release --bin utoo -p utoo-pm
+          cp target/release/utoo /tmp/utoo-next
+          chmod +x /tmp/utoo-next
+          echo "Baseline utoo (next) version: $(/tmp/utoo-next --version)"
+          echo "UTOO_NEXT_BIN=/tmp/utoo-next" >> $GITHUB_ENV
+          git checkout "$CURRENT_SHA"
+          git submodule update --init --recursive --depth 1
+      - name: Build utoo-pm
+        run: cargo build --release --bin utoo -p utoo-pm
+      - name: Update PATH
+        run: echo "${{ github.workspace }}/target/release" >> $GITHUB_PATH
+      - name: Create ut symlink
+        run: ln -sf utoo $(dirname $(which utoo))/ut
+      - name: Resolve pm_list
+        id: pm
+        run: |
+          PM_LIST="${{ github.event.inputs.pm_list || 'utoo,bun' }}"
+          if [ "$PM_LIST" = "all" ]; then
+            PM_LIST="utoo,pnpm,yarn,bun,aube"
+          fi
+          echo "list=$PM_LIST" >> $GITHUB_OUTPUT
+      - name: Install pnpm
+        if: contains(steps.pm.outputs.list, 'pnpm')
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+      - name: Install yarn
+        if: contains(steps.pm.outputs.list, 'yarn')
+        run: npm install -g yarn
+      - name: Install bun
+        if: contains(steps.pm.outputs.list, 'bun')
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install aube
+        if: contains(steps.pm.outputs.list, 'aube')
+        run: npm install -g @endevco/aube
+      - name: Install hyperfine
+        run: brew install hyperfine
+      - name: Verify tools
+        run: |
+          hyperfine --version
+          IFS=',' read -ra PMS <<< "${{ steps.pm.outputs.list }}"
+          for pm in "${PMS[@]}"; do
+            echo "$pm: $($pm --version 2>&1 || echo 'not installed')"
+          done
+      - name: Run benchmark
+        run: |
+          chmod +x bench/pm-bench.sh
+          BENCH_COLD_RUNS=${{ github.event.inputs.cold_runs || '3' }} \
+          BENCH_WARM_RUNS=${{ github.event.inputs.warm_runs || '3' }} \
+          bash bench/pm-bench.sh ${{ github.event.inputs.registry || 'both' }} ${{ steps.pm.outputs.list }}
