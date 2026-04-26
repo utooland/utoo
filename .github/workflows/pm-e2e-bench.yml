@@ -254,26 +254,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Download utoo binary
-        uses: actions/download-artifact@v4
+      - uses: ./.github/actions/setup-utoo-bin
         with:
-          name: utoo-linux-x64
-          path: dist
-      - name: Install utoo
-        run: |
-          chmod +x dist/utoo
-          ln -sf utoo dist/ut
-          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+          artifact: utoo-linux-x64
       - name: Verify tools
         run: |
           utoo --version
           ut --version
-      - name: Make scripts executable
-        run: chmod +x e2e/utoo-pm.sh e2e/pm-arborist.sh
       - name: Run e2e tests
-        run: bash e2e/utoo-pm.sh
-      - name: Run arborist e2e tests
-        run: bash e2e/pm-arborist.sh
+        run: |
+          chmod +x e2e/utoo-pm.sh e2e/pm-arborist.sh
+          bash e2e/utoo-pm.sh
+          bash e2e/pm-arborist.sh
       - name: Upload e2e artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -295,26 +287,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Download utoo binary
-        uses: actions/download-artifact@v4
+      - uses: ./.github/actions/setup-utoo-bin
         with:
-          name: utoo-mac-arm64
-          path: dist
-      - name: Install utoo
-        run: |
-          chmod +x dist/utoo
-          ln -sf utoo dist/ut
-          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+          artifact: utoo-mac-arm64
       - name: Verify tools
         run: |
           utoo --version
           ut --version
-      - name: Make scripts executable
-        run: chmod +x e2e/utoo-pm.sh e2e/pm-arborist.sh
       - name: Run e2e tests
-        run: bash e2e/utoo-pm.sh
-      - name: Run arborist e2e tests
-        run: bash e2e/pm-arborist.sh
+        run: |
+          chmod +x e2e/utoo-pm.sh e2e/pm-arborist.sh
+          bash e2e/utoo-pm.sh
+          bash e2e/pm-arborist.sh
       - name: Upload e2e artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -347,38 +331,22 @@ jobs:
           node -p process.arch
           npm -v
           '
-      - name: Download utoo binary
-        uses: actions/download-artifact@v4
+      - uses: ./.github/actions/setup-utoo-bin
         with:
-          name: utoo-mac-x64
-          path: dist
-      - name: Install utoo
-        run: |
-          chmod +x dist/utoo
-          ln -sf utoo dist/ut
-          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+          artifact: utoo-mac-x64
       - name: Verify tools
         run: |
           utoo --version
           ut --version
-      - name: Make scripts executable
-        run: chmod +x e2e/utoo-pm.sh e2e/pm-arborist.sh
-      - name: Run e2e tests
+      - name: Run e2e tests (under arch -x86_64)
         shell: bash
         run: |
+          chmod +x e2e/utoo-pm.sh e2e/pm-arborist.sh
           arch -x86_64 bash -c '
           export NVM_DIR="$HOME/.nvm"
           [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
           nvm use 22
           bash e2e/utoo-pm.sh
-          '
-      - name: Run arborist e2e tests
-        shell: bash
-        run: |
-          arch -x86_64 bash -c '
-          export NVM_DIR="$HOME/.nvm"
-          [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-          nvm use 22
           bash e2e/pm-arborist.sh
           '
       - name: Upload e2e artifacts on failure
@@ -487,35 +455,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Download utoo binary
-        uses: actions/download-artifact@v4
+      - uses: ./.github/actions/setup-utoo-bin
         with:
-          name: utoo-linux-x64
-          path: dist
-      - name: Install utoo
-        run: |
-          chmod +x dist/utoo
-          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+          artifact: utoo-linux-x64
+          with-ut-symlink: 'false'
       - name: Install bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - name: Install bench tools
-        run: sudo apt-get update && sudo apt-get install -y hyperfine time
-      - name: Install utoo@npm baseline
-        # Install latest published utoo to a temp dir (NOT the global prefix)
-        # so it doesn't shadow $GITHUB_WORKSPACE/dist/utoo on PATH. The bench
-        # script invokes it via $UTOO_NPM_BIN absolute path. Points directly
-        # at node_modules/utoo/bin/utoo (the package's `bin` field) — npm's
-        # node_modules/.bin/ symlink isn't always created for local installs.
-        run: |
-          mkdir -p /tmp/utoo-npm-pkg && cd /tmp/utoo-npm-pkg
-          npm init -y >/dev/null
-          npm install utoo --no-audit --no-fund --no-progress
-          UTOO_NPM_BIN="$PWD/node_modules/utoo/bin/utoo"
-          chmod +x "$UTOO_NPM_BIN"
-          "$UTOO_NPM_BIN" --version
-          echo "UTOO_NPM_BIN=$UTOO_NPM_BIN" >> $GITHUB_ENV
+      - uses: ./.github/actions/install-bench-tools
+        with:
+          platform: linux
+      - uses: ./.github/actions/install-utoo-npm-baseline
       - name: Verify tools
         run: |
           hyperfine --version
@@ -566,37 +517,12 @@ jobs:
           name: pm-bench-logs-linux
           path: /tmp/pm-bench-output
           retention-days: 7
-      - name: Build PR comment body
-        if: always()
-        run: bash .github/scripts/render-bench-phases-comment.sh linux ubuntu-latest
-      - name: Find Current PR
-        id: findPr
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          PR_NUMBER=""
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            PR_NUMBER="${{ github.event.pull_request.number }}"
-          else
-            PR_NUMBER=$(gh pr list --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number' || true)
-            if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" == "null" ]; then
-              PR_NUMBER=$(gh pr list --search "${{ github.sha }}" --state open --json number --jq '.[0].number' || true)
-            fi
-          fi
-          if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
-            echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
-          fi
-      - name: Post PR Comment
-        if: always() && steps.findPr.outputs.number
-        uses: marocchino/sticky-pull-request-comment@v2
+      - if: always()
+        uses: ./.github/actions/post-bench-phases-comment
         with:
-          header: pm-bench-phases-linux
-          path: /tmp/pm-bench-output/pr_comment.md
-          number: ${{ steps.findPr.outputs.number }}
-          recreate: true
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          platform: linux
+          os: ubuntu-latest
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   bench-phases-mac:
     needs: [build-mac-arm64]
@@ -613,38 +539,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Download utoo binary
-        uses: actions/download-artifact@v4
+      - uses: ./.github/actions/setup-utoo-bin
         with:
-          name: utoo-mac-arm64
-          path: dist
-      - name: Install utoo
-        run: |
-          chmod +x dist/utoo
-          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+          artifact: utoo-mac-arm64
+          with-ut-symlink: 'false'
       - name: Install bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - name: Install bench tools
-        # macOS /usr/bin/time isn't GNU; bench/pm-bench-phases.sh uses
-        # `time -v`. Install gnu-time and shadow `time` with a $HOME/bin
-        # symlink earlier on PATH.
-        run: |
-          brew install hyperfine gnu-time
-          mkdir -p "$HOME/bin"
-          ln -sf "$(brew --prefix gnu-time)/bin/gtime" "$HOME/bin/time"
-          echo "$HOME/bin" >> $GITHUB_PATH
-      - name: Install utoo@npm baseline
-        # See linux job — same rationale.
-        run: |
-          mkdir -p /tmp/utoo-npm-pkg && cd /tmp/utoo-npm-pkg
-          npm init -y >/dev/null
-          npm install utoo --no-audit --no-fund --no-progress
-          UTOO_NPM_BIN="$PWD/node_modules/utoo/bin/utoo"
-          chmod +x "$UTOO_NPM_BIN"
-          "$UTOO_NPM_BIN" --version
-          echo "UTOO_NPM_BIN=$UTOO_NPM_BIN" >> $GITHUB_ENV
+      - uses: ./.github/actions/install-bench-tools
+        with:
+          platform: mac
+      - uses: ./.github/actions/install-utoo-npm-baseline
       - name: Verify tools
         run: |
           hyperfine --version
@@ -695,37 +601,12 @@ jobs:
           name: pm-bench-logs-mac
           path: /tmp/pm-bench-output
           retention-days: 7
-      - name: Build PR comment body
-        if: always()
-        run: bash .github/scripts/render-bench-phases-comment.sh mac macos-latest
-      - name: Find Current PR
-        id: findPr
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          PR_NUMBER=""
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            PR_NUMBER="${{ github.event.pull_request.number }}"
-          else
-            PR_NUMBER=$(gh pr list --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number' || true)
-            if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" == "null" ]; then
-              PR_NUMBER=$(gh pr list --search "${{ github.sha }}" --state open --json number --jq '.[0].number' || true)
-            fi
-          fi
-          if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
-            echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
-          fi
-      - name: Post PR Comment
-        if: always() && steps.findPr.outputs.number
-        uses: marocchino/sticky-pull-request-comment@v2
+      - if: always()
+        uses: ./.github/actions/post-bench-phases-comment
         with:
-          header: pm-bench-phases-mac
-          path: /tmp/pm-bench-output/pr_comment.md
-          number: ${{ steps.findPr.outputs.number }}
-          recreate: true
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          platform: mac
+          os: macos-latest
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   # ============================================================
   # PM-BENCH-ALL (manual full PM shootout)
@@ -744,25 +625,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Download utoo binary
-        uses: actions/download-artifact@v4
+      - uses: ./.github/actions/setup-utoo-bin
         with:
-          name: utoo-linux-x64
-          path: dist
-      - name: Install utoo
-        run: |
-          chmod +x dist/utoo
-          ln -sf utoo dist/ut
-          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
-      - name: Install baseline utoo from npm
-        if: github.event.inputs.baseline != 'false'
-        run: |
-          npm install -g utoo
-          BASELINE_PATH=$(which utoo)
-          cp "$BASELINE_PATH" /tmp/utoo-npm
-          chmod +x /tmp/utoo-npm
-          echo "Baseline utoo (npm) version: $(/tmp/utoo-npm --version)"
-          echo "UTOO_NPM_BIN=/tmp/utoo-npm" >> $GITHUB_ENV
+          artifact: utoo-linux-x64
+      - if: github.event.inputs.baseline != 'false'
+        uses: ./.github/actions/install-utoo-npm-baseline
       - name: Build next branch utoo
         if: github.event.inputs.build_next == 'true'
         run: |
@@ -826,25 +693,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Download utoo binary
-        uses: actions/download-artifact@v4
+      - uses: ./.github/actions/setup-utoo-bin
         with:
-          name: utoo-mac-arm64
-          path: dist
-      - name: Install utoo
-        run: |
-          chmod +x dist/utoo
-          ln -sf utoo dist/ut
-          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
-      - name: Install baseline utoo from npm
-        if: github.event.inputs.baseline != 'false'
-        run: |
-          npm install -g utoo
-          BASELINE_PATH=$(which utoo)
-          cp "$BASELINE_PATH" /tmp/utoo-npm
-          chmod +x /tmp/utoo-npm
-          echo "Baseline utoo (npm) version: $(/tmp/utoo-npm --version)"
-          echo "UTOO_NPM_BIN=/tmp/utoo-npm" >> $GITHUB_ENV
+          artifact: utoo-mac-arm64
+      - if: github.event.inputs.baseline != 'false'
+        uses: ./.github/actions/install-utoo-npm-baseline
       - name: Build next branch utoo
         if: github.event.inputs.build_next == 'true'
         run: |
@@ -912,20 +765,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Download utoo binary
-        uses: actions/download-artifact@v4
+      - uses: ./.github/actions/setup-utoo-bin
         with:
-          name: utoo-linux-x64
-          path: dist
-      - name: Install utoo
-        run: |
-          chmod +x dist/utoo
-          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+          artifact: utoo-linux-x64
+          with-ut-symlink: 'false'
       - name: Install bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
       - name: Install pcap tools
+        # tcpdump + dnsutils on top of the standard bench tooling.
         run: sudo apt-get update && sudo apt-get install -y tcpdump dnsutils hyperfine time
       - name: Capture pcap
         env:
