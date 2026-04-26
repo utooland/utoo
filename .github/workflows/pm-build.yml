@@ -1,22 +1,78 @@
 name: utoopm-build
 
-# Build-only workflow. Builds `utoo` once per target and uploads each as
-# an artifact. Downstream workflows (pm-e2e, pm-bench-phases, pm-bench,
-# pm-bench-pcap) trigger on this workflow's completion via `workflow_run`
-# and download the artifacts they need — so each target's
-# `cargo build --release` runs at most once per commit.
+# Single workflow that builds utoo once per target, then fans out to
+# every consumer (e2e, bench-phases, pm-bench, pm-bench-pcap). Replaces
+# the old pm-e2e.yml + pm-bench.yml + pm-bench-phases.yml trio so each
+# target builds exactly once per commit and downstream jobs reuse the
+# uploaded artifact.
 #
-# Triggers:
-#   push to next/e2e-pm — only when commit msg contains `(pm`
-#   pull_request — only when title contains `(pm`, OR labeled `benchmark`
-#   workflow_dispatch — always builds linux + mac arm64 (skips mac x64 +
-#     windows since they only feed e2e and dispatch is for bench/pcap)
+# Triggers (event → consumers):
+#   pull_request / push with `(pm)` in title/msg → e2e jobs
+#   pull_request / push with `(pm` (loose) in title/msg → bench-phases
+#   pull_request labeled `benchmark` → pm-bench (manual perf compare)
+#   workflow_dispatch with `target` choice → manual one-off runs
+#
+# Build job gates are the union of their downstream consumers' gates.
+# Each downstream job is pure download-and-run, no `cargo build`.
 on:
   push:
     branches: ["next", "e2e-pm"]
   pull_request:
     types: [opened, synchronize, reopened, edited, labeled]
   workflow_dispatch:
+    inputs:
+      target:
+        description: 'Manual target to run'
+        required: true
+        type: choice
+        options:
+          - pm-bench
+          - pm-bench-phases
+          - pm-bench-pcap
+        default: pm-bench
+      # ----- pm-bench inputs -----
+      registry:
+        description: '[pm-bench] Registry to test'
+        required: false
+        default: 'both'
+        type: choice
+        options: [both, npmjs, npmmirror]
+      pm_list:
+        description: '[pm-bench] Comma-separated PMs (e.g. utoo,bun); "all" → utoo,pnpm,yarn,bun,aube'
+        required: false
+        default: 'utoo,bun'
+        type: string
+      baseline:
+        description: '[pm-bench] Compare with published utoo from npm'
+        required: false
+        default: true
+        type: boolean
+      build_next:
+        description: '[pm-bench] Also compare with utoo built from `next` branch'
+        required: false
+        default: false
+        type: boolean
+      cold_runs:
+        description: '[pm-bench] Number of cold install runs'
+        required: false
+        default: '3'
+        type: string
+      warm_runs:
+        description: '[pm-bench] Number of warm install runs'
+        required: false
+        default: '3'
+        type: string
+      # ----- pm-bench-phases / pcap inputs -----
+      project:
+        description: '[phases/pcap] Project to bench (under github.com/ant-design/<project>)'
+        required: false
+        default: 'ant-design'
+        type: string
+      bench_runs:
+        description: '[phases] Runs per phase'
+        required: false
+        default: '3'
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -27,13 +83,15 @@ permissions:
 
 jobs:
   # ============================================================
-  # Per-target build jobs. Gates are unions of every downstream
-  # consumer (e2e, bench-phases, pm-bench, pm-bench-pcap). Linux +
-  # mac-arm64 have the broadest set of consumers; mac-x64 and
-  # windows only feed e2e (strict `(pm)` scope).
+  # BUILD JOBS
+  # One per target, runs whenever any downstream consumer needs it.
+  # Downstream jobs `needs:` the relevant build job and download
+  # the uploaded artifact. No downstream rebuilds.
   # ============================================================
 
   build-linux:
+    # Linux serves: e2e-linux, bench-phases-linux, pm-bench-linux, pm-bench-pcap-linux.
+    # Gate is the union of all linux consumers' gates.
     if: >
       (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm')) ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm')) ||
@@ -85,11 +143,12 @@ jobs:
           retention-days: 1
 
   build-mac-arm64:
+    # Mac arm64 serves: e2e-mac-arm64, bench-phases-mac, pm-bench-mac.
     if: >
       (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm')) ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm')) ||
       (github.event_name == 'pull_request' && github.event.label.name == 'benchmark') ||
-      github.event_name == 'workflow_dispatch'
+      (github.event_name == 'workflow_dispatch' && inputs.target != 'pm-bench-pcap')
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -114,8 +173,8 @@ jobs:
           retention-days: 1
 
   build-mac-x64:
-    # Only feeds e2e-mac-x64 — strict `(pm)` scope, no bench consumers.
-    # Cross-compiled on macos-latest (arm64 host).
+    # Mac x86_64 serves: e2e-mac-x64 only. Cross-compiled on macos-latest
+    # (arm64 host) via `rustup target add x86_64-apple-darwin`.
     if: >
       (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
@@ -145,7 +204,7 @@ jobs:
           retention-days: 1
 
   build-windows:
-    # Only feeds e2e-windows — strict `(pm)` scope.
+    # Windows serves: e2e-windows only.
     if: >
       (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
@@ -175,25 +234,714 @@ jobs:
           path: target/x86_64-pc-windows-msvc/release/utoo.exe
           retention-days: 1
 
-  # Always-runs aggregator so this workflow reports a definite check
-  # even on PRs where every build was gated out. Downstream workflows
-  # use `workflow_run` and react to this run's conclusion.
-  build-success:
-    name: utoopm-build-success
+  # ============================================================
+  # E2E JOBS
+  # Auto-trigger on `(pm)` (strict) PR title / commit msg.
+  # ============================================================
+
+  e2e-linux:
+    needs: [build-linux]
+    name: utoopm-e2e-ubuntu-latest-x86_64-unknown-linux-gnu
+    if: >
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download utoo binary
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-linux-x64
+          path: dist
+      - name: Install utoo
+        run: |
+          chmod +x dist/utoo
+          ln -sf utoo dist/ut
+          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+      - name: Verify tools
+        run: |
+          utoo --version
+          ut --version
+      - name: Make scripts executable
+        run: chmod +x e2e/utoo-pm.sh e2e/pm-arborist.sh
+      - name: Run e2e tests
+        run: bash e2e/utoo-pm.sh
+      - name: Run arborist e2e tests
+        run: bash e2e/pm-arborist.sh
+      - name: Upload e2e artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-ubuntu-latest-x86_64-unknown-linux-gnu
+          path: /tmp/utoo-*
+          if-no-files-found: ignore
+
+  e2e-mac-arm64:
+    needs: [build-mac-arm64]
+    name: utoopm-e2e-macos-latest-aarch64-apple-darwin
+    if: >
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download utoo binary
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-mac-arm64
+          path: dist
+      - name: Install utoo
+        run: |
+          chmod +x dist/utoo
+          ln -sf utoo dist/ut
+          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+      - name: Verify tools
+        run: |
+          utoo --version
+          ut --version
+      - name: Make scripts executable
+        run: chmod +x e2e/utoo-pm.sh e2e/pm-arborist.sh
+      - name: Run e2e tests
+        run: bash e2e/utoo-pm.sh
+      - name: Run arborist e2e tests
+        run: bash e2e/pm-arborist.sh
+      - name: Upload e2e artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-macos-latest-aarch64-apple-darwin
+          path: /tmp/utoo-*
+          if-no-files-found: ignore
+
+  e2e-mac-x64:
+    needs: [build-mac-x64]
+    name: utoopm-e2e-macos-latest-x86_64-apple-darwin
+    if: >
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install x86_64 Node.js via nvm
+        run: |
+          arch -x86_64 bash -c '
+          curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+          nvm install 22
+          nvm use 22
+          nvm alias default 22
+          echo "NVM_DIR=$HOME/.nvm" >> $GITHUB_ENV
+          NODE_PATH=$(find $HOME/.nvm/versions/node -name "v22.*" -type d | head -1)
+          echo "$NODE_PATH/bin" >> $GITHUB_PATH
+          node -p process.arch
+          npm -v
+          '
+      - name: Download utoo binary
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-mac-x64
+          path: dist
+      - name: Install utoo
+        run: |
+          chmod +x dist/utoo
+          ln -sf utoo dist/ut
+          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+      - name: Verify tools
+        run: |
+          utoo --version
+          ut --version
+      - name: Make scripts executable
+        run: chmod +x e2e/utoo-pm.sh e2e/pm-arborist.sh
+      - name: Run e2e tests
+        shell: bash
+        run: |
+          arch -x86_64 bash -c '
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+          nvm use 22
+          bash e2e/utoo-pm.sh
+          '
+      - name: Run arborist e2e tests
+        shell: bash
+        run: |
+          arch -x86_64 bash -c '
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+          nvm use 22
+          bash e2e/pm-arborist.sh
+          '
+      - name: Upload e2e artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-macos-latest-x86_64-apple-darwin
+          path: /tmp/utoo-*
+          if-no-files-found: ignore
+
+  e2e-windows:
+    needs: [build-windows]
+    name: utoopm-e2e-windows-latest-x86_64-pc-windows-msvc
+    if: >
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Disable Windows Defender
+        shell: powershell
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download utoo binary
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-windows-x64
+          path: dist
+      - name: Install utoo
+        shell: pwsh
+        run: |
+          $binPath = "${{ github.workspace }}\dist"
+          # ut.exe is just a copy of utoo.exe (Windows has no symlinks).
+          Copy-Item "$binPath\utoo.exe" "$binPath\ut.exe" -Force
+          echo "$binPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Verify tools
+        shell: pwsh
+        run: |
+          $binPath = "${{ github.workspace }}\dist"
+          $env:PATH = "$binPath;$env:PATH"
+          Get-Command utoo | Select-Object -ExpandProperty Source
+          Get-Command ut | Select-Object -ExpandProperty Source
+          utoo --version
+          ut --version
+      - name: Run e2e tests
+        shell: pwsh
+        run: |
+          git config --system core.longpaths true
+          $binPath = "${{ github.workspace }}\dist"
+          $env:PATH = "$binPath;$env:PATH"
+          pwsh -File e2e/utoo-pm.ps1 --verbose
+      - name: Upload e2e artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-windows-latest-x86_64-pc-windows-msvc
+          path: ${{ runner.temp }}/utoo-*
+          if-no-files-found: ignore
+
+  e2e-success:
+    name: utoopm-e2e-success
     runs-on: ubuntu-latest
     if: always()
-    needs: [build-linux, build-mac-arm64, build-mac-x64, build-windows]
+    needs: [build-linux, build-mac-arm64, build-mac-x64, build-windows, e2e-linux, e2e-mac-arm64, e2e-mac-x64, e2e-windows]
     steps:
-      - name: Check builds
+      - name: Check success
         run: |
           for result in \
             "${{ needs.build-linux.result }}" \
             "${{ needs.build-mac-arm64.result }}" \
             "${{ needs.build-mac-x64.result }}" \
-            "${{ needs.build-windows.result }}"; do
+            "${{ needs.build-windows.result }}" \
+            "${{ needs.e2e-linux.result }}" \
+            "${{ needs.e2e-mac-arm64.result }}" \
+            "${{ needs.e2e-mac-x64.result }}" \
+            "${{ needs.e2e-windows.result }}"; do
             if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
-              echo "Build failed or was cancelled"
+              echo "Tests failed or were cancelled"
               exit 1
             fi
           done
-          echo "Builds passed or were skipped"
+          echo "Tests passed or were skipped"
+
+  # ============================================================
+  # BENCH-PHASES JOBS
+  # Auto-trigger on `(pm` (loose) — covers `(pm)`, `(pm-bench-phases)`,
+  # `(pm-foo)`, etc. Posts a sticky PR comment per platform with the
+  # phase-isolated bench results across npmjs + npmmirror.
+  # ============================================================
+
+  bench-phases-linux:
+    needs: [build-linux]
+    if: >
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-phases')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download utoo binary
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-linux-x64
+          path: dist
+      - name: Install utoo
+        run: |
+          chmod +x dist/utoo
+          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install bench tools
+        run: sudo apt-get update && sudo apt-get install -y hyperfine time
+      - name: Install utoo@npm baseline
+        # Install latest published utoo to a temp dir (NOT the global prefix)
+        # so it doesn't shadow $GITHUB_WORKSPACE/dist/utoo on PATH. The bench
+        # script invokes it via $UTOO_NPM_BIN absolute path. Points directly
+        # at node_modules/utoo/bin/utoo (the package's `bin` field) — npm's
+        # node_modules/.bin/ symlink isn't always created for local installs.
+        run: |
+          mkdir -p /tmp/utoo-npm-pkg && cd /tmp/utoo-npm-pkg
+          npm init -y >/dev/null
+          npm install utoo --no-audit --no-fund --no-progress
+          UTOO_NPM_BIN="$PWD/node_modules/utoo/bin/utoo"
+          chmod +x "$UTOO_NPM_BIN"
+          "$UTOO_NPM_BIN" --version
+          echo "UTOO_NPM_BIN=$UTOO_NPM_BIN" >> $GITHUB_ENV
+      - name: Verify tools
+        run: |
+          hyperfine --version
+          utoo --version
+          "$UTOO_NPM_BIN" --version
+          bun --version
+      - name: Define cache wipe function
+        run: |
+          cat > /tmp/wipe-bench-state.sh <<'WIPE'
+          #!/usr/bin/env bash
+          rm -rf /tmp/pm-bench /tmp/pm-bench-results /tmp/pm-bench-output \
+                 /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache /tmp/bun-bench-cache \
+                 ~/.bun/install/cache ~/.cache/nm 2>/dev/null || true
+          mkdir -p /tmp/pm-bench-output
+          WIPE
+          chmod +x /tmp/wipe-bench-state.sh
+      - name: Wipe bench state before npmjs
+        run: bash /tmp/wipe-bench-state.sh
+      - name: Run phase-isolated benchmark · npmjs
+        env:
+          PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
+          REGISTRY: 'https://registry.npmjs.org'
+          BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
+          PM_LIST: 'utoo,utoo-npm,bun'
+        run: |
+          chmod +x bench/pm-bench-phases.sh
+          bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmjs.log
+      - name: Stash npmjs logs and wipe state before npmmirror
+        run: |
+          mkdir -p /tmp/bench-logs-stash
+          cp -r /tmp/pm-bench-output/. /tmp/bench-logs-stash/ 2>/dev/null || true
+          bash /tmp/wipe-bench-state.sh
+          mkdir -p /tmp/pm-bench-output
+          cp -r /tmp/bench-logs-stash/. /tmp/pm-bench-output/ 2>/dev/null || true
+      - name: Run phase-isolated benchmark · npmmirror
+        env:
+          PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
+          REGISTRY: 'https://registry.npmmirror.com'
+          BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
+          PM_LIST: 'utoo,utoo-npm,bun'
+        run: |
+          mkdir -p /tmp/pm-bench-output
+          bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmmirror.log
+      - name: Upload bench logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pm-bench-logs-linux
+          path: /tmp/pm-bench-output
+          retention-days: 7
+      - name: Build PR comment body
+        if: always()
+        run: bash .github/scripts/render-bench-phases-comment.sh linux ubuntu-latest
+      - name: Find Current PR
+        id: findPr
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          PR_NUMBER=""
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          else
+            PR_NUMBER=$(gh pr list --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number' || true)
+            if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" == "null" ]; then
+              PR_NUMBER=$(gh pr list --search "${{ github.sha }}" --state open --json number --jq '.[0].number' || true)
+            fi
+          fi
+          if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+            echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          fi
+      - name: Post PR Comment
+        if: always() && steps.findPr.outputs.number
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pm-bench-phases-linux
+          path: /tmp/pm-bench-output/pr_comment.md
+          number: ${{ steps.findPr.outputs.number }}
+          recreate: true
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  bench-phases-mac:
+    needs: [build-mac-arm64]
+    if: >
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-phases')
+    runs-on: macos-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download utoo binary
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-mac-arm64
+          path: dist
+      - name: Install utoo
+        run: |
+          chmod +x dist/utoo
+          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install bench tools
+        # macOS /usr/bin/time isn't GNU; bench/pm-bench-phases.sh uses
+        # `time -v`. Install gnu-time and shadow `time` with a $HOME/bin
+        # symlink earlier on PATH.
+        run: |
+          brew install hyperfine gnu-time
+          mkdir -p "$HOME/bin"
+          ln -sf "$(brew --prefix gnu-time)/bin/gtime" "$HOME/bin/time"
+          echo "$HOME/bin" >> $GITHUB_PATH
+      - name: Install utoo@npm baseline
+        # See linux job — same rationale.
+        run: |
+          mkdir -p /tmp/utoo-npm-pkg && cd /tmp/utoo-npm-pkg
+          npm init -y >/dev/null
+          npm install utoo --no-audit --no-fund --no-progress
+          UTOO_NPM_BIN="$PWD/node_modules/utoo/bin/utoo"
+          chmod +x "$UTOO_NPM_BIN"
+          "$UTOO_NPM_BIN" --version
+          echo "UTOO_NPM_BIN=$UTOO_NPM_BIN" >> $GITHUB_ENV
+      - name: Verify tools
+        run: |
+          hyperfine --version
+          utoo --version
+          "$UTOO_NPM_BIN" --version
+          bun --version
+      - name: Define cache wipe function
+        run: |
+          cat > /tmp/wipe-bench-state.sh <<'WIPE'
+          #!/usr/bin/env bash
+          rm -rf /tmp/pm-bench /tmp/pm-bench-results /tmp/pm-bench-output \
+                 /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache /tmp/bun-bench-cache \
+                 ~/.bun/install/cache ~/.cache/nm 2>/dev/null || true
+          mkdir -p /tmp/pm-bench-output
+          WIPE
+          chmod +x /tmp/wipe-bench-state.sh
+      - name: Wipe bench state before npmjs
+        run: bash /tmp/wipe-bench-state.sh
+      - name: Run phase-isolated benchmark · npmjs
+        env:
+          PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
+          REGISTRY: 'https://registry.npmjs.org'
+          BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
+          PM_LIST: 'utoo,utoo-npm,bun'
+        run: |
+          chmod +x bench/pm-bench-phases.sh
+          bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmjs.log
+      - name: Stash npmjs logs and wipe state before npmmirror
+        run: |
+          mkdir -p /tmp/bench-logs-stash
+          cp -r /tmp/pm-bench-output/. /tmp/bench-logs-stash/ 2>/dev/null || true
+          bash /tmp/wipe-bench-state.sh
+          mkdir -p /tmp/pm-bench-output
+          cp -r /tmp/bench-logs-stash/. /tmp/pm-bench-output/ 2>/dev/null || true
+      - name: Run phase-isolated benchmark · npmmirror
+        env:
+          PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
+          REGISTRY: 'https://registry.npmmirror.com'
+          BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
+          PM_LIST: 'utoo,utoo-npm,bun'
+        run: |
+          mkdir -p /tmp/pm-bench-output
+          bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmmirror.log
+      - name: Upload bench logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pm-bench-logs-mac
+          path: /tmp/pm-bench-output
+          retention-days: 7
+      - name: Build PR comment body
+        if: always()
+        run: bash .github/scripts/render-bench-phases-comment.sh mac macos-latest
+      - name: Find Current PR
+        id: findPr
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          PR_NUMBER=""
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          else
+            PR_NUMBER=$(gh pr list --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number' || true)
+            if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" == "null" ]; then
+              PR_NUMBER=$(gh pr list --search "${{ github.sha }}" --state open --json number --jq '.[0].number' || true)
+            fi
+          fi
+          if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+            echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          fi
+      - name: Post PR Comment
+        if: always() && steps.findPr.outputs.number
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pm-bench-phases-mac
+          path: /tmp/pm-bench-output/pr_comment.md
+          number: ${{ steps.findPr.outputs.number }}
+          recreate: true
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ============================================================
+  # PM-BENCH JOBS (manual perf compare)
+  # workflow_dispatch with target=pm-bench, or PR labeled `benchmark`.
+  # Compares utoo against other PMs (pnpm/yarn/bun/aube) on cold + warm
+  # installs across configurable registries.
+  # ============================================================
+
+  pm-bench-linux:
+    needs: [build-linux]
+    if: >
+      (github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench') ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'benchmark')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download utoo binary
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-linux-x64
+          path: dist
+      - name: Install utoo
+        run: |
+          chmod +x dist/utoo
+          ln -sf utoo dist/ut
+          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+      - name: Install baseline utoo from npm
+        if: github.event.inputs.baseline != 'false'
+        run: |
+          npm install -g utoo
+          BASELINE_PATH=$(which utoo)
+          cp "$BASELINE_PATH" /tmp/utoo-npm
+          chmod +x /tmp/utoo-npm
+          echo "Baseline utoo (npm) version: $(/tmp/utoo-npm --version)"
+          echo "UTOO_NPM_BIN=/tmp/utoo-npm" >> $GITHUB_ENV
+      - name: Build next branch utoo
+        if: github.event.inputs.build_next == 'true'
+        run: |
+          # The PATH already points at dist/utoo (current branch) — build
+          # `next` separately to /tmp so it doesn't shadow.
+          git fetch origin next --depth=1
+          WORKDIR=$(mktemp -d)
+          git --work-tree="$WORKDIR" --git-dir="$(pwd)/.git" checkout origin/next -- .
+          (cd "$WORKDIR" && git submodule update --init --recursive --depth 1 && cargo build --release --bin utoo -p utoo-pm)
+          cp "$WORKDIR/target/release/utoo" /tmp/utoo-next
+          chmod +x /tmp/utoo-next
+          echo "Baseline utoo (next) version: $(/tmp/utoo-next --version)"
+          echo "UTOO_NEXT_BIN=/tmp/utoo-next" >> $GITHUB_ENV
+      - name: Resolve pm_list
+        id: pm
+        run: |
+          PM_LIST="${{ github.event.inputs.pm_list || 'utoo,bun' }}"
+          if [ "$PM_LIST" = "all" ]; then
+            PM_LIST="utoo,pnpm,yarn,bun,aube"
+          fi
+          echo "list=$PM_LIST" >> $GITHUB_OUTPUT
+      - name: Install pnpm
+        if: contains(steps.pm.outputs.list, 'pnpm')
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+      - name: Install yarn
+        if: contains(steps.pm.outputs.list, 'yarn')
+        run: npm install -g yarn
+      - name: Install bun
+        if: contains(steps.pm.outputs.list, 'bun')
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install aube
+        if: contains(steps.pm.outputs.list, 'aube')
+        run: npm install -g @endevco/aube
+      - name: Install hyperfine and GNU time
+        run: sudo apt-get update && sudo apt-get install -y hyperfine time
+      - name: Verify tools
+        run: |
+          hyperfine --version
+          IFS=',' read -ra PMS <<< "${{ steps.pm.outputs.list }}"
+          for pm in "${PMS[@]}"; do
+            echo "$pm: $($pm --version 2>&1 || echo 'not installed')"
+          done
+      - name: Run benchmark
+        run: |
+          chmod +x bench/pm-bench.sh
+          BENCH_COLD_RUNS=${{ github.event.inputs.cold_runs || '3' }} \
+          BENCH_WARM_RUNS=${{ github.event.inputs.warm_runs || '3' }} \
+          bash bench/pm-bench.sh ${{ github.event.inputs.registry || 'both' }} ${{ steps.pm.outputs.list }}
+
+  pm-bench-mac:
+    needs: [build-mac-arm64]
+    if: >
+      (github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench') ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'benchmark')
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download utoo binary
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-mac-arm64
+          path: dist
+      - name: Install utoo
+        run: |
+          chmod +x dist/utoo
+          ln -sf utoo dist/ut
+          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+      - name: Install baseline utoo from npm
+        if: github.event.inputs.baseline != 'false'
+        run: |
+          npm install -g utoo
+          BASELINE_PATH=$(which utoo)
+          cp "$BASELINE_PATH" /tmp/utoo-npm
+          chmod +x /tmp/utoo-npm
+          echo "Baseline utoo (npm) version: $(/tmp/utoo-npm --version)"
+          echo "UTOO_NPM_BIN=/tmp/utoo-npm" >> $GITHUB_ENV
+      - name: Build next branch utoo
+        if: github.event.inputs.build_next == 'true'
+        run: |
+          git fetch origin next --depth=1
+          WORKDIR=$(mktemp -d)
+          git --work-tree="$WORKDIR" --git-dir="$(pwd)/.git" checkout origin/next -- .
+          (cd "$WORKDIR" && git submodule update --init --recursive --depth 1 && cargo build --release --bin utoo -p utoo-pm)
+          cp "$WORKDIR/target/release/utoo" /tmp/utoo-next
+          chmod +x /tmp/utoo-next
+          echo "Baseline utoo (next) version: $(/tmp/utoo-next --version)"
+          echo "UTOO_NEXT_BIN=/tmp/utoo-next" >> $GITHUB_ENV
+      - name: Resolve pm_list
+        id: pm
+        run: |
+          PM_LIST="${{ github.event.inputs.pm_list || 'utoo,bun' }}"
+          if [ "$PM_LIST" = "all" ]; then
+            PM_LIST="utoo,pnpm,yarn,bun,aube"
+          fi
+          echo "list=$PM_LIST" >> $GITHUB_OUTPUT
+      - name: Install pnpm
+        if: contains(steps.pm.outputs.list, 'pnpm')
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+      - name: Install yarn
+        if: contains(steps.pm.outputs.list, 'yarn')
+        run: npm install -g yarn
+      - name: Install bun
+        if: contains(steps.pm.outputs.list, 'bun')
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install aube
+        if: contains(steps.pm.outputs.list, 'aube')
+        run: npm install -g @endevco/aube
+      - name: Install hyperfine
+        run: brew install hyperfine
+      - name: Verify tools
+        run: |
+          hyperfine --version
+          IFS=',' read -ra PMS <<< "${{ steps.pm.outputs.list }}"
+          for pm in "${PMS[@]}"; do
+            echo "$pm: $($pm --version 2>&1 || echo 'not installed')"
+          done
+      - name: Run benchmark
+        run: |
+          chmod +x bench/pm-bench.sh
+          BENCH_COLD_RUNS=${{ github.event.inputs.cold_runs || '3' }} \
+          BENCH_WARM_RUNS=${{ github.event.inputs.warm_runs || '3' }} \
+          bash bench/pm-bench.sh ${{ github.event.inputs.registry || 'both' }} ${{ steps.pm.outputs.list }}
+
+  # ============================================================
+  # PM-BENCH-PCAP (manual perf-debug only)
+  # workflow_dispatch with target=pm-bench-pcap. Captures tcpdump
+  # of the resolve phase per PM (linux only — sudo + raw sockets).
+  # ============================================================
+
+  pm-bench-pcap-linux:
+    needs: [build-linux]
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-pcap'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download utoo binary
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-linux-x64
+          path: dist
+      - name: Install utoo
+        run: |
+          chmod +x dist/utoo
+          echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install pcap tools
+        run: sudo apt-get update && sudo apt-get install -y tcpdump dnsutils hyperfine time
+      - name: Capture pcap
+        env:
+          PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
+          REGISTRY: 'https://registry.npmjs.org'
+        run: |
+          chmod +x bench/pm-bench-pcap.sh
+          bash bench/pm-bench-pcap.sh
+      - name: Upload pcap artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pm-bench-pcap
+          path: /tmp/pm-bench-pcap
+          retention-days: 7
