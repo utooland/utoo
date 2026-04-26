@@ -17,8 +17,24 @@ mkdir -p "$BENCH_DIR" "$RESULTS_DIR"
 # depend on what each PM considers the default (which varies by HOME, OS
 # image, and previously-set user config).
 UTOO_CACHE="${UTOO_CACHE:-/tmp/utoo-bench-cache}"
+UTOO_NPM_CACHE="${UTOO_NPM_CACHE:-/tmp/utoo-npm-bench-cache}"
 BUN_CACHE="${BUN_CACHE:-/tmp/bun-bench-cache}"
 export BUN_INSTALL_CACHE_DIR="$BUN_CACHE"
+
+# Drop `utoo-npm` from the PM list when no published-baseline binary is
+# wired up — UTOO_NPM_BIN is set by CI's "Install utoo@npm" step. Local
+# runs without it just skip the comparison instead of erroring.
+if [ -z "${UTOO_NPM_BIN:-}" ]; then
+  FILTERED=()
+  for pm in "${PACKAGE_MANAGERS[@]}"; do
+    if [ "$pm" = "utoo-npm" ]; then
+      echo "skip utoo-npm: UTOO_NPM_BIN not set" >&2
+      continue
+    fi
+    FILTERED+=("$pm")
+  done
+  PACKAGE_MANAGERS=("${FILTERED[@]}")
+fi
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -105,7 +121,11 @@ du_bytes() {
 capture_footprint() {
   local phase=$1 pm=$2 out=$3
   local cache
-  case "$pm" in utoo) cache=$UTOO_CACHE ;; bun) cache=$BUN_CACHE ;; esac
+  case "$pm" in
+    utoo)     cache=$UTOO_CACHE ;;
+    utoo-npm) cache=$UTOO_NPM_CACHE ;;
+    bun)      cache=$BUN_CACHE ;;
+  esac
   printf '{"cache":%d,"node_modules":%d,"lockfile":%d}\n' \
     "$(du_bytes "$cache")" \
     "$(du_bytes "$PROJECT_DIR/node_modules")" \
@@ -127,7 +147,11 @@ PROJECT_DIR="$BENCH_DIR/$PROJECT"
 write_prepare() {
   local path=$1 phase=$2 pm=$3
   local cache
-  case "$pm" in utoo) cache=$UTOO_CACHE ;; bun) cache=$BUN_CACHE ;; esac
+  case "$pm" in
+    utoo)     cache=$UTOO_CACHE ;;
+    utoo-npm) cache=$UTOO_NPM_CACHE ;;
+    bun)      cache=$BUN_CACHE ;;
+  esac
 
   cat > "$path" <<EOF
 #!/bin/bash
@@ -148,7 +172,7 @@ EOF
       # Phase 0: full cold install — nothing reused. Lockfile + all caches wiped.
       cat >> "$path" <<EOF
 rm -f package-lock.json bun.lock yarn.lock pnpm-lock.yaml
-rm -rf "$UTOO_CACHE" "$BUN_CACHE"
+rm -rf "$UTOO_CACHE" "$UTOO_NPM_CACHE" "$BUN_CACHE"
 echo "[prep] phase 0 $pm: full cold (lockfile + caches + node_modules wiped)"
 EOF
       ;;
@@ -156,7 +180,7 @@ EOF
       # Phase 1: cold resolve — wipe lockfiles AND caches so nothing can be reused.
       cat >> "$path" <<EOF
 rm -f package-lock.json bun.lock yarn.lock pnpm-lock.yaml
-rm -rf "$UTOO_CACHE" "$BUN_CACHE"
+rm -rf "$UTOO_CACHE" "$UTOO_NPM_CACHE" "$BUN_CACHE"
 echo "[prep] phase 1 $pm: cleaned lockfiles + caches + node_modules"
 EOF
       ;;
@@ -169,6 +193,12 @@ EOF
 rm -f bun.lock yarn.lock pnpm-lock.yaml
 rm -rf "$UTOO_CACHE"
 echo "[prep] phase 3 utoo: kept package-lock.json, wiped $UTOO_CACHE"
+EOF
+          ;;
+        utoo-npm) cat >> "$path" <<EOF
+rm -f bun.lock yarn.lock pnpm-lock.yaml
+rm -rf "$UTOO_NPM_CACHE"
+echo "[prep] phase 3 utoo-npm: kept package-lock.json, wiped $UTOO_NPM_CACHE"
 EOF
           ;;
         bun) cat >> "$path" <<EOF
@@ -185,6 +215,11 @@ EOF
         utoo) cat >> "$path" <<EOF
 rm -f bun.lock yarn.lock pnpm-lock.yaml
 echo "[prep] phase 4 utoo: kept package-lock.json + cache"
+EOF
+          ;;
+        utoo-npm) cat >> "$path" <<EOF
+rm -f bun.lock yarn.lock pnpm-lock.yaml
+echo "[prep] phase 4 utoo-npm: kept package-lock.json + cache"
 EOF
           ;;
         bun) cat >> "$path" <<EOF
@@ -211,6 +246,12 @@ seed_for_phase() {
         utoo deps --registry="$REGISTRY" --cache-dir="$UTOO_CACHE" > "$RESULTS_DIR/seed_${phase}_${pm}.log" 2>&1
       fi
       ;;
+    p3_*:utoo-npm|p4_*:utoo-npm)
+      if [ ! -f package-lock.json ]; then
+        echo -e "  ${CYAN}seed: running \`utoo-npm deps\` to generate package-lock.json${NC}"
+        "$UTOO_NPM_BIN" deps --registry="$REGISTRY" --cache-dir="$UTOO_NPM_CACHE" > "$RESULTS_DIR/seed_${phase}_${pm}.log" 2>&1
+      fi
+      ;;
     p3_*:bun|p4_*:bun)
       if [ ! -f bun.lock ]; then
         echo -e "  ${CYAN}seed: running \`bun install --lockfile-only\` to generate bun.lock${NC}"
@@ -222,13 +263,18 @@ seed_for_phase() {
   # Phase 4 also needs a pre-warmed cache.
   if [[ "$phase" == p4_* ]]; then
     local cache
-    case "$pm" in utoo) cache=$UTOO_CACHE ;; bun) cache=$BUN_CACHE ;; esac
+    case "$pm" in
+      utoo)     cache=$UTOO_CACHE ;;
+      utoo-npm) cache=$UTOO_NPM_CACHE ;;
+      bun)      cache=$BUN_CACHE ;;
+    esac
     if [ ! -d "$cache" ] || [ -z "$(ls -A "$cache" 2>/dev/null)" ]; then
       echo -e "  ${CYAN}seed: warming $pm cache via full install${NC}"
       rm -rf node_modules
       case "$pm" in
-        utoo) utoo install --ignore-scripts --registry="$REGISTRY" --cache-dir="$UTOO_CACHE" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
-        bun)  bun  install --ignore-scripts --registry="$REGISTRY" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
+        utoo)     utoo install --ignore-scripts --registry="$REGISTRY" --cache-dir="$UTOO_CACHE" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
+        utoo-npm) "$UTOO_NPM_BIN" install --ignore-scripts --registry="$REGISTRY" --cache-dir="$UTOO_NPM_CACHE" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
+        bun)      bun  install --ignore-scripts --registry="$REGISTRY" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
       esac
       rm -rf node_modules
     fi
@@ -237,15 +283,17 @@ seed_for_phase() {
 
 install_cmd() {
   case "$1" in
-    utoo) echo "utoo install --ignore-scripts --registry=$REGISTRY --cache-dir=$UTOO_CACHE" ;;
-    bun)  echo "bun install --ignore-scripts --registry=$REGISTRY" ;;
+    utoo)     echo "utoo install --ignore-scripts --registry=$REGISTRY --cache-dir=$UTOO_CACHE" ;;
+    utoo-npm) echo "$UTOO_NPM_BIN install --ignore-scripts --registry=$REGISTRY --cache-dir=$UTOO_NPM_CACHE" ;;
+    bun)      echo "bun install --ignore-scripts --registry=$REGISTRY" ;;
   esac
 }
 
 resolve_cmd() {
   case "$1" in
-    utoo) echo "utoo deps --registry=$REGISTRY --cache-dir=$UTOO_CACHE" ;;
-    bun)  echo "bun install --lockfile-only --registry=$REGISTRY" ;;
+    utoo)     echo "utoo deps --registry=$REGISTRY --cache-dir=$UTOO_CACHE" ;;
+    utoo-npm) echo "$UTOO_NPM_BIN deps --registry=$REGISTRY --cache-dir=$UTOO_NPM_CACHE" ;;
+    bun)      echo "bun install --lockfile-only --registry=$REGISTRY" ;;
   esac
 }
 
@@ -392,7 +440,7 @@ RESULTS_DIR="$RESULTS_DIR" node -e "
     }
 
     // Table B: context switches + network + final on-disk footprint
-    console.log(pad('PM', 6) + ' ' + padR('vCtx', 8) + ' ' + padR('iCtx', 8) + '   ' + padR('net RX', 8) + ' ' + padR('net TX', 8) + '   ' + padR('cache', 8) + ' ' + padR('node_mod', 9) + ' ' + padR('lock', 7));
+    console.log(pad('PM', 6) + ' ' + padR('vCtx', 8) + ' ' + padR('iCtx', 8) + '   ' + padR('netRX', 8) + ' ' + padR('netTX', 8) + '   ' + padR('cache', 8) + ' ' + padR('node_mod', 9) + ' ' + padR('lock', 7));
     for (const pm of pms) {
       const m = mp[pm] || {};
       console.log(

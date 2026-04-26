@@ -501,17 +501,29 @@ jobs:
           bun-version: latest
       - name: Install bench tools
         run: sudo apt-get update && sudo apt-get install -y hyperfine time
+      - name: Install utoo@npm baseline
+        # Install latest published utoo to a temp dir (NOT the global prefix)
+        # so it doesn't shadow $GITHUB_WORKSPACE/dist/utoo on PATH. The bench
+        # script invokes it via $UTOO_NPM_BIN absolute path.
+        run: |
+          mkdir -p /tmp/utoo-npm-pkg && cd /tmp/utoo-npm-pkg
+          npm init -y >/dev/null
+          npm install utoo --no-audit --no-fund --no-progress
+          UTOO_NPM_BIN="$PWD/node_modules/.bin/utoo"
+          "$UTOO_NPM_BIN" --version
+          echo "UTOO_NPM_BIN=$UTOO_NPM_BIN" >> $GITHUB_ENV
       - name: Verify tools
         run: |
           hyperfine --version
           utoo --version
+          "$UTOO_NPM_BIN" --version
           bun --version
       - name: Define cache wipe function
         run: |
           cat > /tmp/wipe-bench-state.sh <<'WIPE'
           #!/usr/bin/env bash
           rm -rf /tmp/pm-bench /tmp/pm-bench-results /tmp/pm-bench-output \
-                 /tmp/utoo-bench-cache /tmp/bun-bench-cache \
+                 /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache /tmp/bun-bench-cache \
                  ~/.bun/install/cache ~/.cache/nm 2>/dev/null || true
           mkdir -p /tmp/pm-bench-output
           WIPE
@@ -523,7 +535,7 @@ jobs:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmjs.org'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
-          PM_LIST: 'utoo,bun'
+          PM_LIST: 'utoo,utoo-npm,bun'
         run: |
           chmod +x e2e/pm-bench-phases.sh
           bash e2e/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmjs.log
@@ -539,7 +551,7 @@ jobs:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmmirror.com'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
-          PM_LIST: 'utoo,bun'
+          PM_LIST: 'utoo,utoo-npm,bun'
         run: |
           mkdir -p /tmp/pm-bench-output
           bash e2e/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmmirror.log
@@ -620,17 +632,27 @@ jobs:
           mkdir -p "$HOME/bin"
           ln -sf "$(brew --prefix gnu-time)/bin/gtime" "$HOME/bin/time"
           echo "$HOME/bin" >> $GITHUB_PATH
+      - name: Install utoo@npm baseline
+        # See linux job — same rationale.
+        run: |
+          mkdir -p /tmp/utoo-npm-pkg && cd /tmp/utoo-npm-pkg
+          npm init -y >/dev/null
+          npm install utoo --no-audit --no-fund --no-progress
+          UTOO_NPM_BIN="$PWD/node_modules/.bin/utoo"
+          "$UTOO_NPM_BIN" --version
+          echo "UTOO_NPM_BIN=$UTOO_NPM_BIN" >> $GITHUB_ENV
       - name: Verify tools
         run: |
           hyperfine --version
           utoo --version
+          "$UTOO_NPM_BIN" --version
           bun --version
       - name: Define cache wipe function
         run: |
           cat > /tmp/wipe-bench-state.sh <<'WIPE'
           #!/usr/bin/env bash
           rm -rf /tmp/pm-bench /tmp/pm-bench-results /tmp/pm-bench-output \
-                 /tmp/utoo-bench-cache /tmp/bun-bench-cache \
+                 /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache /tmp/bun-bench-cache \
                  ~/.bun/install/cache ~/.cache/nm 2>/dev/null || true
           mkdir -p /tmp/pm-bench-output
           WIPE
@@ -642,7 +664,7 @@ jobs:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmjs.org'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
-          PM_LIST: 'utoo,bun'
+          PM_LIST: 'utoo,utoo-npm,bun'
         run: |
           chmod +x e2e/pm-bench-phases.sh
           bash e2e/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmjs.log
@@ -658,7 +680,7 @@ jobs:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmmirror.com'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
-          PM_LIST: 'utoo,bun'
+          PM_LIST: 'utoo,utoo-npm,bun'
         run: |
           mkdir -p /tmp/pm-bench-output
           bash e2e/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmmirror.log
