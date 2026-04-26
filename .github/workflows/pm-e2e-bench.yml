@@ -95,7 +95,6 @@ jobs:
     if: >
       (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)')) ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'bench')) ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -148,7 +147,6 @@ jobs:
     if: >
       (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)')) ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'bench')) ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
       (github.event_name == 'workflow_dispatch' && inputs.target != 'pm-bench-pcap')
     runs-on: macos-latest
@@ -475,7 +473,7 @@ jobs:
   bench-phases-linux:
     needs: [build-linux]
     if: >
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'bench')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
       (github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-phases')
     runs-on: ubuntu-latest
     permissions:
@@ -601,7 +599,7 @@ jobs:
   bench-phases-mac:
     needs: [build-mac-arm64]
     if: >
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'bench')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
       (github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-phases')
     runs-on: macos-latest
     permissions:
@@ -736,9 +734,7 @@ jobs:
 
   pm-bench-linux:
     needs: [build-linux]
-    if: >
-      (github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench') ||
-      (github.event_name == 'pull_request' && github.event.label.name == 'benchmark')
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -820,9 +816,7 @@ jobs:
 
   pm-bench-mac:
     needs: [build-mac-arm64]
-    if: >
-      (github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench') ||
-      (github.event_name == 'pull_request' && github.event.label.name == 'benchmark')
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
