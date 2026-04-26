@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Render the pm-bench-phases sticky PR comment from per-registry log files
-# in /tmp/pm-bench-output/. Called by pm-build.yml's bench-phases-* jobs.
+# in /tmp/pm-bench-output/. Called by pm-e2e-bench.yml's bench-phases-* jobs.
 #
 # Output: /tmp/pm-bench-output/pr_comment.md
 #

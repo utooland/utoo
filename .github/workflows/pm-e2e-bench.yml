@@ -1,4 +1,4 @@
-name: utoopm-build
+name: utoopm-e2e-bench
 
 # Single workflow that builds utoo once per target, then fans out to
 # every consumer (e2e, bench-phases, pm-bench, pm-bench-pcap). Replaces
