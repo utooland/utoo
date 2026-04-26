@@ -540,8 +540,8 @@ jobs:
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
           PM_LIST: 'utoo,utoo-npm,bun'
         run: |
-          chmod +x e2e/pm-bench-phases.sh
-          bash e2e/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmjs.log
+          chmod +x bench/pm-bench-phases.sh
+          bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmjs.log
       - name: Stash npmjs logs and wipe state before npmmirror
         run: |
           mkdir -p /tmp/bench-logs-stash
@@ -557,7 +557,7 @@ jobs:
           PM_LIST: 'utoo,utoo-npm,bun'
         run: |
           mkdir -p /tmp/pm-bench-output
-          bash e2e/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmmirror.log
+          bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmmirror.log
       - name: Upload bench logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -627,7 +627,7 @@ jobs:
         with:
           bun-version: latest
       - name: Install bench tools
-        # macOS /usr/bin/time isn't GNU; e2e/pm-bench-phases.sh uses
+        # macOS /usr/bin/time isn't GNU; bench/pm-bench-phases.sh uses
         # `time -v`. Install gnu-time and shadow `time` with a $HOME/bin
         # symlink earlier on PATH.
         run: |
@@ -670,8 +670,8 @@ jobs:
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
           PM_LIST: 'utoo,utoo-npm,bun'
         run: |
-          chmod +x e2e/pm-bench-phases.sh
-          bash e2e/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmjs.log
+          chmod +x bench/pm-bench-phases.sh
+          bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmjs.log
       - name: Stash npmjs logs and wipe state before npmmirror
         run: |
           mkdir -p /tmp/bench-logs-stash
@@ -687,7 +687,7 @@ jobs:
           PM_LIST: 'utoo,utoo-npm,bun'
         run: |
           mkdir -p /tmp/pm-bench-output
-          bash e2e/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmmirror.log
+          bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmmirror.log
       - name: Upload bench logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -813,10 +813,10 @@ jobs:
           done
       - name: Run benchmark
         run: |
-          chmod +x e2e/pm-bench.sh
+          chmod +x bench/pm-bench.sh
           BENCH_COLD_RUNS=${{ github.event.inputs.cold_runs || '3' }} \
           BENCH_WARM_RUNS=${{ github.event.inputs.warm_runs || '3' }} \
-          bash e2e/pm-bench.sh ${{ github.event.inputs.registry || 'both' }} ${{ steps.pm.outputs.list }}
+          bash bench/pm-bench.sh ${{ github.event.inputs.registry || 'both' }} ${{ steps.pm.outputs.list }}
 
   pm-bench-mac:
     needs: [build-mac-arm64]
@@ -895,10 +895,10 @@ jobs:
           done
       - name: Run benchmark
         run: |
-          chmod +x e2e/pm-bench.sh
+          chmod +x bench/pm-bench.sh
           BENCH_COLD_RUNS=${{ github.event.inputs.cold_runs || '3' }} \
           BENCH_WARM_RUNS=${{ github.event.inputs.warm_runs || '3' }} \
-          bash e2e/pm-bench.sh ${{ github.event.inputs.registry || 'both' }} ${{ steps.pm.outputs.list }}
+          bash bench/pm-bench.sh ${{ github.event.inputs.registry || 'both' }} ${{ steps.pm.outputs.list }}
 
   # ============================================================
   # PM-BENCH-PCAP (manual perf-debug only)
@@ -936,8 +936,8 @@ jobs:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmjs.org'
         run: |
-          chmod +x e2e/pm-bench-pcap.sh
-          bash e2e/pm-bench-pcap.sh
+          chmod +x bench/pm-bench-pcap.sh
+          bash bench/pm-bench-pcap.sh
       - name: Upload pcap artifact
         if: always()
         uses: actions/upload-artifact@v4
