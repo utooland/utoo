@@ -641,7 +641,8 @@ jobs:
           mkdir -p /tmp/utoo-npm-pkg && cd /tmp/utoo-npm-pkg
           npm init -y >/dev/null
           npm install utoo --no-audit --no-fund --no-progress
-          UTOO_NPM_BIN="$PWD/node_modules/.bin/utoo"
+          UTOO_NPM_BIN="$PWD/node_modules/utoo/bin/utoo"
+          chmod +x "$UTOO_NPM_BIN"
           "$UTOO_NPM_BIN" --version
           echo "UTOO_NPM_BIN=$UTOO_NPM_BIN" >> $GITHUB_ENV
       - name: Verify tools
