@@ -504,12 +504,15 @@ jobs:
       - name: Install utoo@npm baseline
         # Install latest published utoo to a temp dir (NOT the global prefix)
         # so it doesn't shadow $GITHUB_WORKSPACE/dist/utoo on PATH. The bench
-        # script invokes it via $UTOO_NPM_BIN absolute path.
+        # script invokes it via $UTOO_NPM_BIN absolute path. Points directly
+        # at node_modules/utoo/bin/utoo (the package's `bin` field) — npm's
+        # node_modules/.bin/ symlink isn't always created for local installs.
         run: |
           mkdir -p /tmp/utoo-npm-pkg && cd /tmp/utoo-npm-pkg
           npm init -y >/dev/null
           npm install utoo --no-audit --no-fund --no-progress
-          UTOO_NPM_BIN="$PWD/node_modules/.bin/utoo"
+          UTOO_NPM_BIN="$PWD/node_modules/utoo/bin/utoo"
+          chmod +x "$UTOO_NPM_BIN"
           "$UTOO_NPM_BIN" --version
           echo "UTOO_NPM_BIN=$UTOO_NPM_BIN" >> $GITHUB_ENV
       - name: Verify tools
