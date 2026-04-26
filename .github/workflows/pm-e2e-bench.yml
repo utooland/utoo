@@ -93,9 +93,10 @@ jobs:
     # Linux serves: e2e-linux, bench-phases-linux, pm-bench-linux, pm-bench-pcap-linux.
     # Gate is the union of all linux consumers' gates.
     if: >
-      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm')) ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm')) ||
-      (github.event_name == 'pull_request' && github.event.label.name == 'benchmark') ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'bench')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     container:
@@ -145,9 +146,10 @@ jobs:
   build-mac-arm64:
     # Mac arm64 serves: e2e-mac-arm64, bench-phases-mac, pm-bench-mac.
     if: >
-      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm')) ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm')) ||
-      (github.event_name == 'pull_request' && github.event.label.name == 'benchmark') ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'bench')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
       (github.event_name == 'workflow_dispatch' && inputs.target != 'pm-bench-pcap')
     runs-on: macos-latest
     steps:
@@ -473,8 +475,7 @@ jobs:
   bench-phases-linux:
     needs: [build-linux]
     if: >
-      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm')) ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'bench')) ||
       (github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-phases')
     runs-on: ubuntu-latest
     permissions:
@@ -600,8 +601,7 @@ jobs:
   bench-phases-mac:
     needs: [build-mac-arm64]
     if: >
-      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm')) ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'bench')) ||
       (github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-phases')
     runs-on: macos-latest
     permissions:
