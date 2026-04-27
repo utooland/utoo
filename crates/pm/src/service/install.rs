@@ -25,7 +25,7 @@ use crate::util::logger::{
 };
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 
-use super::binary::update_package_binary;
+use super::binary::{should_skip_binary_mirror, update_package_binary};
 use super::clean::clean_deps;
 
 /// Check if a package should be omitted based on omit config
@@ -74,6 +74,8 @@ pub async fn install_packages(
     log_progress("validating node_modules");
     clean_deps(groups, cwd).await?;
     log_progress("linking packages");
+
+    let update_binaries = !should_skip_binary_mirror();
 
     // Always process level-by-level to ensure parent directories exist before
     // children. Within each level, tasks run concurrently. The pipeline's
@@ -166,7 +168,11 @@ pub async fn install_packages(
                         }
                         PROGRESS_BAR.inc(1);
                         log_progress(&format!("{name} resolved"));
-                        update_package_binary(&target_path, &name).await
+                        if update_binaries {
+                            update_package_binary(&target_path, &name).await
+                        } else {
+                            Ok(())
+                        }
                     });
                     clone_tasks.push(task);
                 } else {

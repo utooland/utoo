@@ -143,13 +143,6 @@ async fn remove_unused_packages(
 
 /// Clean unused dependencies across all workspace node_modules directories.
 pub async fn clean_deps(groups: &HashMap<usize, Vec<(String, Package)>>, cwd: &Path) -> Result<()> {
-    let valid_packages: HashSet<String> = groups
-        .values()
-        .flat_map(|pkgs| pkgs.iter().map(|(path, _)| path.clone()))
-        .collect();
-
-    tracing::debug!("Valid packages: {valid_packages:?}");
-
     let mut nm_dirs = vec![cwd.join("node_modules")];
     for (_, ws_path, _) in workspace::find_workspaces(cwd).await? {
         let ws_nm = ws_path.join("node_modules");
@@ -158,6 +151,18 @@ pub async fn clean_deps(groups: &HashMap<usize, Vec<(String, Package)>>, cwd: &P
             nm_dirs.push(ws_nm);
         }
     }
+
+    nm_dirs.retain(|nm_dir| nm_dir.exists());
+    if nm_dirs.is_empty() {
+        return Ok(());
+    }
+
+    let valid_packages: HashSet<String> = groups
+        .values()
+        .flat_map(|pkgs| pkgs.iter().map(|(path, _)| path.clone()))
+        .collect();
+
+    tracing::debug!("Valid packages: {valid_packages:?}");
 
     for nm_dir in &nm_dirs {
         remove_stale_entries(nm_dir).await?;
