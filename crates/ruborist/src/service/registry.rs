@@ -68,6 +68,13 @@ pub struct UnifiedRegistry {
     registry_url: String,
     cache: Arc<PackageCache>,
     supports_semver: bool,
+    /// Dedupes concurrent `resolve_full_manifest` fetches for the same
+    /// package name. First caller hits the network and stores the result;
+    /// other callers wait on `Notify` and read the shared `Arc`. Built on
+    /// `DashMap` + `tokio::sync::Notify` so the fast path (cache hit) is
+    /// lock-free.
+    #[cfg(not(target_arch = "wasm32"))]
+    inflight: Arc<crate::util::oncemap::OnceMap<String, FullManifestResult>>,
 }
 
 /// Builder for `UnifiedRegistry`.
@@ -137,6 +144,8 @@ impl UnifiedRegistryBuilder {
             registry_url,
             cache,
             supports_semver,
+            #[cfg(not(target_arch = "wasm32"))]
+            inflight: Arc::new(crate::util::oncemap::OnceMap::new()),
         }
     }
 }
@@ -153,6 +162,8 @@ impl Clone for UnifiedRegistry {
             registry_url: self.registry_url.clone(),
             cache: Arc::clone(&self.cache),
             supports_semver: self.supports_semver,
+            #[cfg(not(target_arch = "wasm32"))]
+            inflight: Arc::clone(&self.inflight),
         }
     }
 }
@@ -161,8 +172,13 @@ impl Clone for UnifiedRegistry {
 ///
 /// Separates the 200 (full data) and 304 (use cache) cases at the type level,
 /// so callers can pattern-match instead of string-matching error messages.
-/// Transient return value, immediately destructured — Box not needed.
+///
+/// `Clone` is required so multiple `resolve_full_manifest` callers that
+/// coalesce through `OnceMap` can each take an owned copy of the shared
+/// `Arc<FullManifestResult>`. `FullManifest` clones cheaply via
+/// `Arc<[u8]>` for its raw bytes, and the other fields are small.
 #[allow(clippy::large_enum_variant)]
+#[derive(Clone)]
 enum FullManifestResult {
     /// Fresh manifest fetched from the network (HTTP 200).
     Full(FullManifest),
@@ -202,13 +218,50 @@ impl UnifiedRegistry {
     /// 4. On 304: use disk cache data
     /// 5. On 200: update memory + disk cache
     async fn resolve_full_manifest(&self, name: &str) -> Result<FullManifestResult, RegistryError> {
-        // 1. Check memory cache first
+        // 1. Fast path: memory cache hit (lock-free read).
         if let Some(manifest) = self.cache.get_full_manifest(name) {
             tracing::debug!("Memory cache hit for full manifest: {}", name);
             return Ok(FullManifestResult::Full(manifest));
         }
 
-        // 2. Load etag from disk cache (if available)
+        // 2. Coalesce concurrent callers for the same name via OnceMap.
+        // First caller runs the fetch closure; others await the shared
+        // result on the OnceMap's `Notify` and clone the cached value.
+        // This avoids 50 packages all triggering 50 simultaneous fetches
+        // of `react` when only 1 is needed.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let shared = self
+                .inflight
+                .get_or_init(name.to_string(), || async {
+                    self.fetch_full_manifest_network(name).await.ok()
+                })
+                .await;
+
+            match shared {
+                Some(arc) => Ok((*arc).clone()),
+                None => {
+                    // OnceMap clears the key on None, so the next caller
+                    // retries the fetch. Retry once here with a fresh error
+                    // so we surface a useful message to this caller.
+                    self.fetch_full_manifest_network(name).await
+                }
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.fetch_full_manifest_network(name).await
+        }
+    }
+
+    /// Perform the actual network fetch + cache update. Separated from
+    /// `resolve_full_manifest` so the OnceMap closure can invoke it
+    /// without re-entering the dedup layer.
+    async fn fetch_full_manifest_network(
+        &self,
+        name: &str,
+    ) -> Result<FullManifestResult, RegistryError> {
+        // 1. Load etag from disk cache (if available)
         let disk_versions = self.cache.get_versions_from_disk(name).await;
         let etag = disk_versions.as_ref().and_then(|v| v.etag.clone());
 
