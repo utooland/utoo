@@ -1,20 +1,39 @@
-//! Parallel manifest preloading for dependency resolution.
+//! Parallel manifest preloading via multi-thread worker pool.
 //!
-//! Uses FuturesUnordered for true streaming concurrency: when a package resolves,
-//! its transitive dependencies are immediately added to the queue.
+//! N long-lived `tokio::spawn` workers pull work items from a shared
+//! lock-free `SegQueue`. Each spawned task is independent on tokio's
+//! multi-thread runtime, so when one worker is parsing manifest JSON
+//! (CPU-bound, simd_json), other workers can still drive their network
+//! IO. Replaces the prior `FuturesUnordered` design where the main task
+//! owned all preload futures and polled them cooperatively — every
+//! per-future await continuation (cache check / OnceMap / RetryIf /
+//! reqwest send / bytes / parse / transitive dispatch) ran on the same
+//! single task, plus all parses serialised in that task's polling.
+//!
+//! Wasm32 fallback uses `wasm_bindgen_futures::spawn_local` since
+//! `JsFuture` is `!Send`. Workers still run independently on the JS
+//! event loop; the queue + Notify + mpsc termination story is identical.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use futures::stream::{FuturesUnordered, StreamExt};
+use crossbeam_queue::SegQueue;
+use dashmap::DashSet;
+use tokio::sync::{Notify, mpsc};
 
+use crate::maybe_send::{MaybeSend, MaybeSync};
 use crate::model::manifest::CoreVersionManifest;
 use crate::model::node::PeerDeps;
+use crate::resolver::registry::ResolveError;
 use crate::resolver::registry::resolve_package;
 use crate::traits::progress::{BuildEvent, EventReceiver};
-use crate::traits::registry::RegistryClient;
+use crate::traits::registry::{RegistryClient, ResolvedPackage};
 
-/// Default concurrency limit for manifest fetching
+/// Default concurrency limit for manifest fetching.
+///
+/// Number of long-lived `tokio::spawn` workers. Each processes one
+/// `resolve_package` at a time on tokio's multi-thread runtime.
 pub const DEFAULT_CONCURRENCY: usize = 64;
 
 /// A dependency spec: (name, version_spec)
@@ -71,79 +90,179 @@ fn extract_transitive_deps(manifest: &CoreVersionManifest, config: &PreloadConfi
     deps
 }
 
-/// Preload all package manifests in parallel with streaming concurrency.
+/// Result message sent from worker to main task: name, resolve result,
+/// per-request elapsed ms, count of new transitives queued by this worker.
+type Completion<E> = (String, Result<ResolvedPackage, ResolveError<E>>, u64, usize);
+
+/// Preload all package manifests in parallel via a multi-thread worker pool.
+///
+/// `registry` is moved in and shared across workers via `Arc`. Each
+/// worker is a long-lived spawned task that pulls work items from a
+/// shared lock-free `SegQueue` until both the queue and the in-flight
+/// counter reach zero, signalling end-of-phase. Each spawned task is
+/// independent on tokio's multi-thread runtime — IO and CPU work
+/// (simd_json parse) parallelise across cores.
+///
+/// `receiver` and `on_manifest` run on the main task only — they do
+/// not need to be `Send`/`Sync`.
 pub async fn preload_manifests<R, E, F>(
     initial_deps: Vec<Dep>,
-    registry: &R,
+    registry: Arc<R>,
     config: PreloadConfig,
     receiver: &E,
     mut on_manifest: F,
 ) -> PreloadStats
 where
-    R: RegistryClient,
+    R: RegistryClient + MaybeSend + MaybeSync + 'static,
+    R::Error: MaybeSend,
     E: EventReceiver,
     F: FnMut(&str, Arc<CoreVersionManifest>),
 {
     let mut stats = PreloadStats::default();
-    let mut processed: HashSet<String> = HashSet::new();
-    let mut pending: VecDeque<Dep> = initial_deps.into();
-    let concurrency = config.concurrency;
+
+    // Shared work queue and dedup set (lock-free, multi-thread safe).
+    let pending: Arc<SegQueue<Dep>> = Arc::new(SegQueue::new());
+    let processed: Arc<DashSet<String>> = Arc::new(DashSet::new());
+
+    // Counters for global termination — when `dispatched == completed`
+    // and the queue is empty, the phase is done.
+    let dispatched: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
+    let completed: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
+    let shutdown: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+
+    // Wake-up signal for workers parked on an empty queue.
+    let notify: Arc<Notify> = Arc::new(Notify::new());
+
+    // Result channel — workers send completions, main task drains.
+    let (result_tx, mut result_rx) = mpsc::unbounded_channel::<Completion<R::Error>>();
+
+    // Seed the queue with initial deps (deduped via DashSet).
+    for dep in initial_deps {
+        let key = format!("{}@{}", dep.0, dep.1);
+        if processed.insert(key) {
+            pending.push(dep);
+            dispatched.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    let initial_count = dispatched.load(Ordering::Relaxed);
+    let concurrency = config.concurrency.max(1);
 
     tracing::debug!(
-        "Preload: {} initial deps, concurrency={}",
-        pending.len(),
+        "Preload: {} initial deps, concurrency={}, mode=mt-worker-pool",
+        initial_count,
         concurrency
     );
 
-    let mut futures = FuturesUnordered::new();
-    let mut in_flight = 0usize;
-    let mut started = false;
+    // Short-circuit if nothing was seeded.
+    if initial_count == 0 {
+        receiver.on_event(BuildEvent::PreloadStart { count: 0 });
+        receiver.on_event(BuildEvent::PreloadComplete {
+            success: 0,
+            failed: 0,
+        });
+        return stats;
+    }
 
-    loop {
-        // Fill up to concurrency limit
-        while in_flight < concurrency {
-            let item = loop {
-                let Some((name, spec)) = pending.pop_front() else {
-                    break None;
-                };
-                let key = format!("{}@{}", name, spec);
-                if !processed.contains(&key) {
-                    processed.insert(key);
-                    break Some((name, spec));
+    for _ in 0..concurrency {
+        let pending = Arc::clone(&pending);
+        let processed = Arc::clone(&processed);
+        let dispatched = Arc::clone(&dispatched);
+        let completed = Arc::clone(&completed);
+        let shutdown = Arc::clone(&shutdown);
+        let notify = Arc::clone(&notify);
+        let result_tx = result_tx.clone();
+        let config_for_worker = config.clone();
+        let registry = Arc::clone(&registry);
+
+        let worker = async move {
+            loop {
+                // Try fetching work first — fast path when queue is hot.
+                if let Some((name, spec)) = pending.pop() {
+                    let start = tokio::time::Instant::now();
+                    let result = resolve_package(&*registry, &name, &spec).await;
+                    let elapsed_ms = start.elapsed().as_millis() as u64;
+
+                    let new_added = if let Ok(resolved) = &result {
+                        let mut count = 0usize;
+                        for tdep in extract_transitive_deps(&resolved.manifest, &config_for_worker)
+                        {
+                            let key = format!("{}@{}", tdep.0, tdep.1);
+                            if processed.insert(key) {
+                                pending.push(tdep);
+                                count += 1;
+                            }
+                        }
+                        if count > 0 {
+                            dispatched.fetch_add(count, Ordering::Release);
+                            // Wake parked workers so they pick up the new
+                            // work before checking the termination condition.
+                            notify.notify_waiters();
+                        }
+                        count
+                    } else {
+                        0
+                    };
+
+                    if result_tx
+                        .send((name, result, elapsed_ms, new_added))
+                        .is_err()
+                    {
+                        // Main task dropped the receiver — done.
+                        break;
+                    }
+                    let done = completed.fetch_add(1, Ordering::AcqRel) + 1;
+
+                    // After completion, check global done condition. The
+                    // `Acquire` on dispatched pairs with the `Release` in
+                    // the producer add above, so we won't miss late
+                    // transitives queued by a sibling worker.
+                    if done == dispatched.load(Ordering::Acquire) && pending.is_empty() {
+                        shutdown.store(true, Ordering::Release);
+                        notify.notify_waiters();
+                        break;
+                    }
+                    continue;
                 }
-            };
 
-            let Some((name, spec)) = item else {
-                break;
-            };
-
-            if !started {
-                receiver.on_event(BuildEvent::PreloadStart { count: 1 });
-                started = true;
-            } else {
-                receiver.on_event(BuildEvent::PreloadQueued { count: 1 });
+                // Queue empty — register interest before re-checking, then
+                // park. The Notify+enable() pattern guarantees we won't
+                // miss a `notify_waiters()` racing with our park.
+                if shutdown.load(Ordering::Acquire) {
+                    break;
+                }
+                let notified = notify.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                if !pending.is_empty() {
+                    continue;
+                }
+                if shutdown.load(Ordering::Acquire) {
+                    break;
+                }
+                if completed.load(Ordering::Acquire) == dispatched.load(Ordering::Acquire) {
+                    shutdown.store(true, Ordering::Release);
+                    notify.notify_waiters();
+                    break;
+                }
+                notified.await;
             }
-
-            receiver.on_event(BuildEvent::PreloadFetching { name: &name });
-
-            futures.push(async move {
-                let start = tokio::time::Instant::now();
-                let result = resolve_package(registry, &name, &spec).await;
-                let elapsed_ms = start.elapsed().as_millis() as u64;
-                (name, result, elapsed_ms)
-            });
-            in_flight += 1;
-        }
-
-        if in_flight == 0 {
-            break;
-        }
-
-        let Some((name, result, elapsed_ms)) = futures.next().await else {
-            break;
         };
-        in_flight -= 1;
+        #[cfg(not(target_arch = "wasm32"))]
+        tokio::spawn(worker);
+        #[cfg(target_arch = "wasm32")]
+        wasm_bindgen_futures::spawn_local(worker);
+    }
+    // Drop the original sender so when all worker clones drop on exit, the
+    // result channel closes and the main loop terminates.
+    drop(result_tx);
 
+    receiver.on_event(BuildEvent::PreloadStart {
+        count: initial_count,
+    });
+
+    // Main task: drain completions, run user callbacks. Receiver/callback
+    // run on this task only — they don't need to be Send/Sync.
+    while let Some((name, result, elapsed_ms, new_added)) = result_rx.recv().await {
         if stats.success_count == 0 && stats.failed_count == 0 {
             stats.min_request_ms = elapsed_ms;
             stats.max_request_ms = elapsed_ms;
@@ -152,6 +271,10 @@ where
             stats.max_request_ms = stats.max_request_ms.max(elapsed_ms);
         }
         stats.total_request_ms += elapsed_ms;
+
+        if new_added > 0 {
+            receiver.on_event(BuildEvent::PreloadQueued { count: new_added });
+        }
 
         match result {
             Ok(resolved) => {
@@ -163,11 +286,8 @@ where
                     version: &resolved.version,
                     current: stats.success_count,
                 });
-
-                // Send PackageResolved event for pipeline downloading
                 receiver.on_event(BuildEvent::PackageResolved((&*resolved.manifest).into()));
 
-                pending.extend(extract_transitive_deps(&resolved.manifest, &config));
                 on_manifest(&name, resolved.manifest);
             }
             Err(e) => {
@@ -177,7 +297,14 @@ where
         }
     }
 
-    stats.total_processed = processed.len();
+    // Snapshot the dedup set's size for the historical observable.
+    stats.total_processed = {
+        let mut set: HashSet<String> = HashSet::with_capacity(processed.len());
+        for entry in processed.iter() {
+            set.insert(entry.key().clone());
+        }
+        set.len()
+    };
 
     receiver.on_event(BuildEvent::PreloadComplete {
         success: stats.success_count,
@@ -208,9 +335,8 @@ mod tests {
     use crate::model::manifest::CoreVersionManifest;
     use crate::traits::progress::NoopReceiver;
     use crate::traits::registry::mock::MockRegistryClient;
-    use std::cell::RefCell;
     use std::collections::HashMap;
-    use std::rc::Rc;
+    use std::sync::Mutex;
 
     fn manifest(name: &str, version: &str) -> CoreVersionManifest {
         CoreVersionManifest {
@@ -237,30 +363,30 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_preload_single() {
         let mut registry = MockRegistryClient::new();
         registry.add_package("lodash", "4.17.21", manifest("lodash", "4.17.21"));
 
-        let cache: Rc<RefCell<HashMap<String, Arc<CoreVersionManifest>>>> = Default::default();
-        let cache_clone = Rc::clone(&cache);
+        let cache: Arc<Mutex<HashMap<String, Arc<CoreVersionManifest>>>> = Default::default();
+        let cache_clone = Arc::clone(&cache);
 
         let stats = preload_manifests(
             vec![("lodash".into(), "^4.17.0".into())],
-            &registry,
+            Arc::new(registry),
             PreloadConfig::default(),
             &NoopReceiver,
-            |name, m| {
-                cache_clone.borrow_mut().insert(name.into(), m);
+            move |name, m| {
+                cache_clone.lock().unwrap().insert(name.into(), m);
             },
         )
         .await;
 
         assert_eq!(stats.success_count, 1);
-        assert!(cache.borrow().contains_key("lodash"));
+        assert!(cache.lock().unwrap().contains_key("lodash"));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_preload_transitive() {
         let mut registry = MockRegistryClient::new();
         registry.add_package(
@@ -270,44 +396,44 @@ mod tests {
         );
         registry.add_package("b", "1.0.0", manifest("b", "1.0.0"));
 
-        let cache: Rc<RefCell<HashMap<String, Arc<CoreVersionManifest>>>> = Default::default();
-        let cache_clone = Rc::clone(&cache);
+        let cache: Arc<Mutex<HashMap<String, Arc<CoreVersionManifest>>>> = Default::default();
+        let cache_clone = Arc::clone(&cache);
 
         let stats = preload_manifests(
             vec![("a".into(), "^1.0.0".into())],
-            &registry,
+            Arc::new(registry),
             PreloadConfig::default(),
             &NoopReceiver,
-            |name, m| {
-                cache_clone.borrow_mut().insert(name.into(), m);
+            move |name, m| {
+                cache_clone.lock().unwrap().insert(name.into(), m);
             },
         )
         .await;
 
         assert_eq!(stats.success_count, 2);
-        assert!(cache.borrow().contains_key("a"));
-        assert!(cache.borrow().contains_key("b"));
+        assert!(cache.lock().unwrap().contains_key("a"));
+        assert!(cache.lock().unwrap().contains_key("b"));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_preload_missing() {
         let registry = MockRegistryClient::new();
-        let cache: Rc<RefCell<HashMap<String, Arc<CoreVersionManifest>>>> = Default::default();
-        let cache_clone = Rc::clone(&cache);
+        let cache: Arc<Mutex<HashMap<String, Arc<CoreVersionManifest>>>> = Default::default();
+        let cache_clone = Arc::clone(&cache);
 
         let stats = preload_manifests(
             vec![("nonexistent".into(), "^1.0.0".into())],
-            &registry,
+            Arc::new(registry),
             PreloadConfig::default(),
             &NoopReceiver,
-            |name, m| {
-                cache_clone.borrow_mut().insert(name.into(), m);
+            move |name, m| {
+                cache_clone.lock().unwrap().insert(name.into(), m);
             },
         )
         .await;
 
         assert_eq!(stats.failed_count, 1);
-        assert!(cache.borrow().is_empty());
+        assert!(cache.lock().unwrap().is_empty());
     }
 
     #[test]
