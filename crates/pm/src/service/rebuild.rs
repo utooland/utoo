@@ -28,8 +28,12 @@ impl RebuildService {
             PackageService::execute_queues_with_options(execution_queues, scripts).await?;
         }
 
-        // bins_only mode does not execute project root hooks
+        // bins_only mode does not execute project or workspace hooks
         if scripts == ScriptPolicy::Run {
+            // Run workspace `prepare`/`postinstall`/etc. in topological order
+            // before the root project's hooks, since the root may import
+            // build artifacts produced by a workspace's `prepare`.
+            PackageService::process_workspace_install_hooks(root_path).await?;
             PackageService::process_project_hooks(root_path).await?;
         }
 
