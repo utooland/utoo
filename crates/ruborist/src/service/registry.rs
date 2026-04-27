@@ -16,10 +16,25 @@
 //!   - Disk cache (persistent, with ETag validation)
 //!   - Network (authoritative source)
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::anyhow;
+use parking_lot::Mutex;
+
+type FetchLock = Arc<tokio::sync::Mutex<()>>;
+
+static FETCH_LOCKS: LazyLock<Mutex<HashMap<String, FetchLock>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn get_fetch_lock(key: String) -> FetchLock {
+    let mut locks = FETCH_LOCKS.lock();
+    locks
+        .entry(key)
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone()
+}
 
 /// Get current timestamp in seconds since UNIX epoch.
 /// Works on both native and WASM targets.
@@ -208,6 +223,16 @@ impl UnifiedRegistry {
             return Ok(FullManifestResult::Full(manifest));
         }
 
+        let fetch_lock = get_fetch_lock(format!("full:{}:{}", self.registry_url, name));
+        let _fetch_guard = fetch_lock.lock().await;
+
+        // Another resolver may have populated the cache while this task was
+        // waiting for the single-flight lock.
+        if let Some(manifest) = self.cache.get_full_manifest(name) {
+            tracing::debug!("Memory cache hit for full manifest after wait: {}", name);
+            return Ok(FullManifestResult::Full(manifest));
+        }
+
         // 2. Load etag from disk cache (if available)
         let disk_versions = self.cache.get_versions_from_disk(name).await;
         let etag = disk_versions.as_ref().and_then(|v| v.etag.clone());
@@ -305,6 +330,18 @@ impl UnifiedRegistry {
             return Ok(manifest);
         }
 
+        let fetch_lock = get_fetch_lock(format!("version:{}:{}@{}", self.registry_url, name, spec));
+        let _fetch_guard = fetch_lock.lock().await;
+
+        if let Some(manifest) = self.cache.get_version_manifest(name, spec) {
+            tracing::debug!(
+                "Memory cache hit for version manifest after wait: {}@{}",
+                name,
+                spec
+            );
+            return Ok(manifest);
+        }
+
         // 2. Check disk cache (only for non-semver registries)
         // Semver registries resolve specs server-side, so disk cache keys (name@spec)
         // may not match the actual resolved version.
@@ -396,6 +433,18 @@ impl RegistryClient for UnifiedRegistry {
         // 1. Check memory cache first
         if let Some(manifest) = self.cache.get_version_manifest(name, spec) {
             tracing::debug!("Memory cache hit for version manifest: {}@{}", name, spec);
+            return Ok(manifest);
+        }
+
+        let fetch_lock = get_fetch_lock(format!("version:{}:{}@{}", self.registry_url, name, spec));
+        let _fetch_guard = fetch_lock.lock().await;
+
+        if let Some(manifest) = self.cache.get_version_manifest(name, spec) {
+            tracing::debug!(
+                "Memory cache hit for version manifest after wait: {}@{}",
+                name,
+                spec
+            );
             return Ok(manifest);
         }
 
