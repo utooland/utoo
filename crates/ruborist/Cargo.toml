@@ -35,6 +35,8 @@ tracing         = { workspace = true }
 # AppData per handshake (CPU-bound; 128 parallel handshakes serialise
 # across 4 cores). aws-lc-rs's per-handshake CPU is roughly 3× faster.
 reqwest         = { version = "0.12", default-features = false, features = [
+  "brotli",
+  "gzip",
   "http2",
   "json",
   "rustls-tls-native-roots-no-provider",
