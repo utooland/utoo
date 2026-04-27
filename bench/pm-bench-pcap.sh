@@ -19,12 +19,11 @@ export BUN_INSTALL_CACHE_DIR="$BUN_CACHE"
 
 mkdir -p "$PCAP_DIR"
 
-# Project must already be cloned by pm-bench-phases.sh (this script is meant
-# to run after it, reusing the clone).
 PROJECT_DIR="$BENCH_DIR/$PROJECT"
+mkdir -p "$BENCH_DIR"
 if [ ! -d "$PROJECT_DIR" ]; then
-  echo "missing $PROJECT_DIR — run pm-bench-phases.sh first" >&2
-  exit 1
+  echo "cloning $PROJECT into $PROJECT_DIR"
+  git clone --depth=1 "https://github.com/ant-design/${PROJECT}.git" "$PROJECT_DIR"
 fi
 
 # Extract hostname (strip scheme + any path) for DNS lookup.
