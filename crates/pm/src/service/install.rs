@@ -4,6 +4,7 @@ use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
+use tokio::task::JoinSet;
 
 use crate::cmd::deps::build_deps;
 use crate::fs;
@@ -23,6 +24,7 @@ use crate::util::linker::link;
 use crate::util::logger::{
     PROGRESS_BAR, finish_progress_bar, log_progress, print_install_counts, start_progress_bar,
 };
+use crate::util::sysconf::parallel_io_limit;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 
 use super::binary::update_package_binary;
@@ -62,6 +64,13 @@ fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
     false
 }
 
+async fn join_next_clone_task(clone_tasks: &mut JoinSet<Result<()>>) -> Result<()> {
+    if let Some(result) = clone_tasks.join_next().await {
+        result.context("clone task panicked")??;
+    }
+    Ok(())
+}
+
 pub async fn install_packages(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
@@ -83,7 +92,8 @@ pub async fn install_packages(
     depths.sort_unstable();
 
     for depth in depths.iter() {
-        let mut clone_tasks: Vec<tokio::task::JoinHandle<Result<()>>> = Vec::new();
+        let mut clone_tasks = JoinSet::new();
+        let clone_limit = parallel_io_limit();
 
         if let Some(packages) = groups.get(depth) {
             for (path, package) in packages.iter() {
@@ -153,7 +163,11 @@ pub async fn install_packages(
                     let is_optional =
                         package.optional == Some(true) || package.dev_optional == Some(true);
 
-                    let task = tokio::spawn(async move {
+                    while clone_tasks.len() >= clone_limit {
+                        join_next_clone_task(&mut clone_tasks).await?;
+                    }
+
+                    clone_tasks.spawn(async move {
                         if let Err(e) =
                             clone_package_once(&name, &version, &resolved, &target_path).await
                         {
@@ -168,7 +182,6 @@ pub async fn install_packages(
                         log_progress(&format!("{name} resolved"));
                         update_package_binary(&target_path, &name).await
                     });
-                    clone_tasks.push(task);
                 } else {
                     PROGRESS_BAR.inc(1);
                     tracing::debug!("{path} no resolved info skipped");
@@ -176,8 +189,8 @@ pub async fn install_packages(
             }
         }
 
-        for task in clone_tasks {
-            task.await??;
+        while !clone_tasks.is_empty() {
+            join_next_clone_task(&mut clone_tasks).await?;
         }
     }
 

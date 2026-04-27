@@ -3,6 +3,11 @@ use std::path::PathBuf;
 use super::receiver::PipelineChannels;
 use crate::util::cloner::{clone_package_once, wait_clone_if_pending};
 use crate::util::downloader::{download_to_cache, is_git_url};
+use crate::util::sysconf::parallel_io_limit;
+
+async fn join_one(tasks: &mut tokio::task::JoinSet<()>) {
+    let _ = tasks.join_next().await;
+}
 
 /// Pipeline worker handles for awaiting completion.
 pub struct PipelineHandles {
@@ -22,6 +27,8 @@ impl PipelineHandles {
 pub fn start_workers(channels: PipelineChannels, cwd: PathBuf) -> PipelineHandles {
     let download_handle = tokio::spawn(async move {
         let mut rx = channels.download_rx;
+        let mut tasks = tokio::task::JoinSet::new();
+        let limit = parallel_io_limit();
         while let Some(info) = rx.recv().await {
             let Some(tarball_url) = info.tarball_url else {
                 continue;
@@ -39,14 +46,22 @@ pub fn start_workers(channels: PipelineChannels, cwd: PathBuf) -> PipelineHandle
             }
             let name = info.name;
             let version = info.version;
-            tokio::spawn(async move {
+            while tasks.len() >= limit {
+                join_one(&mut tasks).await;
+            }
+            tasks.spawn(async move {
                 download_to_cache(&name, &version, &tarball_url).await;
             });
+        }
+        while !tasks.is_empty() {
+            join_one(&mut tasks).await;
         }
     });
 
     let clone_handle = tokio::spawn(async move {
         let mut rx = channels.clone_rx;
+        let mut tasks = tokio::task::JoinSet::new();
+        let limit = parallel_io_limit();
         while let Some(msg) = rx.recv().await {
             let Some(tarball_url) = msg.info.tarball_url else {
                 continue;
@@ -55,7 +70,10 @@ pub fn start_workers(channels: PipelineChannels, cwd: PathBuf) -> PipelineHandle
             let version = msg.info.version;
             let target = cwd.join(&msg.path);
             let parent_path = msg.parent_path.map(|p| cwd.join(&p));
-            tokio::spawn(async move {
+            while tasks.len() >= limit {
+                join_one(&mut tasks).await;
+            }
+            tasks.spawn(async move {
                 if let Some(ref parent) = parent_path {
                     wait_clone_if_pending(&parent.to_string_lossy()).await;
                 }
@@ -63,6 +81,9 @@ pub fn start_workers(channels: PipelineChannels, cwd: PathBuf) -> PipelineHandle
                     tracing::debug!("Pipeline pre-clone failed for {name}@{version}: {e:#}");
                 }
             });
+        }
+        while !tasks.is_empty() {
+            join_one(&mut tasks).await;
         }
     });
 
