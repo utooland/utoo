@@ -165,7 +165,6 @@ pub async fn install_packages(
                             return Err(e);
                         }
                         PROGRESS_BAR.inc(1);
-                        log_progress(&format!("{name} resolved"));
                         update_package_binary(&target_path, &name).await
                     });
                     clone_tasks.push(task);

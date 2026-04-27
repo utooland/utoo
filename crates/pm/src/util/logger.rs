@@ -191,12 +191,12 @@ impl utoo_ruborist::progress::EventReceiver for ProgressReceiver {
             BuildEvent::PreloadStart { count } | BuildEvent::PreloadQueued { count } => {
                 PROGRESS_BAR.inc_length(count as u64);
             }
-            BuildEvent::PreloadFetching { name } => {
-                log_progress(&format!("fetching {}", name));
-            }
-            BuildEvent::PreloadProgress { name, .. } => {
+            BuildEvent::PreloadFetching { .. } => {}
+            BuildEvent::PreloadProgress { current, .. } => {
                 PROGRESS_BAR.inc(1);
-                log_progress(&format!("resolved {}", name));
+                if current % 64 == 0 {
+                    log_progress(&format!("resolved {current} packages"));
+                }
             }
             BuildEvent::PreloadComplete { success, failed } => {
                 PROGRESS_BAR.set_position(0);

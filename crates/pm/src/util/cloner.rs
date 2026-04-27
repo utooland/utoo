@@ -350,6 +350,14 @@ async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
 
 // find the first non built subdirectory
 pub async fn find_real_src<P: AsRef<Path>>(src: P) -> Option<PathBuf> {
+    let package_dir = src.as_ref().join("package");
+    if fs::metadata(&package_dir)
+        .await
+        .is_ok_and(|metadata| metadata.is_dir())
+    {
+        return Some(package_dir);
+    }
+
     let mut read_dir = fs::read_dir(src.as_ref()).await.ok()?;
     while let Some(entry) = read_dir.next_entry().await.ok()? {
         if let Ok(metadata) = entry.metadata().await
@@ -627,6 +635,21 @@ mod tests {
         fs::create_dir(&subdir).await?;
         assert_eq!(find_real_src(&dir).await.unwrap(), subdir);
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_find_real_src_prefers_package_wrapper() -> Result<()> {
+        let temp = TempDir::new()?;
+        let dir = temp.path().join("test_dir");
+        fs::create_dir(&dir).await?;
+
+        let other_dir = dir.join("aaa");
+        fs::create_dir(&other_dir).await?;
+        let package_dir = dir.join("package");
+        fs::create_dir(&package_dir).await?;
+
+        assert_eq!(find_real_src(&dir).await.unwrap(), package_dir);
         Ok(())
     }
 
