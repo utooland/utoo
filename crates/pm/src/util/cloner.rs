@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
+use tokio::sync::Semaphore;
 use tokio_retry::Retry;
 use utoo_ruborist::manifest::IdentityView;
 
@@ -23,6 +24,25 @@ use crate::fs;
 /// `Path::components().collect()` parses both separators uniformly and
 /// rebuilds with the OS-preferred one, giving a stable key.
 static CLONE_CACHE: Lazy<OnceMap<PathBuf, ()>> = Lazy::new(OnceMap::new);
+
+/// Semaphore controlling cache-to-node_modules materialization.
+///
+/// Warm installs can schedule thousands of package clones at once. Letting all
+/// of them enter the blocking hardlink/copy path concurrently causes scheduler
+/// churn and very high context-switch counts; a moderate cap keeps disk I/O
+/// saturated without flooding Tokio's blocking pool.
+static CLONE_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| {
+    let default = std::thread::available_parallelism()
+        .map(|n| n.get().saturating_mul(2))
+        .unwrap_or(8)
+        .clamp(4, 32);
+    let limit = std::env::var("UTOO_PM_CLONE_CONCURRENCY")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|&value| value > 0)
+        .unwrap_or(default);
+    Semaphore::new(limit)
+});
 
 /// Number of `node_modules/` directories freshly materialized this run.
 /// Mirrors pnpm's "added" semantic.
@@ -78,6 +98,7 @@ pub async fn clone_package_once(
     CLONE_CACHE
         .get_or_init(key, || async move {
             let cache_path = resolve_cache_path(&name, &version, &tarball_url).await?;
+            let _permit = CLONE_SEMAPHORE.acquire().await.ok()?;
             let fresh = clone_package(&cache_path, &target_path, &name, &version, !is_git)
                 .await
                 .inspect_err(|e| {
