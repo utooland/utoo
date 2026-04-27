@@ -233,6 +233,10 @@ async fn handle_cypress(
 }
 
 pub async fn update_package_binary(dir: &Path, name: &str) -> Result<()> {
+    if should_skip_binary_mirror() {
+        return Ok(());
+    }
+
     let config = load_config().await?;
 
     let mirrors = config["mirrors"]["china"]
