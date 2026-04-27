@@ -717,9 +717,7 @@ const loadedScripts = new Map();
     }
     promise = new Promise((resolve, reject)=>{
         const script = document.createElement('script');
-        if (CROSS_ORIGIN_LOADING) {
-            script.crossOrigin = CROSS_ORIGIN_LOADING;
-        }
+        script.crossOrigin = CROSS_ORIGIN;
         script.src = scriptUrl;
         script.onload = ()=>resolve();
         script.onerror = ()=>reject(new Error(`Failed to load script: ${scriptUrl}`));

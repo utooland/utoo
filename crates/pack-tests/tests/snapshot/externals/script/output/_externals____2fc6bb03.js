@@ -18,7 +18,10 @@ var mod = await (async () => {
   throw error;
 })();
 
-__turbopack_context__.v(mod);
+var ns = Object.create(null);
+for (var key in mod) ns[key] = mod[key];
+ns.default = mod;
+__turbopack_context__.n(ns);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); } }, true);}),
 ]);

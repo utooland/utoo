@@ -1,3 +1,9 @@
+import JSZip from 'jszip';
+
+const zip = new JSZip();
+
+zip;
+
 const func = async () => {
     // @ts-ignore
     const _ = await import('lodash');
