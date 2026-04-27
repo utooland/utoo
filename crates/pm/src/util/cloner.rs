@@ -41,7 +41,6 @@ fn clone_concurrency_limit() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get().saturating_mul(2))
         .unwrap_or(32)
-        .max(1)
 }
 
 /// Returns the number of fresh clones performed (pnpm "added" equivalent).
@@ -478,6 +477,8 @@ pub async fn clone_package(
     version: &str,
     find_real: bool,
 ) -> Result<bool> {
+    let semaphore = CLONE_SEMAPHORE.get_or_init(|| Semaphore::new(clone_concurrency_limit()));
+    let _permit;
     if crate::fs::try_exists(dst).await? {
         if validate_name_version(dst, name, version).await {
             tracing::debug!(
@@ -488,6 +489,10 @@ pub async fn clone_package(
             );
             return Ok(false);
         }
+        _permit = semaphore
+            .acquire()
+            .await
+            .context("clone semaphore closed unexpectedly")?;
         tracing::debug!(
             "Package at {} has mismatched name/version, removing and re-cloning",
             dst.display()
@@ -495,12 +500,12 @@ pub async fn clone_package(
         if let Err(e) = fs::remove_dir_all(dst).await {
             tracing::warn!("Failed to clean target directory {}: {}", dst.display(), e);
         }
+    } else {
+        _permit = semaphore
+            .acquire()
+            .await
+            .context("clone semaphore closed unexpectedly")?;
     }
-    let semaphore = CLONE_SEMAPHORE.get_or_init(|| Semaphore::new(clone_concurrency_limit()));
-    let _permit = semaphore
-        .acquire()
-        .await
-        .context("clone semaphore closed unexpectedly")?;
     clone(src, dst, find_real).await?;
     Ok(true)
 }
