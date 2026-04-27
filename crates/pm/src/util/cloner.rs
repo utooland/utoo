@@ -350,7 +350,15 @@ async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
 
 // find the first non built subdirectory
 pub async fn find_real_src<P: AsRef<Path>>(src: P) -> Option<PathBuf> {
-    let mut read_dir = fs::read_dir(src.as_ref()).await.ok()?;
+    let src = src.as_ref();
+    let package_dir = src.join("package");
+    if let Ok(metadata) = fs::metadata(&package_dir).await
+        && metadata.is_dir()
+    {
+        return Some(package_dir);
+    }
+
+    let mut read_dir = fs::read_dir(src).await.ok()?;
     while let Some(entry) = read_dir.next_entry().await.ok()? {
         if let Ok(metadata) = entry.metadata().await
             && metadata.is_dir()
@@ -645,6 +653,21 @@ mod tests {
         fs::create_dir(&subdir).await?;
 
         assert_eq!(find_real_src(&dir).await.unwrap(), subdir);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_find_real_src_prefers_package_dir() -> Result<()> {
+        let temp = TempDir::new()?;
+        let dir = temp.path().join("test_dir");
+        fs::create_dir(&dir).await?;
+
+        let package_dir = dir.join("package");
+        let other_dir = dir.join("zzz");
+        fs::create_dir(&other_dir).await?;
+        fs::create_dir(&package_dir).await?;
+
+        assert_eq!(find_real_src(&dir).await.unwrap(), package_dir);
         Ok(())
     }
 
