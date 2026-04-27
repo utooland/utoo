@@ -1,3 +1,7 @@
+import { config, version } from "./async_module.js";
+
+console.log("config loaded:", config, "version:", version);
+
 class LegacyBox {
   constructor(value) {
     this.value = value;
