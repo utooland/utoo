@@ -223,11 +223,13 @@ impl UnifiedRegistry {
         .map_err(RegistryError)?
         {
             manifest::FetchManifestResult::Ok(manifest, new_etag) => {
-                // 4. Cache full manifest in memory
-                self.cache
-                    .set_full_manifest(name.to_string(), manifest.clone());
-
-                // 5. Extract and cache versions info (lightweight)
+                // 4. Extract and cache versions info (lightweight).
+                //
+                // Do not retain the full raw manifest in the process-wide memory
+                // cache here. On npm-style registries this blob can be very large
+                // and is only needed long enough to resolve the current version.
+                // Later specs for the same package can use the cached version list
+                // plus the small per-version manifest cache.
                 let versions_info = VersionsInfo {
                     versions: Versions {
                         version_list: manifest.versions.clone(),
@@ -239,7 +241,7 @@ impl UnifiedRegistry {
                 self.cache
                     .set_versions(name.to_string(), versions_info.clone());
 
-                // 6. Write versions to disk (non-blocking for native, blocking for WASM)
+                // 5. Write versions to disk (non-blocking for native, blocking for WASM)
                 self.cache.set_versions_to_disk(name, &versions_info).await;
 
                 Ok(FullManifestResult::Full(manifest))
@@ -263,9 +265,6 @@ impl UnifiedRegistry {
                     )
                     .await
                     .map_err(RegistryError)?;
-
-                    self.cache
-                        .set_full_manifest(name.to_string(), manifest.clone());
 
                     let versions_info = VersionsInfo {
                         versions: Versions {
