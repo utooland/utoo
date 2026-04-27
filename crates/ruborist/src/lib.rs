@@ -27,6 +27,7 @@ pub mod resolver;
 pub mod service;
 pub mod spec;
 pub mod traits;
+pub mod util;
 
 // ============================================================================
 // Re-exports: only items actually used by consumers
@@ -100,7 +101,3 @@ pub mod http {
     pub use crate::resolver::http::{file_cache_slot, http_cache_slot};
 }
 
-/// Utility functions.
-pub mod util {
-    pub use crate::model::util::{PackageNameStr, parse_package_spec, read_package_json};
-}
