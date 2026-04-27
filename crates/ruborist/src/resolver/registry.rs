@@ -114,11 +114,14 @@ impl<E: std::error::Error + 'static> std::error::Error for ResolveError<E> {
 /// let resolved = resolve_package(&registry, "lodash", "^4.0.0").await?;
 /// println!("Resolved to {}@{}", resolved.name, resolved.version);
 /// ```
-pub async fn resolve_package<R: RegistryClient>(
+pub async fn resolve_package<R: RegistryClient + crate::maybe_send::MaybeSync>(
     registry: &R,
     name: &str,
     spec: &str,
-) -> Result<ResolvedPackage, ResolveError<R::Error>> {
+) -> Result<ResolvedPackage, ResolveError<R::Error>>
+where
+    R::Error: crate::maybe_send::MaybeSend,
+{
     // Normalize spec first to handle npm: alias and workspace: prefix
     // This ensures correct behavior even if RegistryClient::resolve_package is overridden
     // e.g., "wrap-ansi-cjs" + "npm:wrap-ansi@^7.0.0" -> fetch "wrap-ansi" @ "^7.0.0"
@@ -167,12 +170,15 @@ pub fn resolve_from_manifest<E: std::error::Error + 'static>(
 ///
 /// For optional dependencies, returns `Ok(None)` on resolution failure
 /// instead of propagating the error.
-pub async fn resolve_registry_dep<R: RegistryClient>(
+pub async fn resolve_registry_dep<R: RegistryClient + crate::maybe_send::MaybeSync>(
     registry: &R,
     name: &str,
     spec: &str,
     edge_type: &EdgeType,
-) -> Result<Option<ResolvedPackage>, ResolveError<R::Error>> {
+) -> Result<Option<ResolvedPackage>, ResolveError<R::Error>>
+where
+    R::Error: crate::maybe_send::MaybeSend,
+{
     match resolve_package(registry, name, spec).await {
         Ok(resolved) => Ok(Some(resolved)),
         Err(e) => {
