@@ -5,7 +5,10 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use once_cell::sync::Lazy;
-use reqwest::{Client, StatusCode};
+use reqwest::{
+    Client, StatusCode,
+    header::{ACCEPT_ENCODING, HeaderValue},
+};
 use tokio::sync::Semaphore;
 use tokio_retry::RetryIf;
 use utoo_ruborist::http::{file_cache_slot, http_cache_slot};
@@ -209,7 +212,12 @@ pub async fn download_bytes(url: &str) -> Result<Bytes> {
         || async {
             let attempt = retry_count.fetch_add(1, Ordering::Relaxed);
 
-            let response = match DOWNLOADER_CLIENT.get(url).send().await {
+            let response = match DOWNLOADER_CLIENT
+                .get(url)
+                .header(ACCEPT_ENCODING, HeaderValue::from_static("identity"))
+                .send()
+                .await
+            {
                 Ok(r) => r,
                 Err(e) => {
                     tracing::warn!(
@@ -319,5 +327,43 @@ mod tests {
 
         assert!(dest.join("_resolved").exists());
         assert!(dest.join("file.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn test_download_bytes_preserves_gzip_encoded_tarball() {
+        // The downloader's client intentionally honors explicit proxy envs.
+        // Clear them before the Lazy client is initialized so mockito's
+        // localhost server is reached directly in this focused test.
+        unsafe {
+            for key in [
+                "ALL_PROXY",
+                "all_proxy",
+                "HTTP_PROXY",
+                "http_proxy",
+                "HTTPS_PROXY",
+                "https_proxy",
+            ] {
+                std::env::remove_var(key);
+            }
+        }
+
+        let mut server = mockito::Server::new_async().await;
+        let tar_gz = create_tar_gz();
+
+        let mock = server
+            .mock("GET", "/pkg.tgz")
+            .match_header("accept-encoding", "identity")
+            .with_status(200)
+            .with_header("content-encoding", "gzip")
+            .with_body(tar_gz.clone())
+            .create_async()
+            .await;
+
+        let bytes = download_bytes(&format!("{}/pkg.tgz", server.url()))
+            .await
+            .unwrap();
+
+        mock.assert_async().await;
+        assert_eq!(&bytes[..], tar_gz.as_slice());
     }
 }

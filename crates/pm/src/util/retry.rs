@@ -26,6 +26,9 @@ impl std::error::Error for RetryableError {}
 /// Connection pool is unlimited - concurrency is controlled by semaphore instead.
 pub fn build_dns_cached_client() -> reqwest::Client {
     client_builder()
+        // Tarballs are gzip archives themselves. Do not let HTTP
+        // Content-Encoding transparently decode them before extraction.
+        .no_gzip()
         .connect_timeout(std::time::Duration::from_secs(5)) // TLS + TCP handshake
         .read_timeout(std::time::Duration::from_secs(30)) // Timeout for individual read operations
         // No total timeout - large files (e.g. node binary ~100MB) need longer download time
