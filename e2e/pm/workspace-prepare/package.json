@@ -1,0 +1,9 @@
+{
+  "name": "workspace-prepare-test",
+  "private": true,
+  "workspaces": [
+    "app",
+    "lib-a",
+    "lib-b"
+  ]
+}

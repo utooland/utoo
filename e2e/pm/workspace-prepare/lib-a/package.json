@@ -1,0 +1,9 @@
+{
+  "name": "lib-a",
+  "version": "1.0.0",
+  "main": "lib/index.js",
+  "scripts": {
+    "prepare": "mkdir -p lib && printf 'module.exports=\"lib-a-built\";' > lib/index.js",
+    "postinstall": "mkdir -p .markers && touch .markers/postinstall"
+  }
+}

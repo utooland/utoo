@@ -1,0 +1,11 @@
+{
+  "name": "lib-b",
+  "version": "1.0.0",
+  "main": "lib/index.js",
+  "dependencies": {
+    "lib-a": "*"
+  },
+  "scripts": {
+    "prepare": "test -f ../lib-a/lib/index.js && mkdir -p lib && printf 'module.exports=\"lib-b-built\";' > lib/index.js"
+  }
+}
