@@ -93,7 +93,7 @@ pub async fn clone_package_once(
 
             if fresh {
                 CLONE_COUNT.fetch_add(1, Ordering::Relaxed);
-                tracing::debug!("Cloned: {}@{} to {}", name, version, target_path.display());
+                tracing::trace!("Cloned: {}@{} to {}", name, version, target_path.display());
             }
             Some(())
         })
@@ -406,7 +406,7 @@ async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
         Retry::spawn(create_retry_strategy(), || async {
             match unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) } {
                 0 => {
-                    tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
+                    tracing::trace!("clone {} to {} success", real_src.display(), dst.display());
                     Ok(())
                 }
                 _ => {
@@ -431,7 +431,7 @@ async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
     {
         Retry::spawn(create_retry_strategy(), || async {
             hardlink_clone::clone_dir(&real_src, dst).await?;
-            tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
+            tracing::trace!("clone {} to {} success", real_src.display(), dst.display());
             Ok::<(), anyhow::Error>(())
         })
         .await?;

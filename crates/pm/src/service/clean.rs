@@ -148,7 +148,10 @@ pub async fn clean_deps(groups: &HashMap<usize, Vec<(String, Package)>>, cwd: &P
         .flat_map(|pkgs| pkgs.iter().map(|(path, _)| path.clone()))
         .collect();
 
-    tracing::debug!("Valid packages: {valid_packages:?}");
+    tracing::debug!(
+        count = valid_packages.len(),
+        "Collected valid package paths"
+    );
 
     let mut nm_dirs = vec![cwd.join("node_modules")];
     for (_, ws_path, _) in workspace::find_workspaces(cwd).await? {

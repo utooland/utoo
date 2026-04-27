@@ -158,7 +158,7 @@ impl PackageService {
 
             // Binary linking queue - always process if package has bin files
             if !package.bin_files.is_empty() {
-                tracing::debug!("Adding {} to bin linking queue", package.path.display());
+                tracing::trace!("Adding {} to bin linking queue", package.path.display());
                 queues.bin_linking.push((Rc::clone(&package), is_optional));
             }
         }
@@ -281,9 +281,12 @@ impl PackageService {
     /// Queue contains (PackageInfo, is_optional) tuples - is_optional is not used here
     /// as binary linking happens only for successfully installed packages
     async fn execute_binary_linking(queue: &[(Rc<PackageInfo>, bool)]) -> Result<()> {
+        let mut linked_packages = 0usize;
+        let mut linked_bins = 0usize;
         for (package, _is_optional) in queue {
             if !package.bin_files.is_empty() {
-                tracing::debug!("Linking binary files for {}", package.name);
+                tracing::trace!("Linking binary files for {}", package.name);
+                linked_packages += 1;
                 for (bin_name, relative_path) in &package.bin_files {
                     let target_path = package.path.join(relative_path);
                     if !crate::fs::try_exists(&target_path).await? {
@@ -319,10 +322,16 @@ impl PackageService {
                                 link_path.display()
                             )
                         })?;
+                    linked_bins += 1;
                 }
-                tracing::debug!("Linking binary files for {} successfully", package.name);
+                tracing::trace!("Linking binary files for {} successfully", package.name);
             }
         }
+        tracing::debug!(
+            packages = linked_packages,
+            bins = linked_bins,
+            "Binary linking completed"
+        );
         Ok(())
     }
 }

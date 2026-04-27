@@ -81,7 +81,7 @@ pub async fn git_cache_lookup(name: &str, version: &str, tarball_url: &str) -> O
         .await
         .unwrap_or(false)
     {
-        tracing::debug!("Git package cache hit: {}@{}", name, version);
+        tracing::trace!("Git package cache hit: {}@{}", name, version);
         return Some(cache_path);
     }
     tracing::warn!(
@@ -118,7 +118,7 @@ pub async fn file_cache_lookup(name: &str, tarball_url: &str) -> Option<PathBuf>
     let abs_path = tarball_url.strip_prefix("file:")?;
     let hit = slot_cache_lookup(name, file_cache_slot(std::path::Path::new(abs_path))).await;
     if hit.is_some() {
-        tracing::debug!("file: dep cache hit: {} ({})", name, tarball_url);
+        tracing::trace!("file: dep cache hit: {} ({})", name, tarball_url);
     }
     hit
 }
@@ -127,7 +127,7 @@ pub async fn file_cache_lookup(name: &str, tarball_url: &str) -> Option<PathBuf>
 pub async fn http_tarball_cache_lookup(name: &str, tarball_url: &str) -> Option<PathBuf> {
     let hit = slot_cache_lookup(name, http_cache_slot(tarball_url)).await;
     if hit.is_some() {
-        tracing::debug!("HTTP tarball cache hit: {} ({})", name, tarball_url);
+        tracing::trace!("HTTP tarball cache hit: {} ({})", name, tarball_url);
     }
     hit
 }
@@ -173,7 +173,7 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
                 .unwrap_or(false)
             {
                 REUSE_COUNT.fetch_add(1, Ordering::Relaxed);
-                tracing::debug!("Cache hit: {}@{}", name, version);
+                tracing::trace!("Cache hit: {}@{}", name, version);
                 return Some(cache_path);
             }
 
@@ -193,7 +193,7 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
                 .ok()?;
 
             DOWNLOAD_COUNT.fetch_add(1, Ordering::Relaxed);
-            tracing::debug!("Downloaded: {}@{}", name, version);
+            tracing::trace!("Downloaded: {}@{}", name, version);
             Some(cache_path)
         })
         .await
