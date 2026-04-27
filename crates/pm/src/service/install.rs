@@ -62,10 +62,15 @@ fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
     false
 }
 
+fn should_update_package_binary(package: &Package, scripts: ScriptPolicy) -> bool {
+    scripts == ScriptPolicy::Run && package.has_install_scripts()
+}
+
 pub async fn install_packages(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
     omit: &HashSet<OmitType>,
+    scripts: ScriptPolicy,
 ) -> Result<()> {
     use crate::util::cloner::clone_package_once;
 
@@ -152,6 +157,7 @@ pub async fn install_packages(
                     // Check if this is an optional dependency
                     let is_optional =
                         package.optional == Some(true) || package.dev_optional == Some(true);
+                    let update_binary = should_update_package_binary(&package, scripts);
 
                     let task = tokio::spawn(async move {
                         if let Err(e) =
@@ -166,7 +172,10 @@ pub async fn install_packages(
                         }
                         PROGRESS_BAR.inc(1);
                         log_progress(&format!("{name} resolved"));
-                        update_package_binary(&target_path, &name).await
+                        if update_binary {
+                            update_package_binary(&target_path, &name).await?;
+                        }
+                        Ok(())
                     });
                     clone_tasks.push(task);
                 } else {
@@ -271,7 +280,7 @@ impl InstallService {
         }
 
         let link_start = Instant::now();
-        install_packages(&groups, root_path, omit)
+        install_packages(&groups, root_path, omit, scripts)
             .await
             .context("Failed to install packages")?;
 
@@ -410,6 +419,31 @@ mod tests {
         omit_dev_optional.insert(OmitType::Dev);
         omit_dev_optional.insert(OmitType::Optional);
         assert!(should_omit_package(&dev_optional_pkg, &omit_dev_optional));
+    }
+
+    #[test]
+    fn test_should_update_package_binary() {
+        let package_with_script = Package {
+            has_install_script: Some(true),
+            ..Package::default()
+        };
+        let package_without_script = Package {
+            has_install_script: Some(false),
+            ..Package::default()
+        };
+
+        assert!(should_update_package_binary(
+            &package_with_script,
+            ScriptPolicy::Run
+        ));
+        assert!(!should_update_package_binary(
+            &package_with_script,
+            ScriptPolicy::Ignore
+        ));
+        assert!(!should_update_package_binary(
+            &package_without_script,
+            ScriptPolicy::Run
+        ));
     }
 
     #[test]

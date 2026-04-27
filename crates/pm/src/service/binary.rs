@@ -233,6 +233,10 @@ async fn handle_cypress(
 }
 
 pub async fn update_package_binary(dir: &Path, name: &str) -> Result<()> {
+    if should_skip_binary_mirror() {
+        return Ok(());
+    }
+
     let config = load_config().await?;
 
     let mirrors = config["mirrors"]["china"]
@@ -285,12 +289,19 @@ pub async fn update_package_binary(dir: &Path, name: &str) -> Result<()> {
 fn should_skip_binary_mirror() -> bool {
     *SKIP_BINARY_MIRROR.get_or_init(|| {
         let registry = get_registry();
-        let skip = is_npm_registry(&registry);
+        let skip = should_skip_binary_mirror_for_registry(&registry);
         if skip {
-            tracing::debug!("Skipping binary mirror envs for npm registry: {}", registry);
+            tracing::debug!(
+                "Skipping binary mirror config for npm registry: {}",
+                registry
+            );
         }
         skip
     })
+}
+
+fn should_skip_binary_mirror_for_registry(registry: &str) -> bool {
+    is_npm_registry(registry)
 }
 
 pub async fn get_envs() -> Option<&'static Map<String, Value>> {
@@ -389,6 +400,19 @@ mod tests {
             get_replace_host_files(&binary_mirror),
             vec!["lib/index.js", "lib/install.js"]
         );
+    }
+
+    #[test]
+    fn test_should_skip_binary_mirror_for_npm_registry() {
+        assert!(should_skip_binary_mirror_for_registry(
+            "https://registry.npmjs.org"
+        ));
+        assert!(should_skip_binary_mirror_for_registry(
+            "https://registry.npmjs.org/"
+        ));
+        assert!(!should_skip_binary_mirror_for_registry(
+            "https://registry.npmmirror.com"
+        ));
     }
 
     #[tokio::test]
