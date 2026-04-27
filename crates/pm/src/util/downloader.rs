@@ -27,6 +27,14 @@ static DOWNLOAD_CACHE: Lazy<OnceMap<String, PathBuf>> = Lazy::new(OnceMap::new);
 /// Semaphore controlling concurrent download count.
 static DOWNLOAD_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
 
+/// Semaphore controlling concurrent tarball extraction count.
+///
+/// Extraction is CPU and filesystem heavy, so keep it bounded independently
+/// from network concurrency. This lets finished downloads release their
+/// network permits immediately instead of blocking later requests while the
+/// tarball is unpacked.
+static EXTRACT_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
+
 static DOWNLOAD_COUNT: AtomicUsize = AtomicUsize::new(0);
 static REUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -177,16 +185,23 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
                 return Some(cache_path);
             }
 
-            // Download (semaphore controlled)
+            // Download (semaphore controlled). Drop the permit before
+            // extraction so slow filesystem work does not throttle network
+            // fetches.
             let semaphore = DOWNLOAD_SEMAPHORE
                 .get_or_init(|| Semaphore::new(get_manifests_concurrency_limit_sync()));
-            let _permit = semaphore.acquire().await.ok()?;
-            let bytes = download_bytes(&tarball_url)
-                .await
-                .inspect_err(|e| tracing::warn!("Download failed: {}@{}: {}", name, version, e))
-                .ok()?;
+            let bytes = {
+                let _permit = semaphore.acquire().await.ok()?;
+                download_bytes(&tarball_url)
+                    .await
+                    .inspect_err(|e| tracing::warn!("Download failed: {}@{}: {}", name, version, e))
+                    .ok()?
+            };
 
-            // Extract
+            // Extract (separately bounded from download concurrency).
+            let extract_semaphore = EXTRACT_SEMAPHORE
+                .get_or_init(|| Semaphore::new(get_manifests_concurrency_limit_sync()));
+            let _extract_permit = extract_semaphore.acquire().await.ok()?;
             extract_and_write(bytes, &cache_path)
                 .await
                 .inspect_err(|e| tracing::warn!("Extract failed: {}@{}: {}", name, version, e))
