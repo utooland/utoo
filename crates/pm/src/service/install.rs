@@ -17,7 +17,7 @@ use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
 use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
 use crate::util::cloner::clone_count;
-use crate::util::downloader::download_stats;
+use crate::util::downloader::{download_stats, download_to_cache, is_git_url};
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
 use crate::util::logger::{
@@ -60,6 +60,76 @@ fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
     }
 
     false
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DownloadPrefetch {
+    name: String,
+    version: String,
+    resolved: String,
+}
+
+fn collect_download_prefetches(
+    groups: &HashMap<usize, Vec<(String, Package)>>,
+    omit: &HashSet<OmitType>,
+) -> Vec<DownloadPrefetch> {
+    let mut seen = HashSet::new();
+    let mut prefetches = Vec::new();
+
+    for packages in groups.values() {
+        for (path, package) in packages {
+            if should_omit_package(package, omit)
+                || package.link.is_some()
+                || package
+                    .cpu
+                    .as_ref()
+                    .is_some_and(|cpu| !is_cpu_compatible(cpu))
+                || package.os.as_ref().is_some_and(|os| !is_os_compatible(os))
+            {
+                continue;
+            }
+
+            let Some(resolved) = package.resolved.as_ref() else {
+                continue;
+            };
+            if !(resolved.starts_with("https://") || resolved.starts_with("http://"))
+                || is_git_url(resolved)
+            {
+                continue;
+            }
+
+            let name = package.get_name(path);
+            let Some(version) = package.version.clone() else {
+                continue;
+            };
+            if seen.insert((name.clone(), version.clone())) {
+                prefetches.push(DownloadPrefetch {
+                    name,
+                    version,
+                    resolved: resolved.clone(),
+                });
+            }
+        }
+    }
+
+    prefetches
+}
+
+fn start_download_prefetch(prefetches: Vec<DownloadPrefetch>) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut tasks = tokio::task::JoinSet::new();
+        for prefetch in prefetches {
+            tasks.spawn(async move {
+                download_to_cache(&prefetch.name, &prefetch.version, &prefetch.resolved).await;
+            });
+        }
+
+        while let Some(result) = tasks.join_next().await {
+            if let Err(error) = result {
+                tracing::debug!("Download prefetch task failed: {error}");
+            }
+        }
+    })
 }
 
 pub async fn install_packages(
@@ -264,6 +334,16 @@ impl InstallService {
         };
 
         let groups = group_by_depth(&package_lock.packages);
+        let prefetch_handle = if use_fresh_lock {
+            let prefetches = collect_download_prefetches(&groups, omit);
+            if prefetches.is_empty() {
+                None
+            } else {
+                Some(start_download_prefetch(prefetches))
+            }
+        } else {
+            None
+        };
 
         if !package_lock.packages.is_empty() {
             start_progress_bar();
@@ -279,6 +359,9 @@ impl InstallService {
         if let Some(handles) = pipeline_handles {
             handles.await_completion().await;
             super::pipeline::print_pipeline_summary();
+        }
+        if let Some(handle) = prefetch_handle {
+            let _ = handle.await;
         }
         finish_progress_bar("node_modules cloned", Some(link_start.elapsed()));
 
@@ -410,6 +493,88 @@ mod tests {
         omit_dev_optional.insert(OmitType::Dev);
         omit_dev_optional.insert(OmitType::Optional);
         assert!(should_omit_package(&dev_optional_pkg, &omit_dev_optional));
+    }
+
+    #[test]
+    fn test_collect_download_prefetches_filters_non_registry_packages() {
+        let mut groups = HashMap::new();
+        groups.insert(
+            1,
+            vec![
+                (
+                    "node_modules/react".to_string(),
+                    Package {
+                        version: Some("18.2.0".to_string()),
+                        resolved: Some(
+                            "https://registry.npmjs.org/react/-/react-18.2.0.tgz".to_string(),
+                        ),
+                        ..Package::default()
+                    },
+                ),
+                (
+                    "node_modules/react-alias".to_string(),
+                    Package {
+                        name: Some("react".to_string()),
+                        version: Some("18.2.0".to_string()),
+                        resolved: Some(
+                            "https://registry.npmjs.org/react/-/react-18.2.0.tgz".to_string(),
+                        ),
+                        ..Package::default()
+                    },
+                ),
+                (
+                    "node_modules/local".to_string(),
+                    Package {
+                        version: Some("1.0.0".to_string()),
+                        resolved: Some("file:../local.tgz".to_string()),
+                        ..Package::default()
+                    },
+                ),
+                (
+                    "node_modules/linked".to_string(),
+                    Package {
+                        version: Some("1.0.0".to_string()),
+                        resolved: Some("file:../linked".to_string()),
+                        link: Some(true),
+                        ..Package::default()
+                    },
+                ),
+            ],
+        );
+
+        let prefetches = collect_download_prefetches(&groups, &HashSet::new());
+
+        assert_eq!(
+            prefetches,
+            vec![DownloadPrefetch {
+                name: "react".to_string(),
+                version: "18.2.0".to_string(),
+                resolved: "https://registry.npmjs.org/react/-/react-18.2.0.tgz".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn test_collect_download_prefetches_honors_omit() {
+        let mut groups = HashMap::new();
+        groups.insert(
+            1,
+            vec![(
+                "node_modules/dev-only".to_string(),
+                Package {
+                    version: Some("1.0.0".to_string()),
+                    resolved: Some(
+                        "https://registry.npmjs.org/dev-only/-/dev-only-1.0.0.tgz".to_string(),
+                    ),
+                    dev: Some(true),
+                    ..Package::default()
+                },
+            )],
+        );
+        let mut omit = HashSet::new();
+        omit.insert(OmitType::Dev);
+
+        assert!(collect_download_prefetches(&groups, &omit).is_empty());
     }
 
     #[test]
