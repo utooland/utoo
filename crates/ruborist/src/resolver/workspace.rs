@@ -68,42 +68,57 @@ impl<G: Glob> WorkspaceDiscovery<G> {
             None => return Ok(workspaces),
         };
 
+        // Collect every matched workspace directory across all patterns
+        // first, then read each `package.json` concurrently. The previous
+        // serial `for path in matched_paths { read_package_json(...).await }`
+        // paid one FS round-trip per workspace on the resolver hot path —
+        // ant-design has ~200 workspaces and the read takes the largest
+        // unmeasured chunk of `p1_resolve` between glob completion and
+        // BFS start.
+        let mut workspace_paths: Vec<PathBuf> = Vec::new();
         for pattern_str in patterns {
-            // Prepare glob pattern for package.json files
             let package_json_pattern = root_path.join(pattern_str).join("package.json");
-
-            // Match workspace directories using Glob::glob
             let matched_paths = self
                 .glob
                 .glob(&package_json_pattern)
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to glob pattern: {}", e))?;
-
             for path in matched_paths {
-                let workspace_path = match path.parent() {
-                    Some(p) => p.to_path_buf(),
-                    None => continue,
-                };
+                if let Some(p) = path.parent() {
+                    workspace_paths.push(p.to_path_buf());
+                }
+            }
+        }
 
-                // Read workspace package.json
-                let workspace_pkg: PackageJson = match read_package_json(&workspace_path).await {
-                    Ok(pkg) => pkg,
-                    Err(e) => {
-                        tracing::debug!("Failed to read workspace package.json: {}", e);
-                        continue;
-                    }
-                };
+        // Fan out the per-workspace package.json reads. Each is small
+        // (typical workspace package.json < 4 KB) so completion order
+        // doesn't matter — push results into `workspaces` as they land.
+        use futures::stream::{FuturesUnordered, StreamExt};
+        let mut futs: FuturesUnordered<_> = workspace_paths
+            .into_iter()
+            .map(|workspace_path| async move {
+                let pkg = read_package_json(&workspace_path).await;
+                (workspace_path, pkg)
+            })
+            .collect();
 
-                tracing::debug!(
-                    "Found workspace: {} at {:?}",
-                    workspace_pkg.name,
-                    workspace_path
-                );
-                workspaces.push(WorkspacePackage {
-                    name: workspace_pkg.name.clone(),
-                    path: workspace_path,
-                    package_json: workspace_pkg,
-                });
+        while let Some((workspace_path, pkg)) = futs.next().await {
+            match pkg {
+                Ok(workspace_pkg) => {
+                    tracing::debug!(
+                        "Found workspace: {} at {:?}",
+                        workspace_pkg.name,
+                        workspace_path
+                    );
+                    workspaces.push(WorkspacePackage {
+                        name: workspace_pkg.name.clone(),
+                        path: workspace_path,
+                        package_json: workspace_pkg,
+                    });
+                }
+                Err(e) => {
+                    tracing::debug!("Failed to read workspace package.json: {}", e);
+                }
             }
         }
 
