@@ -2,7 +2,8 @@
 "[externals]/_ [external] (_@https://gw.alipayobjects.com/os/lib/lodash/4.17.21/lodash.min.js, script)", ((__turbopack_context__) => {
 "use strict";
 
-return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
+return __turbopack_context__.a(async function(__turbopack_handle_async_dependencies__, __turbopack_async_result__) {
+try {
 var mod = await (async () => {
   if (typeof globalThis["_"] !== 'undefined') {
     return globalThis["_"];
@@ -23,5 +24,7 @@ for (var key in mod) ns[key] = mod[key];
 ns.default = mod;
 __turbopack_context__.n(ns);
 __turbopack_async_result__();
-} catch(e) { __turbopack_async_result__(e); } }, true);}),
+} catch(e) { __turbopack_async_result__(e); }
+}, true);
+}),
 ]);

@@ -2,10 +2,10 @@
   "version": 3,
   "sources": [],
   "sections": [
-    {"offset": {"line": 9, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/shared.js"],"sourcesContent":["await 1;\nawait 1;\nexport default \"hello\";\n"],"names":[],"mappings":"AAAA,MAAM;AACN,MAAM;qCACS"}},
-    {"offset": {"line": 22, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/b.js"],"sourcesContent":["import x from \"./shared\";\n\nexport default x + \" world\";\n"],"names":[],"mappings":"AAAA;;;;;;qCAEe,+CAAC,GAAG"}},
-    {"offset": {"line": 39, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/main.js"],"sourcesContent":["import a from \"./a\";\nimport b from \"./b\";\n\nexport default a + \", \" + b;\n"],"names":[],"mappings":"AAAA;AACA;;;;;;;;qCAEe,+CAAC,GAAG,OAAO,+CAAC"}},
-    {"offset": {"line": 59, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/index.js"],"sourcesContent":["const result = await require(\"./main\");\n\nawait import(\"./async\");\n\nresult.default;"],"names":["result","default"],"mappings":"AAAA,MAAMA,SAAS;AAEf;AAEAA,OAAOC,OAAO"}},
-    {"offset": {"line": 68, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/a.js"],"sourcesContent":["import x from \"./shared\";\n\nexport default x + \" world\";\n"],"names":[],"mappings":"AAAA;;;;;;qCAEe,+CAAC,GAAG"}},
-    {"offset": {"line": 84, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/async.js"],"sourcesContent":["// This is the async chunk\nexport default 42;\nexport const nested = () => import(\"./a\");\n"],"names":["nested"],"mappings":"AAAA,0BAA0B;qCACX;AACR,MAAMA,SAAS"}}]
+    {"offset": {"line": 8, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/shared.js"],"sourcesContent":["await 1;\nawait 1;\nexport default \"hello\";\n"],"names":[],"mappings":";;QAAA,MAAM;QACN,MAAM;6CACS"}},
+    {"offset": {"line": 26, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/b.js"],"sourcesContent":["import x from \"./shared\";\n\nexport default x + \" world\";\n"],"names":[],"mappings":";;QAAA;;;;;;6CAEe,+CAAC,GAAG"}},
+    {"offset": {"line": 48, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/main.js"],"sourcesContent":["import a from \"./a\";\nimport b from \"./b\";\n\nexport default a + \", \" + b;\n"],"names":[],"mappings":";;QAAA;QACA;;;;;;;;6CAEe,+CAAC,GAAG,OAAO,+CAAC"}},
+    {"offset": {"line": 73, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/index.js"],"sourcesContent":["const result = await require(\"./main\");\n\nawait import(\"./async\");\n\nresult.default;"],"names":["result","default"],"mappings":";;QAAA,MAAMA,SAAS;QAEf;QAEAA,OAAOC,OAAO"}},
+    {"offset": {"line": 87, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/a.js"],"sourcesContent":["import x from \"./shared\";\n\nexport default x + \" world\";\n"],"names":[],"mappings":";;QAAA;;;;;;6CAEe,+CAAC,GAAG"}},
+    {"offset": {"line": 109, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/async.js"],"sourcesContent":["// This is the async chunk\nexport default 42;\nexport const nested = () => import(\"./a\");\n"],"names":["nested"],"mappings":"AAAA,0BAA0B;qCACX;AACR,MAAMA,SAAS"}}]
 }
