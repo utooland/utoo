@@ -22,6 +22,7 @@
 //! }).await?;
 //! ```
 
+pub mod maybe_send;
 pub mod model;
 pub mod resolver;
 pub mod service;
