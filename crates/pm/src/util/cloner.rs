@@ -44,13 +44,15 @@ fn cache_key(target_path: &Path) -> PathBuf {
     target_path.to_path_buf()
 }
 
-/// Wait for a pending clone at the given target path to complete (if any).
+/// Wait for an already-pending clone at the given target path to complete.
 ///
 /// Used by the pipeline clone worker to ensure parent packages are
-/// cloned before their children.
+/// cloned before their children when the parent itself is being cloned.
+/// Missing keys are ignored: local/workspace parents never enter the clone
+/// cache, so waiting for creation would hang child package clones.
 pub async fn wait_clone_if_pending(target_path: &str) {
     CLONE_CACHE
-        .wait_if_pending(&cache_key(Path::new(target_path)))
+        .wait_existing_if_pending(&cache_key(Path::new(target_path)))
         .await;
 }
 

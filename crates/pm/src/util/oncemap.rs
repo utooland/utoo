@@ -160,6 +160,34 @@ where
         notified.await;
     }
 
+    /// Wait only if the key is already registered and in progress.
+    ///
+    /// Unlike [`wait_if_pending`], this does not create a waiter for missing
+    /// keys. Use it when a missing key means "no work will be scheduled" rather
+    /// than "work has not been scheduled yet".
+    pub async fn wait_existing_if_pending(&self, key: &K) {
+        let Some(entry) = self.map.get(key) else {
+            return;
+        };
+
+        match entry.value() {
+            Value::Done(_) => {}
+            Value::Waiting(notify) => {
+                let notify = Arc::clone(notify);
+                let notified = notify.notified();
+                drop(entry);
+
+                if let Some(entry) = self.map.get(key)
+                    && matches!(entry.value(), Value::Done(_))
+                {
+                    return;
+                }
+
+                notified.await;
+            }
+        }
+    }
+
     /// Complete a pre-registered key with a value.
     ///
     /// This is used in conjunction with `register()` for the pre-registration pattern:
@@ -373,6 +401,37 @@ mod tests {
             .await;
         assert_eq!(*result.unwrap(), 42);
         assert_eq!(attempt.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn test_wait_existing_if_pending_ignores_missing_key() {
+        let map: OnceMap<String, i32> = OnceMap::new();
+
+        tokio::time::timeout(
+            Duration::from_millis(50),
+            map.wait_existing_if_pending(&"missing".to_string()),
+        )
+        .await
+        .expect("missing keys should not register a waiter");
+    }
+
+    #[tokio::test]
+    async fn test_wait_existing_if_pending_waits_for_registered_key() {
+        let map = Arc::new(OnceMap::<String, i32>::new());
+        let key = "key".to_string();
+        let notify = map.register(key.clone()).unwrap();
+
+        let waiter_map = Arc::clone(&map);
+        let waiter_key = key.clone();
+        let waiter = tokio::spawn(async move {
+            waiter_map.wait_existing_if_pending(&waiter_key).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert!(!waiter.is_finished());
+
+        map.complete(key, Some(42), notify);
+        waiter.await.unwrap();
     }
 
     /// Test that waiters don't miss notifications due to race conditions.

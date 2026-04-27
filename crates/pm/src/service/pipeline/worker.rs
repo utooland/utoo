@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use super::receiver::PipelineChannels;
 use crate::util::cloner::{clone_package_once, wait_clone_if_pending};
 use crate::util::downloader::{download_to_cache, is_git_url};
+use crate::util::user_config::get_manifests_concurrency_limit_sync;
+use tokio::task::JoinSet;
 
 /// Pipeline worker handles for awaiting completion.
 pub struct PipelineHandles {
@@ -18,10 +20,26 @@ impl PipelineHandles {
     }
 }
 
+async fn join_next(join_set: &mut JoinSet<()>, worker_name: &str) {
+    if let Some(result) = join_set.join_next().await
+        && let Err(e) = result
+    {
+        tracing::debug!("{worker_name} task failed: {e}");
+    }
+}
+
+async fn drain_tasks(join_set: &mut JoinSet<()>, worker_name: &str) {
+    while !join_set.is_empty() {
+        join_next(join_set, worker_name).await;
+    }
+}
+
 /// Start download and clone pipeline workers, returning handles to await completion.
 pub fn start_workers(channels: PipelineChannels, cwd: PathBuf) -> PipelineHandles {
     let download_handle = tokio::spawn(async move {
         let mut rx = channels.download_rx;
+        let mut tasks = JoinSet::new();
+        let max_in_flight = get_manifests_concurrency_limit_sync().max(1);
         while let Some(info) = rx.recv().await {
             let Some(tarball_url) = info.tarball_url else {
                 continue;
@@ -39,14 +57,20 @@ pub fn start_workers(channels: PipelineChannels, cwd: PathBuf) -> PipelineHandle
             }
             let name = info.name;
             let version = info.version;
-            tokio::spawn(async move {
+            tasks.spawn(async move {
                 download_to_cache(&name, &version, &tarball_url).await;
             });
+            if tasks.len() >= max_in_flight {
+                join_next(&mut tasks, "pipeline download").await;
+            }
         }
+        drain_tasks(&mut tasks, "pipeline download").await;
     });
 
     let clone_handle = tokio::spawn(async move {
         let mut rx = channels.clone_rx;
+        let mut tasks = JoinSet::new();
+        let max_in_flight = get_manifests_concurrency_limit_sync().max(1);
         while let Some(msg) = rx.recv().await {
             let Some(tarball_url) = msg.info.tarball_url else {
                 continue;
@@ -55,7 +79,7 @@ pub fn start_workers(channels: PipelineChannels, cwd: PathBuf) -> PipelineHandle
             let version = msg.info.version;
             let target = cwd.join(&msg.path);
             let parent_path = msg.parent_path.map(|p| cwd.join(&p));
-            tokio::spawn(async move {
+            tasks.spawn(async move {
                 if let Some(ref parent) = parent_path {
                     wait_clone_if_pending(&parent.to_string_lossy()).await;
                 }
@@ -63,7 +87,11 @@ pub fn start_workers(channels: PipelineChannels, cwd: PathBuf) -> PipelineHandle
                     tracing::debug!("Pipeline pre-clone failed for {name}@{version}: {e:#}");
                 }
             });
+            if tasks.len() >= max_in_flight {
+                join_next(&mut tasks, "pipeline clone").await;
+            }
         }
+        drain_tasks(&mut tasks, "pipeline clone").await;
     });
 
     PipelineHandles {
