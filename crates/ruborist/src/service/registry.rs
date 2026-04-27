@@ -228,25 +228,8 @@ impl UnifiedRegistry {
             return Ok(FullManifestResult::Full(manifest));
         }
 
-        // Coalesce concurrent callers for the same name via OnceMap.
-        // First caller runs the fetch closure; others await the shared
-        // result on the OnceMap's `Notify` and clone the cached value.
-        let shared = self
-            .inflight
-            .get_or_init(name.to_string(), || async {
-                self.fetch_full_manifest_network(name).await.ok()
-            })
-            .await;
-
-        match shared {
-            Some(arc) => Ok((*arc).clone()),
-            None => {
-                // OnceMap clears the key on None, so the next caller
-                // retries the fetch. Retry once here with a fresh error
-                // so we surface a useful message to this caller.
-                self.fetch_full_manifest_network(name).await
-            }
-        }
+        // PROBE: OnceMap dedup stripped — direct fetch on every caller.
+        self.fetch_full_manifest_network(name).await
     }
 
     /// Perform the actual network fetch + cache update. Separated from
