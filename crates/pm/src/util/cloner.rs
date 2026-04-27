@@ -1,8 +1,10 @@
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
+use tokio::sync::Semaphore;
 use tokio_retry::Retry;
 use utoo_ruborist::manifest::IdentityView;
 
@@ -27,6 +29,20 @@ static CLONE_CACHE: Lazy<OnceMap<PathBuf, ()>> = Lazy::new(OnceMap::new);
 /// Number of `node_modules/` directories freshly materialized this run.
 /// Mirrors pnpm's "added" semantic.
 static CLONE_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// Limits concurrent filesystem clone operations.
+///
+/// Package trees are copied/hardlinked on the blocking pool. Letting thousands
+/// of package clones enter that pool at once mostly creates scheduler churn and
+/// filesystem contention, especially in warm-link installs.
+static CLONE_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
+
+fn clone_concurrency_limit() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get().saturating_mul(2))
+        .unwrap_or(32)
+        .max(1)
+}
 
 /// Returns the number of fresh clones performed (pnpm "added" equivalent).
 pub fn clone_count() -> usize {
@@ -480,6 +496,11 @@ pub async fn clone_package(
             tracing::warn!("Failed to clean target directory {}: {}", dst.display(), e);
         }
     }
+    let semaphore = CLONE_SEMAPHORE.get_or_init(|| Semaphore::new(clone_concurrency_limit()));
+    let _permit = semaphore
+        .acquire()
+        .await
+        .context("clone semaphore closed unexpectedly")?;
     clone(src, dst, find_real).await?;
     Ok(true)
 }
