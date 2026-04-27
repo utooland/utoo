@@ -1,0 +1,28 @@
+name: setup-utoo-bin
+description: Download a utoo artifact built by pm-e2e-bench's build-* job, install it on PATH, optionally create the `ut` symlink. Unix only — Windows e2e handles its own .exe layout inline.
+
+inputs:
+  artifact:
+    description: Artifact name to download (e.g. utoo-linux-x64, utoo-mac-arm64)
+    required: true
+  with-ut-symlink:
+    description: Create `ut → utoo` symlink alongside the binary (e2e tests use both names; bench scripts don't).
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Download utoo binary
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.artifact }}
+        path: dist
+    - name: Install utoo
+      shell: bash
+      run: |
+        chmod +x dist/utoo
+        if [ "${{ inputs.with-ut-symlink }}" = "true" ]; then
+          ln -sf utoo dist/ut
+        fi
+        echo "$GITHUB_WORKSPACE/dist" >> $GITHUB_PATH

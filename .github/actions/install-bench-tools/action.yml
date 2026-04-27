@@ -1,0 +1,23 @@
+name: install-bench-tools
+description: Install hyperfine + GNU time on the bench runner. macOS /usr/bin/time isn't GNU; install gnu-time and shadow `time` via $HOME/bin so bench scripts can use `time -v` regardless of platform.
+
+inputs:
+  platform:
+    description: linux or mac
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install bench tools (linux)
+      if: inputs.platform == 'linux'
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y hyperfine time
+    - name: Install bench tools (mac)
+      if: inputs.platform == 'mac'
+      shell: bash
+      run: |
+        brew install hyperfine gnu-time
+        mkdir -p "$HOME/bin"
+        ln -sf "$(brew --prefix gnu-time)/bin/gtime" "$HOME/bin/time"
+        echo "$HOME/bin" >> $GITHUB_PATH
