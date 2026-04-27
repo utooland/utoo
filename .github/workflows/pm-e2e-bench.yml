@@ -174,6 +174,89 @@ jobs:
           path: target/aarch64-apple-darwin/release/utoo
           retention-days: 1
 
+  # ============================================================
+  # NEXT-BRANCH BASELINE BUILDS
+  # Build utoo from origin/next HEAD so bench-phases can include a
+  # `utoo-next` column alongside `utoo` (this branch HEAD) — gives
+  # a clean A/B for the perf delta this PR contributes vs the merged
+  # baseline. Only fires when bench-phases will run.
+  # ============================================================
+
+  build-next-linux:
+    if: >
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-phases')
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:20.04
+    steps:
+      - name: Install dependencies
+        timeout-minutes: 6
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          install_pkgs() {
+            timeout 60 apt-get update \
+              && timeout 60 apt-get install -y build-essential curl pkg-config git
+          }
+          install_pkgs && exit 0
+          dpkg --configure -a || true
+          sed -i 's|http://archive\.ubuntu\.com|http://mirrors.edge.kernel.org|g; s|http://security\.ubuntu\.com|http://mirrors.edge.kernel.org|g' /etc/apt/sources.list
+          install_pkgs
+      - uses: actions/checkout@v4
+        with:
+          ref: next
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory /__w/utoo/utoo
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-02
+          targets: x86_64-unknown-linux-gnu
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pm-build-next-linux
+      - name: Build utoo-pm from next
+        run: cargo build --release --target x86_64-unknown-linux-gnu --bin utoo -p utoo-pm
+      - name: Upload utoo-next binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: utoo-next-linux-x64
+          path: target/x86_64-unknown-linux-gnu/release/utoo
+          retention-days: 1
+
+  build-next-mac-arm64:
+    if: >
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-phases')
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: next
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-02
+          targets: aarch64-apple-darwin
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pm-build-next-mac-arm64
+      - name: Build utoo-pm from next
+        run: cargo build --release --target aarch64-apple-darwin --bin utoo -p utoo-pm
+      - name: Upload utoo-next binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: utoo-next-mac-arm64
+          path: target/aarch64-apple-darwin/release/utoo
+          retention-days: 1
+
   build-mac-x64:
     # Mac x86_64 serves: e2e-mac-x64 only. Cross-compiled on macos-latest
     # (arm64 host) via `rustup target add x86_64-apple-darwin`.
@@ -441,7 +524,7 @@ jobs:
   # ============================================================
 
   bench-phases-linux:
-    needs: [build-linux]
+    needs: [build-linux, build-next-linux]
     if: >
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
       (github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-phases')
@@ -467,18 +550,22 @@ jobs:
         with:
           platform: linux
       - uses: ./.github/actions/install-utoo-npm-baseline
+      - uses: ./.github/actions/setup-utoo-next-baseline
+        with:
+          artifact: utoo-next-linux-x64
       - name: Verify tools
         run: |
           hyperfine --version
           utoo --version
           "$UTOO_NPM_BIN" --version
+          "$UTOO_NEXT_BIN" --version
           bun --version
       - name: Define cache wipe function
         run: |
           cat > /tmp/wipe-bench-state.sh <<'WIPE'
           #!/usr/bin/env bash
           rm -rf /tmp/pm-bench /tmp/pm-bench-results /tmp/pm-bench-output \
-                 /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache /tmp/bun-bench-cache \
+                 /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache /tmp/utoo-next-bench-cache /tmp/bun-bench-cache \
                  ~/.bun/install/cache ~/.cache/nm 2>/dev/null || true
           mkdir -p /tmp/pm-bench-output
           WIPE
@@ -490,7 +577,7 @@ jobs:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmjs.org'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
-          PM_LIST: 'utoo,utoo-npm,bun'
+          PM_LIST: 'utoo,utoo-next,utoo-npm,bun'
         run: |
           chmod +x bench/pm-bench-phases.sh
           bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmjs.log
@@ -506,7 +593,7 @@ jobs:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmmirror.com'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
-          PM_LIST: 'utoo,utoo-npm,bun'
+          PM_LIST: 'utoo,utoo-next,utoo-npm,bun'
         run: |
           mkdir -p /tmp/pm-bench-output
           bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmmirror.log
@@ -525,7 +612,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
   bench-phases-mac:
-    needs: [build-mac-arm64]
+    needs: [build-mac-arm64, build-next-mac-arm64]
     if: >
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
       (github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-phases')
@@ -551,18 +638,22 @@ jobs:
         with:
           platform: mac
       - uses: ./.github/actions/install-utoo-npm-baseline
+      - uses: ./.github/actions/setup-utoo-next-baseline
+        with:
+          artifact: utoo-next-mac-arm64
       - name: Verify tools
         run: |
           hyperfine --version
           utoo --version
           "$UTOO_NPM_BIN" --version
+          "$UTOO_NEXT_BIN" --version
           bun --version
       - name: Define cache wipe function
         run: |
           cat > /tmp/wipe-bench-state.sh <<'WIPE'
           #!/usr/bin/env bash
           rm -rf /tmp/pm-bench /tmp/pm-bench-results /tmp/pm-bench-output \
-                 /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache /tmp/bun-bench-cache \
+                 /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache /tmp/utoo-next-bench-cache /tmp/bun-bench-cache \
                  ~/.bun/install/cache ~/.cache/nm 2>/dev/null || true
           mkdir -p /tmp/pm-bench-output
           WIPE
@@ -574,7 +665,7 @@ jobs:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmjs.org'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
-          PM_LIST: 'utoo,utoo-npm,bun'
+          PM_LIST: 'utoo,utoo-next,utoo-npm,bun'
         run: |
           chmod +x bench/pm-bench-phases.sh
           bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmjs.log
@@ -590,7 +681,7 @@ jobs:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmmirror.com'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
-          PM_LIST: 'utoo,utoo-npm,bun'
+          PM_LIST: 'utoo,utoo-next,utoo-npm,bun'
         run: |
           mkdir -p /tmp/pm-bench-output
           bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmmirror.log
