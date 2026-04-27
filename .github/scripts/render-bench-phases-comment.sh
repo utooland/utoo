@@ -35,7 +35,7 @@ mkdir -p /tmp/pm-bench-output
   echo ""
   echo "[Workflow run]($RUN_URL) — ant-design"
   echo ""
-  echo "_PMs: \`utoo\` (this branch) · \`utoo-npm\` (latest published) · \`bun\` (latest)_"
+  echo "_PMs: \`utoo\` (this branch) · \`utoo-next\` (next-branch baseline) · \`utoo-npm\` (latest published) · \`bun\` (latest)_"
   echo ""
 } > "$OUT"
 

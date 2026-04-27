@@ -1,0 +1,23 @@
+name: setup-utoo-next-baseline
+description: Download the utoo binary built from origin/next HEAD (by build-next-* jobs) into a temp directory and export $UTOO_NEXT_BIN. Used by bench-phases to add a `utoo-next` baseline column — the merged-but-not-published code — so PRs can show their delta vs the trunk baseline (not just vs the older npm-published version).
+
+inputs:
+  artifact:
+    description: Artifact name uploaded by the matching build-next-* job (e.g. utoo-next-linux-x64)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Download utoo-next binary
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.artifact }}
+        path: /tmp/utoo-next-pkg
+    - name: Set UTOO_NEXT_BIN
+      shell: bash
+      run: |
+        UTOO_NEXT_BIN="/tmp/utoo-next-pkg/utoo"
+        chmod +x "$UTOO_NEXT_BIN"
+        "$UTOO_NEXT_BIN" --version
+        echo "UTOO_NEXT_BIN=$UTOO_NEXT_BIN" >> $GITHUB_ENV

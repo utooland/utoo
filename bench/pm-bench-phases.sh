@@ -18,23 +18,27 @@ mkdir -p "$BENCH_DIR" "$RESULTS_DIR"
 # image, and previously-set user config).
 UTOO_CACHE="${UTOO_CACHE:-/tmp/utoo-bench-cache}"
 UTOO_NPM_CACHE="${UTOO_NPM_CACHE:-/tmp/utoo-npm-bench-cache}"
+UTOO_NEXT_CACHE="${UTOO_NEXT_CACHE:-/tmp/utoo-next-bench-cache}"
 BUN_CACHE="${BUN_CACHE:-/tmp/bun-bench-cache}"
 export BUN_INSTALL_CACHE_DIR="$BUN_CACHE"
 
-# Drop `utoo-npm` from the PM list when no published-baseline binary is
-# wired up — UTOO_NPM_BIN is set by CI's "Install utoo@npm" step. Local
-# runs without it just skip the comparison instead of erroring.
-if [ -z "${UTOO_NPM_BIN:-}" ]; then
-  FILTERED=()
-  for pm in "${PACKAGE_MANAGERS[@]}"; do
-    if [ "$pm" = "utoo-npm" ]; then
-      echo "skip utoo-npm: UTOO_NPM_BIN not set" >&2
-      continue
-    fi
-    FILTERED+=("$pm")
-  done
-  PACKAGE_MANAGERS=("${FILTERED[@]}")
-fi
+# Drop `utoo-npm` / `utoo-next` from the PM list when their binaries
+# aren't wired up. CI sets UTOO_NPM_BIN (latest published) and
+# UTOO_NEXT_BIN (next-branch HEAD); local runs without them just skip
+# the comparison instead of erroring.
+FILTERED=()
+for pm in "${PACKAGE_MANAGERS[@]}"; do
+  if [ "$pm" = "utoo-npm" ] && [ -z "${UTOO_NPM_BIN:-}" ]; then
+    echo "skip utoo-npm: UTOO_NPM_BIN not set" >&2
+    continue
+  fi
+  if [ "$pm" = "utoo-next" ] && [ -z "${UTOO_NEXT_BIN:-}" ]; then
+    echo "skip utoo-next: UTOO_NEXT_BIN not set" >&2
+    continue
+  fi
+  FILTERED+=("$pm")
+done
+PACKAGE_MANAGERS=("${FILTERED[@]}")
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -122,9 +126,10 @@ capture_footprint() {
   local phase=$1 pm=$2 out=$3
   local cache
   case "$pm" in
-    utoo)     cache=$UTOO_CACHE ;;
-    utoo-npm) cache=$UTOO_NPM_CACHE ;;
-    bun)      cache=$BUN_CACHE ;;
+    utoo)      cache=$UTOO_CACHE ;;
+    utoo-npm)  cache=$UTOO_NPM_CACHE ;;
+    utoo-next) cache=$UTOO_NEXT_CACHE ;;
+    bun)       cache=$BUN_CACHE ;;
   esac
   printf '{"cache":%d,"node_modules":%d,"lockfile":%d}\n' \
     "$(du_bytes "$cache")" \
@@ -148,9 +153,10 @@ write_prepare() {
   local path=$1 phase=$2 pm=$3
   local cache
   case "$pm" in
-    utoo)     cache=$UTOO_CACHE ;;
-    utoo-npm) cache=$UTOO_NPM_CACHE ;;
-    bun)      cache=$BUN_CACHE ;;
+    utoo)      cache=$UTOO_CACHE ;;
+    utoo-npm)  cache=$UTOO_NPM_CACHE ;;
+    utoo-next) cache=$UTOO_NEXT_CACHE ;;
+    bun)       cache=$BUN_CACHE ;;
   esac
 
   cat > "$path" <<EOF
@@ -172,7 +178,7 @@ EOF
       # Phase 0: full cold install — nothing reused. Lockfile + all caches wiped.
       cat >> "$path" <<EOF
 rm -f package-lock.json bun.lock yarn.lock pnpm-lock.yaml
-rm -rf "$UTOO_CACHE" "$UTOO_NPM_CACHE" "$BUN_CACHE"
+rm -rf "$UTOO_CACHE" "$UTOO_NPM_CACHE" "$UTOO_NEXT_CACHE" "$BUN_CACHE"
 echo "[prep] phase 0 $pm: full cold (lockfile + caches + node_modules wiped)"
 EOF
       ;;
@@ -180,7 +186,7 @@ EOF
       # Phase 1: cold resolve — wipe lockfiles AND caches so nothing can be reused.
       cat >> "$path" <<EOF
 rm -f package-lock.json bun.lock yarn.lock pnpm-lock.yaml
-rm -rf "$UTOO_CACHE" "$UTOO_NPM_CACHE" "$BUN_CACHE"
+rm -rf "$UTOO_CACHE" "$UTOO_NPM_CACHE" "$UTOO_NEXT_CACHE" "$BUN_CACHE"
 echo "[prep] phase 1 $pm: cleaned lockfiles + caches + node_modules"
 EOF
       ;;
@@ -199,6 +205,12 @@ EOF
 rm -f bun.lock yarn.lock pnpm-lock.yaml
 rm -rf "$UTOO_NPM_CACHE"
 echo "[prep] phase 3 utoo-npm: kept package-lock.json, wiped $UTOO_NPM_CACHE"
+EOF
+          ;;
+        utoo-next) cat >> "$path" <<EOF
+rm -f bun.lock yarn.lock pnpm-lock.yaml
+rm -rf "$UTOO_NEXT_CACHE"
+echo "[prep] phase 3 utoo-next: kept package-lock.json, wiped $UTOO_NEXT_CACHE"
 EOF
           ;;
         bun) cat >> "$path" <<EOF
@@ -220,6 +232,11 @@ EOF
         utoo-npm) cat >> "$path" <<EOF
 rm -f bun.lock yarn.lock pnpm-lock.yaml
 echo "[prep] phase 4 utoo-npm: kept package-lock.json + cache"
+EOF
+          ;;
+        utoo-next) cat >> "$path" <<EOF
+rm -f bun.lock yarn.lock pnpm-lock.yaml
+echo "[prep] phase 4 utoo-next: kept package-lock.json + cache"
 EOF
           ;;
         bun) cat >> "$path" <<EOF
@@ -252,6 +269,12 @@ seed_for_phase() {
         "$UTOO_NPM_BIN" deps --registry="$REGISTRY" --cache-dir="$UTOO_NPM_CACHE" > "$RESULTS_DIR/seed_${phase}_${pm}.log" 2>&1
       fi
       ;;
+    p3_*:utoo-next|p4_*:utoo-next)
+      if [ ! -f package-lock.json ]; then
+        echo -e "  ${CYAN}seed: running \`utoo-next deps\` to generate package-lock.json${NC}"
+        "$UTOO_NEXT_BIN" deps --registry="$REGISTRY" --cache-dir="$UTOO_NEXT_CACHE" > "$RESULTS_DIR/seed_${phase}_${pm}.log" 2>&1
+      fi
+      ;;
     p3_*:bun|p4_*:bun)
       if [ ! -f bun.lock ]; then
         echo -e "  ${CYAN}seed: running \`bun install --lockfile-only\` to generate bun.lock${NC}"
@@ -264,17 +287,19 @@ seed_for_phase() {
   if [[ "$phase" == p4_* ]]; then
     local cache
     case "$pm" in
-      utoo)     cache=$UTOO_CACHE ;;
-      utoo-npm) cache=$UTOO_NPM_CACHE ;;
-      bun)      cache=$BUN_CACHE ;;
+      utoo)      cache=$UTOO_CACHE ;;
+      utoo-npm)  cache=$UTOO_NPM_CACHE ;;
+      utoo-next) cache=$UTOO_NEXT_CACHE ;;
+      bun)       cache=$BUN_CACHE ;;
     esac
     if [ ! -d "$cache" ] || [ -z "$(ls -A "$cache" 2>/dev/null)" ]; then
       echo -e "  ${CYAN}seed: warming $pm cache via full install${NC}"
       rm -rf node_modules
       case "$pm" in
-        utoo)     utoo install --ignore-scripts --registry="$REGISTRY" --cache-dir="$UTOO_CACHE" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
-        utoo-npm) "$UTOO_NPM_BIN" install --ignore-scripts --registry="$REGISTRY" --cache-dir="$UTOO_NPM_CACHE" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
-        bun)      bun  install --ignore-scripts --registry="$REGISTRY" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
+        utoo)      utoo install --ignore-scripts --registry="$REGISTRY" --cache-dir="$UTOO_CACHE" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
+        utoo-npm)  "$UTOO_NPM_BIN" install --ignore-scripts --registry="$REGISTRY" --cache-dir="$UTOO_NPM_CACHE" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
+        utoo-next) "$UTOO_NEXT_BIN" install --ignore-scripts --registry="$REGISTRY" --cache-dir="$UTOO_NEXT_CACHE" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
+        bun)       bun  install --ignore-scripts --registry="$REGISTRY" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
       esac
       rm -rf node_modules
     fi
@@ -283,17 +308,19 @@ seed_for_phase() {
 
 install_cmd() {
   case "$1" in
-    utoo)     echo "utoo install --ignore-scripts --registry=$REGISTRY --cache-dir=$UTOO_CACHE" ;;
-    utoo-npm) echo "$UTOO_NPM_BIN install --ignore-scripts --registry=$REGISTRY --cache-dir=$UTOO_NPM_CACHE" ;;
-    bun)      echo "bun install --ignore-scripts --registry=$REGISTRY" ;;
+    utoo)      echo "utoo install --ignore-scripts --registry=$REGISTRY --cache-dir=$UTOO_CACHE" ;;
+    utoo-npm)  echo "$UTOO_NPM_BIN install --ignore-scripts --registry=$REGISTRY --cache-dir=$UTOO_NPM_CACHE" ;;
+    utoo-next) echo "$UTOO_NEXT_BIN install --ignore-scripts --registry=$REGISTRY --cache-dir=$UTOO_NEXT_CACHE" ;;
+    bun)       echo "bun install --ignore-scripts --registry=$REGISTRY" ;;
   esac
 }
 
 resolve_cmd() {
   case "$1" in
-    utoo)     echo "utoo deps --registry=$REGISTRY --cache-dir=$UTOO_CACHE" ;;
-    utoo-npm) echo "$UTOO_NPM_BIN deps --registry=$REGISTRY --cache-dir=$UTOO_NPM_CACHE" ;;
-    bun)      echo "bun install --lockfile-only --registry=$REGISTRY" ;;
+    utoo)      echo "utoo deps --registry=$REGISTRY --cache-dir=$UTOO_CACHE" ;;
+    utoo-npm)  echo "$UTOO_NPM_BIN deps --registry=$REGISTRY --cache-dir=$UTOO_NPM_CACHE" ;;
+    utoo-next) echo "$UTOO_NEXT_BIN deps --registry=$REGISTRY --cache-dir=$UTOO_NEXT_CACHE" ;;
+    bun)       echo "bun install --lockfile-only --registry=$REGISTRY" ;;
   esac
 }
 
