@@ -132,9 +132,10 @@ pub fn get_install_scope() -> InstallScope {
     INSTALL_SCOPE.get().copied().unwrap_or_default()
 }
 
-// Manifest fetch concurrency configuration
+// Manifest fetch concurrency configuration. Used by both preload (worker
+// pool size) and downloader (Semaphore for tarball fetches).
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 64));
+    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 128));
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
     MANIFESTS_CONCURRENCY_LIMIT.set(value);
