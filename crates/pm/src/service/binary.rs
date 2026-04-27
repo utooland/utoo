@@ -232,7 +232,26 @@ async fn handle_cypress(
     Ok(())
 }
 
+fn should_skip_binary_mirror_for_registry(registry: &str) -> bool {
+    is_npm_registry(registry)
+}
+
+fn should_skip_binary_mirror() -> bool {
+    *SKIP_BINARY_MIRROR.get_or_init(|| {
+        let registry = get_registry();
+        let skip = should_skip_binary_mirror_for_registry(&registry);
+        if skip {
+            tracing::debug!("Skipping binary mirror envs for npm registry: {}", registry);
+        }
+        skip
+    })
+}
+
 pub async fn update_package_binary(dir: &Path, name: &str) -> Result<()> {
+    if should_skip_binary_mirror() {
+        return Ok(());
+    }
+
     let config = load_config().await?;
 
     let mirrors = config["mirrors"]["china"]
@@ -282,17 +301,6 @@ pub async fn update_package_binary(dir: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
-fn should_skip_binary_mirror() -> bool {
-    *SKIP_BINARY_MIRROR.get_or_init(|| {
-        let registry = get_registry();
-        let skip = is_npm_registry(&registry);
-        if skip {
-            tracing::debug!("Skipping binary mirror envs for npm registry: {}", registry);
-        }
-        skip
-    })
-}
-
 pub async fn get_envs() -> Option<&'static Map<String, Value>> {
     // Skip binary mirror envs when using official npm registry
     if should_skip_binary_mirror() {
@@ -313,6 +321,19 @@ mod tests {
     use super::*;
     use serde_json::json;
     use tempfile::tempdir;
+
+    #[test]
+    fn test_should_skip_binary_mirror_for_npm_registry() {
+        assert!(should_skip_binary_mirror_for_registry(
+            "https://registry.npmjs.org"
+        ));
+        assert!(should_skip_binary_mirror_for_registry(
+            "https://registry.npmjs.org/"
+        ));
+        assert!(!should_skip_binary_mirror_for_registry(
+            "https://registry.npmmirror.com"
+        ));
+    }
 
     #[tokio::test]
     async fn test_update_binary_config() {
