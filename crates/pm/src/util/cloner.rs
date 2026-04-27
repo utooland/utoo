@@ -112,7 +112,6 @@ use libc::clonefile;
 
 #[cfg(not(target_os = "macos"))]
 mod hardlink_clone {
-    use std::collections::HashSet;
     use std::path::{Path, PathBuf};
     use std::{fs, io};
 
@@ -189,10 +188,13 @@ mod hardlink_clone {
             collect_entries(&src, &dst, &mut files, &mut dirs)?;
 
             // Phase 2: Create all directories
-            let mut created_dirs = HashSet::new();
-            for dir in &dirs {
-                if created_dirs.insert(dir.clone())
-                    && let Err(e) = fs::create_dir_all(dir)
+            for (idx, dir) in dirs.iter().enumerate() {
+                let result = if idx == 0 {
+                    fs::create_dir_all(dir)
+                } else {
+                    fs::create_dir(dir)
+                };
+                if let Err(e) = result
                     && e.kind() != io::ErrorKind::AlreadyExists
                 {
                     return Err(e);
@@ -350,7 +352,15 @@ async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
 
 // find the first non built subdirectory
 pub async fn find_real_src<P: AsRef<Path>>(src: P) -> Option<PathBuf> {
-    let mut read_dir = fs::read_dir(src.as_ref()).await.ok()?;
+    let src = src.as_ref();
+    let package_dir = src.join("package");
+    if let Ok(metadata) = fs::metadata(&package_dir).await
+        && metadata.is_dir()
+    {
+        return Some(package_dir);
+    }
+
+    let mut read_dir = fs::read_dir(src).await.ok()?;
     while let Some(entry) = read_dir.next_entry().await.ok()? {
         if let Ok(metadata) = entry.metadata().await
             && metadata.is_dir()
@@ -645,6 +655,21 @@ mod tests {
         fs::create_dir(&subdir).await?;
 
         assert_eq!(find_real_src(&dir).await.unwrap(), subdir);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_find_real_src_prefers_package_dir() -> Result<()> {
+        let temp = TempDir::new()?;
+        let dir = temp.path().join("test_dir");
+        fs::create_dir(&dir).await?;
+
+        let other = dir.join("aaa");
+        let package = dir.join("package");
+        fs::create_dir(&other).await?;
+        fs::create_dir(&package).await?;
+
+        assert_eq!(find_real_src(&dir).await.unwrap(), package);
         Ok(())
     }
 
