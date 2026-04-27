@@ -314,12 +314,26 @@ pub trait RegistryClient {
     }
 }
 
+/// Convenience bound for registries usable by the parallel preload worker pool.
+///
+/// `Clone + 'static` lets callers wrap the registry in `Rc` and share one
+/// owned handle across N `spawn_local` workers; without `'static` the
+/// spawned worker future couldn't outlive any borrow, and without `Clone`
+/// the caller couldn't hand the worker pool an owned copy. Both
+/// `UnifiedRegistry` (real client, `Clone` is `Arc`-based and shallow) and
+/// `MockRegistryClient` (test client) satisfy this trivially, so the bound
+/// is invisible at every real call site — the alias just keeps the bound
+/// list short on the resolver entry-point signatures.
+pub trait PreloadRegistry: RegistryClient + Clone + 'static {}
+impl<T: RegistryClient + Clone + 'static> PreloadRegistry for T {}
+
 /// A simple in-memory registry client for testing.
 #[cfg(test)]
 pub mod mock {
     use super::*;
 
     /// Internal package data for mock registry.
+    #[derive(Clone)]
     struct MockPackage {
         name: String,
         dist_tags: HashMap<String, String>,
@@ -327,6 +341,7 @@ pub mod mock {
     }
 
     /// Mock registry client that returns predefined packages.
+    #[derive(Clone)]
     pub struct MockRegistryClient {
         packages: HashMap<String, MockPackage>,
     }

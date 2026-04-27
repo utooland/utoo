@@ -1,20 +1,37 @@
-//! Parallel manifest preloading for dependency resolution.
+//! Parallel manifest preloading via single-thread worker pool.
 //!
-//! Uses FuturesUnordered for true streaming concurrency: when a package resolves,
-//! its transitive dependencies are immediately added to the queue.
+//! N long-lived `tokio::task::spawn_local` workers pull work items from a
+//! shared `VecDeque`. Replaces the prior `FuturesUnordered` design where
+//! the main task owned all preload futures and polled them cooperatively
+//! — every per-future `await` continuation (cache check / OnceMap /
+//! RetryIf / reqwest send / bytes / parse / transitive dispatch) ran on
+//! the same single task, saturating it. CI ant-design preload sustained
+//! avg_conc ~55-60 even when the standalone manifest-bench (same reqwest
+//! stack, no resolver overhead) hit 90+ at the same nominal cap. Splitting
+//! the futures into N independent `spawn_local` tasks lets tokio schedule
+//! each future's continuation independently while still running all
+//! workers on the current OS thread — no `Send`/`Sync` bound on the
+//! registry trait, wasm-compatible.
 
+use std::cell::{Cell, RefCell};
 use std::collections::{HashSet, VecDeque};
+use std::rc::Rc;
 use std::sync::Arc;
 
-use futures::stream::{FuturesUnordered, StreamExt};
+use tokio::sync::{Notify, mpsc};
+use tokio::task::LocalSet;
 
 use crate::model::manifest::CoreVersionManifest;
 use crate::model::node::PeerDeps;
+use crate::resolver::registry::ResolveError;
 use crate::resolver::registry::resolve_package;
 use crate::traits::progress::{BuildEvent, EventReceiver};
-use crate::traits::registry::RegistryClient;
+use crate::traits::registry::{RegistryClient, ResolvedPackage};
 
-/// Default concurrency limit for manifest fetching
+/// Default concurrency limit for manifest fetching.
+///
+/// Number of long-lived `spawn_local` workers. Each processes one
+/// `resolve_package` at a time on the current thread.
 pub const DEFAULT_CONCURRENCY: usize = 64;
 
 /// A dependency spec: (name, version_spec)
@@ -71,113 +88,223 @@ fn extract_transitive_deps(manifest: &CoreVersionManifest, config: &PreloadConfi
     deps
 }
 
-/// Preload all package manifests in parallel with streaming concurrency.
+/// Result message sent from worker to main task: name, resolve result,
+/// per-request elapsed ms, count of new transitives queued by this worker.
+type Completion<E> = (String, Result<ResolvedPackage, ResolveError<E>>, u64, usize);
+
+/// Preload all package manifests in parallel via a single-thread worker pool.
+///
+/// Spawns N long-lived `spawn_local` workers on a `LocalSet` that all share
+/// a `Rc<RefCell<VecDeque<Dep>>>` work queue and a `Rc<RefCell<HashSet>>`
+/// dedup set. Workers pull, call `resolve_package`, push transitives, and
+/// send completions back via an unbounded mpsc channel which the main task
+/// drains.
+///
+/// `registry` is moved in and shared across workers via `Rc` (single-thread
+/// reference count, no `Send` required). `receiver` and `on_manifest` are
+/// borrowed for the lifetime of the call.
 pub async fn preload_manifests<R, E, F>(
     initial_deps: Vec<Dep>,
-    registry: &R,
+    registry: Rc<R>,
     config: PreloadConfig,
     receiver: &E,
     mut on_manifest: F,
 ) -> PreloadStats
 where
-    R: RegistryClient,
+    R: RegistryClient + 'static,
     E: EventReceiver,
     F: FnMut(&str, Arc<CoreVersionManifest>),
 {
     let mut stats = PreloadStats::default();
-    let mut processed: HashSet<String> = HashSet::new();
-    let mut pending: VecDeque<Dep> = initial_deps.into();
-    let concurrency = config.concurrency;
 
-    tracing::debug!(
-        "Preload: {} initial deps, concurrency={}",
-        pending.len(),
-        concurrency
-    );
+    // Shared single-thread state. `Rc<RefCell<...>>` is fine here —
+    // every worker is `spawn_local`-ed onto the same OS thread, so no
+    // synchronisation primitives are needed.
+    let pending: Rc<RefCell<VecDeque<Dep>>> = Rc::new(RefCell::new(VecDeque::new()));
+    let processed: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
 
-    let mut futures = FuturesUnordered::new();
-    let mut in_flight = 0usize;
-    let mut started = false;
+    // Counters for global termination — when `dispatched == completed`
+    // and the queue is empty, the phase is done.
+    let dispatched: Rc<Cell<usize>> = Rc::new(Cell::new(0));
+    let completed: Rc<Cell<usize>> = Rc::new(Cell::new(0));
+    let shutdown: Rc<Cell<bool>> = Rc::new(Cell::new(false));
 
-    loop {
-        // Fill up to concurrency limit
-        while in_flight < concurrency {
-            let item = loop {
-                let Some((name, spec)) = pending.pop_front() else {
-                    break None;
-                };
-                let key = format!("{}@{}", name, spec);
-                if !processed.contains(&key) {
-                    processed.insert(key);
-                    break Some((name, spec));
-                }
-            };
+    // Wake-up signal for workers parked on an empty queue.
+    let notify: Rc<Notify> = Rc::new(Notify::new());
 
-            let Some((name, spec)) = item else {
-                break;
-            };
+    // Result channel — workers send completions, main task drains.
+    let (result_tx, mut result_rx) = mpsc::unbounded_channel::<Completion<R::Error>>();
 
-            if !started {
-                receiver.on_event(BuildEvent::PreloadStart { count: 1 });
-                started = true;
-            } else {
-                receiver.on_event(BuildEvent::PreloadQueued { count: 1 });
-            }
-
-            receiver.on_event(BuildEvent::PreloadFetching { name: &name });
-
-            futures.push(async move {
-                let start = tokio::time::Instant::now();
-                let result = resolve_package(registry, &name, &spec).await;
-                let elapsed_ms = start.elapsed().as_millis() as u64;
-                (name, result, elapsed_ms)
-            });
-            in_flight += 1;
-        }
-
-        if in_flight == 0 {
-            break;
-        }
-
-        let Some((name, result, elapsed_ms)) = futures.next().await else {
-            break;
-        };
-        in_flight -= 1;
-
-        if stats.success_count == 0 && stats.failed_count == 0 {
-            stats.min_request_ms = elapsed_ms;
-            stats.max_request_ms = elapsed_ms;
-        } else {
-            stats.min_request_ms = stats.min_request_ms.min(elapsed_ms);
-            stats.max_request_ms = stats.max_request_ms.max(elapsed_ms);
-        }
-        stats.total_request_ms += elapsed_ms;
-
-        match result {
-            Ok(resolved) => {
-                stats.success_count += 1;
-                tracing::debug!("Preloaded {}@{}", name, resolved.version);
-
-                receiver.on_event(BuildEvent::PreloadProgress {
-                    name: &name,
-                    version: &resolved.version,
-                    current: stats.success_count,
-                });
-
-                // Send PackageResolved event for pipeline downloading
-                receiver.on_event(BuildEvent::PackageResolved((&*resolved.manifest).into()));
-
-                pending.extend(extract_transitive_deps(&resolved.manifest, &config));
-                on_manifest(&name, resolved.manifest);
-            }
-            Err(e) => {
-                stats.failed_count += 1;
-                tracing::debug!("Failed to preload {}: {}", name, e);
+    // Seed the queue with initial deps (deduped via the shared set).
+    {
+        let mut p = pending.borrow_mut();
+        let mut s = processed.borrow_mut();
+        for dep in initial_deps {
+            let key = format!("{}@{}", dep.0, dep.1);
+            if s.insert(key) {
+                p.push_back(dep);
+                dispatched.set(dispatched.get() + 1);
             }
         }
     }
+    let initial_count = dispatched.get();
+    let concurrency = config.concurrency.max(1);
 
-    stats.total_processed = processed.len();
+    tracing::debug!(
+        "Preload: {} initial deps, concurrency={}, mode=spawn_local-pool",
+        initial_count,
+        concurrency
+    );
+
+    // Short-circuit if nothing was seeded.
+    if initial_count == 0 {
+        receiver.on_event(BuildEvent::PreloadStart { count: 0 });
+        receiver.on_event(BuildEvent::PreloadComplete {
+            success: 0,
+            failed: 0,
+        });
+        return stats;
+    }
+
+    // Run all worker spawns + the main drain loop inside a LocalSet so
+    // `spawn_local` is valid and worker futures can borrow `&R`.
+    let local = LocalSet::new();
+
+    for _ in 0..concurrency {
+        let pending = Rc::clone(&pending);
+        let processed = Rc::clone(&processed);
+        let dispatched = Rc::clone(&dispatched);
+        let completed = Rc::clone(&completed);
+        let shutdown = Rc::clone(&shutdown);
+        let notify = Rc::clone(&notify);
+        let result_tx = result_tx.clone();
+        let config_for_worker = config.clone();
+        let registry = Rc::clone(&registry);
+
+        local.spawn_local(async move {
+            loop {
+                // Try fetching work first — fast path when queue is hot.
+                let work = pending.borrow_mut().pop_front();
+                if let Some((name, spec)) = work {
+                    let start = tokio::time::Instant::now();
+                    let result = resolve_package(&*registry, &name, &spec).await;
+                    let elapsed_ms = start.elapsed().as_millis() as u64;
+
+                    let new_added = if let Ok(resolved) = &result {
+                        let mut count = 0usize;
+                        for tdep in extract_transitive_deps(&resolved.manifest, &config_for_worker)
+                        {
+                            let key = format!("{}@{}", tdep.0, tdep.1);
+                            if processed.borrow_mut().insert(key) {
+                                pending.borrow_mut().push_back(tdep);
+                                count += 1;
+                            }
+                        }
+                        if count > 0 {
+                            dispatched.set(dispatched.get() + count);
+                            // Wake parked workers so they pick up the new
+                            // work before checking the termination condition.
+                            notify.notify_waiters();
+                        }
+                        count
+                    } else {
+                        0
+                    };
+
+                    if result_tx
+                        .send((name, result, elapsed_ms, new_added))
+                        .is_err()
+                    {
+                        // Main task dropped the receiver — done.
+                        break;
+                    }
+                    let done = completed.get() + 1;
+                    completed.set(done);
+
+                    // After completion, check global done condition.
+                    if done == dispatched.get() && pending.borrow().is_empty() {
+                        shutdown.set(true);
+                        notify.notify_waiters();
+                        break;
+                    }
+                    continue;
+                }
+
+                // Queue empty — register interest before re-checking, then
+                // park. The Notify+enable() pattern guarantees we won't
+                // miss a `notify_waiters()` racing with our park.
+                if shutdown.get() {
+                    break;
+                }
+                let notified = notify.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                if !pending.borrow().is_empty() {
+                    continue;
+                }
+                if shutdown.get() {
+                    break;
+                }
+                if completed.get() == dispatched.get() {
+                    shutdown.set(true);
+                    notify.notify_waiters();
+                    break;
+                }
+                notified.await;
+            }
+        });
+    }
+    // Drop the original sender so when all worker clones drop on exit, the
+    // result channel closes and the main loop terminates.
+    drop(result_tx);
+
+    // Main drain loop — runs inside the LocalSet alongside the workers.
+    local
+        .run_until(async {
+            receiver.on_event(BuildEvent::PreloadStart {
+                count: initial_count,
+            });
+
+            while let Some((name, result, elapsed_ms, new_added)) = result_rx.recv().await {
+                if stats.success_count == 0 && stats.failed_count == 0 {
+                    stats.min_request_ms = elapsed_ms;
+                    stats.max_request_ms = elapsed_ms;
+                } else {
+                    stats.min_request_ms = stats.min_request_ms.min(elapsed_ms);
+                    stats.max_request_ms = stats.max_request_ms.max(elapsed_ms);
+                }
+                stats.total_request_ms += elapsed_ms;
+
+                // Grow the progress bar length as transitives are discovered.
+                if new_added > 0 {
+                    receiver.on_event(BuildEvent::PreloadQueued { count: new_added });
+                }
+
+                match result {
+                    Ok(resolved) => {
+                        stats.success_count += 1;
+                        tracing::debug!("Preloaded {}@{}", name, resolved.version);
+
+                        receiver.on_event(BuildEvent::PreloadProgress {
+                            name: &name,
+                            version: &resolved.version,
+                            current: stats.success_count,
+                        });
+                        receiver
+                            .on_event(BuildEvent::PackageResolved((&*resolved.manifest).into()));
+
+                        on_manifest(&name, resolved.manifest);
+                    }
+                    Err(e) => {
+                        stats.failed_count += 1;
+                        tracing::debug!("Failed to preload {}: {}", name, e);
+                    }
+                }
+            }
+        })
+        .await;
+
+    stats.total_processed = processed.borrow().len();
 
     receiver.on_event(BuildEvent::PreloadComplete {
         success: stats.success_count,
@@ -247,7 +374,7 @@ mod tests {
 
         let stats = preload_manifests(
             vec![("lodash".into(), "^4.17.0".into())],
-            &registry,
+            Rc::new(registry),
             PreloadConfig::default(),
             &NoopReceiver,
             |name, m| {
@@ -275,7 +402,7 @@ mod tests {
 
         let stats = preload_manifests(
             vec![("a".into(), "^1.0.0".into())],
-            &registry,
+            Rc::new(registry),
             PreloadConfig::default(),
             &NoopReceiver,
             |name, m| {
@@ -297,7 +424,7 @@ mod tests {
 
         let stats = preload_manifests(
             vec![("nonexistent".into(), "^1.0.0".into())],
-            &registry,
+            Rc::new(registry),
             PreloadConfig::default(),
             &NoopReceiver,
             |name, m| {
