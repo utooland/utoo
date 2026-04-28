@@ -80,6 +80,11 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 
+/// Cuts hung TCP/TLS handshakes that would otherwise pin a conn-slot
+/// indefinitely — `service::fetch`'s retry layer only fires on a reqwest
+/// error, which silently-stalled sockets never raise.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Global HTTP client with connection pooling and DNS caching.
 ///
 /// Stores `Result<Client, String>` so that proxy-configuration errors are
@@ -94,28 +99,24 @@ pub(crate) fn get_client() -> Result<&'static reqwest::Client> {
     HTTP_CLIENT.as_ref().map_err(|e| anyhow!("{e}"))
 }
 
-/// Build a `rustls::ClientConfig` using the `aws-lc-rs` crypto provider
-/// instead of reqwest's default `ring`. Gated to macOS only — local
-/// 8-run interleaved benchmark on M-series ARM (ant-design / npmmirror,
-/// release-local profile) measured median 6.60 s → 3.85 s (-2.75 s,
-/// 42 % faster) swapping the provider; CI bench-phases on Linux x86_64
-/// + Mac CI showed +0.3-0.5 s regressions, so non-macOS keeps ring via
-/// reqwest's default `rustls-tls-native-roots` feature.
+/// Override reqwest's default `ring` with `aws-lc-rs` on macOS. Local
+/// M-series benchmarks show ~40 % faster cold resolves; CI bench-phases
+/// regresses on Linux/x86_64, so non-macOS targets keep ring via
+/// `rustls-tls-native-roots`.
 #[cfg(target_os = "macos")]
 fn build_rustls_config() -> Result<rustls::ClientConfig> {
-    // Install aws-lc-rs as the default for any other rustls consumer in
-    // the process. Idempotent — only the first call per process wins.
+    // `install_default` consumes the provider by value, so we can't share
+    // it with the `Arc` below — `default_provider()` is cheap (a struct of
+    // function pointers), so the duplicate call is fine. Idempotent across
+    // the process; only the first call wins. Sets the default for any
+    // other rustls consumer (e.g. `gix`).
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-    // Load OS root certs. On Linux this hits /etc/ssl/certs/,
-    // on macOS it queries the Security framework keychain. Called once
-    // per process via `HTTP_CLIENT`'s `LazyLock`.
     let roots = rustls_native_certs::load_native_certs();
     let mut root_store = rustls::RootCertStore::empty();
     for cert in roots.certs {
-        // Best-effort: skip any cert rustls refuses (same tolerance
-        // native-tls shows). A hard fail here would brick every
-        // request on a box with one bad root in its trust store.
+        // Tolerate individual bad roots so one broken cert in the OS
+        // trust store doesn't brick all requests.
         let _ = root_store.add(cert);
     }
     if !roots.errors.is_empty() {
@@ -129,7 +130,7 @@ fn build_rustls_config() -> Result<rustls::ClientConfig> {
         rustls::crypto::aws_lc_rs::default_provider(),
     ))
     .with_safe_default_protocol_versions()
-    .map_err(|e| anyhow!("rustls safe_default_protocol_versions: {e}"))?
+    .context("rustls safe_default_protocol_versions")?
     .with_root_certificates(root_store)
     .with_no_client_auth();
 
@@ -155,37 +156,15 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
     let builder = {
         use crate::service::dns::shared_resolver;
 
-        let mut builder = builder.no_proxy().dns_resolver(shared_resolver());
+        let mut builder = builder
+            .no_proxy()
+            .dns_resolver(shared_resolver())
+            .connect_timeout(CONNECT_TIMEOUT);
 
-        // macOS: override TLS to aws-lc-rs (see `build_rustls_config`).
-        // Linux/Windows: reqwest's default rustls + ring (via the
-        // `rustls-tls-native-roots` feature in Cargo.toml).
         #[cfg(target_os = "macos")]
         {
             builder = builder.use_preconfigured_tls(build_rustls_config()?);
         }
-
-        builder = builder
-            // Without this, a hung TCP/TLS handshake holds its conn-slot
-            // indefinitely. The retry layer in `service::fetch` only fires
-            // on a reqwest error — if the socket is silently waiting at
-            // SYN-ACK or ClientHello, no error surfaces and the request
-            // waits forever. Observed on a ~400 ms-RTT wifi against
-            // npmmirror: wall 22.6 s → 19.5 s, avg_conc 83 → 88, no
-            // retry inflation, no false-positive cancellations.
-            //
-            // 5 s window leaves ~4× headroom over the worst RTTs we
-            // expect (≤1.2 s for 400 ms RTT × 3 round-trips for full
-            // TCP+TLS).
-            //
-            // No `.read_timeout()` or `.timeout()` is set: a per-read or
-            // total-time cap risks killing legitimate slow body
-            // downloads (cold-cache CDN edges that pause for >10 s mid-
-            // body) and triggering a retry storm. CI bench-phases
-            // showed an experimental `read_timeout(10s)` regressed
-            // Linux ubuntu-latest npmmirror p1_resolve by +7 s with
-            // σ=6.33 — cure worse than disease.
-            .connect_timeout(Duration::from_secs(5));
 
         match env_var("ALL_PROXY") {
             Some(url) => {
