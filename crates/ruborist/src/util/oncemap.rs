@@ -194,6 +194,9 @@ where
     /// If another task is already computing the value, this will wait for it to complete.
     ///
     /// Returns `Some(Arc<V>)` if the computation succeeded, `None` if it failed.
+    ///
+    /// For fallible work that needs to propagate a typed error to the worker
+    /// caller, see [`Self::get_or_try_init`].
     pub async fn get_or_init<F, Fut>(&self, key: K, init: F) -> Option<Arc<V>>
     where
         F: FnOnce() -> Fut,
@@ -271,6 +274,76 @@ where
         }
         self.notify_all(&key, &notify);
         arc_value
+    }
+
+    /// Like [`Self::get_or_init`] but the work returns a `Result`. The worker
+    /// caller receives `Err(E)` if the closure failed; waiters see `Ok(None)`
+    /// (the key is cleared, next caller retries the work).
+    ///
+    /// On success, both the worker and waiters get `Ok(Some(Arc<V>))`.
+    pub async fn get_or_try_init<E, F, Fut>(
+        &self,
+        key: K,
+        init: F,
+    ) -> Result<Option<Arc<V>>, E>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<V, E>>,
+    {
+        // Fast path: already done.
+        if let Some(entry) = self.map.get(&key)
+            && let Value::Done(result) = entry.value()
+        {
+            return Ok(Some(Arc::clone(result)));
+        }
+
+        let notify = Arc::new(Notify::new());
+        let entry = self.map.entry(key.clone());
+
+        match entry {
+            Entry::Occupied(occupied) => match occupied.get() {
+                Value::Done(result) => return Ok(Some(Arc::clone(result))),
+                Value::Waiting(existing_notify) => {
+                    let existing_notify = Arc::clone(existing_notify);
+                    let notified = existing_notify.notified();
+                    drop(occupied);
+
+                    if let Some(entry) = self.map.get(&key)
+                        && let Value::Done(result) = entry.value()
+                    {
+                        return Ok(Some(Arc::clone(result)));
+                    }
+
+                    notified.await;
+
+                    if let Some(entry) = self.map.get(&key)
+                        && let Value::Done(result) = entry.value()
+                    {
+                        return Ok(Some(Arc::clone(result)));
+                    }
+                    return Ok(None);
+                }
+            },
+            Entry::Vacant(vacant) => {
+                vacant.insert(Value::Waiting(Arc::clone(&notify)));
+            }
+        }
+
+        let result = init().await;
+        match result {
+            Ok(v) => {
+                let arc = Arc::new(v);
+                self.map
+                    .insert(key.clone(), Value::Done(Arc::clone(&arc)));
+                self.notify_all(&key, &notify);
+                Ok(Some(arc))
+            }
+            Err(e) => {
+                self.map.remove(&key);
+                self.notify_all(&key, &notify);
+                Err(e)
+            }
+        }
     }
 }
 

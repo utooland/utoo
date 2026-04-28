@@ -44,6 +44,7 @@ use crate::model::manifest::{CoreVersionManifest, FullManifest};
 use crate::resolver::semver::normalize_spec;
 use crate::resolver::version::resolve_target_version;
 use crate::traits::registry::{RegistryClient, RegistryError, ResolvedPackage, is_npm_registry};
+use crate::util::OnceMap;
 
 /// Unified registry client that works on both native and WASM.
 ///
@@ -68,6 +69,17 @@ pub struct UnifiedRegistry {
     registry_url: String,
     cache: Arc<PackageCache>,
     supports_semver: bool,
+    /// Single-flight gate for full-manifest fetches keyed by package name.
+    /// Concurrent BFS workers resolving the same name share one network +
+    /// disk + parse round-trip; the canonical `Arc<FullManifest>` lands in
+    /// `cache.full_manifests` and the gate value is just `()`. Lower
+    /// layers (`manifest::fetch_full_manifest`, `service/http.rs`) are
+    /// unaware of this dedup.
+    inflight_full: Arc<OnceMap<String, ()>>,
+    /// Single-flight gate for version-manifest fetches keyed by
+    /// `(name, spec)`. Same gate-only pattern: the value lives in
+    /// `cache.version_manifests`, the gate stores `()`.
+    inflight_version: Arc<OnceMap<(String, String), ()>>,
 }
 
 /// Builder for `UnifiedRegistry`.
@@ -137,6 +149,8 @@ impl UnifiedRegistryBuilder {
             registry_url,
             cache,
             supports_semver,
+            inflight_full: Arc::new(OnceMap::new()),
+            inflight_version: Arc::new(OnceMap::new()),
         }
     }
 }
@@ -153,6 +167,8 @@ impl Clone for UnifiedRegistry {
             registry_url: self.registry_url.clone(),
             cache: Arc::clone(&self.cache),
             supports_semver: self.supports_semver,
+            inflight_full: Arc::clone(&self.inflight_full),
+            inflight_version: Arc::clone(&self.inflight_version),
         }
     }
 }
@@ -197,145 +213,188 @@ impl UnifiedRegistry {
     /// Resolve full manifest with three-tier caching and ETag validation.
     ///
     /// Cache flow:
-    /// 1. Check memory cache -> return if hit
-    /// 2. Check disk cache for versions.json (etag + version list)
-    /// 3. Fetch from network with etag for 304 validation
-    /// 4. On 304: use disk cache data
-    /// 5. On 200: update memory + disk cache
+    /// 1. Check memory cache -> return if hit (Arc bump, lock-free read)
+    /// 2. Single-flight gate: dedup concurrent fetches for the same name.
+    ///    The gate value is `()`; the canonical Arc lands in `cache`.
+    /// 3. After gate: re-read cache. `full_manifests` populated → 200;
+    ///    only `versions_info` populated → 304; both empty → race error.
     async fn resolve_full_manifest(&self, name: &str) -> Result<FullManifestResult, RegistryError> {
-        // 1. Check memory cache first
+        // Fast path: memory cache hit on a populated entry.
         if let Some(manifest) = self.cache.get_full_manifest(name) {
             tracing::debug!("Memory cache hit for full manifest: {}", name);
             return Ok(FullManifestResult::Full(manifest));
         }
 
-        // 2. Load etag from disk cache (if available)
-        let disk_versions = self.cache.get_versions_from_disk(name).await;
-        let etag = disk_versions.as_ref().and_then(|v| v.etag.clone());
-
-        // 3. Fetch from network with ETag for validation
-        match manifest::fetch_full_manifest(manifest::FetchManifestOptions {
-            registry_url: &self.registry_url,
-            name,
-            format: manifest::MetadataFormat::Abbreviated,
-            etag: etag.as_deref(),
-        })
-        .await
-        .map_err(RegistryError)?
-        {
-            manifest::FetchManifestResult::Ok(manifest, new_etag) => {
-                let versions_info = Arc::new(VersionsInfo {
-                    versions: Versions {
-                        version_list: manifest.versions.clone(),
-                        dist_tags: manifest.dist_tags.clone(),
-                    },
-                    etag: new_etag,
-                    last_updated: current_timestamp_secs(),
-                });
-                let arc = Arc::new(manifest);
-                self.cache
-                    .set_full_manifest(name.to_string(), Arc::clone(&arc));
-                self.cache
-                    .set_versions(name.to_string(), Arc::clone(&versions_info));
-                self.cache.set_versions_to_disk(name, &versions_info).await;
-                Ok(FullManifestResult::Full(arc))
-            }
-            manifest::FetchManifestResult::NotModified => {
-                tracing::debug!("ETag cache hit (304) for: {}", name);
-                if let Some(versions_info) = disk_versions {
-                    self.cache.set_versions(name.to_string(), versions_info);
-                    Ok(FullManifestResult::NotModified)
-                } else {
-                    // Disk cache corrupted, fetch fresh (without etag)
-                    let (manifest, new_etag) = manifest::fetch_full_manifest_fresh(
-                        &self.registry_url,
-                        name,
-                        manifest::MetadataFormat::Abbreviated,
-                    )
-                    .await
-                    .map_err(RegistryError)?;
-
-                    let versions_info = Arc::new(VersionsInfo {
-                        versions: Versions {
-                            version_list: manifest.versions.clone(),
-                            dist_tags: manifest.dist_tags.clone(),
-                        },
-                        etag: new_etag,
-                        last_updated: current_timestamp_secs(),
-                    });
-                    let arc = Arc::new(manifest);
-                    self.cache
-                        .set_full_manifest(name.to_string(), Arc::clone(&arc));
-                    self.cache
-                        .set_versions(name.to_string(), Arc::clone(&versions_info));
-                    self.cache.set_versions_to_disk(name, &versions_info).await;
-                    Ok(FullManifestResult::Full(arc))
+        // Single-flight: dedup concurrent disk + network work for the same
+        // package name. The closure populates `cache` as a side effect; we
+        // read the result back below.
+        self.inflight_full
+            .get_or_try_init::<RegistryError, _, _>(name.to_string(), || async {
+                // Re-check inside the worker — a previous winner may have
+                // populated the cache while we queued on the OnceMap shard.
+                if self.cache.get_full_manifest(name).is_some() {
+                    return Ok(());
                 }
-            }
+
+                let disk_versions = self.cache.get_versions_from_disk(name).await;
+                let etag = disk_versions.as_ref().and_then(|v| v.etag.clone());
+
+                match manifest::fetch_full_manifest(manifest::FetchManifestOptions {
+                    registry_url: &self.registry_url,
+                    name,
+                    format: manifest::MetadataFormat::Abbreviated,
+                    etag: etag.as_deref(),
+                })
+                .await
+                .map_err(RegistryError)?
+                {
+                    manifest::FetchManifestResult::Ok(manifest, new_etag) => {
+                        let versions_info = Arc::new(VersionsInfo {
+                            versions: Versions {
+                                version_list: manifest.versions.clone(),
+                                dist_tags: manifest.dist_tags.clone(),
+                            },
+                            etag: new_etag,
+                            last_updated: current_timestamp_secs(),
+                        });
+                        let arc = Arc::new(manifest);
+                        self.cache
+                            .set_full_manifest(name.to_string(), Arc::clone(&arc));
+                        self.cache
+                            .set_versions(name.to_string(), Arc::clone(&versions_info));
+                        self.cache.set_versions_to_disk(name, &versions_info).await;
+                    }
+                    manifest::FetchManifestResult::NotModified => {
+                        tracing::debug!("ETag cache hit (304) for: {}", name);
+                        if let Some(versions_info) = disk_versions {
+                            // Only populate `versions_info`; absence of
+                            // `full_manifests` after the gate is the 304
+                            // signal.
+                            self.cache.set_versions(name.to_string(), versions_info);
+                        } else {
+                            // Disk cache corrupted, fetch fresh (without etag).
+                            let (manifest, new_etag) = manifest::fetch_full_manifest_fresh(
+                                &self.registry_url,
+                                name,
+                                manifest::MetadataFormat::Abbreviated,
+                            )
+                            .await
+                            .map_err(RegistryError)?;
+                            let versions_info = Arc::new(VersionsInfo {
+                                versions: Versions {
+                                    version_list: manifest.versions.clone(),
+                                    dist_tags: manifest.dist_tags.clone(),
+                                },
+                                etag: new_etag,
+                                last_updated: current_timestamp_secs(),
+                            });
+                            let arc = Arc::new(manifest);
+                            self.cache
+                                .set_full_manifest(name.to_string(), Arc::clone(&arc));
+                            self.cache
+                                .set_versions(name.to_string(), Arc::clone(&versions_info));
+                            self.cache.set_versions_to_disk(name, &versions_info).await;
+                        }
+                    }
+                }
+                Ok(())
+            })
+            .await?;
+
+        // Cache state is the discriminator: full_manifests populated → 200;
+        // only versions_info populated → 304; neither → race / eviction.
+        if let Some(manifest) = self.cache.get_full_manifest(name) {
+            Ok(FullManifestResult::Full(manifest))
+        } else if self.cache.get_versions(name).is_some() {
+            Ok(FullManifestResult::NotModified)
+        } else {
+            Err(RegistryError(anyhow!(
+                "manifest for {name} vanished from cache after fetch"
+            )))
         }
     }
 
-    /// Resolve version manifest with three-tier caching.
-    ///
-    /// Cache key is `name@spec` (e.g., `lodash@^4.17.0`).
-    /// This allows cache hits when the same spec is requested multiple times.
+    /// Resolve version manifest with three-tier caching + single-flight gate.
     ///
     /// Cache flow:
-    /// 1. Memory cache -> fastest
-    /// 2. Disk cache -> persistent
-    /// 3. Network -> authoritative
+    /// 1. Memory cache → return Arc directly if hit (lock-free read).
+    /// 2. Single-flight gate dedups concurrent fetches for the same
+    ///    `(name, spec)`; the closure populates `cache.version_manifests` as
+    ///    a side effect, the gate value is `()`.
+    /// 3. After gate: re-read cache. Missing only on race / eviction.
     async fn resolve_version_manifest(
         &self,
         name: &str,
         spec: &str,
     ) -> Result<Arc<CoreVersionManifest>, RegistryError> {
-        // 1. Check memory cache using name@spec as key
+        // Fast path: memory hit.
         if let Some(manifest) = self.cache.get_version_manifest(name, spec) {
             tracing::debug!("Memory cache hit for version manifest: {}@{}", name, spec);
             return Ok(manifest);
         }
 
-        // 2. Check disk cache (only for non-semver registries)
-        // Semver registries resolve specs server-side, so disk cache keys (name@spec)
-        // may not match the actual resolved version.
-        if !self.supports_semver
-            && let Some(manifest) = self.cache.get_version_manifest_from_disk(name, spec).await
-        {
-            tracing::debug!("Disk cache hit for version manifest: {}@{}", name, spec);
-            // Already cached in memory by get_version_manifest_from_disk
-            return Ok(manifest);
-        }
+        self.inflight_version
+            .get_or_try_init::<RegistryError, _, _>(
+                (name.to_string(), spec.to_string()),
+                || async {
+                    // Re-check inside the worker (race window).
+                    if self.cache.get_version_manifest(name, spec).is_some() {
+                        return Ok(());
+                    }
 
-        // 3. Fetch from network (http module handles pure HTTP)
-        // Use abbreviated format only for semver-supporting registries
-        tracing::debug!("Cache miss for {}@{}, fetching from network", name, spec);
-        let manifest = manifest::fetch_version_manifest(manifest::FetchVersionManifestOptions {
-            registry_url: &self.registry_url,
-            name,
-            spec,
-            format: if self.supports_semver {
-                manifest::MetadataFormat::Abbreviated
-            } else {
-                manifest::MetadataFormat::Complete
-            },
-        })
-        .await
-        .map_err(RegistryError)?;
+                    // Disk cache (non-semver only — semver specs may not
+                    // match the eventual resolved version on disk).
+                    if !self.supports_semver
+                        && self
+                            .cache
+                            .get_version_manifest_from_disk(name, spec)
+                            .await
+                            .is_some()
+                    {
+                        tracing::debug!("Disk cache hit for version manifest: {}@{}", name, spec);
+                        // get_version_manifest_from_disk also populates memory.
+                        return Ok(());
+                    }
 
-        let manifest = Arc::new(manifest);
+                    tracing::debug!("Cache miss for {}@{}, fetching from network", name, spec);
+                    let manifest = manifest::fetch_version_manifest(
+                        manifest::FetchVersionManifestOptions {
+                            registry_url: &self.registry_url,
+                            name,
+                            spec,
+                            format: if self.supports_semver {
+                                manifest::MetadataFormat::Abbreviated
+                            } else {
+                                manifest::MetadataFormat::Complete
+                            },
+                        },
+                    )
+                    .await
+                    .map_err(RegistryError)?;
 
-        // 4. Cache in memory
+                    let arc = Arc::new(manifest);
+                    self.cache.set_version_manifest(
+                        name.to_string(),
+                        spec.to_string(),
+                        Arc::clone(&arc),
+                    );
+                    if !self.supports_semver {
+                        self.cache
+                            .set_version_manifest_to_disk(name, spec, &arc)
+                            .await;
+                    }
+                    Ok(())
+                },
+            )
+            .await?;
+
         self.cache
-            .set_version_manifest(name.to_string(), spec.to_string(), manifest.clone());
-
-        // 5. Write to disk cache (only for non-semver registries)
-        if !self.supports_semver {
-            self.cache
-                .set_version_manifest_to_disk(name, spec, &manifest)
-                .await;
-        }
-
-        Ok(manifest)
+            .get_version_manifest(name, spec)
+            .ok_or_else(|| {
+                RegistryError(anyhow!(
+                    "version manifest for {name}@{spec} vanished from cache after fetch"
+                ))
+            })
     }
 }
 
