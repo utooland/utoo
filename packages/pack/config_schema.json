@@ -72,6 +72,17 @@
         }
       ]
     },
+    "mdx": {
+      "description": "Enable Rust MDX transform support",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SchemaMdxConfigOrBoolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "mode": {
       "description": "Build mode",
       "type": [
@@ -915,6 +926,83 @@
         {
           "description": "Loader with options"
         }
+      ]
+    },
+    "SchemaMdxConfig": {
+      "description": "Rust MDX transform options",
+      "type": "object",
+      "properties": {
+        "development": {
+          "description": "Whether to compile in development mode",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "jsx": {
+          "description": "Whether to preserve JSX in the MDX compiler output",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "jsxImportSource": {
+          "description": "JSX import source to use",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "jsxRuntime": {
+          "description": "JSX runtime to use",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mdxType": {
+          "description": "MDX parser mode",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaMdxParseConstructs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "providerImportSource": {
+          "description": "Module providing useMDXComponents",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "SchemaMdxConfigOrBoolean": {
+      "description": "MDX configuration",
+      "anyOf": [
+        {
+          "description": "Simple boolean to enable/disable the Rust MDX transform",
+          "type": "boolean"
+        },
+        {
+          "description": "Advanced MDX transform options",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SchemaMdxConfig"
+            }
+          ]
+        }
+      ]
+    },
+    "SchemaMdxParseConstructs": {
+      "description": "MDX parser mode",
+      "type": "string",
+      "enum": [
+        "commonmark",
+        "gfm"
       ]
     },
     "SchemaModularizeImportPackageConfig": {
