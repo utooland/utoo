@@ -22,14 +22,9 @@ thiserror    = { workspace = true }
 tokio-fs-ext = { workspace = true }
 tokio-retry  = "0.3"
 tracing      = { workspace = true }
-# HTTP client - works on both native and WASM
-reqwest      = { version = "0.12", default-features = false, features = [
-  "http2",
-  "json",
-  "rustls-tls",
-  "rustls-tls-native-roots",
-  "socks"
-] }
+# TLS provider is selected per-target below: macOS overrides to
+# aws-lc-rs (see service/http.rs); every other target keeps ring.
+reqwest      = { version = "0.12", default-features = false, features = ["http2", "json", "socks"] }
 # Shared URL-hash + staging helpers for native-only resolvers (git / http)
 sha2         = { workspace = true, optional = true }
 tempfile     = { workspace = true, optional = true }
@@ -51,13 +46,26 @@ workspace = true
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
 
+# Native (non-macOS) targets: reqwest's default rustls + ring.
+[target.'cfg(not(any(target_arch = "wasm32", target_os = "macos")))'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
+
 # Native-only dependencies (not compiled for WASM)
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 libc = "0.2"
 
-# WASM-only dependencies
+# Browser handles TLS via the fetch API, so reqwest needs no rustls
+# feature on this target.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = "0.3"  # For time in WASM
+js-sys = "0.3"
+
+# macOS uses aws-lc-rs (BoringSSL primitives) for ~40 % faster cold
+# resolves on M-series ARM. CI bench-phases regresses on Linux/x86_64
+# with this provider, so it's gated to macOS only. See service/http.rs.
+[target.'cfg(target_os = "macos")'.dependencies]
+reqwest             = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots-no-provider"] }
+rustls              = { version = "0.23", default-features = false, features = ["aws-lc-rs", "logging", "std", "tls12"] }
+rustls-native-certs = "0.8"
 
 [features]
 default      = []
