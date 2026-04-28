@@ -166,24 +166,26 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
         }
 
         builder = builder
-            // Without these, a hung TCP/TLS handshake or stalled response
-            // body holds its conn-slot indefinitely. The retry layer in
-            // `service::fetch` only fires on a reqwest error — if the
-            // socket is silently waiting, no error surfaces and the request
-            // waits forever. Observed on a ~400 ms-RTT wifi: an outlier
-            // capped at 16 s pinned p1_resolve to 22 s while p50 stayed at
-            // ~400 ms; with these two timeouts wall dropped to 19.5 s
-            // (-3 s, avg_conc 83 → 88) and no retries fired (n unchanged,
-            // 0 failed).
+            // Without this, a hung TCP/TLS handshake holds its conn-slot
+            // indefinitely. The retry layer in `service::fetch` only fires
+            // on a reqwest error — if the socket is silently waiting at
+            // SYN-ACK or ClientHello, no error surfaces and the request
+            // waits forever. Observed on a ~400 ms-RTT wifi against
+            // npmmirror: wall 22.6 s → 19.5 s, avg_conc 83 → 88, no
+            // retry inflation, no false-positive cancellations.
             //
-            // 5 s connect window: ~4× headroom for TCP+TLS at the worst
-            // RTTs we expect (≤1.2 s for 400 ms RTT × 3 round-trips).
-            // 10 s read window: per-read inactivity, not total — large
-            // npm manifests (`@babel/*`, ~5 MB) on slow links keep
-            // streaming bytes well under that. Intentionally no global
-            // `.timeout()` to avoid cutting off legitimate slow downloads.
-            .connect_timeout(Duration::from_secs(5))
-            .read_timeout(Duration::from_secs(10));
+            // 5 s window leaves ~4× headroom over the worst RTTs we
+            // expect (≤1.2 s for 400 ms RTT × 3 round-trips for full
+            // TCP+TLS).
+            //
+            // No `.read_timeout()` or `.timeout()` is set: a per-read or
+            // total-time cap risks killing legitimate slow body
+            // downloads (cold-cache CDN edges that pause for >10 s mid-
+            // body) and triggering a retry storm. CI bench-phases
+            // showed an experimental `read_timeout(10s)` regressed
+            // Linux ubuntu-latest npmmirror p1_resolve by +7 s with
+            // σ=6.33 — cure worse than disease.
+            .connect_timeout(Duration::from_secs(5));
 
         match env_var("ALL_PROXY") {
             Some(url) => {
