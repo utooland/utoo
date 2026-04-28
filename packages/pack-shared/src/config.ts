@@ -143,7 +143,7 @@ export interface ResolveOptions {
   extensions?: string[];
 }
 
-export type ExternalType = "script" | "commonjs" | "esm" | "global";
+export type ExternalType = "script" | "commonjs" | "esm" | "global" | "promise";
 
 export interface ExternalAdvanced {
   root: string;

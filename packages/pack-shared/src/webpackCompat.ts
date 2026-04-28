@@ -95,6 +95,7 @@ export type WebpackExternals =
   | Record<string, string | string[] | object>
   | (string | RegExp | Record<string, string | string[] | object>)[];
 
+export type WebpackExternalsType = "promise";
 export type WebpackTarget = string | string[];
 export type WebpackDevTool = string | boolean;
 export type WebpackStats = string | boolean | object;
@@ -108,6 +109,7 @@ export interface WebpackConfig {
   module?: WebpackModule;
   resolve?: WebpackResolve;
   externals?: WebpackExternals;
+  externalsType?: WebpackExternalsType;
   output?: WebpackOutput;
   target?: WebpackTarget;
   devtool?: WebpackDevTool;
@@ -127,6 +129,7 @@ export function compatOptionsFromWebpack(
     module,
     resolve,
     externals,
+    externalsType,
     output,
     target,
     devtool,
@@ -154,7 +157,7 @@ export function compatOptionsFromWebpack(
       mode: compatMode(mode),
       module: compatModule(module),
       resolve: compatResolve(resolve),
-      externals: compatExternals(externals),
+      externals: compatExternals(externals, externalsType),
       output: outputCompat,
       target: compatTarget(target),
       sourceMaps: compatSourceMaps(devtool),
@@ -361,6 +364,7 @@ function compatProvider(
 
 function compatExternals(
   webpackExternals?: WebpackExternals,
+  externalsType?: WebpackExternalsType,
 ): ConfigComplete["externals"] {
   if (!webpackExternals) {
     return undefined;
@@ -369,7 +373,10 @@ function compatExternals(
   switch (typeof webpackExternals) {
     case "string": {
       // Single string external: "lodash" -> { "lodash": "lodash" }
-      externals[webpackExternals] = webpackExternals;
+      externals[webpackExternals] = compatExternalValue(
+        webpackExternals,
+        externalsType,
+      );
       break;
     }
     case "object": {
@@ -378,9 +385,9 @@ function compatExternals(
         externals = webpackExternals.reduce(
           (acc, external) => {
             if (typeof external === "string") {
-              acc![external] = external;
+              acc![external] = compatExternalValue(external, externalsType);
             } else if (typeof external === "object" && external !== null) {
-              Object.assign(acc!, compatExternals(external));
+              Object.assign(acc!, compatExternals(external, externalsType));
             }
             return acc;
           },
@@ -409,7 +416,7 @@ function compatExternals(
               }
             } else {
               // Simple string mapping: { "react": "React" }
-              externals![key] = value;
+              externals![key] = compatExternalValue(value, externalsType);
             }
           } else if (Array.isArray(value)) {
             // Array format handling
@@ -437,6 +444,8 @@ function compatExternals(
                   externals![key] = `commonjs ${second}`;
                 } else if (first === "module") {
                   externals![key] = `esm ${second}`;
+                } else if (first === "promise") {
+                  externals![key] = `promise ${second}`;
                 } else if (
                   first === "var" ||
                   first === "global" ||
@@ -450,10 +459,16 @@ function compatExternals(
                   externals![key] = `${first} ${second}`;
                 }
               } else {
-                externals![key] = value[0] || key;
+                externals![key] = compatExternalValue(
+                  value[0] || key,
+                  externalsType,
+                );
               }
             } else {
-              externals![key] = value[0] || key;
+              externals![key] = compatExternalValue(
+                value[0] || key,
+                externalsType,
+              );
             }
           } else if (typeof value === "object" && value !== null) {
             // Object format: handle complex configurations
@@ -463,11 +478,11 @@ function compatExternals(
               if (val.commonjs) {
                 externals![key] = `commonjs ${val.commonjs}`;
               } else if (val.root) {
-                externals![key] = val.root;
+                externals![key] = compatExternalValue(val.root, externalsType);
               } else if (val.amd) {
-                externals![key] = val.amd;
+                externals![key] = compatExternalValue(val.amd, externalsType);
               } else {
-                externals![key] = key;
+                externals![key] = compatExternalValue(key, externalsType);
               }
             } else {
               // Treat as utoopack specific configuration (might already be in correct format)
@@ -475,7 +490,7 @@ function compatExternals(
             }
           } else {
             // Fallback to key name
-            externals![key] = key;
+            externals![key] = compatExternalValue(key, externalsType);
           }
         });
       }
@@ -489,6 +504,19 @@ function compatExternals(
   }
 
   return externals;
+}
+
+function compatExternalValue(
+  value: string,
+  externalsType?: WebpackExternalsType,
+): ExternalConfig {
+  if (
+    externalsType === "promise" &&
+    !value.match(/^(commonjs|esm|script|promise)\s/)
+  ) {
+    return `promise ${value}`;
+  }
+  return value;
 }
 
 function compatModule(
