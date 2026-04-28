@@ -952,7 +952,7 @@ pub struct SwcPlugins(
 pub struct OptionalMdxTransformOptions(Option<ResolvedVc<MdxTransformOptions>>);
 
 #[derive(
-    Clone, Debug, PartialEq, Deserialize, TraceRawVcs, NonLocalValue, OperationValue, Encode, Decode,
+    Clone, Debug, PartialEq, Deserialize, Serialize,
 )]
 #[serde(untagged)]
 pub enum MdxOptions {
