@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! OnceMap: A concurrent map that ensures each key's work is done exactly once.
 //!
 //! Based on the pattern from uv package manager:
@@ -37,6 +36,14 @@
 //!       lib-a fetches react ──► network request
 //!       lib-z waits on lib-a ──► shares result (no duplicate!)
 //! ```
+//!
+//! # Failure semantics
+//!
+//! When `init` returns `None` (or `Err` via `get_or_try_init`), the entry is
+//! removed and waiters wake up to observe `None` / `Err` themselves. Each
+//! waiter retries by re-entering `get_or_init`/`get_or_try_init`, so a single
+//! transient failure isn't broadcast as a shared error to every concurrent
+//! caller.
 
 use dashmap::{DashMap, mapref::entry::Entry};
 use std::future::Future;
@@ -71,6 +78,12 @@ pub struct OnceMap<K, V> {
     waiters: DashMap<K, Arc<Notify>>,
 }
 
+impl<K, V> std::fmt::Debug for OnceMap<K, V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OnceMap").finish_non_exhaustive()
+    }
+}
+
 impl<K, V> Default for OnceMap<K, V>
 where
     K: Eq + Hash + Clone,
@@ -95,7 +108,6 @@ where
     /// Register a key as pending (Waiting state) without starting work.
     /// Returns the Notify handle if newly registered, None if already exists.
     pub fn register(&self, key: K) -> Option<Arc<Notify>> {
-        use dashmap::mapref::entry::Entry;
         match self.map.entry(key) {
             Entry::Occupied(_) => None,
             Entry::Vacant(vacant) => {
@@ -272,6 +284,89 @@ where
         self.notify_all(&key, &notify);
         arc_value
     }
+
+    /// Fallible variant of [`get_or_init`].
+    ///
+    /// Concurrent callers single-flight the work; on `Err` the entry is
+    /// removed and each waiter resumes by re-running its own `init` closure
+    /// (since the original error can't be cloned across waiters and we'd
+    /// rather have each caller see a fresh error than a stale shared one).
+    pub async fn get_or_try_init<E, F, Fut>(&self, key: K, init: F) -> Result<Arc<V>, E>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<V, E>>,
+    {
+        // Fast path: check if already done
+        if let Some(entry) = self.map.get(&key)
+            && let Value::Done(result) = entry.value()
+        {
+            return Ok(Arc::clone(result));
+        }
+
+        // Try to register as the worker
+        let notify = Arc::new(Notify::new());
+        let entry = self.map.entry(key.clone());
+
+        let is_worker = match entry {
+            Entry::Occupied(occupied) => {
+                match occupied.get() {
+                    Value::Done(result) => {
+                        return Ok(Arc::clone(result));
+                    }
+                    Value::Waiting(existing_notify) => {
+                        let existing_notify = Arc::clone(existing_notify);
+                        let notified = existing_notify.notified();
+                        drop(occupied);
+
+                        if let Some(entry) = self.map.get(&key)
+                            && let Value::Done(result) = entry.value()
+                        {
+                            return Ok(Arc::clone(result));
+                        }
+
+                        notified.await;
+
+                        if let Some(entry) = self.map.get(&key)
+                            && let Value::Done(result) = entry.value()
+                        {
+                            return Ok(Arc::clone(result));
+                        }
+                        // Worker failed; promote ourselves to retry as a fresh worker.
+                        false
+                    }
+                }
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(Value::Waiting(Arc::clone(&notify)));
+                true
+            }
+        };
+
+        // If we observed a failed prior attempt, retry recursively. Recursion
+        // depth is bounded by concurrent retries on the same key, which is
+        // typically tiny; pinning avoids the boxed-future cost in the common
+        // single-pass case.
+        if !is_worker {
+            return Box::pin(self.get_or_try_init(key, init)).await;
+        }
+
+        // Execute the work
+        let result = init().await;
+
+        match result {
+            Ok(v) => {
+                let arc = Arc::new(v);
+                self.map.insert(key.clone(), Value::Done(Arc::clone(&arc)));
+                self.notify_all(&key, &notify);
+                Ok(arc)
+            }
+            Err(e) => {
+                self.map.remove(&key);
+                self.notify_all(&key, &notify);
+                Err(e)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -380,38 +475,6 @@ mod tests {
     /// This test verifies the fix for a race condition where a waiter could
     /// miss the notification if the worker completed between the waiter
     /// releasing the lock and registering for notifications.
-    ///
-    /// Timeline of the race condition (before fix):
-    /// ```text
-    /// Worker                          Waiter
-    /// ──────                          ──────
-    /// 1. register key
-    ///    insert Waiting(notify)
-    ///    start work...
-    ///                                 2. sees Waiting state
-    ///                                    clone notify
-    ///                                    drop(lock) ← release lock
-    ///
-    ///                                    ┌─────────────────┐
-    ///                                    │  DANGER WINDOW  │
-    ///                                    │  (not listening │
-    ///                                    │   for notify)   │
-    ///                                    └─────────────────┘
-    ///
-    /// 3. work done!
-    ///    insert Done(value)
-    ///    notify_waiters() ← sent!
-    ///    (but no one listening)
-    ///
-    ///                                 4. notified = notify.notified()
-    ///                                    ← too late! already notified
-    ///
-    ///                                 5. notified.await
-    ///                                    ← waits forever, deadlock!
-    /// ```
-    ///
-    /// The fix: register `notified()` BEFORE releasing the lock, then
-    /// double-check if the value was inserted.
     #[tokio::test]
     async fn test_no_missed_notifications() {
         use tokio::sync::Barrier;
@@ -419,32 +482,23 @@ mod tests {
         let map = Arc::new(OnceMap::<String, i32>::new());
         let barrier = Arc::new(Barrier::new(2));
 
-        // Spawn the worker task
         let map_clone = Arc::clone(&map);
         let barrier_clone = Arc::clone(&barrier);
         let worker = tokio::spawn(async move {
             map_clone
                 .get_or_init("key".to_string(), || async move {
-                    // Wait for waiter to be ready
                     barrier_clone.wait().await;
-                    // Small delay to let waiter release lock
                     tokio::time::sleep(Duration::from_millis(5)).await;
                     Some(42)
                 })
                 .await
         });
 
-        // Spawn waiter task
         let map_clone = Arc::clone(&map);
         let barrier_clone = Arc::clone(&barrier);
         let waiter = tokio::spawn(async move {
-            // Small delay to ensure worker registers first
             tokio::time::sleep(Duration::from_millis(1)).await;
-
-            // Signal worker to proceed
             barrier_clone.wait().await;
-
-            // This should not hang - if it does, the race condition exists
             map_clone
                 .get_or_init("key".to_string(), || async move {
                     panic!("Waiter should not execute work");
@@ -452,14 +506,86 @@ mod tests {
                 .await
         });
 
-        // Use timeout to detect deadlock
         let timeout = Duration::from_secs(2);
         let results = tokio::time::timeout(timeout, futures::future::join(worker, waiter))
             .await
             .expect("Test timed out - possible deadlock due to missed notification");
 
-        // Both should get the same result
         assert_eq!(*results.0.unwrap().unwrap(), 42);
         assert_eq!(*results.1.unwrap().unwrap(), 42);
+    }
+
+    #[tokio::test]
+    async fn test_try_init_dedupes_success() {
+        let map = Arc::new(OnceMap::<String, i32>::new());
+        let call_count = Arc::new(AtomicUsize::new(0));
+
+        let mut handles = vec![];
+        for _ in 0..8 {
+            let map = Arc::clone(&map);
+            let call_count = Arc::clone(&call_count);
+            handles.push(tokio::spawn(async move {
+                map.get_or_try_init::<&'static str, _, _>("k".to_string(), || async move {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    call_count.fetch_add(1, Ordering::SeqCst);
+                    Ok::<_, &'static str>(7)
+                })
+                .await
+            }));
+        }
+        for h in handles {
+            assert_eq!(*h.await.unwrap().unwrap(), 7);
+        }
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn test_try_init_failure_allows_retry() {
+        let map: OnceMap<String, i32> = OnceMap::new();
+        let result = map
+            .get_or_try_init::<&'static str, _, _>("k".to_string(), || async move { Err("boom") })
+            .await;
+        assert_eq!(result.unwrap_err(), "boom");
+
+        let result = map
+            .get_or_try_init::<&'static str, _, _>("k".to_string(), || async move {
+                Ok::<_, &'static str>(9)
+            })
+            .await;
+        assert_eq!(*result.unwrap(), 9);
+    }
+
+    #[tokio::test]
+    async fn test_try_init_waiter_retries_after_worker_error() {
+        let map = Arc::new(OnceMap::<String, i32>::new());
+        let attempts = Arc::new(AtomicUsize::new(0));
+
+        let map1 = Arc::clone(&map);
+        let attempts1 = Arc::clone(&attempts);
+        let worker = tokio::spawn(async move {
+            map1.get_or_try_init::<&'static str, _, _>("k".to_string(), || async move {
+                attempts1.fetch_add(1, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                Err::<i32, _>("worker failed")
+            })
+            .await
+        });
+
+        let map2 = Arc::clone(&map);
+        let attempts2 = Arc::clone(&attempts);
+        let waiter = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            map2.get_or_try_init::<&'static str, _, _>("k".to_string(), || async move {
+                attempts2.fetch_add(1, Ordering::SeqCst);
+                Ok::<_, &'static str>(11)
+            })
+            .await
+        });
+
+        let (w, ww) = futures::future::join(worker, waiter).await;
+        assert_eq!(w.unwrap().unwrap_err(), "worker failed");
+        // Waiter sees the failure, promotes itself to a fresh worker, and succeeds.
+        assert_eq!(*ww.unwrap().unwrap(), 11);
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
     }
 }

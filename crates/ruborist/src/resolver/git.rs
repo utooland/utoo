@@ -364,7 +364,6 @@ pub async fn ensure_repo_cached(
                 &resolved_url,
                 &name_owned,
             )
-            .map(Arc::new)
         })
         .await
         .context("git resolver task failed")?
