@@ -14,7 +14,7 @@ use crate::{
     utils::{get_diagnostics, get_issues},
 };
 
-#[turbo_tasks::value(shared, serialization = "none")]
+#[turbo_tasks::value(shared, serialization = "skip")]
 pub struct HmrUpdateWithIssues {
     pub update: ReadRef<Update>,
     pub issues: Arc<Vec<ReadRef<PlainIssue>>>,
@@ -51,7 +51,7 @@ fn project_hmr_update_operation(
     project.hmr_update(identifier, *state)
 }
 
-#[turbo_tasks::value(shared, serialization = "none")]
+#[turbo_tasks::value(shared, serialization = "skip")]
 pub struct HmrIdentifiersWithIssues {
     pub identifiers: ReadRef<Vec<RcStr>>,
     pub issues: Arc<Vec<ReadRef<PlainIssue>>>,

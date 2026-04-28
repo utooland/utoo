@@ -86,7 +86,6 @@ plugin                 = [
   "swc_core/plugin_transform_host_native",
   "swc_core/plugin_transform_host_native_filesystem_cache",
   "swc_core/plugin_transform_host_native_shared_runtime",
-  "turbopack-ecmascript-plugins/swc_ecma_transform_plugin",
 ]
 # Enable support for the tokio console: https://github.com/tokio-rs/console
 tokio-console          = ["dep:console-subscriber"]

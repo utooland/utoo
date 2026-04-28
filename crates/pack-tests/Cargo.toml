@@ -12,7 +12,7 @@ autobenches = false
 anyhow                       = { workspace = true }
 dunce                        = { workspace = true }
 once_cell                    = { workspace = true }
-pack-api                     = { workspace = true, features = ["process_pool"] }
+pack-api                     = { workspace = true, features = ["process_pool", "test"] }
 pack-core                    = { workspace = true, features = ["process_pool", "test"] }
 rustc-hash                   = { workspace = true }
 serde                        = { workspace = true }

@@ -10,6 +10,7 @@ use turbopack_browser::ecmascript::{
     EcmascriptBrowserChunk, EcmascriptBrowserEvaluateChunk, EcmascriptDevChunkList,
 };
 use turbopack_core::{
+    asset::Asset,
     chunk::{Chunk, ChunkItem, ChunkableModule},
     output::{OutputAsset, OutputAssets, OutputAssetsReference},
 };
@@ -31,7 +32,7 @@ pub async fn get_asset_intermediate_info(
     asset: ResolvedVc<Box<dyn OutputAsset>>,
     dist_root: Vc<FileSystemPath>,
 ) -> Result<Vc<AssetIntermediateInfo>> {
-    let asset_len = asset.size_bytes().await?.unwrap_or_default();
+    let asset_len = asset.content().len().await?.unwrap_or_default();
     let asset_path_full = asset.path().await?;
     let path = dist_root
         .await?
@@ -330,7 +331,6 @@ pub async fn generate_webpack_stats(
         }
     }
 
-    // Add dev chunk lists to all entrypoints
     for dev_chunk_list in dev_chunk_lists {
         for entrypoint in entrypoints.values_mut() {
             entrypoint.chunks.push(dev_chunk_list.clone());
@@ -364,6 +364,13 @@ pub async fn generate_webpack_stats(
         .try_join()
         .await?;
 
+    #[cfg(feature = "test")]
+    let modules = {
+        let mut modules = modules;
+        sort_stats_for_tests(&mut assets, &mut chunks, &mut modules, &mut entrypoints);
+        modules
+    };
+
     Ok(WebpackStats {
         assets,
         entrypoints,
@@ -380,6 +387,26 @@ fn remove_extension_from_str(filename: &str) -> &str {
         return &filename[..dot_index];
     }
     filename
+}
+
+#[cfg(feature = "test")]
+fn sort_stats_for_tests(
+    assets: &mut [WebpackStatsAsset],
+    chunks: &mut [WebpackStatsChunk],
+    modules: &mut [WebpackStatsModule],
+    entrypoints: &mut FxIndexMap<RcStr, WebpackStatsEntrypoint>,
+) {
+    assets.sort_by(|a, b| a.name.cmp(&b.name));
+    chunks.sort_by(|a, b| a.id.cmp(&b.id));
+    modules.sort_by(|a, b| a.id.cmp(&b.id));
+
+    let mut entrypoint_pairs = std::mem::take(entrypoints).into_iter().collect::<Vec<_>>();
+    entrypoint_pairs.sort_by(|a, b| a.0.cmp(&b.0));
+    for (name, mut entrypoint) in entrypoint_pairs {
+        entrypoint.chunks.sort();
+        entrypoint.assets.sort_by(|a, b| a.name.cmp(&b.name));
+        entrypoints.insert(name, entrypoint);
+    }
 }
 
 #[turbo_tasks::value]
@@ -442,7 +469,7 @@ pub struct WebpackStatsEntrypoint {
     pub assets: Vec<WebpackStatsEntrypointAssets>,
 }
 
-#[turbo_tasks::value(serialization = "none")]
+#[turbo_tasks::value(serialization = "skip")]
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct WebpackStats {

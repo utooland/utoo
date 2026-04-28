@@ -83,8 +83,7 @@ const App = ()=>{
 var __TURBOPACK__default__export__ = App;
 __turbopack_context__.s([
     "default",
-    0,
-    __TURBOPACK__default__export__
+    ()=>__TURBOPACK__default__export__
 ]);
 }),
 ]);

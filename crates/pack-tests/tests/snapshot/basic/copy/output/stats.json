@@ -35,7 +35,7 @@
       "entry": false,
       "recorded": false,
       "id": "main.js",
-      "size": 0,
+      "size": 288,
       "hash": "",
       "files": [
         "main.js"
@@ -43,54 +43,6 @@
     }
   ],
   "assets": [
-    {
-      "type": "asset",
-      "name": "input_index_d913cfd2.js",
-      "info": {},
-      "size": 328,
-      "emitted": false,
-      "comparedForEmit": false,
-      "cached": false,
-      "chunks": [
-        "input_index_d913cfd2.js"
-      ]
-    },
-    {
-      "type": "asset",
-      "name": "main.js",
-      "info": {},
-      "size": 0,
-      "emitted": false,
-      "comparedForEmit": false,
-      "cached": false,
-      "chunks": [
-        "main.js"
-      ]
-    },
-    {
-      "type": "asset",
-      "name": "reset2.css",
-      "info": {},
-      "size": 0,
-      "emitted": false,
-      "comparedForEmit": false,
-      "cached": false,
-      "chunks": [
-        "reset2.css"
-      ]
-    },
-    {
-      "type": "asset",
-      "name": "reset.css",
-      "info": {},
-      "size": 0,
-      "emitted": false,
-      "comparedForEmit": false,
-      "cached": false,
-      "chunks": [
-        "reset.css"
-      ]
-    },
     {
       "type": "asset",
       "name": "ant.svg",
@@ -105,21 +57,21 @@
     },
     {
       "type": "asset",
-      "name": "logo.svg",
+      "name": "input_index_d913cfd2.js",
       "info": {},
-      "size": 0,
+      "size": 328,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "logo.svg"
+        "input_index_d913cfd2.js"
       ]
     },
     {
       "type": "asset",
       "name": "input_index_d913cfd2.js.map",
       "info": {},
-      "size": 0,
+      "size": 290,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -129,14 +81,62 @@
     },
     {
       "type": "asset",
+      "name": "logo.svg",
+      "info": {},
+      "size": 3896,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "logo.svg"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "main.js",
+      "info": {},
+      "size": 288,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "main.js"
+      ]
+    },
+    {
+      "type": "asset",
       "name": "main.js.map",
       "info": {},
-      "size": 0,
+      "size": 53,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
         "main.js.map"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "reset.css",
+      "info": {},
+      "size": 37,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "reset.css"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "reset2.css",
+      "info": {},
+      "size": 35,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "reset2.css"
       ]
     }
   ],
