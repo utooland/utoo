@@ -727,7 +727,39 @@ if grep -q "\[app\]" run-glob.out; then
     exit 1
 fi
 
-rm -f run-all.out run-subset.out run-glob.out
+# Sub-case: --if-present should skip workspaces missing the script silently,
+# without blank `✓` rows or empty `▶ N/M` layer separators.
+NO_COLOR=1 ut run test --workspaces --if-present > run-ifpresent.out 2>&1 \
+  || { echo -e "${RED}FAIL: ut run test --workspaces --if-present exited non-zero${NC}"; cat run-ifpresent.out; exit 1; }
+echo "--- ut run test --workspaces --if-present ---"
+cat run-ifpresent.out
+echo "---"
+
+# Only lib-b has a `test` script — expect exactly one result line.
+grep -q "\[lib-b\] echo testing lib-b" run-ifpresent.out \
+  || { echo -e "${RED}FAIL: missing [lib-b] test announcement${NC}"; cat run-ifpresent.out; exit 1; }
+if grep -q "\[lib-a\]\|\[app\]" run-ifpresent.out; then
+    echo -e "${RED}FAIL: --if-present should not announce workspaces without the script${NC}"
+    cat run-ifpresent.out
+    exit 1
+fi
+
+# No blank `✓` rows (the old bug: one empty tick per skipped workspace).
+if grep -Eq '^✓[[:space:]]*$' run-ifpresent.out; then
+    echo -e "${RED}FAIL: --if-present printed blank ✓ rows${NC}"
+    cat run-ifpresent.out
+    exit 1
+fi
+
+# No layer separator for layers where every workspace is skipped.
+# lib-b sits in layer 1; layers 2 (lib-a) and 3 (app) must not appear.
+if grep -q "▶ 2/3\|▶ 3/3" run-ifpresent.out; then
+    echo -e "${RED}FAIL: --if-present printed empty layer separator${NC}"
+    cat run-ifpresent.out
+    exit 1
+fi
+
+rm -f run-all.out run-subset.out run-glob.out run-ifpresent.out
 echo -e "${GREEN}PASS: ut run multi-workspace log presentation${NC}"
 cd ../../..
 

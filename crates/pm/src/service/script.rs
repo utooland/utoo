@@ -490,8 +490,6 @@ impl ScriptService {
                 continue;
             }
 
-            print_layer_separator(layer_index, layer_count);
-
             let mut join_set = JoinSet::new();
             for (workspace_name, ws_path) in workspaces_to_run {
                 let script_name = script_name.to_string();
@@ -510,10 +508,24 @@ impl ScriptService {
             }
 
             let mut failed_names = Vec::new();
-            while let Some(ws) = join_set.join_next().await.transpose()? {
-                print_workspace_result(&ws.header, &ws.body, ws.success);
-                if !ws.success {
-                    failed_names.push(ws.name);
+            let mut separator_printed = false;
+            while let Some(outcome) = join_set.join_next().await.transpose()? {
+                let WorkspaceOutcome::Ran {
+                    name,
+                    header,
+                    body,
+                    success,
+                } = outcome
+                else {
+                    continue;
+                };
+                if !separator_printed {
+                    print_layer_separator(layer_index, layer_count);
+                    separator_printed = true;
+                }
+                print_workspace_result(&header, &body, success);
+                if !success {
+                    failed_names.push(name);
                 }
             }
             anyhow::ensure!(
@@ -528,11 +540,14 @@ impl ScriptService {
     }
 }
 
-struct WorkspaceResult {
-    name: String,
-    header: String,
-    body: Vec<u8>,
-    success: bool,
+enum WorkspaceOutcome {
+    Ran {
+        name: String,
+        header: String,
+        body: Vec<u8>,
+        success: bool,
+    },
+    Skipped,
 }
 
 async fn run_script_captured(
@@ -541,7 +556,7 @@ async fn run_script_captured(
     workspace_name: &str,
     missing: MissingScript,
     script_args: Option<Vec<String>>,
-) -> WorkspaceResult {
+) -> WorkspaceOutcome {
     let mut header = String::new();
     let mut body = Vec::new();
 
@@ -550,7 +565,7 @@ async fn run_script_captured(
 
         if !package.scripts.contains_key(script_name) {
             if missing == MissingScript::Skip {
-                return Ok(());
+                return Ok(false);
             }
             anyhow::bail!(
                 "Missing script: \"{script_name}\"\n\nTo see a list of scripts, run:\n  utoo run --workspace={workspace_name}"
@@ -617,21 +632,22 @@ async fn run_script_captured(
             }
         }
 
-        Ok::<(), anyhow::Error>(())
+        Ok::<bool, anyhow::Error>(true)
     };
 
     match inner.await {
-        Ok(()) => WorkspaceResult {
+        Ok(true) => WorkspaceOutcome::Ran {
             name: workspace_name.to_string(),
             header,
             body,
             success: true,
         },
+        Ok(false) => WorkspaceOutcome::Skipped,
         Err(e) => {
             tracing::debug!(
                 "Failed to run script '{script_name}' in workspace '{workspace_name}': {e}"
             );
-            WorkspaceResult {
+            WorkspaceOutcome::Ran {
                 name: workspace_name.to_string(),
                 header,
                 body,
