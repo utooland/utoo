@@ -357,8 +357,8 @@ impl UnifiedRegistry {
                     }
 
                     tracing::debug!("Cache miss for {}@{}, fetching from network", name, spec);
-                    let manifest = manifest::fetch_version_manifest(
-                        manifest::FetchVersionManifestOptions {
+                    let manifest =
+                        manifest::fetch_version_manifest(manifest::FetchVersionManifestOptions {
                             registry_url: &self.registry_url,
                             name,
                             spec,
@@ -367,10 +367,9 @@ impl UnifiedRegistry {
                             } else {
                                 manifest::MetadataFormat::Complete
                             },
-                        },
-                    )
-                    .await
-                    .map_err(RegistryError)?;
+                        })
+                        .await
+                        .map_err(RegistryError)?;
 
                     let arc = Arc::new(manifest);
                     self.cache.set_version_manifest(
@@ -388,13 +387,11 @@ impl UnifiedRegistry {
             )
             .await?;
 
-        self.cache
-            .get_version_manifest(name, spec)
-            .ok_or_else(|| {
-                RegistryError(anyhow!(
-                    "version manifest for {name}@{spec} vanished from cache after fetch"
-                ))
-            })
+        self.cache.get_version_manifest(name, spec).ok_or_else(|| {
+            RegistryError(anyhow!(
+                "version manifest for {name}@{spec} vanished from cache after fetch"
+            ))
+        })
     }
 }
 

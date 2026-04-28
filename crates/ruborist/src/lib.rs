@@ -100,4 +100,3 @@ pub mod http {
     #[cfg(feature = "http-tarball")]
     pub use crate::resolver::http::{file_cache_slot, http_cache_slot};
 }
-

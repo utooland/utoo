@@ -373,10 +373,7 @@ pub mod mock {
     impl RegistryClient for MockRegistryClient {
         type Error = MockError;
 
-        async fn fetch_full_manifest(
-            &self,
-            name: &str,
-        ) -> Result<Arc<FullManifest>, Self::Error> {
+        async fn fetch_full_manifest(&self, name: &str) -> Result<Arc<FullManifest>, Self::Error> {
             let pkg = self
                 .packages
                 .get(name)

@@ -281,11 +281,7 @@ where
     /// (the key is cleared, next caller retries the work).
     ///
     /// On success, both the worker and waiters get `Ok(Some(Arc<V>))`.
-    pub async fn get_or_try_init<E, F, Fut>(
-        &self,
-        key: K,
-        init: F,
-    ) -> Result<Option<Arc<V>>, E>
+    pub async fn get_or_try_init<E, F, Fut>(&self, key: K, init: F) -> Result<Option<Arc<V>>, E>
     where
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<V, E>>,
@@ -333,8 +329,7 @@ where
         match result {
             Ok(v) => {
                 let arc = Arc::new(v);
-                self.map
-                    .insert(key.clone(), Value::Done(Arc::clone(&arc)));
+                self.map.insert(key.clone(), Value::Done(Arc::clone(&arc)));
                 self.notify_all(&key, &notify);
                 Ok(Some(arc))
             }
