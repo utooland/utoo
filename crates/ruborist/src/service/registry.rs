@@ -185,11 +185,9 @@ impl Clone for UnifiedRegistry {
 ///
 /// Separates the 200 (full data) and 304 (use cache) cases at the type level,
 /// so callers can pattern-match instead of string-matching error messages.
-/// Transient return value, immediately destructured — Box not needed.
-#[allow(clippy::large_enum_variant)]
 enum FullManifestResult {
     /// Fresh manifest fetched from the network (HTTP 200).
-    Full(FullManifest),
+    Full(Arc<FullManifest>),
     /// ETag matched, versions cache is valid (HTTP 304).
     /// Caller should resolve from the in-memory versions cache and
     /// fetch individual version manifests as needed.
@@ -257,16 +255,16 @@ impl UnifiedRegistry {
                 .map_err(RegistryError)?
                 {
                     manifest::FetchManifestResult::Ok(manifest, new_etag) => {
-                        self.cache
-                            .set_full_manifest(name.to_string(), manifest.clone());
-                        let versions_info = VersionsInfo {
+                        let versions_info = Arc::new(VersionsInfo {
                             versions: Versions {
                                 version_list: manifest.versions.clone(),
                                 dist_tags: manifest.dist_tags.clone(),
                             },
                             etag: new_etag,
                             last_updated: current_timestamp_secs(),
-                        };
+                        });
+                        self.cache
+                            .set_full_manifest(name.to_string(), Arc::new(manifest));
                         self.cache
                             .set_versions(name.to_string(), versions_info.clone());
                         self.cache.set_versions_to_disk(name, &versions_info).await;
@@ -287,16 +285,16 @@ impl UnifiedRegistry {
                             .await
                             .map_err(RegistryError)?;
 
-                            self.cache
-                                .set_full_manifest(name.to_string(), manifest.clone());
-                            let versions_info = VersionsInfo {
+                            let versions_info = Arc::new(VersionsInfo {
                                 versions: Versions {
                                     version_list: manifest.versions.clone(),
                                     dist_tags: manifest.dist_tags.clone(),
                                 },
                                 etag: new_etag,
                                 last_updated: current_timestamp_secs(),
-                            };
+                            });
+                            self.cache
+                                .set_full_manifest(name.to_string(), Arc::new(manifest));
                             self.cache
                                 .set_versions(name.to_string(), versions_info.clone());
                             self.cache.set_versions_to_disk(name, &versions_info).await;
@@ -409,25 +407,12 @@ impl RegistryClient for UnifiedRegistry {
         self.supports_semver
     }
 
-    fn get_cached_full_manifest(&self, name: &str) -> Option<FullManifest> {
-        self.cache.get_full_manifest(name)
-    }
-
-    fn get_cached_versions(&self, name: &str) -> Option<crate::traits::registry::VersionsInfo> {
-        self.cache
-            .get_versions(name)
-            .map(|v| crate::traits::registry::VersionsInfo {
-                version_list: v.versions.version_list,
-                dist_tags: v.versions.dist_tags,
-            })
-    }
-
     fn cache_version_manifest(&self, name: &str, spec: &str, manifest: Arc<CoreVersionManifest>) {
         self.cache
             .set_version_manifest(name.to_string(), spec.to_string(), manifest);
     }
 
-    async fn fetch_full_manifest(&self, name: &str) -> Result<FullManifest, Self::Error> {
+    async fn fetch_full_manifest(&self, name: &str) -> Result<Arc<FullManifest>, Self::Error> {
         match self.resolve_full_manifest(name).await? {
             FullManifestResult::Full(manifest) => Ok(manifest),
             FullManifestResult::NotModified => {
