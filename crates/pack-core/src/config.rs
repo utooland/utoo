@@ -183,6 +183,7 @@ pub struct Config {
     plugin_runtime_strategy: Option<PluginRuntimeStrategy>,
     persistent_caching: Option<bool>,
     node_polyfill: Option<bool>,
+    mdx: Option<MdxOptions>,
     dev_server: Option<DevServer>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     server: Option<ServerConfig>,
@@ -950,6 +951,15 @@ pub struct SwcPlugins(
 #[turbo_tasks::value(transparent)]
 pub struct OptionalMdxTransformOptions(Option<ResolvedVc<MdxTransformOptions>>);
 
+#[derive(
+    Clone, Debug, PartialEq, Deserialize, TraceRawVcs, NonLocalValue, OperationValue, Encode, Decode,
+)]
+#[serde(untagged)]
+pub enum MdxOptions {
+    Boolean(bool),
+    Option(MdxTransformOptions),
+}
+
 #[turbo_tasks::value(transparent)]
 pub struct ExternalsConfig(
     #[bincode(with = "turbo_bincode::indexmap")] FxIndexMap<RcStr, ExternalConfig>,
@@ -1413,6 +1423,17 @@ impl Config {
     #[turbo_tasks::function]
     pub fn node_polyfill(&self) -> Vc<bool> {
         Vc::cell(self.node_polyfill.unwrap_or(false))
+    }
+
+    #[turbo_tasks::function]
+    pub fn mdx(&self) -> Vc<OptionalMdxTransformOptions> {
+        let options = match &self.mdx {
+            Some(MdxOptions::Boolean(true)) => Some(MdxTransformOptions::default().resolved_cell()),
+            Some(MdxOptions::Option(options)) => Some(options.clone().resolved_cell()),
+            _ => None,
+        };
+
+        OptionalMdxTransformOptions(options).cell()
     }
 
     #[turbo_tasks::function]

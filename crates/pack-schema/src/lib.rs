@@ -73,6 +73,11 @@ pub struct CompleteConfig {
     #[schemars(description = "React configuration")]
     pub react: Option<SchemaReactConfig>,
 
+    /// Enable Rust MDX transform support
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Enable Rust MDX transform support")]
+    pub mdx: Option<SchemaMdxConfigOrBoolean>,
+
     /// Build optimization settings
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Build optimization settings")]
@@ -146,6 +151,53 @@ pub struct SchemaReactConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Custom JSX import source")]
     pub import_source: Option<String>,
+}
+
+/// MDX configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SchemaMdxConfigOrBoolean {
+    /// Simple boolean to enable/disable the Rust MDX transform
+    Boolean(bool),
+    /// Advanced MDX transform options
+    Options(SchemaMdxConfig),
+}
+
+/// Rust MDX transform options
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaMdxConfig {
+    /// Whether to compile in development mode
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub development: Option<bool>,
+
+    /// Whether to preserve JSX in the MDX compiler output
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jsx: Option<bool>,
+
+    /// JSX runtime to use
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jsx_runtime: Option<String>,
+
+    /// JSX import source to use
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jsx_import_source: Option<String>,
+
+    /// Module providing useMDXComponents
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_import_source: Option<String>,
+
+    /// MDX parser mode
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mdx_type: Option<SchemaMdxParseConstructs>,
+}
+
+/// MDX parser mode
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum SchemaMdxParseConstructs {
+    Commonmark,
+    Gfm,
 }
 
 // ---------------------------------------------------------------------------
