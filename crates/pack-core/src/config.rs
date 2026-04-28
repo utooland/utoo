@@ -183,6 +183,7 @@ pub struct Config {
     plugin_runtime_strategy: Option<PluginRuntimeStrategy>,
     persistent_caching: Option<bool>,
     node_polyfill: Option<bool>,
+    #[bincode(with = "turbo_bincode::serde_self_describing")]
     mdx: Option<MdxOptions>,
     dev_server: Option<DevServer>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
