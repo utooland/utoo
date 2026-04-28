@@ -1,0 +1,48 @@
+name: post-bench-phases-comment
+description: Render bench-phases output as markdown tables and upsert a sticky PR comment. The comment is keyed by header `pm-bench-phases-<platform>` so each platform's results live as a separate sticky comment, idempotent across commits.
+
+inputs:
+  platform:
+    description: Platform name (linux / mac) — used in the comment header marker
+    required: true
+  os:
+    description: Runner OS string (ubuntu-latest / macos-latest) — shown in the comment title
+    required: true
+  github-token:
+    description: GitHub token for `gh` CLI lookups + sticky-comment posting
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Build PR comment body
+      shell: bash
+      run: bash .github/scripts/render-bench-phases-comment.sh ${{ inputs.platform }} ${{ inputs.os }}
+    - name: Find Current PR
+      id: findPr
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GH_REPO: ${{ github.repository }}
+      run: |
+        PR_NUMBER=""
+        if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+        else
+          PR_NUMBER=$(gh pr list --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number' || true)
+          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" == "null" ]; then
+            PR_NUMBER=$(gh pr list --search "${{ github.sha }}" --state open --json number --jq '.[0].number' || true)
+          fi
+        fi
+        if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+          echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
+        fi
+    - name: Post PR Comment
+      if: steps.findPr.outputs.number
+      uses: marocchino/sticky-pull-request-comment@v2
+      with:
+        header: pm-bench-phases-${{ inputs.platform }}
+        path: /tmp/pm-bench-output/pr_comment.md
+        number: ${{ steps.findPr.outputs.number }}
+        recreate: true
+        GITHUB_TOKEN: ${{ inputs.github-token }}

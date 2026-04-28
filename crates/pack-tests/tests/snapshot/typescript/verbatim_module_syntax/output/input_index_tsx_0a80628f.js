@@ -17,8 +17,7 @@ __turbopack_context__.s([
     "RefType",
     ()=>RefType,
     "default",
-    0,
-    __TURBOPACK__default__export__
+    ()=>__TURBOPACK__default__export__
 ]);
 }),
 ]);
