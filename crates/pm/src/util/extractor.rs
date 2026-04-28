@@ -65,23 +65,12 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
     rx.await.with_context(|| "Extract task panicked")?
 }
 
-/// Synchronous extraction: decompress + parse + chunked parallel write, all on rayon.
-///
-/// Writes are batched into fixed-size chunks: each rayon task writes a contiguous
-/// run of `WRITE_CHUNK_SIZE` files sequentially. This keeps multi-core parallelism
-/// for IO-overlap while cutting the rayon task count (and its work-stealing
-/// futex park/unpark pressure) by the chunk factor. Cross-package parallelism is
-/// preserved by the outer `rayon::spawn` in `extract_tarball`.
+/// Synchronous extraction: decompress + parse + parallel write, all on rayon.
 fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -> Result<()> {
     use rayon::prelude::*;
     use std::collections::HashSet;
     use std::fs;
     use std::io::{Cursor, Read, Write};
-
-    /// Files per rayon task when writing extracted tar entries. Sized to amortize
-    /// work-stealing overhead while leaving enough tasks to keep cores busy on
-    /// large packages (e.g. 500-file packages → ~16 tasks with WRITE_CHUNK_SIZE=32).
-    const WRITE_CHUNK_SIZE: usize = 32;
 
     // Decompress gzip using libdeflate
     let mut output = vec![0u8; estimated_size];
@@ -163,27 +152,21 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
         fs::create_dir(dir).ok();
     }
 
-    // Chunked parallel writes: N files per rayon task. Retains IO-overlap
-    // parallelism across cores while cutting the rayon task count (and the
-    // associated work-stealing futex traffic) relative to per-file par_iter.
-    entries
-        .par_chunks(WRITE_CHUNK_SIZE)
-        .try_for_each(|chunk| -> Result<()> {
-            for entry in chunk {
-                let mut file = fs::File::create(&entry.path)
-                    .with_context(|| format!("Failed to create: {}", entry.path.display()))?;
-                file.write_all(&entry.content)
-                    .with_context(|| format!("Failed to write: {}", entry.path.display()))?;
+    // Write files in parallel using rayon
+    entries.par_iter().try_for_each(|entry| -> Result<()> {
+        let mut file = fs::File::create(&entry.path)
+            .with_context(|| format!("Failed to create: {}", entry.path.display()))?;
+        file.write_all(&entry.content)
+            .with_context(|| format!("Failed to write: {}", entry.path.display()))?;
 
-                // Skip chmod for 0o644 (most files) — File::create() already
-                // produces this via umask (0o666 & ~0o022 = 0o644).
-                #[cfg(unix)]
-                if entry.mode != 0o644 {
-                    fs::set_permissions(&entry.path, fs::Permissions::from_mode(entry.mode)).ok();
-                }
-            }
-            Ok(())
-        })?;
+        // Skip chmod for 0o644 (most files) — File::create() already produces
+        // this via umask (0o666 & ~0o022 = 0o644).
+        #[cfg(unix)]
+        if entry.mode != 0o644 {
+            fs::set_permissions(&entry.path, fs::Permissions::from_mode(entry.mode)).ok();
+        }
+        Ok(())
+    })?;
 
     // Set directory permissions
     #[cfg(unix)]
