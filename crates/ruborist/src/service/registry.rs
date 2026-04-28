@@ -87,7 +87,12 @@ pub struct UnifiedRegistry {
     /// Single-flight gate for version-manifest fetches keyed by `(name, spec)`.
     /// `name@spec` is used because semver registries resolve spec server-side,
     /// so two requests with the same name but different specs must not share.
-    inflight_version: Arc<OnceMap<(String, String), CoreVersionManifest>>,
+    /// Stores `()` — the canonical `Arc<CoreVersionManifest>` lives in
+    /// `PackageCache::version_manifests`. Cheaper than storing the value:
+    /// every code path that would otherwise need an owned `CoreVersionManifest`
+    /// to satisfy the `OnceMap` value slot now flows through the cache, where
+    /// reads are Arc-bumps with no deep clone.
+    inflight_version: Arc<OnceMap<(String, String), ()>>,
 }
 
 /// Builder for `UnifiedRegistry`.
@@ -348,26 +353,32 @@ impl UnifiedRegistry {
             return Ok(manifest);
         }
 
-        // 2. Single-flight: concurrent resolves for the same (name, spec) share
-        //    the disk-cache check + network fetch + full-manifest extraction.
-        //    PackageCache is populated as a side effect for fast-path hits on
-        //    subsequent calls.
+        // 2. Single-flight gate: concurrent resolves for the same (name, spec)
+        //    share the disk-cache check + network fetch + full-manifest
+        //    extraction. The gate value is `()`; the canonical
+        //    `Arc<CoreVersionManifest>` lives in `PackageCache::version_manifests`
+        //    and is read back after the gate releases (Arc bump, no clone).
         self.inflight_version
             .get_or_try_init::<RegistryError, _, _>(
                 (name.to_string(), spec.to_string()),
                 || async {
                     // Re-check memory cache inside the worker (covers the brief
                     // window between fast-path miss and shard-lock acquire).
-                    if let Some(manifest) = self.cache.get_version_manifest(name, spec) {
-                        return Ok((*manifest).clone());
+                    if self.cache.get_version_manifest(name, spec).is_some() {
+                        return Ok(());
                     }
 
                     if !self.supports_semver
-                        && let Some(manifest) =
-                            self.cache.get_version_manifest_from_disk(name, spec).await
+                        && self
+                            .cache
+                            .get_version_manifest_from_disk(name, spec)
+                            .await
+                            .is_some()
                     {
+                        // `get_version_manifest_from_disk` populates the memory
+                        // cache as a side effect.
                         tracing::debug!("Disk cache hit for version manifest: {}@{}", name, spec);
-                        return Ok((*manifest).clone());
+                        return Ok(());
                     }
 
                     if !self.supports_semver {
@@ -377,23 +388,23 @@ impl UnifiedRegistry {
                         // same name share one full-manifest fetch.
                         let (resolved_version, manifest) =
                             self.resolve_via_full_manifest(name, spec).await?;
-                        let arc = Arc::new(manifest.clone());
+                        let arc = Arc::new(manifest);
                         self.cache.set_version_manifest(
                             name.to_string(),
                             spec.to_string(),
-                            arc.clone(),
+                            Arc::clone(&arc),
                         );
                         if resolved_version != spec {
                             self.cache.set_version_manifest(
                                 name.to_string(),
                                 resolved_version.clone(),
-                                arc.clone(),
+                                Arc::clone(&arc),
                             );
                         }
                         self.cache
                             .set_version_manifest_to_disk(name, &resolved_version, &arc)
                             .await;
-                        return Ok(manifest);
+                        return Ok(());
                     }
 
                     tracing::debug!("Cache miss for {}@{}, fetching from network", name, spec);
@@ -410,12 +421,23 @@ impl UnifiedRegistry {
                     self.cache.set_version_manifest(
                         name.to_string(),
                         spec.to_string(),
-                        Arc::new(manifest.clone()),
+                        Arc::new(manifest),
                     );
-                    Ok(manifest)
+                    Ok(())
                 },
             )
-            .await
+            .await?;
+
+        // Gate released — populated either by us, a prior waiter, or a previous
+        // run that hit memory/disk cache. A missing entry here would only occur
+        // under cache eviction (we don't currently evict).
+        self.cache
+            .get_version_manifest(name, spec)
+            .ok_or_else(|| {
+                RegistryError(anyhow!(
+                    "version manifest for {name}@{spec} vanished from cache after fetch"
+                ))
+            })
     }
 
     /// Resolve `(name, spec)` for non-semver registries by reading the full
