@@ -686,6 +686,7 @@ pub enum SchemaExternalType {
     #[serde(rename = "esm")]
     ESM,
     Global,
+    Promise,
 }
 
 /// Sub-path configuration for externals
@@ -1115,6 +1116,10 @@ mod tests {
             "root": "bar_require2",
             "type": "commonjs"
           },
+          "foo_promise2": {
+            "root": "bar_promise2",
+            "type": "promise"
+          },
           "antd": {
             "root": "antd",
             "subPath": {
@@ -1144,6 +1149,7 @@ mod tests {
 
         // Verify we can deserialize advanced externals
         assert!(externals.contains_key("foo_require2"));
+        assert!(externals.contains_key("foo_promise2"));
         assert!(externals.contains_key("antd"));
 
         // Test serialization back to JSON

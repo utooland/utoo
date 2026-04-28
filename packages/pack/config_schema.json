@@ -791,7 +791,8 @@
         "script",
         "commonjs",
         "esm",
-        "global"
+        "global",
+        "promise"
       ]
     },
     "SchemaExternalUmd": {
