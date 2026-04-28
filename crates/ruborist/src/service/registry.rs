@@ -331,6 +331,12 @@ impl UnifiedRegistry {
     /// 1. Memory cache -> fastest
     /// 2. Disk cache -> persistent
     /// 3. Network -> authoritative
+    ///
+    /// Non-semver registries resolve the spec by extracting the matching
+    /// version from the full manifest (the latter is itself single-flight
+    /// gated by `inflight_full`). Semver registries query the version
+    /// manifest directly. Either way the work for one `(name, spec)` runs
+    /// once; concurrent callers for the same key share the result.
     async fn resolve_version_manifest(
         &self,
         name: &str,
@@ -343,10 +349,9 @@ impl UnifiedRegistry {
         }
 
         // 2. Single-flight: concurrent resolves for the same (name, spec) share
-        //    the disk-cache check + network fetch. The OnceMap-stored
-        //    `Arc<CoreVersionManifest>` is the canonical result; PackageCache
-        //    is populated as a side effect for cross-registry/cross-instance
-        //    sharing via the global memory cache singleton.
+        //    the disk-cache check + network fetch + full-manifest extraction.
+        //    PackageCache is populated as a side effect for fast-path hits on
+        //    subsequent calls.
         self.inflight_version
             .get_or_try_init::<RegistryError, _, _>(
                 (name.to_string(), spec.to_string()),
@@ -354,8 +359,6 @@ impl UnifiedRegistry {
                     // Re-check memory cache inside the worker (covers the brief
                     // window between fast-path miss and shard-lock acquire).
                     if let Some(manifest) = self.cache.get_version_manifest(name, spec) {
-                        // OnceMap requires owning the V; clone the inner manifest
-                        // out of its Arc.
                         return Ok((*manifest).clone());
                     }
 
@@ -367,36 +370,111 @@ impl UnifiedRegistry {
                         return Ok((*manifest).clone());
                     }
 
+                    if !self.supports_semver {
+                        // Non-semver: resolve the spec by extracting the matching
+                        // version from the full manifest. `resolve_full_manifest`
+                        // is itself inflight-gated, so concurrent specs for the
+                        // same name share one full-manifest fetch.
+                        let (resolved_version, manifest) =
+                            self.resolve_via_full_manifest(name, spec).await?;
+                        let arc = Arc::new(manifest.clone());
+                        self.cache.set_version_manifest(
+                            name.to_string(),
+                            spec.to_string(),
+                            arc.clone(),
+                        );
+                        if resolved_version != spec {
+                            self.cache.set_version_manifest(
+                                name.to_string(),
+                                resolved_version.clone(),
+                                arc.clone(),
+                            );
+                        }
+                        self.cache
+                            .set_version_manifest_to_disk(name, &resolved_version, &arc)
+                            .await;
+                        return Ok(manifest);
+                    }
+
                     tracing::debug!("Cache miss for {}@{}, fetching from network", name, spec);
                     let manifest =
                         manifest::fetch_version_manifest(manifest::FetchVersionManifestOptions {
                             registry_url: &self.registry_url,
                             name,
                             spec,
-                            format: if self.supports_semver {
-                                manifest::MetadataFormat::Abbreviated
-                            } else {
-                                manifest::MetadataFormat::Complete
-                            },
+                            format: manifest::MetadataFormat::Abbreviated,
                         })
                         .await
                         .map_err(RegistryError)?;
 
-                    let arc_manifest = Arc::new(manifest.clone());
                     self.cache.set_version_manifest(
                         name.to_string(),
                         spec.to_string(),
-                        arc_manifest.clone(),
+                        Arc::new(manifest.clone()),
                     );
-                    if !self.supports_semver {
-                        self.cache
-                            .set_version_manifest_to_disk(name, spec, &arc_manifest)
-                            .await;
-                    }
                     Ok(manifest)
                 },
             )
             .await
+    }
+
+    /// Resolve `(name, spec)` for non-semver registries by reading the full
+    /// manifest and extracting the matching version.
+    ///
+    /// Handles the 304 (NotModified) case by falling back to the in-memory
+    /// versions cache for resolution and a single-version network fetch for
+    /// the manifest itself. The caller is responsible for caching the
+    /// extracted manifest; this helper does not touch `PackageCache`.
+    async fn resolve_via_full_manifest(
+        &self,
+        name: &str,
+        spec: &str,
+    ) -> Result<(String, CoreVersionManifest), RegistryError> {
+        match self.resolve_full_manifest(name).await? {
+            FullManifestResult::Full(full) => {
+                if full.versions.is_empty() {
+                    return Err(RegistryError(anyhow!("No versions available for {}", name)));
+                }
+                let resolved_version =
+                    resolve_target_version(&full.dist_tags, &full.versions, spec)
+                        .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
+                let core = full.get_core_version(&resolved_version).ok_or_else(|| {
+                    RegistryError(anyhow!(
+                        "Version {} not found in manifest for {}",
+                        resolved_version,
+                        name
+                    ))
+                })?;
+                Ok((resolved_version, core))
+            }
+            FullManifestResult::NotModified => {
+                // 304 fallback: ETag matched, full payload not refetched.
+                // Resolve via the lightweight versions cache, then hit the
+                // network for the single requested version. Direct call into
+                // `manifest::fetch_version_manifest` (not `self.resolve_version_manifest`)
+                // to avoid re-entering the inflight_version gate; the outer
+                // `inflight_version<(name, spec)>` already serializes us.
+                let versions_info = self.cache.get_versions(name).ok_or_else(|| {
+                    RegistryError(anyhow!("Versions cache not found for {}", name))
+                })?;
+                let resolved_version = resolve_target_version(
+                    &versions_info.versions.dist_tags,
+                    &versions_info.versions.version_list,
+                    spec,
+                )
+                .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
+                let manifest =
+                    manifest::fetch_version_manifest(manifest::FetchVersionManifestOptions {
+                        registry_url: &self.registry_url,
+                        name,
+                        spec: &resolved_version,
+                        format: manifest::MetadataFormat::Complete,
+                    })
+                    .await
+                    .map_err(RegistryError)?;
+                Ok((resolved_version, manifest))
+            }
+        }
     }
 }
 
@@ -453,208 +531,18 @@ impl RegistryClient for UnifiedRegistry {
             );
         }
 
-        // Always check memory cache first (project cache is pre-loaded here)
-        if let Some(manifest) = self.cache.get_version_manifest(&fetch_name, &fetch_spec) {
-            tracing::debug!(
-                "Memory cache hit for version manifest: {}@{}",
-                fetch_name,
-                fetch_spec
-            );
-            return Ok(ResolvedPackage {
-                name: name.to_string(),
-                version: manifest.version.clone(),
-                manifest,
-            });
-        }
-
-        // Check full manifest cache (from preload phase)
-        // This avoids redundant HTTP requests when preload already fetched the full manifest
-        if let Some(full_manifest) = self.cache.get_full_manifest(&fetch_name) {
-            tracing::debug!(
-                "Full manifest cache HIT for {}@{}, resolving from cached manifest",
-                fetch_name,
-                fetch_spec
-            );
-            tracing::debug!(
-                "Using cached full manifest for {}@{}",
-                fetch_name,
-                fetch_spec
-            );
-            let version_list: Vec<String> = full_manifest.versions.clone();
-            let resolved_version =
-                resolve_target_version(&full_manifest.dist_tags, &version_list, &fetch_spec)
-                    .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
-            let version_manifest = full_manifest
-                .get_core_version(&resolved_version)
-                .map(Arc::new)
-                .ok_or_else(|| {
-                    RegistryError(anyhow!(
-                        "Version {} not found in manifest for {}",
-                        resolved_version,
-                        fetch_name
-                    ))
-                })?;
-            // Cache version_manifest for project cache export
-            self.cache.set_version_manifest(
-                fetch_name.to_string(),
-                fetch_spec.to_string(),
-                version_manifest.clone(),
-            );
-            // Write to disk cache for non-semver registries
-            if !self.supports_semver {
-                self.cache
-                    .set_version_manifest_to_disk(&fetch_name, &resolved_version, &version_manifest)
-                    .await;
-            }
-            return Ok(ResolvedPackage {
-                name: name.to_string(),
-                version: resolved_version,
-                manifest: version_manifest,
-            });
-        }
-
-        if self.supports_semver {
-            // Semver-supporting registry: use cached version manifest
-            tracing::debug!("Using semver resolution for {}@{}", fetch_name, fetch_spec);
-            let manifest = self
-                .resolve_version_manifest(&fetch_name, &fetch_spec)
-                .await?;
-            Ok(ResolvedPackage {
-                name: name.to_string(),
-                version: manifest.version.clone(),
-                manifest,
-            })
-        } else {
-            // 1. Try to resolve using cached versions (avoid network request)
-            if let Some(versions_info) = self.cache.get_versions(&fetch_name)
-                && let Ok(resolved_version) = resolve_target_version(
-                    &versions_info.versions.dist_tags,
-                    &versions_info.versions.version_list,
-                    &fetch_spec,
-                )
-            {
-                // Check if we have the version manifest cached
-                if let Some(manifest) = self
-                    .cache
-                    .get_version_manifest(&fetch_name, &resolved_version)
-                {
-                    tracing::debug!(
-                        "Using cached versions + manifest for {}@{} => {}",
-                        fetch_name,
-                        fetch_spec,
-                        resolved_version
-                    );
-                    return Ok(ResolvedPackage {
-                        name: name.to_string(),
-                        version: resolved_version,
-                        manifest,
-                    });
-                }
-
-                // Have versions cache but not version manifest, fetch it
-                if let Ok(manifest) = self
-                    .resolve_version_manifest(&fetch_name, &resolved_version)
-                    .await
-                {
-                    tracing::debug!(
-                        "Using cached versions, fetched manifest for {}@{} => {}",
-                        fetch_name,
-                        fetch_spec,
-                        resolved_version
-                    );
-                    // Cache for project cache export
-                    self.cache.set_version_manifest(
-                        fetch_name.to_string(),
-                        fetch_spec.to_string(),
-                        manifest.clone(),
-                    );
-                    return Ok(ResolvedPackage {
-                        name: name.to_string(),
-                        version: resolved_version,
-                        manifest,
-                    });
-                }
-            }
-
-            // Try to get full manifest, handle 304 case specially
-            let resolve_result = match self.resolve_full_manifest(&fetch_name).await? {
-                FullManifestResult::Full(full_manifest) => {
-                    // Got full manifest, resolve from it
-                    let version_list: Vec<String> = full_manifest.versions.clone();
-
-                    if version_list.is_empty() {
-                        return Err(RegistryError(anyhow!(
-                            "No versions available for {}",
-                            fetch_name
-                        )));
-                    }
-
-                    let resolved_version = resolve_target_version(
-                        &full_manifest.dist_tags,
-                        &version_list,
-                        &fetch_spec,
-                    )
-                    .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
-
-                    let version_manifest = full_manifest
-                        .get_core_version(&resolved_version)
-                        .map(Arc::new)
-                        .ok_or_else(|| {
-                            RegistryError(anyhow!(
-                                "Version {} not found in manifest for {}",
-                                resolved_version,
-                                fetch_name
-                            ))
-                        })?;
-
-                    (resolved_version, version_manifest)
-                }
-                FullManifestResult::NotModified => {
-                    // 304 case: use versions cache to resolve, then fetch version manifest
-                    tracing::debug!("Using versions cache for {}@{}", fetch_name, fetch_spec);
-
-                    let versions_info = self.cache.get_versions(&fetch_name).ok_or_else(|| {
-                        RegistryError(anyhow!("Versions cache not found for {}", fetch_name))
-                    })?;
-
-                    let resolved_version = resolve_target_version(
-                        &versions_info.versions.dist_tags,
-                        &versions_info.versions.version_list,
-                        &fetch_spec,
-                    )
-                    .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
-
-                    // Fetch individual version manifest
-                    let version_manifest = self
-                        .resolve_version_manifest(&fetch_name, &resolved_version)
-                        .await?;
-
-                    (resolved_version, version_manifest)
-                }
-            };
-
-            let (resolved_version, version_manifest) = resolve_result;
-
-            // Cache in memory for project cache export
-            self.cache.set_version_manifest(
-                fetch_name.to_string(),
-                fetch_spec.to_string(),
-                version_manifest.clone(),
-            );
-
-            // Write to disk cache (only for non-semver registries)
-            if !self.supports_semver {
-                self.cache
-                    .set_version_manifest_to_disk(&fetch_name, &resolved_version, &version_manifest)
-                    .await;
-            }
-
-            Ok(ResolvedPackage {
-                name: name.to_string(),
-                version: resolved_version,
-                manifest: version_manifest,
-            })
-        }
+        // Single entry point: `resolve_version_manifest` covers both semver
+        // (direct version-manifest fetch) and non-semver (full-manifest +
+        // extract) paths, with `inflight_version<(name, spec)>` ensuring one
+        // fetch+extraction per `(name, spec)` regardless of registry type.
+        let manifest = self
+            .resolve_version_manifest(&fetch_name, &fetch_spec)
+            .await?;
+        Ok(ResolvedPackage {
+            name: name.to_string(),
+            version: manifest.version.clone(),
+            manifest,
+        })
     }
 }
 
