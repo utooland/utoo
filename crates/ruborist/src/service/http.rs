@@ -95,14 +95,13 @@ pub(crate) fn get_client() -> Result<&'static reqwest::Client> {
 }
 
 /// Build a `rustls::ClientConfig` using the `aws-lc-rs` crypto provider
-/// instead of reqwest's default `ring`. Measured on CI (4-core runner)
-/// against npmjs.org, ring's per-TLS-handshake client-side CPU cost
-/// (ECDHE key derivation + cert verification + Finished MAC) serialised
-/// across 128 parallel handshakes into a 154 ms "CCS → first AppData"
-/// span — the HTTP requests couldn't fire until all TLS crypto drained
-/// through 4 async workers. aws-lc-rs uses BoringSSL's assembly-optimised
-/// primitives and is roughly 3× faster at handshake work.
-#[cfg(not(target_arch = "wasm32"))]
+/// instead of reqwest's default `ring`. Gated to macOS only — local
+/// 8-run interleaved benchmark on M-series ARM (ant-design / npmmirror,
+/// release-local profile) measured median 6.60 s → 3.85 s (-2.75 s,
+/// 42 % faster) swapping the provider; CI bench-phases on Linux x86_64
+/// + Mac CI showed +0.3-0.5 s regressions, so non-macOS keeps ring via
+/// reqwest's default `rustls-tls-native-roots` feature.
+#[cfg(target_os = "macos")]
 fn build_rustls_config() -> Result<rustls::ClientConfig> {
     // Install aws-lc-rs as the default for any other rustls consumer in
     // the process. Idempotent — only the first call per process wins.
@@ -156,11 +155,17 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
     let builder = {
         use crate::service::dns::shared_resolver;
 
-        let tls_config = build_rustls_config()?;
-        let mut builder = builder
-            .use_preconfigured_tls(tls_config)
-            .no_proxy()
-            .dns_resolver(shared_resolver())
+        let mut builder = builder.no_proxy().dns_resolver(shared_resolver());
+
+        // macOS: override TLS to aws-lc-rs (see `build_rustls_config`).
+        // Linux/Windows: reqwest's default rustls + ring (via the
+        // `rustls-tls-native-roots` feature in Cargo.toml).
+        #[cfg(target_os = "macos")]
+        {
+            builder = builder.use_preconfigured_tls(build_rustls_config()?);
+        }
+
+        builder = builder
             // Without these, a hung TCP/TLS handshake or stalled response
             // body holds its conn-slot indefinitely. The retry layer in
             // `service::fetch` only fires on a reqwest error — if the
