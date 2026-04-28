@@ -40,9 +40,15 @@ pub struct FullManifest {
     #[serde(default, deserialize_with = "deserialize_version_keys")]
     pub versions: Vec<String>,
 
-    /// Raw HTTP response bytes. Injected post-parse; used for on-demand version extraction.
+    /// Pre-parsed `versions` subtree from the registry response.
+    ///
+    /// Populated once at fetch time by [`crate::service::manifest::fetch_full_manifest`]
+    /// (which parses the raw JSON to a `simd_json::OwnedValue` and takes the
+    /// `versions` field out). [`extract_version`](Self::extract_version) then
+    /// looks up a single version by key and deserializes only that subtree —
+    /// no full reparse of the manifest payload per call.
     #[serde(skip)]
-    pub raw: Arc<[u8]>,
+    pub versions_tree: Arc<simd_json::OwnedValue>,
 
     pub time: HashMap<String, String>,
 
@@ -76,17 +82,17 @@ pub struct FullManifest {
 }
 
 impl FullManifest {
-    /// Extract a single version from raw bytes on demand.
+    /// Extract a single version from the pre-parsed `versions` subtree.
     ///
-    /// Copies raw bytes, parses with `simd_json::to_borrowed_value`, navigates
-    /// to `versions[ver]`, then converts to the target type via `serde_json::Value`.
+    /// Looks the version up in [`Self::versions_tree`] (parsed once at fetch
+    /// time) and deserializes that subtree directly into `T` without cloning
+    /// the intermediate tree — `&OwnedValue` is itself a serde `Deserializer`,
+    /// so strings/arrays/maps are visited in place and only `T`'s own owned
+    /// fields are allocated.
     fn extract_version<T: for<'de> Deserialize<'de>>(&self, version: &str) -> Option<T> {
         use simd_json::prelude::ValueObjectAccess;
-        let mut buf = self.raw.to_vec();
-        let parsed = simd_json::to_borrowed_value(&mut buf).ok()?;
-        let version_obj = parsed.get("versions")?.get(version)?;
-        let value = serde_json::to_value(version_obj).ok()?;
-        serde_json::from_value(value).ok()
+        let val = self.versions_tree.get(version)?;
+        T::deserialize(val).ok()
     }
 
     /// Parse a single version on demand into CoreVersionManifest (hot path).

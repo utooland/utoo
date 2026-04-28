@@ -91,12 +91,27 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                         .await
                         .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
                         .to_vec();
-                    // Save raw bytes before simd_json mutates the parse buffer
-                    let mut parse_buf = raw_bytes.clone();
+                    // Two parses against independent buffers (simd_json mutates in-place):
+                    //   1. Skeleton (name / dist_tags / versions: Vec<String>) via the
+                    //      `IgnoredAny`-based serde path — fast, doesn't materialize
+                    //      version values.
+                    //   2. Full owned tree, from which we take the `versions` subtree
+                    //      and stash it on the manifest for `extract_version`.
+                    let mut skeleton_buf = raw_bytes.clone();
                     let mut manifest: FullManifest =
-                        simd_json::serde::from_slice(&mut parse_buf)
+                        simd_json::serde::from_slice(&mut skeleton_buf)
                             .map_err(|e| FetchError::Permanent(anyhow!("JSON parse error: {e}")))?;
-                    manifest.raw = std::sync::Arc::from(raw_bytes);
+                    let mut tree_buf = raw_bytes;
+                    let mut root = simd_json::to_owned_value(&mut tree_buf).map_err(|e| {
+                        FetchError::Permanent(anyhow!("JSON tree parse error: {e}"))
+                    })?;
+                    let versions_tree = match &mut root {
+                        simd_json::OwnedValue::Object(map) => {
+                            map.remove("versions").unwrap_or_default()
+                        }
+                        _ => simd_json::OwnedValue::default(),
+                    };
+                    manifest.versions_tree = std::sync::Arc::new(versions_tree);
 
                     Ok(FetchManifestResult::Ok(manifest, new_etag))
                 } else {

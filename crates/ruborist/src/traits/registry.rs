@@ -378,19 +378,20 @@ pub mod mock {
                 .get(name)
                 .ok_or_else(|| MockError(format!("Package not found: {}", name)))?;
 
-            // Build JSON and serialize to raw bytes for on-demand extraction
-            let json = serde_json::json!({
-                "name": &pkg.name,
-                "dist-tags": &pkg.dist_tags,
-                "versions": &pkg.versions,
-            });
-            let raw = serde_json::to_vec(&json).expect("mock JSON serialization");
+            // Serialize the per-version objects to bytes, parse to OwnedValue,
+            // then hand the resulting subtree to FullManifest. Mirrors how
+            // `service::manifest::fetch_full_manifest` builds the live manifest.
+            let versions_json =
+                serde_json::to_vec(&pkg.versions).expect("mock versions JSON serialization");
+            let mut buf = versions_json;
+            let versions_tree =
+                simd_json::to_owned_value(&mut buf).expect("mock versions JSON parse");
 
             Ok(Arc::new(FullManifest {
                 name: pkg.name.clone(),
                 dist_tags: pkg.dist_tags.clone(),
                 versions: pkg.versions.keys().cloned().collect(),
-                raw: Arc::from(raw),
+                versions_tree: Arc::new(versions_tree),
                 ..Default::default()
             }))
         }
