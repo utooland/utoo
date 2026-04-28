@@ -115,6 +115,7 @@ pub async fn get_server_module_options_context(
         .to_resolved()
         .await?;
     let decorators_options = get_decorators_transform_options(project_path.clone());
+    let enable_mdx_rs = *config.mdx().await?;
 
     let jsx_transform_options = get_jsx_transform_options(mode, config, false)
         .to_resolved()
@@ -278,7 +279,7 @@ pub async fn get_server_module_options_context(
             ..module_options_context.ecmascript.clone()
         },
         enable_webpack_loaders,
-        enable_mdx_rs: None,
+        enable_mdx_rs,
         rules: vec![
             (
                 foreign_code_context_condition(config).await?,
