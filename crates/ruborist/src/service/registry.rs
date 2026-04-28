@@ -431,13 +431,11 @@ impl UnifiedRegistry {
         // Gate released — populated either by us, a prior waiter, or a previous
         // run that hit memory/disk cache. A missing entry here would only occur
         // under cache eviction (we don't currently evict).
-        self.cache
-            .get_version_manifest(name, spec)
-            .ok_or_else(|| {
-                RegistryError(anyhow!(
-                    "version manifest for {name}@{spec} vanished from cache after fetch"
-                ))
-            })
+        self.cache.get_version_manifest(name, spec).ok_or_else(|| {
+            RegistryError(anyhow!(
+                "version manifest for {name}@{spec} vanished from cache after fetch"
+            ))
+        })
     }
 
     /// Resolve `(name, spec)` for non-semver registries by reading the full
