@@ -8,7 +8,7 @@ use utoo_ruborist::manifest::IdentityView;
 
 use super::downloader::{is_git_url, resolve_cache_path};
 use super::json::load_package_json;
-use super::oncemap::OnceMap;
+use utoo_ruborist::util::OnceMap;
 use super::retry::create_retry_strategy;
 use crate::fs;
 
