@@ -76,6 +76,7 @@
 //! WASM targets skip DNS entirely (browser handles it).
 
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 
@@ -159,7 +160,25 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
         let mut builder = builder
             .use_preconfigured_tls(tls_config)
             .no_proxy()
-            .dns_resolver(shared_resolver());
+            .dns_resolver(shared_resolver())
+            // Without these, a hung TCP/TLS handshake or stalled response
+            // body holds its conn-slot indefinitely. The retry layer in
+            // `service::fetch` only fires on a reqwest error — if the
+            // socket is silently waiting, no error surfaces and the request
+            // waits forever. Observed on a ~400 ms-RTT wifi: an outlier
+            // capped at 16 s pinned p1_resolve to 22 s while p50 stayed at
+            // ~400 ms; with these two timeouts wall dropped to 19.5 s
+            // (-3 s, avg_conc 83 → 88) and no retries fired (n unchanged,
+            // 0 failed).
+            //
+            // 5 s connect window: ~4× headroom for TCP+TLS at the worst
+            // RTTs we expect (≤1.2 s for 400 ms RTT × 3 round-trips).
+            // 10 s read window: per-read inactivity, not total — large
+            // npm manifests (`@babel/*`, ~5 MB) on slow links keep
+            // streaming bytes well under that. Intentionally no global
+            // `.timeout()` to avoid cutting off legitimate slow downloads.
+            .connect_timeout(Duration::from_secs(5))
+            .read_timeout(Duration::from_secs(10));
 
         match env_var("ALL_PROXY") {
             Some(url) => {
