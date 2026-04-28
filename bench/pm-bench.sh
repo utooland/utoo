@@ -380,7 +380,7 @@ print_results() {
         if (!raw.trim()) { console.log('  skip empty: ' + file); continue; }
         data = JSON.parse(raw);
       } catch (err) {
-        console.log('  skip unparseable: ' + file + ' (' + err.message + ')');
+        console.log('  skip unparsable: ' + file + ' (' + err.message + ')');
         continue;
       }
       const base = file.replace('.json', '');
