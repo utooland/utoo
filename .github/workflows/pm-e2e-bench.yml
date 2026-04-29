@@ -145,11 +145,12 @@ jobs:
           retention-days: 1
 
   build-mac-arm64:
-    # Mac arm64 serves: e2e-mac-arm64, bench-phases-mac, pm-bench-all-mac.
+    # Mac arm64 serves: e2e-mac-arm64, bench-phases-mac (manual only),
+    # pm-bench-all-mac (manual only). Label-triggered benches now stick
+    # to linux, so we no longer build on the `benchmark` label.
     if: >
       (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)')) ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
       (github.event_name == 'workflow_dispatch' && inputs.target != 'pm-bench-pcap')
     runs-on: macos-latest
     steps:
@@ -494,7 +495,10 @@ jobs:
         run: |
           chmod +x bench/pm-bench-phases.sh
           bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmjs.log
+      # npmmirror only runs on manual dispatch — label-triggered runs stick to
+      # the npmjs leg to keep PR feedback loops short.
       - name: Stash npmjs logs and wipe state before npmmirror
+        if: github.event_name == 'workflow_dispatch'
         run: |
           mkdir -p /tmp/bench-logs-stash
           cp -r /tmp/pm-bench-output/. /tmp/bench-logs-stash/ 2>/dev/null || true
@@ -502,6 +506,7 @@ jobs:
           mkdir -p /tmp/pm-bench-output
           cp -r /tmp/bench-logs-stash/. /tmp/pm-bench-output/ 2>/dev/null || true
       - name: Run phase-isolated benchmark · npmmirror
+        if: github.event_name == 'workflow_dispatch'
         env:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmmirror.com'
@@ -525,10 +530,11 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
   bench-phases-mac:
+    # Mac runners are scarce and slow — only the manual dispatch path runs
+    # them. Label-triggered PR benches stick to linux to keep the feedback
+    # loop tight.
     needs: [build-mac-arm64]
-    if: >
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
-      (github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-phases')
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-phases'
     runs-on: macos-latest
     permissions:
       contents: read
