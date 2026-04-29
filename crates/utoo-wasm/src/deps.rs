@@ -9,7 +9,7 @@ use anyhow::Result;
 use utoo_ruborist::builder::PeerDeps;
 use utoo_ruborist::lock::PackageLock;
 use utoo_ruborist::progress::NoopReceiver;
-use utoo_ruborist::service::{BuildDepsOptions, NoopStore, build_deps};
+use utoo_ruborist::service::{build_deps, BuildDepsOptions, NoopStore};
 
 use crate::fs::OpfsGlob;
 
