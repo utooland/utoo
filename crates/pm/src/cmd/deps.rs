@@ -12,14 +12,14 @@ pub async fn build_deps(cwd: &Path) -> Result<PackageLock> {
     start_progress_bar();
     let resolve_start = Instant::now();
 
-    let package_lock = Context::build_deps(cwd.to_path_buf()).await?;
+    let output = Context::build_deps(cwd.to_path_buf()).await?;
 
     finish_progress_bar("package-lock.json resolved", Some(resolve_start.elapsed()));
 
     // Save to disk
-    save_package_lock(cwd, &package_lock).await?;
+    save_package_lock(cwd, &output.lock).await?;
 
-    Ok(package_lock)
+    Ok(output.lock)
 }
 
 pub async fn build_workspace(cwd: &Path) -> Result<()> {

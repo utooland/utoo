@@ -6,21 +6,17 @@
 //! # Example
 //!
 //! ```ignore
-//! use utoo_ruborist::service::{build_deps, BuildDepsOptions, NoopFileSystem};
+//! use utoo_ruborist::service::{build_deps, BuildDepsOptions};
 //! use utoo_ruborist::progress::NoopReceiver;
 //!
-//! let package_lock = build_deps(BuildDepsOptions {
-//!     cwd: PathBuf::from("."),
-//!     registry_url: "https://registry.npmmirror.com".to_string(),
-//!     cache_dir: None,
-//!     concurrency: 20,
-//!     peer_deps: PeerDeps::Include,
-//!     fs: NoopFileSystem,
-//!     receiver: NoopReceiver,
-//! }).await?;
+//! let output = build_deps(BuildDepsOptions::new(
+//!     PathBuf::from("."),
+//!     my_glob,
+//!     NoopReceiver,
+//! )).await?;
 //!
 //! // Serialize to JSON
-//! let json = serde_json::to_string_pretty(&package_lock)?;
+//! let json = serde_json::to_string_pretty(&output.lock)?;
 //! ```
 
 use std::collections::HashMap;
@@ -29,9 +25,10 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use super::cache::{PackageCache, load_project_cache, save_project_cache};
+use super::cache::{PackageCache, ProjectCacheData};
 use super::fs::Glob;
 use super::registry::UnifiedRegistry;
+use super::store::{ManifestStore, NoopStore};
 use crate::model::graph::{DependencyGraph, PackageNode};
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
@@ -46,14 +43,20 @@ use crate::spec::Catalogs;
 use crate::traits::progress::EventReceiver;
 
 /// Options for dependency resolution.
-#[derive(Debug)]
 pub struct BuildDepsOptions<G, R> {
     /// Current working directory (contains package.json)
     pub cwd: PathBuf,
     /// Registry URL (e.g., "https://registry.npmmirror.com")
     pub registry_url: String,
-    /// Cache directory for disk cache (None = pure in-memory mode)
+    /// Tarball cache directory passed through to non-registry resolvers
+    /// (http/tarball, native-git). Unrelated to manifest disk cache.
     pub cache_dir: Option<PathBuf>,
+    /// Persistence backend for manifest cache. Defaults to `NoopStore`
+    /// (everything is in-memory).
+    pub manifest_store: Arc<dyn ManifestStore>,
+    /// Project-level warm cache pre-loaded by the host. Pre-populates the
+    /// in-memory manifest cache to skip the preload phase on a warm install.
+    pub warm_project_cache: Option<ProjectCacheData>,
     /// Maximum concurrent network requests
     pub concurrency: usize,
     /// How to handle peer dependencies.
@@ -80,6 +83,8 @@ impl<G, R> BuildDepsOptions<G, R> {
             cwd,
             registry_url: "https://registry.npmmirror.com".to_string(),
             cache_dir: None,
+            manifest_store: Arc::new(NoopStore),
+            warm_project_cache: None,
             concurrency: 20,
             peer_deps: PeerDeps::Skip,
             glob,
@@ -90,7 +95,18 @@ impl<G, R> BuildDepsOptions<G, R> {
     }
 }
 
-/// Build dependency tree and return PackageLock.
+/// Output of [`build_deps`].
+///
+/// `project_cache` carries the manifests resolved during this run; the host
+/// decides whether and where to persist it (typically to
+/// `node_modules/.utoo-manifest.json`). It is empty when no resolutions
+/// happened.
+pub struct BuildDepsOutput {
+    pub lock: PackageLock,
+    pub project_cache: ProjectCacheData,
+}
+
+/// Build dependency tree and return [`BuildDepsOutput`].
 ///
 /// This is the main entry point for dependency resolution. It:
 /// 1. Reads package.json from cwd (and finds workspace root if applicable)
@@ -98,27 +114,8 @@ impl<G, R> BuildDepsOptions<G, R> {
 /// 3. Injects runtime dependencies (node-bin packages from engines.install-node)
 /// 4. Initializes the dependency graph
 /// 5. Resolves all dependencies using the registry
-/// 6. Returns a PackageLock ready for serialization
-///
-/// # Arguments
-/// * `options` - Configuration options including cwd, registry, cache, etc.
-///
-/// # Returns
-/// * `PackageLock` - The resolved dependency tree
-///
-/// # Example
-/// ```ignore
-/// let lock = build_deps(BuildDepsOptions {
-///     cwd: PathBuf::from("."),
-///     registry_url: "https://registry.npmmirror.com".to_string(),
-///     cache_dir: Some(PathBuf::from("~/.cache/nm")),
-///     concurrency: 20,
-///     peer_deps: PeerDeps::Include,
-///     glob: TokioGlob,
-///     receiver: MyProgressReceiver,
-/// }).await?;
-/// ```
-pub async fn build_deps<G, R>(options: BuildDepsOptions<G, R>) -> Result<PackageLock>
+/// 6. Returns a [`BuildDepsOutput`] with the package lock and the new project cache
+pub async fn build_deps<G, R>(options: BuildDepsOptions<G, R>) -> Result<BuildDepsOutput>
 where
     G: Glob + Clone,
     R: EventReceiver,
@@ -127,6 +124,8 @@ where
         cwd,
         registry_url,
         cache_dir,
+        manifest_store,
+        warm_project_cache,
         concurrency,
         peer_deps,
         glob,
@@ -205,74 +204,36 @@ where
         add_edges_from(&mut graph, workspace_index, &ws_pkg, &edge_ctx);
     }
 
-    // 7. Create package cache (with optional disk cache)
-    let package_cache = if let Some(cache_path) = &cache_dir {
-        Arc::new(PackageCache::with_cache_dir(cache_path.clone()))
-    } else {
-        Arc::new(PackageCache::new())
-    };
-
-    // 8. Load project cache and pre-populate memory cache
-    let project_cache_path = root_path.join("node_modules/.utoo-manifest.json");
-    let project_cache_data = load_project_cache(&project_cache_path)
-        .await
-        .unwrap_or_default();
-
-    // Pre-populate cache from project cache
-    // Use specs to get original spec -> version mapping, then fetch manifest by version
-    let mut cache_count = 0;
-    let mut missing_count = 0;
-    for (name, pkg_cache) in &project_cache_data.cache {
-        for (spec, version) in &pkg_cache.specs {
-            if let Some(manifest) = pkg_cache.manifests.get(version) {
-                // Cache key is "name@spec" (e.g., "lodash@^4.17.0")
-                package_cache.set_version_manifest(
-                    name.clone(),
-                    spec.clone(),
-                    Arc::new(manifest.clone()),
-                );
-                cache_count += 1;
-            } else {
-                // Spec points to version but manifest is missing - cache is corrupted
-                tracing::debug!(
-                    "Project cache missing manifest: {}@{} (version {})",
-                    name,
-                    spec,
-                    version
-                );
-                missing_count += 1;
-            }
-        }
-    }
+    // 7. Create in-memory package cache and pre-populate from the warm
+    // project cache (host-supplied; `None` for cold runs).
+    let package_cache = Arc::new(PackageCache::default());
+    let (cache_count, missing_count) =
+        prepopulate_warm_cache(&package_cache, warm_project_cache.as_ref());
     if missing_count > 0 {
         tracing::warn!(
-            "Project cache has {} specs with missing manifests, will re-fetch from registry",
-            missing_count
+            "Project cache has {missing_count} specs with missing manifests, will re-fetch from registry"
         );
     }
-
     if cache_count > 0 {
-        tracing::debug!("Loaded {} manifests from project cache", cache_count);
+        tracing::debug!("Loaded {cache_count} manifests from project cache");
     }
 
-    // 9. Create registry client with shared cache
+    // 8. Create registry client with shared cache and persistence backend.
     let mut builder = UnifiedRegistry::builder()
         .registry(&registry_url)
-        .cache(package_cache);
+        .cache(package_cache)
+        .store(Arc::clone(&manifest_store));
     if let Some(semver) = supports_semver {
         builder = builder.supports_semver(semver);
     }
     let registry = builder.build();
 
     tracing::debug!(
-        "Using registry: {} (semver: {}, disk cache: {})",
+        "Using registry: {} (semver: {})",
         registry.registry_url(),
         registry.supports_semver(),
-        cache_dir.is_some()
     );
 
-    // 10. Build dependency tree
-    // Skip preload if project cache exists (cache is already warm)
     let skip_preload = cache_count > 0;
     let mut config = BuildDepsConfig::default()
         .with_peer_deps(peer_deps)
@@ -297,32 +258,50 @@ where
         .await
         .map_err(|e| anyhow::Error::new(e).context("Dependency resolution failed"))?;
 
-    // 11. Serialize to PackageLock
     let (packages, _total) = graph.serialize_to_packages(&root_path);
 
-    // 12. Save project cache (export from memory cache)
-    let mut new_cache_data = super::cache::ProjectCacheData::default();
-    // Export version manifests from memory cache to project cache
-    // Memory cache key format: "name@spec", manifest contains resolved version
+    // Export project cache from memory cache for the host to persist.
+    let mut project_cache = ProjectCacheData::default();
     for (key, manifest) in registry.cache().export_version_manifests() {
-        // Use parse_package_spec to handle scoped packages correctly
-        // e.g., "@babel/core@^7.0.0" -> ("@babel/core", "^7.0.0")
+        // `parse_package_spec` rather than `split_once('@')` so scoped names
+        // (`@babel/core@^7.0.0`) parse to (`@babel/core`, `^7.0.0`).
         let (name, spec) = parse_package_spec(&key);
         let version = manifest.version.clone();
-        let pkg_cache = new_cache_data.cache.entry(name.to_string()).or_default();
-        // specs: spec -> version (e.g., "^2.1.1" -> "2.1.1")
+        let pkg_cache = project_cache.cache.entry(name.to_string()).or_default();
         pkg_cache.specs.insert(spec.to_string(), version.clone());
-        // manifests: version -> manifest (e.g., "2.1.1" -> {...})
         pkg_cache.manifests.insert(version, (*manifest).clone());
     }
 
-    if !new_cache_data.cache.is_empty()
-        && let Err(e) = save_project_cache(&project_cache_path, &new_cache_data).await
-    {
-        tracing::warn!("Failed to save project cache: {}", e);
-    }
+    Ok(BuildDepsOutput {
+        lock: PackageLock::new(&pkg.name, &pkg.version, packages),
+        project_cache,
+    })
+}
 
-    Ok(PackageLock::new(&pkg.name, &pkg.version, packages))
+/// Pre-populate `cache` from a warm project cache. Returns
+/// `(loaded, missing)` — `loaded` is the count of usable spec→manifest
+/// entries; `missing` counts specs whose resolved version had no manifest
+/// (corrupted cache, will be re-fetched).
+fn prepopulate_warm_cache(cache: &PackageCache, warm: Option<&ProjectCacheData>) -> (usize, usize) {
+    let Some(warm) = warm else {
+        return (0, 0);
+    };
+    let mut loaded = 0;
+    let mut missing = 0;
+    for (name, pkg_cache) in &warm.cache {
+        for (spec, version) in &pkg_cache.specs {
+            let Some(manifest) = pkg_cache.manifests.get(version) else {
+                tracing::debug!(
+                    "Project cache missing manifest: {name}@{spec} (version {version})"
+                );
+                missing += 1;
+                continue;
+            };
+            cache.set_version_manifest(name.clone(), spec.clone(), Arc::new(manifest.clone()));
+            loaded += 1;
+        }
+    }
+    (loaded, missing)
 }
 
 #[cfg(test)]
@@ -337,6 +316,8 @@ mod tests {
             cwd: PathBuf::from("."),
             registry_url: "https://registry.npmmirror.com".to_string(),
             cache_dir: None,
+            manifest_store: Arc::new(NoopStore),
+            warm_project_cache: None,
             concurrency: 20,
             peer_deps: PeerDeps::Skip,
             glob: NoopGlob,
@@ -355,8 +336,6 @@ mod tests {
         // Test that scoped packages are correctly parsed when exporting project cache
         // This ensures "@babel/core@^7.0.0" is parsed as ("@babel/core", "^7.0.0")
         // not ("", "babel/core@^7.0.0")
-
-        // Test parse_package_spec directly to avoid polluting global cache
         let test_cases = [
             // (input, expected_name, expected_spec)
             ("@babel/core@^7.0.0", "@babel/core", "^7.0.0"),
@@ -380,8 +359,6 @@ mod tests {
             );
         }
 
-        // Verify the old buggy behavior would have failed
-        // split_once('@') on "@babel/core@^7.0.0" returns ("", "babel/core@^7.0.0")
         let buggy_result = "@babel/core@^7.0.0".split_once('@');
         assert_eq!(buggy_result, Some(("", "babel/core@^7.0.0")));
     }

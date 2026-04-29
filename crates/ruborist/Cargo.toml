@@ -8,6 +8,7 @@ license     = "MIT"
 # tombi: format.rules.table-keys-order.disabled = true
 [dependencies]
 anyhow       = { workspace = true }
+async-trait  = { workspace = true }
 bytes        = "1"
 dashmap      = "6.1.0"
 pathdiff     = { workspace = true }
