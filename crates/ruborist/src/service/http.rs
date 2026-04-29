@@ -185,7 +185,7 @@ pub(crate) fn pick_client() -> Result<&'static reqwest::Client> {
 /// span — the HTTP requests couldn't fire until all TLS crypto drained
 /// through 4 async workers. aws-lc-rs uses BoringSSL's assembly-optimised
 /// primitives and is roughly 3× faster at handshake work.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_os = "macos")]
 fn build_rustls_config() -> Result<rustls::ClientConfig> {
     // Install aws-lc-rs as the default for any other rustls consumer in
     // the process. Idempotent — only the first call per process wins.
@@ -239,9 +239,7 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
     let builder = {
         use crate::service::dns::shared_resolver;
 
-        let tls_config = build_rustls_config()?;
         let mut builder = builder
-            .use_preconfigured_tls(tls_config)
             .no_proxy()
             .dns_resolver(shared_resolver())
             // Force HTTP/1.1 with a connection pool. reqwest multiplexes all
@@ -254,6 +252,11 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
             // churning connections.
             .http1_only()
             .pool_max_idle_per_host(256);
+
+        #[cfg(target_os = "macos")]
+        {
+            builder = builder.use_preconfigured_tls(build_rustls_config()?);
+        }
 
         match env_var("ALL_PROXY") {
             Some(url) => {

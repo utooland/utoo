@@ -8,6 +8,28 @@ use crate::model::manifest::{CoreVersionManifest, FullManifest};
 use crate::resolver::semver::normalize_spec;
 use crate::resolver::version::resolve_target_version;
 
+// `Send` is required so the native preload worker-pool can move resolve
+// futures onto `tokio::spawn`. `wasm-bindgen-futures` produce
+// `Rc<RefCell<…>>`-backed futures that aren't `Send`/`Sync`, so on wasm we
+// fall back to a no-op blanket impl.
+#[cfg(not(target_arch = "wasm32"))]
+pub trait MaybeSend: Send {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Send + ?Sized> MaybeSend for T {}
+#[cfg(target_arch = "wasm32")]
+pub trait MaybeSend {}
+#[cfg(target_arch = "wasm32")]
+impl<T: ?Sized> MaybeSend for T {}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub trait MaybeSync: Sync {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Sync + ?Sized> MaybeSync for T {}
+#[cfg(target_arch = "wasm32")]
+pub trait MaybeSync {}
+#[cfg(target_arch = "wasm32")]
+impl<T: ?Sized> MaybeSync for T {}
+
 /// Check if a registry URL is the official npm registry.
 ///
 /// The official npm registry (registry.npmjs.org/com) does not support:
@@ -140,7 +162,7 @@ pub trait RegistryClient {
     fn fetch_full_manifest(
         &self,
         name: &str,
-    ) -> impl Future<Output = Result<FullManifest, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<FullManifest, Self::Error>> + MaybeSend;
 
     /// Fetch specific version manifest from registry.
     ///
@@ -153,9 +175,9 @@ pub trait RegistryClient {
         &self,
         name: &str,
         spec: &str,
-    ) -> impl Future<Output = Result<Arc<CoreVersionManifest>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<Arc<CoreVersionManifest>, Self::Error>> + MaybeSend
     where
-        Self: Sync,
+        Self: MaybeSync,
     {
         async move {
             let manifest = self.fetch_full_manifest(name).await?;
@@ -193,9 +215,9 @@ pub trait RegistryClient {
         &self,
         name: &str,
         spec: &str,
-    ) -> impl Future<Output = Result<ResolvedPackage, Self::Error>> + Send
+    ) -> impl Future<Output = Result<ResolvedPackage, Self::Error>> + MaybeSend
     where
-        Self: Sync,
+        Self: MaybeSync,
     {
         async move {
             // Normalize spec (handles npm: alias and workspace: prefix)
