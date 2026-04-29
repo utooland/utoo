@@ -97,11 +97,6 @@ impl MemoryCache {
         GLOBAL_MEMORY_CACHE.clone()
     }
 
-    /// Get the global memory cache singleton (alias for `new`).
-    pub fn global() -> Self {
-        GLOBAL_MEMORY_CACHE.clone()
-    }
-
     pub fn get_full_manifest(&self, name: &str) -> Option<Arc<FullManifest>> {
         let result = self.0.full_manifests.get(name).map(|v| v.clone());
         if result.is_some() {
@@ -191,11 +186,9 @@ pub struct CacheStats {
     pub version_manifest_count: usize,
 }
 
-/// Legacy alias — `PackageCache` is now just the memory tier.
+/// Alias kept so call sites that pre-date the disk-cache split can continue
+/// to spell the in-memory cache as `PackageCache` without churn.
 pub type PackageCache = MemoryCache;
-
-/// Legacy alias kept for back-compat with existing callers.
-pub type ManifestCache = MemoryCache;
 
 // ============================================================================
 // Project-level cache (per-project resolved packages)
@@ -224,78 +217,13 @@ pub struct ProjectPackageCache {
     pub manifests: HashMap<String, CoreVersionManifest>,
 }
 
-/// Thread-safe project cache for dependency resolution state.
-///
-/// Sharded per package name via `DashMap` so concurrent lookups across
-/// distinct packages don't contend.
-#[derive(Clone, Default)]
-pub struct ProjectCache {
-    cache: Arc<DashMap<String, Arc<parking_lot::Mutex<ProjectPackageCache>>>>,
-}
-
-impl ProjectCache {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn get_resolved_version(&self, name: &str, spec: &str) -> Option<String> {
-        let entry = self.cache.get(name)?;
-        let pkg = entry.lock();
-        pkg.specs.get(spec).cloned()
-    }
-
-    pub fn get_manifest(&self, name: &str, version: &str) -> Option<Arc<CoreVersionManifest>> {
-        let entry = self.cache.get(name)?;
-        let pkg = entry.lock();
-        pkg.manifests.get(version).cloned().map(Arc::new)
-    }
-
-    pub fn set_resolved(
-        &self,
-        name: &str,
-        spec: &str,
-        version: &str,
-        manifest: &CoreVersionManifest,
-    ) {
-        let entry = self
-            .cache
-            .entry(name.to_string())
-            .or_insert_with(|| Arc::new(parking_lot::Mutex::new(ProjectPackageCache::default())))
-            .clone();
-        let mut pkg = entry.lock();
-        pkg.specs.insert(spec.to_string(), version.to_string());
-        pkg.manifests.insert(version.to_string(), manifest.clone());
-    }
-
-    pub fn export(&self) -> ProjectCacheData {
-        let cache = self
-            .cache
-            .iter()
-            .map(|kv| (kv.key().clone(), kv.value().lock().clone()))
-            .collect();
-        ProjectCacheData { cache }
-    }
-
-    pub fn import(&self, data: ProjectCacheData) {
-        self.cache.clear();
-        for (name, pkg) in data.cache {
-            self.cache
-                .insert(name, Arc::new(parking_lot::Mutex::new(pkg)));
-        }
-    }
-
-    pub fn clear(&self) {
-        self.cache.clear();
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_memory_cache_full_manifest() {
-        let cache = MemoryCache::global();
+        let cache = MemoryCache::new();
 
         let manifest = FullManifest {
             name: "test".to_string(),
@@ -311,7 +239,7 @@ mod tests {
 
     #[test]
     fn test_memory_cache_versions() {
-        let cache = MemoryCache::global();
+        let cache = MemoryCache::new();
 
         let info = VersionsInfo {
             versions: Versions {
@@ -331,7 +259,7 @@ mod tests {
 
     #[test]
     fn test_memory_cache_version_manifest() {
-        let cache = MemoryCache::global();
+        let cache = MemoryCache::new();
 
         let manifest = CoreVersionManifest {
             name: "test".to_string(),

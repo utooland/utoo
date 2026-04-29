@@ -204,46 +204,21 @@ where
         add_edges_from(&mut graph, workspace_index, &ws_pkg, &edge_ctx);
     }
 
-    // 7. Create in-memory package cache.
+    // 7. Create in-memory package cache and pre-populate from the warm
+    // project cache (host-supplied; `None` for cold runs).
     let package_cache = Arc::new(PackageCache::new());
-
-    // 8. Pre-populate from warm project cache (host-supplied).
-    let mut cache_count = 0;
-    let mut missing_count = 0;
-    if let Some(ref project_cache_data) = warm_project_cache {
-        for (name, pkg_cache) in &project_cache_data.cache {
-            for (spec, version) in &pkg_cache.specs {
-                if let Some(manifest) = pkg_cache.manifests.get(version) {
-                    package_cache.set_version_manifest(
-                        name.clone(),
-                        spec.clone(),
-                        Arc::new(manifest.clone()),
-                    );
-                    cache_count += 1;
-                } else {
-                    tracing::debug!(
-                        "Project cache missing manifest: {}@{} (version {})",
-                        name,
-                        spec,
-                        version
-                    );
-                    missing_count += 1;
-                }
-            }
-        }
-    }
+    let (cache_count, missing_count) =
+        prepopulate_warm_cache(&package_cache, warm_project_cache.as_ref());
     if missing_count > 0 {
         tracing::warn!(
-            "Project cache has {} specs with missing manifests, will re-fetch from registry",
-            missing_count
+            "Project cache has {missing_count} specs with missing manifests, will re-fetch from registry"
         );
     }
-
     if cache_count > 0 {
-        tracing::debug!("Loaded {} manifests from project cache", cache_count);
+        tracing::debug!("Loaded {cache_count} manifests from project cache");
     }
 
-    // 9. Create registry client with shared cache and persistence backend.
+    // 8. Create registry client with shared cache and persistence backend.
     let mut builder = UnifiedRegistry::builder()
         .registry(&registry_url)
         .cache(package_cache)
@@ -259,8 +234,6 @@ where
         registry.supports_semver(),
     );
 
-    // 10. Build dependency tree
-    // Skip preload if project cache exists (cache is already warm)
     let skip_preload = cache_count > 0;
     let mut config = BuildDepsConfig::default()
         .with_peer_deps(peer_deps)
@@ -285,14 +258,13 @@ where
         .await
         .map_err(|e| anyhow::Error::new(e).context("Dependency resolution failed"))?;
 
-    // 11. Serialize to PackageLock
     let (packages, _total) = graph.serialize_to_packages(&root_path);
 
-    // 12. Export project cache from memory cache.
+    // Export project cache from memory cache for the host to persist.
     let mut project_cache = ProjectCacheData::default();
     for (key, manifest) in registry.cache().export_version_manifests() {
-        // Use parse_package_spec to handle scoped packages correctly
-        // e.g., "@babel/core@^7.0.0" -> ("@babel/core", "^7.0.0")
+        // `parse_package_spec` rather than `split_once('@')` so scoped names
+        // (`@babel/core@^7.0.0`) parse to (`@babel/core`, `^7.0.0`).
         let (name, spec) = parse_package_spec(&key);
         let version = manifest.version.clone();
         let pkg_cache = project_cache.cache.entry(name.to_string()).or_default();
@@ -304,6 +276,32 @@ where
         lock: PackageLock::new(&pkg.name, &pkg.version, packages),
         project_cache,
     })
+}
+
+/// Pre-populate `cache` from a warm project cache. Returns
+/// `(loaded, missing)` — `loaded` is the count of usable spec→manifest
+/// entries; `missing` counts specs whose resolved version had no manifest
+/// (corrupted cache, will be re-fetched).
+fn prepopulate_warm_cache(cache: &PackageCache, warm: Option<&ProjectCacheData>) -> (usize, usize) {
+    let Some(warm) = warm else {
+        return (0, 0);
+    };
+    let mut loaded = 0;
+    let mut missing = 0;
+    for (name, pkg_cache) in &warm.cache {
+        for (spec, version) in &pkg_cache.specs {
+            let Some(manifest) = pkg_cache.manifests.get(version) else {
+                tracing::debug!(
+                    "Project cache missing manifest: {name}@{spec} (version {version})"
+                );
+                missing += 1;
+                continue;
+            };
+            cache.set_version_manifest(name.clone(), spec.clone(), Arc::new(manifest.clone()));
+            loaded += 1;
+        }
+    }
+    (loaded, missing)
 }
 
 #[cfg(test)]

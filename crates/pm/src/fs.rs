@@ -15,9 +15,10 @@ pub use tokio_fs_ext::{
     copy,
     create_dir_all,
     metadata,
+    // File operations
+    read,
     read_dir,
     read_link,
-    // File operations
     read_to_string,
     remove_dir,
     remove_dir_all,

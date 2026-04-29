@@ -54,8 +54,8 @@ mod store;
 
 pub use api::{BuildDepsOptions, BuildDepsOutput, build_deps};
 pub use cache::{
-    CacheStats, ManifestCache, MemoryCache, PackageCache, ProjectCache, ProjectCacheData,
-    ProjectPackageCache, Versions, VersionsInfo,
+    CacheStats, MemoryCache, PackageCache, ProjectCacheData, ProjectPackageCache, Versions,
+    VersionsInfo,
 };
 pub use fs::{Glob, NoopGlob, exists, read_to_string};
 pub use http::client_builder;

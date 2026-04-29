@@ -50,7 +50,7 @@ use crate::util::OnceMap;
 
 /// Unified registry client that works on both native and WASM.
 ///
-/// Caches manifest data in three tiers:
+/// Cache lookup order:
 /// 1. In-memory `PackageCache` (fastest, lost on restart)
 /// 2. Host-provided `ManifestStore` (persistent; disk on native, no-op on WASM by default)
 /// 3. Network (slowest, always authoritative)
@@ -207,7 +207,7 @@ impl UnifiedRegistry {
         &self.cache
     }
 
-    /// Resolve full manifest with three-tier caching and ETag validation.
+    /// Resolve full manifest through memory → store → network with ETag validation.
     ///
     /// Single-flight cache flow:
     /// 1. Memory cache hit on `full_manifests` → return immediately (Arc bump).
@@ -308,15 +308,10 @@ impl UnifiedRegistry {
         }
     }
 
-    /// Resolve version manifest with three-tier caching.
+    /// Resolve version manifest through memory → store → network.
     ///
-    /// Cache key is `name@spec` (e.g., `lodash@^4.17.0`).
-    /// This allows cache hits when the same spec is requested multiple times.
-    ///
-    /// Cache flow:
-    /// 1. Memory cache -> fastest
-    /// 2. ManifestStore -> persistent
-    /// 3. Network -> authoritative
+    /// Cache key is `name@spec` (e.g., `lodash@^4.17.0`), so the same spec
+    /// requested multiple times shares one fetch.
     ///
     /// Non-semver registries resolve the spec by extracting the matching
     /// version from the full manifest (the latter is itself single-flight
