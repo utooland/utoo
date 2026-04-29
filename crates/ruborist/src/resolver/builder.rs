@@ -120,11 +120,19 @@ pub struct BuildDepsConfig {
     pub catalogs: Catalogs,
 }
 
+/// Fallback concurrency for wasm where the worker-pool preload module is
+/// gated out. wasm runs serial BFS resolution so this only sizes the inner
+/// `FuturesUnordered` for transitive fanout — keep it modest.
+#[cfg(target_arch = "wasm32")]
+const DEFAULT_CONCURRENCY: usize = 16;
+#[cfg(not(target_arch = "wasm32"))]
+const DEFAULT_CONCURRENCY: usize = crate::resolver::preload::DEFAULT_CONCURRENCY;
+
 impl Default for BuildDepsConfig {
     fn default() -> Self {
         Self {
             peer_deps: PeerDeps::Skip,
-            concurrency: crate::resolver::preload::DEFAULT_CONCURRENCY,
+            concurrency: DEFAULT_CONCURRENCY,
             skip_preload: false,
             cache_dir: dirs::home_dir().map(|d| d.join(".cache/nm")),
             git_clone_cache: Arc::new(GitCloneCache::new()),

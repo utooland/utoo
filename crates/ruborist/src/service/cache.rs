@@ -210,6 +210,29 @@ pub fn get_manifest_cache_path(cache_dir: &Path, package_name: &str, version: &s
         .join(format!("{version}.json"))
 }
 
+/// Fire-and-forget disk write spawner.
+///
+/// On native: `tokio::spawn` drops the work onto the multi-threaded runtime so
+/// the caller returns immediately and the disk I/O doesn't stall the resolve
+/// pipeline. On wasm: `spawn_local` schedules onto the current task's
+/// `LocalSet` (the only thing wasm-bindgen-futures supports — its `JsFuture`
+/// is `Rc<RefCell<…>>`-backed and can't cross threads).
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_disk_write<F>(fut: F)
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    tokio::spawn(fut);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_disk_write<F>(fut: F)
+where
+    F: std::future::Future<Output = ()> + 'static,
+{
+    wasm_bindgen_futures::spawn_local(fut);
+}
+
 // ============================================================================
 // Unified PackageCache
 // ============================================================================
@@ -385,7 +408,10 @@ impl PackageCache {
         let name = name.to_string();
         let info = info.clone();
 
-        tokio::spawn(async move {
+        // wasm-bindgen-futures aren't `Send`, so we can't fire-and-forget
+        // through `tokio::spawn` there. Use the local-set spawner; on wasm
+        // it falls through to `wasm_bindgen_futures::spawn_local`.
+        spawn_disk_write(async move {
             let path = get_versions_cache_path(&cache_dir, &name);
             if let Some(parent) = path.parent() {
                 let _ = tokio_fs_ext::create_dir_all(parent).await;
@@ -457,7 +483,7 @@ impl PackageCache {
         let name = name.to_string();
         let version = version.to_string();
 
-        tokio::spawn(async move {
+        spawn_disk_write(async move {
             let path = get_manifest_cache_path(&cache_dir, &name, &version);
             if let Some(parent) = path.parent() {
                 let _ = tokio_fs_ext::create_dir_all(parent).await;
