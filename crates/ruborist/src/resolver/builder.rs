@@ -126,8 +126,8 @@ impl Default for BuildDepsConfig {
             concurrency: crate::resolver::preload::DEFAULT_CONCURRENCY,
             skip_preload: false,
             cache_dir: dirs::home_dir().map(|d| d.join(".cache/nm")),
-            git_clone_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-            http_fetch_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            git_clone_cache: Arc::new(GitCloneCache::new()),
+            http_fetch_cache: Arc::new(HttpFetchCache::new()),
             catalogs: HashMap::new(),
         }
     }

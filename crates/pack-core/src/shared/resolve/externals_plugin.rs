@@ -241,6 +241,9 @@ fn handle_external_config(
             } else if name_str.starts_with("esm ") {
                 let actual_name = name_str.strip_prefix("esm ").unwrap_or(name_str);
                 (actual_name.into(), ExternalType::EcmaScriptModule)
+            } else if name_str.starts_with("promise ") {
+                let actual_name = name_str.strip_prefix("promise ").unwrap_or(name_str);
+                (actual_name.into(), ExternalType::Promise)
             } else if name_str.starts_with("script ") {
                 let script_content = name_str.strip_prefix("script ").unwrap_or(name_str);
                 // For script type in basic config, check if script_content already contains '@' separator
@@ -283,6 +286,7 @@ fn handle_external_config(
                     );
                 }
                 Some(crate::config::ExternalType::Global) => ExternalType::Global,
+                Some(crate::config::ExternalType::Promise) => ExternalType::Promise,
                 None => ExternalType::Global,
             };
             (advanced.root.clone(), external_type)
@@ -576,6 +580,7 @@ impl AfterResolvePlugin for ExternalsPlugin {
                             Some(ConfigExternalType::ESM) => ExternalType::EcmaScriptModule,
                             Some(ConfigExternalType::Script) => ExternalType::Script,
                             Some(ConfigExternalType::Global) => ExternalType::Global,
+                            Some(ConfigExternalType::Promise) => ExternalType::Promise,
                             None => ExternalType::Global,
                         };
 

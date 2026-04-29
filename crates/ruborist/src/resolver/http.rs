@@ -86,7 +86,6 @@
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
@@ -199,7 +198,7 @@ pub(crate) async fn resolve_http_dep(
     let manifest = dedup_init(fetch_cache, url_owned.clone(), move || async move {
         let bytes = download_tarball(&url_owned).await?;
         tokio::task::spawn_blocking(move || {
-            fetch_and_extract_blocking(&cache_dir_owned, &url_owned, bytes).map(Arc::new)
+            fetch_and_extract_blocking(&cache_dir_owned, &url_owned, bytes)
         })
         .await
         .context("http tarball extractor task failed")?

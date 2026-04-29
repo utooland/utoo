@@ -101,6 +101,15 @@ export interface StartServerOptions {
   hostname?: string;
   logServerInfo?: boolean;
   selfSignedCertificate?: SelfSignedCertificate;
+  /**
+   * Called after the initial dev build has been written and the HTTP server is
+   * listening. Integrations can await this instead of polling the internal
+   * server port.
+   */
+  onReady?: (context: {
+    port: number;
+    hostname: string;
+  }) => void | Promise<void>;
 }
 
 /** Options for honoServe excluding fetch; we only use HTTP or HTTPS (no HTTP/2). */
@@ -308,6 +317,27 @@ async function runDev(
     fetch: app.fetch,
   });
   injectWebSocket(server);
+
+  if (!server.listening) {
+    await new Promise<void>((resolve, reject) => {
+      const onListening = () => {
+        server.off("error", onError);
+        resolve();
+      };
+      const onError = (error: Error) => {
+        server.off("listening", onListening);
+        reject(error);
+      };
+
+      server.once("listening", onListening);
+      server.once("error", onError);
+    });
+  }
+
+  await serverOptions?.onReady?.({
+    port: serveOptsBase.port,
+    hostname: serveOptsBase.hostname,
+  });
 
   if (serverOptions?.logServerInfo !== false) {
     const scheme = serveOptsBase.serverOptions ? "https" : "http";

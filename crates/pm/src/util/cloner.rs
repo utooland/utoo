@@ -6,12 +6,12 @@ use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
 use tokio_retry::Retry;
 use utoo_ruborist::manifest::IdentityView;
+use utoo_ruborist::util::OnceMap;
 
 use super::downloader::{is_git_url, resolve_cache_path};
 use super::json::load_package_json;
 use super::retry::create_retry_strategy;
 use crate::fs;
-use utoo_ruborist::util::oncemap::OnceMap;
 
 /// Global clone cache shared between pipeline and install phases.
 ///
