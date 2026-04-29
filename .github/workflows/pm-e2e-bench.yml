@@ -471,10 +471,12 @@ jobs:
       - name: Build next branch utoo
         run: |
           # The PATH already points at dist/utoo (current branch) — build
-          # `next` separately to /tmp so it doesn't shadow.
+          # `next` separately to /tmp so it doesn't shadow. Use a linked
+          # git worktree so submodule init works normally inside WORKDIR.
+          WORKDIR=/tmp/utoo-next-src
+          rm -rf "$WORKDIR"
           git fetch origin next --depth=1
-          WORKDIR=$(mktemp -d)
-          git --work-tree="$WORKDIR" --git-dir="$(pwd)/.git" checkout origin/next -- .
+          git worktree add --detach "$WORKDIR" origin/next
           (cd "$WORKDIR" && git submodule update --init --recursive --depth 1 && cargo build --release --bin utoo -p utoo-pm)
           cp "$WORKDIR/target/release/utoo" /tmp/utoo-next
           chmod +x /tmp/utoo-next
