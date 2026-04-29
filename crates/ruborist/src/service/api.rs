@@ -206,7 +206,7 @@ where
 
     // 7. Create in-memory package cache and pre-populate from the warm
     // project cache (host-supplied; `None` for cold runs).
-    let package_cache = Arc::new(PackageCache::new());
+    let package_cache = Arc::new(PackageCache::default());
     let (cache_count, missing_count) =
         prepopulate_warm_cache(&package_cache, warm_project_cache.as_ref());
     if missing_count > 0 {

@@ -92,11 +92,6 @@ impl Default for MemoryCache {
 }
 
 impl MemoryCache {
-    /// Get the global memory cache singleton.
-    pub fn new() -> Self {
-        GLOBAL_MEMORY_CACHE.clone()
-    }
-
     pub fn get_full_manifest(&self, name: &str) -> Option<Arc<FullManifest>> {
         let result = self.0.full_manifests.get(name).map(|v| v.clone());
         if result.is_some() {
@@ -223,7 +218,7 @@ mod tests {
 
     #[test]
     fn test_memory_cache_full_manifest() {
-        let cache = MemoryCache::new();
+        let cache = MemoryCache::default();
 
         let manifest = FullManifest {
             name: "test".to_string(),
@@ -239,7 +234,7 @@ mod tests {
 
     #[test]
     fn test_memory_cache_versions() {
-        let cache = MemoryCache::new();
+        let cache = MemoryCache::default();
 
         let info = VersionsInfo {
             versions: Versions {
@@ -259,7 +254,7 @@ mod tests {
 
     #[test]
     fn test_memory_cache_version_manifest() {
-        let cache = MemoryCache::new();
+        let cache = MemoryCache::default();
 
         let manifest = CoreVersionManifest {
             name: "test".to_string(),

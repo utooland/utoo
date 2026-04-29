@@ -140,7 +140,9 @@ impl UnifiedRegistryBuilder {
             .supports_semver
             .unwrap_or_else(|| !is_npm_registry(&registry_url));
 
-        let cache = self.cache.unwrap_or_else(|| Arc::new(PackageCache::new()));
+        let cache = self
+            .cache
+            .unwrap_or_else(|| Arc::new(PackageCache::default()));
         let store = self.store.unwrap_or_else(|| Arc::new(NoopStore));
 
         UnifiedRegistry {
@@ -337,7 +339,12 @@ impl UnifiedRegistry {
                         return Ok(());
                     }
 
+                    // Store keys are *resolved* versions — only do this lookup
+                    // when the caller already has an exact version. Range/tag
+                    // specs would always miss (and on Windows, range chars
+                    // like `*` / `>` aren't even valid filenames).
                     if !self.supports_semver
+                        && deno_semver::Version::parse_from_npm(spec).is_ok()
                         && let Some(manifest) = self.store.load_version_manifest(name, spec).await
                     {
                         tracing::debug!("Persistent store hit for version manifest: {name}@{spec}");
@@ -593,7 +600,7 @@ mod tests {
 
     #[test]
     fn test_unified_registry_with_shared_cache() {
-        let shared_cache = Arc::new(PackageCache::new());
+        let shared_cache = Arc::new(PackageCache::default());
 
         let registry1 = UnifiedRegistry::builder()
             .registry("https://registry.npmmirror.com")
