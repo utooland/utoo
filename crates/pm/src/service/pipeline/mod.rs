@@ -36,17 +36,18 @@ pub struct PipelineResult {
 /// Note: caller is responsible for managing progress bar lifecycle.
 pub async fn resolve_with_pipeline(root_path: &std::path::Path) -> anyhow::Result<PipelineResult> {
     use crate::helper::lock::save_package_lock;
-    use crate::helper::ruborist_context::Context;
+    use crate::helper::ruborist_context::{Context, spawn_save_project_cache};
 
     let (options, channels) = Context::pipeline_deps_options(root_path.to_path_buf()).await;
     let handles = worker::start_workers(channels, root_path.to_path_buf());
 
-    let package_lock = utoo_ruborist::service::build_deps(options).await?;
+    let output = utoo_ruborist::service::build_deps(options).await?;
 
-    save_package_lock(root_path, &package_lock).await?;
+    save_package_lock(root_path, &output.lock).await?;
+    spawn_save_project_cache(root_path.to_path_buf(), output.project_cache);
 
     Ok(PipelineResult {
-        package_lock,
+        package_lock: output.lock,
         handles,
     })
 }

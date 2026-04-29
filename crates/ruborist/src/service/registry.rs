@@ -1,22 +1,23 @@
 //! Unified registry client implementation.
 //!
 //! Provides `UnifiedRegistry` that works on both native and WASM targets.
-//! Combines HTTP fetching with in-memory caching and automatic registry
-//! capability detection (semver support).
+//! Combines HTTP fetching with in-memory caching, optional persistent storage
+//! through a [`ManifestStore`], and automatic registry capability detection
+//! (semver support).
 //!
-//! For non-semver registries (npmjs.org), supports disk cache with ETag validation:
-//! - `versions.json`: version list + dist-tags + etag (lightweight)
-//! - `manifests/{version}.json`: individual version manifests
+//! For non-semver registries (npmjs.org), the persistent store doubles as the
+//! ETag source: `versions.json` carries the etag for the next conditional
+//! GET, and per-version manifests act as a warm cache for `(name, spec)`
+//! pairs.
 //!
 //! # Architecture
 //!
 //! - `manifest` module: Manifest fetching with retry (`fetch_full_manifest`, `fetch_version_manifest`)
-//! - `UnifiedRegistry`: Handles caching logic with three-tier strategy
+//! - `UnifiedRegistry`: in-memory cache + injected `ManifestStore` (host-supplied persistence)
 //!   - Memory cache (fastest)
-//!   - Disk cache (persistent, with ETag validation)
+//!   - `ManifestStore` (host: disk / KV / no-op)
 //!   - Network (authoritative source)
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -40,6 +41,7 @@ fn current_timestamp_secs() -> u64 {
 
 use super::cache::{PackageCache, Versions, VersionsInfo};
 use super::manifest;
+use super::store::{ManifestStore, NoopStore};
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 use crate::resolver::semver::normalize_spec;
 use crate::resolver::version::resolve_target_version;
@@ -48,13 +50,14 @@ use crate::util::OnceMap;
 
 /// Unified registry client that works on both native and WASM.
 ///
-/// Uses three-tier caching:
-/// 1. Memory cache (fastest, lost on restart)
-/// 2. Disk cache (persistent, via tokio-fs-ext)
+/// Caches manifest data in three tiers:
+/// 1. In-memory `PackageCache` (fastest, lost on restart)
+/// 2. Host-provided `ManifestStore` (persistent; disk on native, no-op on WASM by default)
 /// 3. Network (slowest, always authoritative)
 ///
-/// For non-semver registries (npmjs.org), uses ETag validation
-/// to avoid re-downloading unchanged manifests.
+/// For non-semver registries (npmjs.org), uses ETag validation to avoid
+/// re-downloading unchanged manifests; the etag is sourced from
+/// `ManifestStore::load_versions`.
 ///
 /// # Example
 ///
@@ -62,17 +65,18 @@ use crate::util::OnceMap;
 /// // Using builder pattern
 /// let registry = UnifiedRegistry::builder()
 ///     .registry("https://registry.npmmirror.com")
-///     .cache_dir(PathBuf::from("/tmp/cache"))
+///     .store(Arc::new(MyManifestStore::new()))
 ///     .build();
 /// ```
 pub struct UnifiedRegistry {
     registry_url: String,
     cache: Arc<PackageCache>,
+    store: Arc<dyn ManifestStore>,
     supports_semver: bool,
     /// Single-flight gate for full-manifest fetches keyed by package name.
     /// **Gate-only**: the entry value is `()`; the canonical
     /// `Arc<FullManifest>` lives in `PackageCache`. Concurrent resolves for
-    /// the same name share one network + disk + parse round-trip; the
+    /// the same name share one network + parse round-trip; the
     /// 200/304 outcome is recovered by inspecting cache state after the
     /// gate releases.
     inflight_full: Arc<OnceMap<String, ()>>,
@@ -86,7 +90,7 @@ pub struct UnifiedRegistry {
 pub struct UnifiedRegistryBuilder {
     registry_url: Option<String>,
     cache: Option<Arc<PackageCache>>,
-    cache_dir: Option<PathBuf>,
+    store: Option<Arc<dyn ManifestStore>>,
     supports_semver: Option<bool>,
 }
 
@@ -96,7 +100,7 @@ impl UnifiedRegistryBuilder {
         Self {
             registry_url: None,
             cache: None,
-            cache_dir: None,
+            store: None,
             supports_semver: None,
         }
     }
@@ -107,13 +111,13 @@ impl UnifiedRegistryBuilder {
         self
     }
 
-    /// Set the cache directory for disk caching.
-    pub fn cache_dir(mut self, path: PathBuf) -> Self {
-        self.cache_dir = Some(path);
+    /// Set the persistence backend. Defaults to [`NoopStore`].
+    pub fn store(mut self, store: Arc<dyn ManifestStore>) -> Self {
+        self.store = Some(store);
         self
     }
 
-    /// Set a shared cache instance.
+    /// Set a shared in-memory cache instance.
     pub fn cache(mut self, cache: Arc<PackageCache>) -> Self {
         self.cache = Some(cache);
         self
@@ -136,18 +140,13 @@ impl UnifiedRegistryBuilder {
             .supports_semver
             .unwrap_or_else(|| !is_npm_registry(&registry_url));
 
-        // Priority: shared cache > cache_dir > new cache
-        let cache = self.cache.unwrap_or_else(|| {
-            if let Some(dir) = self.cache_dir {
-                Arc::new(PackageCache::with_cache_dir(dir))
-            } else {
-                Arc::new(PackageCache::new())
-            }
-        });
+        let cache = self.cache.unwrap_or_else(|| Arc::new(PackageCache::new()));
+        let store = self.store.unwrap_or_else(|| Arc::new(NoopStore));
 
         UnifiedRegistry {
             registry_url,
             cache,
+            store,
             supports_semver,
             inflight_full: Arc::new(OnceMap::new()),
             inflight_version: Arc::new(OnceMap::new()),
@@ -166,6 +165,7 @@ impl Clone for UnifiedRegistry {
         Self {
             registry_url: self.registry_url.clone(),
             cache: Arc::clone(&self.cache),
+            store: Arc::clone(&self.store),
             supports_semver: self.supports_semver,
             inflight_full: Arc::clone(&self.inflight_full),
             inflight_version: Arc::clone(&self.inflight_version),
@@ -202,7 +202,7 @@ impl UnifiedRegistry {
         self.supports_semver
     }
 
-    /// Get the underlying cache.
+    /// Get the underlying in-memory cache.
     pub fn cache(&self) -> &PackageCache {
         &self.cache
     }
@@ -219,7 +219,6 @@ impl UnifiedRegistry {
     ///    populated → 304.
     async fn resolve_full_manifest(&self, name: &str) -> Result<FullManifestResult, RegistryError> {
         if let Some(manifest) = self.cache.get_full_manifest(name) {
-            tracing::debug!("Memory cache hit for full manifest: {}", name);
             return Ok(FullManifestResult::Full(manifest));
         }
 
@@ -231,8 +230,8 @@ impl UnifiedRegistry {
                     return Ok(());
                 }
 
-                let disk_versions = self.cache.get_versions_from_disk(name).await;
-                let etag = disk_versions.as_ref().and_then(|v| v.etag.clone());
+                let store_versions = self.store.load_versions(name).await.map(Arc::new);
+                let etag = store_versions.as_ref().and_then(|v| v.etag.clone());
 
                 match manifest::fetch_full_manifest(manifest::FetchManifestOptions {
                     registry_url: &self.registry_url,
@@ -256,17 +255,18 @@ impl UnifiedRegistry {
                             .set_full_manifest(name.to_string(), Arc::new(manifest));
                         self.cache
                             .set_versions(name.to_string(), Arc::clone(&versions_info));
-                        self.cache.set_versions_to_disk(name, &versions_info).await;
+                        // Fire-and-forget: store may spawn its own task.
+                        self.store.store_versions(name, versions_info);
                     }
                     manifest::FetchManifestResult::NotModified => {
                         tracing::debug!("ETag cache hit (304) for: {}", name);
-                        if let Some(versions_info) = disk_versions {
+                        if let Some(versions_info) = store_versions {
                             // Only populate `versions_info`; absence of
                             // `full_manifests` after the gate is the 304
                             // signal.
                             self.cache.set_versions(name.to_string(), versions_info);
                         } else {
-                            // Disk cache corrupted, fetch fresh (without etag).
+                            // Persistent store corrupted/missing, fetch fresh (without etag).
                             let (manifest, new_etag) = manifest::fetch_full_manifest_fresh(
                                 &self.registry_url,
                                 name,
@@ -287,7 +287,7 @@ impl UnifiedRegistry {
                                 .set_full_manifest(name.to_string(), Arc::new(manifest));
                             self.cache
                                 .set_versions(name.to_string(), Arc::clone(&versions_info));
-                            self.cache.set_versions_to_disk(name, &versions_info).await;
+                            self.store.store_versions(name, versions_info);
                         }
                     }
                 }
@@ -315,7 +315,7 @@ impl UnifiedRegistry {
     ///
     /// Cache flow:
     /// 1. Memory cache -> fastest
-    /// 2. Disk cache -> persistent
+    /// 2. ManifestStore -> persistent
     /// 3. Network -> authoritative
     ///
     /// Non-semver registries resolve the spec by extracting the matching
@@ -329,7 +329,6 @@ impl UnifiedRegistry {
         spec: &str,
     ) -> Result<Arc<CoreVersionManifest>, RegistryError> {
         if let Some(manifest) = self.cache.get_version_manifest(name, spec) {
-            tracing::debug!("Memory cache hit for version manifest: {}@{}", name, spec);
             return Ok(manifest);
         }
 
@@ -344,14 +343,15 @@ impl UnifiedRegistry {
                     }
 
                     if !self.supports_semver
-                        && self
-                            .cache
-                            .get_version_manifest_from_disk(name, spec)
-                            .await
-                            .is_some()
+                        && let Some(manifest) = self.store.load_version_manifest(name, spec).await
                     {
-                        tracing::debug!("Disk cache hit for version manifest: {}@{}", name, spec);
-                        // `get_version_manifest_from_disk` already populated memory.
+                        tracing::debug!("Persistent store hit for version manifest: {name}@{spec}");
+                        // Populate memory cache ourselves — store knows nothing about it.
+                        self.cache.set_version_manifest(
+                            name.to_string(),
+                            spec.to_string(),
+                            Arc::new(manifest),
+                        );
                         return Ok(());
                     }
 
@@ -375,9 +375,11 @@ impl UnifiedRegistry {
                                 Arc::clone(&arc),
                             );
                         }
-                        self.cache
-                            .set_version_manifest_to_disk(name, &resolved_version, &arc)
-                            .await;
+                        self.store.store_version_manifest(
+                            name,
+                            &resolved_version,
+                            Arc::clone(&arc),
+                        );
                         return Ok(());
                     }
 
@@ -503,7 +505,7 @@ impl RegistryClient for UnifiedRegistry {
         spec: &str,
     ) -> Result<Arc<CoreVersionManifest>, Self::Error> {
         // Delegates to `resolve_version_manifest` so the inflight dedup +
-        // memory/disk cache logic lives in one place.
+        // memory/store cache logic lives in one place.
         self.resolve_version_manifest(name, spec).await
     }
 
@@ -595,18 +597,8 @@ mod tests {
     }
 
     #[test]
-    fn test_unified_registry_with_cache_dir() {
-        let registry = UnifiedRegistry::builder()
-            .registry("https://registry.npmmirror.com")
-            .cache_dir(PathBuf::from("/tmp/cache"))
-            .build();
-        assert!(registry.supports_semver());
-        assert!(registry.cache().cache_dir().is_some());
-    }
-
-    #[test]
     fn test_unified_registry_with_shared_cache() {
-        let shared_cache = Arc::new(PackageCache::with_cache_dir(PathBuf::from("/tmp/shared")));
+        let shared_cache = Arc::new(PackageCache::new());
 
         let registry1 = UnifiedRegistry::builder()
             .registry("https://registry.npmmirror.com")

@@ -1,22 +1,10 @@
-//! Three-tier manifest cache for dependency resolution.
+//! In-memory manifest cache for dependency resolution.
 //!
-//! Provides a unified caching layer that works across platforms:
-//! - **Memory cache**: Fast in-memory lookup (platform-specific synchronization)
-//! - **Disk cache**: Persistent storage (via tokio-fs-ext)
-//! - **Project cache**: Per-project resolved packages
-//!
-//! # Architecture
-//!
-//! ```text
-//!  PackageCache                    (entry point, delegates to tiers)
-//!  ├── memory: MemoryCache         tier 1 — in-process, lost on restart
-//!  └── cache_dir: Option<PathBuf>  tier 2 — persistent, ~/.utoo/cache/
-//!
-//!  ProjectCacheData                tier 3 — per-project .utoo-manifest.json
-//!  └── cache: HashMap<name, ProjectPackageCache>
-//!      ├── specs:     spec → version      ("^2.1" → "2.1.1")
-//!      └── manifests: version → CoreVersionManifest  (serde, owned)
-//! ```
+//! ruborist itself only owns the memory tier; persistent storage (disk, remote
+//! KV, …) is delegated to a [`super::store::ManifestStore`] supplied by the
+//! host. The project-level cache ([`ProjectCacheData`]) is also pure data —
+//! callers load/save it themselves and pass it through `BuildDepsOptions` /
+//! `BuildDepsOutput`.
 //!
 //! # Memory Layout
 //!
@@ -41,30 +29,26 @@
 //! ```text
 //!  resolve(name, spec)
 //!    │
-//!    ├─ 1. Memory hit?  ──yes──► Arc<CoreVersionManifest> clone → done
-//!    │
-//!    ├─ 2. Disk hit?    ──yes──► deserialize → Arc::new() → store memory → done
-//!    │
-//!    └─ 3. Network      ──────► fetch JSON → Arc::new() → store memory + disk → done
-//!
-//!  Project cache is loaded at startup (cold) and saved at end (cold).
-//!  It pre-populates memory cache to skip network on subsequent runs.
+//!    ├─ 1. Memory hit?       ──yes──► Arc<CoreVersionManifest> clone → done
+//!    ├─ 2. ManifestStore hit? ──yes──► populate memory → done
+//!    └─ 3. Network            ──────► fetch JSON → store memory + fire-and-forget
+//!                                       ManifestStore::store_*
 //! ```
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock};
 
-use anyhow::{Context, Result};
+use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 
-/// Lightweight versions info for disk cache.
+/// Lightweight versions info, persisted by `ManifestStore` for ETag validation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VersionsInfo {
     pub versions: Versions,
     pub etag: Option<String>,
-    pub last_updated: u64, // Unix timestamp
+    pub last_updated: u64,
 }
 
 /// Version list and dist-tags.
@@ -76,16 +60,12 @@ pub struct Versions {
 }
 
 // ============================================================================
-// Memory cache implementation (lock-free reads via DashMap)
+// Memory cache (lock-free reads via DashMap)
 // ============================================================================
 
-use std::sync::{Arc, LazyLock};
-
-use dashmap::DashMap;
-
-/// Thread-safe in-memory cache. Uses sharded `DashMap`s so concurrent reads
-/// are lock-free across shards and writes only contend within a single shard;
-/// values are stored as `Arc<…>` so reads return cheap ref-count clones
+/// Thread-safe in-memory manifest cache. Uses sharded `DashMap`s so concurrent
+/// reads are lock-free across shards and writes only contend within a single
+/// shard; values are stored as `Arc<…>` so reads return cheap ref-count clones
 /// instead of cloning the full (potentially large) manifest payload.
 #[derive(Clone)]
 pub struct MemoryCache(Arc<MemoryCacheInner>);
@@ -96,8 +76,7 @@ struct MemoryCacheInner {
     version_manifests: DashMap<String, Arc<CoreVersionManifest>>,
 }
 
-/// Global singleton for memory cache.
-/// This ensures all UnifiedRegistry instances share the same cache.
+/// Global singleton. All `UnifiedRegistry` instances share the same cache.
 static GLOBAL_MEMORY_CACHE: LazyLock<MemoryCache> = LazyLock::new(|| {
     MemoryCache(Arc::new(MemoryCacheInner {
         full_manifests: DashMap::new(),
@@ -114,36 +93,52 @@ impl Default for MemoryCache {
 
 impl MemoryCache {
     /// Get the global memory cache singleton.
+    pub fn new() -> Self {
+        GLOBAL_MEMORY_CACHE.clone()
+    }
+
+    /// Get the global memory cache singleton (alias for `new`).
     pub fn global() -> Self {
         GLOBAL_MEMORY_CACHE.clone()
     }
 
-    // Full manifests
     pub fn get_full_manifest(&self, name: &str) -> Option<Arc<FullManifest>> {
-        self.0.full_manifests.get(name).map(|v| v.clone())
+        let result = self.0.full_manifests.get(name).map(|v| v.clone());
+        if result.is_some() {
+            tracing::debug!("Memory cache hit for full manifest: {name}");
+        }
+        result
     }
 
     pub fn set_full_manifest(&self, name: String, manifest: Arc<FullManifest>) {
+        tracing::debug!("Caching full manifest in memory: {name}");
         self.0.full_manifests.insert(name, manifest);
     }
 
-    // Versions info
     pub fn get_versions(&self, name: &str) -> Option<Arc<VersionsInfo>> {
-        self.0.versions_info.get(name).map(|v| v.clone())
+        let result = self.0.versions_info.get(name).map(|v| v.clone());
+        if result.is_some() {
+            tracing::debug!("Memory cache hit for versions: {name}");
+        }
+        result
     }
 
     pub fn set_versions(&self, name: String, info: Arc<VersionsInfo>) {
+        tracing::debug!("Caching versions in memory: {name}");
         self.0.versions_info.insert(name, info);
     }
 
-    // Version manifests (Arc-wrapped for cheap cloning)
     pub fn get_version_manifest(
         &self,
         name: &str,
         version: &str,
     ) -> Option<Arc<CoreVersionManifest>> {
         let key = format!("{name}@{version}");
-        self.0.version_manifests.get(&key).map(|v| v.clone())
+        let result = self.0.version_manifests.get(&key).map(|v| v.clone());
+        if result.is_some() {
+            tracing::debug!("Memory cache hit for version manifest: {name}@{version}");
+        }
+        result
     }
 
     pub fn set_version_manifest(
@@ -152,11 +147,11 @@ impl MemoryCache {
         version: String,
         manifest: Arc<CoreVersionManifest>,
     ) {
+        tracing::debug!("Caching version manifest in memory: {name}@{version}");
         let key = format!("{name}@{version}");
         self.0.version_manifests.insert(key, manifest);
     }
 
-    // Stats
     pub fn full_manifest_count(&self) -> usize {
         self.0.full_manifests.len()
     }
@@ -169,7 +164,7 @@ impl MemoryCache {
         self.0.version_manifests.len()
     }
 
-    /// Export all version manifests for persistence.
+    /// Export all version manifests for persistence into a project cache.
     pub fn export_version_manifests(&self) -> Vec<(String, Arc<CoreVersionManifest>)> {
         self.0
             .version_manifests
@@ -177,254 +172,13 @@ impl MemoryCache {
             .map(|kv| (kv.key().clone(), kv.value().clone()))
             .collect()
     }
-}
-
-// ============================================================================
-// Disk cache paths
-// ============================================================================
-
-/// Get the path for package versions cache file.
-///
-/// Structure: `{cache_dir}/{package_name}/versions.json`
-pub fn get_versions_cache_path(cache_dir: &Path, package_name: &str) -> PathBuf {
-    cache_dir.join(package_name).join("versions.json")
-}
-
-/// Get the path for package manifest cache file.
-///
-/// Structure: `{cache_dir}/{package_name}/manifests/{version}.json`
-pub fn get_manifest_cache_path(cache_dir: &Path, package_name: &str, version: &str) -> PathBuf {
-    cache_dir
-        .join(package_name)
-        .join("manifests")
-        .join(format!("{version}.json"))
-}
-
-// ============================================================================
-// Unified PackageCache
-// ============================================================================
-
-/// Three-tier package cache.
-///
-/// Provides unified access to memory, disk, and project caches.
-#[derive(Clone, Default)]
-pub struct PackageCache {
-    /// In-memory cache (platform-specific implementation)
-    memory: MemoryCache,
-    /// Disk cache directory (None = no disk cache)
-    cache_dir: Option<PathBuf>,
-}
-
-impl PackageCache {
-    /// Create a new package cache.
-    pub fn new() -> Self {
-        Self {
-            memory: MemoryCache::global(),
-            cache_dir: None,
-        }
-    }
-
-    /// Create a package cache with disk caching enabled.
-    pub fn with_cache_dir(cache_dir: PathBuf) -> Self {
-        Self {
-            memory: MemoryCache::global(),
-            cache_dir: Some(cache_dir),
-        }
-    }
-
-    /// Get the cache directory.
-    pub fn cache_dir(&self) -> Option<&Path> {
-        self.cache_dir.as_deref()
-    }
-
-    // === Memory cache operations (sync) ===
-
-    /// Get full manifest from memory cache.
-    pub fn get_full_manifest(&self, name: &str) -> Option<Arc<FullManifest>> {
-        let result = self.memory.get_full_manifest(name);
-        if result.is_some() {
-            tracing::debug!("Memory cache hit for full manifest: {name}");
-        }
-        result
-    }
-
-    /// Set full manifest in memory cache.
-    pub fn set_full_manifest(&self, name: String, manifest: Arc<FullManifest>) {
-        tracing::debug!("Caching full manifest in memory: {name}");
-        self.memory.set_full_manifest(name, manifest);
-    }
-
-    /// Get versions info from memory cache.
-    pub fn get_versions(&self, name: &str) -> Option<Arc<VersionsInfo>> {
-        let result = self.memory.get_versions(name);
-        if result.is_some() {
-            tracing::debug!("Memory cache hit for versions: {name}");
-        }
-        result
-    }
-
-    /// Set versions info in memory cache.
-    pub fn set_versions(&self, name: String, info: Arc<VersionsInfo>) {
-        tracing::debug!("Caching versions in memory: {name}");
-        self.memory.set_versions(name, info);
-    }
-
-    /// Get version manifest from memory cache.
-    pub fn get_version_manifest(
-        &self,
-        name: &str,
-        version: &str,
-    ) -> Option<Arc<CoreVersionManifest>> {
-        let result = self.memory.get_version_manifest(name, version);
-        if result.is_some() {
-            tracing::debug!("Memory cache hit for version manifest: {name}@{version}");
-        }
-        result
-    }
-
-    /// Set version manifest in memory cache.
-    pub fn set_version_manifest(
-        &self,
-        name: String,
-        version: String,
-        manifest: Arc<CoreVersionManifest>,
-    ) {
-        tracing::debug!("Caching version manifest in memory: {name}@{version}");
-        self.memory.set_version_manifest(name, version, manifest);
-    }
-
-    // === Disk cache operations (async, uses tokio-fs-ext) ===
-
-    /// Load versions info from disk cache.
-    pub async fn get_versions_from_disk(&self, name: &str) -> Option<Arc<VersionsInfo>> {
-        let cache_dir = self.cache_dir.as_ref()?;
-        let path = get_versions_cache_path(cache_dir, name);
-
-        if !super::fs::exists(&path).await {
-            return None;
-        }
-
-        match super::fs::read_json::<VersionsInfo>(&path).await {
-            Ok(info) => {
-                tracing::debug!("Disk cache hit for versions: {name}");
-                let info = Arc::new(info);
-                // Also cache in memory
-                self.memory.set_versions(name.to_string(), info.clone());
-                Some(info)
-            }
-            Err(e) => {
-                tracing::debug!("Failed to read versions cache for {name}: {e}");
-                None
-            }
-        }
-    }
-
-    /// Save versions info to disk cache.
-    pub async fn set_versions_to_disk(&self, name: &str, info: &VersionsInfo) {
-        let Some(cache_dir) = &self.cache_dir else {
-            return;
-        };
-
-        let path = get_versions_cache_path(cache_dir, name);
-
-        // Ensure parent directory exists
-        if let Some(parent) = path.parent() {
-            let _ = tokio_fs_ext::create_dir_all(parent).await;
-        }
-
-        match serde_json::to_string_pretty(info) {
-            Ok(content) => {
-                if let Err(e) = tokio_fs_ext::write(&path, content.as_bytes()).await {
-                    tracing::debug!("Failed to write versions cache for {name}: {e}");
-                } else {
-                    tracing::debug!("Wrote versions to disk cache: {name}");
-                }
-            }
-            Err(e) => {
-                tracing::debug!("Failed to serialize versions for {name}: {e}");
-            }
-        }
-    }
-
-    /// Load version manifest from disk cache.
-    pub async fn get_version_manifest_from_disk(
-        &self,
-        name: &str,
-        version: &str,
-    ) -> Option<Arc<CoreVersionManifest>> {
-        let cache_dir = self.cache_dir.as_ref()?;
-        let path = get_manifest_cache_path(cache_dir, name, version);
-
-        if !super::fs::exists(&path).await {
-            return None;
-        }
-
-        match super::fs::read_json::<CoreVersionManifest>(&path).await {
-            Ok(manifest) => {
-                tracing::debug!("Disk cache hit for manifest: {name}@{version}");
-                let manifest = Arc::new(manifest);
-                // Also cache in memory
-                self.memory.set_version_manifest(
-                    name.to_string(),
-                    version.to_string(),
-                    manifest.clone(),
-                );
-                Some(manifest)
-            }
-            Err(e) => {
-                tracing::debug!("Failed to read manifest cache for {name}@{version}: {e}");
-                None
-            }
-        }
-    }
-
-    /// Save version manifest to disk cache.
-    pub async fn set_version_manifest_to_disk(
-        &self,
-        name: &str,
-        version: &str,
-        manifest: &CoreVersionManifest,
-    ) {
-        let Some(cache_dir) = &self.cache_dir else {
-            return;
-        };
-
-        let path = get_manifest_cache_path(cache_dir, name, version);
-
-        // Ensure parent directory exists
-        if let Some(parent) = path.parent() {
-            let _ = tokio_fs_ext::create_dir_all(parent).await;
-        }
-
-        match serde_json::to_string_pretty(manifest) {
-            Ok(content) => {
-                if let Err(e) = tokio_fs_ext::write(&path, content.as_bytes()).await {
-                    tracing::debug!("Failed to write manifest cache for {name}@{version}: {e}");
-                } else {
-                    tracing::debug!("Wrote manifest to disk cache: {name}@{version}");
-                }
-            }
-            Err(e) => {
-                tracing::debug!("Failed to serialize manifest for {name}@{version}: {e}");
-            }
-        }
-    }
-
-    /// Export all version manifests for persistence.
-    /// Returns iterator of (key, manifest) pairs where key is "name@version".
-    pub fn export_version_manifests(&self) -> Vec<(String, Arc<CoreVersionManifest>)> {
-        self.memory.export_version_manifests()
-    }
-
-    // === Stats ===
 
     /// Get cache statistics.
     pub fn stats(&self) -> CacheStats {
         CacheStats {
-            full_manifest_count: self.memory.full_manifest_count(),
-            versions_count: self.memory.versions_count(),
-            version_manifest_count: self.memory.version_manifest_count(),
-            has_disk_cache: self.cache_dir.is_some(),
+            full_manifest_count: self.full_manifest_count(),
+            versions_count: self.versions_count(),
+            version_manifest_count: self.version_manifest_count(),
         }
     }
 }
@@ -435,22 +189,26 @@ pub struct CacheStats {
     pub full_manifest_count: usize,
     pub versions_count: usize,
     pub version_manifest_count: usize,
-    pub has_disk_cache: bool,
 }
+
+/// Legacy alias — `PackageCache` is now just the memory tier.
+pub type PackageCache = MemoryCache;
+
+/// Legacy alias kept for back-compat with existing callers.
+pub type ManifestCache = MemoryCache;
 
 // ============================================================================
 // Project-level cache (per-project resolved packages)
 // ============================================================================
 
-/// Project-level cache data structure.
+/// Project-level cache data.
 ///
-/// Stores resolved package information for a specific project.
-/// This is typically stored in `.utoo-manifest.json` in the project root.
+/// Stores resolved package information for a specific project. Hosts persist
+/// this (typically as `node_modules/.utoo-manifest.json`) and pass it back via
+/// `BuildDepsOptions::warm_project_cache`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProjectCacheData {
-    /// Map of package name -> (spec_map, manifest_map)
-    /// spec_map: spec -> version
-    /// manifest_map: version -> manifest
+    /// package name -> per-package cache
     #[serde(default)]
     pub cache: HashMap<String, ProjectPackageCache>,
 }
@@ -469,9 +227,7 @@ pub struct ProjectPackageCache {
 /// Thread-safe project cache for dependency resolution state.
 ///
 /// Sharded per package name via `DashMap` so concurrent lookups across
-/// distinct packages don't contend. Within a single package the inner
-/// per-package state is small and protected by a short-held parking_lot
-/// mutex (writes are infrequent: once per resolved spec).
+/// distinct packages don't contend.
 #[derive(Clone, Default)]
 pub struct ProjectCache {
     cache: Arc<DashMap<String, Arc<parking_lot::Mutex<ProjectPackageCache>>>>,
@@ -533,46 +289,6 @@ impl ProjectCache {
     }
 }
 
-/// Load project cache from file.
-pub async fn load_project_cache(path: &Path) -> Result<ProjectCacheData> {
-    if !super::fs::exists(path).await {
-        tracing::debug!("Project cache file not found: {}", path.display());
-        return Ok(ProjectCacheData::default());
-    }
-
-    let data: ProjectCacheData = super::fs::read_json(path)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to read/parse project cache: {}", e))?;
-
-    tracing::debug!("Loaded project cache from {}", path.display());
-    Ok(data)
-}
-
-/// Save project cache to file.
-pub async fn save_project_cache(path: &Path, data: &ProjectCacheData) -> Result<()> {
-    // Ensure parent directory exists
-    if let Some(parent) = path.parent() {
-        let _ = tokio_fs_ext::create_dir_all(parent).await;
-    }
-
-    let content =
-        serde_json::to_string_pretty(data).context("Failed to serialize project cache")?;
-
-    tokio_fs_ext::write(path, content.as_bytes())
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to write project cache: {}", e))?;
-
-    tracing::debug!("Saved project cache to {}", path.display());
-    Ok(())
-}
-
-// ============================================================================
-// Legacy alias for backward compatibility
-// ============================================================================
-
-/// Alias for backward compatibility.
-pub type ManifestCache = MemoryCache;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -590,7 +306,7 @@ mod tests {
 
         let retrieved = cache.get_full_manifest("test").unwrap();
         assert_eq!(retrieved.name, "test");
-        assert_eq!(cache.full_manifest_count(), 1);
+        assert!(cache.full_manifest_count() >= 1);
     }
 
     #[test]
@@ -610,7 +326,7 @@ mod tests {
 
         let retrieved = cache.get_versions("test").unwrap();
         assert_eq!(retrieved.versions.version_list, vec!["1.0.0"]);
-        assert_eq!(cache.versions_count(), 1);
+        assert!(cache.versions_count() >= 1);
     }
 
     #[test]
@@ -628,63 +344,6 @@ mod tests {
         let retrieved = cache.get_version_manifest("test", "1.0.0").unwrap();
         assert_eq!(retrieved.name, "test");
         assert_eq!(retrieved.version, "1.0.0");
-        assert_eq!(cache.version_manifest_count(), 1);
-    }
-
-    #[test]
-    fn test_cache_paths() {
-        let cache_dir = PathBuf::from("/tmp/cache");
-
-        let versions_path = get_versions_cache_path(&cache_dir, "lodash");
-        assert_eq!(
-            versions_path,
-            PathBuf::from("/tmp/cache/lodash/versions.json")
-        );
-
-        let manifest_path = get_manifest_cache_path(&cache_dir, "lodash", "4.17.21");
-        assert_eq!(
-            manifest_path,
-            PathBuf::from("/tmp/cache/lodash/manifests/4.17.21.json")
-        );
-    }
-
-    #[test]
-    fn test_cache_paths_scoped_package() {
-        let cache_dir = PathBuf::from("/tmp/cache");
-
-        let versions_path = get_versions_cache_path(&cache_dir, "@types/node");
-        assert_eq!(
-            versions_path,
-            PathBuf::from("/tmp/cache/@types/node/versions.json")
-        );
-
-        let manifest_path = get_manifest_cache_path(&cache_dir, "@types/node", "18.0.0");
-        assert_eq!(
-            manifest_path,
-            PathBuf::from("/tmp/cache/@types/node/manifests/18.0.0.json")
-        );
-    }
-
-    #[test]
-    fn test_package_cache_stats() {
-        // Note: MemoryCache uses global singleton, so we can't assert initial values are 0
-        // Instead, just verify the stats structure works correctly
-        let cache = PackageCache::new();
-        let stats = cache.stats();
-
-        // Verify stats fields are accessible (values may vary due to global cache)
-        let _ = stats.full_manifest_count;
-        let _ = stats.versions_count;
-        let _ = stats.version_manifest_count;
-        assert!(!stats.has_disk_cache);
-    }
-
-    #[test]
-    fn test_package_cache_with_disk() {
-        let cache = PackageCache::with_cache_dir(PathBuf::from("/tmp/cache"));
-        let stats = cache.stats();
-
-        assert!(stats.has_disk_cache);
-        assert_eq!(cache.cache_dir(), Some(Path::new("/tmp/cache")));
+        assert!(cache.version_manifest_count() >= 1);
     }
 }
