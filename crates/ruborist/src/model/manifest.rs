@@ -37,24 +37,14 @@ pub struct FullManifest {
     #[serde(rename = "dist-tags")]
     pub dist_tags: HashMap<String, String>,
 
-    /// Version keys (preserved order) and pre-parsed `CoreVersionManifest`s,
-    /// populated in a single pass by [`Versions`]'s custom `Deserialize`.
-    ///
-    /// Replaces the previous `versions: Vec<String>` (populated by
-    /// `IgnoredAny` visitor) + per-resolve `extract_version` that
-    /// re-parsed the full raw JSON via `simd_json::to_borrowed_value`
-    /// for every `resolve_package` call. That re-parse was uninstrumented
-    /// CPU on the async worker — ~0.4ms avg × 4567 resolves = 1.85s
-    /// serial load on the 4-core tokio runtime, preventing the pipeline
-    /// from maintaining 64 in-flight fetches (observed ~38 effective).
-    ///
-    /// With eager parse, `get_core_version` becomes an O(1) map lookup.
-    pub versions: Versions,
+    #[serde(default, deserialize_with = "deserialize_version_keys")]
+    pub versions: Vec<String>,
 
-    /// Raw HTTP response bytes. Retained only for `get_full_version`
-    /// (cold path — `ut view` command) which still needs on-demand
-    /// extraction of the full `VersionManifest`. Hot-path resolve uses
-    /// [`Self::versions`] which is pre-parsed.
+    /// Raw HTTP response bytes. Injected post-parse; used for on-demand
+    /// version extraction via [`extract_version`](Self::extract_version).
+    /// Storing the raw bytes (rather than a parsed tree) keeps the cached
+    /// `FullManifest` compact — npm `versions` subtrees parsed to a typed
+    /// tree expand to ~1.5–2.5x the raw size on real-world packages.
     #[serde(skip)]
     pub raw: Arc<[u8]>,
 
@@ -90,157 +80,64 @@ pub struct FullManifest {
 }
 
 impl FullManifest {
-    /// On-demand `CoreVersionManifest` extraction from a pre-parsed
-    /// `simd_json::OwnedValue` subtree.
+    /// Extract a single version from raw bytes on demand.
     ///
-    /// History: we've been through three designs here.
-    /// 1. **Eager struct parse (previous)**: `Versions::deserialize`
-    ///    built `Arc<CoreVersionManifest>` for every version up
-    ///    front. Lookup was O(1) but fetch-time spawn_blocking had to
-    ///    materialise ~500 structs per manifest × 2730 manifests =
-    ///    ~1.37M CoreVersionManifest builds, 99 % of which the
-    ///    resolver never reads. Blocking pool saturation at cap=128
-    ///    showed up as `parse_us` avg 20 ms with long tails.
-    /// 2. **Lazy `Arc<serde_json::Value>` (tried in c5cd8318,
-    ///    reverted fe8365d7)**: stored `serde_json::Value` subtrees
-    ///    and called `from_value(value.clone())` on demand. The
-    ///    deep clone + serde_json walk ran on async worker and
-    ///    measured `core_version_us` 11-18 ms avg — worse than eager.
-    /// 3. **This design — lazy simd_json `OwnedValue` + memoisation**:
-    ///    Store each version as `Arc<simd_json::OwnedValue>` (the
-    ///    native simd_json tree form — no serde_json round-trip).
-    ///    On demand call `from_refvalue(&OwnedValue)` which
-    ///    zero-copies through `&Value` implementing `Deserializer`.
-    ///    First hit for a given (manifest, version) pays ~50-200 μs
-    ///    of subtree walking; subsequent hits are `Arc::clone` via
-    ///    the `DashMap` memoisation cache.
+    /// Parses the full manifest into a `simd_json::BorrowedValue` tree
+    /// (transient, dropped at end of call), navigates to the matching
+    /// version, and deserializes that subtree directly into `T`.
+    /// `&BorrowedValue` is itself a serde `Deserializer`, so the matched
+    /// subtree is visited in place — no intermediate `serde_json::Value`
+    /// allocation.
     ///
-    /// Why this is better than design 1: a typical resolve touches
-    /// 1-3 of a manifest's ~500 versions. Building the other 497+
-    /// was pure waste on the blocking pool's critical path.
-    ///
-    /// Why this is better than design 2: `simd_json::OwnedValue`'s
-    /// `&Value: Deserializer` zero-copies through the tree without
-    /// allocating an intermediate `serde_json::Value`. And moving
-    /// the conversion out of `spawn_blocking` (it's small, runs on
-    /// async worker) removes the 200 μs dispatch overhead that was
-    /// ~500 ms of the previous lazy attempt.
-    pub fn get_core_version(&self, version: &str) -> Option<Arc<CoreVersionManifest>> {
-        // Fast path: memoised conversion.
-        if let Some(cached) = self.versions.cache.get(version) {
-            return Some(cached.clone());
-        }
-        let tree = self.versions.trees.get(version)?;
-        // `&simd_json::OwnedValue` impls `Deserializer<'_>` directly
-        // (see simd_json::serde::value::owned::de), so this is a
-        // zero-allocation tree walk — no Value clone, no bytes copy.
-        let core = CoreVersionManifest::deserialize(tree.as_ref()).ok()?;
-        let arc = Arc::new(core);
-        self.versions.cache.insert(version.to_string(), arc.clone());
-        Some(arc)
-    }
-
-    /// Parse a single version on demand into full `VersionManifest`
-    /// (cold path — `ut view`). Uses the retained raw bytes because
-    /// `VersionManifest` carries display fields that `CoreVersionManifest`
-    /// drops, and `ut view` is infrequent.
-    pub fn get_full_version(&self, version: &str) -> Option<VersionManifest> {
+    /// `OnceMap` single-flight in `UnifiedRegistry` reduces the per-key
+    /// invocation count to one, so the per-call full-tree parse cost is
+    /// bounded.
+    fn extract_version<T: for<'de> Deserialize<'de>>(&self, version: &str) -> Option<T> {
         use simd_json::prelude::ValueObjectAccess;
         let mut buf = self.raw.to_vec();
         let parsed = simd_json::to_borrowed_value(&mut buf).ok()?;
         let version_obj = parsed.get("versions")?.get(version)?;
-        let value = serde_json::to_value(version_obj).ok()?;
-        serde_json::from_value(value).ok()
+        T::deserialize(version_obj).ok()
+    }
+
+    /// Parse a single version on demand into CoreVersionManifest (hot path).
+    pub fn get_core_version(&self, version: &str) -> Option<CoreVersionManifest> {
+        self.extract_version(version)
+    }
+
+    /// Parse a single version on demand into full VersionManifest (cold path, e.g. `ut view`).
+    pub fn get_full_version(&self, version: &str) -> Option<VersionManifest> {
+        self.extract_version(version)
     }
 }
 
-/// Version entries of a `FullManifest`: preserves key insertion order
-/// (for `VersionsInfo`/semver callers that iterate the list) alongside
-/// per-version pre-parsed JSON subtrees and a memoisation cache for
-/// strongly-typed `CoreVersionManifest` conversions.
+/// Deserialize a versions map by extracting only the keys, skipping all values.
 ///
-/// Fetch-time parse builds only `Arc<simd_json::OwnedValue>` per
-/// version — cheaper than constructing a full `CoreVersionManifest`
-/// because `OwnedValue` is the native simd_json tree without
-/// field-by-field `#[serde(default)]` / `skip_on_error` validation.
-/// The real `CoreVersionManifest` is materialised on demand inside
-/// `FullManifest::get_core_version`, so the ~99 % of versions the
-/// resolver never touches don't pay for field-level parsing.
-#[derive(Debug, Clone, Default)]
-pub struct Versions {
-    /// Version strings in insertion order — used by
-    /// `resolve_target_version` and cached into `VersionsInfo`.
-    pub keys: Vec<String>,
-    /// Per-version pre-parsed JSON subtrees. `Arc` because the
-    /// `FullManifest` is cloned across cache tiers (memory / project
-    /// cache) and we want Arc-level sharing of the underlying bytes.
-    pub trees: HashMap<String, Arc<simd_json::OwnedValue>>,
-    /// Memoisation cache populated on first `get_core_version(v)`
-    /// call. `DashMap` instead of `Mutex<HashMap>` because
-    /// multiple resolves for the same (name, version) can land
-    /// concurrently on different async workers; DashMap avoids
-    /// serialising them on a global mutex.
-    pub cache: Arc<dashmap::DashMap<String, Arc<CoreVersionManifest>>>,
-}
-
-impl Versions {
-    pub fn is_empty(&self) -> bool {
-        self.keys.is_empty()
-    }
-}
-
-impl Serialize for Versions {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        // Serialize the same shape the registry returns: a JSON object
-        // mapping version string -> raw JSON tree. Order follows
-        // `keys` for determinism (HashMap iteration order is arbitrary
-        // otherwise).
-        use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(Some(self.keys.len()))?;
-        for k in &self.keys {
-            if let Some(v) = self.trees.get(k) {
-                map.serialize_entry(k, v.as_ref())?;
-            }
+/// Uses `IgnoredAny` to skip over version manifest JSON objects without allocating,
+/// only collecting the version number strings.
+fn deserialize_version_keys<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct VersionKeysVisitor;
+    impl<'de> serde::de::Visitor<'de> for VersionKeysVisitor {
+        type Value = Vec<String>;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("a map of version strings to objects")
         }
-        map.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for Versions {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct VersionsVisitor;
-        impl<'de> serde::de::Visitor<'de> for VersionsVisitor {
-            type Value = Versions;
-            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                f.write_str("a map of version strings to manifest objects")
+        fn visit_map<M: serde::de::MapAccess<'de>>(
+            self,
+            mut map: M,
+        ) -> Result<Vec<String>, M::Error> {
+            let mut keys = Vec::with_capacity(map.size_hint().unwrap_or(0));
+            while let Some(key) = map.next_key::<String>()? {
+                map.next_value::<serde::de::IgnoredAny>()?;
+                keys.push(key);
             }
-            fn visit_map<M: serde::de::MapAccess<'de>>(
-                self,
-                mut map: M,
-            ) -> Result<Versions, M::Error> {
-                let cap = map.size_hint().unwrap_or(0);
-                let mut keys = Vec::with_capacity(cap);
-                let mut trees = HashMap::with_capacity(cap);
-                while let Some(key) = map.next_key::<String>()? {
-                    // Deserialize into `simd_json::OwnedValue` — the
-                    // native simd_json tree. Cheaper than building
-                    // `CoreVersionManifest` because it skips field
-                    // validation / `skip_on_error` round-trips; those
-                    // only run on demand for versions the resolver
-                    // actually reads.
-                    let tree: simd_json::OwnedValue = map.next_value()?;
-                    trees.insert(key.clone(), Arc::new(tree));
-                    keys.push(key);
-                }
-                Ok(Versions {
-                    keys,
-                    trees,
-                    cache: Arc::new(dashmap::DashMap::new()),
-                })
-            }
+            Ok(keys)
         }
-        deserializer.deserialize_map(VersionsVisitor)
     }
+    deserializer.deserialize_map(VersionKeysVisitor)
 }
 
 /// Version-specific manifest from npm registry.
@@ -416,19 +313,6 @@ pub struct VersionManifest {
 /// Contains only the ~13 fields needed for dependency resolution, installation,
 /// and lockfile serialization. Display-only fields (description, author, homepage,
 /// keywords, bugs, repository, npm_user, etc.) are omitted.
-///
-/// `skip_on_error` is kept on every field that's typed as `HashMap`,
-/// `String`, or `bool` — real registry data regularly ships values
-/// that don't match the expected shape (e.g. `engines` with a null
-/// value, `hasInstallScript` as a string, legacy `license` as an
-/// array-of-object). Dropping the wrapper on those fields broke the
-/// lodash fetch at `"ExpectedMap at character 0"` in CI.
-///
-/// The three `Option<Value>` fields (`bin`, `os`, `cpu`) are the only
-/// safe cases: `Value` absorbs any JSON, so the `Value::deserialize`
-/// round-trip in `skip_on_error` provides zero robustness. Dropping
-/// it there saves one allocation + recursive walk per occurrence
-/// without correctness risk.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CoreVersionManifest {
@@ -464,7 +348,10 @@ pub struct CoreVersionManifest {
 
     pub dist: Dist,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub bin: Option<Value>,
 
     #[serde(
@@ -473,10 +360,16 @@ pub struct CoreVersionManifest {
     )]
     pub engines: Option<HashMap<String, String>>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub os: Option<Value>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub cpu: Option<Value>,
 
     #[serde(

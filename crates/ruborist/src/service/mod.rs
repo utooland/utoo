@@ -50,12 +50,12 @@ mod fs;
 pub(crate) mod http;
 mod manifest;
 mod registry;
+mod store;
 
-pub use api::{BuildDepsOptions, build_deps};
+pub use api::{BuildDepsOptions, BuildDepsOutput, build_deps};
 pub use cache::{
-    CacheStats, ManifestCache, MemoryCache, PackageCache, ProjectCache, ProjectCacheData,
-    ProjectPackageCache, Versions, VersionsInfo, get_manifest_cache_path, get_versions_cache_path,
-    load_project_cache, save_project_cache,
+    CacheStats, MemoryCache, PackageCache, ProjectCacheData, ProjectPackageCache, Versions,
+    VersionsInfo,
 };
 pub use fs::{Glob, NoopGlob, exists, read_to_string};
 pub use http::client_builder;
@@ -64,3 +64,4 @@ pub use manifest::{
     fetch_full_manifest, fetch_full_manifest_fresh, fetch_version_manifest,
 };
 pub use registry::UnifiedRegistry;
+pub use store::{ManifestStore, NoopStore};

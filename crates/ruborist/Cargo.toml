@@ -8,6 +8,7 @@ license     = "MIT"
 # tombi: format.rules.table-keys-order.disabled = true
 [dependencies]
 anyhow          = { workspace = true }
+async-trait     = { workspace = true }
 bytes           = "1"
 crossbeam-queue = "0.3"
 dashmap         = "6.1.0"
@@ -59,10 +60,7 @@ libc = "0.2"
 # Browser handles TLS via the fetch API, so reqwest needs no rustls
 # feature on this target.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys               = "0.3"
-# Fire-and-forget disk writes use `spawn_local` because wasm-bindgen-futures
-# (and the OPFS-backed `tokio_fs_ext`) aren't `Send`.
-wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
 
 # macOS uses aws-lc-rs (BoringSSL primitives) for ~40 % faster cold
 # resolves on M-series ARM. CI bench-phases regresses on Linux/x86_64

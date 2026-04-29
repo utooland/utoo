@@ -157,12 +157,13 @@ pub trait RegistryClient {
 
     /// Fetch full package manifest from registry.
     ///
-    /// Returns the complete package manifest with all versions.
-    /// Required for registries that don't support semver resolution.
+    /// Returns the complete package manifest with all versions, wrapped in
+    /// an `Arc` so callers share the (potentially large) payload without
+    /// cloning.
     fn fetch_full_manifest(
         &self,
         name: &str,
-    ) -> impl Future<Output = Result<FullManifest, Self::Error>> + MaybeSend;
+    ) -> impl Future<Output = Result<Arc<FullManifest>, Self::Error>> + MaybeSend;
 
     /// Fetch specific version manifest from registry.
     ///
@@ -181,20 +182,23 @@ pub trait RegistryClient {
     {
         async move {
             let manifest = self.fetch_full_manifest(name).await?;
-            let version_list: Vec<String> = manifest.versions.keys.clone();
+            let version_list: Vec<String> = manifest.versions.clone();
 
             // Resolve version using shared logic
             let resolved_version = resolve_target_version(&manifest.dist_tags, &version_list, spec)
                 .map_err(|e| RegistryError(anyhow::anyhow!("{}@{}: {}", name, spec, e)))?;
 
-            manifest.get_core_version(&resolved_version).ok_or_else(|| {
-                RegistryError(anyhow::anyhow!(
-                    "Version {} not found in manifest for {}",
-                    resolved_version,
-                    name
-                ))
-                .into()
-            })
+            manifest
+                .get_core_version(&resolved_version)
+                .map(Arc::new)
+                .ok_or_else(|| {
+                    RegistryError(anyhow::anyhow!(
+                        "Version {} not found in manifest for {}",
+                        resolved_version,
+                        name
+                    ))
+                    .into()
+                })
         }
     }
 
@@ -251,7 +255,7 @@ pub trait RegistryClient {
                     fetch_spec
                 );
                 let full_manifest = self.fetch_full_manifest(&fetch_name).await?;
-                let version_list: Vec<String> = full_manifest.versions.keys.clone();
+                let version_list: Vec<String> = full_manifest.versions.clone();
 
                 if version_list.is_empty() {
                     return Err(RegistryError(anyhow::anyhow!(
@@ -267,6 +271,7 @@ pub trait RegistryClient {
 
                 let version_manifest = full_manifest
                     .get_core_version(&resolved_version)
+                    .map(Arc::new)
                     .ok_or_else(|| {
                         RegistryError(anyhow::anyhow!(
                             "Version {} not found in manifest for {}",
@@ -295,31 +300,10 @@ pub trait RegistryClient {
         async move {
             let manifest = self.fetch_full_manifest(name).await?;
             Ok(VersionsInfo {
-                version_list: manifest.versions.keys.clone(),
-                dist_tags: manifest.dist_tags,
+                version_list: manifest.versions.clone(),
+                dist_tags: manifest.dist_tags.clone(),
             })
         }
-    }
-
-    /// Get cached full manifest if available (synchronous, memory cache only).
-    ///
-    /// This method is used by preload to extract version manifests from cached
-    /// full manifests without additional network requests.
-    ///
-    /// Default implementation returns None (no caching).
-    fn get_cached_full_manifest(&self, _name: &str) -> Option<FullManifest> {
-        None
-    }
-
-    /// Get cached versions info if available (synchronous, memory cache only).
-    ///
-    /// This method is used by preload to handle 304 responses efficiently.
-    /// When fetch_full_manifest returns 304, the versions info is cached in memory,
-    /// and this method can retrieve it without additional network requests.
-    ///
-    /// Default implementation returns None (no caching).
-    fn get_cached_versions(&self, _name: &str) -> Option<VersionsInfo> {
-        None
     }
 
     /// Cache a resolved version manifest for later use.
@@ -418,27 +402,27 @@ pub mod mock {
     impl RegistryClient for MockRegistryClient {
         type Error = MockError;
 
-        async fn fetch_full_manifest(&self, name: &str) -> Result<FullManifest, Self::Error> {
+        async fn fetch_full_manifest(&self, name: &str) -> Result<Arc<FullManifest>, Self::Error> {
             let pkg = self
                 .packages
                 .get(name)
                 .ok_or_else(|| MockError(format!("Package not found: {}", name)))?;
 
-            // Build JSON matching the registry wire format and round-trip
-            // it through the real `FullManifest` deserializer so tests
-            // exercise the same `Versions` parse path as production.
+            // Build JSON and serialize to raw bytes for on-demand extraction
             let json = serde_json::json!({
                 "name": &pkg.name,
                 "dist-tags": &pkg.dist_tags,
-                "_id": &pkg.name,
                 "versions": &pkg.versions,
             });
             let raw = serde_json::to_vec(&json).expect("mock JSON serialization");
-            let mut parse_buf = raw.clone();
-            let mut manifest: FullManifest = simd_json::serde::from_slice(&mut parse_buf)
-                .map_err(|e| MockError(format!("mock manifest parse error: {e}")))?;
-            manifest.raw = Arc::from(raw);
-            Ok(manifest)
+
+            Ok(Arc::new(FullManifest {
+                name: pkg.name.clone(),
+                dist_tags: pkg.dist_tags.clone(),
+                versions: pkg.versions.keys().cloned().collect(),
+                raw: Arc::from(raw),
+                ..Default::default()
+            }))
         }
     }
 }
