@@ -9,14 +9,15 @@
 //! Errors are logged at debug level — disk cache is opportunistic; a failed
 //! write only costs a future cache miss.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use serde::Serialize;
 use utoo_ruborist::model::manifest::CoreVersionManifest;
 use utoo_ruborist::service::{ManifestStore, VersionsInfo};
 
-use crate::util::json::{read_json_file, write_json_file};
+use crate::util::json::read_json_file;
 
 pub struct DiskManifestStore {
     cache_dir: PathBuf,
@@ -57,11 +58,7 @@ impl ManifestStore for DiskManifestStore {
 
     fn store_versions(&self, name: &str, info: Arc<VersionsInfo>) {
         let path = self.versions_path(name);
-        tokio::spawn(async move {
-            if let Err(e) = write_json_file(&path, &*info).await {
-                tracing::debug!("Failed to write {path:?}: {e}");
-            }
-        });
+        tokio::spawn(async move { write_json(&path, &*info).await });
     }
 
     fn store_version_manifest(
@@ -71,10 +68,34 @@ impl ManifestStore for DiskManifestStore {
         manifest: Arc<CoreVersionManifest>,
     ) {
         let path = self.manifest_path(name, version);
-        tokio::spawn(async move {
-            if let Err(e) = write_json_file(&path, &*manifest).await {
+        tokio::spawn(async move { write_json(&path, &*manifest).await });
+    }
+}
+
+/// Serialize `value` and write to `path`. On `NotFound`, create the parent
+/// directory and retry once — saves the mkdir syscall on every warm-cache
+/// rewrite. Errors are logged at debug; disk cache is opportunistic.
+async fn write_json<T: Serialize>(path: &Path, value: &T) {
+    let bytes = match serde_json::to_vec(value) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::debug!("Failed to serialize {path:?}: {e}");
+            return;
+        }
+    };
+    match crate::fs::write(path, &bytes).await {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if let Some(parent) = path.parent()
+                && let Err(e) = crate::fs::create_dir_all(parent).await
+            {
+                tracing::debug!("Failed to create {parent:?}: {e}");
+                return;
+            }
+            if let Err(e) = crate::fs::write(path, &bytes).await {
                 tracing::debug!("Failed to write {path:?}: {e}");
             }
-        });
+        }
+        Err(e) => tracing::debug!("Failed to write {path:?}: {e}"),
     }
 }

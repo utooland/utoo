@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 /// Read and parse a JSON file into the specified type.
@@ -11,30 +10,6 @@ pub async fn read_json_file<T: DeserializeOwned>(path: &Path) -> Result<T> {
         .with_context(|| format!("Failed to read file {path:?}"))?;
 
     serde_json::from_slice(&bytes).with_context(|| format!("Failed to parse JSON from {path:?}"))
-}
-
-/// Serialize and write JSON to `path`, creating parent directories on demand.
-///
-/// Tries the write first; falls back to `create_dir_all` only when the parent
-/// is missing. Avoids paying the mkdir syscall on every warm-cache rewrite.
-pub async fn write_json_file<T: Serialize + ?Sized>(path: &Path, value: &T) -> Result<()> {
-    let bytes = serde_json::to_vec(value)
-        .with_context(|| format!("Failed to serialize JSON for {path:?}"))?;
-
-    match crate::fs::write(path, &bytes).await {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            if let Some(parent) = path.parent() {
-                crate::fs::create_dir_all(parent)
-                    .await
-                    .with_context(|| format!("Failed to create {parent:?}"))?;
-            }
-            crate::fs::write(path, &bytes)
-                .await
-                .with_context(|| format!("Failed to write {path:?}"))
-        }
-        Err(e) => Err(e).with_context(|| format!("Failed to write {path:?}")),
-    }
 }
 
 /// Load package.json from a directory path and deserialize into the caller's
