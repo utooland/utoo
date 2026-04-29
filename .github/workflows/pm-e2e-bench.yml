@@ -468,18 +468,32 @@ jobs:
         with:
           platform: linux
       - uses: ./.github/actions/install-utoo-npm-baseline
+      - name: Build next branch utoo
+        run: |
+          # The PATH already points at dist/utoo (current branch) — build
+          # `next` separately to /tmp so it doesn't shadow.
+          git fetch origin next --depth=1
+          WORKDIR=$(mktemp -d)
+          git --work-tree="$WORKDIR" --git-dir="$(pwd)/.git" checkout origin/next -- .
+          (cd "$WORKDIR" && git submodule update --init --recursive --depth 1 && cargo build --release --bin utoo -p utoo-pm)
+          cp "$WORKDIR/target/release/utoo" /tmp/utoo-next
+          chmod +x /tmp/utoo-next
+          echo "Baseline utoo (next) version: $(/tmp/utoo-next --version)"
+          echo "UTOO_NEXT_BIN=/tmp/utoo-next" >> $GITHUB_ENV
       - name: Verify tools
         run: |
           hyperfine --version
           utoo --version
           "$UTOO_NPM_BIN" --version
+          "$UTOO_NEXT_BIN" --version
           bun --version
       - name: Define cache wipe function
         run: |
           cat > /tmp/wipe-bench-state.sh <<'WIPE'
           #!/usr/bin/env bash
           rm -rf /tmp/pm-bench /tmp/pm-bench-results /tmp/pm-bench-output \
-                 /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache /tmp/bun-bench-cache \
+                 /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache \
+                 /tmp/utoo-next-bench-cache /tmp/bun-bench-cache \
                  ~/.bun/install/cache ~/.cache/nm 2>/dev/null || true
           mkdir -p /tmp/pm-bench-output
           WIPE
@@ -491,7 +505,7 @@ jobs:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmjs.org'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
-          PM_LIST: 'utoo,utoo-npm,bun'
+          PM_LIST: 'utoo,utoo-next,utoo-npm,bun'
         run: |
           chmod +x bench/pm-bench-phases.sh
           bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmjs.log
@@ -511,7 +525,7 @@ jobs:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmmirror.com'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
-          PM_LIST: 'utoo,utoo-npm,bun'
+          PM_LIST: 'utoo,utoo-next,utoo-npm,bun'
         run: |
           mkdir -p /tmp/pm-bench-output
           bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmmirror.log
