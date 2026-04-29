@@ -468,26 +468,20 @@ jobs:
         with:
           platform: linux
       - uses: ./.github/actions/install-utoo-npm-baseline
-      - name: Checkout next branch source for utoo-next baseline
+      - name: Build next branch utoo
         run: |
           # The PATH already points at dist/utoo (current branch) — build
           # `next` separately to /tmp so it doesn't shadow. Use a linked
           # git worktree so submodule init works normally inside WORKDIR.
+          # No rust-cache here on purpose: the repo cache budget (10GB) is
+          # already saturated by the per-platform build-pm caches, so adding
+          # a ~400MB utoo-next cache would just LRU-evict more useful ones.
           WORKDIR=/tmp/utoo-next-src
           rm -rf "$WORKDIR"
           git fetch origin next --depth=1
           git worktree add --detach "$WORKDIR" origin/next
-          (cd "$WORKDIR" && git submodule update --init --recursive --depth 1)
-      - name: Cache cargo target for utoo-next
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: /tmp/utoo-next-src -> target
-          shared-key: utoo-next-linux
-          cache-on-failure: true
-      - name: Build next branch utoo
-        run: |
-          (cd /tmp/utoo-next-src && cargo build --release --bin utoo -p utoo-pm)
-          cp /tmp/utoo-next-src/target/release/utoo /tmp/utoo-next
+          (cd "$WORKDIR" && git submodule update --init --recursive --depth 1 && cargo build --release --bin utoo -p utoo-pm)
+          cp "$WORKDIR/target/release/utoo" /tmp/utoo-next
           chmod +x /tmp/utoo-next
           echo "Baseline utoo (next) version: $(/tmp/utoo-next --version)"
           echo "UTOO_NEXT_BIN=/tmp/utoo-next" >> $GITHUB_ENV
