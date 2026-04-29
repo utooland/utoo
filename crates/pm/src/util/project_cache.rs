@@ -5,10 +5,10 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use utoo_ruborist::service::ProjectCacheData;
 
-use crate::util::json::read_json_file;
+use crate::util::json::{read_json_file, write_json_file};
 
 pub fn path_for(root: &Path) -> PathBuf {
     root.join("node_modules/.utoo-manifest.json")
@@ -18,29 +18,9 @@ pub async fn load(root: &Path) -> ProjectCacheData {
     read_json_file(&path_for(root)).await.unwrap_or_default()
 }
 
-/// Persist the project cache atomically: write to a sibling tmp file and
-/// rename. Crash mid-write leaves the previous good cache intact.
-///
-/// (Per-package manifests in `manifest_store` skip atomicity — they're
-/// individually opportunistic, and the extra rename per-package would
-/// add ~10k syscalls on a cold install.)
 pub async fn save(root: &Path, data: &ProjectCacheData) -> Result<()> {
     if data.cache.is_empty() {
         return Ok(());
     }
-    let path = path_for(root);
-    if let Some(parent) = path.parent() {
-        crate::fs::create_dir_all(parent)
-            .await
-            .with_context(|| format!("Failed to create {parent:?}"))?;
-    }
-    let tmp = path.with_extension("json.tmp");
-    let bytes = serde_json::to_vec(data).context("Failed to serialize project cache")?;
-    crate::fs::write(&tmp, &bytes)
-        .await
-        .with_context(|| format!("Failed to write {tmp:?}"))?;
-    crate::fs::rename(&tmp, &path)
-        .await
-        .with_context(|| format!("Failed to rename {tmp:?} -> {path:?}"))?;
-    Ok(())
+    write_json_file(&path_for(root), data).await
 }
