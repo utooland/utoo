@@ -2,13 +2,14 @@
 //!
 //! Uses ruborist's unified `build_deps` API with OPFS file system.
 
-use anyhow::Result;
 use std::path::PathBuf;
+use std::sync::Arc;
 
+use anyhow::Result;
 use utoo_ruborist::builder::PeerDeps;
 use utoo_ruborist::lock::PackageLock;
 use utoo_ruborist::progress::NoopReceiver;
-use utoo_ruborist::service::{build_deps, BuildDepsOptions};
+use utoo_ruborist::service::{BuildDepsOptions, NoopStore, build_deps};
 
 use crate::fs::OpfsGlob;
 
@@ -20,10 +21,9 @@ const DEFAULT_CONCURRENCY: usize = 20;
 
 /// Build dependency lock from package.json in the given directory.
 ///
-/// Uses ruborist's unified API which provides:
-/// - Automatic registry capability detection
-/// - Three-tier caching (memory -> OPFS disk -> network)
-/// - Support for both npm and npmmirror-style registries
+/// Uses ruborist's unified API. Persistence is opt-in: the browser build
+/// uses [`NoopStore`] (no manifest cache), so every cold resolve hits the
+/// network. The host can swap in an OPFS-backed store later.
 ///
 /// # Arguments
 /// * `cwd` - Current working directory containing package.json
@@ -38,6 +38,8 @@ pub async fn build_deps_from_file(
         cwd: PathBuf::from(cwd),
         registry_url: registry_url.unwrap_or(DEFAULT_REGISTRY).to_string(),
         cache_dir: None,
+        manifest_store: Arc::new(NoopStore),
+        warm_project_cache: None,
         concurrency: concurrency.unwrap_or(DEFAULT_CONCURRENCY),
         peer_deps: PeerDeps::Skip,
         glob: OpfsGlob,
@@ -46,5 +48,5 @@ pub async fn build_deps_from_file(
         catalogs: std::collections::HashMap::new(),
     };
 
-    build_deps(options).await
+    build_deps(options).await.map(|output| output.lock)
 }
