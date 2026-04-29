@@ -10,10 +10,10 @@ use tokio::sync::Semaphore;
 use tokio_retry::RetryIf;
 use utoo_ruborist::http::{file_cache_slot, http_cache_slot};
 use utoo_ruborist::spec::Protocol;
+use utoo_ruborist::util::OnceMap;
 
 use super::cache::get_cache_dir;
 use super::extractor::extract_and_write;
-use super::oncemap::OnceMap;
 use super::retry::{RetryableError, build_dns_cached_client, create_retry_strategy};
 use super::user_config::get_manifests_concurrency_limit_sync;
 

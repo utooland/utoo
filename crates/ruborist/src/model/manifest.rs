@@ -40,7 +40,11 @@ pub struct FullManifest {
     #[serde(default, deserialize_with = "deserialize_version_keys")]
     pub versions: Vec<String>,
 
-    /// Raw HTTP response bytes. Injected post-parse; used for on-demand version extraction.
+    /// Raw HTTP response bytes. Injected post-parse; used for on-demand
+    /// version extraction via [`extract_version`](Self::extract_version).
+    /// Storing the raw bytes (rather than a parsed tree) keeps the cached
+    /// `FullManifest` compact — npm `versions` subtrees parsed to a typed
+    /// tree expand to ~1.5–2.5x the raw size on real-world packages.
     #[serde(skip)]
     pub raw: Arc<[u8]>,
 
@@ -78,15 +82,22 @@ pub struct FullManifest {
 impl FullManifest {
     /// Extract a single version from raw bytes on demand.
     ///
-    /// Copies raw bytes, parses with `simd_json::to_borrowed_value`, navigates
-    /// to `versions[ver]`, then converts to the target type via `serde_json::Value`.
+    /// Parses the full manifest into a `simd_json::BorrowedValue` tree
+    /// (transient, dropped at end of call), navigates to the matching
+    /// version, and deserializes that subtree directly into `T`.
+    /// `&BorrowedValue` is itself a serde `Deserializer`, so the matched
+    /// subtree is visited in place — no intermediate `serde_json::Value`
+    /// allocation.
+    ///
+    /// `OnceMap` single-flight in `UnifiedRegistry` reduces the per-key
+    /// invocation count to one, so the per-call full-tree parse cost is
+    /// bounded.
     fn extract_version<T: for<'de> Deserialize<'de>>(&self, version: &str) -> Option<T> {
         use simd_json::prelude::ValueObjectAccess;
         let mut buf = self.raw.to_vec();
         let parsed = simd_json::to_borrowed_value(&mut buf).ok()?;
         let version_obj = parsed.get("versions")?.get(version)?;
-        let value = serde_json::to_value(version_obj).ok()?;
-        serde_json::from_value(value).ok()
+        T::deserialize(version_obj).ok()
     }
 
     /// Parse a single version on demand into CoreVersionManifest (hot path).

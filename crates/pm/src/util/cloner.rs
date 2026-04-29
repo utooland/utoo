@@ -5,10 +5,10 @@ use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
 use tokio_retry::Retry;
 use utoo_ruborist::manifest::IdentityView;
+use utoo_ruborist::util::OnceMap;
 
 use super::downloader::{is_git_url, resolve_cache_path};
 use super::json::load_package_json;
-use super::oncemap::OnceMap;
 use super::retry::create_retry_strategy;
 use crate::fs;
 

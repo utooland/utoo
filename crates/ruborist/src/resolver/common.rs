@@ -1,6 +1,8 @@
 //! Shared helpers for native, non-registry resolvers (git, http tarball).
 //!
-//! - [`DedupCache<T>`] / [`dedup_init`] — session-scoped one-fetch-per-key
+//! - [`DedupCache<T>`] — session-scoped single-flight cache (alias for
+//!   [`OnceMap`](crate::util::OnceMap)) so concurrent fetches of the same key
+//!   share one underlying request.
 //! - [`validate_package_name`] — path-traversal guard for cache paths
 //! - [`finalize_non_registry_manifest`] — empty-version default, `dist`,
 //!   `has_install_script`
@@ -11,9 +13,7 @@
 //!   `super::git`   — caches at `<cache>/<name>/<commit_sha>/`
 //!   `super::http`  — caches at `<cache>/<name>/_http_<url_hash>/`
 
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 #[cfg(any(feature = "native-git", feature = "http-tarball"))]
 use std::path::Path;
@@ -23,12 +23,14 @@ use anyhow::Context;
 use anyhow::{Result, anyhow};
 
 use crate::model::manifest::{CoreVersionManifest, Dist};
+use crate::util::OnceMap;
 
 /// Session-scoped dedup cache keyed by canonical URL (+ optional ref).
 ///
-/// Concurrent requests for the same key share a single [`tokio::sync::OnceCell`],
-/// so only the first caller performs the fetch and the rest await.
-pub type DedupCache<T> = tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::OnceCell<Arc<T>>>>>;
+/// Concurrent requests for the same key share a single [`OnceMap`] entry,
+/// so only the first caller performs the fetch and the rest await its result.
+/// On error, the entry is removed so subsequent calls retry.
+pub type DedupCache<T> = OnceMap<String, T>;
 
 /// Reject package names that contain path-traversal components
 /// (`..`, absolute roots) before using them in `cache_dir.join(name)`.
@@ -135,23 +137,24 @@ where
     }
 }
 
-/// Look up (or create) the dedup cell for `key`, then run `init` under it.
+/// Look up (or create) the dedup entry for `key`, then run `init` under it.
 ///
-/// Wraps the `lock → entry(...).or_insert_with(OnceCell) → clone` ritual both
-/// resolvers need, and returns the cloned `Arc<T>` ready for use.
-pub async fn dedup_init<T, F, Fut>(cache: &DedupCache<T>, key: String, init: F) -> Result<Arc<T>>
+/// Single-flight wrapper over [`OnceMap::get_or_try_init`]: concurrent callers
+/// for the same key share one `init` invocation; on `Err` the entry is removed
+/// so subsequent calls retry.
+pub async fn dedup_init<T, F, Fut>(
+    cache: &DedupCache<T>,
+    key: String,
+    init: F,
+) -> Result<std::sync::Arc<T>>
 where
     T: Send + Sync + 'static,
     F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = Result<Arc<T>>>,
+    Fut: std::future::Future<Output = Result<T>>,
 {
-    let cell = {
-        let mut map = cache.lock().await;
-        map.entry(key)
-            .or_insert_with(|| Arc::new(tokio::sync::OnceCell::new()))
-            .clone()
-    };
-    cell.get_or_try_init(init).await.cloned()
+    cache
+        .get_or_try_init::<anyhow::Error, _, _>(key, init)
+        .await
 }
 
 #[cfg(test)]

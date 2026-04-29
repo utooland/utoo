@@ -91,7 +91,7 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                         .await
                         .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
                         .to_vec();
-                    // Save raw bytes before simd_json mutates the parse buffer
+                    // Save raw bytes before simd_json mutates the parse buffer.
                     let mut parse_buf = raw_bytes.clone();
                     let mut manifest: FullManifest =
                         simd_json::serde::from_slice(&mut parse_buf)
