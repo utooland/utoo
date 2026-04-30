@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
-use std::time::Instant;
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
@@ -30,28 +29,6 @@ static DOWNLOAD_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
 
 static DOWNLOAD_COUNT: AtomicUsize = AtomicUsize::new(0);
 static REUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-// Per-operation wall time summed across all packages. Sum is non-exclusive
-// across cores — dividing by wall clock gives average concurrency for the phase.
-static DOWNLOAD_MICROS: AtomicU64 = AtomicU64::new(0);
-static EXTRACT_MICROS: AtomicU64 = AtomicU64::new(0);
-static DOWNLOAD_BYTES: AtomicU64 = AtomicU64::new(0);
-
-/// Snapshot of per-phase totals accumulated during install.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct PhaseTotals {
-    pub download_micros: u64,
-    pub extract_micros: u64,
-    pub downloaded_bytes: u64,
-}
-
-pub fn phase_totals() -> PhaseTotals {
-    PhaseTotals {
-        download_micros: DOWNLOAD_MICROS.load(Ordering::Relaxed),
-        extract_micros: EXTRACT_MICROS.load(Ordering::Relaxed),
-        downloaded_bytes: DOWNLOAD_BYTES.load(Ordering::Relaxed),
-    }
-}
 
 /// Process-global counters for tarball outcomes, matching pnpm's
 /// vocabulary. Each unique `(name, version)` pair lands in exactly one
@@ -204,21 +181,16 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
             let semaphore = DOWNLOAD_SEMAPHORE
                 .get_or_init(|| Semaphore::new(get_manifests_concurrency_limit_sync()));
             let _permit = semaphore.acquire().await.ok()?;
-            let t0 = Instant::now();
             let bytes = download_bytes(&tarball_url)
                 .await
                 .inspect_err(|e| tracing::warn!("Download failed: {}@{}: {}", name, version, e))
                 .ok()?;
-            DOWNLOAD_MICROS.fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
-            DOWNLOAD_BYTES.fetch_add(bytes.len() as u64, Ordering::Relaxed);
 
             // Extract
-            let t1 = Instant::now();
             extract_and_write(bytes, &cache_path)
                 .await
                 .inspect_err(|e| tracing::warn!("Extract failed: {}@{}: {}", name, version, e))
                 .ok()?;
-            EXTRACT_MICROS.fetch_add(t1.elapsed().as_micros() as u64, Ordering::Relaxed);
 
             DOWNLOAD_COUNT.fetch_add(1, Ordering::Relaxed);
             tracing::debug!("Downloaded: {}@{}", name, version);

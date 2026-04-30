@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::time::Instant;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
@@ -29,17 +28,9 @@ static CLONE_CACHE: Lazy<OnceMap<PathBuf, ()>> = Lazy::new(OnceMap::new);
 /// Mirrors pnpm's "added" semantic.
 static CLONE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-/// Wall microseconds summed across every per-package clone invocation.
-static CLONE_MICROS: AtomicU64 = AtomicU64::new(0);
-
 /// Returns the number of fresh clones performed (pnpm "added" equivalent).
 pub fn clone_count() -> usize {
     CLONE_COUNT.load(Ordering::Relaxed)
-}
-
-/// Cumulative wall microseconds spent in `clone_package` across the process.
-pub fn clone_micros() -> u64 {
-    CLONE_MICROS.load(Ordering::Relaxed)
 }
 
 /// Normalize a target path into the canonical key used by `CLONE_CACHE`.
@@ -87,7 +78,6 @@ pub async fn clone_package_once(
     CLONE_CACHE
         .get_or_init(key, || async move {
             let cache_path = resolve_cache_path(&name, &version, &tarball_url).await?;
-            let t0 = Instant::now();
             let fresh = clone_package(&cache_path, &target_path, &name, &version, !is_git)
                 .await
                 .inspect_err(|e| {
@@ -100,7 +90,6 @@ pub async fn clone_package_once(
                     )
                 })
                 .ok()?;
-            CLONE_MICROS.fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
 
             if fresh {
                 CLONE_COUNT.fetch_add(1, Ordering::Relaxed);

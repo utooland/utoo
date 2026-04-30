@@ -836,7 +836,6 @@ async fn run_preload_phase<
     }
 
     tracing::debug!("Preload phase: {} initial dependencies", initial_deps.len());
-    // Note: PreloadStart is emitted inside `preload_manifests` itself now.
 
     let preload_config = PreloadConfig {
         peer_deps: config.peer_deps,
@@ -859,18 +858,12 @@ async fn run_preload_phase<
     )
     .await;
 
-    let elapsed = start.elapsed();
-    tracing::info!(
-        "Preload phase: {:.2?} ({} success, {} failed, {} initial deps)",
-        elapsed,
-        stats.success_count,
-        stats.failed_count,
-        stats.total_processed,
-    );
     receiver.on_event(BuildEvent::PreloadComplete {
         success: stats.success_count,
         failed: stats.failed_count,
     });
+
+    tracing::debug!("Preload phase: {:?}", start.elapsed());
 }
 
 /// Run the BFS traversal phase to build the dependency tree.

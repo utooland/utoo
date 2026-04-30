@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::time::Instant;
 
 use crossbeam_queue::SegQueue;
 use dashmap::DashSet;
@@ -60,9 +59,6 @@ pub struct PreloadStats {
     pub success_count: usize,
     pub failed_count: usize,
     pub total_processed: usize,
-    pub min_request_ms: u64,
-    pub max_request_ms: u64,
-    pub total_request_ms: u64,
 }
 
 /// Collect dependencies from any deps map, filtering out non-registry specs.
@@ -91,7 +87,6 @@ fn extract_transitive_deps(manifest: &CoreVersionManifest, config: &PreloadConfi
 type Completion<E> = (
     String,
     Result<crate::traits::registry::ResolvedPackage, ResolveError<E>>,
-    u64,
 );
 
 /// Preload all package manifests in parallel via a tokio worker pool.
@@ -167,9 +162,7 @@ where
             loop {
                 // Try fetching work first — fast path when queue is hot.
                 if let Some((name, spec)) = pending.pop() {
-                    let start = Instant::now();
                     let result = resolve_package(&*registry, &name, &spec).await;
-                    let elapsed_ms = start.elapsed().as_millis() as u64;
 
                     if let Ok(resolved) = &result {
                         let mut new_added = 0usize;
@@ -189,7 +182,7 @@ where
                         }
                     }
 
-                    if result_tx.send((name, result, elapsed_ms)).is_err() {
+                    if result_tx.send((name, result)).is_err() {
                         // Main task dropped the receiver — done collecting.
                         break;
                     }
@@ -240,16 +233,7 @@ where
     });
 
     // Main task: drain completions, run user callbacks.
-    while let Some((name, result, elapsed_ms)) = result_rx.recv().await {
-        if stats.success_count == 0 && stats.failed_count == 0 {
-            stats.min_request_ms = elapsed_ms;
-            stats.max_request_ms = elapsed_ms;
-        } else {
-            stats.min_request_ms = stats.min_request_ms.min(elapsed_ms);
-            stats.max_request_ms = stats.max_request_ms.max(elapsed_ms);
-        }
-        stats.total_request_ms += elapsed_ms;
-
+    while let Some((name, result)) = result_rx.recv().await {
         match result {
             Ok(resolved) => {
                 stats.success_count += 1;
