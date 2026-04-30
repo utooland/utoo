@@ -137,14 +137,12 @@ pub fn resolve_from_manifest<E: std::error::Error + 'static>(
     manifest: &FullManifest,
     spec: &str,
 ) -> Result<ResolvedPackage, ResolveError<E>> {
-    let version_list: Vec<String> = manifest.versions.clone();
-
-    if version_list.is_empty() {
+    if manifest.versions.is_empty() {
         return Err(ResolveError::NoVersions(manifest.name.clone()));
     }
 
     // Resolve version using shared logic
-    let resolved_version = resolve_target_version(&manifest.dist_tags, &version_list, spec)
+    let resolved_version = resolve_target_version(&manifest.dist_tags, &manifest.versions, spec)
         .map_err(|e| ResolveError::Version(format!("{}@{}: {}", manifest.name, spec, e)))?;
 
     let version_manifest = manifest

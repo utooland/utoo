@@ -182,11 +182,11 @@ pub trait RegistryClient {
     {
         async move {
             let manifest = self.fetch_full_manifest(name).await?;
-            let version_list: Vec<String> = manifest.versions.clone();
 
             // Resolve version using shared logic
-            let resolved_version = resolve_target_version(&manifest.dist_tags, &version_list, spec)
-                .map_err(|e| RegistryError(anyhow::anyhow!("{}@{}: {}", name, spec, e)))?;
+            let resolved_version =
+                resolve_target_version(&manifest.dist_tags, &manifest.versions, spec)
+                    .map_err(|e| RegistryError(anyhow::anyhow!("{}@{}: {}", name, spec, e)))?;
 
             manifest
                 .get_core_version(&resolved_version)
@@ -255,9 +255,8 @@ pub trait RegistryClient {
                     fetch_spec
                 );
                 let full_manifest = self.fetch_full_manifest(&fetch_name).await?;
-                let version_list: Vec<String> = full_manifest.versions.clone();
 
-                if version_list.is_empty() {
+                if full_manifest.versions.is_empty() {
                     return Err(RegistryError(anyhow::anyhow!(
                         "No versions available for {}",
                         fetch_name
@@ -265,9 +264,12 @@ pub trait RegistryClient {
                     .into());
                 }
 
-                let resolved_version =
-                    resolve_target_version(&full_manifest.dist_tags, &version_list, &fetch_spec)
-                        .map_err(|e| RegistryError(anyhow::anyhow!("{}@{}: {}", name, spec, e)))?;
+                let resolved_version = resolve_target_version(
+                    &full_manifest.dist_tags,
+                    &full_manifest.versions,
+                    &fetch_spec,
+                )
+                .map_err(|e| RegistryError(anyhow::anyhow!("{}@{}: {}", name, spec, e)))?;
 
                 let version_manifest = full_manifest
                     .get_core_version(&resolved_version)
