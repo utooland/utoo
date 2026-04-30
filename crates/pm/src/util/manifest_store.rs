@@ -16,16 +16,27 @@ use async_trait::async_trait;
 use serde::Serialize;
 use utoo_ruborist::model::manifest::CoreVersionManifest;
 use utoo_ruborist::service::{ManifestStore, VersionsInfo};
+use utoo_ruborist::util::OnceMap;
 
 use crate::util::json::read_json_file;
 
 pub struct DiskManifestStore {
     cache_dir: PathBuf,
+    /// Dedup `(name, resolved_version)` disk writes. The upstream
+    /// `inflight_version<(name, original_spec)>` gate keys on the original
+    /// spec, so two specs (`^4.17.0`, `~4.17.20`) resolving to the same
+    /// `4.17.21` each call `store_version_manifest` and would otherwise
+    /// spawn duplicate `write_json` tasks racing on truncate of the same
+    /// path. `OnceMap::register` is a sync, atomic "first wins" check.
+    inflight_version_writes: Arc<OnceMap<(String, String), ()>>,
 }
 
 impl DiskManifestStore {
     pub fn new(cache_dir: PathBuf) -> Self {
-        Self { cache_dir }
+        Self {
+            cache_dir,
+            inflight_version_writes: Arc::new(OnceMap::new()),
+        }
     }
 
     fn versions_path(&self, name: &str) -> PathBuf {
@@ -67,8 +78,21 @@ impl ManifestStore for DiskManifestStore {
         version: &str,
         manifest: Arc<CoreVersionManifest>,
     ) {
+        let key = (name.to_string(), version.to_string());
+        let Some(notify) = self.inflight_version_writes.register(key.clone()) else {
+            // Another caller already enqueued this write — skip the
+            // duplicate serialize + spawn + truncate-race.
+            return;
+        };
         let path = self.manifest_path(name, version);
-        tokio::spawn(async move { write_json(&path, &*manifest).await });
+        // Move an `Arc` clone of the OnceMap into the task so we can
+        // transition Waiting → Done after the write completes; this also
+        // notifies any future `wait_if_pending` callers.
+        let inflight = Arc::clone(&self.inflight_version_writes);
+        tokio::spawn(async move {
+            write_json(&path, &*manifest).await;
+            inflight.complete(key, Some(()), notify);
+        });
     }
 }
 
