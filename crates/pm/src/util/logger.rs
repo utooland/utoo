@@ -205,23 +205,30 @@ impl utoo_ruborist::progress::EventReceiver for ProgressReceiver {
         match event {
             BuildEvent::PreloadStart { .. }
             | BuildEvent::PreloadQueued { .. }
-            | BuildEvent::PreloadFetching { .. }
-            | BuildEvent::PreloadProgress { .. } => {
-                // Hot path: 4571 dispatches + 4571 completions = ~9000
-                // events landing on the main task during a 3-4 s phase.
-                // Every `PROGRESS_BAR.inc[_length]` takes indicatif's
-                // internal `Mutex<ProgressBarState>`, contending with the
-                // steady_tick draw thread. Standalone manifest-bench
-                // sustains avg_conc=95 at cap=128; ruborist with these
-                // events stuck at 56 — the indicatif lock acquisitions
-                // cap the main loop's fill-and-drain rate. Measured cost:
-                // +0.23s on p1_resolve in CI Linux (round-6 vs round-7
-                // A/B), σ 0.10 / 0.07 — independently reproducible.
+            | BuildEvent::PreloadFetching { .. } => {
+                // Phase-start / BFS-expansion / pre-fetch events: drop.
+                // Phase-start fires ~1×, queued fires ~10× (BFS layers),
+                // fetching fires per-package — last one is the killer.
+                // None of these add information the user can't infer from
+                // the per-package resolved log below.
+            }
+            BuildEvent::PreloadProgress { name, .. } => {
+                // Per-package "resolved" — keep this one. Halves the
+                // indicatif lock-acquisition count from ~9000 (fetching +
+                // progress) to ~4571 (progress only) while preserving the
+                // user-visible signal that the phase is making progress.
                 //
-                // Drop all per-event progress bar updates during preload.
-                // The spinner still ticks via steady_tick so the user
-                // sees the phase is alive; the final summary prints
-                // success/fail counts at PreloadComplete.
+                // Length stays at 0 (we don't call inc_length on Start/
+                // Queued), so the bar shows a counter without a
+                // percentage — fine for spinner-style display.
+                //
+                // Indicatif's per-call `Mutex<ProgressBarState>` cost is
+                // measured at ~0.23s on p1_resolve when both fetching +
+                // progress fire (round-6/7/8 A/B/A on CI Linux); halving
+                // the call count should bring the regression to ~0.10-
+                // 0.15s — to be confirmed by round-9 bench.
+                PROGRESS_BAR.inc(1);
+                log_progress(&format!("resolved {}", name));
             }
             BuildEvent::PreloadComplete { success, failed } => {
                 PROGRESS_BAR.set_position(0);
