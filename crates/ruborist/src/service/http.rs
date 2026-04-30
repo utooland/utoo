@@ -94,7 +94,7 @@ static HTTP_CLIENT: LazyLock<Result<reqwest::Client, String>> = LazyLock::new(||
         .map_err(|e| e.to_string())
 });
 
-pub(crate) fn pick_client() -> Result<&'static reqwest::Client> {
+pub(crate) fn get_client() -> Result<&'static reqwest::Client> {
     HTTP_CLIENT.as_ref().map_err(|e| anyhow!("{e}"))
 }
 

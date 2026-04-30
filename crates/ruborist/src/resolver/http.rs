@@ -98,7 +98,7 @@ use crate::model::manifest::CoreVersionManifest;
 use crate::service::fetch::{
     FetchError, classify_reqwest_error, classify_status, is_retryable, retry_strategy,
 };
-use crate::service::http::pick_client;
+use crate::service::http::get_client;
 use crate::traits::registry::ResolvedPackage;
 
 /// Session-scoped dedup cache: one fetch per URL even under concurrent BFS.
@@ -153,7 +153,7 @@ async fn download_tarball(url: &str) -> Result<Bytes> {
         || {
             let url = url.to_string();
             async move {
-                let resp = pick_client()
+                let resp = get_client()
                     .map_err(FetchError::Permanent)?
                     .get(&url)
                     .send()

@@ -484,12 +484,11 @@ pub async fn save_package_lock(path: &Path, package_lock: &PackageLock) -> Resul
     let temp_path = path.join("package-lock.json.tmp");
     let target_path = path.join("package-lock.json");
 
+    // PackageLock now has all required fields (name, version, lockfile_version, requires, packages)
     let content = serde_json::to_string_pretty(package_lock)?;
-
     fs::write(&temp_path, content)
         .await
         .context("Failed to write temporary package-lock.json")?;
-
     fs::rename(temp_path, target_path)
         .await
         .context("Failed to rename package-lock.json")?;

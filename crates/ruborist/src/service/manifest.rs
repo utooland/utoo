@@ -10,7 +10,7 @@ use tokio_retry::RetryIf;
 use super::fetch::{
     FetchError, classify_reqwest_error, classify_status, is_retryable, retry_strategy,
 };
-use super::http::pick_client;
+use super::http::get_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 
 /// Result of a full manifest fetch with ETag support.
@@ -60,7 +60,7 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
             let url = url.clone();
             let etag = etag_owned.clone();
             async move {
-                let mut request = pick_client()
+                let mut request = get_client()
                     .map_err(FetchError::Permanent)?
                     .get(&url)
                     .header("Accept", accept);
@@ -86,24 +86,12 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                         .and_then(|v| v.to_str().ok())
                         .map(|s| s.to_string());
 
-                    let raw_bytes: Vec<u8> = response
+                    let raw_bytes = response
                         .bytes()
                         .await
                         .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
-                        .into();
-
-                    // Inline parse on the async worker — simd_json is fast
-                    // (1-5ms CPU per manifest) and the worker-pool preload
-                    // architecture distributes 80+ concurrent fetches across
-                    // tokio's worker_threads (= num_cpus). Earlier
-                    // spawn_blocking offload backed up the 4-thread blocking
-                    // pool: parse diag at cap=160 showed queue p95=200ms
-                    // sum=70-89s, adding ~26ms per request — accounted for
-                    // the entire ruborist-vs-standalone per-req gap (55ms vs
-                    // 28ms). Inline parse trades a brief async-worker stall
-                    // for zero queue wait, and worker-pool's independent
-                    // task scheduling means one stalled worker doesn't
-                    // starve the others.
+                        .to_vec();
+                    // Save raw bytes before simd_json mutates the parse buffer.
                     let mut parse_buf = raw_bytes.clone();
                     let mut manifest: FullManifest =
                         simd_json::serde::from_slice(&mut parse_buf)
@@ -185,7 +173,7 @@ pub async fn fetch_version_manifest(
         || {
             let url = url.clone();
             async move {
-                let response = pick_client()
+                let response = get_client()
                     .map_err(FetchError::Permanent)?
                     .get(&url)
                     .header("Accept", accept)
@@ -194,16 +182,12 @@ pub async fn fetch_version_manifest(
                     .map_err(classify_reqwest_error)?;
 
                 if response.status().is_success() {
-                    let bytes: Vec<u8> = response
+                    let mut bytes = response
                         .bytes()
                         .await
                         .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
-                        .into();
-                    // Inline parse — see fetch_full_manifest above for the
-                    // rationale (blocking-pool queue saturation under
-                    // worker-pool preload concurrency).
-                    let mut buf = bytes;
-                    simd_json::serde::from_slice::<CoreVersionManifest>(&mut buf)
+                        .to_vec();
+                    simd_json::serde::from_slice(&mut bytes)
                         .map_err(|e| FetchError::Permanent(anyhow!("JSON parse error: {e}")))
                 } else {
                     Err(classify_status(response.status(), &url))
