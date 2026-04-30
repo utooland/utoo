@@ -8,6 +8,28 @@ use crate::model::manifest::{CoreVersionManifest, FullManifest};
 use crate::resolver::semver::normalize_spec;
 use crate::resolver::version::resolve_target_version;
 
+// `Send` is required so the native preload worker-pool can move resolve
+// futures onto `tokio::spawn`. `wasm-bindgen-futures` produce
+// `Rc<RefCell<…>>`-backed futures that aren't `Send`/`Sync`, so on wasm we
+// fall back to a no-op blanket impl.
+#[cfg(not(target_arch = "wasm32"))]
+pub trait MaybeSend: Send {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Send + ?Sized> MaybeSend for T {}
+#[cfg(target_arch = "wasm32")]
+pub trait MaybeSend {}
+#[cfg(target_arch = "wasm32")]
+impl<T: ?Sized> MaybeSend for T {}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub trait MaybeSync: Sync {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Sync + ?Sized> MaybeSync for T {}
+#[cfg(target_arch = "wasm32")]
+pub trait MaybeSync {}
+#[cfg(target_arch = "wasm32")]
+impl<T: ?Sized> MaybeSync for T {}
+
 /// Check if a registry URL is the official npm registry.
 ///
 /// The official npm registry (registry.npmjs.org/com) does not support:
@@ -141,7 +163,7 @@ pub trait RegistryClient {
     fn fetch_full_manifest(
         &self,
         name: &str,
-    ) -> impl Future<Output = Result<Arc<FullManifest>, Self::Error>> + crate::maybe_send::MaybeSend;
+    ) -> impl Future<Output = Result<Arc<FullManifest>, Self::Error>> + MaybeSend;
 
     /// Fetch specific version manifest from registry.
     ///
@@ -154,10 +176,9 @@ pub trait RegistryClient {
         &self,
         name: &str,
         spec: &str,
-    ) -> impl Future<Output = Result<Arc<CoreVersionManifest>, Self::Error>> + crate::maybe_send::MaybeSend
+    ) -> impl Future<Output = Result<Arc<CoreVersionManifest>, Self::Error>> + MaybeSend
     where
-        Self: crate::maybe_send::MaybeSync,
-        Self::Error: crate::maybe_send::MaybeSend,
+        Self: MaybeSync,
     {
         async move {
             let manifest = self.fetch_full_manifest(name).await?;
@@ -198,10 +219,9 @@ pub trait RegistryClient {
         &self,
         name: &str,
         spec: &str,
-    ) -> impl Future<Output = Result<ResolvedPackage, Self::Error>> + crate::maybe_send::MaybeSend
+    ) -> impl Future<Output = Result<ResolvedPackage, Self::Error>> + MaybeSend
     where
-        Self: crate::maybe_send::MaybeSync,
-        Self::Error: crate::maybe_send::MaybeSend,
+        Self: MaybeSync,
     {
         async move {
             // Normalize spec (handles npm: alias and workspace: prefix)
@@ -276,11 +296,7 @@ pub trait RegistryClient {
     fn fetch_versions_info(
         &self,
         name: &str,
-    ) -> impl Future<Output = Result<VersionsInfo, Self::Error>> + crate::maybe_send::MaybeSend
-    where
-        Self: crate::maybe_send::MaybeSync,
-        Self::Error: crate::maybe_send::MaybeSend,
-    {
+    ) -> impl Future<Output = Result<VersionsInfo, Self::Error>> {
         async move {
             let manifest = self.fetch_full_manifest(name).await?;
             Ok(VersionsInfo {
@@ -304,34 +320,6 @@ pub trait RegistryClient {
     ) {
         // Default: no-op
     }
-}
-
-/// Convenience bound for registries usable by the parallel preload worker pool.
-///
-/// `Clone + 'static` lets callers share one owned handle across N spawned
-/// workers (`Arc<R>` on native, `Rc<R>` on wasm). `MaybeSend + MaybeSync`
-/// expand to `Send + Sync` on native (so the spawned worker future can be
-/// scheduled across tokio's multi-thread runtime) and to no-op shims on
-/// wasm (where `wasm_bindgen_futures::spawn_local` runs everything on the
-/// JS event loop and `JsFuture` is `!Send`). Both `UnifiedRegistry` (real
-/// client; `Clone` is shallow Arc-based) and `MockRegistryClient` (test
-/// client) satisfy this trivially.
-pub trait PreloadRegistry:
-    RegistryClient + Clone + crate::maybe_send::MaybeSend + crate::maybe_send::MaybeSync + 'static
-where
-    Self::Error: crate::maybe_send::MaybeSend,
-{
-}
-
-impl<T> PreloadRegistry for T
-where
-    T: RegistryClient
-        + Clone
-        + crate::maybe_send::MaybeSend
-        + crate::maybe_send::MaybeSync
-        + 'static,
-    T::Error: crate::maybe_send::MaybeSend,
-{
 }
 
 /// A simple in-memory registry client for testing.

@@ -76,47 +76,130 @@
 //! WASM targets skip DNS entirely (browser handles it).
 
 use std::sync::LazyLock;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow};
+use crossbeam_queue::SegQueue;
 
-/// Cuts hung TCP/TLS handshakes that would otherwise pin a conn-slot
-/// indefinitely — `service::fetch`'s retry layer only fires on a reqwest
-/// error, which silently-stalled sockets never raise.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// Diagnostic: per-HTTP-request `(send_start, body_end)` timestamps.
+///
+/// When the flag is active, manifest fetch sites push `(Instant, Instant)`
+/// pairs into the queue. Preload uses the collected intervals to compute
+/// "pure network window", "busy window" (interval union), and per-request
+/// stats — isolating network wait from our own CPU work.
+///
+/// Flag is a single `AtomicBool` (relaxed) and only manifests as one
+/// comparison + two `Instant::now()` per HTTP request when enabled; zero
+/// cost on the disabled path.
+static HTTP_TRACE_ACTIVE: AtomicBool = AtomicBool::new(false);
+static HTTP_TRACE: LazyLock<SegQueue<(Instant, Instant)>> = LazyLock::new(SegQueue::new);
+
+/// Activate per-request HTTP timing capture. Drains any prior trace.
+pub fn start_http_trace() {
+    while HTTP_TRACE.pop().is_some() {}
+    HTTP_TRACE_ACTIVE.store(true, Ordering::Relaxed);
+}
+
+/// Stop capturing and return the collected `(start, end)` intervals.
+pub fn finish_http_trace() -> Vec<(Instant, Instant)> {
+    HTTP_TRACE_ACTIVE.store(false, Ordering::Relaxed);
+    let mut out = Vec::new();
+    while let Some(v) = HTTP_TRACE.pop() {
+        out.push(v);
+    }
+    out
+}
+
+/// Record one completed HTTP request's `(send_start, body_end)` timestamps.
+/// No-op when the trace flag is off. Cheap relaxed-load check guards the
+/// push so disabled callers pay almost nothing.
+#[inline]
+pub fn record_http_interval(start: Instant, end: Instant) {
+    if HTTP_TRACE_ACTIVE.load(Ordering::Relaxed) {
+        HTTP_TRACE.push((start, end));
+    }
+}
+
+/// Diagnostic: per-parse `(queued_at, exec_start, exec_end)` timestamps.
+///
+/// `queued_at` is captured right before `spawn_blocking` is called;
+/// `exec_start` is captured inside the closure (i.e. once the blocking
+/// pool actually picks the task up). `queue_wait = exec_start − queued_at`
+/// measures how long each parse sat idle in the blocking-pool queue.
+/// When `queue_wait p50 ≫ exec p50` the pool is the bottleneck, and
+/// `resolve_package` awaits stall the `FuturesUnordered` pipeline.
+static PARSE_TRACE_ACTIVE: AtomicBool = AtomicBool::new(false);
+static PARSE_TRACE: LazyLock<SegQueue<(Instant, Instant, Instant)>> = LazyLock::new(SegQueue::new);
+
+pub fn start_parse_trace() {
+    while PARSE_TRACE.pop().is_some() {}
+    PARSE_TRACE_ACTIVE.store(true, Ordering::Relaxed);
+}
+
+pub fn finish_parse_trace() -> Vec<(Instant, Instant, Instant)> {
+    PARSE_TRACE_ACTIVE.store(false, Ordering::Relaxed);
+    let mut out = Vec::new();
+    while let Some(v) = PARSE_TRACE.pop() {
+        out.push(v);
+    }
+    out
+}
+
+#[inline]
+pub fn parse_trace_enabled() -> bool {
+    PARSE_TRACE_ACTIVE.load(Ordering::Relaxed)
+}
+
+#[inline]
+pub fn record_parse_interval(queued_at: Instant, exec_start: Instant, exec_end: Instant) {
+    if PARSE_TRACE_ACTIVE.load(Ordering::Relaxed) {
+        PARSE_TRACE.push((queued_at, exec_start, exec_end));
+    }
+}
 
 /// Global HTTP client with connection pooling and DNS caching.
 ///
 /// Stores `Result<Client, String>` so that proxy-configuration errors are
 /// surfaced to callers instead of panicking or calling `process::exit`.
+///
+/// Multi-client experiments (2 and 4 isolated clients + preheat) both
+/// regressed p1_resolve on CI — preheat TLS handshake cost exceeded the
+/// phase-lock smoothing benefit, and uv (which uses a single client)
+/// proves one pool is the right default.
 static HTTP_CLIENT: LazyLock<Result<reqwest::Client, String>> = LazyLock::new(|| {
     client_builder()
         .and_then(|b| b.build().context("Failed to build reqwest client"))
         .map_err(|e| e.to_string())
 });
 
-pub(crate) fn get_client() -> Result<&'static reqwest::Client> {
+pub(crate) fn pick_client() -> Result<&'static reqwest::Client> {
     HTTP_CLIENT.as_ref().map_err(|e| anyhow!("{e}"))
 }
 
-/// Override reqwest's default `ring` with `aws-lc-rs` on macOS. Local
-/// M-series benchmarks show ~40 % faster cold resolves; CI bench-phases
-/// regresses on Linux/x86_64, so non-macOS targets keep ring via
-/// `rustls-tls-native-roots`.
+/// Build a `rustls::ClientConfig` using the `aws-lc-rs` crypto provider
+/// instead of reqwest's default `ring`. Measured on CI (4-core runner)
+/// against npmjs.org, ring's per-TLS-handshake client-side CPU cost
+/// (ECDHE key derivation + cert verification + Finished MAC) serialised
+/// across 128 parallel handshakes into a 154 ms "CCS → first AppData"
+/// span — the HTTP requests couldn't fire until all TLS crypto drained
+/// through 4 async workers. aws-lc-rs uses BoringSSL's assembly-optimised
+/// primitives and is roughly 3× faster at handshake work.
 #[cfg(target_os = "macos")]
 fn build_rustls_config() -> Result<rustls::ClientConfig> {
-    // `install_default` consumes the provider by value, so we can't share
-    // it with the `Arc` below — `default_provider()` is cheap (a struct of
-    // function pointers), so the duplicate call is fine. Idempotent across
-    // the process; only the first call wins. Sets the default for any
-    // other rustls consumer (e.g. `gix`).
+    // Install aws-lc-rs as the default for any other rustls consumer in
+    // the process. Idempotent — only the first call per process wins.
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
+    // Load OS root certs. On Linux this hits /etc/ssl/certs/,
+    // on macOS it queries the Security framework keychain. Called once
+    // per process via `HTTP_CLIENT`'s `LazyLock`.
     let roots = rustls_native_certs::load_native_certs();
     let mut root_store = rustls::RootCertStore::empty();
     for cert in roots.certs {
-        // Tolerate individual bad roots so one broken cert in the OS
-        // trust store doesn't brick all requests.
+        // Best-effort: skip any cert rustls refuses (same tolerance
+        // native-tls shows). A hard fail here would brick every
+        // request on a box with one bad root in its trust store.
         let _ = root_store.add(cert);
     }
     if !roots.errors.is_empty() {
@@ -130,7 +213,7 @@ fn build_rustls_config() -> Result<rustls::ClientConfig> {
         rustls::crypto::aws_lc_rs::default_provider(),
     ))
     .with_safe_default_protocol_versions()
-    .context("rustls safe_default_protocol_versions")?
+    .map_err(|e| anyhow!("rustls safe_default_protocol_versions: {e}"))?
     .with_root_certificates(root_store)
     .with_no_client_auth();
 
@@ -159,7 +242,16 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
         let mut builder = builder
             .no_proxy()
             .dns_resolver(shared_resolver())
-            .connect_timeout(CONNECT_TIMEOUT);
+            // Force HTTP/1.1 with a connection pool. reqwest multiplexes all
+            // requests over a single HTTP/2 connection by default, which
+            // makes head-of-line blocking on one slow response stall the
+            // whole manifest fetch phase. An H1 pool lets concurrent
+            // manifest requests open independent TCP streams instead.
+            // Pool size matches `preload::DEFAULT_CONCURRENCY` so the
+            // per-host idle pool can absorb every in-flight fetch without
+            // churning connections.
+            .http1_only()
+            .pool_max_idle_per_host(256);
 
         #[cfg(target_os = "macos")]
         {

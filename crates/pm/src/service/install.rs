@@ -287,6 +287,18 @@ impl InstallService {
         let added = clone_count().saturating_sub(clone_baseline);
         let download_delta = download_stats() - download_baseline;
         print_install_counts(added, download_delta.reused, download_delta.downloaded);
+
+        // Per-phase cumulative time (summed across concurrent tasks, not wall).
+        // Ratio to wall clock gives effective concurrency for that phase.
+        let phases = crate::util::downloader::phase_totals();
+        let clone_us = crate::util::cloner::clone_micros();
+        println!(
+            "  download {:.2}s · extract {:.2}s · clone {:.2}s · {:.1} MB fetched",
+            phases.download_micros as f64 / 1e6,
+            phases.extract_micros as f64 / 1e6,
+            clone_us as f64 / 1e6,
+            phases.downloaded_bytes as f64 / (1024.0 * 1024.0),
+        );
         Ok(())
     }
 

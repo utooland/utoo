@@ -30,11 +30,12 @@ use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
 use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::resolver::preload::{PreloadConfig, preload_manifests};
 use crate::resolver::registry::{ResolveError, resolve_registry_dep};
 use crate::spec::{Catalogs, PackageSpec, Protocol};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
-use crate::traits::registry::{PreloadRegistry, RegistryClient, ResolvedPackage};
+use crate::traits::registry::{MaybeSend, MaybeSync, RegistryClient, ResolvedPackage};
 
 /// Dispatch a git/github spec to the real `gix`-backed resolver when the
 /// `native-git` feature is enabled, otherwise error with a hint.
@@ -119,11 +120,19 @@ pub struct BuildDepsConfig {
     pub catalogs: Catalogs,
 }
 
+/// Fallback concurrency for wasm where the worker-pool preload module is
+/// gated out. wasm runs serial BFS resolution so this only sizes the inner
+/// `FuturesUnordered` for transitive fanout — keep it modest.
+#[cfg(target_arch = "wasm32")]
+const DEFAULT_CONCURRENCY: usize = 16;
+#[cfg(not(target_arch = "wasm32"))]
+const DEFAULT_CONCURRENCY: usize = crate::resolver::preload::DEFAULT_CONCURRENCY;
+
 impl Default for BuildDepsConfig {
     fn default() -> Self {
         Self {
             peer_deps: PeerDeps::Skip,
-            concurrency: crate::resolver::preload::DEFAULT_CONCURRENCY,
+            concurrency: DEFAULT_CONCURRENCY,
             skip_preload: false,
             cache_dir: dirs::home_dir().map(|d| d.join(".cache/nm")),
             git_clone_cache: Arc::new(GitCloneCache::new()),
@@ -458,16 +467,13 @@ async fn process_file_dep<E>(
 ///
 /// # Returns
 /// The result of processing (reused, created, or skipped)
-pub async fn process_dependency<R: RegistryClient + crate::maybe_send::MaybeSync>(
+pub async fn process_dependency<R: RegistryClient + MaybeSync>(
     graph: &mut DependencyGraph,
     registry: &R,
     node_index: NodeIndex,
     edge_info: &DependencyEdgeInfo,
     config: &BuildDepsConfig,
-) -> Result<ProcessResult, ResolveError<R::Error>>
-where
-    R::Error: crate::maybe_send::MaybeSend,
-{
+) -> Result<ProcessResult, ResolveError<R::Error>> {
     tracing::debug!(
         "Processing dependency {}@{} from [{:?}]",
         edge_info.name,
@@ -710,13 +716,13 @@ where
 /// // Add initial dependency edges to root...
 /// build_deps(&mut graph, &registry, PeerDeps::Include).await?;
 /// ```
-pub async fn build_deps<R: PreloadRegistry>(
+pub async fn build_deps<R: RegistryClient + Clone + MaybeSend + MaybeSync + 'static>(
     graph: &mut DependencyGraph,
     registry: &R,
     peer_deps: PeerDeps,
 ) -> Result<(), ResolveError<R::Error>>
 where
-    R::Error: crate::maybe_send::MaybeSend,
+    R::Error: MaybeSend,
 {
     let config = BuildDepsConfig::default().with_peer_deps(peer_deps);
     build_deps_with_config(graph, registry, config, &NoopReceiver).await
@@ -735,14 +741,17 @@ where
 /// * `registry` - Registry client for fetching packages
 /// * `peer_deps` - How to handle peer dependencies
 /// * `receiver` - Event receiver for handling build events
-pub async fn build_deps_with_receiver<R: PreloadRegistry, E: EventReceiver>(
+pub async fn build_deps_with_receiver<
+    R: RegistryClient + Clone + MaybeSend + MaybeSync + 'static,
+    E: EventReceiver,
+>(
     graph: &mut DependencyGraph,
     registry: &R,
     peer_deps: PeerDeps,
     receiver: &E,
 ) -> Result<(), ResolveError<R::Error>>
 where
-    R::Error: crate::maybe_send::MaybeSend,
+    R::Error: MaybeSend,
 {
     let config = BuildDepsConfig::default().with_peer_deps(peer_deps);
     build_deps_with_config(graph, registry, config, receiver).await
@@ -768,14 +777,17 @@ where
 ///
 /// build_deps_with_config(&mut graph, &registry, config, &receiver).await?;
 /// ```
-pub async fn build_deps_with_config<R: PreloadRegistry, E: EventReceiver>(
+pub async fn build_deps_with_config<
+    R: RegistryClient + Clone + MaybeSend + MaybeSync + 'static,
+    E: EventReceiver,
+>(
     graph: &mut DependencyGraph,
     registry: &R,
     config: BuildDepsConfig,
     receiver: &E,
 ) -> Result<(), ResolveError<R::Error>>
 where
-    R::Error: crate::maybe_send::MaybeSend,
+    R::Error: MaybeSend,
 {
     tracing::debug!(
         "Starting dependency tree build, peer_deps: {:?}, concurrency: {}, skip_preload: {}",
@@ -784,7 +796,9 @@ where
         config.skip_preload
     );
 
-    // Phase 1: Preload manifests in parallel (unless skipped)
+    // Phase 1: Preload manifests in parallel (unless skipped).
+    // wasm has no worker-pool — preload runs serially in BFS instead.
+    #[cfg(not(target_arch = "wasm32"))]
     run_preload_phase(graph, registry, &config, receiver).await;
 
     // Phase 2: BFS traversal to build the dependency tree
@@ -798,13 +812,17 @@ where
 }
 
 /// Run the preload phase to warm up the cache with manifests.
-async fn run_preload_phase<R: PreloadRegistry, E: EventReceiver>(
+#[cfg(not(target_arch = "wasm32"))]
+async fn run_preload_phase<
+    R: RegistryClient + Clone + MaybeSend + MaybeSync + 'static,
+    E: EventReceiver,
+>(
     graph: &DependencyGraph,
     registry: &R,
     config: &BuildDepsConfig,
     receiver: &E,
 ) where
-    R::Error: crate::maybe_send::MaybeSend,
+    R::Error: MaybeSend,
 {
     if config.skip_preload {
         return;
@@ -818,7 +836,7 @@ async fn run_preload_phase<R: PreloadRegistry, E: EventReceiver>(
     }
 
     tracing::debug!("Preload phase: {} initial dependencies", initial_deps.len());
-    // PreloadStart / PreloadComplete are emitted inside `preload_manifests`.
+    // Note: PreloadStart is emitted inside `preload_manifests` itself now.
 
     let preload_config = PreloadConfig {
         peer_deps: config.peer_deps,
@@ -826,9 +844,8 @@ async fn run_preload_phase<R: PreloadRegistry, E: EventReceiver>(
     };
 
     // Wrap registry in Arc for the worker pool. Each worker holds an
-    // Arc<R> so resolution runs as an independent `tokio::spawn` task on
-    // the multi-thread runtime. UnifiedRegistry's Clone is shallow
-    // (Arc-based), so this clone is cheap.
+    // Arc<R> so resolution runs on tokio's global executor independently
+    // of the main task driving result aggregation.
     let registry_arc = std::sync::Arc::new(registry.clone());
 
     let stats = preload_manifests(
@@ -842,25 +859,27 @@ async fn run_preload_phase<R: PreloadRegistry, E: EventReceiver>(
     )
     .await;
 
-    tracing::debug!(
-        "Preload phase completed: {} success, {} failed",
+    let elapsed = start.elapsed();
+    tracing::info!(
+        "Preload phase: {:.2?} ({} success, {} failed, {} initial deps)",
+        elapsed,
         stats.success_count,
-        stats.failed_count
+        stats.failed_count,
+        stats.total_processed,
     );
-
-    tracing::debug!("Preload phase: {:?}", start.elapsed());
+    receiver.on_event(BuildEvent::PreloadComplete {
+        success: stats.success_count,
+        failed: stats.failed_count,
+    });
 }
 
 /// Run the BFS traversal phase to build the dependency tree.
-async fn run_bfs_phase<R: RegistryClient + crate::maybe_send::MaybeSync, E: EventReceiver>(
+async fn run_bfs_phase<R: RegistryClient + MaybeSync, E: EventReceiver>(
     graph: &mut DependencyGraph,
     registry: &R,
     config: &BuildDepsConfig,
     receiver: &E,
-) -> Result<(), ResolveError<R::Error>>
-where
-    R::Error: crate::maybe_send::MaybeSend,
-{
+) -> Result<(), ResolveError<R::Error>> {
     let start = tokio::time::Instant::now();
 
     let mut current_level = vec![graph.root_index];
@@ -978,12 +997,12 @@ use std::path::Path;
 /// let pkg: PackageJson = serde_json::from_str(&pkg_content)?;
 /// let lock = resolve(&pkg, &registry).await?;
 /// ```
-pub async fn resolve<R: PreloadRegistry>(
+pub async fn resolve<R: RegistryClient + Clone + MaybeSend + MaybeSync + 'static>(
     pkg: &PackageJson,
     registry: &R,
 ) -> Result<PackageLock, ResolveError<R::Error>>
 where
-    R::Error: crate::maybe_send::MaybeSend,
+    R::Error: MaybeSend,
 {
     resolve_with_options(pkg, registry, PeerDeps::Include, &NoopReceiver).await
 }
@@ -995,14 +1014,17 @@ where
 /// * `registry` - Registry client for fetching packages
 /// * `peer_deps` - How to handle peer dependencies
 /// * `receiver` - Event receiver for progress tracking
-pub async fn resolve_with_options<R: PreloadRegistry, E: EventReceiver>(
+pub async fn resolve_with_options<
+    R: RegistryClient + Clone + MaybeSend + MaybeSync + 'static,
+    E: EventReceiver,
+>(
     pkg: &PackageJson,
     registry: &R,
     peer_deps: PeerDeps,
     receiver: &E,
 ) -> Result<PackageLock, ResolveError<R::Error>>
 where
-    R::Error: crate::maybe_send::MaybeSend,
+    R::Error: MaybeSend,
 {
     // Create graph with root node
     let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg.clone());
