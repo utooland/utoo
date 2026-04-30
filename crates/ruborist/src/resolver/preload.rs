@@ -34,7 +34,10 @@ use crate::traits::registry::{RegistryClient, ResolvedPackage};
 ///
 /// Number of long-lived `tokio::spawn` workers. Each processes one
 /// `resolve_package` at a time on tokio's multi-thread runtime.
-pub const DEFAULT_CONCURRENCY: usize = 64;
+/// 128 matches the manifests-concurrency-limit sweet spot — high
+/// enough to saturate independent npmjs connections, low enough to
+/// stay under the Cloudflare per-source-IP throttle threshold.
+pub const DEFAULT_CONCURRENCY: usize = 128;
 
 /// A dependency spec: (name, version_spec)
 pub type Dep = (String, String);

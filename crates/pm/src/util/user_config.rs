@@ -132,9 +132,17 @@ pub fn get_install_scope() -> InstallScope {
     INSTALL_SCOPE.get().copied().unwrap_or_default()
 }
 
-// Manifest fetch concurrency configuration
+// Manifest fetch concurrency configuration.
+//
+// Sweep history under worker-pool (ant-design / npmjs):
+//   cap=64  wall=3.10s avg_conc=56 (FuturesUnordered ceiling)
+//   cap=128 wall=2.15s avg_conc=84 (worker-pool sweet spot)
+//   cap=160 wall=2.14s avg_conc=119 (Cloudflare per-IP throttle bites)
+//   cap=256 wall=3.50s avg_conc=90  (per-req inflated 30ms→146ms)
+// 128 saturates independent connections without triggering the
+// Cloudflare per-source-IP throttle.
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 64));
+    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 128));
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
     MANIFESTS_CONCURRENCY_LIMIT.set(value);
