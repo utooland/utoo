@@ -245,6 +245,15 @@ impl UnifiedRegistry {
                 .map_err(RegistryError)?
                 {
                     manifest::FetchManifestResult::Ok(manifest, new_etag) => {
+                        // Build a `VersionsInfo` strictly for the disk-persist
+                        // task. We do NOT also fill the in-memory
+                        // `versions_info` cache slot on the 200 path: readers
+                        // (`resolve_via_full_manifest::Full`) now go through
+                        // `VersionsRef::from(&Arc<FullManifest>)` for this
+                        // case, so the `full_manifests` slot is the single
+                        // source of truth in memory. The `versions_info` slot
+                        // is reserved for the 304 path (or disk-loaded warm
+                        // cache from a previous run).
                         let versions_info = Arc::new(VersionsInfo {
                             versions: Versions {
                                 version_list: manifest.versions.clone(),
@@ -255,8 +264,6 @@ impl UnifiedRegistry {
                         });
                         self.cache
                             .set_full_manifest(name.to_string(), Arc::new(manifest));
-                        self.cache
-                            .set_versions(name.to_string(), Arc::clone(&versions_info));
                         // Fire-and-forget: store may spawn its own task.
                         self.store.store_versions(name, versions_info);
                     }
@@ -277,6 +284,10 @@ impl UnifiedRegistry {
                             .await
                             .map_err(RegistryError)?;
 
+                            // Same shape as the 200 branch: only the
+                            // canonical `full_manifests` slot is filled in
+                            // memory; the disk-persist task gets its own
+                            // `Arc<VersionsInfo>`.
                             let versions_info = Arc::new(VersionsInfo {
                                 versions: Versions {
                                     version_list: manifest.versions.clone(),
@@ -287,8 +298,6 @@ impl UnifiedRegistry {
                             });
                             self.cache
                                 .set_full_manifest(name.to_string(), Arc::new(manifest));
-                            self.cache
-                                .set_versions(name.to_string(), Arc::clone(&versions_info));
                             self.store.store_versions(name, versions_info);
                         }
                     }
@@ -432,9 +441,8 @@ impl UnifiedRegistry {
                 if full.versions.is_empty() {
                     return Err(RegistryError(anyhow!("No versions available for {}", name)));
                 }
-                let resolved_version =
-                    resolve_target_version(&full.dist_tags, &full.versions, spec)
-                        .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
+                let resolved_version = resolve_target_version((&*full).into(), spec)
+                    .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
                 let core = full.get_core_version(&resolved_version).ok_or_else(|| {
                     RegistryError(anyhow!(
                         "Version {} not found in manifest for {}",
@@ -454,12 +462,8 @@ impl UnifiedRegistry {
                 let versions_info = self.cache.get_versions(name).ok_or_else(|| {
                     RegistryError(anyhow!("Versions cache not found for {}", name))
                 })?;
-                let resolved_version = resolve_target_version(
-                    &versions_info.versions.dist_tags,
-                    &versions_info.versions.version_list,
-                    spec,
-                )
-                .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
+                let resolved_version = resolve_target_version((&*versions_info).into(), spec)
+                    .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
                 let manifest =
                     manifest::fetch_version_manifest(manifest::FetchVersionManifestOptions {
                         registry_url: &self.registry_url,

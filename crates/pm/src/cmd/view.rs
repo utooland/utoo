@@ -27,10 +27,8 @@ pub async fn view(package_spec: &str) -> Result<()> {
     tracing::debug!("Fetched package info: {full_manifest:?}");
 
     // Resolve version and get full VersionManifest (with all display fields)
-    let version_list: Vec<String> = full_manifest.versions.clone();
     let resolved_version = utoo_ruborist::resolver::version::resolve_target_version(
-        &full_manifest.dist_tags,
-        &version_list,
+        (&full_manifest).into(),
         version_spec,
     )
     .map_err(|e| {

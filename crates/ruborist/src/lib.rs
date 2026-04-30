@@ -41,7 +41,9 @@ pub mod graph {
 
 /// Package manifest types.
 pub mod manifest {
-    pub use crate::model::manifest::{CoreVersionManifest, Dist, FullManifest, VersionManifest};
+    pub use crate::model::manifest::{
+        CoreVersionManifest, Dist, FullManifest, VersionManifest, VersionsRef,
+    };
     pub use crate::model::package_json::{
         DepsView, EnginesView, IdentityView, PackageInstallView, PackageJson, PublishConfig,
         ScriptsView,
