@@ -150,14 +150,7 @@ fn build_rustls_config() -> Result<rustls::ClientConfig> {
 ///
 /// Returns `Err` if a proxy URL from the environment is malformed.
 pub fn client_builder() -> Result<reqwest::ClientBuilder> {
-    // Force HTTP/1.1 to bypass any per-connection stream throttle on
-    // Cloudflare's edge: H2 multiplexes 100+ streams per TCP connection,
-    // and a per-connection stream-rate cap can serialise concurrent
-    // manifest/tarball fetches even when the client opens parallel
-    // streams. H/1.1 spreads concurrency across multiple TCP connections
-    // (one in-flight request per connection), which is rate-limited per
-    // IP at a higher absolute ceiling.
-    let builder = reqwest::Client::builder().http1_only();
+    let builder = reqwest::Client::builder();
 
     #[cfg(not(target_arch = "wasm32"))]
     let builder = {
