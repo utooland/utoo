@@ -36,8 +36,23 @@ pub fn init_tracing(verbose: bool) -> Result<(PathBuf, WorkerGuard)> {
     let console_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(format!("utoo={console_level}")));
 
-    // File filter: always capture debug+ for troubleshooting
-    let file_filter = EnvFilter::new("utoo=debug");
+    // File filter: capture info+ by default. Hot-path debug!() calls
+    // (cache hits, per-package preload events, BFS dispatch) emit
+    // ~5-10 events per resolved manifest. With 2730+ manifests during
+    // a cold preload that's 15-30k events that — even routed through
+    // the non_blocking appender's channel — pay format/serialise CPU
+    // on the resolving thread. CI standalone manifest-bench reaches
+    // avg_conc=92 at cap=128 with the same reqwest stack; ruborist
+    // sat at avg_conc=56 after every other Mutex/clone hot-path was
+    // eliminated. Tracing was the last remaining shared cost.
+    //
+    // Override via `UTOO_FILE_LOG=debug` (or any RUST_LOG-style spec)
+    // to bring the troubleshooting captures back when actually
+    // diagnosing.
+    let file_filter = match env::var("UTOO_FILE_LOG") {
+        Ok(spec) if !spec.is_empty() => EnvFilter::new(spec),
+        _ => EnvFilter::new("utoo=info"),
+    };
 
     // 2. Create log file
     let timestamp = SystemTime::now()
@@ -188,15 +203,23 @@ impl utoo_ruborist::progress::EventReceiver for ProgressReceiver {
     fn on_event(&self, event: utoo_ruborist::progress::BuildEvent) {
         use utoo_ruborist::progress::BuildEvent;
         match event {
-            BuildEvent::PreloadStart { count } | BuildEvent::PreloadQueued { count } => {
-                PROGRESS_BAR.inc_length(count as u64);
-            }
-            BuildEvent::PreloadFetching { name } => {
-                log_progress(&format!("fetching {}", name));
-            }
-            BuildEvent::PreloadProgress { name, .. } => {
-                PROGRESS_BAR.inc(1);
-                log_progress(&format!("resolved {}", name));
+            BuildEvent::PreloadStart { .. }
+            | BuildEvent::PreloadQueued { .. }
+            | BuildEvent::PreloadFetching { .. }
+            | BuildEvent::PreloadProgress { .. } => {
+                // Hot path: 4571 dispatches + 4571 completions = ~9000
+                // events landing on the main task during a 3-4 s phase.
+                // Every `PROGRESS_BAR.inc[_length]` takes indicatif's
+                // internal ProgressBar `Mutex`, contending with the
+                // steady_tick draw thread. Standalone manifest-bench
+                // sustains avg_conc=95 at cap=128; ruborist with these
+                // events stuck at 56 — the indicatif lock acquisitions
+                // cap the main loop's fill-and-drain rate.
+                //
+                // Drop all per-event progress bar updates during preload.
+                // The spinner still ticks via steady_tick so the user
+                // sees the phase is alive; the final summary prints
+                // success/fail counts at PreloadComplete.
             }
             BuildEvent::PreloadComplete { success, failed } => {
                 PROGRESS_BAR.set_position(0);
