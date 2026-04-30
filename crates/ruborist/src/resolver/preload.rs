@@ -15,7 +15,7 @@ use crate::traits::progress::{BuildEvent, EventReceiver};
 use crate::traits::registry::RegistryClient;
 
 /// Default concurrency limit for manifest fetching
-pub const DEFAULT_CONCURRENCY: usize = 128;
+pub const DEFAULT_CONCURRENCY: usize = 256;
 
 /// A dependency spec: (name, version_spec)
 pub type Dep = (String, String);
