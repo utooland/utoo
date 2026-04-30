@@ -160,16 +160,16 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
             .no_proxy()
             .dns_resolver(shared_resolver())
             .connect_timeout(CONNECT_TIMEOUT)
-            // Force HTTP/1.1 with a connection pool. reqwest multiplexes all
-            // requests over a single HTTP/2 connection by default, which
-            // makes head-of-line blocking on one slow response stall the
+            // Force HTTP/1.1. reqwest multiplexes all requests over a
+            // single HTTP/2 connection by default, which makes
+            // head-of-line blocking on one slow response stall the
             // whole manifest fetch phase. An H1 pool lets concurrent
             // manifest requests open independent TCP streams instead.
-            // Pool size matches `preload::DEFAULT_CONCURRENCY` * 2 so the
-            // per-host idle pool can absorb every in-flight fetch without
-            // churning connections.
-            .http1_only()
-            .pool_max_idle_per_host(256);
+            // Pool size is left at reqwest's unlimited default —
+            // upstream `MANIFESTS_CONCURRENCY_LIMIT` (128) already
+            // bounds the in-flight count, so an explicit pool ceiling
+            // is redundant.
+            .http1_only();
 
         #[cfg(target_os = "macos")]
         {
