@@ -362,9 +362,8 @@ impl UnifiedRegistry {
                         // version from the full manifest. `resolve_full_manifest`
                         // is itself inflight-gated, so concurrent specs for the
                         // same name share one full-manifest fetch.
-                        let (resolved_version, manifest) =
+                        let (resolved_version, arc) =
                             self.resolve_via_full_manifest(name, spec).await?;
-                        let arc = Arc::new(manifest);
                         self.cache.set_version_manifest(
                             name.to_string(),
                             spec.to_string(),
@@ -426,7 +425,7 @@ impl UnifiedRegistry {
         &self,
         name: &str,
         spec: &str,
-    ) -> Result<(String, CoreVersionManifest), RegistryError> {
+    ) -> Result<(String, Arc<CoreVersionManifest>), RegistryError> {
         match self.resolve_full_manifest(name).await? {
             FullManifestResult::Full(full) => {
                 if full.versions.is_empty() {
@@ -435,6 +434,14 @@ impl UnifiedRegistry {
                 let resolved_version =
                     resolve_target_version(&full.dist_tags, &full.versions, spec)
                         .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
+                // Short-circuit: a sibling spec may have already resolved to
+                // this same version and warmed the cache. Skip the rayon
+                // reparse (the dominant cost on the resolve hot path) and
+                // share the existing `Arc<CoreVersionManifest>` instead of
+                // deep-cloning its HashMaps.
+                if let Some(cached) = self.cache.get_version_manifest(name, &resolved_version) {
+                    return Ok((resolved_version, cached));
+                }
                 let core = crate::model::manifest::extract_core_version_off_runtime(
                     Arc::clone(&full),
                     resolved_version.clone(),
@@ -474,7 +481,7 @@ impl UnifiedRegistry {
                     })
                     .await
                     .map_err(RegistryError)?;
-                Ok((resolved_version, manifest))
+                Ok((resolved_version, Arc::new(manifest)))
             }
         }
     }

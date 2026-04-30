@@ -116,22 +116,25 @@ impl FullManifest {
 /// `simd_json::to_borrowed_value`, which on hot paths (300+ resolves per
 /// install) accumulates into the dominant CPU bucket.
 ///
-/// Wasm32 falls back to inline parse — no rayon, no thread pool.
+/// Returns `Arc<CoreVersionManifest>` so callers (e.g. UnifiedRegistry's
+/// version-manifest cache) can store and clone the result without
+/// deep-copying the underlying `HashMap`s. Wasm32 falls back to inline
+/// parse — no rayon, no thread pool.
 pub async fn extract_core_version_off_runtime(
     full: std::sync::Arc<FullManifest>,
     version: String,
-) -> Option<CoreVersionManifest> {
+) -> Option<std::sync::Arc<CoreVersionManifest>> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let (tx, rx) = tokio::sync::oneshot::channel();
         rayon::spawn(move || {
-            let _ = tx.send(full.get_core_version(&version));
+            let _ = tx.send(full.get_core_version(&version).map(std::sync::Arc::new));
         });
         rx.await.ok().flatten()
     }
     #[cfg(target_arch = "wasm32")]
     {
-        full.get_core_version(&version)
+        full.get_core_version(&version).map(std::sync::Arc::new)
     }
 }
 
