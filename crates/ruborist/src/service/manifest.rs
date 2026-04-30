@@ -13,6 +13,35 @@ use super::fetch::{
 use super::http::get_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 
+/// Parse JSON bytes on rayon's CPU thread pool (native) or inline
+/// (wasm32). Keeps the tokio runtime free of `simd_json` CPU work so
+/// other in-flight manifest fetches can keep driving network IO while
+/// this one is parsing. Rayon's global pool work-steals across
+/// `num_cpus` threads, so concurrent manifest parses parallelise.
+async fn parse_json_off_runtime<T>(bytes: Vec<u8>) -> Result<T, anyhow::Error>
+where
+    T: serde::de::DeserializeOwned + Send + 'static,
+{
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        rayon::spawn(move || {
+            let mut buf = bytes;
+            let result = simd_json::serde::from_slice::<T>(&mut buf)
+                .map_err(|e| anyhow!("JSON parse error: {e}"));
+            // Receiver dropped means the awaiting future was cancelled.
+            let _ = tx.send(result);
+        });
+        rx.await
+            .map_err(|e| anyhow!("rayon parse channel closed: {e}"))?
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut buf = bytes;
+        simd_json::serde::from_slice::<T>(&mut buf).map_err(|e| anyhow!("JSON parse error: {e}"))
+    }
+}
+
 /// Result of a full manifest fetch with ETag support.
 /// Transient return value, immediately destructured — Box not needed.
 #[allow(clippy::large_enum_variant)]
@@ -91,11 +120,13 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                         .await
                         .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
                         .to_vec();
-                    // Save raw bytes before simd_json mutates the parse buffer.
-                    let mut parse_buf = raw_bytes.clone();
-                    let mut manifest: FullManifest =
-                        simd_json::serde::from_slice(&mut parse_buf)
-                            .map_err(|e| FetchError::Permanent(anyhow!("JSON parse error: {e}")))?;
+                    // simd_json mutates the parse buffer; clone so the raw
+                    // bytes survive for `manifest.raw`. Parse runs off-runtime
+                    // on rayon (native) so it cannot block sibling fetches.
+                    let parse_buf = raw_bytes.clone();
+                    let mut manifest: FullManifest = parse_json_off_runtime(parse_buf)
+                        .await
+                        .map_err(FetchError::Permanent)?;
                     manifest.raw = std::sync::Arc::from(raw_bytes);
 
                     Ok(FetchManifestResult::Ok(manifest, new_etag))
@@ -182,13 +213,14 @@ pub async fn fetch_version_manifest(
                     .map_err(classify_reqwest_error)?;
 
                 if response.status().is_success() {
-                    let mut bytes = response
+                    let bytes = response
                         .bytes()
                         .await
                         .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
                         .to_vec();
-                    simd_json::serde::from_slice(&mut bytes)
-                        .map_err(|e| FetchError::Permanent(anyhow!("JSON parse error: {e}")))
+                    parse_json_off_runtime::<CoreVersionManifest>(bytes)
+                        .await
+                        .map_err(FetchError::Permanent)
                 } else {
                     Err(classify_status(response.status(), &url))
                 }
