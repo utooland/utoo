@@ -15,18 +15,18 @@ use tracing_subscriber::{
 
 /// Cached at startup: is stderr connected to a terminal?
 ///
-/// indicatif's `inc()` / `set_message()` always acquire a write-lock on
-/// the internal `ProgressState` even when the draw target is hidden or
-/// the underlying stream is not a TTY — only the *rendering* short-
-/// circuits, not the state mutation. On the worker-pool preload hot
-/// path that's 9000+ lock acquisitions per phase contending across 128
-/// workers, costing ~0.23s on p1_resolve in CI (round-7 vs round-6/8
-/// A/B/A on `pm-bench-phases-linux`).
+/// indicatif's `inc()` / `set_message()` always acquire the internal
+/// `Mutex<ProgressState>` write-lock and mutate `pos` / `est.buf` /
+/// `message`, even when the draw target is hidden or the underlying
+/// stream is not a TTY — only the *rendering* short-circuits, not the
+/// state mutation. On the dependency-resolve hot path that's 9000+
+/// lock acquisitions per phase contending across multiple workers,
+/// costing measurable wall time on CI.
 ///
-/// Gating *every* indicatif touch behind this flag means non-TTY
-/// environments (CI, piped output, `2>&1 | tee`) pay zero cost — no
-/// `inc`, no `set_message`, no `format!()` allocation either. Local
-/// dev keeps the full progress UX.
+/// Gating every `ProgressReceiver` event behind this flag means
+/// non-TTY environments (CI, piped output, `2>&1 | tee`) pay zero
+/// indicatif cost — no `inc`, no `set_message`, no `format!()`
+/// allocation. Local dev keeps the full progress UX.
 pub static IS_TTY: Lazy<bool> = Lazy::new(|| std::io::stderr().is_terminal());
 
 pub static PROGRESS_BAR: Lazy<ProgressBar> = Lazy::new(|| {
@@ -53,23 +53,8 @@ pub fn init_tracing(verbose: bool) -> Result<(PathBuf, WorkerGuard)> {
     let console_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(format!("utoo={console_level}")));
 
-    // File filter: capture info+ by default. Hot-path debug!() calls
-    // (cache hits, per-package preload events, BFS dispatch) emit
-    // ~5-10 events per resolved manifest. With 2730+ manifests during
-    // a cold preload that's 15-30k events that — even routed through
-    // the non_blocking appender's channel — pay format/serialise CPU
-    // on the resolving thread. CI standalone manifest-bench reaches
-    // avg_conc=92 at cap=128 with the same reqwest stack; ruborist
-    // sat at avg_conc=56 after every other Mutex/clone hot-path was
-    // eliminated. Tracing was the last remaining shared cost.
-    //
-    // Override via `UTOO_FILE_LOG=debug` (or any RUST_LOG-style spec)
-    // to bring the troubleshooting captures back when actually
-    // diagnosing.
-    let file_filter = match env::var("UTOO_FILE_LOG") {
-        Ok(spec) if !spec.is_empty() => EnvFilter::new(spec),
-        _ => EnvFilter::new("utoo=info"),
-    };
+    // File filter: always capture debug+ for troubleshooting
+    let file_filter = EnvFilter::new("utoo=debug");
 
     // 2. Create log file
     let timestamp = SystemTime::now()
@@ -227,9 +212,8 @@ impl utoo_ruborist::progress::EventReceiver for ProgressReceiver {
         // Single TTY check at the receiver boundary. Non-TTY (CI, piped
         // output, `2>&1 | tee`) drops the entire indicatif update path —
         // no Mutex<ProgressState> write-lock, no format!() allocation,
-        // no String clones into set_message. Worth ~0.23s on p1_resolve
-        // for ant-design at worker-pool concurrency=128 (round-7 vs
-        // round-6/8 A/B/A on `pm-bench-phases-linux`).
+        // no String clones into set_message. Worth measurable wall time
+        // on the worker-pool resolve hot path; see `IS_TTY` doc comment.
         if !*IS_TTY {
             return;
         }
