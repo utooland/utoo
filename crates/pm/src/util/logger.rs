@@ -203,23 +203,15 @@ impl utoo_ruborist::progress::EventReceiver for ProgressReceiver {
     fn on_event(&self, event: utoo_ruborist::progress::BuildEvent) {
         use utoo_ruborist::progress::BuildEvent;
         match event {
-            BuildEvent::PreloadStart { .. }
-            | BuildEvent::PreloadQueued { .. }
-            | BuildEvent::PreloadFetching { .. }
-            | BuildEvent::PreloadProgress { .. } => {
-                // Hot path: 4571 dispatches + 4571 completions = ~9000
-                // events landing on the main task during a 3-4 s phase.
-                // Every `PROGRESS_BAR.inc[_length]` takes indicatif's
-                // internal ProgressBar `Mutex`, contending with the
-                // steady_tick draw thread. Standalone manifest-bench
-                // sustains avg_conc=95 at cap=128; ruborist with these
-                // events stuck at 56 — the indicatif lock acquisitions
-                // cap the main loop's fill-and-drain rate.
-                //
-                // Drop all per-event progress bar updates during preload.
-                // The spinner still ticks via steady_tick so the user
-                // sees the phase is alive; the final summary prints
-                // success/fail counts at PreloadComplete.
+            BuildEvent::PreloadStart { count } | BuildEvent::PreloadQueued { count } => {
+                PROGRESS_BAR.inc_length(count as u64);
+            }
+            BuildEvent::PreloadFetching { name } => {
+                log_progress(&format!("fetching {}", name));
+            }
+            BuildEvent::PreloadProgress { name, .. } => {
+                PROGRESS_BAR.inc(1);
+                log_progress(&format!("resolved {}", name));
             }
             BuildEvent::PreloadComplete { success, failed } => {
                 PROGRESS_BAR.set_position(0);

@@ -10,7 +10,7 @@ use tokio_retry::RetryIf;
 use super::fetch::{
     FetchError, classify_reqwest_error, classify_status, is_retryable, retry_strategy,
 };
-use super::http::{parse_trace_enabled, pick_client, record_http_interval, record_parse_interval};
+use super::http::pick_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 
 /// Result of a full manifest fetch with ETag support.
@@ -68,14 +68,10 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                     request = request.header("If-None-Match", etag_value);
                 }
 
-                let send_start = std::time::Instant::now();
                 let response = request.send().await.map_err(classify_reqwest_error)?;
                 let status = response.status();
 
                 if status == reqwest::StatusCode::NOT_MODIFIED {
-                    // 304 has no body but the round-trip still uses the wire;
-                    // record the headers-only window so `busy` doesn't lose it.
-                    record_http_interval(send_start, std::time::Instant::now());
                     if etag.is_some() {
                         return Ok(FetchManifestResult::NotModified);
                     }
@@ -95,7 +91,6 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                         .await
                         .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
                         .into();
-                    record_http_interval(send_start, std::time::Instant::now());
 
                     // Inline parse on the async worker — simd_json is fast
                     // (1-5ms CPU per manifest) and the worker-pool preload
@@ -109,17 +104,11 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                     // for zero queue wait, and worker-pool's independent
                     // task scheduling means one stalled worker doesn't
                     // starve the others.
-                    let traced = parse_trace_enabled();
-                    let queued_at = traced.then(std::time::Instant::now);
-                    let exec_start = queued_at.map(|_| std::time::Instant::now());
                     let mut parse_buf = raw_bytes.clone();
                     let mut manifest: FullManifest =
                         simd_json::serde::from_slice(&mut parse_buf)
                             .map_err(|e| FetchError::Permanent(anyhow!("JSON parse error: {e}")))?;
                     manifest.raw = std::sync::Arc::from(raw_bytes);
-                    if let (Some(q), Some(s)) = (queued_at, exec_start) {
-                        record_parse_interval(q, s, std::time::Instant::now());
-                    }
 
                     Ok(FetchManifestResult::Ok(manifest, new_etag))
                 } else {
@@ -196,7 +185,6 @@ pub async fn fetch_version_manifest(
         || {
             let url = url.clone();
             async move {
-                let send_start = std::time::Instant::now();
                 let response = pick_client()
                     .map_err(FetchError::Permanent)?
                     .get(&url)
@@ -211,20 +199,12 @@ pub async fn fetch_version_manifest(
                         .await
                         .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
                         .into();
-                    record_http_interval(send_start, std::time::Instant::now());
                     // Inline parse — see fetch_full_manifest above for the
                     // rationale (blocking-pool queue saturation under
                     // worker-pool preload concurrency).
-                    let traced = parse_trace_enabled();
-                    let queued_at = traced.then(std::time::Instant::now);
-                    let exec_start = queued_at.map(|_| std::time::Instant::now());
                     let mut buf = bytes;
-                    let result = simd_json::serde::from_slice::<CoreVersionManifest>(&mut buf)
-                        .map_err(|e| FetchError::Permanent(anyhow!("JSON parse error: {e}")));
-                    if let (Some(q), Some(s)) = (queued_at, exec_start) {
-                        record_parse_interval(q, s, std::time::Instant::now());
-                    }
-                    result
+                    simd_json::serde::from_slice::<CoreVersionManifest>(&mut buf)
+                        .map_err(|e| FetchError::Permanent(anyhow!("JSON parse error: {e}")))
                 } else {
                     Err(classify_status(response.status(), &url))
                 }

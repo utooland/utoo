@@ -24,9 +24,6 @@ use crate::model::manifest::CoreVersionManifest;
 use crate::model::node::PeerDeps;
 use crate::resolver::registry::ResolveError;
 use crate::resolver::registry::resolve_package;
-use crate::service::http::{
-    finish_http_trace, finish_parse_trace, start_http_trace, start_parse_trace,
-};
 use crate::traits::progress::{BuildEvent, EventReceiver};
 use crate::traits::registry::RegistryClient;
 
@@ -120,9 +117,6 @@ where
     F: FnMut(&str, Arc<CoreVersionManifest>),
 {
     let mut stats = PreloadStats::default();
-    let preload_wall_start = Instant::now();
-    start_http_trace();
-    start_parse_trace();
 
     // Shared work queue and dedup set.
     let pending: Arc<SegQueue<Dep>> = Arc::new(SegQueue::new());
@@ -284,172 +278,8 @@ where
         failed: stats.failed_count,
     });
 
-    let preload_wall_ms = preload_wall_start.elapsed().as_millis();
-    let intervals = finish_http_trace();
-    log_http_diagnostics(&intervals, preload_wall_ms);
-    let parses = finish_parse_trace();
-    log_parse_diagnostics(&parses);
-
-    let total = stats.success_count + stats.failed_count;
-    let avg = if total > 0 {
-        stats.total_request_ms / total as u64
-    } else {
-        0
-    };
-    tracing::debug!(
-        "Preload stats: {} requests, min={}ms, max={}ms, avg={}ms, total={}ms",
-        total,
-        stats.min_request_ms,
-        stats.max_request_ms,
-        avg,
-        stats.total_request_ms
-    );
-
     stats
 }
-
-/// Summarise captured HTTP intervals from the preload phase and log one
-/// info-level line. Splits total preload wall into:
-///
-/// - `wall` — first HTTP send → last HTTP body end (pure network window)
-/// - `busy` — interval union (time at least one request was in-flight)
-/// - `sum`  — Σ per-request `(end − start)` (total req-level time)
-/// - `cpu_tail` = preload_total − wall (our CPU work after last body)
-/// - `avg_conc` = sum / busy (effective parallelism over busy window)
-/// - percentiles of per-request latency
-fn log_http_diagnostics(intervals: &[(Instant, Instant)], preload_wall_ms: u128) {
-    if intervals.is_empty() {
-        tracing::info!(
-            "Preload HTTP diag: no requests captured (total wall {}ms)",
-            preload_wall_ms
-        );
-        return;
-    }
-
-    let mut spans: Vec<(Instant, Instant)> = intervals.to_vec();
-    spans.sort_by_key(|(s, _)| *s);
-
-    let first_start = spans.first().unwrap().0;
-    let last_end = spans.iter().map(|(_, e)| *e).max().unwrap();
-    let wall = last_end.duration_since(first_start).as_millis();
-
-    let sum: u128 = spans
-        .iter()
-        .map(|(s, e)| e.duration_since(*s).as_micros())
-        .sum();
-
-    // Interval union: sweep sorted spans, merging overlaps.
-    let mut busy_us: u128 = 0;
-    let (mut cur_s, mut cur_e) = spans[0];
-    for &(s, e) in &spans[1..] {
-        if s <= cur_e {
-            if e > cur_e {
-                cur_e = e;
-            }
-        } else {
-            busy_us += cur_e.duration_since(cur_s).as_micros();
-            cur_s = s;
-            cur_e = e;
-        }
-    }
-    busy_us += cur_e.duration_since(cur_s).as_micros();
-
-    let mut per_req_us: Vec<u128> = spans
-        .iter()
-        .map(|(s, e)| e.duration_since(*s).as_micros())
-        .collect();
-    per_req_us.sort_unstable();
-    let n = per_req_us.len();
-    let p50 = per_req_us[n / 2];
-    let p95 = per_req_us[(n * 95).div_ceil(100).saturating_sub(1)];
-    let max = *per_req_us.last().unwrap();
-
-    let cpu_tail_ms = preload_wall_ms.saturating_sub(wall);
-    let avg_conc = if busy_us > 0 {
-        sum as f64 / busy_us as f64
-    } else {
-        0.0
-    };
-
-    tracing::info!(
-        "Preload HTTP diag: n={} wall={}ms busy={}ms ({:.0}% of wall) sum={}ms avg_conc={:.1} p50={}ms p95={}ms max={}ms cpu_tail={}ms",
-        n,
-        wall,
-        busy_us / 1000,
-        if wall > 0 {
-            100.0 * (busy_us as f64 / 1000.0) / wall as f64
-        } else {
-            0.0
-        },
-        sum / 1000,
-        avg_conc,
-        p50 / 1000,
-        p95 / 1000,
-        max / 1000,
-        cpu_tail_ms,
-    );
-}
-
-/// Summarise parse timing.
-fn log_parse_diagnostics(parses: &[(Instant, Instant, Instant)]) {
-    if parses.is_empty() {
-        return;
-    }
-
-    let mut queue_us: Vec<u128> = parses
-        .iter()
-        .map(|(q, s, _)| s.duration_since(*q).as_micros())
-        .collect();
-    let mut exec_us: Vec<u128> = parses
-        .iter()
-        .map(|(_, s, e)| e.duration_since(*s).as_micros())
-        .collect();
-    queue_us.sort_unstable();
-    exec_us.sort_unstable();
-
-    let n = parses.len();
-    let pct = |v: &[u128], p: usize| v[(n * p).div_ceil(100).saturating_sub(1)];
-    let sum_queue: u128 = queue_us.iter().sum();
-    let sum_exec: u128 = exec_us.iter().sum();
-
-    let mut spans: Vec<(Instant, Instant)> = parses.iter().map(|(_, s, e)| (*s, *e)).collect();
-    spans.sort_by_key(|(s, _)| *s);
-    let (mut cur_s, mut cur_e) = spans[0];
-    let mut exec_busy_us: u128 = 0;
-    for &(s, e) in &spans[1..] {
-        if s <= cur_e {
-            if e > cur_e {
-                cur_e = e;
-            }
-        } else {
-            exec_busy_us += cur_e.duration_since(cur_s).as_micros();
-            cur_s = s;
-            cur_e = e;
-        }
-    }
-    exec_busy_us += cur_e.duration_since(cur_s).as_micros();
-    let avg_exec_parallelism = if exec_busy_us > 0 {
-        sum_exec as f64 / exec_busy_us as f64
-    } else {
-        0.0
-    };
-
-    tracing::info!(
-        "Preload parse diag: n={} queue(p50={}ms p95={}ms max={}ms sum={}ms) exec(p50={}ms p95={}ms max={}ms sum={}ms) exec_busy={}ms avg_parallel={:.1}",
-        n,
-        queue_us[n / 2] / 1000,
-        pct(&queue_us, 95) / 1000,
-        queue_us.last().unwrap() / 1000,
-        sum_queue / 1000,
-        exec_us[n / 2] / 1000,
-        pct(&exec_us, 95) / 1000,
-        exec_us.last().unwrap() / 1000,
-        sum_exec / 1000,
-        exec_busy_us / 1000,
-        avg_exec_parallelism,
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

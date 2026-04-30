@@ -76,87 +76,8 @@
 //! WASM targets skip DNS entirely (browser handles it).
 
 use std::sync::LazyLock;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow};
-use crossbeam_queue::SegQueue;
-
-/// Diagnostic: per-HTTP-request `(send_start, body_end)` timestamps.
-///
-/// When the flag is active, manifest fetch sites push `(Instant, Instant)`
-/// pairs into the queue. Preload uses the collected intervals to compute
-/// "pure network window", "busy window" (interval union), and per-request
-/// stats — isolating network wait from our own CPU work.
-///
-/// Flag is a single `AtomicBool` (relaxed) and only manifests as one
-/// comparison + two `Instant::now()` per HTTP request when enabled; zero
-/// cost on the disabled path.
-static HTTP_TRACE_ACTIVE: AtomicBool = AtomicBool::new(false);
-static HTTP_TRACE: LazyLock<SegQueue<(Instant, Instant)>> = LazyLock::new(SegQueue::new);
-
-/// Activate per-request HTTP timing capture. Drains any prior trace.
-pub fn start_http_trace() {
-    while HTTP_TRACE.pop().is_some() {}
-    HTTP_TRACE_ACTIVE.store(true, Ordering::Relaxed);
-}
-
-/// Stop capturing and return the collected `(start, end)` intervals.
-pub fn finish_http_trace() -> Vec<(Instant, Instant)> {
-    HTTP_TRACE_ACTIVE.store(false, Ordering::Relaxed);
-    let mut out = Vec::new();
-    while let Some(v) = HTTP_TRACE.pop() {
-        out.push(v);
-    }
-    out
-}
-
-/// Record one completed HTTP request's `(send_start, body_end)` timestamps.
-/// No-op when the trace flag is off. Cheap relaxed-load check guards the
-/// push so disabled callers pay almost nothing.
-#[inline]
-pub fn record_http_interval(start: Instant, end: Instant) {
-    if HTTP_TRACE_ACTIVE.load(Ordering::Relaxed) {
-        HTTP_TRACE.push((start, end));
-    }
-}
-
-/// Diagnostic: per-parse `(queued_at, exec_start, exec_end)` timestamps.
-///
-/// `queued_at` is captured right before `spawn_blocking` is called;
-/// `exec_start` is captured inside the closure (i.e. once the blocking
-/// pool actually picks the task up). `queue_wait = exec_start − queued_at`
-/// measures how long each parse sat idle in the blocking-pool queue.
-/// When `queue_wait p50 ≫ exec p50` the pool is the bottleneck, and
-/// `resolve_package` awaits stall the `FuturesUnordered` pipeline.
-static PARSE_TRACE_ACTIVE: AtomicBool = AtomicBool::new(false);
-static PARSE_TRACE: LazyLock<SegQueue<(Instant, Instant, Instant)>> = LazyLock::new(SegQueue::new);
-
-pub fn start_parse_trace() {
-    while PARSE_TRACE.pop().is_some() {}
-    PARSE_TRACE_ACTIVE.store(true, Ordering::Relaxed);
-}
-
-pub fn finish_parse_trace() -> Vec<(Instant, Instant, Instant)> {
-    PARSE_TRACE_ACTIVE.store(false, Ordering::Relaxed);
-    let mut out = Vec::new();
-    while let Some(v) = PARSE_TRACE.pop() {
-        out.push(v);
-    }
-    out
-}
-
-#[inline]
-pub fn parse_trace_enabled() -> bool {
-    PARSE_TRACE_ACTIVE.load(Ordering::Relaxed)
-}
-
-#[inline]
-pub fn record_parse_interval(queued_at: Instant, exec_start: Instant, exec_end: Instant) {
-    if PARSE_TRACE_ACTIVE.load(Ordering::Relaxed) {
-        PARSE_TRACE.push((queued_at, exec_start, exec_end));
-    }
-}
 
 /// Global HTTP client with connection pooling and DNS caching.
 ///
