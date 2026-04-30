@@ -15,7 +15,7 @@ use utoo_ruborist::util::OnceMap;
 use super::cache::get_cache_dir;
 use super::extractor::extract_and_write;
 use super::retry::{RetryableError, build_dns_cached_client, create_retry_strategy};
-use super::user_config::get_manifests_concurrency_limit_sync;
+use utoo_ruborist::resolver::preload::DEFAULT_CONCURRENCY;
 
 // Global downloader client - no pool limit, concurrency controlled by OnceMap
 static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
@@ -177,9 +177,11 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
                 return Some(cache_path);
             }
 
-            // Download (semaphore controlled)
-            let semaphore = DOWNLOAD_SEMAPHORE
-                .get_or_init(|| Semaphore::new(get_manifests_concurrency_limit_sync()));
+            // Download (semaphore controlled). Sized to match preload's
+            // `DEFAULT_CONCURRENCY` so download/install phase isn't capped
+            // tighter than resolve phase — both share the same per-IP
+            // ceiling on the registry side.
+            let semaphore = DOWNLOAD_SEMAPHORE.get_or_init(|| Semaphore::new(DEFAULT_CONCURRENCY));
             let _permit = semaphore.acquire().await.ok()?;
             let bytes = download_bytes(&tarball_url)
                 .await

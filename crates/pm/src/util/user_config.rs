@@ -144,10 +144,6 @@ pub async fn get_manifests_concurrency_limit() -> usize {
     MANIFESTS_CONCURRENCY_LIMIT.get().await
 }
 
-pub fn get_manifests_concurrency_limit_sync() -> usize {
-    MANIFESTS_CONCURRENCY_LIMIT.get_sync()
-}
-
 pub async fn set_cache_dir(cache_dir: Option<String>) {
     // Priority: CLI argument > UTOO_CACHE_DIR env > config > default
     let final_cache_dir = if let Some(dir) = cache_dir {

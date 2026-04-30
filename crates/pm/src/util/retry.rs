@@ -26,6 +26,12 @@ impl std::error::Error for RetryableError {}
 /// Connection pool is unlimited - concurrency is controlled by semaphore instead.
 pub fn build_dns_cached_client() -> reqwest::Client {
     client_builder()
+        // Force HTTP/2 on tarball CDN: tarballs default-negotiate H1.1 with
+        // npmjs.org, so 128 concurrent downloads open 128 TCP/TLS handshakes.
+        // H/2 multiplexes them onto a few persistent connections — fewer
+        // handshakes, lower memory pressure, but exposes us to per-stream
+        // rate-limit if the CDN enforces one. Experiment E.
+        .http2_prior_knowledge()
         .connect_timeout(std::time::Duration::from_secs(5)) // TLS + TCP handshake
         .read_timeout(std::time::Duration::from_secs(30)) // Timeout for individual read operations
         // No total timeout - large files (e.g. node binary ~100MB) need longer download time
