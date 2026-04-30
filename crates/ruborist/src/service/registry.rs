@@ -245,6 +245,15 @@ impl UnifiedRegistry {
                 .map_err(RegistryError)?
                 {
                     manifest::FetchManifestResult::Ok(manifest, new_etag) => {
+                        // Build a `VersionsInfo` strictly for the disk-persist
+                        // task. We do NOT also fill the in-memory
+                        // `versions_info` cache slot on the 200 path: readers
+                        // (`resolve_via_full_manifest::Full`) now go through
+                        // `VersionsRef::from(&Arc<FullManifest>)` for this
+                        // case, so the `full_manifests` slot is the single
+                        // source of truth in memory. The `versions_info` slot
+                        // is reserved for the 304 path (or disk-loaded warm
+                        // cache from a previous run).
                         let versions_info = Arc::new(VersionsInfo {
                             versions: Versions {
                                 version_list: manifest.versions.clone(),
@@ -255,8 +264,6 @@ impl UnifiedRegistry {
                         });
                         self.cache
                             .set_full_manifest(name.to_string(), Arc::new(manifest));
-                        self.cache
-                            .set_versions(name.to_string(), Arc::clone(&versions_info));
                         // Fire-and-forget: store may spawn its own task.
                         self.store.store_versions(name, versions_info);
                     }
@@ -277,6 +284,10 @@ impl UnifiedRegistry {
                             .await
                             .map_err(RegistryError)?;
 
+                            // Same shape as the 200 branch: only the
+                            // canonical `full_manifests` slot is filled in
+                            // memory; the disk-persist task gets its own
+                            // `Arc<VersionsInfo>`.
                             let versions_info = Arc::new(VersionsInfo {
                                 versions: Versions {
                                     version_list: manifest.versions.clone(),
@@ -287,8 +298,6 @@ impl UnifiedRegistry {
                             });
                             self.cache
                                 .set_full_manifest(name.to_string(), Arc::new(manifest));
-                            self.cache
-                                .set_versions(name.to_string(), Arc::clone(&versions_info));
                             self.store.store_versions(name, versions_info);
                         }
                     }
