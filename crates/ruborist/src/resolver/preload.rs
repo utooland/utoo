@@ -156,7 +156,6 @@ where
         match result {
             Ok(resolved) => {
                 stats.success_count += 1;
-                tracing::debug!("Preloaded {}@{}", name, resolved.version);
 
                 receiver.on_event(BuildEvent::PreloadProgress {
                     name: &name,

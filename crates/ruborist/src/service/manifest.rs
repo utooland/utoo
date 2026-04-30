@@ -52,8 +52,6 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
         MetadataFormat::Complete => "application/json",
     };
 
-    tracing::debug!("Fetching full manifest for {} from {}", opts.name, url);
-
     RetryIf::spawn(
         retry_strategy(),
         || {
@@ -160,13 +158,6 @@ pub async fn fetch_version_manifest(
         MetadataFormat::Abbreviated => "application/vnd.npm.install-v1+json",
         MetadataFormat::Complete => "application/json",
     };
-
-    tracing::debug!(
-        "Fetching version manifest for {}@{} from {}",
-        opts.name,
-        opts.spec,
-        url
-    );
 
     RetryIf::spawn(
         retry_strategy(),
