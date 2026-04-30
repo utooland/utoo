@@ -165,8 +165,7 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
             // makes head-of-line blocking on one slow response stall the
             // whole manifest fetch phase. An H1 pool lets concurrent
             // manifest requests open independent TCP streams instead.
-            .http1_only()
-            .pool_max_idle_per_host(64);
+            .http1_only();
 
         #[cfg(target_os = "macos")]
         {
