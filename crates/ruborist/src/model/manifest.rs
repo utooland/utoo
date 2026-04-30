@@ -149,30 +149,33 @@ impl FullManifest {
     }
 }
 
-/// Re-parse the raw manifest bytes on rayon's CPU thread pool to extract
-/// a single version. Each resolved package triggers one full re-parse via
-/// `simd_json::to_borrowed_value`, which on hot paths (300+ resolves per
-/// install) accumulates into the dominant CPU bucket.
+/// Extract a single version from `FullManifest` on rayon's CPU pool
+/// (native) or inline (wasm32). The native path keeps the tokio runtime
+/// free of `simd_json::to_borrowed_value` work so sibling manifest
+/// fetches keep driving network IO while this one re-parses.
 ///
-/// Returns `Arc<CoreVersionManifest>` so callers (e.g. UnifiedRegistry's
-/// version-manifest cache) can store and clone the result without
-/// deep-copying the underlying `HashMap`s. Wasm32 falls back to inline
-/// parse — no rayon, no thread pool.
+/// Returns `(version, Option<Arc<CoreVersionManifest>>)` — the input
+/// `version` is handed back to the caller alongside the result so it
+/// can be reused for the error path and the outer return without a
+/// clone. The native path requires `'static` for the rayon closure,
+/// so the closure owns the string for its duration.
 pub async fn extract_core_version_off_runtime(
-    full: std::sync::Arc<FullManifest>,
+    full: Arc<FullManifest>,
     version: String,
-) -> Option<std::sync::Arc<CoreVersionManifest>> {
+) -> (String, Option<Arc<CoreVersionManifest>>) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let (tx, rx) = tokio::sync::oneshot::channel();
         rayon::spawn(move || {
-            let _ = tx.send(full.get_core_version(&version).map(std::sync::Arc::new));
+            let core = full.get_core_version(&version).map(Arc::new);
+            let _ = tx.send((version, core));
         });
-        rx.await.ok().flatten()
+        rx.await.expect("rayon parse worker dropped before sending")
     }
     #[cfg(target_arch = "wasm32")]
     {
-        full.get_core_version(&version).map(std::sync::Arc::new)
+        let core = full.get_core_version(&version).map(Arc::new);
+        (version, core)
     }
 }
 

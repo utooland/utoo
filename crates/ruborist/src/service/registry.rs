@@ -42,7 +42,7 @@ fn current_timestamp_secs() -> u64 {
 use super::cache::{PackageCache, Versions, VersionsInfo};
 use super::manifest;
 use super::store::{ManifestStore, NoopStore};
-use crate::model::manifest::{CoreVersionManifest, FullManifest};
+use crate::model::manifest::{CoreVersionManifest, FullManifest, extract_core_version_off_runtime};
 use crate::resolver::semver::normalize_spec;
 use crate::resolver::version::resolve_target_version;
 use crate::traits::registry::{RegistryClient, RegistryError, ResolvedPackage, is_npm_registry};
@@ -439,20 +439,18 @@ impl UnifiedRegistry {
                 }
                 let resolved_version = resolve_target_version((&*full).into(), spec)
                     .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
-                // Short-circuit: a sibling spec may have already resolved to
-                // this same version and warmed the cache. Skip the rayon
-                // reparse (the dominant cost on the resolve hot path) and
-                // share the existing `Arc<CoreVersionManifest>` instead of
-                // deep-cloning its HashMaps.
+                // Race window: while we awaited `resolve_full_manifest` (gated
+                // by `inflight_full<name>`), a sibling spec for the same
+                // package may have resolved to this same version and populated
+                // `version_manifests` cache (writer at line 373-387 stores
+                // both `(name, spec)` and `(name, resolved_version)` keys).
+                // Reuse the Arc instead of paying the off-runtime reparse.
                 if let Some(cached) = self.cache.get_version_manifest(name, &resolved_version) {
                     return Ok((resolved_version, cached));
                 }
-                let core = crate::model::manifest::extract_core_version_off_runtime(
-                    Arc::clone(&full),
-                    resolved_version.clone(),
-                )
-                .await
-                .ok_or_else(|| {
+                let (resolved_version, core) =
+                    extract_core_version_off_runtime(full, resolved_version).await;
+                let core = core.ok_or_else(|| {
                     RegistryError(anyhow!(
                         "Version {} not found in manifest for {}",
                         resolved_version,
