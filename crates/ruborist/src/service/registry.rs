@@ -39,6 +39,8 @@ fn current_timestamp_secs() -> u64 {
     (js_sys::Date::now() / 1000.0) as u64
 }
 
+use dashmap::DashSet;
+
 use super::cache::{PackageCache, Versions, VersionsInfo};
 use super::manifest;
 use super::store::{ManifestStore, NoopStore};
@@ -84,6 +86,13 @@ pub struct UnifiedRegistry {
     /// `(name, spec)`. Same gate-only pattern: the canonical `Arc<…>`
     /// lives in `PackageCache.version_manifests`; the gate stores `()`.
     inflight_version: Arc<OnceMap<(String, String), ()>>,
+    /// Dedup set for `store_version_manifest` disk writes keyed by
+    /// `(name, resolved_version)`. `inflight_version` is keyed by
+    /// `(name, spec)`, so sibling specs (e.g. `^1.0.0` and `^1.2.0`)
+    /// resolving to the same version each fire the gate independently
+    /// and would otherwise issue duplicate writes for the same path.
+    /// First insert wins; subsequent specs skip the redundant write.
+    stored_version: Arc<DashSet<(String, String)>>,
 }
 
 /// Builder for `UnifiedRegistry`.
@@ -152,6 +161,7 @@ impl UnifiedRegistryBuilder {
             supports_semver,
             inflight_full: Arc::new(OnceMap::new()),
             inflight_version: Arc::new(OnceMap::new()),
+            stored_version: Arc::new(DashSet::new()),
         }
     }
 }
@@ -171,6 +181,7 @@ impl Clone for UnifiedRegistry {
             supports_semver: self.supports_semver,
             inflight_full: Arc::clone(&self.inflight_full),
             inflight_version: Arc::clone(&self.inflight_version),
+            stored_version: Arc::clone(&self.stored_version),
         }
     }
 }
@@ -383,11 +394,16 @@ impl UnifiedRegistry {
                                 Arc::clone(&arc),
                             );
                         }
-                        self.store.store_version_manifest(
-                            name,
-                            &resolved_version,
-                            Arc::clone(&arc),
-                        );
+                        if self
+                            .stored_version
+                            .insert((name.to_string(), resolved_version.clone()))
+                        {
+                            self.store.store_version_manifest(
+                                name,
+                                &resolved_version,
+                                Arc::clone(&arc),
+                            );
+                        }
                         return Ok(());
                     }
 
