@@ -349,15 +349,6 @@ fn main() {
         .map(|n| n.get())
         .unwrap_or(4);
 
-    // Rayon's CPU thread pool absorbs all simd_json parses + tarball
-    // extraction. Default sizing is `num_cpus`, which leaves work-stealing
-    // workers idle whenever any one of them stalls on a fs write inside
-    // an extract_tarball task. 2× lets siblings keep draining while one
-    // is in `fs::File::create`.
-    let _ = rayon::ThreadPoolBuilder::new()
-        .num_threads(worker_threads * 2)
-        .build_global();
-
     let result = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .worker_threads(worker_threads)
