@@ -28,8 +28,7 @@ pub async fn view(package_spec: &str) -> Result<()> {
 
     // Resolve version and get full VersionManifest (with all display fields)
     let resolved_version = utoo_ruborist::resolver::version::resolve_target_version(
-        &full_manifest.dist_tags,
-        &full_manifest.versions,
+        (&full_manifest).into(),
         version_spec,
     )
     .map_err(|e| {

@@ -41,7 +41,7 @@ use std::sync::{Arc, LazyLock};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 
-use crate::model::manifest::{CoreVersionManifest, FullManifest};
+use crate::model::manifest::{CoreVersionManifest, FullManifest, VersionsRef};
 
 /// Lightweight versions info, persisted by `ManifestStore` for ETag validation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,12 +51,27 @@ pub struct VersionsInfo {
     pub last_updated: u64,
 }
 
+impl<'a> From<&'a VersionsInfo> for VersionsRef<'a> {
+    fn from(info: &'a VersionsInfo) -> Self {
+        VersionsRef::from(&info.versions)
+    }
+}
+
 /// Version list and dist-tags.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Versions {
     pub version_list: Vec<String>,
     #[serde(rename = "dist-tags")]
     pub dist_tags: HashMap<String, String>,
+}
+
+impl<'a> From<&'a Versions> for VersionsRef<'a> {
+    fn from(v: &'a Versions) -> Self {
+        Self {
+            versions: &v.version_list,
+            dist_tags: &v.dist_tags,
+        }
+    }
 }
 
 // ============================================================================

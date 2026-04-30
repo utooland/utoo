@@ -184,9 +184,8 @@ pub trait RegistryClient {
             let manifest = self.fetch_full_manifest(name).await?;
 
             // Resolve version using shared logic
-            let resolved_version =
-                resolve_target_version(&manifest.dist_tags, &manifest.versions, spec)
-                    .map_err(|e| RegistryError(anyhow::anyhow!("{}@{}: {}", name, spec, e)))?;
+            let resolved_version = resolve_target_version((&*manifest).into(), spec)
+                .map_err(|e| RegistryError(anyhow::anyhow!("{}@{}: {}", name, spec, e)))?;
 
             manifest
                 .get_core_version(&resolved_version)
@@ -264,12 +263,9 @@ pub trait RegistryClient {
                     .into());
                 }
 
-                let resolved_version = resolve_target_version(
-                    &full_manifest.dist_tags,
-                    &full_manifest.versions,
-                    &fetch_spec,
-                )
-                .map_err(|e| RegistryError(anyhow::anyhow!("{}@{}: {}", name, spec, e)))?;
+                let resolved_version =
+                    resolve_target_version((&*full_manifest).into(), &fetch_spec)
+                        .map_err(|e| RegistryError(anyhow::anyhow!("{}@{}: {}", name, spec, e)))?;
 
                 let version_manifest = full_manifest
                     .get_core_version(&resolved_version)

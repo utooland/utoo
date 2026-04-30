@@ -7,12 +7,12 @@
 //! - For semver-supporting registries: directly fetches specific version
 //! - For traditional registries: fetches full manifest and resolves locally
 
+use std::sync::Arc;
+
 use crate::model::manifest::FullManifest;
 use crate::model::node::EdgeType;
 use crate::resolver::semver::normalize_spec;
 use crate::resolver::version::resolve_target_version;
-use std::sync::Arc;
-
 use crate::traits::registry::{MaybeSync, RegistryClient, ResolvedPackage};
 
 /// Error type for package resolution.
@@ -142,9 +142,10 @@ pub fn resolve_from_manifest<E: std::error::Error + 'static>(
     }
 
     // Resolve version using shared logic
-    let resolved_version = resolve_target_version(&manifest.dist_tags, &manifest.versions, spec)
+    let resolved_version = resolve_target_version(manifest.into(), spec)
         .map_err(|e| ResolveError::Version(format!("{}@{}: {}", manifest.name, spec, e)))?;
 
+    // Get manifest for resolved version (lazy: parse from Value on demand)
     let version_manifest = manifest
         .get_core_version(&resolved_version)
         .map(Arc::new)
