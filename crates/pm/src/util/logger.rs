@@ -1,5 +1,6 @@
 use anyhow::Result;
 use std::env;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -11,6 +12,22 @@ use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{
     EnvFilter, Layer, Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
+
+/// Cached at startup: is stderr connected to a terminal?
+///
+/// indicatif's `inc()` / `set_message()` always acquire a write-lock on
+/// the internal `ProgressState` even when the draw target is hidden or
+/// the underlying stream is not a TTY — only the *rendering* short-
+/// circuits, not the state mutation. On the worker-pool preload hot
+/// path that's 9000+ lock acquisitions per phase contending across 128
+/// workers, costing ~0.23s on p1_resolve in CI (round-7 vs round-6/8
+/// A/B/A on `pm-bench-phases-linux`).
+///
+/// Gating *every* indicatif touch behind this flag means non-TTY
+/// environments (CI, piped output, `2>&1 | tee`) pay zero cost — no
+/// `inc`, no `set_message`, no `format!()` allocation either. Local
+/// dev keeps the full progress UX.
+pub static IS_TTY: Lazy<bool> = Lazy::new(|| std::io::stderr().is_terminal());
 
 pub static PROGRESS_BAR: Lazy<ProgressBar> = Lazy::new(|| {
     let pb = ProgressBar::new(0).with_style(
@@ -139,6 +156,9 @@ pub fn print_install_counts(added: usize, reused: usize, downloaded: usize) {
 }
 
 pub fn start_progress_bar() {
+    if !*IS_TTY {
+        return;
+    }
     PROGRESS_BAR.reset();
     PROGRESS_BAR.set_style(
         ProgressStyle::with_template("{spinner:.blue} {pos:.green}/{len:.magenta} {wide_msg}")
@@ -150,6 +170,9 @@ pub fn start_progress_bar() {
 }
 
 pub fn log_progress(text: &str) {
+    if !*IS_TTY {
+        return;
+    }
     PROGRESS_BAR.set_message(text.to_string());
 }
 
@@ -201,32 +224,24 @@ pub struct ProgressReceiver;
 
 impl utoo_ruborist::progress::EventReceiver for ProgressReceiver {
     fn on_event(&self, event: utoo_ruborist::progress::BuildEvent) {
+        // Single TTY check at the receiver boundary. Non-TTY (CI, piped
+        // output, `2>&1 | tee`) drops the entire indicatif update path —
+        // no Mutex<ProgressState> write-lock, no format!() allocation,
+        // no String clones into set_message. Worth ~0.23s on p1_resolve
+        // for ant-design at worker-pool concurrency=128 (round-7 vs
+        // round-6/8 A/B/A on `pm-bench-phases-linux`).
+        if !*IS_TTY {
+            return;
+        }
         use utoo_ruborist::progress::BuildEvent;
         match event {
-            BuildEvent::PreloadStart { .. }
-            | BuildEvent::PreloadQueued { .. }
-            | BuildEvent::PreloadFetching { .. } => {
-                // Phase-start / BFS-expansion / pre-fetch events: drop.
-                // Phase-start fires ~1×, queued fires ~10× (BFS layers),
-                // fetching fires per-package — last one is the killer.
-                // None of these add information the user can't infer from
-                // the per-package resolved log below.
+            BuildEvent::PreloadStart { count } | BuildEvent::PreloadQueued { count } => {
+                PROGRESS_BAR.inc_length(count as u64);
+            }
+            BuildEvent::PreloadFetching { name } => {
+                log_progress(&format!("fetching {}", name));
             }
             BuildEvent::PreloadProgress { name, .. } => {
-                // Per-package "resolved" — keep this one. Halves the
-                // indicatif lock-acquisition count from ~9000 (fetching +
-                // progress) to ~4571 (progress only) while preserving the
-                // user-visible signal that the phase is making progress.
-                //
-                // Length stays at 0 (we don't call inc_length on Start/
-                // Queued), so the bar shows a counter without a
-                // percentage — fine for spinner-style display.
-                //
-                // Indicatif's per-call `Mutex<ProgressBarState>` cost is
-                // measured at ~0.23s on p1_resolve when both fetching +
-                // progress fire (round-6/7/8 A/B/A on CI Linux); halving
-                // the call count should bring the regression to ~0.10-
-                // 0.15s — to be confirmed by round-9 bench.
                 PROGRESS_BAR.inc(1);
                 log_progress(&format!("resolved {}", name));
             }
