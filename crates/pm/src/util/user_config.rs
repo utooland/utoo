@@ -134,19 +134,21 @@ pub fn get_install_scope() -> InstallScope {
 
 // Manifest fetch concurrency configuration.
 //
-// Sweep history under worker-pool (ant-design / npmjs):
+// Sweep history under worker-pool + HTTP/1.1 + DNS per-family rotation:
 //   cap=64  wall=3.10s avg_conc=56 (FuturesUnordered ceiling)
-//   cap=96  wall=2.30s avg_conc=78 (gentler burst, less Cloudflare throttle risk)
-//   cap=128 wall=2.15s avg_conc=84 (sweet spot in stable conditions)
+//   cap=96  wall=2.87-3.08s ratio 0.83-1.03 (s9-s10 with H1 stack)
+//   cap=128 wall=2.15s avg_conc=84 (PR #2818 historical sweet spot, inline parse)
 //   cap=160 wall=2.14s avg_conc=119 (Cloudflare per-IP throttle bites)
-//   cap=256 wall=3.50s avg_conc=90  (per-req inflated 30ms→146ms)
-// 96 chosen over 128 to reduce burst aggression on Cloudflare-throttle-heavy
-// slots — 4-sample empirical data from 2026-04-30 showed ratio 1.12 (lucky)
-// to 1.73 across clean runs at cap=128, with utoo doing worse on bun-fast
-// slots. cap=96 sacrifices ~6% on stable slots in exchange for tighter
-// cross-slot variance.
+//
+// 96 was chosen empirically when burst aggression on H2 was triggering
+// Cloudflare throttle (pre-H1 era). Once `.http1_only()` landed and
+// requests stopped multiplexing through a single TCP connection, cap=128
+// becomes the right setting again — independent TCP streams distribute
+// across the rotated DNS pool without tripping per-IP throttle, and the
+// extra 33% concurrency saturates more of the Cloudflare connection
+// budget.
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 96));
+    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 128));
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
     MANIFESTS_CONCURRENCY_LIMIT.set(value);
