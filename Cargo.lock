@@ -11820,6 +11820,7 @@ dependencies = [
  "tokio-fs-ext",
  "tokio-retry",
  "tracing",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]

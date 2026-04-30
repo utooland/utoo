@@ -60,7 +60,8 @@ libc = "0.2"
 # Browser handles TLS via the fetch API, so reqwest needs no rustls
 # feature on this target.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = "0.3"
+js-sys               = "0.3"
+wasm-bindgen-futures = "0.4"
 
 # macOS uses aws-lc-rs (BoringSSL primitives) for ~40 % faster cold
 # resolves on M-series ARM. CI bench-phases regresses on Linux/x86_64
