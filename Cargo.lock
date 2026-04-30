@@ -11805,6 +11805,7 @@ dependencies = [
  "parking_lot",
  "pathdiff",
  "petgraph 0.6.5",
+ "rayon",
  "reqwest 0.12.24",
  "rustls",
  "rustls-native-certs",

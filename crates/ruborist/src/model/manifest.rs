@@ -149,6 +149,30 @@ impl FullManifest {
     }
 }
 
+/// Re-parse the raw manifest bytes on rayon's CPU thread pool to extract
+/// a single version. Each resolved package triggers one full re-parse via
+/// `simd_json::to_borrowed_value`, which on hot paths (300+ resolves per
+/// install) accumulates into the dominant CPU bucket.
+///
+/// Wasm32 falls back to inline parse — no rayon, no thread pool.
+pub async fn extract_core_version_off_runtime(
+    full: std::sync::Arc<FullManifest>,
+    version: String,
+) -> Option<CoreVersionManifest> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        rayon::spawn(move || {
+            let _ = tx.send(full.get_core_version(&version));
+        });
+        rx.await.ok().flatten()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        full.get_core_version(&version)
+    }
+}
+
 /// Deserialize a versions map by extracting only the keys, skipping all values.
 ///
 /// Uses `IgnoredAny` to skip over version manifest JSON objects without allocating,

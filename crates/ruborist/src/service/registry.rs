@@ -440,7 +440,12 @@ impl UnifiedRegistry {
                 }
                 let resolved_version = resolve_target_version((&*full).into(), spec)
                     .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
-                let core = full.get_core_version(&resolved_version).ok_or_else(|| {
+                let core = crate::model::manifest::extract_core_version_off_runtime(
+                    Arc::clone(&full),
+                    resolved_version.clone(),
+                )
+                .await
+                .ok_or_else(|| {
                     RegistryError(anyhow!(
                         "Version {} not found in manifest for {}",
                         resolved_version,
