@@ -136,13 +136,17 @@ pub fn get_install_scope() -> InstallScope {
 //
 // Sweep history under worker-pool (ant-design / npmjs):
 //   cap=64  wall=3.10s avg_conc=56 (FuturesUnordered ceiling)
-//   cap=128 wall=2.15s avg_conc=84 (worker-pool sweet spot)
+//   cap=96  wall=2.30s avg_conc=78 (gentler burst, less Cloudflare throttle risk)
+//   cap=128 wall=2.15s avg_conc=84 (sweet spot in stable conditions)
 //   cap=160 wall=2.14s avg_conc=119 (Cloudflare per-IP throttle bites)
 //   cap=256 wall=3.50s avg_conc=90  (per-req inflated 30ms→146ms)
-// 128 saturates independent connections without triggering the
-// Cloudflare per-source-IP throttle.
+// 96 chosen over 128 to reduce burst aggression on Cloudflare-throttle-heavy
+// slots — 4-sample empirical data from 2026-04-30 showed ratio 1.12 (lucky)
+// to 1.73 across clean runs at cap=128, with utoo doing worse on bun-fast
+// slots. cap=96 sacrifices ~6% on stable slots in exchange for tighter
+// cross-slot variance.
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 128));
+    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 96));
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
     MANIFESTS_CONCURRENCY_LIMIT.set(value);
