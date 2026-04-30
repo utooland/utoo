@@ -244,11 +244,19 @@ impl UnifiedRegistry {
                 .await
                 .map_err(RegistryError)?
                 {
-                    manifest::FetchManifestResult::Ok(manifest, new_etag) => {
+                    manifest::FetchManifestResult::Ok(mut manifest, new_etag) => {
+                        // Move version_list / dist_tags out of `manifest`
+                        // into `VersionsInfo` instead of cloning. The cached
+                        // `Arc<FullManifest>` keeps `raw` + scalar metadata;
+                        // the canonical version_list / dist_tags now live in
+                        // the `versions_info` cache slot only. Readers that
+                        // need them go through `cache.get_versions(name)`.
+                        let version_list = std::mem::take(&mut manifest.versions);
+                        let dist_tags = std::mem::take(&mut manifest.dist_tags);
                         let versions_info = Arc::new(VersionsInfo {
                             versions: Versions {
-                                version_list: manifest.versions.clone(),
-                                dist_tags: manifest.dist_tags.clone(),
+                                version_list,
+                                dist_tags,
                             },
                             etag: new_etag,
                             last_updated: current_timestamp_secs(),
@@ -269,7 +277,7 @@ impl UnifiedRegistry {
                             self.cache.set_versions(name.to_string(), versions_info);
                         } else {
                             // Persistent store corrupted/missing, fetch fresh (without etag).
-                            let (manifest, new_etag) = manifest::fetch_full_manifest_fresh(
+                            let (mut manifest, new_etag) = manifest::fetch_full_manifest_fresh(
                                 &self.registry_url,
                                 name,
                                 manifest::MetadataFormat::Abbreviated,
@@ -277,10 +285,12 @@ impl UnifiedRegistry {
                             .await
                             .map_err(RegistryError)?;
 
+                            let version_list = std::mem::take(&mut manifest.versions);
+                            let dist_tags = std::mem::take(&mut manifest.dist_tags);
                             let versions_info = Arc::new(VersionsInfo {
                                 versions: Versions {
-                                    version_list: manifest.versions.clone(),
-                                    dist_tags: manifest.dist_tags.clone(),
+                                    version_list,
+                                    dist_tags,
                                 },
                                 etag: new_etag,
                                 last_updated: current_timestamp_secs(),
@@ -428,12 +438,22 @@ impl UnifiedRegistry {
     ) -> Result<(String, Arc<CoreVersionManifest>), RegistryError> {
         match self.resolve_full_manifest(name).await? {
             FullManifestResult::Full(full) => {
-                if full.versions.is_empty() {
+                // Canonical `version_list` / `dist_tags` live in the
+                // `versions_info` cache slot; the parallel slot is filled by
+                // the same code path that filled `full_manifests`. We don't
+                // duplicate them on the cached `Arc<FullManifest>`.
+                let versions_info = self.cache.get_versions(name).ok_or_else(|| {
+                    RegistryError(anyhow!("Versions cache not found for {}", name))
+                })?;
+                if versions_info.versions.version_list.is_empty() {
                     return Err(RegistryError(anyhow!("No versions available for {}", name)));
                 }
-                let resolved_version =
-                    resolve_target_version(&full.dist_tags, &full.versions, spec)
-                        .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
+                let resolved_version = resolve_target_version(
+                    &versions_info.versions.dist_tags,
+                    &versions_info.versions.version_list,
+                    spec,
+                )
+                .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
                 // Short-circuit: a sibling spec may have already resolved to
                 // this same version and warmed the cache. Skip the rayon
                 // reparse (the dominant cost on the resolve hot path) and
