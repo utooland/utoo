@@ -7,13 +7,13 @@
 //! - For semver-supporting registries: directly fetches specific version
 //! - For traditional registries: fetches full manifest and resolves locally
 
-use std::sync::Arc;
-
 use crate::model::manifest::FullManifest;
 use crate::model::node::EdgeType;
 use crate::resolver::semver::normalize_spec;
 use crate::resolver::version::resolve_target_version;
-use crate::traits::registry::{RegistryClient, ResolvedPackage};
+use std::sync::Arc;
+
+use crate::traits::registry::{MaybeSync, RegistryClient, ResolvedPackage};
 
 /// Error type for package resolution.
 #[derive(Debug)]
@@ -114,14 +114,11 @@ impl<E: std::error::Error + 'static> std::error::Error for ResolveError<E> {
 /// let resolved = resolve_package(&registry, "lodash", "^4.0.0").await?;
 /// println!("Resolved to {}@{}", resolved.name, resolved.version);
 /// ```
-pub async fn resolve_package<R: RegistryClient + crate::maybe_send::MaybeSync>(
+pub async fn resolve_package<R: RegistryClient + MaybeSync>(
     registry: &R,
     name: &str,
     spec: &str,
-) -> Result<ResolvedPackage, ResolveError<R::Error>>
-where
-    R::Error: crate::maybe_send::MaybeSend,
-{
+) -> Result<ResolvedPackage, ResolveError<R::Error>> {
     // Normalize spec first to handle npm: alias and workspace: prefix
     // This ensures correct behavior even if RegistryClient::resolve_package is overridden
     // e.g., "wrap-ansi-cjs" + "npm:wrap-ansi@^7.0.0" -> fetch "wrap-ansi" @ "^7.0.0"
@@ -150,7 +147,6 @@ pub fn resolve_from_manifest<E: std::error::Error + 'static>(
     let resolved_version = resolve_target_version(&manifest.dist_tags, &version_list, spec)
         .map_err(|e| ResolveError::Version(format!("{}@{}: {}", manifest.name, spec, e)))?;
 
-    // Get manifest for resolved version (lazy: parse from Value on demand)
     let version_manifest = manifest
         .get_core_version(&resolved_version)
         .map(Arc::new)
@@ -170,15 +166,12 @@ pub fn resolve_from_manifest<E: std::error::Error + 'static>(
 ///
 /// For optional dependencies, returns `Ok(None)` on resolution failure
 /// instead of propagating the error.
-pub async fn resolve_registry_dep<R: RegistryClient + crate::maybe_send::MaybeSync>(
+pub async fn resolve_registry_dep<R: RegistryClient + MaybeSync>(
     registry: &R,
     name: &str,
     spec: &str,
     edge_type: &EdgeType,
-) -> Result<Option<ResolvedPackage>, ResolveError<R::Error>>
-where
-    R::Error: crate::maybe_send::MaybeSend,
-{
+) -> Result<Option<ResolvedPackage>, ResolveError<R::Error>> {
     match resolve_package(registry, name, spec).await {
         Ok(resolved) => Ok(Some(resolved)),
         Err(e) => {

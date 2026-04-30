@@ -1,40 +1,37 @@
-//! Parallel manifest preloading via multi-thread worker pool.
+//! Parallel manifest preloading via worker pool.
 //!
-//! N long-lived `tokio::spawn` workers pull work items from a shared
-//! lock-free `SegQueue`. Each spawned task is independent on tokio's
-//! multi-thread runtime, so when one worker is parsing manifest JSON
-//! (CPU-bound, simd_json), other workers can still drive their network
-//! IO. Replaces the prior `FuturesUnordered` design where the main task
-//! owned all preload futures and polled them cooperatively — every
-//! per-future await continuation (cache check / OnceMap / RetryIf /
-//! reqwest send / bytes / parse / transitive dispatch) ran on the same
-//! single task, plus all parses serialised in that task's polling.
-//!
-//! Wasm32 fallback uses `wasm_bindgen_futures::spawn_local` since
-//! `JsFuture` is `!Send`. Workers still run independently on the JS
-//! event loop; the queue + Notify + mpsc termination story is identical.
+//! Architecture: N long-lived `tokio::spawn` workers pulling work from a
+//! shared `SegQueue`. Replaces the prior `FuturesUnordered` design that
+//! had main task own the futures and poll them cooperatively, which
+//! capped effective parallelism at ~55-60 even when standalone
+//! manifest-bench (same reqwest stack, no resolver overhead) sustained
+//! 90+ concurrent at the same cap. The deeper `await` chain inside
+//! `resolve_package` (registry cache check + `OnceMap::get_or_init` +
+//! `RetryIf` + `request.send()` + `bytes()` + parse-spawn_blocking)
+//! made every yielded poll round-trip through the main task —
+//! starving the dispatch refill. Worker tasks run on tokio's global
+//! pool so each future progresses independently.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::Instant;
 
 use crossbeam_queue::SegQueue;
 use dashmap::DashSet;
 use tokio::sync::{Notify, mpsc};
 
-use crate::maybe_send::{MaybeSend, MaybeSync};
 use crate::model::manifest::CoreVersionManifest;
 use crate::model::node::PeerDeps;
 use crate::resolver::registry::ResolveError;
 use crate::resolver::registry::resolve_package;
 use crate::traits::progress::{BuildEvent, EventReceiver};
-use crate::traits::registry::{RegistryClient, ResolvedPackage};
+use crate::traits::registry::RegistryClient;
 
 /// Default concurrency limit for manifest fetching.
 ///
-/// Number of long-lived `tokio::spawn` workers. Each processes one
-/// `resolve_package` at a time on tokio's multi-thread runtime.
-pub const DEFAULT_CONCURRENCY: usize = 64;
+/// Preload now runs N long-lived worker tasks; this is N. Each worker
+/// processes one resolve_package at a time on tokio's global pool.
+pub const DEFAULT_CONCURRENCY: usize = 256;
 
 /// A dependency spec: (name, version_spec)
 pub type Dep = (String, String);
@@ -90,18 +87,19 @@ fn extract_transitive_deps(manifest: &CoreVersionManifest, config: &PreloadConfi
     deps
 }
 
-/// Result message sent from worker to main task: name, resolve result,
-/// per-request elapsed ms, count of new transitives queued by this worker.
-type Completion<E> = (String, Result<ResolvedPackage, ResolveError<E>>, u64, usize);
+/// Result message sent from worker to main task.
+type Completion<E> = (
+    String,
+    Result<crate::traits::registry::ResolvedPackage, ResolveError<E>>,
+    u64,
+);
 
-/// Preload all package manifests in parallel via a multi-thread worker pool.
+/// Preload all package manifests in parallel via a tokio worker pool.
 ///
 /// `registry` is moved in and shared across workers via `Arc`. Each
 /// worker is a long-lived spawned task that pulls work items from a
 /// shared lock-free `SegQueue` until both the queue and the in-flight
-/// counter reach zero, signalling end-of-phase. Each spawned task is
-/// independent on tokio's multi-thread runtime — IO and CPU work
-/// (simd_json parse) parallelise across cores.
+/// counter reach zero, signalling end-of-phase.
 ///
 /// `receiver` and `on_manifest` run on the main task only — they do
 /// not need to be `Send`/`Sync`.
@@ -113,14 +111,15 @@ pub async fn preload_manifests<R, E, F>(
     mut on_manifest: F,
 ) -> PreloadStats
 where
-    R: RegistryClient + MaybeSend + MaybeSync + 'static,
-    R::Error: MaybeSend,
+    R: RegistryClient + Send + Sync + 'static,
+    R::Error: Send,
     E: EventReceiver,
     F: FnMut(&str, Arc<CoreVersionManifest>),
 {
     let mut stats = PreloadStats::default();
+    let preload_wall_start = Instant::now();
 
-    // Shared work queue and dedup set (lock-free, multi-thread safe).
+    // Shared work queue and dedup set.
     let pending: Arc<SegQueue<Dep>> = Arc::new(SegQueue::new());
     let processed: Arc<DashSet<String>> = Arc::new(DashSet::new());
 
@@ -148,21 +147,12 @@ where
     let concurrency = config.concurrency.max(1);
 
     tracing::debug!(
-        "Preload: {} initial deps, concurrency={}, mode=mt-worker-pool",
+        "Preload: {} initial deps, concurrency={}, mode=worker-pool",
         initial_count,
         concurrency
     );
 
-    // Short-circuit if nothing was seeded.
-    if initial_count == 0 {
-        receiver.on_event(BuildEvent::PreloadStart { count: 0 });
-        receiver.on_event(BuildEvent::PreloadComplete {
-            success: 0,
-            failed: 0,
-        });
-        return stats;
-    }
-
+    // Spawn N long-lived workers. Each loops: pop -> resolve -> push transitives.
     for _ in 0..concurrency {
         let pending = Arc::clone(&pending);
         let processed = Arc::clone(&processed);
@@ -171,43 +161,37 @@ where
         let shutdown = Arc::clone(&shutdown);
         let notify = Arc::clone(&notify);
         let result_tx = result_tx.clone();
-        let config_for_worker = config.clone();
         let registry = Arc::clone(&registry);
+        let config_for_worker = config.clone();
 
-        let worker = async move {
+        tokio::spawn(async move {
             loop {
                 // Try fetching work first — fast path when queue is hot.
                 if let Some((name, spec)) = pending.pop() {
-                    let start = tokio::time::Instant::now();
+                    let start = Instant::now();
                     let result = resolve_package(&*registry, &name, &spec).await;
                     let elapsed_ms = start.elapsed().as_millis() as u64;
 
-                    let new_added = if let Ok(resolved) = &result {
-                        let mut count = 0usize;
+                    if let Ok(resolved) = &result {
+                        let mut new_added = 0usize;
                         for tdep in extract_transitive_deps(&resolved.manifest, &config_for_worker)
                         {
                             let key = format!("{}@{}", tdep.0, tdep.1);
                             if processed.insert(key) {
                                 pending.push(tdep);
-                                count += 1;
+                                new_added += 1;
                             }
                         }
-                        if count > 0 {
-                            dispatched.fetch_add(count, Ordering::Release);
-                            // Wake parked workers so they pick up the new
-                            // work before checking the termination condition.
+                        if new_added > 0 {
+                            dispatched.fetch_add(new_added, Ordering::Release);
+                            // Wake parked workers so they pick up the new work
+                            // before checking the termination condition.
                             notify.notify_waiters();
                         }
-                        count
-                    } else {
-                        0
-                    };
+                    }
 
-                    if result_tx
-                        .send((name, result, elapsed_ms, new_added))
-                        .is_err()
-                    {
-                        // Main task dropped the receiver — done.
+                    if result_tx.send((name, result, elapsed_ms)).is_err() {
+                        // Main task dropped the receiver — done collecting.
                         break;
                     }
                     let done = completed.fetch_add(1, Ordering::AcqRel) + 1;
@@ -246,11 +230,7 @@ where
                 }
                 notified.await;
             }
-        };
-        #[cfg(not(target_arch = "wasm32"))]
-        tokio::spawn(worker);
-        #[cfg(target_arch = "wasm32")]
-        wasm_bindgen_futures::spawn_local(worker);
+        });
     }
     // Drop the original sender so when all worker clones drop on exit, the
     // result channel closes and the main loop terminates.
@@ -260,9 +240,8 @@ where
         count: initial_count,
     });
 
-    // Main task: drain completions, run user callbacks. Receiver/callback
-    // run on this task only — they don't need to be Send/Sync.
-    while let Some((name, result, elapsed_ms, new_added)) = result_rx.recv().await {
+    // Main task: drain completions, run user callbacks.
+    while let Some((name, result, elapsed_ms)) = result_rx.recv().await {
         if stats.success_count == 0 && stats.failed_count == 0 {
             stats.min_request_ms = elapsed_ms;
             stats.max_request_ms = elapsed_ms;
@@ -271,10 +250,6 @@ where
             stats.max_request_ms = stats.max_request_ms.max(elapsed_ms);
         }
         stats.total_request_ms += elapsed_ms;
-
-        if new_added > 0 {
-            receiver.on_event(BuildEvent::PreloadQueued { count: new_added });
-        }
 
         match result {
             Ok(resolved) => {
@@ -297,19 +272,14 @@ where
         }
     }
 
-    // Snapshot the dedup set's size for the historical observable.
-    stats.total_processed = {
-        let mut set: HashSet<String> = HashSet::with_capacity(processed.len());
-        for entry in processed.iter() {
-            set.insert(entry.key().clone());
-        }
-        set.len()
-    };
+    stats.total_processed = processed.len();
 
     receiver.on_event(BuildEvent::PreloadComplete {
         success: stats.success_count,
         failed: stats.failed_count,
     });
+
+    let _preload_wall_ms = preload_wall_start.elapsed().as_millis();
 
     let total = stats.success_count + stats.failed_count;
     let avg = if total > 0 {
