@@ -432,9 +432,8 @@ impl UnifiedRegistry {
                 if full.versions.is_empty() {
                     return Err(RegistryError(anyhow!("No versions available for {}", name)));
                 }
-                let resolved_version =
-                    resolve_target_version(&full.dist_tags, &full.versions, spec)
-                        .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
+                let resolved_version = resolve_target_version((&*full).into(), spec)
+                    .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
                 let core = full.get_core_version(&resolved_version).ok_or_else(|| {
                     RegistryError(anyhow!(
                         "Version {} not found in manifest for {}",
@@ -454,12 +453,8 @@ impl UnifiedRegistry {
                 let versions_info = self.cache.get_versions(name).ok_or_else(|| {
                     RegistryError(anyhow!("Versions cache not found for {}", name))
                 })?;
-                let resolved_version = resolve_target_version(
-                    &versions_info.versions.dist_tags,
-                    &versions_info.versions.version_list,
-                    spec,
-                )
-                .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
+                let resolved_version = resolve_target_version((&*versions_info).into(), spec)
+                    .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
                 let manifest =
                     manifest::fetch_version_manifest(manifest::FetchVersionManifestOptions {
                         registry_url: &self.registry_url,

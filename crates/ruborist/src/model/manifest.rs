@@ -9,6 +9,44 @@ use std::sync::Arc;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
+/// Borrowed view of the data needed to resolve a version spec — a slice of
+/// available versions plus a dist-tag map.
+///
+/// The version-resolution logic ([`crate::resolver::version::resolve_target_version`])
+/// only needs read access to these two pieces of data; everything else on a
+/// `FullManifest` (raw bytes, time map, maintainers, …) is irrelevant. By
+/// borrowing them through a unified view we can serve the same resolver from
+/// multiple in-memory shapes (a freshly-fetched `FullManifest`, a 304-cached
+/// `VersionsInfo`, a disk-loaded `Versions`) without cloning data or
+/// duplicating the resolution code.
+///
+/// The lifetime parameter ties the view to whatever the caller is holding,
+/// so the borrow checker statically rejects any attempt to keep the view
+/// alive past its source. In practice every call site uses the view inside
+/// a single function body — the lifetime never escapes.
+///
+/// Construct via the `From` impls (defined alongside each source type):
+/// ```ignore
+/// // From a freshly-fetched manifest:
+/// let view = VersionsRef::from(&*full_manifest);
+/// // From the 304-path versions cache:
+/// let view = VersionsRef::from(&*versions_info);
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct VersionsRef<'a> {
+    pub versions: &'a [String],
+    pub dist_tags: &'a HashMap<String, String>,
+}
+
+impl<'a> From<&'a FullManifest> for VersionsRef<'a> {
+    fn from(m: &'a FullManifest) -> Self {
+        Self {
+            versions: &m.versions,
+            dist_tags: &m.dist_tags,
+        }
+    }
+}
+
 /// Skip on error - try to deserialize, return None if fails.
 /// This handles malformed npm registry data gracefully.
 fn skip_on_error<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
