@@ -459,13 +459,6 @@ impl DependencyGraph {
             let child = &self.graph[child_idx];
             if child.name == name {
                 if matches(spec, &child.version) {
-                    tracing::debug!(
-                        "found existing deps {}@{} got {}, reuse at {:?}",
-                        name,
-                        spec,
-                        child.version,
-                        child_idx
-                    );
                     return FindResult::Reuse(child_idx);
                 } else {
                     tracing::debug!(

@@ -88,19 +88,13 @@ pub fn classify_reqwest_error(e: reqwest::Error) -> FetchError {
 /// Callers should handle the 2xx (and 304, for ETag-aware endpoints) paths
 /// before reaching this function.
 pub fn classify_status(status: reqwest::StatusCode, url: &str) -> FetchError {
+    // Status + URL are carried by the anyhow chain; the tokio-retry caller
+    // surfaces them to the user on final failure. Skip per-attempt tracing
+    // here so a 10-retry loop doesn't spam the same line ten times.
     match status.as_u16() {
         404 => FetchError::Permanent(anyhow!("HTTP 404: {url}")),
-        429 => {
-            tracing::warn!("HTTP 429 (rate limited) for {}", url);
-            FetchError::Retryable(anyhow!("HTTP 429: {url}"))
-        }
-        s if (500..600).contains(&s) => {
-            tracing::warn!("HTTP {} for {}", status, url);
-            FetchError::Retryable(anyhow!("HTTP {status}: {url}"))
-        }
-        _ => {
-            tracing::warn!("HTTP {} for {}", status, url);
-            FetchError::Permanent(anyhow!("HTTP {status}: {url}"))
-        }
+        429 => FetchError::Retryable(anyhow!("HTTP 429: {url}")),
+        s if (500..600).contains(&s) => FetchError::Retryable(anyhow!("HTTP {status}: {url}")),
+        _ => FetchError::Permanent(anyhow!("HTTP {status}: {url}")),
     }
 }

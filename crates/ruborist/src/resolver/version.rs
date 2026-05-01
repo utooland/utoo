@@ -52,10 +52,7 @@ pub fn resolve_target_version(view: VersionsRef<'_>, spec: &str) -> Result<Strin
     let version = dist_tags
         .get("latest")
         .filter(|latest| matches(spec, latest))
-        .map(|latest| {
-            tracing::debug!("Using dist-tags 'latest' version {latest} for spec {spec}");
-            latest.to_string()
-        })
+        .map(|latest| latest.to_string())
         .or_else(|| {
             max_satisfying(versions.iter().map(|s| s.as_str()), spec).map(|v| v.to_string())
         });
