@@ -81,7 +81,6 @@ pub async fn git_cache_lookup(name: &str, version: &str, tarball_url: &str) -> O
         .await
         .unwrap_or(false)
     {
-        tracing::debug!("Git package cache hit: {}@{}", name, version);
         return Some(cache_path);
     }
     tracing::warn!(
@@ -116,20 +115,12 @@ async fn slot_cache_lookup(name: &str, slot: String) -> Option<PathBuf> {
 /// project root before reaching the cloner.
 pub async fn file_cache_lookup(name: &str, tarball_url: &str) -> Option<PathBuf> {
     let abs_path = tarball_url.strip_prefix("file:")?;
-    let hit = slot_cache_lookup(name, file_cache_slot(std::path::Path::new(abs_path))).await;
-    if hit.is_some() {
-        tracing::debug!("file: dep cache hit: {} ({})", name, tarball_url);
-    }
-    hit
+    slot_cache_lookup(name, file_cache_slot(std::path::Path::new(abs_path))).await
 }
 
 /// Look up the cache path for an HTTP(S) tarball dep.
 pub async fn http_tarball_cache_lookup(name: &str, tarball_url: &str) -> Option<PathBuf> {
-    let hit = slot_cache_lookup(name, http_cache_slot(tarball_url)).await;
-    if hit.is_some() {
-        tracing::debug!("HTTP tarball cache hit: {} ({})", name, tarball_url);
-    }
-    hit
+    slot_cache_lookup(name, http_cache_slot(tarball_url)).await
 }
 
 /// Resolve the local cache path for a package, downloading if necessary.
@@ -173,7 +164,6 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
                 .unwrap_or(false)
             {
                 REUSE_COUNT.fetch_add(1, Ordering::Relaxed);
-                tracing::debug!("Cache hit: {}@{}", name, version);
                 return Some(cache_path);
             }
 
@@ -183,17 +173,32 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
             let _permit = semaphore.acquire().await.ok()?;
             let bytes = download_bytes(&tarball_url)
                 .await
-                .inspect_err(|e| tracing::warn!("Download failed: {}@{}: {}", name, version, e))
+                .inspect_err(|e| {
+                    tracing::warn!(
+                        "Download {}@{} from {}: {:#}",
+                        name,
+                        version,
+                        tarball_url,
+                        e
+                    )
+                })
                 .ok()?;
 
             // Extract
             extract_and_write(bytes, &cache_path)
                 .await
-                .inspect_err(|e| tracing::warn!("Extract failed: {}@{}: {}", name, version, e))
+                .inspect_err(|e| {
+                    tracing::warn!(
+                        "Extract {}@{} into {}: {:#}",
+                        name,
+                        version,
+                        cache_path.display(),
+                        e
+                    )
+                })
                 .ok()?;
 
             DOWNLOAD_COUNT.fetch_add(1, Ordering::Relaxed);
-            tracing::debug!("Downloaded: {}@{}", name, version);
             Some(cache_path)
         })
         .await
@@ -209,51 +214,31 @@ pub async fn download_bytes(url: &str) -> Result<Bytes> {
         || async {
             let attempt = retry_count.fetch_add(1, Ordering::Relaxed);
 
-            let response = match DOWNLOADER_CLIENT.get(url).send().await {
-                Ok(r) => r,
-                Err(e) => {
-                    tracing::warn!(
-                        "Retry {}/10 - Network error: {}, url: {}",
-                        attempt + 1,
-                        e,
-                        url
-                    );
-                    return Err(RetryableError::Temporary(format!("Network error: {e}")));
-                }
-            };
+            let response = DOWNLOADER_CLIENT
+                .get(url)
+                .send()
+                .await
+                .map_err(|e| RetryableError::Temporary(format!("Network error: {e}")))?;
 
             match response.status() {
                 StatusCode::OK => {
-                    let bytes = response.bytes().await.map_err(|e| {
-                        tracing::warn!(
-                            "Retry {}/10 - Stream error: {}, url: {}",
-                            attempt + 1,
-                            e,
-                            url
-                        );
-                        RetryableError::Temporary(format!("Stream error: {e}"))
-                    })?;
+                    let bytes = response
+                        .bytes()
+                        .await
+                        .map_err(|e| RetryableError::Temporary(format!("Stream error: {e}")))?;
                     if attempt > 0 {
-                        tracing::info!("Retry succeeded on attempt {}, url: {}", attempt + 1, url);
+                        tracing::info!("Retry succeeded on attempt {}: {url}", attempt + 1);
                     }
                     Ok(bytes)
                 }
-                StatusCode::NOT_FOUND => {
-                    tracing::debug!("URL not found {url}");
-                    Err(RetryableError::Permanent(format!("URL not found {url}")))
-                }
-                status => {
-                    tracing::warn!("Retry {}/10 - HTTP {}, url: {}", attempt + 1, status, url);
-                    Err(RetryableError::Temporary(format!(
-                        "HTTP error: {status}, url: {url}"
-                    )))
-                }
+                StatusCode::NOT_FOUND => Err(RetryableError::Permanent(format!("HTTP 404: {url}"))),
+                status => Err(RetryableError::Temporary(format!("HTTP {status}: {url}"))),
             }
         },
         |e: &RetryableError| matches!(e, RetryableError::Temporary(_)),
     )
     .await
-    .context("Download failed after retries")
+    .with_context(|| format!("Download failed after retries: {url}"))
 }
 
 #[cfg(test)]

@@ -93,7 +93,6 @@ pub async fn clone_package_once(
 
             if fresh {
                 CLONE_COUNT.fetch_add(1, Ordering::Relaxed);
-                tracing::debug!("Cloned: {}@{} to {}", name, version, target_path.display());
             }
             Some(())
         })
@@ -210,6 +209,10 @@ mod hardlink_clone {
             // Any other hardlink error (EMLINK on a single inode whose link
             // count is exhausted, EPERM on a specific file, etc.) is
             // per-file: copy this one and keep trying hardlink on the next.
+            // We warn only on the first such failure per package to avoid
+            // spamming hundreds of identical warnings when an entire package
+            // can't be hardlinked.
+            let mut warned_per_file = false;
             for entry in &files {
                 if force_copy {
                     copy_file_sync(&entry.src, &entry.dst)?;
@@ -222,13 +225,14 @@ mod hardlink_clone {
                             e
                         );
                         force_copy = true;
-                    } else {
+                    } else if !warned_per_file {
                         tracing::warn!(
-                            "hardlink failed for {} -> {}: {}; falling back to copy for this file",
+                            "hardlink failed for {} -> {}: {}; falling back to copy (further per-file failures suppressed)",
                             entry.src.display(),
                             entry.dst.display(),
                             e
                         );
+                        warned_per_file = true;
                     }
                     copy_file_sync(&entry.src, &entry.dst)?;
                 }
@@ -246,7 +250,6 @@ async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
     }
 
     if !fs::metadata(src).await?.is_dir() || !fs::metadata(dst).await?.is_dir() {
-        tracing::debug!("validating failed, since it's not a directory");
         return Ok(false);
     }
 
@@ -298,21 +301,6 @@ async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
     dst_entries.sort_by(|a, b| a.path.cmp(&b.path));
 
     if src_entries.len() != dst_entries.len() {
-        tracing::debug!(
-            "validating failed {}:{} to {}:{}, since entries length is not equal\nsrc entries: {:?}\ndst entries: {:?}",
-            src.display(),
-            src_entries.len(),
-            dst.display(),
-            dst_entries.len(),
-            src_entries
-                .iter()
-                .map(|e| e.path.file_name().unwrap_or_default())
-                .collect::<Vec<_>>(),
-            dst_entries
-                .iter()
-                .map(|e| e.path.file_name().unwrap_or_default())
-                .collect::<Vec<_>>()
-        );
         return Ok(false);
     }
 
@@ -324,23 +312,9 @@ async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
             }
         } else if !src_entry.is_dir && !dst_entry.is_dir {
             if src_entry.size != dst_entry.size {
-                tracing::debug!(
-                    "validating failed {}:{} to {}:{}, since diff size",
-                    src_entry.path.display(),
-                    src_entry.size,
-                    dst_entry.path.display(),
-                    dst_entry.size
-                );
                 return Ok(false);
             }
         } else {
-            tracing::debug!(
-                "validating failed {}:{} to {}:{}, since diff size",
-                src_entry.path.display(),
-                src_entry.size,
-                dst_entry.path.display(),
-                dst_entry.size
-            );
             return Ok(false);
         }
     }
@@ -373,22 +347,12 @@ async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
     };
 
     if crate::fs::try_exists(dst).await? {
-        let is_valid = validate_directory(&real_src, dst)
-            .await
-            .unwrap_or_else(|e| {
-                tracing::debug!("validate_directory error: {e}, will override target directory");
-                false
-            });
+        let is_valid = validate_directory(&real_src, dst).await.unwrap_or(false);
 
         if is_valid {
-            tracing::debug!(
-                "Target directory {} already exists and validation passed, skipping clone",
-                dst.display()
-            );
             return Ok(());
         }
 
-        tracing::debug!("{real_src:?} --> {dst:?} overrides");
         if let Err(e) = fs::remove_dir_all(dst).await {
             tracing::warn!("Failed to clean target directory {}: {}", dst.display(), e);
         }
@@ -405,20 +369,13 @@ async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
 
         Retry::spawn(create_retry_strategy(), || async {
             match unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) } {
-                0 => {
-                    tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
-                    Ok(())
-                }
+                0 => Ok(()),
                 _ => {
-                    let _ = fs::remove_dir_all(dst).await.map_err(|e| {
-                        tracing::debug!(
-                            "Failed to clean target directory {}: {}",
-                            dst.display(),
-                            e
-                        );
-                    });
+                    let _ = fs::remove_dir_all(dst).await;
                     Err(anyhow::anyhow!(
-                        "Failed to clone file: {}",
+                        "clonefile {} -> {}: {}",
+                        real_src.display(),
+                        dst.display(),
                         std::io::Error::last_os_error()
                     ))
                 }
@@ -430,8 +387,11 @@ async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
     #[cfg(not(target_os = "macos"))]
     {
         Retry::spawn(create_retry_strategy(), || async {
-            hardlink_clone::clone_dir(&real_src, dst).await?;
-            tracing::debug!("clone {} to {} success", real_src.display(), dst.display());
+            hardlink_clone::clone_dir(&real_src, dst)
+                .await
+                .with_context(|| {
+                    format!("clone_dir {} -> {}", real_src.display(), dst.display())
+                })?;
             Ok::<(), anyhow::Error>(())
         })
         .await?;
@@ -464,18 +424,8 @@ pub async fn clone_package(
 ) -> Result<bool> {
     if crate::fs::try_exists(dst).await? {
         if validate_name_version(dst, name, version).await {
-            tracing::debug!(
-                "Package {}@{} already exists at {}, skipping clone",
-                name,
-                version,
-                dst.display()
-            );
             return Ok(false);
         }
-        tracing::debug!(
-            "Package at {} has mismatched name/version, removing and re-cloning",
-            dst.display()
-        );
         if let Err(e) = fs::remove_dir_all(dst).await {
             tracing::warn!("Failed to clean target directory {}: {}", dst.display(), e);
         }

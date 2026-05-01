@@ -268,7 +268,6 @@ impl UnifiedRegistry {
                         self.store.store_versions(name, versions_info);
                     }
                     manifest::FetchManifestResult::NotModified => {
-                        tracing::debug!("ETag cache hit (304) for: {}", name);
                         if let Some(versions_info) = store_versions {
                             // Only populate `versions_info`; absence of
                             // `full_manifests` after the gate is the 304
@@ -356,7 +355,6 @@ impl UnifiedRegistry {
                         && deno_semver::Version::parse_from_npm(spec).is_ok()
                         && let Some(manifest) = self.store.load_version_manifest(name, spec).await
                     {
-                        tracing::debug!("Persistent store hit for version manifest: {name}@{spec}");
                         // Populate memory cache ourselves — store knows nothing about it.
                         self.cache.set_version_manifest(
                             name.to_string(),
@@ -393,7 +391,6 @@ impl UnifiedRegistry {
                         return Ok(());
                     }
 
-                    tracing::debug!("Cache miss for {}@{}, fetching from network", name, spec);
                     let manifest =
                         manifest::fetch_version_manifest(manifest::FetchVersionManifestOptions {
                             registry_url: &self.registry_url,

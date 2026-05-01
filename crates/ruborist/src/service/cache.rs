@@ -108,28 +108,18 @@ impl Default for MemoryCache {
 
 impl MemoryCache {
     pub fn get_full_manifest(&self, name: &str) -> Option<Arc<FullManifest>> {
-        let result = self.0.full_manifests.get(name).map(|v| v.clone());
-        if result.is_some() {
-            tracing::debug!("Memory cache hit for full manifest: {name}");
-        }
-        result
+        self.0.full_manifests.get(name).map(|v| v.clone())
     }
 
     pub fn set_full_manifest(&self, name: String, manifest: Arc<FullManifest>) {
-        tracing::debug!("Caching full manifest in memory: {name}");
         self.0.full_manifests.insert(name, manifest);
     }
 
     pub fn get_versions(&self, name: &str) -> Option<Arc<VersionsInfo>> {
-        let result = self.0.versions_info.get(name).map(|v| v.clone());
-        if result.is_some() {
-            tracing::debug!("Memory cache hit for versions: {name}");
-        }
-        result
+        self.0.versions_info.get(name).map(|v| v.clone())
     }
 
     pub fn set_versions(&self, name: String, info: Arc<VersionsInfo>) {
-        tracing::debug!("Caching versions in memory: {name}");
         self.0.versions_info.insert(name, info);
     }
 
@@ -139,11 +129,7 @@ impl MemoryCache {
         version: &str,
     ) -> Option<Arc<CoreVersionManifest>> {
         let key = format!("{name}@{version}");
-        let result = self.0.version_manifests.get(&key).map(|v| v.clone());
-        if result.is_some() {
-            tracing::debug!("Memory cache hit for version manifest: {name}@{version}");
-        }
-        result
+        self.0.version_manifests.get(&key).map(|v| v.clone())
     }
 
     pub fn set_version_manifest(
@@ -152,7 +138,6 @@ impl MemoryCache {
         version: String,
         manifest: Arc<CoreVersionManifest>,
     ) {
-        tracing::debug!("Caching version manifest in memory: {name}@{version}");
         let key = format!("{name}@{version}");
         self.0.version_manifests.insert(key, manifest);
     }

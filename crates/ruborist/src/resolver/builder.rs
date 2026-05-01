@@ -247,14 +247,6 @@ pub fn create_package_node(
         parent_node.path.join(format!("node_modules/{name}"))
     };
 
-    tracing::debug!(
-        "Creating node {}@{} under parent {:?} at {}",
-        name,
-        pkg.version,
-        parent,
-        path.display()
-    );
-
     PackageNode::from_version_manifest(name.to_string(), path, pkg.manifest.clone())
 }
 
@@ -474,27 +466,9 @@ pub async fn process_dependency<R: RegistryClient + MaybeSync>(
     edge_info: &DependencyEdgeInfo,
     config: &BuildDepsConfig,
 ) -> Result<ProcessResult, ResolveError<R::Error>> {
-    tracing::debug!(
-        "Processing dependency {}@{} from [{:?}]",
-        edge_info.name,
-        edge_info.spec,
-        node_index
-    );
-
     // Find installation location
     match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
         FindResult::Reuse(existing_index) => {
-            let version = graph
-                .get_node(existing_index)
-                .map(|n| n.version.as_str())
-                .unwrap_or("unknown");
-            tracing::debug!(
-                "Reusing existing {}@{} at {:?}",
-                edge_info.name,
-                version,
-                existing_index
-            );
-
             // Mark edge as resolved
             graph.mark_dependency_resolved(edge_info.edge_id, existing_index);
 
@@ -504,13 +478,6 @@ pub async fn process_dependency<R: RegistryClient + MaybeSync>(
             Ok(ProcessResult::Reused(existing_index))
         }
         FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
-            tracing::debug!(
-                "Need to resolve {}@{} (conflict/new at {:?})",
-                edge_info.name,
-                edge_info.spec,
-                conflict_parent
-            );
-
             // Parse spec once and exhaustively route by variant.
             // The exhaustive match ensures the compiler forces a decision for any
             // new PackageSpec variant — no silent fall-through to the wrong resolver.
@@ -666,13 +633,6 @@ pub async fn process_dependency<R: RegistryClient + MaybeSync>(
             } else {
                 resolved
             };
-
-            tracing::debug!(
-                "Resolved {}@{} => {}",
-                edge_info.name,
-                edge_info.spec,
-                resolved.version
-            );
 
             // Create new node
             let new_node = create_package_node(&edge_info.name, &resolved, conflict_parent, graph);

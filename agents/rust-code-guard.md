@@ -42,7 +42,7 @@ You are the Rust code review agent for the utoo project. Your responsibility is 
 
 ## Review Checklist
 
-For each diff, review against the following 12 dimensions and output findings with fix suggestions.
+For each diff, review against the following 14 dimensions and output findings with fix suggestions.
 
 ### 1. Type Modeling & Zero-Cost Abstractions
 
@@ -334,6 +334,152 @@ impl PathExt for std::path::Path { fn is_hidden(&self) -> bool { .. } }
 - [ ] Side-effectful iteration: use `for` loop not `.iter().for_each(|..| { ... })`.
 - [ ] Collection building: prefer `.filter_map().collect()` over `Vec::new()` + `for` + `push` when the mapping is simple.
 
+### 14. Logging Discipline & `anyhow` Context Conventions
+
+**Rule: Logs cost format CPU + channel send on every event. Levels exist to match the audience: never punish CI / large installs with per-package debug noise, never duplicate the same fact across log + error chain, never strip context (URL, path) when wrapping an error for return.**
+
+This dimension came out of an audit where a single `utoo deps` for ant-design generated **2.3 MB of log** (~16k lines) where ~95 % was per-package dedup / cache-hit / "fetching" / "preloaded" noise no operator ever reads. Subsequent fixes shrank the same workload to ~2k lines while improving failure diagnosis (link errors used to drop source/target path; retry loops used to print the URL ten times).
+
+#### 14.1 Log level discipline
+
+- [ ] Is a `tracing::debug!()` fired **once per package / per BFS edge / per cache lookup** in a hot path that visits 500+ items? Drop it or downgrade to `trace`.
+- [ ] Is the same line printed by **multiple sibling layers** (e.g. retry loop warns + outer wrapper warns + final `anyhow!` chain) for one logical failure? Pick exactly one layer.
+- [ ] Is a level used to mean its opposite? `tracing::warn!("Optional dependency X failed (ignored)")` is fine; `tracing::warn!("HTTP 404 for {url}")` for a normal lookup miss is noise — use `debug` or fold into the error chain.
+
+| Level | Frequency rule | Examples |
+|---|---|---|
+| `error!` | One terminal failure per CLI invocation | Fatal install error before exit |
+| `warn!` | Per-incident, ≤ once per affected resource | "Failed to clean target dir X" |
+| `info!` | Phase-level, ≤ ~10 per command | "Retry succeeded on attempt 3" |
+| `debug!` | Phase markers + one-shot config | NEVER per-package / per-edge in BFS |
+| `trace!` | Verbose flow-tracing | Per-edge inspector if needed |
+
+```rust
+// ❌ BAD — fires per package across thousands of BFS edges
+tracing::debug!("Reusing existing {}@{} at {:?}", name, version, idx);
+
+// ✅ GOOD — one line per phase, with summary stats
+tracing::debug!("Preload phase: {} initial deps, concurrency={}", n, concurrency);
+// Final stats line is enough to reconstruct what happened.
+```
+
+#### 14.2 Don't double-log a failure
+
+Both `tracing::warn!` and the `anyhow!` value carry the same data, but they're *spent* differently — the warn fires immediately on the producer thread, the anyhow chain fires only when the failure escapes to `main`. **Pick one** based on how the caller will surface the failure.
+
+```rust
+// ❌ BAD — every retry attempt prints the URL; final anyhow chain repeats it
+match status.as_u16() {
+    429 => {
+        tracing::warn!("HTTP 429 for {}", url);                 // ← per-attempt noise
+        FetchError::Retryable(anyhow!("HTTP 429: {url}"))       // ← same data, second emission
+    }
+    ...
+}
+
+// ✅ GOOD — anyhow chain owns the URL, retry framework propagates it once on final failure
+match status.as_u16() {
+    429 => FetchError::Retryable(anyhow!("HTTP 429: {url}")),
+    ...
+}
+// Caller's `with_context(|| format!("Download failed: {url}"))` adds one more layer at the boundary.
+```
+
+#### 14.3 Preserve context when wrapping errors
+
+Returning a fresh `anyhow!(format!("Link failed: {e}"))` strips the path or URL the inner error never knew about. The caller sees `Link failed: Permission denied (os error 13)` and has no idea **which file**.
+
+```rust
+// ❌ BAD — the only context the user gets is the OS error string
+if let Err(e) = link(&resolved, &path).await {
+    tracing::debug!("Link failed: source={resolved}, target={path}, error={e}"); // ← debug-only,
+    return Err(anyhow::anyhow!("Link failed: {e}"));                              //   needs file log
+}
+
+// ✅ GOOD — paths land in the returned error chain, not just in opt-in debug
+link(&resolved, &path)
+    .await
+    .with_context(|| format!("Link failed: {resolved} -> {path}"))?;
+```
+
+The same rule applies to `inspect_err`-then-warn at the inner layer: if the warn carries the path/URL but the returned error doesn't, **the warn is on a verbose channel a CLI user can't see**. Either move the data into the returned error or accept that the warn is for `UTOO_FILE_LOG=debug` operators only.
+
+#### 14.4 `anyhow` context idioms
+
+- [ ] Use `.with_context(|| format!(...))` (lazy closure), not `.context(format!(...))` (eager). The closure fires only on `Err`; `format!` allocates always.
+- [ ] Use `anyhow::bail!(...)` not `return Err(anyhow::anyhow!(...))`.
+- [ ] Use `with_context(|| ...)?` not `.map_err(|e| anyhow!("{}", e))?` — the latter erases the source chain.
+- [ ] Format an `anyhow::Error` with `{:#}` (alternate) when logging — that prints the full cause chain. Plain `{}` only shows the outermost message.
+
+```rust
+// ❌ BAD — eager allocation on every call, even when result is Ok
+fs::write(path, contents).context(format!("write {}", path.display()))?;
+
+// ✅ GOOD — lazy: format runs only on Err
+fs::write(path, contents).with_context(|| format!("write {}", path.display()))?;
+
+// ❌ BAD — drops the source chain, replaces with a single string
+download_bytes(&url).await.map_err(|e| anyhow!("{}", e))?;
+
+// ✅ GOOD — preserves chain, adds context
+download_bytes(&url).await.with_context(|| format!("download {url}"))?;
+
+// ❌ BAD — outer message only
+tracing::warn!("Download failed: {}", e);
+
+// ✅ GOOD — full chain so root cause is visible
+tracing::warn!("Download failed: {:#}", e);
+```
+
+#### 14.5 Per-incident warns inside loops
+
+When a tight loop can fail repeatedly for the same root cause (per-file hardlink failure across a 1000-file package, per-attempt retry within a request), warn **once per package / per request** and suppress subsequent occurrences. The first warn names the failure mode; printing it 999 more times only obscures the next problem.
+
+```rust
+// ❌ BAD — 1000-file package with EMLINK = 1000 warn lines
+for entry in &files {
+    if let Err(e) = fs::hard_link(&entry.src, &entry.dst) {
+        tracing::warn!("hardlink failed: {} -> {}: {}", entry.src.display(), entry.dst.display(), e);
+        copy_file_sync(&entry.src, &entry.dst)?;
+    }
+}
+
+// ✅ GOOD — one warn per package, then silent fallback
+let mut warned = false;
+for entry in &files {
+    if let Err(e) = fs::hard_link(&entry.src, &entry.dst) {
+        if !warned {
+            tracing::warn!("hardlink failed: {} -> {}: {}; falling back to copy (further suppressed)", ...);
+            warned = true;
+        }
+        copy_file_sync(&entry.src, &entry.dst)?;
+    }
+}
+```
+
+For retries specifically: **don't warn each attempt at all**. Let the retry framework swallow transient failures. Log only on `info!` for "retry succeeded on attempt N" and let the outer caller's `.with_context(|| format!("... {url}"))?` surface the final failure once.
+
+#### 14.6 Failure paths must include the resource
+
+Network: URL must be in the returned error (not only in the per-attempt warn).
+File: the failing path must be in the returned error (`with_context(|| format!("read {}", path.display()))`).
+Link: both source and target paths.
+Spawn / external command: command + args.
+
+If you find yourself writing `tracing::debug!("... source=..., target=..., error=...")` immediately before `return Err(anyhow!("X failed: {e}"))`, **move the source/target into the returned error** instead — the debug log is invisible to a normal CLI user.
+
+#### Anti-patterns
+
+| # | Anti-Pattern | Grep Pattern | Fix Direction |
+|---|---|---|---|
+| A27 | Per-package debug in hot path | `tracing::debug!\("(Cache hit\|Resolved\|Reusing\|Preloaded\|Cloned\|Downloaded)` | Drop or move to phase-level summary |
+| A28 | Retry-loop warn duplication | `tracing::warn!\("Retry .*url:` or sibling warns inside a `RetryIf` closure | Remove per-attempt warn; let `with_context` carry URL on final failure |
+| A29 | Lost context in returned error | `tracing::debug!\(.*source=.*target=` followed by `Err\(anyhow!\("X failed: \{e\}"\)\)` | `.with_context(\|\| format!("X failed: {src} -> {dst}"))?` |
+| A30 | Eager `.context(format!(...))` | `\.context\(format!\(` | `.with_context(\|\| format!(...))` |
+| A31 | Source chain stripped | `.map_err\(\|e\| anyhow!\("\{\}", e\)\)` | `.with_context(\|\| ...)` to preserve `e` as cause |
+| A32 | Outer-only error format | `tracing::(warn\|error)!\("[^"]*: \{\}", e\)` where `e: anyhow::Error` | `{:#}` instead of `{}` to print full chain |
+| A33 | Per-iteration warn spam | warn inside `for entry in &files` / `for attempt in 0..N` without a "warned once" latch | Latch a `bool` and suppress after first occurrence |
+
 ---
 
 ## Output Format
@@ -343,7 +489,7 @@ For each issue in each file, output in the following format:
 ```markdown
 ## <file_path>:<line_range>
 
-**Dimension**: <which of 1-13>
+**Dimension**: <which of 1-14>
 **Severity**: 🔴 Must fix | 🟡 Should fix | 🟢 Style suggestion
 **Issue**: <one-line description>
 **Reason**: <why this is a problem>
@@ -360,7 +506,7 @@ For each issue in each file, output in the following format:
 1. **Identify scope** — determine which files to review (PR diff, staged changes, or user-specified paths)
 2. **Read and understand context** — read each file and understand its role within the crate; check `lib.rs` exports and `Cargo.toml` dependencies
 3. **Run automated checks** — execute `cargo clippy` and `cargo fmt --check` to catch mechanical issues
-4. **Review against the 13 dimensions** — check each item in the checklist above, scanning for anti-patterns A1–A26
+4. **Review against the 14 dimensions** — check each item in the checklist above, scanning for anti-patterns A1–A33
 5. **Output findings** — report issues in the specified format, sorted by severity (🔴 first, then 🟡, then 🟢)
 
 ---
