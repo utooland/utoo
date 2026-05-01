@@ -159,7 +159,13 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
         let mut builder = builder
             .no_proxy()
             .dns_resolver(shared_resolver())
-            .connect_timeout(CONNECT_TIMEOUT);
+            .connect_timeout(CONNECT_TIMEOUT)
+            // Force HTTP/1.1 with a connection pool. reqwest multiplexes all
+            // requests over a single HTTP/2 connection by default, which
+            // makes head-of-line blocking on one slow response stall the
+            // whole manifest fetch phase. An H1 pool lets concurrent
+            // manifest requests open independent TCP streams instead.
+            .http1_only();
 
         #[cfg(target_os = "macos")]
         {

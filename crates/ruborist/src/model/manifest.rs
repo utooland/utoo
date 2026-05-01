@@ -149,6 +149,36 @@ impl FullManifest {
     }
 }
 
+/// Extract a single version from `FullManifest` on rayon's CPU pool
+/// (native) or inline (wasm32). The native path keeps the tokio runtime
+/// free of `simd_json::to_borrowed_value` work so sibling manifest
+/// fetches keep driving network IO while this one re-parses.
+///
+/// Returns `(version, Option<Arc<CoreVersionManifest>>)` — the input
+/// `version` is handed back to the caller alongside the result so it
+/// can be reused for the error path and the outer return without a
+/// clone. The native path requires `'static` for the rayon closure,
+/// so the closure owns the string for its duration.
+pub async fn extract_core_version_off_runtime(
+    full: Arc<FullManifest>,
+    version: String,
+) -> (String, Option<Arc<CoreVersionManifest>>) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        rayon::spawn(move || {
+            let core = full.get_core_version(&version).map(Arc::new);
+            let _ = tx.send((version, core));
+        });
+        rx.await.expect("rayon parse worker dropped before sending")
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let core = full.get_core_version(&version).map(Arc::new);
+        (version, core)
+    }
+}
+
 /// Deserialize a versions map by extracting only the keys, skipping all values.
 ///
 /// Uses `IgnoredAny` to skip over version manifest JSON objects without allocating,
