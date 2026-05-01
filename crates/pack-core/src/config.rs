@@ -183,6 +183,7 @@ pub struct Config {
     plugin_runtime_strategy: Option<PluginRuntimeStrategy>,
     persistent_caching: Option<bool>,
     node_polyfill: Option<bool>,
+    mdx: Option<MdxOptions>,
     dev_server: Option<DevServer>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     server: Option<ServerConfig>,
@@ -213,6 +214,8 @@ pub enum ExternalType {
     ESM,
     #[serde(rename = "global")]
     Global,
+    #[serde(rename = "promise")]
+    Promise,
 }
 
 #[turbo_tasks::value]
@@ -948,6 +951,15 @@ pub struct SwcPlugins(
 #[turbo_tasks::value(transparent)]
 pub struct OptionalMdxTransformOptions(Option<ResolvedVc<MdxTransformOptions>>);
 
+#[derive(
+    Clone, Debug, PartialEq, Deserialize, TraceRawVcs, NonLocalValue, OperationValue, Encode, Decode,
+)]
+#[serde(untagged)]
+pub enum MdxOptions {
+    Boolean(bool),
+    Option(MdxTransformOptions),
+}
+
 #[turbo_tasks::value(transparent)]
 pub struct ExternalsConfig(
     #[bincode(with = "turbo_bincode::indexmap")] FxIndexMap<RcStr, ExternalConfig>,
@@ -1414,6 +1426,17 @@ impl Config {
     }
 
     #[turbo_tasks::function]
+    pub fn mdx(&self) -> Vc<OptionalMdxTransformOptions> {
+        let options = match &self.mdx {
+            Some(MdxOptions::Boolean(true)) => Some(MdxTransformOptions::default().resolved_cell()),
+            Some(MdxOptions::Option(options)) => Some(options.clone().resolved_cell()),
+            _ => None,
+        };
+
+        OptionalMdxTransformOptions(options).cell()
+    }
+
+    #[turbo_tasks::function]
     pub fn image_config(&self) -> Vc<OptionImageConfig> {
         Vc::cell(self.images.clone())
     }
@@ -1692,6 +1715,11 @@ mod tests {
                     "root": "foo",
                     "type": "esm"
                 },
+                "foo_promise": "promise foo",
+                "foo_promise2": {
+                    "root": "foo",
+                    "type": "promise"
+                },
                 "react": {
                     "root": "React",
                     "commonjs": "react"
@@ -1733,6 +1761,9 @@ mod tests {
         assert!(
             matches!(externals.get("foo_import"), Some(ExternalConfig::Basic(name)) if name.as_str() == "esm foo")
         );
+        assert!(
+            matches!(externals.get("foo_promise"), Some(ExternalConfig::Basic(name)) if name.as_str() == "promise foo")
+        );
 
         // test advanced external config
         if let Some(ExternalConfig::Advanced(advanced)) = externals.get("foo_require2") {
@@ -1747,6 +1778,13 @@ mod tests {
             assert_eq!(advanced.r#type, Some(ExternalType::ESM));
         } else {
             panic!("Expected ExternalConfig::Advanced for foo_import2");
+        }
+
+        if let Some(ExternalConfig::Advanced(advanced)) = externals.get("foo_promise2") {
+            assert_eq!(advanced.root.as_str(), "foo");
+            assert_eq!(advanced.r#type, Some(ExternalType::Promise));
+        } else {
+            panic!("Expected ExternalConfig::Advanced for foo_promise2");
         }
 
         if let Some(ExternalConfig::Umd(umd_config)) = externals.get("react") {

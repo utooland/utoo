@@ -3,13 +3,13 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
 
-/// Read and parse a JSON file into the specified type
+/// Read and parse a JSON file into the specified type.
 pub async fn read_json_file<T: DeserializeOwned>(path: &Path) -> Result<T> {
-    let content = crate::fs::read_to_string(path)
+    let bytes = crate::fs::read(path)
         .await
         .with_context(|| format!("Failed to read file {path:?}"))?;
 
-    serde_json::from_str(&content).with_context(|| format!("Failed to parse JSON from {path:?}"))
+    serde_json::from_slice(&bytes).with_context(|| format!("Failed to parse JSON from {path:?}"))
 }
 
 /// Load package.json from a directory path and deserialize into the caller's

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use std::env;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -11,6 +12,22 @@ use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{
     EnvFilter, Layer, Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
+
+/// Cached at startup: is stderr connected to a terminal?
+///
+/// indicatif's `inc()` / `set_message()` always acquire the internal
+/// `Mutex<ProgressState>` write-lock and mutate `pos` / `est.buf` /
+/// `message`, even when the draw target is hidden or the underlying
+/// stream is not a TTY — only the *rendering* short-circuits, not the
+/// state mutation. On the dependency-resolve hot path that's 9000+
+/// lock acquisitions per phase contending across multiple workers,
+/// costing measurable wall time on CI.
+///
+/// Gating every `ProgressReceiver` event behind this flag means
+/// non-TTY environments (CI, piped output, `2>&1 | tee`) pay zero
+/// indicatif cost — no `inc`, no `set_message`, no `format!()`
+/// allocation. Local dev keeps the full progress UX.
+pub static IS_TTY: Lazy<bool> = Lazy::new(|| std::io::stderr().is_terminal());
 
 pub static PROGRESS_BAR: Lazy<ProgressBar> = Lazy::new(|| {
     let pb = ProgressBar::new(0).with_style(
@@ -124,6 +141,9 @@ pub fn print_install_counts(added: usize, reused: usize, downloaded: usize) {
 }
 
 pub fn start_progress_bar() {
+    if !*IS_TTY {
+        return;
+    }
     PROGRESS_BAR.reset();
     PROGRESS_BAR.set_style(
         ProgressStyle::with_template("{spinner:.blue} {pos:.green}/{len:.magenta} {wide_msg}")
@@ -135,6 +155,9 @@ pub fn start_progress_bar() {
 }
 
 pub fn log_progress(text: &str) {
+    if !*IS_TTY {
+        return;
+    }
     PROGRESS_BAR.set_message(text.to_string());
 }
 
@@ -186,6 +209,14 @@ pub struct ProgressReceiver;
 
 impl utoo_ruborist::progress::EventReceiver for ProgressReceiver {
     fn on_event(&self, event: utoo_ruborist::progress::BuildEvent) {
+        // Single TTY check at the receiver boundary. Non-TTY (CI, piped
+        // output, `2>&1 | tee`) drops the entire indicatif update path —
+        // no Mutex<ProgressState> write-lock, no format!() allocation,
+        // no String clones into set_message. Worth measurable wall time
+        // on the worker-pool resolve hot path; see `IS_TTY` doc comment.
+        if !*IS_TTY {
+            return;
+        }
         use utoo_ruborist::progress::BuildEvent;
         match event {
             BuildEvent::PreloadStart { count } | BuildEvent::PreloadQueued { count } => {

@@ -143,13 +143,49 @@ jobs:
           name: utoo-linux-x64
           path: target/x86_64-unknown-linux-gnu/release/utoo
           retention-days: 1
+      # Piggyback on the already-built target/ from the step above: when the
+      # PR is labeled `benchmark`, overlay origin/next's tree onto the current
+      # workdir and re-run cargo build. cargo's incremental compile only
+      # rebuilds crates that actually differ between this PR and next — for
+      # bench-infra-only PRs that's a few seconds (just relink); for PRs that
+      # touch pm sources, only the affected crates rebuild. Either way far
+      # cheaper than a separate cold workspace, and the artifact route avoids
+      # competing with build-* rust-caches for the repo's 10GB cache budget.
+      - name: Build next branch utoo (bench baseline)
+        if: >
+          (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
+          (github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-phases')
+        run: |
+          # The previous Upload step has already shipped the PR binary; we
+          # can now overwrite target/.../release/utoo safely.
+          git fetch origin next --depth=1
+          # Overlay origin/next's working tree onto the current workdir
+          # without moving HEAD. After this every tracked file matches
+          # origin/next; submodule pointers may differ so re-init.
+          git checkout origin/next -- .
+          git submodule update --init --recursive --depth 1
+          cargo build --release --target x86_64-unknown-linux-gnu --bin utoo -p utoo-pm
+      - name: Upload utoo-next binary
+        if: >
+          (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
+          (github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-phases')
+        uses: actions/upload-artifact@v4
+        with:
+          name: utoo-next-linux-x64
+          # Same workspace-relative path as utoo-linux-x64 above — but the
+          # content here is the next-branch binary because the cargo build
+          # in the previous step overwrote it. download-artifact then lays
+          # it out as `<dest>/utoo` (flat), matching utoo-linux-x64's shape.
+          path: target/x86_64-unknown-linux-gnu/release/utoo
+          retention-days: 1
 
   build-mac-arm64:
-    # Mac arm64 serves: e2e-mac-arm64, bench-phases-mac, pm-bench-all-mac.
+    # Mac arm64 serves: e2e-mac-arm64, bench-phases-mac (manual only),
+    # pm-bench-all-mac (manual only). Label-triggered benches now stick
+    # to linux, so we no longer build on the `benchmark` label.
     if: >
       (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)')) ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
       (github.event_name == 'workflow_dispatch' && inputs.target != 'pm-bench-pcap')
     runs-on: macos-latest
     steps:
@@ -467,18 +503,33 @@ jobs:
         with:
           platform: linux
       - uses: ./.github/actions/install-utoo-npm-baseline
+      # The utoo-next binary is built upstream by build-linux's
+      # "Build next branch utoo (bench baseline)" step. Just download.
+      - name: Download utoo-next binary
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-next-linux-x64
+          path: /tmp/utoo-next-dist
+      - name: Install utoo-next
+        run: |
+          chmod +x /tmp/utoo-next-dist/utoo
+          mv /tmp/utoo-next-dist/utoo /tmp/utoo-next
+          echo "Baseline utoo (next) version: $(/tmp/utoo-next --version)"
+          echo "UTOO_NEXT_BIN=/tmp/utoo-next" >> $GITHUB_ENV
       - name: Verify tools
         run: |
           hyperfine --version
           utoo --version
           "$UTOO_NPM_BIN" --version
+          "$UTOO_NEXT_BIN" --version
           bun --version
       - name: Define cache wipe function
         run: |
           cat > /tmp/wipe-bench-state.sh <<'WIPE'
           #!/usr/bin/env bash
           rm -rf /tmp/pm-bench /tmp/pm-bench-results /tmp/pm-bench-output \
-                 /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache /tmp/bun-bench-cache \
+                 /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache \
+                 /tmp/utoo-next-bench-cache /tmp/bun-bench-cache \
                  ~/.bun/install/cache ~/.cache/nm 2>/dev/null || true
           mkdir -p /tmp/pm-bench-output
           WIPE
@@ -490,11 +541,14 @@ jobs:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmjs.org'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
-          PM_LIST: 'utoo,utoo-npm,bun'
+          PM_LIST: 'utoo,utoo-next,utoo-npm,bun'
         run: |
           chmod +x bench/pm-bench-phases.sh
           bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmjs.log
+      # npmmirror only runs on manual dispatch — label-triggered runs stick to
+      # the npmjs leg to keep PR feedback loops short.
       - name: Stash npmjs logs and wipe state before npmmirror
+        if: github.event_name == 'workflow_dispatch'
         run: |
           mkdir -p /tmp/bench-logs-stash
           cp -r /tmp/pm-bench-output/. /tmp/bench-logs-stash/ 2>/dev/null || true
@@ -502,11 +556,12 @@ jobs:
           mkdir -p /tmp/pm-bench-output
           cp -r /tmp/bench-logs-stash/. /tmp/pm-bench-output/ 2>/dev/null || true
       - name: Run phase-isolated benchmark · npmmirror
+        if: github.event_name == 'workflow_dispatch'
         env:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmmirror.com'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
-          PM_LIST: 'utoo,utoo-npm,bun'
+          PM_LIST: 'utoo,utoo-next,utoo-npm,bun'
         run: |
           mkdir -p /tmp/pm-bench-output
           bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmmirror.log
@@ -525,10 +580,11 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
   bench-phases-mac:
+    # Mac runners are scarce and slow — only the manual dispatch path runs
+    # them. Label-triggered PR benches stick to linux to keep the feedback
+    # loop tight.
     needs: [build-mac-arm64]
-    if: >
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
-      (github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-phases')
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-phases'
     runs-on: macos-latest
     permissions:
       contents: read

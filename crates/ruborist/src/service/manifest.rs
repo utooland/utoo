@@ -52,8 +52,6 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
         MetadataFormat::Complete => "application/json",
     };
 
-    tracing::debug!("Fetching full manifest for {} from {}", opts.name, url);
-
     RetryIf::spawn(
         retry_strategy(),
         || {
@@ -91,7 +89,7 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                         .await
                         .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
                         .to_vec();
-                    // Save raw bytes before simd_json mutates the parse buffer
+                    // Save raw bytes before simd_json mutates the parse buffer.
                     let mut parse_buf = raw_bytes.clone();
                     let mut manifest: FullManifest =
                         simd_json::serde::from_slice(&mut parse_buf)
@@ -160,13 +158,6 @@ pub async fn fetch_version_manifest(
         MetadataFormat::Abbreviated => "application/vnd.npm.install-v1+json",
         MetadataFormat::Complete => "application/json",
     };
-
-    tracing::debug!(
-        "Fetching version manifest for {}@{} from {}",
-        opts.name,
-        opts.spec,
-        url
-    );
 
     RetryIf::spawn(
         retry_strategy(),

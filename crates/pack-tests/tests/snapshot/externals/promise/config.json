@@ -1,0 +1,17 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.ts",
+        "name": "main"
+      }
+    ],
+    "externals": {
+      "jquery": {
+        "root": "$",
+        "type": "promise"
+      },
+      "async-value": "promise Promise.resolve({ default: \"async-value\", named: true })"
+    }
+  }
+}

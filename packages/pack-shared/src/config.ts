@@ -25,6 +25,17 @@ export type JSONValue =
   | JSONValue[]
   | { [k: string]: JSONValue };
 
+export interface MdxTransformOptions {
+  development?: boolean;
+  jsx?: boolean;
+  jsxRuntime?: string;
+  jsxImportSource?: string;
+  providerImportSource?: string;
+  mdxType?: "commonmark" | "gfm";
+}
+
+export type MdxOptions = boolean | MdxTransformOptions;
+
 // At the moment, Turbopack options must be JSON-serializable, so restrict values.
 export type TurbopackLoaderOptions = Record<string, JSONValue>;
 
@@ -143,7 +154,7 @@ export interface ResolveOptions {
   extensions?: string[];
 }
 
-export type ExternalType = "script" | "commonjs" | "esm" | "global";
+export type ExternalType = "script" | "commonjs" | "esm" | "global" | "promise";
 
 export interface ExternalAdvanced {
   root: string;
@@ -299,6 +310,7 @@ export interface ConfigComplete {
   pluginRuntimeStrategy?: "workerThreads" | "childProcesses";
   persistentCaching?: boolean;
   nodePolyfill?: boolean;
+  mdx?: MdxOptions;
   devServer?: DevServerConfig;
   server?: {
     /** Entry point for the server runtime (e.g. "src/server.ts") */

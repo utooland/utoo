@@ -90,7 +90,6 @@ pub async fn install_packages(
                 // Skip packages based on omit config
                 if should_omit_package(package, omit) {
                     PROGRESS_BAR.inc(1);
-                    tracing::debug!("Skipping omitted dependency: {}", path);
                     continue;
                 }
                 let path = path.clone();
@@ -110,16 +109,11 @@ pub async fn install_packages(
                         let link_name = extract_package_name(&path);
                         if link_name.is_empty() {
                             PROGRESS_BAR.inc(1);
-                            tracing::debug!("Link skipped due to empty package name: {path}");
                             continue;
                         }
-                        tracing::debug!("Attempting to link from {resolved} to {path}");
-                        if let Err(e) = link(Path::new(&resolved), Path::new(&path)).await {
-                            tracing::debug!(
-                                "Link failed: source={resolved}, target={path}, error={e}"
-                            );
-                            return Err(anyhow::anyhow!("Link failed: {e}"));
-                        }
+                        link(Path::new(&resolved), Path::new(&path))
+                            .await
+                            .with_context(|| format!("Link failed: {resolved} -> {path}"))?;
                         PROGRESS_BAR.inc(1);
                         continue;
                     }
@@ -129,7 +123,6 @@ pub async fn install_packages(
                         && !is_cpu_compatible(cpu)
                     {
                         PROGRESS_BAR.inc(1);
-                        tracing::debug!("cpu skipped: {}", &path);
                         continue;
                     }
 
@@ -137,7 +130,6 @@ pub async fn install_packages(
                         && !is_os_compatible(os)
                     {
                         PROGRESS_BAR.inc(1);
-                        tracing::debug!("os skipped: {}", &path);
                         continue;
                     }
 
@@ -158,7 +150,9 @@ pub async fn install_packages(
                             clone_package_once(&name, &version, &resolved, &target_path).await
                         {
                             if is_optional {
-                                tracing::warn!("Optional dependency {name} failed (ignored)");
+                                tracing::warn!(
+                                    "Optional dependency {name} failed (ignored): {e:#}"
+                                );
                                 PROGRESS_BAR.inc(1);
                                 return Ok(());
                             }
@@ -171,7 +165,6 @@ pub async fn install_packages(
                     clone_tasks.push(task);
                 } else {
                     PROGRESS_BAR.inc(1);
-                    tracing::debug!("{path} no resolved info skipped");
                 }
             }
         }
