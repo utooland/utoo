@@ -39,13 +39,9 @@ impl PackageService {
         Ok(())
     }
 
-    /// Run install lifecycle hooks for each workspace package in topological order.
-    ///
-    /// Mirrors npm 7+ semantics: after `node_modules` is linked, every
-    /// workspace package gets its `preinstall`/`install`/`postinstall`/
-    /// `prepare` chain run. Workspaces depending on another workspace wait
-    /// until that dependency's hooks complete, so a `prepare` build step
-    /// produces the artifacts a downstream consumer expects to import.
+    /// Run install lifecycle hooks for each workspace package in topological
+    /// order, so a downstream workspace can import build artifacts produced
+    /// by an upstream workspace's `prepare` (npm 7+ semantics).
     pub async fn process_workspace_install_hooks(root_path: &Path) -> Result<()> {
         let resolved = WorkspaceService::resolve_layers(root_path, WorkspaceFilter::All).await?;
         let (layers, paths) = match resolved {
@@ -55,13 +51,10 @@ impl PackageService {
 
         for layer in layers {
             for name in layer {
-                // `resolve_layers` populates `paths` from the same nodes that
-                // produced layer names, so a miss is an internal invariant
-                // violation, not a normal case.
                 let path = paths
                     .get(&name)
                     .expect("workspace name from layers must be in paths map");
-                let package = PackageInfo::load(path)
+                let package = PackageInfo::load_with_name_fallback(path, &name)
                     .await
                     .with_context(|| format!("Failed to load workspace {name}"))?;
                 for &hook in LifecycleHook::PROJECT_INSTALL_HOOKS {
@@ -1200,6 +1193,59 @@ mod tests {
         assert!(
             result.is_err(),
             "a failing workspace prepare must surface as an error"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_workspace_install_hooks_anonymous_workspaces() {
+        // Regression for arborist `workspaces-need-update` fixture: workspace
+        // package.json files may omit `name`. Without the folder-derived
+        // fallback (npm `name-from-folder`), hooks could not be loaded and
+        // anonymous siblings collapsed to the same empty key. We expect both
+        // to be visited and to run their hooks.
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+
+        fs::write(
+            root.join("package.json"),
+            r#"{
+                "name": "root",
+                "private": true,
+                "workspaces": ["a", "b"]
+            }"#,
+        )
+        .unwrap();
+
+        let a_dir = root.join("a");
+        let b_dir = root.join("b");
+        fs::create_dir_all(&a_dir).unwrap();
+        fs::create_dir_all(&b_dir).unwrap();
+
+        // Both workspaces are anonymous (no `name` field). Each writes a
+        // distinct marker file from a `prepare` script.
+        fs::write(
+            a_dir.join("package.json"),
+            r#"{ "scripts": { "prepare": "touch marker-a" } }"#,
+        )
+        .unwrap();
+        fs::write(
+            b_dir.join("package.json"),
+            r#"{ "scripts": { "prepare": "touch marker-b" } }"#,
+        )
+        .unwrap();
+
+        let result = PackageService::process_workspace_install_hooks(root).await;
+        assert!(
+            result.is_ok(),
+            "anonymous workspaces should not fail load: {result:?}"
+        );
+        assert!(
+            a_dir.join("marker-a").exists(),
+            "anonymous workspace `a` prepare must have run"
+        );
+        assert!(
+            b_dir.join("marker-b").exists(),
+            "anonymous workspace `b` prepare must have run"
         );
     }
 }

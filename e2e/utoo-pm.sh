@@ -697,6 +697,34 @@ rm -rf node_modules app/node_modules lib-a/node_modules lib-b/node_modules
 rm -rf lib-a/lib lib-a/.markers lib-b/lib package-lock.json
 cd ../../..
 
+# Case: anonymous workspace packages (no `name` field) — npm/arborist
+# fixtures like workspaces-need-update ship unnamed workspaces; ut install
+# must derive a name from the folder layout (npm `@npmcli/name-from-folder`)
+# and still run their lifecycle install hooks, otherwise an early bail like
+# "Failed to get package name from package.json" aborts the whole walk.
+echo -e "${YELLOW}Case: anonymous workspace packages (no name field)${NC}"
+cd e2e/pm/workspace-anonymous
+rm -rf node_modules anon-a/node_modules anon-b/node_modules
+rm -f anon-a/marker-postinstall anon-b/marker-prepare package-lock.json
+
+utoo install --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: utoo install crashed on anonymous workspaces${NC}"; exit 1; }
+
+# Both anonymous workspaces must have run their lifecycle hooks.
+if [ ! -f "anon-a/marker-postinstall" ]; then
+    echo -e "${RED}FAIL: anonymous workspace anon-a postinstall did not run${NC}"
+    exit 1
+fi
+if [ ! -f "anon-b/marker-prepare" ]; then
+    echo -e "${RED}FAIL: anonymous workspace anon-b prepare did not run${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: anonymous workspace hooks ran via name-from-folder fallback${NC}"
+
+rm -rf node_modules anon-a/node_modules anon-b/node_modules
+rm -f anon-a/marker-postinstall anon-b/marker-prepare package-lock.json
+cd ../../..
+
 # Case: multi-workspace `ut run` log presentation
 echo -e "${YELLOW}Case: ut run multi-workspace log presentation${NC}"
 cd e2e/pm/run-workspaces

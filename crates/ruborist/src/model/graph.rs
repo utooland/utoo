@@ -94,6 +94,16 @@ impl PackageNode {
     /// Create a workspace package node from PackageJson.
     pub fn workspace_from_package_json(path: PathBuf, pkg: PackageJson) -> Self {
         let name = pkg.name.clone();
+        Self::workspace_from_package_json_with_name(path, pkg, name)
+    }
+
+    /// Like [`workspace_from_package_json`] but uses an explicit `name`,
+    /// for anonymous workspace packages whose name was derived from folder.
+    pub fn workspace_from_package_json_with_name(
+        path: PathBuf,
+        pkg: PackageJson,
+        name: String,
+    ) -> Self {
         let version = if pkg.version.is_empty() {
             "*".to_string()
         } else {
@@ -115,6 +125,11 @@ impl PackageNode {
     /// Create a symlinked package node from PackageJson.
     pub fn link_from_package_json(path: PathBuf, pkg: PackageJson) -> Self {
         let name = pkg.name.clone();
+        Self::link_from_package_json_with_name(path, pkg, name)
+    }
+
+    /// Like [`link_from_package_json`] but uses an explicit `name`.
+    pub fn link_from_package_json_with_name(path: PathBuf, pkg: PackageJson, name: String) -> Self {
         let version = pkg.version.clone();
         Self {
             path,

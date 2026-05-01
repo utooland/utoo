@@ -21,6 +21,20 @@ use crate::model::package_json::PackageJson;
 use crate::model::util::read_package_json;
 use crate::service::Glob;
 
+/// Mirrors npm's `@npmcli/name-from-folder`: returns `<base>` for
+/// `<parent>/<base>`, or `<parent>/<base>` when `<parent>` starts with `@`.
+fn name_from_folder(path: &Path) -> Option<String> {
+    let base = path.file_name()?.to_str()?;
+    match path
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|s| s.to_str())
+    {
+        Some(parent) if parent.starts_with('@') => Some(format!("{parent}/{base}")),
+        _ => Some(base.to_string()),
+    }
+}
+
 /// A discovered workspace package.
 #[derive(Debug, Clone)]
 pub struct WorkspacePackage {
@@ -94,13 +108,19 @@ impl<G: Glob> WorkspaceDiscovery<G> {
                     }
                 };
 
-                tracing::debug!(
-                    "Found workspace: {} at {:?}",
-                    workspace_pkg.name,
-                    workspace_path
-                );
+                let name = if workspace_pkg.name.is_empty() {
+                    name_from_folder(&workspace_path).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "anonymous workspace at {} has no derivable name",
+                            workspace_path.display()
+                        )
+                    })?
+                } else {
+                    workspace_pkg.name.clone()
+                };
+                tracing::debug!("Found workspace: {} at {:?}", name, workspace_path);
                 workspaces.push(WorkspacePackage {
-                    name: workspace_pkg.name.clone(),
+                    name,
                     path: workspace_path,
                     package_json: workspace_pkg,
                 });
@@ -242,6 +262,22 @@ mod tests {
     use super::*;
     use crate::model::package_json::WorkspacesConfig;
     use crate::service::NoopGlob;
+
+    #[test]
+    fn test_name_from_folder() {
+        // Plain folder → its own basename.
+        assert_eq!(
+            name_from_folder(Path::new("/tmp/repo/packages/foo")),
+            Some("foo".to_string())
+        );
+        // Folder under an `@scope` parent → "@scope/name" (matches npm).
+        assert_eq!(
+            name_from_folder(Path::new("/tmp/repo/packages/@scope/foo")),
+            Some("@scope/foo".to_string())
+        );
+        // No parent at all (root path) → just the base.
+        assert_eq!(name_from_folder(Path::new("foo")), Some("foo".to_string()));
+    }
 
     #[test]
     fn test_is_workspace_root() {
