@@ -28,7 +28,7 @@ if [ "$IS_WIN" = "1" ]; then
         ARCH="x64"
     fi
 else
-    OS=$(echo "$UNAME_S" | tr '[:upper:]' '[:lower:]')
+    OS=$(echo "${UNAME_S:-unknown}" | tr '[:upper:]' '[:lower:]')
     ARCH=$(uname -m)
 
     if [ "$ARCH" = "x86_64" ]; then
