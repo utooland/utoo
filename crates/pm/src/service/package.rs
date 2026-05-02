@@ -282,65 +282,95 @@ impl PackageService {
     /// Queue contains (PackageInfo, is_optional) tuples - is_optional is not used
     /// here as binary linking happens only for successfully installed packages.
     ///
-    /// Emits a single `[bin-link]` line on stderr summarising the batch
-    /// (count + wall time). Captured by the bench harness via hyperfine's
-    /// `--show-output` so we can quantify what fraction of warm-link wall
-    /// is bin linking before deciding whether to parallelise.
+    /// Strategy:
+    ///   1. Sort packages by path so module-local bin-name collisions resolve
+    ///      deterministically (shallower / lex-smaller path wins).
+    ///   2. Dedupe by `link_path` in a `HashSet` — first writer wins, mirroring
+    ///      npm `bin-links/lib/link-gently.js`'s seen-set. Without this,
+    ///      multiple packages declaring the same bin (e.g. `svgo` + `svgo-browser`)
+    ///      both call into `link_bin`, which resolves via "remove existing,
+    ///      symlink new" and yields non-deterministic last-writer-wins.
+    ///   3. Walk the deduped jobs serially calling sync `link_bin`. Each
+    ///      `link_bin` is `try_exists` + `symlink_metadata` + `symlink(2)` —
+    ///      microsecond-class syscalls where async `tokio::fs::*` overhead
+    ///      (spawn_blocking + mpsc + thread hop) dominates real cost. Bench
+    ///      data on ant-design (228 bins) showed 36ms async → 6ms sync; adding
+    ///      try_join_all/rayon parallelism only saved an additional 2-3ms over
+    ///      sync, well within stddev — not worth the concurrency complexity.
+    ///
+    /// Emits one `[bin-link]` line on stdout summarising the batch (captured
+    /// by `bench/pm-bench-phases.sh` via hyperfine `--show-output`).
     async fn execute_binary_linking(queue: &[(Rc<PackageInfo>, bool)]) -> Result<()> {
+        use std::collections::HashSet;
+
         let bin_link_start = std::time::Instant::now();
+
+        // Sort by package path for deterministic dedupe winners across runs
+        // (`collect_packages_from_lock` walks a HashMap, so input order is
+        // non-deterministic without this).
+        let mut ordered: Vec<&(Rc<PackageInfo>, bool)> = queue.iter().collect();
+        ordered.sort_by(|a, b| a.0.path.cmp(&b.0.path));
+
+        let mut seen: HashSet<PathBuf> = HashSet::new();
         let mut total: u64 = 0;
-        let mut skipped: u64 = 0;
+        let mut deduped: u64 = 0;
+        let mut skipped_missing: u64 = 0;
+        let mut processed: u64 = 0;
 
-        for (package, _is_optional) in queue {
-            if !package.bin_files.is_empty() {
-                tracing::debug!("Linking binary files for {}", package.name);
-                for (bin_name, relative_path) in &package.bin_files {
-                    total += 1;
-                    let target_path = package.path.join(relative_path);
-                    if !crate::fs::try_exists(&target_path).await? {
-                        tracing::debug!(
-                            "Binary file {} does not exist, skipping",
-                            target_path.display()
-                        );
-                        skipped += 1;
-                        continue;
-                    }
+        for (package, _is_optional) in ordered {
+            if package.bin_files.is_empty() {
+                continue;
+            }
+            // Hoist out of the inner loop: `get_bin_dir` walks `path.ancestors()`
+            // looking for `node_modules`, but the result is constant per package.
+            let bin_dir = package
+                .get_bin_dir()
+                .with_context(|| format!("Failed to get bin directory for {}", package.name))?;
+            for (bin_name, relative_path) in &package.bin_files {
+                total += 1;
 
-                    let bin_dir = package.get_bin_dir().with_context(|| {
-                        format!("Failed to get bin directory for {}", package.name)
-                    })?;
-                    let link_path = bin_dir.join(bin_name);
-
-                    ScriptService::ensure_executable(&target_path)
-                        .await
-                        .with_context(|| {
-                            format!(
-                                "Failed to ensure binary is executable for {} (path: {})",
-                                package.name,
-                                target_path.display()
-                            )
-                        })?;
-
-                    crate::util::linker::link_bin(&target_path, &link_path)
-                        .await
-                        .with_context(|| {
-                            format!(
-                                "Failed to link binary for {} (from: {} to: {})",
-                                package.name,
-                                target_path.display(),
-                                link_path.display()
-                            )
-                        })?;
+                let link_path = bin_dir.join(bin_name);
+                if !seen.insert(link_path.clone()) {
+                    deduped += 1;
+                    continue;
                 }
-                tracing::debug!("Linking binary files for {} successfully", package.name);
+
+                let target_path = package.path.join(relative_path);
+                if !crate::fs::try_exists(&target_path).await? {
+                    tracing::debug!(
+                        "Binary file {} does not exist, skipping",
+                        target_path.display()
+                    );
+                    skipped_missing += 1;
+                    continue;
+                }
+
+                ScriptService::ensure_executable(&target_path)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "Failed to ensure binary is executable for {} (path: {})",
+                            package.name,
+                            target_path.display()
+                        )
+                    })?;
+
+                crate::util::linker::link_bin(&target_path, &link_path).with_context(|| {
+                    format!(
+                        "Failed to link binary for {} (from: {} to: {})",
+                        package.name,
+                        target_path.display(),
+                        link_path.display()
+                    )
+                })?;
+                processed += 1;
             }
         }
 
         if total > 0 {
             let wall = bin_link_start.elapsed();
-            eprintln!(
-                "[bin-link] mode=serial total={total} processed={} skipped={skipped} wall_ms={}",
-                total - skipped,
+            println!(
+                "[bin-link] total={total} processed={processed} skipped_missing={skipped_missing} deduped={deduped} wall_ms={}",
                 wall.as_millis()
             );
         }
