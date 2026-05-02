@@ -27,6 +27,20 @@ static DOWNLOAD_CACHE: Lazy<OnceMap<String, PathBuf>> = Lazy::new(OnceMap::new);
 /// Semaphore controlling concurrent download count.
 static DOWNLOAD_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
 
+/// Prefetch back-pressure gate, sized smaller than [`DOWNLOAD_SEMAPHORE`].
+///
+/// `spawn_tarball_prefetch` fan-outs N spawn calls on entry; without
+/// this gate, the first ~N tasks acquire `DOWNLOAD_SEMAPHORE` slots
+/// before `install_packages` even spawns its first layer, so install's
+/// clone tasks queue behind every prefetch task. p3_cold_install on
+/// CI bench-phases-linux saw σ jump from 1.56s → 3.93s as a result.
+///
+/// Capping prefetch at 16 leaves `64 - 16 = 48` slots permanently
+/// available to the install path; the OnceMap dedup still ensures
+/// install's later resolve hits the prefetched future on completion.
+static PREFETCH_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
+const PREFETCH_BACKLOG_LIMIT: usize = 16;
+
 static DOWNLOAD_COUNT: AtomicUsize = AtomicUsize::new(0);
 static REUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -139,6 +153,35 @@ pub async fn resolve_cache_path(name: &str, version: &str, tarball_url: &str) ->
             None => download_to_cache(name, version, tarball_url).await,
         },
     }
+}
+
+/// Prefetch variant: same as [`download_to_cache`] but bounded by
+/// [`PREFETCH_SEMAPHORE`] so a fan-out batch can't starve the install
+/// path of [`DOWNLOAD_SEMAPHORE`] slots.
+///
+/// On a warm-cache hit there's nothing to gate (the OnceMap closure
+/// short-circuits before acquiring [`DOWNLOAD_SEMAPHORE`]); the
+/// prefetch gate is only acquired around the actual `download_to_cache`
+/// call, so warm tarballs return immediately without consuming
+/// prefetch slots.
+pub async fn prefetch_to_cache(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
+    // Quick warm-cache short-circuit before paying the prefetch gate.
+    let cache_path = get_cache_dir().join(name).join(version);
+    if crate::fs::try_exists(&cache_path.join("_resolved"))
+        .await
+        .unwrap_or(false)
+    {
+        return Some(cache_path);
+    }
+
+    let permit = PREFETCH_SEMAPHORE
+        .get_or_init(|| Semaphore::new(PREFETCH_BACKLOG_LIMIT))
+        .acquire()
+        .await
+        .ok()?;
+    let result = download_to_cache(name, version, tarball_url).await;
+    drop(permit);
+    result
 }
 
 /// Download a registry tarball to the global cache directory, returning the cache path.

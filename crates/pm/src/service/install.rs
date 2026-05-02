@@ -18,7 +18,7 @@ use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
 use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
 use crate::util::cloner::clone_count;
-use crate::util::downloader::{download_stats, download_to_cache, is_git_url};
+use crate::util::downloader::{download_stats, is_git_url, prefetch_to_cache};
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
 use crate::util::logger::{
@@ -240,7 +240,7 @@ fn spawn_tarball_prefetch(package_lock: &utoo_ruborist::lock::PackageLock, cwd: 
         let _ = cwd; // reserved for future relative-path resolution
         let resolved = resolved.to_string();
         tokio::spawn(async move {
-            download_to_cache(&name, &version, &resolved).await;
+            prefetch_to_cache(&name, &version, &resolved).await;
         });
     }
 }
