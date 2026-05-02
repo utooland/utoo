@@ -38,15 +38,12 @@ pub enum MissingScript {
 
 /// Where the output of a [`ScriptService::run_lifecycle`] call goes.
 ///
-/// Capture mode borrows the caller's buffers so that on a partial failure
-/// (one of pre/main/post bails) the caller still has whatever bytes were
-/// captured up to the failing step — used to print a `✗ [ws] …` block with
-/// the error tail under [`run_in_layers`].
+/// Capture borrows the caller's buffers so they retain bytes captured up to
+/// a failing step — `run_in_layers` prints those as the `✗ [ws] …` tail.
 pub enum LifecycleSink<'a> {
-    /// Stream stdout/stderr to the terminal in real time.
-    /// `workspace_label` is shown in the `> [label] cmd` announce line.
-    Stream { workspace_label: Option<&'a str> },
-    /// Capture stdout/stderr into the caller's buffers.
+    Stream {
+        workspace_label: Option<&'a str>,
+    },
     Capture {
         workspace_label: &'a str,
         header: &'a mut String,
@@ -400,24 +397,19 @@ impl ScriptService {
         Ok(())
     }
 
-    /// Run the npm event chain `pre<event>` / `<event>` / `post<event>` for a
-    /// single package. Each step is independent — any of the three can be
-    /// missing and the others still run. This mirrors npm's lifecycle
-    /// semantics (e.g. `install` event = preinstall + install + postinstall).
+    /// Run the npm event chain `pre<event>` / `<event>` / `post<event>` on a
+    /// single package, mirroring npm's lifecycle semantics (e.g. `install`
+    /// event = preinstall + install + postinstall, each independent).
     ///
-    /// `main_required = true` makes a missing main script an error (matches
-    /// `npm run <name>` which bails when `<name>` is undefined). With
-    /// `main_required = false`, the function silently runs whatever subset
-    /// of the three exists, returning `ran_any = false` when none do.
-    ///
-    /// On error, [`LifecycleSink::Capture`]'s buffers retain whatever was
-    /// captured up to the failing step.
+    /// `missing` controls behaviour when the main script is undefined:
+    /// `Fail` bails (matches `npm run <name>`), `Skip` runs whatever subset
+    /// of pre/post exists. Pre/post are always silently skipped when absent.
     pub async fn run_lifecycle(
         package: &PackageInfo,
         event: &str,
         args: &[&str],
         mut sink: LifecycleSink<'_>,
-        main_required: bool,
+        missing: MissingScript,
     ) -> Result<bool> {
         let pre_name = format!("pre{event}");
         let post_name = format!("post{event}");
@@ -426,17 +418,14 @@ impl ScriptService {
         let pre_script = package.scripts.get(&pre_name).cloned();
         let post_script = package.scripts.get(&post_name).cloned();
 
-        if main_required && main_script.is_none() {
+        if missing == MissingScript::Fail && main_script.is_none() {
             anyhow::bail!("Script '{event}' not found in package.json");
         }
 
-        // Each step: (script_name, content, args). Only the main step takes
-        // user args; pre/post are always argless (matches npm semantics).
-        let no_args: &[&str] = &[];
         let steps: [(&str, Option<String>, &[&str]); 3] = [
-            (pre_name.as_str(), pre_script, no_args),
+            (pre_name.as_str(), pre_script, &[]),
             (event, main_script, args),
-            (post_name.as_str(), post_script, no_args),
+            (post_name.as_str(), post_script, &[]),
         ];
 
         let mut ran_any = false;
@@ -446,8 +435,7 @@ impl ScriptService {
 
             match &mut sink {
                 LifecycleSink::Stream { workspace_label } => {
-                    let args_str = step_args.join(" ");
-                    announce_script(*workspace_label, &content, &args_str);
+                    announce_script(*workspace_label, &content, &step_args.join(" "));
                     Self::execute_custom_script(package, step_name, &content, step_args.to_vec())
                         .await
                         .with_context(|| format!("Failed to execute {step_name}"))?;
@@ -539,7 +527,7 @@ impl ScriptService {
             LifecycleSink::Stream {
                 workspace_label: workspace,
             },
-            true,
+            MissingScript::Fail,
         )
         .await?;
 
@@ -647,9 +635,9 @@ async fn run_script_captured(
     let outcome = async {
         let package = PackageInfo::load(workspace_dir).await?;
 
-        // CLI surfaces a friendlier "missing script" hint than run_lifecycle's
-        // generic error, so short-circuit Fail-mode missing here.
-        if !package.scripts.contains_key(script_name) && missing == MissingScript::Fail {
+        // Override run_lifecycle's generic "Script not found" error with a
+        // CLI-friendly hint that names the workspace and points at `utoo run`.
+        if missing == MissingScript::Fail && !package.scripts.contains_key(script_name) {
             anyhow::bail!(
                 "Missing script: \"{script_name}\"\n\nTo see a list of scripts, run:\n  utoo run --workspace={workspace_name}"
             );
@@ -671,10 +659,7 @@ async fn run_script_captured(
                 header: &mut header,
                 body: &mut body,
             },
-            // We already short-circuited Fail-mode missing above, so let
-            // run_lifecycle treat a missing main as a no-op and rely on
-            // `ran_any` below.
-            false,
+            MissingScript::Skip,
         )
         .await
     }

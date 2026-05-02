@@ -12,14 +12,11 @@ use utoo_ruborist::lock::PackageLock;
 use utoo_ruborist::manifest::ScriptsView;
 use utoo_ruborist::model::package_json::parse_bin_field;
 
-use super::script::{LifecycleSink, ScriptOutput, ScriptService};
+use super::script::{LifecycleSink, MissingScript, ScriptOutput, ScriptService};
 use super::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
 
-/// npm install lifecycle, expressed as the three event chains npm runs in
-/// order. Each maps to `pre<event>` / `<event>` / `post<event>`, together
-/// covering preinstall, install, postinstall, prepublish, preprepare,
-/// prepare, postprepare — at the npm-event granularity that
-/// [`ScriptService::run_lifecycle`] expects.
+/// npm install lifecycle ordered by event chain, each expanding to
+/// `pre<event>` / `<event>` / `post<event>` via [`ScriptService::run_lifecycle`].
 const NPM_INSTALL_EVENTS: &[&str] = &["install", "prepublish", "prepare"];
 
 /// Execution queues for package scripts and binary linking
@@ -41,9 +38,9 @@ impl PackageService {
         Self::run_install_lifecycle(&package_info, None).await
     }
 
-    /// Run install lifecycle hooks for each workspace package in topological
-    /// order, so a downstream workspace can import build artifacts produced
-    /// by an upstream workspace's `prepare` (npm 7+ semantics).
+    /// Walk workspaces in topological order so a downstream workspace can
+    /// consume build artifacts produced by an upstream workspace's `prepare`
+    /// (npm 7+ semantics, fixes #2833).
     pub async fn process_workspace_install_hooks(root_path: &Path) -> Result<()> {
         let layers = match WorkspaceService::resolve_layers(root_path, WorkspaceFilter::All).await?
         {
@@ -51,23 +48,21 @@ impl PackageService {
             ResolvedWorkspaces::Current => return Ok(()),
         };
 
-        // `find_workspaces` already applied the npm `name-from-folder`
-        // fallback to anonymous workspaces, so `pkg.name` is non-empty here.
-        let mut by_name: HashMap<String, (PathBuf, PackageInfo)> = find_workspaces(root_path)
+        let mut by_name: HashMap<String, PackageInfo> = find_workspaces(root_path)
             .await?
             .into_iter()
             .map(|(name, path, pkg)| {
                 let info = PackageInfo::from_package_json(&path, &pkg)
                     .with_context(|| format!("Failed to load workspace {name}"))?;
-                Ok((name, (path, info)))
+                Ok((name, info))
             })
             .collect::<Result<_>>()?;
 
         for layer in layers {
             for name in layer {
-                let (_, package) = by_name
-                    .remove(&name)
-                    .expect("workspace name from layers must be in workspaces map");
+                let package = by_name.remove(&name).with_context(|| {
+                    format!("workspace {name} present in topology but missing from workspace map")
+                })?;
                 Self::run_install_lifecycle(&package, Some(&name)).await?;
             }
         }
@@ -75,9 +70,6 @@ impl PackageService {
         Ok(())
     }
 
-    /// Run npm's install lifecycle (`install` / `prepublish` / `prepare`
-    /// events, each expanding into `pre*`/main/`post*`) on a single package.
-    /// `workspace_label`, when present, tags announce lines as `[name]`.
     async fn run_install_lifecycle(
         package: &PackageInfo,
         workspace_label: Option<&str>,
@@ -88,7 +80,7 @@ impl PackageService {
                 event,
                 &[],
                 LifecycleSink::Stream { workspace_label },
-                false,
+                MissingScript::Skip,
             )
             .await
             .with_context(|| match workspace_label {
