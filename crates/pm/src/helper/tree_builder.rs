@@ -89,22 +89,13 @@ impl TreeBuilder {
         for (name, path, pkg) in workspaces {
             let version = &pkg.version;
 
-            // `find_workspaces` already applied the npm name-from-folder
-            // fallback for anonymous workspaces, so pass the resolved name
-            // explicitly — the no-arg constructors would default to the
-            // (possibly empty) `pkg.name`.
-            let workspace_node = PackageNode::workspace_from_package_json_with_name(
-                path.clone(),
-                pkg.clone(),
-                name.clone(),
-            );
+            // Create workspace node
+            let workspace_node =
+                PackageNode::workspace_from_package_json(path.clone(), pkg.clone());
             let workspace_index = graph.add_node(workspace_node);
 
-            let link_node = PackageNode::link_from_package_json_with_name(
-                path.clone(),
-                pkg.clone(),
-                name.clone(),
-            );
+            // Create link node
+            let link_node = PackageNode::link_from_package_json(path.clone(), pkg.clone());
             let link_index = graph.add_node(link_node);
 
             // Add physical edges

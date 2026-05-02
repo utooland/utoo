@@ -174,29 +174,9 @@ impl PackageInfo {
         Self::from_package_json(path, &pkg)
     }
 
-    /// Like [`load`], but uses `fallback_name` when `package.json` omits
-    /// `name` — for anonymous workspace packages identified by folder layout.
-    pub async fn load_with_name_fallback(path: &Path, fallback_name: &str) -> Result<Self> {
-        let pkg = get_or_load_package_json(path).await?;
-        Self::from_package_json_with_name_fallback(path, &pkg, fallback_name)
-    }
-
     /// Build from the full PackageJson (cached path, project/workspace packages).
     pub fn from_package_json(path: &Path, pkg: &PackageJson) -> Result<Self> {
-        Self::from_package_json_with_name_fallback(path, pkg, "")
-    }
-
-    fn from_package_json_with_name_fallback(
-        path: &Path,
-        pkg: &PackageJson,
-        fallback_name: &str,
-    ) -> Result<Self> {
-        let name = if pkg.name.is_empty() {
-            fallback_name
-        } else {
-            &pkg.name
-        };
-        if name.is_empty() {
+        if pkg.name.is_empty() {
             anyhow::bail!("Failed to get package name from package.json");
         }
         Ok(PackageInfo {
@@ -204,7 +184,7 @@ impl PackageInfo {
             bin_files: pkg.bin_entries(),
             lifecycle_scripts: LifecycleScripts::from_scripts(pkg.scripts_or_empty()),
             scripts: pkg.scripts_or_empty().clone(),
-            name: name.to_string(),
+            name: pkg.name.clone(),
         })
     }
 

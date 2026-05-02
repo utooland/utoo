@@ -100,7 +100,8 @@ impl<G: Glob> WorkspaceDiscovery<G> {
                 };
 
                 // Read workspace package.json
-                let workspace_pkg: PackageJson = match read_package_json(&workspace_path).await {
+                let mut workspace_pkg: PackageJson = match read_package_json(&workspace_path).await
+                {
                     Ok(pkg) => pkg,
                     Err(e) => {
                         tracing::debug!("Failed to read workspace package.json: {}", e);
@@ -108,19 +109,25 @@ impl<G: Glob> WorkspaceDiscovery<G> {
                     }
                 };
 
-                let name = if workspace_pkg.name.is_empty() {
-                    name_from_folder(&workspace_path).ok_or_else(|| {
+                // Anonymous workspaces (no `name` in package.json) get the
+                // npm `@npmcli/name-from-folder` fallback written back into
+                // the in-memory `PackageJson`, so every downstream consumer
+                // sees a non-empty name without needing a parallel API.
+                if workspace_pkg.name.is_empty() {
+                    workspace_pkg.name = name_from_folder(&workspace_path).ok_or_else(|| {
                         anyhow::anyhow!(
                             "anonymous workspace at {} has no derivable name",
                             workspace_path.display()
                         )
-                    })?
-                } else {
-                    workspace_pkg.name.clone()
-                };
-                tracing::debug!("Found workspace: {} at {:?}", name, workspace_path);
+                    })?;
+                }
+                tracing::debug!(
+                    "Found workspace: {} at {:?}",
+                    workspace_pkg.name,
+                    workspace_path
+                );
                 workspaces.push(WorkspacePackage {
-                    name,
+                    name: workspace_pkg.name.clone(),
                     path: workspace_path,
                     package_json: workspace_pkg,
                 });

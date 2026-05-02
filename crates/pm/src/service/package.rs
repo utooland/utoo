@@ -1,8 +1,10 @@
+use crate::helper::workspace::find_workspaces;
 use crate::model::package::{LifecycleHook, LifecycleScripts, PackageInfo};
 use crate::util::cli_enum::ScriptPolicy;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
 use anyhow::{Context, Result};
 use futures;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
@@ -43,20 +45,29 @@ impl PackageService {
     /// order, so a downstream workspace can import build artifacts produced
     /// by an upstream workspace's `prepare` (npm 7+ semantics).
     pub async fn process_workspace_install_hooks(root_path: &Path) -> Result<()> {
-        let resolved = WorkspaceService::resolve_layers(root_path, WorkspaceFilter::All).await?;
-        let (layers, paths) = match resolved {
-            ResolvedWorkspaces::Layers { layers, paths } => (layers, paths),
+        let layers = match WorkspaceService::resolve_layers(root_path, WorkspaceFilter::All).await?
+        {
+            ResolvedWorkspaces::Layers { layers, .. } => layers,
             ResolvedWorkspaces::Current => return Ok(()),
         };
 
+        // `find_workspaces` already applied the npm `name-from-folder`
+        // fallback to anonymous workspaces, so `pkg.name` is non-empty here.
+        let mut by_name: HashMap<String, (PathBuf, PackageInfo)> = find_workspaces(root_path)
+            .await?
+            .into_iter()
+            .map(|(name, path, pkg)| {
+                let info = PackageInfo::from_package_json(&path, &pkg)
+                    .with_context(|| format!("Failed to load workspace {name}"))?;
+                Ok((name, (path, info)))
+            })
+            .collect::<Result<_>>()?;
+
         for layer in layers {
             for name in layer {
-                let path = paths
-                    .get(&name)
-                    .expect("workspace name from layers must be in paths map");
-                let package = PackageInfo::load_with_name_fallback(path, &name)
-                    .await
-                    .with_context(|| format!("Failed to load workspace {name}"))?;
+                let (_, package) = by_name
+                    .remove(&name)
+                    .expect("workspace name from layers must be in workspaces map");
                 for &hook in LifecycleHook::PROJECT_INSTALL_HOOKS {
                     ScriptService::execute_script(&package, hook, ScriptOutput::Verbose)
                         .await
