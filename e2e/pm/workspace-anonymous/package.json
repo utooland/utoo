@@ -1,0 +1,8 @@
+{
+  "name": "workspace-anonymous-test",
+  "private": true,
+  "workspaces": [
+    "anon-a",
+    "anon-b"
+  ]
+}

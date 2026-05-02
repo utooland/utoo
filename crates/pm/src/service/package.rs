@@ -1,8 +1,10 @@
+use crate::helper::workspace::find_workspaces;
 use crate::model::package::{LifecycleHook, LifecycleScripts, PackageInfo};
 use crate::util::cli_enum::ScriptPolicy;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
 use anyhow::{Context, Result};
 use futures;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
@@ -10,7 +12,12 @@ use utoo_ruborist::lock::PackageLock;
 use utoo_ruborist::manifest::ScriptsView;
 use utoo_ruborist::model::package_json::parse_bin_field;
 
-use super::script::{ScriptOutput, ScriptService};
+use super::script::{LifecycleSink, MissingScript, ScriptOutput, ScriptService};
+use super::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
+
+/// npm install lifecycle ordered by event chain, each expanding to
+/// `pre<event>` / `<event>` / `post<event>` via [`ScriptService::run_lifecycle`].
+const NPM_INSTALL_EVENTS: &[&str] = &["install", "prepublish", "prepare"];
 
 /// Execution queues for package scripts and binary linking
 /// Each entry is (PackageInfo, is_optional) where is_optional indicates if the package
@@ -28,13 +35,59 @@ pub struct PackageService;
 impl PackageService {
     pub async fn process_project_hooks(root_path: &Path) -> Result<()> {
         let package_info = PackageInfo::load(root_path).await?;
+        Self::run_install_lifecycle(&package_info, None).await
+    }
 
-        for &hook in LifecycleHook::PROJECT_INSTALL_HOOKS {
-            ScriptService::execute_script(&package_info, hook, ScriptOutput::Verbose)
-                .await
-                .with_context(|| format!("Failed to execute project hook {hook}"))?;
+    /// Walk workspaces in topological order so a downstream workspace can
+    /// consume build artifacts produced by an upstream workspace's `prepare`
+    /// (npm 7+ semantics, fixes #2833).
+    pub async fn process_workspace_install_hooks(root_path: &Path) -> Result<()> {
+        let layers = match WorkspaceService::resolve_layers(root_path, WorkspaceFilter::All).await?
+        {
+            ResolvedWorkspaces::Layers { layers, .. } => layers,
+            ResolvedWorkspaces::Current => return Ok(()),
+        };
+
+        let mut by_name: HashMap<String, PackageInfo> = find_workspaces(root_path)
+            .await?
+            .into_iter()
+            .map(|(name, path, pkg)| {
+                let info = PackageInfo::from_package_json(&path, &pkg)
+                    .with_context(|| format!("Failed to load workspace {name}"))?;
+                Ok((name, info))
+            })
+            .collect::<Result<_>>()?;
+
+        for layer in layers {
+            for name in layer {
+                let package = by_name.remove(&name).with_context(|| {
+                    format!("workspace {name} present in topology but missing from workspace map")
+                })?;
+                Self::run_install_lifecycle(&package, Some(&name)).await?;
+            }
         }
 
+        Ok(())
+    }
+
+    async fn run_install_lifecycle(
+        package: &PackageInfo,
+        workspace_label: Option<&str>,
+    ) -> Result<()> {
+        for &event in NPM_INSTALL_EVENTS {
+            ScriptService::run_lifecycle(
+                package,
+                event,
+                &[],
+                LifecycleSink::Stream { workspace_label },
+                MissingScript::Skip,
+            )
+            .await
+            .with_context(|| match workspace_label {
+                Some(label) => format!("Failed to execute {event} lifecycle for {label}"),
+                None => format!("Failed to execute project {event} lifecycle"),
+            })?;
+        }
         Ok(())
     }
 
@@ -598,7 +651,7 @@ mod tests {
             result
                 .unwrap_err()
                 .to_string()
-                .contains("Failed to execute project hook")
+                .contains("Failed to execute project")
         );
     }
 
@@ -1101,6 +1154,171 @@ mod tests {
         assert!(
             result.is_err(),
             "Required dependency script failure should return error"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_workspace_install_hooks_topological_order() {
+        // Reproduces issue #2833: workspace B depends on A and consumes
+        // A's `prepare`-built artifact. process_workspace_install_hooks must
+        // run A's prepare before B's so B can find the artifact.
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+
+        fs::write(
+            root.join("package.json"),
+            r#"{
+                "name": "root",
+                "private": true,
+                "workspaces": ["packages/*"]
+            }"#,
+        )
+        .unwrap();
+
+        let a_dir = root.join("packages/A");
+        let b_dir = root.join("packages/B");
+        fs::create_dir_all(&a_dir).unwrap();
+        fs::create_dir_all(&b_dir).unwrap();
+
+        // A's `prepare` produces lib/marker; B's `prepare` asserts it exists.
+        fs::write(
+            a_dir.join("package.json"),
+            r#"{
+                "name": "A",
+                "version": "1.0.0",
+                "scripts": {
+                    "prepare": "mkdir -p lib && echo built > lib/marker"
+                }
+            }"#,
+        )
+        .unwrap();
+        fs::write(
+            b_dir.join("package.json"),
+            r#"{
+                "name": "B",
+                "version": "1.0.0",
+                "dependencies": { "A": "*" },
+                "scripts": {
+                    "prepare": "test -f ../A/lib/marker"
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let result = PackageService::process_workspace_install_hooks(root).await;
+        assert!(
+            result.is_ok(),
+            "workspace install hooks should run in topological order: {result:?}"
+        );
+        assert!(
+            a_dir.join("lib/marker").exists(),
+            "A's prepare should have produced lib/marker"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_workspace_install_hooks_no_workspaces() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+
+        // Single package, no workspaces field — must be a no-op success.
+        fs::write(
+            root.join("package.json"),
+            r#"{ "name": "lonely", "version": "1.0.0" }"#,
+        )
+        .unwrap();
+
+        let result = PackageService::process_workspace_install_hooks(root).await;
+        assert!(
+            result.is_ok(),
+            "non-workspace project should succeed without running anything"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_workspace_install_hooks_propagates_failure() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+
+        fs::write(
+            root.join("package.json"),
+            r#"{
+                "name": "root",
+                "private": true,
+                "workspaces": ["packages/*"]
+            }"#,
+        )
+        .unwrap();
+
+        let pkg_dir = root.join("packages/fail");
+        fs::create_dir_all(&pkg_dir).unwrap();
+        fs::write(
+            pkg_dir.join("package.json"),
+            r#"{
+                "name": "fail",
+                "version": "1.0.0",
+                "scripts": { "prepare": "exit 1" }
+            }"#,
+        )
+        .unwrap();
+
+        let result = PackageService::process_workspace_install_hooks(root).await;
+        assert!(
+            result.is_err(),
+            "a failing workspace prepare must surface as an error"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_workspace_install_hooks_anonymous_workspaces() {
+        // Regression for arborist `workspaces-need-update` fixture: workspace
+        // package.json files may omit `name`. Without the folder-derived
+        // fallback (npm `name-from-folder`), hooks could not be loaded and
+        // anonymous siblings collapsed to the same empty key. We expect both
+        // to be visited and to run their hooks.
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+
+        fs::write(
+            root.join("package.json"),
+            r#"{
+                "name": "root",
+                "private": true,
+                "workspaces": ["a", "b"]
+            }"#,
+        )
+        .unwrap();
+
+        let a_dir = root.join("a");
+        let b_dir = root.join("b");
+        fs::create_dir_all(&a_dir).unwrap();
+        fs::create_dir_all(&b_dir).unwrap();
+
+        // Both workspaces are anonymous (no `name` field). Each writes a
+        // distinct marker file from a `prepare` script.
+        fs::write(
+            a_dir.join("package.json"),
+            r#"{ "scripts": { "prepare": "touch marker-a" } }"#,
+        )
+        .unwrap();
+        fs::write(
+            b_dir.join("package.json"),
+            r#"{ "scripts": { "prepare": "touch marker-b" } }"#,
+        )
+        .unwrap();
+
+        let result = PackageService::process_workspace_install_hooks(root).await;
+        assert!(
+            result.is_ok(),
+            "anonymous workspaces should not fail load: {result:?}"
+        );
+        assert!(
+            a_dir.join("marker-a").exists(),
+            "anonymous workspace `a` prepare must have run"
+        );
+        assert!(
+            b_dir.join("marker-b").exists(),
+            "anonymous workspace `b` prepare must have run"
         );
     }
 }

@@ -1,0 +1,11 @@
+{
+  "name": "app",
+  "version": "1.0.0",
+  "dependencies": {
+    "lib-a": "*",
+    "lib-b": "*"
+  },
+  "scripts": {
+    "prepare": "test -f ../lib-a/lib/index.js && test -f ../lib-b/lib/index.js"
+  }
+}

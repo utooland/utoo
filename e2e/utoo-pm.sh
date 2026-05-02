@@ -634,6 +634,97 @@ fi
 echo -e "${GREEN}PASS: workspace devDep cycle handled correctly${NC}"
 cd ../../..
 
+# Case: workspace `prepare`/`postinstall` hooks run in topological order
+# Regression guard for #2833: ut install must run lifecycle install hooks
+# on workspace source packages (npm 7+ semantics) so that a consumer
+# workspace can import the producer workspace's `prepare`-built output.
+echo -e "${YELLOW}Case: workspace prepare hooks (issue #2833)${NC}"
+cd e2e/pm/workspace-prepare
+rm -rf node_modules app/node_modules lib-a/node_modules lib-b/node_modules
+rm -rf lib-a/lib lib-a/.markers lib-b/lib package-lock.json
+
+utoo install --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: utoo install failed for workspace-prepare${NC}"; exit 1; }
+
+# lib-a's `prepare` must produce lib/index.js BEFORE lib-b's prepare runs
+if [ ! -f "lib-a/lib/index.js" ]; then
+    echo -e "${RED}FAIL: lib-a/lib/index.js missing — lib-a prepare did not run${NC}"
+    exit 1
+fi
+# lib-b's `prepare` only succeeds if lib-a's artifact already exists; the
+# fact that lib-b/lib/index.js was produced proves topological ordering held
+if [ ! -f "lib-b/lib/index.js" ]; then
+    echo -e "${RED}FAIL: lib-b/lib/index.js missing — topological order broken${NC}"
+    exit 1
+fi
+# postinstall on a workspace package must also fire (not just prepare)
+if [ ! -f "lib-a/.markers/postinstall" ]; then
+    echo -e "${RED}FAIL: lib-a postinstall did not run${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: utoo install ran workspace prepare/postinstall in topo order${NC}"
+
+# ut rebuild must re-run the same hooks (per issue: rebuild was also broken)
+rm -rf lib-a/lib lib-a/.markers lib-b/lib
+
+utoo rebuild \
+  || { echo -e "${RED}FAIL: utoo rebuild failed for workspace-prepare${NC}"; exit 1; }
+
+if [ ! -f "lib-a/lib/index.js" ] || [ ! -f "lib-b/lib/index.js" ]; then
+    echo -e "${RED}FAIL: utoo rebuild did not run workspace prepare hooks${NC}"
+    exit 1
+fi
+if [ ! -f "lib-a/.markers/postinstall" ]; then
+    echo -e "${RED}FAIL: utoo rebuild did not run workspace postinstall${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: utoo rebuild re-ran workspace prepare/postinstall${NC}"
+
+# --ignore-scripts must skip workspace hooks too (no surprise side effects)
+rm -rf node_modules lib-a/lib lib-a/.markers lib-b/lib package-lock.json
+
+utoo install --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: utoo install --ignore-scripts failed${NC}"; exit 1; }
+
+if [ -f "lib-a/lib/index.js" ] || [ -f "lib-a/.markers/postinstall" ]; then
+    echo -e "${RED}FAIL: --ignore-scripts must skip workspace hooks${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: --ignore-scripts skips workspace hooks${NC}"
+
+# Cleanup so re-runs start clean
+rm -rf node_modules app/node_modules lib-a/node_modules lib-b/node_modules
+rm -rf lib-a/lib lib-a/.markers lib-b/lib package-lock.json
+cd ../../..
+
+# Case: anonymous workspace packages (no `name` field) — npm/arborist
+# fixtures like workspaces-need-update ship unnamed workspaces; ut install
+# must derive a name from the folder layout (npm `@npmcli/name-from-folder`)
+# and still run their lifecycle install hooks, otherwise an early bail like
+# "Failed to get package name from package.json" aborts the whole walk.
+echo -e "${YELLOW}Case: anonymous workspace packages (no name field)${NC}"
+cd e2e/pm/workspace-anonymous
+rm -rf node_modules anon-a/node_modules anon-b/node_modules
+rm -f anon-a/marker-postinstall anon-b/marker-prepare package-lock.json
+
+utoo install --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: utoo install crashed on anonymous workspaces${NC}"; exit 1; }
+
+# Both anonymous workspaces must have run their lifecycle hooks.
+if [ ! -f "anon-a/marker-postinstall" ]; then
+    echo -e "${RED}FAIL: anonymous workspace anon-a postinstall did not run${NC}"
+    exit 1
+fi
+if [ ! -f "anon-b/marker-prepare" ]; then
+    echo -e "${RED}FAIL: anonymous workspace anon-b prepare did not run${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: anonymous workspace hooks ran via name-from-folder fallback${NC}"
+
+rm -rf node_modules anon-a/node_modules anon-b/node_modules
+rm -f anon-a/marker-postinstall anon-b/marker-prepare package-lock.json
+cd ../../..
+
 # Case: multi-workspace `ut run` log presentation
 echo -e "${YELLOW}Case: ut run multi-workspace log presentation${NC}"
 cd e2e/pm/run-workspaces

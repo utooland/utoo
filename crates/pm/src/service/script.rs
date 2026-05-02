@@ -36,6 +36,21 @@ pub enum MissingScript {
     Skip,
 }
 
+/// Where the output of a [`ScriptService::run_lifecycle`] call goes.
+///
+/// Capture borrows the caller's buffers so they retain bytes captured up to
+/// a failing step — `run_in_layers` prints those as the `✗ [ws] …` tail.
+pub enum LifecycleSink<'a> {
+    Stream {
+        workspace_label: Option<&'a str>,
+    },
+    Capture {
+        workspace_label: &'a str,
+        header: &'a mut String,
+        body: &'a mut Vec<u8>,
+    },
+}
+
 /// Build a `Command` with the standard npm env vars for script execution.
 async fn build_script_command(
     package: &PackageInfo,
@@ -382,6 +397,79 @@ impl ScriptService {
         Ok(())
     }
 
+    /// Run the npm event chain `pre<event>` / `<event>` / `post<event>` on a
+    /// single package, mirroring npm's lifecycle semantics (e.g. `install`
+    /// event = preinstall + install + postinstall, each independent).
+    ///
+    /// `missing` controls behaviour when the main script is undefined:
+    /// `Fail` bails (matches `npm run <name>`), `Skip` runs whatever subset
+    /// of pre/post exists. Pre/post are always silently skipped when absent.
+    pub async fn run_lifecycle(
+        package: &PackageInfo,
+        event: &str,
+        args: &[&str],
+        mut sink: LifecycleSink<'_>,
+        missing: MissingScript,
+    ) -> Result<bool> {
+        let pre_name = format!("pre{event}");
+        let post_name = format!("post{event}");
+
+        let main_script = package.scripts.get(event).cloned();
+        let pre_script = package.scripts.get(&pre_name).cloned();
+        let post_script = package.scripts.get(&post_name).cloned();
+
+        if missing == MissingScript::Fail && main_script.is_none() {
+            anyhow::bail!("Script '{event}' not found in package.json");
+        }
+
+        let steps: [(&str, Option<String>, &[&str]); 3] = [
+            (pre_name.as_str(), pre_script, &[]),
+            (event, main_script, args),
+            (post_name.as_str(), post_script, &[]),
+        ];
+
+        let mut ran_any = false;
+        for (step_name, script_opt, step_args) in steps {
+            let Some(content) = script_opt else { continue };
+            ran_any = true;
+
+            match &mut sink {
+                LifecycleSink::Stream { workspace_label } => {
+                    announce_script(*workspace_label, &content, &step_args.join(" "));
+                    Self::execute_custom_script(package, step_name, &content, step_args.to_vec())
+                        .await
+                        .with_context(|| format!("Failed to execute {step_name}"))?;
+                }
+                LifecycleSink::Capture {
+                    workspace_label,
+                    header,
+                    body,
+                } => {
+                    let _ = writeln!(
+                        header,
+                        "[{}] {} {}",
+                        workspace_label,
+                        content,
+                        step_args.join(" ")
+                    );
+                    let cap = Self::execute_custom_script_captured(
+                        package,
+                        step_name,
+                        &content,
+                        step_args.to_vec(),
+                    )
+                    .await?;
+                    append_captured(body, &cap.stdout, &cap.stderr);
+                    if !cap.status.success() {
+                        anyhow::bail!("Failed to execute {step_name}");
+                    }
+                }
+            }
+        }
+
+        Ok(ran_any)
+    }
+
     /// Like [`Self::execute_custom_script`], but captures stdout/stderr
     /// instead of streaming to the terminal.
     pub async fn execute_custom_script_captured(
@@ -430,34 +518,18 @@ impl ScriptService {
         };
 
         let package = PackageInfo::load(&package_path).await?;
+        let args = script_args.unwrap_or_default();
 
-        let pre_script_name = format!("pre{script_name}");
-        if let Some(pre_script) = package.scripts.get(&pre_script_name) {
-            announce_script(workspace, pre_script, "");
-            Self::execute_custom_script(&package, &pre_script_name, pre_script, vec![])
-                .await
-                .with_context(|| format!("Failed to execute pre script {pre_script_name}"))?;
-        }
-
-        let script_content = package
-            .scripts
-            .get(script_name)
-            .ok_or_else(|| anyhow::anyhow!("Script '{script_name}' not found in package.json"))?;
-
-        let script_args = script_args.unwrap_or_default();
-        let script_args_str = script_args.join(" ");
-        announce_script(workspace, script_content, &script_args_str);
-        Self::execute_custom_script(&package, script_name, script_content, script_args)
-            .await
-            .with_context(|| format!("Failed to execute script {script_name}"))?;
-
-        let post_script_name = format!("post{script_name}");
-        if let Some(post_script) = package.scripts.get(&post_script_name) {
-            announce_script(workspace, post_script, "");
-            Self::execute_custom_script(&package, &post_script_name, post_script, vec![])
-                .await
-                .with_context(|| format!("Failed to execute post script {post_script_name}"))?;
-        }
+        Self::run_lifecycle(
+            &package,
+            script_name,
+            &args,
+            LifecycleSink::Stream {
+                workspace_label: workspace,
+            },
+            MissingScript::Fail,
+        )
+        .await?;
 
         Ok(())
     }
@@ -560,82 +632,40 @@ async fn run_script_captured(
     let mut header = String::new();
     let mut body = Vec::new();
 
-    let inner = async {
+    let outcome = async {
         let package = PackageInfo::load(workspace_dir).await?;
 
-        if !package.scripts.contains_key(script_name) {
-            if missing == MissingScript::Skip {
-                return Ok(false);
-            }
+        // Override run_lifecycle's generic "Script not found" error with a
+        // CLI-friendly hint that names the workspace and points at `utoo run`.
+        if missing == MissingScript::Fail && !package.scripts.contains_key(script_name) {
             anyhow::bail!(
                 "Missing script: \"{script_name}\"\n\nTo see a list of scripts, run:\n  utoo run --workspace={workspace_name}"
             );
         }
 
-        let pre_script_name = format!("pre{script_name}");
-        if let Some(pre_script) = package.scripts.get(&pre_script_name) {
-            let _ = writeln!(header, "[{workspace_name}] {pre_script}");
-            let cap = ScriptService::execute_custom_script_captured(
-                &package,
-                &pre_script_name,
-                pre_script,
-                vec![],
-            )
-            .await?;
-            append_captured(&mut body, &cap.stdout, &cap.stderr);
-            if !cap.status.success() {
-                anyhow::bail!("Failed to execute pre script {pre_script_name}");
-            }
-        }
-
-        let script_content = package
-            .scripts
-            .get(script_name)
-            .ok_or_else(|| anyhow::anyhow!("Script '{script_name}' not found in package.json"))?;
-
-        let script_args_refs: Vec<&str> = script_args
+        let args_refs: Vec<&str> = script_args
             .as_deref()
             .unwrap_or_default()
             .iter()
             .map(|s| s.as_str())
             .collect();
-        let _ = writeln!(
-            header,
-            "[{workspace_name}] {script_content} {}",
-            script_args_refs.join(" ")
-        );
-        let cap = ScriptService::execute_custom_script_captured(
+
+        ScriptService::run_lifecycle(
             &package,
             script_name,
-            script_content,
-            script_args_refs,
+            &args_refs,
+            LifecycleSink::Capture {
+                workspace_label: workspace_name,
+                header: &mut header,
+                body: &mut body,
+            },
+            MissingScript::Skip,
         )
-        .await?;
-        append_captured(&mut body, &cap.stdout, &cap.stderr);
-        if !cap.status.success() {
-            anyhow::bail!("Failed to execute script {script_name}");
-        }
+        .await
+    }
+    .await;
 
-        let post_script_name = format!("post{script_name}");
-        if let Some(post_script) = package.scripts.get(&post_script_name) {
-            let _ = writeln!(header, "[{workspace_name}] {post_script}");
-            let cap = ScriptService::execute_custom_script_captured(
-                &package,
-                &post_script_name,
-                post_script,
-                vec![],
-            )
-            .await?;
-            append_captured(&mut body, &cap.stdout, &cap.stderr);
-            if !cap.status.success() {
-                anyhow::bail!("Failed to execute post script {post_script_name}");
-            }
-        }
-
-        Ok::<bool, anyhow::Error>(true)
-    };
-
-    match inner.await {
+    match outcome {
         Ok(true) => WorkspaceOutcome::Ran {
             name: workspace_name.to_string(),
             header,
