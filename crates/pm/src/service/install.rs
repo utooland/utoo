@@ -201,7 +201,11 @@ pub async fn install_packages(
 /// hit without redundant network or extract work.
 ///
 /// Skipped: `link:` workspace targets, `git+*` (BFS-resolved), `file:`
-/// (cache slot is BFS-seeded — no equivalent in fresh-lock yet).
+/// (cache slot is BFS-seeded — no equivalent in fresh-lock yet),
+/// CPU/OS-incompatible optional natives (e.g. `lightningcss-linux-arm64`
+/// on a darwin host) — install would skip them anyway, and prefetching
+/// them inflates network RX 3× on bench-phases-linux because every
+/// optional platform variant pulls its full tarball.
 fn spawn_tarball_prefetch(package_lock: &utoo_ruborist::lock::PackageLock, cwd: &Path) {
     for (path, package) in package_lock.packages.iter() {
         if package.link.is_some() {
@@ -216,6 +220,16 @@ fn spawn_tarball_prefetch(package_lock: &utoo_ruborist::lock::PackageLock, cwd: 
         if is_git_url(resolved) || resolved.starts_with("file:") {
             continue;
         }
+        if let Some(ref cpu) = package.cpu
+            && !is_cpu_compatible(cpu)
+        {
+            continue;
+        }
+        if let Some(ref os) = package.os
+            && !is_os_compatible(os)
+        {
+            continue;
+        }
         let Some(version) = package.version.clone() else {
             continue;
         };
@@ -223,12 +237,6 @@ fn spawn_tarball_prefetch(package_lock: &utoo_ruborist::lock::PackageLock, cwd: 
         if name.is_empty() {
             continue;
         }
-        // CPU/OS-incompatible packages still get prefetched: the layer
-        // overhead is dominated by the slow tail, and skipping them
-        // here would require re-doing the compat check that
-        // `install_packages` already does. The download buys the
-        // option of installing on a different host that reuses the
-        // same cache.
         let _ = cwd; // reserved for future relative-path resolution
         let resolved = resolved.to_string();
         tokio::spawn(async move {
