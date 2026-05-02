@@ -33,19 +33,6 @@ pub enum LifecycleHook {
     Postpublish,
 }
 
-impl LifecycleHook {
-    /// Hooks executed for the project root during install.
-    pub const PROJECT_INSTALL_HOOKS: &[Self] = &[
-        Self::Preinstall,
-        Self::Install,
-        Self::Postinstall,
-        Self::Prepublish,
-        Self::Preprepare,
-        Self::Prepare,
-        Self::Postprepare,
-    ];
-}
-
 /// Lifecycle scripts extracted from package.json.
 /// Only contains known npm lifecycle hooks; arbitrary user scripts are in `PackageInfo.scripts`.
 #[derive(Debug, Default, Clone)]

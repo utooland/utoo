@@ -12,8 +12,15 @@ use utoo_ruborist::lock::PackageLock;
 use utoo_ruborist::manifest::ScriptsView;
 use utoo_ruborist::model::package_json::parse_bin_field;
 
-use super::script::{ScriptOutput, ScriptService};
+use super::script::{LifecycleSink, ScriptOutput, ScriptService};
 use super::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
+
+/// npm install lifecycle, expressed as the three event chains npm runs in
+/// order. Each maps to `pre<event>` / `<event>` / `post<event>`, together
+/// covering preinstall, install, postinstall, prepublish, preprepare,
+/// prepare, postprepare — at the npm-event granularity that
+/// [`ScriptService::run_lifecycle`] expects.
+const NPM_INSTALL_EVENTS: &[&str] = &["install", "prepublish", "prepare"];
 
 /// Execution queues for package scripts and binary linking
 /// Each entry is (PackageInfo, is_optional) where is_optional indicates if the package
@@ -31,14 +38,7 @@ pub struct PackageService;
 impl PackageService {
     pub async fn process_project_hooks(root_path: &Path) -> Result<()> {
         let package_info = PackageInfo::load(root_path).await?;
-
-        for &hook in LifecycleHook::PROJECT_INSTALL_HOOKS {
-            ScriptService::execute_script(&package_info, hook, ScriptOutput::Verbose)
-                .await
-                .with_context(|| format!("Failed to execute project hook {hook}"))?;
-        }
-
-        Ok(())
+        Self::run_install_lifecycle(&package_info, None).await
     }
 
     /// Run install lifecycle hooks for each workspace package in topological
@@ -68,16 +68,34 @@ impl PackageService {
                 let (_, package) = by_name
                     .remove(&name)
                     .expect("workspace name from layers must be in workspaces map");
-                for &hook in LifecycleHook::PROJECT_INSTALL_HOOKS {
-                    ScriptService::execute_script(&package, hook, ScriptOutput::Verbose)
-                        .await
-                        .with_context(|| {
-                            format!("Failed to execute workspace hook {hook} for {name}")
-                        })?;
-                }
+                Self::run_install_lifecycle(&package, Some(&name)).await?;
             }
         }
 
+        Ok(())
+    }
+
+    /// Run npm's install lifecycle (`install` / `prepublish` / `prepare`
+    /// events, each expanding into `pre*`/main/`post*`) on a single package.
+    /// `workspace_label`, when present, tags announce lines as `[name]`.
+    async fn run_install_lifecycle(
+        package: &PackageInfo,
+        workspace_label: Option<&str>,
+    ) -> Result<()> {
+        for &event in NPM_INSTALL_EVENTS {
+            ScriptService::run_lifecycle(
+                package,
+                event,
+                &[],
+                LifecycleSink::Stream { workspace_label },
+                false,
+            )
+            .await
+            .with_context(|| match workspace_label {
+                Some(label) => format!("Failed to execute {event} lifecycle for {label}"),
+                None => format!("Failed to execute project {event} lifecycle"),
+            })?;
+        }
         Ok(())
     }
 
@@ -589,7 +607,7 @@ mod tests {
             result
                 .unwrap_err()
                 .to_string()
-                .contains("Failed to execute project hook")
+                .contains("Failed to execute project")
         );
     }
 
