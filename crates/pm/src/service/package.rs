@@ -277,20 +277,32 @@ impl PackageService {
         Ok(())
     }
 
-    /// Execute binary file linking for packages
-    /// Queue contains (PackageInfo, is_optional) tuples - is_optional is not used here
-    /// as binary linking happens only for successfully installed packages
+    /// Execute binary file linking for packages.
+    ///
+    /// Queue contains (PackageInfo, is_optional) tuples - is_optional is not used
+    /// here as binary linking happens only for successfully installed packages.
+    ///
+    /// Emits a single `[bin-link]` line on stderr summarising the batch
+    /// (count + wall time). Captured by the bench harness via hyperfine's
+    /// `--show-output` so we can quantify what fraction of warm-link wall
+    /// is bin linking before deciding whether to parallelise.
     async fn execute_binary_linking(queue: &[(Rc<PackageInfo>, bool)]) -> Result<()> {
+        let bin_link_start = std::time::Instant::now();
+        let mut total: u64 = 0;
+        let mut skipped: u64 = 0;
+
         for (package, _is_optional) in queue {
             if !package.bin_files.is_empty() {
                 tracing::debug!("Linking binary files for {}", package.name);
                 for (bin_name, relative_path) in &package.bin_files {
+                    total += 1;
                     let target_path = package.path.join(relative_path);
                     if !crate::fs::try_exists(&target_path).await? {
                         tracing::debug!(
                             "Binary file {} does not exist, skipping",
                             target_path.display()
                         );
+                        skipped += 1;
                         continue;
                     }
 
@@ -323,6 +335,16 @@ impl PackageService {
                 tracing::debug!("Linking binary files for {} successfully", package.name);
             }
         }
+
+        if total > 0 {
+            let wall = bin_link_start.elapsed();
+            eprintln!(
+                "[bin-link] mode=serial total={total} processed={} skipped={skipped} wall_ms={}",
+                total - skipped,
+                wall.as_millis()
+            );
+        }
+
         Ok(())
     }
 }
