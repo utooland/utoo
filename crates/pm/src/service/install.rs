@@ -18,7 +18,7 @@ use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
 use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
 use crate::util::cloner::clone_count;
-use crate::util::downloader::download_stats;
+use crate::util::downloader::{download_stats, download_to_cache, is_git_url};
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
 use crate::util::logger::{
@@ -186,6 +186,57 @@ pub async fn install_packages(
     Ok(())
 }
 
+/// Fan-out tarball downloads for every package in `package_lock` so they
+/// race ahead of the depth-ordered install loop.
+///
+/// Install must run layer-by-layer so a parent's `node_modules/` exists
+/// before children clone into it — but **download** has no such
+/// dependency: any tarball can land in the cache at any time. Without
+/// this prefetch, a fresh-lock install (no pipeline phase) only starts
+/// downloading depth-N+1 tarballs after depth-N's clone barrier
+/// releases, serializing what should be parallel network I/O.
+///
+/// `download_to_cache` is `OnceMap`-deduped on `name@version`, so the
+/// install loop's later call resolves to the prefetched future / cache
+/// hit without redundant network or extract work.
+///
+/// Skipped: `link:` workspace targets, `git+*` (BFS-resolved), `file:`
+/// (cache slot is BFS-seeded — no equivalent in fresh-lock yet).
+fn spawn_tarball_prefetch(package_lock: &utoo_ruborist::lock::PackageLock, cwd: &Path) {
+    for (path, package) in package_lock.packages.iter() {
+        if package.link.is_some() {
+            continue;
+        }
+        let Some(resolved) = package.resolved.as_deref() else {
+            continue;
+        };
+        if resolved.is_empty() {
+            continue;
+        }
+        if is_git_url(resolved) || resolved.starts_with("file:") {
+            continue;
+        }
+        let Some(version) = package.version.clone() else {
+            continue;
+        };
+        let name = package.get_name(path);
+        if name.is_empty() {
+            continue;
+        }
+        // CPU/OS-incompatible packages still get prefetched: the layer
+        // overhead is dominated by the slow tail, and skipping them
+        // here would require re-doing the compat check that
+        // `install_packages` already does. The download buys the
+        // option of installing on a different host that reuses the
+        // same cache.
+        let _ = cwd; // reserved for future relative-path resolution
+        let resolved = resolved.to_string();
+        tokio::spawn(async move {
+            download_to_cache(&name, &version, &resolved).await;
+        });
+    }
+}
+
 pub struct InstallService;
 
 impl InstallService {
@@ -264,6 +315,16 @@ impl InstallService {
             finish_progress_bar("package-lock.json resolved", Some(resolve_start.elapsed()));
             (result.package_lock, Some(result.handles))
         };
+
+        // Stale-lock path already gets per-package downloads kicked off
+        // by the BFS pipeline (`PackageResolved` → download_worker), so
+        // the prefetch is only a win for the fresh-lock path. OnceMap
+        // dedup means a duplicate kick from this prefetch is a cheap
+        // future-share, not duplicate work — but skipping the loop
+        // entirely saves the spawn cost.
+        if pipeline_handles.is_none() {
+            spawn_tarball_prefetch(&package_lock, root_path);
+        }
 
         let groups = group_by_depth(&package_lock.packages);
 
