@@ -104,6 +104,10 @@ jobs:
         if: ${{ matrix.settings.setup }}
         shell: bash
       
+      - name: Postinstall OS-detection e2e
+        run: sh e2e/postinstall-os-detect.sh
+        shell: bash
+
       - name: Setup Utoo
         uses: utooland/setup-utoo@v1
 
