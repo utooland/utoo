@@ -1,7 +1,23 @@
 #!/bin/sh
 
 # Get CPU & OS info - POSIX compatible (works with sh on Windows Git)
-if [ "$OSTYPE" = "msys" ] || [ "$OSTYPE" = "win32" ]; then
+# Detect Windows via uname output (MINGW*/MSYS*/CYGWIN*) so kernel-version
+# bumps on the host (e.g. Server 2022 -> 2025) don't change the package name.
+UNAME_S=$(uname -s 2>/dev/null || echo "")
+case "$UNAME_S" in
+    MINGW*|MSYS*|CYGWIN*)
+        IS_WIN=1
+        ;;
+    *)
+        if [ "$OSTYPE" = "msys" ] || [ "$OSTYPE" = "win32" ]; then
+            IS_WIN=1
+        else
+            IS_WIN=0
+        fi
+        ;;
+esac
+
+if [ "$IS_WIN" = "1" ]; then
     OS="win32"
     # On Windows, use PROCESSOR_ARCHITECTURE
     if [ "$PROCESSOR_ARCHITECTURE" = "AMD64" ] || [ "$PROCESSOR_ARCHITECTURE" = "x86_64" ]; then
@@ -11,15 +27,15 @@ if [ "$OSTYPE" = "msys" ] || [ "$OSTYPE" = "win32" ]; then
     else
         ARCH="x64"  # default
     fi
-else  
-    OS=$(uname -s | tr '[:upper:]' '[:lower:]')  
-    ARCH=$(uname -m)  
-    if [ "$ARCH" = "x86_64" ]; then  
-        ARCH="x64"  
-    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then  
-        ARCH="arm64"  
-    fi  
-fi  
+else
+    OS=$(echo "$UNAME_S" | tr '[:upper:]' '[:lower:]')
+    ARCH=$(uname -m)
+    if [ "$ARCH" = "x86_64" ]; then
+        ARCH="x64"
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+        ARCH="arm64"
+    fi
+fi
 
 # Function to find node_modules directory recursively
 find_node_modules() {
