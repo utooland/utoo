@@ -192,6 +192,21 @@ pub async fn prefetch_to_cache(name: &str, version: &str, tarball_url: &str) -> 
 /// For git-resolved packages, use [`resolve_cache_path`] instead.
 pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
     let key = format!("{}@{}", name, version);
+
+    // Hot fast-path: when the prefetch (or a sibling resolve) already
+    // populated the OnceMap entry, skip the per-call string allocs and
+    // future construction by reusing the cached `Arc<PathBuf>`. The
+    // pipeline path drives `download_to_cache` for every BFS-resolved
+    // package, and install-loop calls usually arrive after — most hit
+    // a `Done` slot.
+    if DOWNLOAD_CACHE.is_done(&key) {
+        return DOWNLOAD_CACHE
+            .get_or_init(key, || async { None })
+            .await
+            .as_deref()
+            .cloned();
+    }
+
     let cache_dir = get_cache_dir();
     let name = name.to_string();
     let version = version.to_string();

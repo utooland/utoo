@@ -118,6 +118,22 @@ where
         }
     }
 
+    /// Sync, allocation-free check for a completed entry.
+    ///
+    /// Lets hot-path callers short-circuit before paying string clones /
+    /// future construction for a key that's already been resolved by a
+    /// peer (e.g. install loop deduping against pipeline-pre-cloned
+    /// targets, where 95%+ of packages hit a `Done` slot).
+    ///
+    /// Returns `false` for both unknown keys and `Waiting` slots; only
+    /// `Done` is reported. Waiting entries fall through to the normal
+    /// `get_or_init` path which knows how to subscribe and wait.
+    pub fn is_done(&self, key: &K) -> bool {
+        self.map
+            .get(key)
+            .is_some_and(|e| matches!(e.value(), Value::Done(_)))
+    }
+
     /// Wait for a key to complete.
     ///
     /// - If the key exists and is Done, returns immediately.
