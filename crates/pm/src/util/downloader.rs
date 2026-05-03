@@ -167,10 +167,17 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
                 return Some(cache_path);
             }
 
-            // Download (semaphore controlled)
+            // Download (semaphore controlled). The permit gates only
+            // network I/O — extract runs on rayon's CPU pool and does
+            // not contend with download bandwidth, so we release the
+            // permit before the CPU-bound phase. This lets the next
+            // `download_to_cache` start immediately, doubling effective
+            // concurrency on tarball-heavy installs (download tasks no
+            // longer block on a peer task's ~50–200ms libdeflate +
+            // tar parse + parallel writes).
             let semaphore = DOWNLOAD_SEMAPHORE
                 .get_or_init(|| Semaphore::new(get_manifests_concurrency_limit_sync()));
-            let _permit = semaphore.acquire().await.ok()?;
+            let permit = semaphore.acquire().await.ok()?;
             let bytes = download_bytes(&tarball_url)
                 .await
                 .inspect_err(|e| {
@@ -183,6 +190,7 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
                     )
                 })
                 .ok()?;
+            drop(permit);
 
             // Extract
             extract_and_write(bytes, &cache_path)
