@@ -5,7 +5,18 @@
 # Self-heal makes a failed/skipped postinstall recoverable instead of terminal.
 set -e
 
+# Resolve $0 through symlinks. npm registers global bins as symlinks
+# (`$prefix/bin/utoo` -> `$prefix/lib/node_modules/utoo/bin/utoo`); without
+# this, `dirname "$0"` yields the symlink dir and the package.json walk-up
+# below misses the real package root.
 SELF_PATH="$0"
+while [ -L "$SELF_PATH" ]; do
+    LINK=$(readlink "$SELF_PATH")
+    case "$LINK" in
+        /*) SELF_PATH="$LINK" ;;
+        *) SELF_PATH="$(dirname "$SELF_PATH")/$LINK" ;;
+    esac
+done
 SELF_DIR=$(cd "$(dirname "$SELF_PATH")" && pwd)
 
 UNAME_S=$(uname -s 2>/dev/null || echo "")
@@ -111,13 +122,33 @@ if [ ! -f "$SRC_BIN" ]; then
     exit 1
 fi
 
-# Atomic install: copy to sibling .new then rename. POSIX rename is atomic and
-# leaves the currently-executing script's open fd intact, so this invocation
-# keeps running while future invocations see the new binary.
+# Atomic install: stage the new binary as a sibling, then rename. POSIX
+# rename is atomic and leaves the currently-executing script's open fd
+# intact, so this invocation keeps running while future invocations see the
+# new binary.
 cp "$SRC_BIN" "$SELF_DIR/utoo.new"
 chmod +x "$SELF_DIR/utoo.new"
-mv -f "$SELF_DIR/utoo.new" "$SELF_DIR/utoo"
 
-# Hand off to the real binary with the original args. PATH-based exec also
-# refreshes any shell hash for `utoo` in this process tree.
+# Always replace the canonical bin/utoo (npm shims for both `utoo` and `ut`
+# resolve here via the package.json bin map).
+cp -f "$SELF_DIR/utoo.new" "$SELF_DIR/utoo.tmp"
+mv -f "$SELF_DIR/utoo.tmp" "$SELF_DIR/utoo"
+
+# Also overwrite the bin file we were actually invoked through (e.g. bin/ut
+# if some shim or direct call landed there). After symlink resolution above
+# this is usually the same as bin/utoo, in which case the mv is a redundant
+# replace; only the direct-bin/ut invocation path benefits, but it costs one
+# rename and prevents that path from re-bootstrapping.
+if [ "$SELF_PATH" != "$SELF_DIR/utoo" ]; then
+    mv -f "$SELF_DIR/utoo.new" "$SELF_PATH"
+else
+    rm -f "$SELF_DIR/utoo.new"
+fi
+
+# `exec` replaces the process image, so the EXIT/INT/TERM trap above never
+# fires. Clean up the temp dir manually before handing off, otherwise every
+# successful bootstrap leaks an mktemp directory.
+trap - EXIT INT TERM
+rm -rf "$TMP"
+
 exec "$SELF_DIR/utoo" "$@"
