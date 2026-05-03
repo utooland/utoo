@@ -1,4 +1,24 @@
 #!/bin/sh
+# utoo postinstall — fast path of the bootstrap flow.
+#
+#   npm i utoo (+ optional @utoo/utoo-${OS}-${ARCH} sibling)
+#           │
+#           ▼
+#   detect OS / ARCH
+#   find_node_modules @utoo/utoo-${OS}-${ARCH}
+#           │
+#           ├── present:  cp <opt>/bin/utoo → bin/utoo  (Win: utoo.exe in prefix)
+#           │             real binary in place; user runs `utoo` directly.
+#           │
+#           └── absent:   return 0 with a "self-heal on first run" log.
+#                         placeholder bin/utoo stays; bin/utoo will download
+#                         the platform tarball itself on first invocation.
+#
+# Why no `npm i -g --force` fallback here: it recurses into another install,
+# can deadlock the parent (Windows lock contention, EACCES on global prefix),
+# and on failure leaves the bin permanently broken with no recovery path.
+# The placeholder self-heal is bounded, idempotent, and doesn't touch global
+# npm state. See vendor/templates/placeholder.utoo.sh.template.
 
 # Get CPU & OS info - POSIX compatible (works with sh on Windows Git)
 # Detect Windows via uname output (MINGW*/MSYS*/CYGWIN*) so kernel-version

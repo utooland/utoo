@@ -1,8 +1,46 @@
 #!/bin/sh
 # utoo bootstrap placeholder.
-# Replaced by the real binary either by postinstall (fast path) or by this
-# script downloading the platform tarball from the registry on first run.
-# Self-heal makes a failed/skipped postinstall recoverable instead of terminal.
+#
+# Two paths replace this file with the real platform binary:
+#   1. postinstall (fast path) — copies from the optional @utoo/utoo-${OS}-
+#      ${ARCH} sibling installed alongside us into bin/utoo.
+#   2. this script (self-heal) — runs only if (1) was skipped or failed
+#      (--no-optional, --ignore-scripts, missing platform variant, network
+#      blip, EACCES on global prefix, ...). Downloads the same tarball
+#      directly from the registry and atomic-renames it onto bin/utoo.
+#
+# Either way the user's first invocation succeeds; failed postinstall is
+# recoverable instead of a permanent dead end.
+#
+# Flow:
+#
+#   user runs `utoo …` or `ut …`
+#           │
+#           ▼  (npm shim symlink, both `utoo` and `ut` point here)
+#   <pkg>/bin/utoo
+#           │
+#           ├── if real binary  ─▶  exec, done.
+#           │
+#           └── if still placeholder (this script):
+#                   resolve $0 through symlinks → real <pkg>/bin/utoo
+#                   detect OS / ARCH
+#                   walk up to find utoo's package.json → version
+#                   for REG in [$UTOO_REGISTRY?, npmjs, npmmirror]:
+#                       curl -fsSL --connect-timeout 10 --max-time 120
+#                            <REG>/@utoo/utoo-${OS}-${ARCH}/-/...tgz
+#                       first 2xx wins
+#                   tar -xzf into mktemp dir
+#                   stage tmp/package/bin/utoo as bin/utoo.tmp
+#                   mv -f utoo.tmp utoo  (atomic; current open fd stays valid)
+#                   trap clear + rm -rf $TMP  (exec skips traps)
+#                   exec bin/utoo "$@"
+#
+# Invariants:
+#   - bin/utoo is the only physical bin file. bin/ut also exists as a
+#     placeholder but is never invoked (npm bin map: `ut` → `bin/utoo`).
+#   - The flow is idempotent. Any mid-flight failure (download / tar / pre-mv
+#     crash) leaves either the placeholder or the real binary on disk — never
+#     a half-installed state. Next invocation retries.
 set -e
 
 # Resolve $0 through symlinks. npm registers global bins as symlinks
