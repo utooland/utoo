@@ -22,7 +22,7 @@ use crate::fs;
 /// `ERROR_SHARING_VIOLATION` (os error 32) on Windows. `PathBuf` from
 /// `Path::components().collect()` parses both separators uniformly and
 /// rebuilds with the OS-preferred one, giving a stable key.
-static CLONE_CACHE: Lazy<OnceMap<PathBuf, ()>> = Lazy::new(OnceMap::new);
+pub(crate) static CLONE_CACHE: Lazy<OnceMap<PathBuf, ()>> = Lazy::new(OnceMap::new);
 
 /// Number of `node_modules/` directories freshly materialized this run.
 /// Mirrors pnpm's "added" semantic.
@@ -35,12 +35,12 @@ pub fn clone_count() -> usize {
 
 /// Normalize a target path into the canonical key used by `CLONE_CACHE`.
 #[cfg(windows)]
-fn cache_key(target_path: &Path) -> PathBuf {
+pub(crate) fn cache_key(target_path: &Path) -> PathBuf {
     target_path.components().collect()
 }
 
 #[cfg(not(windows))]
-fn cache_key(target_path: &Path) -> PathBuf {
+pub(crate) fn cache_key(target_path: &Path) -> PathBuf {
     target_path.to_path_buf()
 }
 
@@ -65,6 +65,15 @@ pub async fn clone_package_once(
     target_path: &Path,
 ) -> Result<()> {
     let key = cache_key(target_path);
+
+    // Hot fast-path: most install-loop calls hit a target the BFS
+    // pipeline (or a previous depth's spawn) already cloned. Probe
+    // CLONE_CACHE before paying the 5 string allocs + future
+    // construction below.
+    if CLONE_CACHE.is_done(&key) {
+        return Ok(());
+    }
+
     let err_label = format!("{name}@{version}");
     let name = name.to_string();
     let version = version.to_string();
