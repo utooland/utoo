@@ -78,8 +78,10 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-# Registry list mirrors utoo.land/install: env override, then npm, then china mirror.
-REGISTRIES="${UTOO_REGISTRY:-} https://registry.npmjs.org https://registry.npmmirror.com"
+# Registry order mirrors utoo.land/install. Keep this list in sync with the
+# canonical installer if you add a mirror.
+REGISTRIES="https://registry.npmjs.org https://registry.npmmirror.com"
+[ -n "${UTOO_REGISTRY:-}" ] && REGISTRIES="$UTOO_REGISTRY $REGISTRIES"
 
 if ! command -v curl >/dev/null 2>&1; then
     echo "utoo: curl is required to bootstrap the binary" >&2
@@ -97,9 +99,10 @@ trap 'rm -rf "$TMP"' EXIT INT TERM
 
 DOWNLOADED=0
 for REG in $REGISTRIES; do
-    [ -z "$REG" ] && continue
     URL="${REG}/@utoo/${PKG}/-/${PKG}-${VERSION}.tgz"
-    if curl -fsSL --connect-timeout 10 -o "$TMP/pkg.tgz" "$URL" 2>/dev/null; then
+    # --max-time caps the whole transfer; without it a registry that accepts
+    # the connection then trickles bytes hangs the user's first command.
+    if curl -fsSL --connect-timeout 10 --max-time 120 -o "$TMP/pkg.tgz" "$URL" 2>/dev/null; then
         DOWNLOADED=1
         break
     fi
@@ -122,32 +125,17 @@ if [ ! -f "$SRC_BIN" ]; then
     exit 1
 fi
 
-# Atomic install: stage the new binary as a sibling, then rename. POSIX
-# rename is atomic and leaves the currently-executing script's open fd
-# intact, so this invocation keeps running while future invocations see the
-# new binary.
-cp "$SRC_BIN" "$SELF_DIR/utoo.new"
-chmod +x "$SELF_DIR/utoo.new"
-
-# Always replace the canonical bin/utoo (npm shims for both `utoo` and `ut`
-# resolve here via the package.json bin map).
-cp -f "$SELF_DIR/utoo.new" "$SELF_DIR/utoo.tmp"
+# Atomic install. Stage as a sibling tmp file, then rename onto bin/utoo.
+# POSIX rename keeps this script's open fd intact, so the current invocation
+# keeps running while future invocations see the new binary. npm shims for
+# both `utoo` and `ut` resolve to bin/utoo via the package.json bin map, so
+# replacing only this one file covers both commands.
+cp "$SRC_BIN" "$SELF_DIR/utoo.tmp"
+chmod +x "$SELF_DIR/utoo.tmp"
 mv -f "$SELF_DIR/utoo.tmp" "$SELF_DIR/utoo"
 
-# Also overwrite the bin file we were actually invoked through (e.g. bin/ut
-# if some shim or direct call landed there). After symlink resolution above
-# this is usually the same as bin/utoo, in which case the mv is a redundant
-# replace; only the direct-bin/ut invocation path benefits, but it costs one
-# rename and prevents that path from re-bootstrapping.
-if [ "$SELF_PATH" != "$SELF_DIR/utoo" ]; then
-    mv -f "$SELF_DIR/utoo.new" "$SELF_PATH"
-else
-    rm -f "$SELF_DIR/utoo.new"
-fi
-
-# `exec` replaces the process image, so the EXIT/INT/TERM trap above never
-# fires. Clean up the temp dir manually before handing off, otherwise every
-# successful bootstrap leaks an mktemp directory.
+# `exec` replaces the process image and skips the EXIT/INT/TERM trap. Clean
+# up the temp dir manually, otherwise every bootstrap leaks an mktemp dir.
 trap - EXIT INT TERM
 rm -rf "$TMP"
 
