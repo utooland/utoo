@@ -335,8 +335,12 @@ async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
 pub async fn find_real_src<P: AsRef<Path>>(src: P) -> Option<PathBuf> {
     let mut read_dir = fs::read_dir(src.as_ref()).await.ok()?;
     while let Some(entry) = read_dir.next_entry().await.ok()? {
-        if let Ok(metadata) = entry.metadata().await
-            && metadata.is_dir()
+        // `file_type()` reads `d_type` from the cached readdir result on
+        // ext4/btrfs/xfs (no extra syscall); `metadata()` always issues
+        // an `lstat`. Saves ~3–5 stats per call × N packages on the
+        // cold install hot path.
+        if let Ok(file_type) = entry.file_type().await
+            && file_type.is_dir()
             && let Some(name) = entry.path().file_name()
             && name.to_string_lossy() != ".utoo_built"
         {
