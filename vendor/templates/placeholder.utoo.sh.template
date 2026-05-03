@@ -1,0 +1,123 @@
+#!/bin/sh
+# utoo bootstrap placeholder.
+# Replaced by the real binary either by postinstall (fast path) or by this
+# script downloading the platform tarball from the registry on first run.
+# Self-heal makes a failed/skipped postinstall recoverable instead of terminal.
+set -e
+
+SELF_PATH="$0"
+SELF_DIR=$(cd "$(dirname "$SELF_PATH")" && pwd)
+
+UNAME_S=$(uname -s 2>/dev/null || echo "")
+case "$UNAME_S" in
+    MINGW*|MSYS*|CYGWIN*) OS="win32" ;;
+    Darwin) OS="darwin" ;;
+    Linux) OS="linux" ;;
+    *)
+        if [ "${OSTYPE:-}" = "msys" ] || [ "${OSTYPE:-}" = "win32" ]; then
+            OS="win32"
+        else
+            echo "utoo: unsupported OS: ${UNAME_S:-unknown}" >&2
+            exit 1
+        fi
+        ;;
+esac
+
+if [ "$OS" = "win32" ]; then
+    case "${PROCESSOR_ARCHITECTURE:-}" in
+        AMD64|x86_64) ARCH="x64" ;;
+        ARM64) ARCH="arm64" ;;
+        *) ARCH="x64" ;;
+    esac
+else
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64|amd64) ARCH="x64" ;;
+        aarch64|arm64) ARCH="arm64" ;;
+        *)
+            echo "utoo: unsupported arch: $ARCH" >&2
+            exit 1
+            ;;
+    esac
+fi
+
+PKG="utoo-${OS}-${ARCH}"
+
+# Resolve installed version from the enclosing utoo package.json.
+PKG_ROOT=""
+d="$SELF_DIR"
+while [ "$d" != "/" ] && [ -n "$d" ]; do
+    if [ -f "$d/package.json" ] && grep -q '"name"[[:space:]]*:[[:space:]]*"utoo"' "$d/package.json"; then
+        PKG_ROOT="$d"
+        break
+    fi
+    d=$(dirname "$d")
+done
+
+if [ -z "$PKG_ROOT" ]; then
+    echo "utoo: cannot locate utoo package.json from $SELF_DIR" >&2
+    exit 1
+fi
+
+VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$PKG_ROOT/package.json" \
+    | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+
+if [ -z "$VERSION" ]; then
+    echo "utoo: cannot read version from $PKG_ROOT/package.json" >&2
+    exit 1
+fi
+
+# Registry list mirrors utoo.land/install: env override, then npm, then china mirror.
+REGISTRIES="${UTOO_REGISTRY:-} https://registry.npmjs.org https://registry.npmmirror.com"
+
+if ! command -v curl >/dev/null 2>&1; then
+    echo "utoo: curl is required to bootstrap the binary" >&2
+    exit 1
+fi
+if ! command -v tar >/dev/null 2>&1; then
+    echo "utoo: tar is required to bootstrap the binary" >&2
+    exit 1
+fi
+
+echo "utoo: bootstrapping @utoo/${PKG}@${VERSION}..." >&2
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT INT TERM
+
+DOWNLOADED=0
+for REG in $REGISTRIES; do
+    [ -z "$REG" ] && continue
+    URL="${REG}/@utoo/${PKG}/-/${PKG}-${VERSION}.tgz"
+    if curl -fsSL --connect-timeout 10 -o "$TMP/pkg.tgz" "$URL" 2>/dev/null; then
+        DOWNLOADED=1
+        break
+    fi
+done
+
+if [ "$DOWNLOADED" != "1" ]; then
+    echo "utoo: failed to download @utoo/${PKG}@${VERSION} from any registry" >&2
+    echo "utoo: tried: $REGISTRIES" >&2
+    exit 1
+fi
+
+if ! tar -xzf "$TMP/pkg.tgz" -C "$TMP"; then
+    echo "utoo: failed to extract package archive" >&2
+    exit 1
+fi
+
+SRC_BIN="$TMP/package/bin/utoo"
+if [ ! -f "$SRC_BIN" ]; then
+    echo "utoo: binary not found in package (expected package/bin/utoo)" >&2
+    exit 1
+fi
+
+# Atomic install: copy to sibling .new then rename. POSIX rename is atomic and
+# leaves the currently-executing script's open fd intact, so this invocation
+# keeps running while future invocations see the new binary.
+cp "$SRC_BIN" "$SELF_DIR/utoo.new"
+chmod +x "$SELF_DIR/utoo.new"
+mv -f "$SELF_DIR/utoo.new" "$SELF_DIR/utoo"
+
+# Hand off to the real binary with the original args. PATH-based exec also
+# refreshes any shell hash for `utoo` in this process tree.
+exec "$SELF_DIR/utoo" "$@"

@@ -36,20 +36,23 @@ chmod +x "$ENTRY_DIR/postinstall.sh"
 cp ../../README.md "$ENTRY_DIR/README.md"
 
 # create placeholder binaries
+# Unix placeholder self-heals: if postinstall did not replace it (missing
+# optional dep, --no-optional, --ignore-scripts, network blip, etc.), first
+# invocation downloads the platform tarball from the registry, atomically
+# replaces itself, and exec's the real binary. Failed postinstall becomes
+# recoverable instead of a permanent dead end.
 mkdir -p "$ENTRY_DIR/bin"
 for binary in utoo ut; do
-    # Unix version
-    cat > "$ENTRY_DIR/bin/$binary" << 'EOF'
-#!/bin/sh
-echo "This is a placeholder binary. The actual binary will be installed via postinstall script."
-exit 1
-EOF
+    cp ../templates/placeholder.utoo.sh.template "$ENTRY_DIR/bin/$binary"
     chmod +x "$ENTRY_DIR/bin/$binary"
-    
-    # Windows version (.cmd)
+
+    # Windows .cmd placeholder. postinstall on Windows writes utoo.exe into
+    # the npm prefix and removes this shim; if it didn't run, surface a clear
+    # recovery hint instead of a generic "placeholder" error.
     cat > "$ENTRY_DIR/bin/$binary.cmd" << 'EOF'
 @echo off
-echo This is a placeholder binary for %~n0. The actual binary will be installed via postinstall script.
+echo utoo: native binary not installed (postinstall did not run or failed). 1>&2
+echo utoo: recover with: npm install -g utoo --force 1>&2
 exit /b 1
 EOF
 done
