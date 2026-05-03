@@ -74,7 +74,6 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
 /// Synchronous extraction: decompress + parse + parallel write, all on rayon.
 fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -> Result<()> {
     use rayon::prelude::*;
-    use std::collections::HashSet;
     use std::fs;
     use std::io::Write;
 
@@ -104,18 +103,26 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
 
     // Collect every ancestor directory (up to `dest`), then create them
     // shallowest-first so a single mkdir() per dir is sufficient.
-    let mut seen = HashSet::new();
+    //
+    // Push to a Vec first (cheap) and dedup once at the end via sort
+    // — replaces a per-entry `HashSet<PathBuf>` insert that allocated
+    // a PathBuf for every ancestor on every entry, even when most
+    // entries share the same parent dirs (the common case).
+    let mut dirs: Vec<PathBuf> = Vec::with_capacity(entries.len());
     for entry in &entries {
         let mut p = entry.path.parent();
         while let Some(dir) = p {
-            if dir == dest || !seen.insert(dir.to_path_buf()) {
+            if dir == dest {
                 break;
             }
+            dirs.push(dir.to_path_buf());
             p = dir.parent();
         }
     }
-    let mut dirs: Vec<_> = seen.into_iter().collect();
-    dirs.sort_unstable_by_key(|p| p.as_os_str().len());
+    dirs.sort_unstable();
+    dirs.dedup();
+    // Sort by depth ascending so parent exists before child mkdir.
+    dirs.sort_by_key(|p| p.as_os_str().len());
     for dir in &dirs {
         fs::create_dir(dir).ok();
     }
