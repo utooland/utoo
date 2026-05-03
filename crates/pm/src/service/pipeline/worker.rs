@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use super::receiver::PipelineChannels;
 use crate::util::cloner::{clone_package_once, wait_clone_if_pending};
-use crate::util::downloader::{is_git_url, prefetch_to_cache};
+use crate::util::downloader::{download_to_cache, is_git_url};
 
 /// Pipeline worker handles for awaiting completion.
 pub struct PipelineHandles {
@@ -39,13 +39,8 @@ pub fn start_workers(channels: PipelineChannels, cwd: PathBuf) -> PipelineHandle
             }
             let name = info.name;
             let version = info.version;
-            // Route through `prefetch_to_cache` (16-slot back-pressure
-            // gate) so BFS-driven download fan-out can't starve the
-            // install loop's direct `download_to_cache` calls of
-            // DOWNLOAD_SEMAPHORE slots. Same pattern as fresh-lock
-            // tarball prefetch — install path always gets ≥48 slots.
             tokio::spawn(async move {
-                prefetch_to_cache(&name, &version, &tarball_url).await;
+                download_to_cache(&name, &version, &tarball_url).await;
             });
         }
     });
