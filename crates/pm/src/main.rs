@@ -345,13 +345,25 @@ enum Commands {
 fn main() {
     crate::util::sysconf::init();
 
-    let worker_threads = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4);
-
-    let result = tokio::runtime::Builder::new_multi_thread()
+    // Experiment: drop tokio's multi-thread work-stealing in favor of
+    // a single-thread async runtime. Hypothesis: the bulk of utoo's
+    // ~150K vCtx vs bun's ~17K is tokio worker-stealing — async tasks
+    // bouncing between worker threads to balance load. Single-thread
+    // runtime keeps all async work on one OS thread; the blocking
+    // pool (still enabled via `enable_all`) handles `spawn_blocking`
+    // for fs ops, and rayon's pool handles CPU-bound extract.
+    //
+    // Network I/O is unaffected: the same epoll/kqueue multiplexer
+    // drives 64-concurrent downloads, just from one thread instead
+    // of N. CPU-bound work is already off-loaded via rayon, so the
+    // single async thread should mostly poll and dispatch.
+    //
+    // Risk: any unexpected CPU-bound await would now serialize the
+    // whole runtime instead of stealing into another worker. Watch
+    // for wall-time regression on workloads that previously hid
+    // small CPU spikes inside multi-thread parallelism.
+    let result = tokio::runtime::Builder::new_current_thread()
         .enable_all()
-        .worker_threads(worker_threads)
         .build()
         .expect("failed to build tokio runtime")
         .block_on(async_main());
