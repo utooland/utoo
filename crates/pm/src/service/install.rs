@@ -17,7 +17,7 @@ use crate::helper::workspace::init_project_root;
 use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
 use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
-use crate::util::cloner::{CLONE_CACHE, cache_key, clone_count};
+use crate::util::cloner::{CLONE_CACHE, cache_key, clone_count, wait_clone_if_pending};
 use crate::util::downloader::{download_stats, is_git_url, prefetch_to_cache};
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
@@ -64,6 +64,16 @@ fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
     false
 }
 
+/// Compute the install path of `path`'s parent package, if any.
+///
+/// Lockfile paths embed the install hierarchy via repeated
+/// `node_modules/`. The parent's install path is everything up to the
+/// final `/node_modules/` separator. Top-level packages
+/// (`node_modules/foo`) have no parent.
+fn parent_install_path(path: &str) -> Option<&str> {
+    path.rfind("/node_modules/").map(|i| &path[..i])
+}
+
 pub async fn install_packages(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
@@ -77,23 +87,20 @@ pub async fn install_packages(
     clean_deps(groups, cwd).await?;
     log_progress("linking packages");
 
-    // Always process level-by-level to ensure parent directories exist before
-    // children. Within each level, tasks run concurrently. The pipeline's
-    // clone_worker may have already cloned some packages — clone_package_once
-    // deduplicates via CLONE_CACHE so no double work occurs.
+    // Cross-depth streaming: rather than running depth-by-depth with a
+    // barrier between layers, fan out every package to its own task and
+    // gate parent-before-child via `wait_clone_if_pending(parent)`
+    // inside the task. Same pattern the BFS pipeline already uses for
+    // its `clone_worker`. Removes the (max-depth × layer-tail latency)
+    // wall time previously spent waiting for one slow tarball at the
+    // back of each layer to finish before starting the next layer.
     let mut depths: Vec<_> = groups.keys().cloned().collect();
     depths.sort_unstable();
 
-    for depth in depths.iter() {
-        // Stream task completion within a layer instead of joining serially.
-        // The previous `for task in clone_tasks { task.await?? }` walks tasks
-        // in spawn order — slow tasks block the pop of already-finished
-        // ones, leaving idle latency between layers on deep trees. With
-        // FuturesUnordered we drain in completion order, propagating the
-        // first error early.
-        let mut clone_tasks: FuturesUnordered<tokio::task::JoinHandle<Result<()>>> =
-            FuturesUnordered::new();
+    let clone_tasks: FuturesUnordered<tokio::task::JoinHandle<Result<()>>> =
+        FuturesUnordered::new();
 
+    for depth in depths.iter() {
         if let Some(packages) = groups.get(depth) {
             for (path, package) in packages.iter() {
                 // Skip packages based on omit config
@@ -163,7 +170,15 @@ pub async fn install_packages(
                     let is_optional =
                         package.optional == Some(true) || package.dev_optional == Some(true);
 
+                    // Capture the parent's install path so the child can
+                    // `wait_clone_if_pending` before its own clone, lifting
+                    // the cross-depth ordering out of an explicit barrier.
+                    let parent_path = parent_install_path(&path).map(|p| cwd_clone.join(p));
+
                     let task = tokio::spawn(async move {
+                        if let Some(parent) = parent_path {
+                            wait_clone_if_pending(&parent.to_string_lossy()).await;
+                        }
                         if let Err(e) =
                             clone_package_once(&name, &version, &resolved, &target_path).await
                         {
@@ -186,10 +201,11 @@ pub async fn install_packages(
                 }
             }
         }
+    }
 
-        while let Some(joined) = clone_tasks.next().await {
-            joined??;
-        }
+    let mut clone_tasks = clone_tasks;
+    while let Some(joined) = clone_tasks.next().await {
+        joined??;
     }
 
     Ok(())
