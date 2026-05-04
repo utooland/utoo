@@ -1,0 +1,79 @@
+name: cargo-publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 1.0.30). Dry-run only via this trigger."
+        required: true
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || (startsWith(github.event.release.tag_name, 'utoo-v') && github.event.release.prerelease == false)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Resolve version
+        id: meta
+        env:
+          VERSION_INPUT: ${{ github.event.inputs.version }}
+          TAG_RELEASE: ${{ github.event.release.tag_name }}
+        run: |
+          if [ -n "$VERSION_INPUT" ]; then
+            VERSION="$VERSION_INPUT"
+          else
+            VERSION="${TAG_RELEASE#utoo-v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-02
+
+      - name: Bump versions
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -e
+          # crates/pm: package version + the path-dep version on utoo-ruborist
+          sed -i.bak "0,/^version *=.*/s|^version *=.*|version     = \"${VERSION}\"|" crates/pm/Cargo.toml
+          sed -i.bak "s|^utoo-ruborist *=.*|utoo-ruborist      = { path = \"../ruborist\", version = \"${VERSION}\", features = [\"http-tarball\", \"native-git\"] }|" crates/pm/Cargo.toml
+
+          # crates/ruborist: package version
+          sed -i.bak "0,/^version *=.*/s|^version *=.*|version     = \"${VERSION}\"|" crates/ruborist/Cargo.toml
+
+          rm -f crates/pm/Cargo.toml.bak crates/ruborist/Cargo.toml.bak
+
+          echo "----- crates/ruborist/Cargo.toml -----"
+          head -12 crates/ruborist/Cargo.toml
+          echo "----- crates/pm/Cargo.toml -----"
+          head -16 crates/pm/Cargo.toml
+          grep '^utoo-ruborist' crates/pm/Cargo.toml
+
+      - name: Publish utoo-ruborist (dry-run on workflow_dispatch)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            cargo publish -p utoo-ruborist --dry-run --allow-dirty
+          else
+            cargo publish -p utoo-ruborist --allow-dirty
+          fi
+
+      - name: Publish utoo-pm (dry-run on workflow_dispatch)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            cargo publish -p utoo-pm --dry-run --allow-dirty
+          else
+            cargo publish -p utoo-pm --allow-dirty
+          fi
