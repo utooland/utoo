@@ -138,6 +138,140 @@ mod hardlink_clone {
         Ok(())
     }
 
+    /// Phase-3 hardlink loop, abstracted across platforms.
+    ///
+    /// Linux: drives N concurrent `compio_fs::hard_link` futures so the
+    /// io_uring driver batches SQEs in a single `io_uring_enter` syscall
+    /// (vs N separate `linkat` syscalls in the std::fs version). On
+    /// EXDEV the function detects cross-device, latches `force_copy`,
+    /// and finishes the rest with `copy_file_sync` — same fallback
+    /// shape as the std::fs path.
+    ///
+    /// Other targets (non-macOS, non-Linux Unix + Windows): per-file
+    /// `fs::hard_link` loop, unchanged from the original implementation.
+    #[cfg(target_os = "linux")]
+    fn hardlink_phase(
+        files: &[CloneEntry],
+        force_copy: &mut bool,
+        src: &Path,
+        dst: &Path,
+    ) -> io::Result<()> {
+        use compio::runtime::Runtime as CompioRuntime;
+        use futures_util::future::join_all;
+
+        // Per-thread compio runtime — block_on requires &mut, so each
+        // tokio blocking thread gets its own io_uring instance, kept
+        // alive across calls. ~16KB per ring; tokio's blocking pool
+        // tops out around 64 active threads on this workload, so the
+        // overhead is bounded.
+        thread_local! {
+            static COMPIO_RT: std::cell::RefCell<Option<CompioRuntime>> =
+                const { std::cell::RefCell::new(None) };
+        }
+
+        // Empty input — nothing to do, also avoids paying runtime init.
+        if files.is_empty() {
+            return Ok(());
+        }
+
+        // If force_copy already latched (install-script package), do not
+        // touch compio at all — copy each file with std::fs.
+        if *force_copy {
+            for entry in files {
+                copy_file_sync(&entry.src, &entry.dst)?;
+            }
+            return Ok(());
+        }
+
+        // First pass: batch-issue hardlinks via compio. Collect per-file
+        // results so we can apply EXDEV / per-file fallback after.
+        let results: Vec<(usize, io::Result<()>)> = COMPIO_RT.with(|cell| {
+            let mut borrowed = cell.borrow_mut();
+            let rt = borrowed.get_or_insert_with(|| {
+                CompioRuntime::new().expect("failed to build compio runtime")
+            });
+            rt.block_on(async {
+                let futs = files.iter().enumerate().map(|(i, e)| {
+                    let src = e.src.clone();
+                    let dst = e.dst.clone();
+                    async move { (i, compio_fs::hard_link(src, dst).await) }
+                });
+                join_all(futs).await
+            })
+        });
+
+        // Second pass: apply EXDEV / per-file fallback in original order.
+        let mut warned_per_file = false;
+        for (i, result) in results {
+            if *force_copy {
+                copy_file_sync(&files[i].src, &files[i].dst)?;
+                continue;
+            }
+            if let Err(e) = result {
+                if e.kind() == io::ErrorKind::CrossesDevices {
+                    tracing::warn!(
+                        "cross-device hardlink {} -> {}: {}; falling back to copy for remaining files",
+                        src.display(),
+                        dst.display(),
+                        e
+                    );
+                    *force_copy = true;
+                } else if !warned_per_file {
+                    tracing::warn!(
+                        "hardlink failed for {} -> {}: {}; falling back to copy (further per-file failures suppressed)",
+                        files[i].src.display(),
+                        files[i].dst.display(),
+                        e
+                    );
+                    warned_per_file = true;
+                }
+                copy_file_sync(&files[i].src, &files[i].dst)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn hardlink_phase(
+        files: &[CloneEntry],
+        force_copy: &mut bool,
+        src: &Path,
+        dst: &Path,
+    ) -> io::Result<()> {
+        // Any other hardlink error (EMLINK on a single inode whose link
+        // count is exhausted, EPERM on a specific file, etc.) is
+        // per-file: copy this one and keep trying hardlink on the next.
+        // Warn only on the first such failure per package to avoid
+        // spamming hundreds of identical warnings.
+        let mut warned_per_file = false;
+        for entry in files {
+            if *force_copy {
+                copy_file_sync(&entry.src, &entry.dst)?;
+            } else if let Err(e) = fs::hard_link(&entry.src, &entry.dst) {
+                if e.kind() == io::ErrorKind::CrossesDevices {
+                    tracing::warn!(
+                        "cross-device hardlink {} -> {}: {}; falling back to copy for remaining files",
+                        src.display(),
+                        dst.display(),
+                        e
+                    );
+                    *force_copy = true;
+                } else if !warned_per_file {
+                    tracing::warn!(
+                        "hardlink failed for {} -> {}: {}; falling back to copy (further per-file failures suppressed)",
+                        entry.src.display(),
+                        entry.dst.display(),
+                        e
+                    );
+                    warned_per_file = true;
+                }
+                copy_file_sync(&entry.src, &entry.dst)?;
+            }
+        }
+        Ok(())
+    }
+
     fn collect_entries(
         src: &Path,
         dst: &Path,
@@ -205,38 +339,7 @@ mod hardlink_clone {
             // than /usr/local) is a property of the src/dst pair — every
             // remaining file would fail the same way, so latch `force_copy`
             // and skip hardlink for the rest of this clone.
-            //
-            // Any other hardlink error (EMLINK on a single inode whose link
-            // count is exhausted, EPERM on a specific file, etc.) is
-            // per-file: copy this one and keep trying hardlink on the next.
-            // We warn only on the first such failure per package to avoid
-            // spamming hundreds of identical warnings when an entire package
-            // can't be hardlinked.
-            let mut warned_per_file = false;
-            for entry in &files {
-                if force_copy {
-                    copy_file_sync(&entry.src, &entry.dst)?;
-                } else if let Err(e) = fs::hard_link(&entry.src, &entry.dst) {
-                    if e.kind() == io::ErrorKind::CrossesDevices {
-                        tracing::warn!(
-                            "cross-device hardlink {} -> {}: {}; falling back to copy for remaining files",
-                            src.display(),
-                            dst.display(),
-                            e
-                        );
-                        force_copy = true;
-                    } else if !warned_per_file {
-                        tracing::warn!(
-                            "hardlink failed for {} -> {}: {}; falling back to copy (further per-file failures suppressed)",
-                            entry.src.display(),
-                            entry.dst.display(),
-                            e
-                        );
-                        warned_per_file = true;
-                    }
-                    copy_file_sync(&entry.src, &entry.dst)?;
-                }
-            }
+            hardlink_phase(&files, &mut force_copy, &src, &dst)?;
             Ok(())
         })
         .await?

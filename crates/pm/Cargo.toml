@@ -69,3 +69,13 @@ mockito = "1.7.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["full"] }
+
+# Linux-only: compio + io_uring for batched fs operations.
+# Experiment branch only — currently used inside `hardlink_clone` to
+# replace the per-file `fs::hard_link` syscall loop with concurrent
+# `compio_fs::hard_link` futures, which compio's io_uring driver
+# submits as batched SQEs in one `io_uring_enter` syscall.
+[target.'cfg(target_os = "linux")'.dependencies]
+compio = { version = "0.16", default-features = false, features = ["runtime"] }
+compio-fs = { version = "0.10", default-features = false }
+futures-util = "0.3"
