@@ -194,7 +194,7 @@ mod hardlink_clone {
                 let futs = files.iter().enumerate().map(|(i, e)| {
                     let src = e.src.clone();
                     let dst = e.dst.clone();
-                    async move { (i, compio_fs::hard_link(src, dst).await) }
+                    async move { (i, compio::fs::hard_link(src, dst).await) }
                 });
                 join_all(futs).await
             })

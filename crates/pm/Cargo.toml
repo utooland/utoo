@@ -76,6 +76,11 @@ tokio = { workspace = true, features = ["full"] }
 # `compio_fs::hard_link` futures, which compio's io_uring driver
 # submits as batched SQEs in one `io_uring_enter` syscall.
 [target.'cfg(target_os = "linux")'.dependencies]
+# Use only the compio parent crate (re-exports compio-fs::*) so
+# compio-runtime resolves to a single version. Mixing direct
+# `compio-fs` + `compio` deps pulled two different compio-runtime
+# versions, so `compio_fs::hard_link`'s thread-local lookup landed
+# in a separate RUNTIME slot from `compio::runtime::Runtime` and
+# panicked with "not in a compio runtime".
 compio = { version = "0.16", default-features = false, features = ["runtime", "io-uring"] }
-compio-fs = { version = "0.10", default-features = false }
 futures-util = "0.3"
