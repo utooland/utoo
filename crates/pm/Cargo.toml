@@ -76,6 +76,6 @@ tokio = { workspace = true, features = ["full"] }
 # `compio_fs::hard_link` futures, which compio's io_uring driver
 # submits as batched SQEs in one `io_uring_enter` syscall.
 [target.'cfg(target_os = "linux")'.dependencies]
-compio = { version = "0.16", default-features = false, features = ["runtime"] }
+compio = { version = "0.16", default-features = false, features = ["runtime", "io-uring"] }
 compio-fs = { version = "0.10", default-features = false }
 futures-util = "0.3"
