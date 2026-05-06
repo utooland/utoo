@@ -731,7 +731,7 @@ mod tests {
         let cmd = Cli::command();
 
         // Test "add" is recognized as install command
-        let result = cmd.clone().try_get_matches_from(&["utoo", "add", "lodash"]);
+        let result = cmd.clone().try_get_matches_from(["utoo", "add", "lodash"]);
         assert!(
             result.is_ok(),
             "Should parse 'utoo add' as valid Install command"
@@ -750,7 +750,7 @@ mod tests {
         // Verify old alias "i" still works
         let cmd = Cli::command();
 
-        let result = cmd.clone().try_get_matches_from(&["utoo", "i", "lodash"]);
+        let result = cmd.clone().try_get_matches_from(["utoo", "i", "lodash"]);
         assert!(
             result.is_ok(),
             "Should parse 'utoo i' as valid Install command"
@@ -765,7 +765,7 @@ mod tests {
         // Verify full command name still works
         let cmd = Cli::command();
 
-        let result = cmd.try_get_matches_from(&["utoo", "install", "lodash"]);
+        let result = cmd.try_get_matches_from(["utoo", "install", "lodash"]);
         assert!(
             result.is_ok(),
             "Should parse 'utoo install' as valid Install command"
