@@ -1506,13 +1506,10 @@ impl Config {
         &self,
         _is_development: bool,
     ) -> Vc<OptionTreeShaking> {
-        let tree_shaking = self
-            .optimization
-            .as_ref()
-            .map(|op| op.tree_shaking.unwrap_or_default());
+        let tree_shaking = self.optimization.as_ref().and_then(|op| op.tree_shaking);
 
         OptionTreeShaking(match tree_shaking {
-            Some(false) => Some(TreeShakingMode::ReexportsOnly),
+            Some(false) => None,
             Some(true) => Some(TreeShakingMode::ModuleFragments),
             None => Some(TreeShakingMode::ReexportsOnly),
         })
@@ -1521,13 +1518,10 @@ impl Config {
 
     #[turbo_tasks::function]
     pub fn tree_shaking_mode_for_user_code(&self, _is_development: bool) -> Vc<OptionTreeShaking> {
-        let tree_shaking = self
-            .optimization
-            .as_ref()
-            .map(|op| op.tree_shaking.unwrap_or_default());
+        let tree_shaking = self.optimization.as_ref().and_then(|op| op.tree_shaking);
 
         OptionTreeShaking(match tree_shaking {
-            Some(false) => Some(TreeShakingMode::ReexportsOnly),
+            Some(false) => None,
             Some(true) => Some(TreeShakingMode::ModuleFragments),
             None => Some(TreeShakingMode::ReexportsOnly),
         })
