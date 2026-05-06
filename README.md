@@ -45,8 +45,10 @@ Utoo is a modern, high-performance frontend toolchain designed to provide a unif
 ### 1. Install
 
 ```bash
-# Install the core toolchain
-npm install -g utoo
+# Install the core toolchain (pick one)
+brew install utooland/tap/utoo   # macOS / Linux via Homebrew
+npm install -g utoo              # cross-platform via npm
+cargo install utoo-pm            # build from source via Cargo
 
 # Install the bundler in nodejs environment
 ut install @utoo/pack --save-dev
