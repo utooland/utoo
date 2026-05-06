@@ -44,13 +44,6 @@ fn cache_key(target_path: &Path) -> PathBuf {
     target_path.to_path_buf()
 }
 
-/// Check whether a target path has already been cloned this run.
-/// Used by the install loop to skip `tokio::spawn` for packages the
-/// pipeline already finished.
-pub fn is_target_cloned(target_path: &Path) -> bool {
-    CLONE_CACHE.is_done(&cache_key(target_path))
-}
-
 /// Wait for a pending clone at the given target path to complete (if any).
 ///
 /// Used by the pipeline clone worker to ensure parent packages are

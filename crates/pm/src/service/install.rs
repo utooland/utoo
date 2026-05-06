@@ -17,7 +17,7 @@ use crate::helper::workspace::init_project_root;
 use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
 use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
-use crate::util::cloner::{clone_count, is_target_cloned};
+use crate::util::cloner::clone_count;
 use crate::util::downloader::download_stats;
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
@@ -145,14 +145,6 @@ pub async fn install_packages(
                         .ok_or_else(|| anyhow::anyhow!("package {name} missing version"))?;
                     let cwd_clone = cwd.to_path_buf();
                     let target_path = cwd_clone.join(&path);
-
-                    // Eager skip: if the BFS pipeline (or a sibling depth)
-                    // already cloned this target, skip the spawn + future
-                    // construction altogether.
-                    if is_target_cloned(&target_path) {
-                        progress_inc(1);
-                        continue;
-                    }
 
                     // Check if this is an optional dependency
                     let is_optional =
