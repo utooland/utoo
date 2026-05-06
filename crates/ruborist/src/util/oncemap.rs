@@ -134,6 +134,23 @@ where
             .is_some_and(|e| matches!(e.value(), Value::Done(_)))
     }
 
+    /// Sync fetch of a completed value, single map lookup.
+    ///
+    /// Lets value-returning hot-path callers (e.g. `download_to_cache`'s
+    /// `Arc<PathBuf>` slot) skip the `is_done` + `get_or_init(no-op)`
+    /// double-lookup dance — one `DashMap::get` and we return the
+    /// `Arc` if the entry is `Done`, `None` otherwise.
+    ///
+    /// Returns `None` for both unknown keys and `Waiting` slots; only
+    /// `Done` is reported. Use `is_done` instead when `V = ()` and you
+    /// only care about presence.
+    pub fn get(&self, key: &K) -> Option<Arc<V>> {
+        self.map.get(key).and_then(|e| match e.value() {
+            Value::Done(v) => Some(Arc::clone(v)),
+            Value::Waiting(_) => None,
+        })
+    }
+
     /// Wait for a key to complete.
     ///
     /// - If the key exists and is Done, returns immediately.
