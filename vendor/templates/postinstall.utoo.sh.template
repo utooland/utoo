@@ -1,4 +1,24 @@
 #!/bin/sh
+# utoo postinstall — fast path of the bootstrap flow.
+#
+#   npm i utoo (+ optional @utoo/utoo-${OS}-${ARCH} sibling)
+#           │
+#           ▼
+#   detect OS / ARCH
+#   find_node_modules @utoo/utoo-${OS}-${ARCH}
+#           │
+#           ├── present:  cp <opt>/bin/utoo → bin/utoo  (Win: utoo.exe in prefix)
+#           │             real binary in place; user runs `utoo` directly.
+#           │
+#           └── absent:   return 0 with a "self-heal on first run" log.
+#                         placeholder bin/utoo stays; bin/utoo will download
+#                         the platform tarball itself on first invocation.
+#
+# Why no `npm i -g --force` fallback here: it recurses into another install,
+# can deadlock the parent (Windows lock contention, EACCES on global prefix),
+# and on failure leaves the bin permanently broken with no recovery path.
+# The placeholder self-heal is bounded, idempotent, and doesn't touch global
+# npm state. See vendor/templates/placeholder.utoo.sh.template.
 
 # Get CPU & OS info - POSIX compatible (works with sh on Windows Git)
 # Detect Windows via uname output (MINGW*/MSYS*/CYGWIN*) so kernel-version
@@ -68,18 +88,15 @@ install_binary() {
     NODE_MODULES_DIR=$(find_node_modules "$(pwd)" "$package_name")
 
     if [ -z "$NODE_MODULES_DIR" ]; then
-        echo "Binary package ${package_name} not found in any parent node_modules directory"
-        echo "Attempting to install globally as fallback..."
-
-        # Fallback: install globally
-        npm i -g "${package_name}" --force
-
-        if [ $? -ne 0 ]; then
-            echo "Failed to install ${package_name} globally"
-            exit 1
-        fi
-
-        echo "Successfully installed ${package_name} globally"
+        # The optional platform dep is not present (e.g. installed with
+        # --no-optional, --ignore-scripts skipped a sibling, or registry blip
+        # on the optional fetch). Do not retry via `npm i -g --force` here:
+        # that recurses into another install, can deadlock the parent install
+        # (Windows lock contention, EACCES on global prefix), and on failure
+        # leaves the bin permanently broken. Exit 0 so the placeholder bin
+        # stays in place; it will self-heal on first invocation by downloading
+        # the tarball directly from the registry.
+        echo "utoo: optional ${package_name} not present; placeholder will self-heal on first run" >&2
         return 0
     fi
 

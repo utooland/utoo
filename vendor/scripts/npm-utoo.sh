@@ -35,21 +35,17 @@ chmod +x "$ENTRY_DIR/postinstall.sh"
 # copy README.md from repository root
 cp ../../README.md "$ENTRY_DIR/README.md"
 
-# create placeholder binaries
+# Placeholder binaries. Unix self-heals on first invocation; Windows .cmd
+# prints a recovery hint (postinstall replaces both on the happy path).
 mkdir -p "$ENTRY_DIR/bin"
 for binary in utoo ut; do
-    # Unix version
-    cat > "$ENTRY_DIR/bin/$binary" << 'EOF'
-#!/bin/sh
-echo "This is a placeholder binary. The actual binary will be installed via postinstall script."
-exit 1
-EOF
+    cp ../templates/placeholder.utoo.sh.template "$ENTRY_DIR/bin/$binary"
     chmod +x "$ENTRY_DIR/bin/$binary"
-    
-    # Windows version (.cmd)
+
     cat > "$ENTRY_DIR/bin/$binary.cmd" << 'EOF'
 @echo off
-echo This is a placeholder binary for %~n0. The actual binary will be installed via postinstall script.
+echo utoo: native binary not installed (postinstall did not run or failed). 1>&2
+echo utoo: recover with: npm install -g utoo --force 1>&2
 exit /b 1
 EOF
 done

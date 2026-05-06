@@ -108,6 +108,10 @@ jobs:
         run: sh e2e/postinstall-os-detect.sh
         shell: bash
 
+      - name: Placeholder self-heal e2e
+        run: sh e2e/placeholder-self-heal.sh
+        shell: bash
+
       - name: Setup Utoo
         uses: utooland/setup-utoo@v1
 
