@@ -9,7 +9,7 @@
 ;
 ;
 function useFnA() {
-    return (0, __TURBOPACK__imported__module__$5b$project$5d2f$optimization$2f$remove_unused_imports_reexport$2f$input$2f$node_modules$2f$pkg$2f$a$2e$js__$5b$client$5d$__$28$ecmascript$29$__["fnA"])();
+    return fnA();
 }
 // MERGED MODULE: [project]/optimization/remove_unused_imports_reexport/input/node_modules/pkg/b.js [client] (ecmascript)
 ;
