@@ -149,6 +149,12 @@ pub async fn resolve_cache_path(name: &str, version: &str, tarball_url: &str) ->
 /// For git-resolved packages, use [`resolve_cache_path`] instead.
 pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
     let key = format!("{}@{}", name, version);
+
+    // Skip the param clones + future construction on cache hit.
+    if let Some(cache_path) = DOWNLOAD_CACHE.get(&key) {
+        return Some((*cache_path).clone());
+    }
+
     let cache_dir = get_cache_dir();
     let name = name.to_string();
     let version = version.to_string();
@@ -167,7 +173,9 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
                 return Some(cache_path);
             }
 
-            // Download (semaphore controlled)
+            // Download (semaphore controlled). Permit held through extract
+            // — A/B-revert experiment to test if early permit release is
+            // the source of utoo p0 σ being ~2× baseline.
             let semaphore = DOWNLOAD_SEMAPHORE
                 .get_or_init(|| Semaphore::new(get_manifests_concurrency_limit_sync()));
             let _permit = semaphore.acquire().await.ok()?;

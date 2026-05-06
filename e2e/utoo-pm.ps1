@@ -377,4 +377,117 @@ finally {
     Remove-Item -Recurse -Force $esbuildDir -ErrorAction SilentlyContinue
 }
 
+# ═══════════════════════════════════════════════════════════════
+# Case: Test 'utoo add' alias works the same as 'utoo install'
+# ═══════════════════════════════════════════════════════════════
+Write-Yellow "Case: Test 'utoo add' alias (Issue #2608)"
+$addTestDir = Join-Path $env:TEMP "utoo-e2e-add-$(Get-Random)"
+try {
+    New-Item -ItemType Directory -Path $addTestDir -Force | Out-Null
+    Push-Location $addTestDir
+
+    @{
+        name = "test-add-alias"
+        version = "1.0.0"
+        dependencies = @{}
+    } | ConvertTo-Json | Set-Content "package.json"
+
+    # Test 1: Basic add command
+    Write-Yellow "  Subtest 1.1: utoo add react"
+    utoo add react --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "utoo add react failed" }
+    if (-not (Test-Path "node_modules/react")) { throw "react not installed" }
+    Write-Green "  ✓ PASS: utoo add react"
+
+    # Test 2: Add with -D flag (dev dependency)
+    Write-Yellow "  Subtest 1.2: utoo add lodash -D"
+    utoo add lodash -D --ignore-scripts
+    if ($LASTEXITCODE -ne 0) { throw "utoo add -D failed" }
+    $pkgContent = Get-Content package.json -Raw
+    if ($pkgContent -notmatch '"devDependencies"') { throw "-D flag not working" }
+    Write-Green "  ✓ PASS: utoo add lodash -D"
+
+    # Test 3: Short alias ut add
+    Write-Yellow "  Subtest 1.3: ut add express"
+    ut add express --ignore-scripts
+    if ($LASTEXITCODE -ne 0) { throw "ut add express failed" }
+    if (-not (Test-Path "node_modules/express")) { throw "express not installed" }
+    Write-Green "  ✓ PASS: ut add express"
+
+    # Test 4: Add with -O flag (optional dependency)
+    Write-Yellow "  Subtest 1.4: utoo add debug -O"
+    utoo add debug@4.3.4 -O --ignore-scripts
+    if ($LASTEXITCODE -ne 0) { throw "utoo add -O failed" }
+    $pkgContent = Get-Content package.json -Raw
+    if ($pkgContent -notmatch '"optionalDependencies"') { throw "-O flag not working" }
+    Write-Green "  ✓ PASS: utoo add debug -O"
+
+    # Test 5: Add with --save-peer flag (peer dependency)
+    Write-Yellow "  Subtest 1.5: utoo add typescript --save-peer"
+    utoo add typescript@5.0.4 --save-peer --ignore-scripts
+    if ($LASTEXITCODE -ne 0) { throw "utoo add --save-peer failed" }
+    $pkgContent = Get-Content package.json -Raw
+    if ($pkgContent -notmatch '"peerDependencies"') { throw "--save-peer flag not working" }
+    Write-Green "  ✓ PASS: utoo add typescript --save-peer"
+
+    # Test 6: Help text verification
+    Write-Yellow "  Subtest 1.6: Help text shows add alias"
+    $helpOutput = utoo --help 2>&1 | Out-String
+    if ($helpOutput -notmatch "add") { throw "'add' not in help" }
+    utoo add --help | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "utoo add --help failed" }
+    Write-Green "  ✓ PASS: Help text includes add alias"
+
+    # Test 7: Backward compatibility - install still works
+    Write-Yellow "  Subtest 1.7: Backward compatibility - utoo install"
+    Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+    utoo install react --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "utoo install still required" }
+    if (-not (Test-Path "node_modules/react")) { throw "react not installed via install" }
+    Write-Green "  ✓ PASS: utoo install still works"
+
+    # Test 8: Backward compatibility - 'i' alias still works
+    Write-Yellow "  Subtest 1.8: Backward compatibility - ut i"
+    Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+    ut i lodash --ignore-scripts
+    if ($LASTEXITCODE -ne 0) { throw "ut i still required" }
+    if (-not (Test-Path "node_modules/lodash")) { throw "lodash not installed via 'i'" }
+    Write-Green "  ✓ PASS: ut i still works"
+
+    # Test 9: Add multiple packages at once
+    Write-Yellow "  Subtest 1.9: Add multiple packages"
+    Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+    utoo add is-array is-object --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "utoo add multiple packages failed" }
+    if (-not (Test-Path "node_modules/is-array")) { throw "is-array not installed" }
+    if (-not (Test-Path "node_modules/is-object")) { throw "is-object not installed" }
+    Write-Green "  ✓ PASS: Add multiple packages"
+
+    # Test 10: Add with version spec
+    Write-Yellow "  Subtest 1.10: Add with version spec"
+    Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+    utoo add 'semver@^7.0.0' --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "utoo add with version spec failed" }
+    if (-not (Test-Path "node_modules/semver")) { throw "semver not installed" }
+    Write-Green "  ✓ PASS: Add with version spec"
+
+    Write-Green "PASS: All 'utoo add' alias tests successful"
+}
+finally {
+    Pop-Location
+    Remove-Item -Recurse -Force $addTestDir -ErrorAction SilentlyContinue
+}
+
+# ═══════════════════════════════════════════════════════════════
+# Case: Test 'utoo add' global install
+# ═══════════════════════════════════════════════════════════════
+Write-Yellow "Case: Test 'utoo add' global install (Issue #2608)"
+Write-Yellow "  Subtest 2.1: utoo add -g cowsay"
+utoo add -g cowsay --registry=https://registry.npmjs.org
+if ($LASTEXITCODE -ne 0) { throw "utoo add -g cowsay failed" }
+if (-not (Get-Command cowsay -ErrorAction SilentlyContinue)) {
+    throw "cowsay not in PATH after global add"
+}
+Write-Green "  ✓ PASS: utoo add -g works"
+
 Write-Green "All e2e tests passed successfully!"

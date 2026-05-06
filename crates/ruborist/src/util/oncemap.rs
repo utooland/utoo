@@ -118,6 +118,21 @@ where
         }
     }
 
+    /// Sync presence probe — `Done` only, single `DashMap::get`.
+    /// Returns `false` for unknown / `Waiting` slots.
+    pub fn is_done(&self, key: &K) -> bool {
+        self.get(key).is_some()
+    }
+
+    /// Sync fetch of a completed value, single `DashMap::get`.
+    /// Returns `None` for unknown / `Waiting` slots.
+    pub fn get(&self, key: &K) -> Option<Arc<V>> {
+        self.map.get(key).and_then(|e| match e.value() {
+            Value::Done(v) => Some(Arc::clone(v)),
+            Value::Waiting(_) => None,
+        })
+    }
+
     /// Wait for a key to complete.
     ///
     /// - If the key exists and is Done, returns immediately.
