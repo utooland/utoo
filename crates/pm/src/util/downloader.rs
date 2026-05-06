@@ -173,11 +173,12 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
                 return Some(cache_path);
             }
 
-            // The semaphore gates network I/O only; extract runs on
-            // rayon and is released below before the CPU-bound phase.
+            // Download (semaphore controlled). Permit held through extract
+            // — A/B-revert experiment to test if early permit release is
+            // the source of utoo p0 σ being ~2× baseline.
             let semaphore = DOWNLOAD_SEMAPHORE
                 .get_or_init(|| Semaphore::new(get_manifests_concurrency_limit_sync()));
-            let permit = semaphore.acquire().await.ok()?;
+            let _permit = semaphore.acquire().await.ok()?;
             let bytes = download_bytes(&tarball_url)
                 .await
                 .inspect_err(|e| {
@@ -190,7 +191,6 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
                     )
                 })
                 .ok()?;
-            drop(permit);
 
             // Extract
             extract_and_write(bytes, &cache_path)
