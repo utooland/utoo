@@ -161,24 +161,6 @@ pub fn log_progress(text: &str) {
     PROGRESS_BAR.set_message(text.to_string());
 }
 
-/// TTY-gated `PROGRESS_BAR.inc`. indicatif's inc takes its internal
-/// state Mutex even with a hidden draw target — see [`IS_TTY`].
-#[inline]
-pub fn progress_inc(n: u64) {
-    if !*IS_TTY {
-        return;
-    }
-    PROGRESS_BAR.inc(n);
-}
-
-#[inline]
-pub fn progress_set_length(len: u64) {
-    if !*IS_TTY {
-        return;
-    }
-    PROGRESS_BAR.set_length(len);
-}
-
 // Global timer for log_time/log_time_end
 static START_TIME: OnceCell<Instant> = OnceCell::new();
 

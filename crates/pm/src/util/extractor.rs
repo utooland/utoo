@@ -41,15 +41,9 @@ fn estimate_uncompressed_size(gzip_data: &[u8]) -> usize {
     }
 }
 
-/// Tarball entry recorded during the parse pass, deferred until parallel
-/// write. `data_offset`/`data_len` index into the decompressed buffer
-/// (lifetime-erased from the buffer for reuse during `par_iter`); avoids
-/// the per-file `Vec<u8>` allocation+copy that `read_to_end` previously
-/// did for every file in the archive.
 struct ExtractedEntry {
     path: PathBuf,
-    data_offset: usize,
-    data_len: usize,
+    content: Vec<u8>,
     mode: u32,
 }
 
@@ -74,8 +68,9 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
 /// Synchronous extraction: decompress + parse + parallel write, all on rayon.
 fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -> Result<()> {
     use rayon::prelude::*;
+    use std::collections::HashSet;
     use std::fs;
-    use std::io::Write;
+    use std::io::{Cursor, Read, Write};
 
     // Decompress gzip using libdeflate
     let mut output = vec![0u8; estimated_size];
@@ -95,34 +90,73 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
     };
     output.truncate(actual_size);
 
-    let entries = parse_tar_entries(&output, dest)?;
+    // Parse tar entries
+    let cursor = Cursor::new(&output[..]);
+    let mut archive = tar::Archive::new(cursor);
+    let mut entries = Vec::new();
 
-    // Lex sort suffices for parent-before-child mkdir order: every dir
-    // is a descendant of the same `dest` root, so a parent's path is a
-    // strict byte prefix of any descendant's and sorts before.
-    let mut dirs: Vec<&Path> = Vec::new();
+    for entry_result in archive.entries()? {
+        let mut entry = entry_result.with_context(|| "Failed to read tar entry")?;
+        let path = entry
+            .path()
+            .with_context(|| "Failed to get entry path")?
+            .into_owned();
+
+        // Guard against path traversal (Tar Slip): reject absolute paths
+        // and entries containing ".." components.
+        if path.is_absolute()
+            || path
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            tracing::warn!("Skipping tar entry with unsafe path: {}", path.display());
+            continue;
+        }
+
+        let full_path = dest.join(&path);
+
+        if !entry.header().entry_type().is_dir() {
+            let mut content = Vec::new();
+            entry
+                .read_to_end(&mut content)
+                .with_context(|| format!("Failed to read tar entry: {}", path.display()))?;
+
+            // Normalize to npm/pnpm convention: 0o755 if any exec bit is set,
+            // else 0o644. Preserving raw tar modes (e.g. 0o640 in google-protobuf)
+            // breaks world-readability in containers and multi-user setups.
+            let raw_mode = entry.header().mode().unwrap_or(0o644);
+            let mode = if raw_mode & 0o111 != 0 { 0o755 } else { 0o644 };
+            entries.push(ExtractedEntry {
+                path: full_path,
+                content,
+                mode,
+            });
+        }
+    }
+
+    // Collect every ancestor directory (up to `dest`), then create them
+    // shallowest-first so a single mkdir() per dir is sufficient.
+    let mut seen = HashSet::new();
     for entry in &entries {
         let mut p = entry.path.parent();
         while let Some(dir) = p {
-            if dir == dest {
+            if dir == dest || !seen.insert(dir.to_path_buf()) {
                 break;
             }
-            dirs.push(dir);
             p = dir.parent();
         }
     }
-    dirs.sort_unstable();
-    dirs.dedup();
+    let mut dirs: Vec<_> = seen.into_iter().collect();
+    dirs.sort_unstable_by_key(|p| p.as_os_str().len());
     for dir in &dirs {
         fs::create_dir(dir).ok();
     }
 
-    let buf: &[u8] = &output;
+    // Write files in parallel using rayon
     entries.par_iter().try_for_each(|entry| -> Result<()> {
         let mut file = fs::File::create(&entry.path)
             .with_context(|| format!("Failed to create: {}", entry.path.display()))?;
-        let data = &buf[entry.data_offset..entry.data_offset + entry.data_len];
-        file.write_all(data)
+        file.write_all(&entry.content)
             .with_context(|| format!("Failed to write: {}", entry.path.display()))?;
 
         // Skip chmod for 0o644 (most files) — File::create() already produces
@@ -146,70 +180,4 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
         .with_context(|| format!("Failed to create resolution marker in: {}", dest.display()))?;
 
     Ok(())
-}
-
-/// Walk the tar stream and collect file entries as `(path, offset, len, mode)`
-/// tuples into the decompressed `buf`. Skips directories, ignores any
-/// path-traversal entries.
-fn parse_tar_entries(buf: &[u8], dest: &Path) -> Result<Vec<ExtractedEntry>> {
-    use std::io::Cursor;
-
-    let cursor = Cursor::new(buf);
-    let mut archive = tar::Archive::new(cursor);
-    let mut entries = Vec::new();
-
-    for entry_result in archive.entries()? {
-        let entry = entry_result.with_context(|| "Failed to read tar entry")?;
-        let path = entry
-            .path()
-            .with_context(|| "Failed to get entry path")?
-            .into_owned();
-
-        // Guard against path traversal (Tar Slip): reject absolute paths
-        // and entries containing ".." components.
-        if path.is_absolute()
-            || path
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
-        {
-            tracing::warn!("Skipping tar entry with unsafe path: {}", path.display());
-            continue;
-        }
-
-        if entry.header().entry_type().is_dir() {
-            continue;
-        }
-
-        // tar::Entry exposes the byte offset and size inside the parsed
-        // stream — that's the same `buf` we'll later slice in `par_iter`.
-        let data_offset = entry.raw_file_position() as usize;
-        let data_len = entry.size() as usize;
-        if data_offset
-            .checked_add(data_len)
-            .is_none_or(|end| end > buf.len())
-        {
-            anyhow::bail!(
-                "Tar entry {} extends past decompressed buffer ({}..+{} > {})",
-                path.display(),
-                data_offset,
-                data_len,
-                buf.len()
-            );
-        }
-
-        let full_path = dest.join(&path);
-        // Normalize to npm/pnpm convention: 0o755 if any exec bit is set,
-        // else 0o644. Preserving raw tar modes (e.g. 0o640 in google-protobuf)
-        // breaks world-readability in containers and multi-user setups.
-        let raw_mode = entry.header().mode().unwrap_or(0o644);
-        let mode = if raw_mode & 0o111 != 0 { 0o755 } else { 0o644 };
-        entries.push(ExtractedEntry {
-            path: full_path,
-            data_offset,
-            data_len,
-            mode,
-        });
-    }
-
-    Ok(entries)
 }

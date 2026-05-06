@@ -1,7 +1,6 @@
 use crate::util::cli_enum::ScriptPolicy;
 use anyhow::Context;
 use anyhow::Result;
-use futures::stream::{FuturesUnordered, StreamExt};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
@@ -22,8 +21,7 @@ use crate::util::downloader::download_stats;
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
 use crate::util::logger::{
-    finish_progress_bar, log_progress, print_install_counts, progress_inc, progress_set_length,
-    start_progress_bar,
+    PROGRESS_BAR, finish_progress_bar, log_progress, print_install_counts, start_progress_bar,
 };
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 
@@ -85,16 +83,13 @@ pub async fn install_packages(
     depths.sort_unstable();
 
     for depth in depths.iter() {
-        // Drain in completion order so a slow tarball doesn't pin its
-        // siblings, and surface the first error early.
-        let mut clone_tasks: FuturesUnordered<tokio::task::JoinHandle<Result<()>>> =
-            FuturesUnordered::new();
+        let mut clone_tasks: Vec<tokio::task::JoinHandle<Result<()>>> = Vec::new();
 
         if let Some(packages) = groups.get(depth) {
             for (path, package) in packages.iter() {
                 // Skip packages based on omit config
                 if should_omit_package(package, omit) {
-                    progress_inc(1);
+                    PROGRESS_BAR.inc(1);
                     continue;
                 }
                 let path = path.clone();
@@ -113,13 +108,13 @@ pub async fn install_packages(
                     if package.link.is_some() {
                         let link_name = extract_package_name(&path);
                         if link_name.is_empty() {
-                            progress_inc(1);
+                            PROGRESS_BAR.inc(1);
                             continue;
                         }
                         link(Path::new(&resolved), Path::new(&path))
                             .await
                             .with_context(|| format!("Link failed: {resolved} -> {path}"))?;
-                        progress_inc(1);
+                        PROGRESS_BAR.inc(1);
                         continue;
                     }
 
@@ -127,14 +122,14 @@ pub async fn install_packages(
                     if let Some(ref cpu) = package.cpu
                         && !is_cpu_compatible(cpu)
                     {
-                        progress_inc(1);
+                        PROGRESS_BAR.inc(1);
                         continue;
                     }
 
                     if let Some(ref os) = package.os
                         && !is_os_compatible(os)
                     {
-                        progress_inc(1);
+                        PROGRESS_BAR.inc(1);
                         continue;
                     }
 
@@ -158,24 +153,24 @@ pub async fn install_packages(
                                 tracing::warn!(
                                     "Optional dependency {name} failed (ignored): {e:#}"
                                 );
-                                progress_inc(1);
+                                PROGRESS_BAR.inc(1);
                                 return Ok(());
                             }
                             return Err(e);
                         }
-                        progress_inc(1);
+                        PROGRESS_BAR.inc(1);
                         log_progress(&format!("{name} resolved"));
                         update_package_binary(&target_path, &name).await
                     });
                     clone_tasks.push(task);
                 } else {
-                    progress_inc(1);
+                    PROGRESS_BAR.inc(1);
                 }
             }
         }
 
-        while let Some(joined) = clone_tasks.next().await {
-            joined??;
+        for task in clone_tasks {
+            task.await??;
         }
     }
 
@@ -265,7 +260,7 @@ impl InstallService {
 
         if !package_lock.packages.is_empty() {
             start_progress_bar();
-            progress_set_length(package_lock.packages.len() as u64);
+            PROGRESS_BAR.set_length(package_lock.packages.len() as u64);
         }
 
         let link_start = Instant::now();
