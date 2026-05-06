@@ -2,13 +2,13 @@
 name        = "utoo-pm"
 version     = "0.0.0"
 edition     = "2024"
-license     = "MIT"
 description = "Unified frontend toolchain — Rust-powered, npm-compatible package manager (utoo / ut)"
-repository  = "https://github.com/utooland/utoo"
-homepage    = "https://github.com/utooland/utoo"
 readme      = "../../README.md"
-keywords    = ["package-manager", "npm", "javascript", "frontend", "toolchain"]
-categories  = ["development-tools", "command-line-utilities"]
+homepage    = "https://github.com/utooland/utoo"
+repository  = "https://github.com/utooland/utoo"
+license     = "MIT"
+keywords    = ["frontend", "javascript", "npm", "package-manager", "toolchain"]
+categories  = ["command-line-utilities", "development-tools"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

@@ -3,10 +3,10 @@ name        = "utoo-ruborist"
 version     = "0.1.0"
 edition     = "2024"
 description = "Rust arborist - dependency resolution core for utoo package manager"
-license     = "MIT"
-repository  = "https://github.com/utooland/utoo"
 homepage    = "https://github.com/utooland/utoo"
-keywords    = ["npm", "package-manager", "dependency-resolution", "arborist"]
+repository  = "https://github.com/utooland/utoo"
+license     = "MIT"
+keywords    = ["arborist", "dependency-resolution", "npm", "package-manager"]
 categories  = ["development-tools"]
 
 # tombi: format.rules.table-keys-order.disabled = true
