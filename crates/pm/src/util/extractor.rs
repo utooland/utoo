@@ -101,28 +101,28 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
     // safe.
     let entries = parse_tar_entries(&output, dest)?;
 
-    // Collect every ancestor directory (up to `dest`), then create them
-    // shallowest-first so a single mkdir() per dir is sufficient.
+    // Collect every ancestor directory (up to `dest`) by borrowing
+    // straight out of `entries.path` — no per-entry PathBuf allocation.
+    // `entries` outlives the mkdir + parallel-write phases, so the
+    // `&Path` references stay valid.
     //
-    // Push to a Vec first (cheap) and dedup once at the end via sort
-    // — replaces a per-entry `HashSet<PathBuf>` insert that allocated
-    // a PathBuf for every ancestor on every entry, even when most
-    // entries share the same parent dirs (the common case).
-    let mut dirs: Vec<PathBuf> = Vec::with_capacity(entries.len());
+    // Lex sort + dedup is all we need: every dir here is a descendant
+    // of the same `dest` root, so a parent's path is a strict byte
+    // prefix of any descendant's path → it sorts before. The previous
+    // secondary `sort_by_key(len)` is redundant.
+    let mut dirs: Vec<&Path> = Vec::with_capacity(entries.len());
     for entry in &entries {
         let mut p = entry.path.parent();
         while let Some(dir) = p {
             if dir == dest {
                 break;
             }
-            dirs.push(dir.to_path_buf());
+            dirs.push(dir);
             p = dir.parent();
         }
     }
     dirs.sort_unstable();
     dirs.dedup();
-    // Sort by depth ascending so parent exists before child mkdir.
-    dirs.sort_by_key(|p| p.as_os_str().len());
     for dir in &dirs {
         fs::create_dir(dir).ok();
     }
