@@ -156,8 +156,12 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
     // pipeline path drives `download_to_cache` for every BFS-resolved
     // package, and install-loop calls usually arrive after — most hit
     // a `Done` slot.
-    if let Some(cache_path) = DOWNLOAD_CACHE.get(&key) {
-        return Some((*cache_path).clone());
+    if DOWNLOAD_CACHE.is_done(&key) {
+        return DOWNLOAD_CACHE
+            .get_or_init(key, || async { None })
+            .await
+            .as_deref()
+            .cloned();
     }
 
     let cache_dir = get_cache_dir();
