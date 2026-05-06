@@ -56,7 +56,7 @@ impl ConfigService {
 
         // Define all utoo-pm commands using constants
         let builtin_commands = vec![
-            (cmd::INSTALL_NAME, cmd::INSTALL_ALIAS, cmd::INSTALL_ABOUT),
+            (cmd::INSTALL_NAME, cmd::INSTALL_ALIASES, cmd::INSTALL_ABOUT),
             (
                 cmd::UNINSTALL_NAME,
                 cmd::UNINSTALL_ALIAS,
