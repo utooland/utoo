@@ -10,7 +10,9 @@
     "optimization": {
       "minify": false,
       "moduleIds": "named",
-      "treeShaking": false
+      "treeShaking": false,
+      "removeUnusedExports": true,
+      "removeUnusedImports": true
     }
   },
   "runtimeType": "Dummy"

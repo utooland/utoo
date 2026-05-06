@@ -14,10 +14,6 @@ module.exports = mod;
 "[project]/target_node/onelogger_named_reexport/input/node_modules/onelogger/dist/esm/Logger.js [server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
-__turbopack_context__.s([
-    "Logger",
-    ()=>Logger
-]);
 var __TURBOPACK__imported__module__$5b$externals$5d2f$node$3a$assert__$5b$external$5d$__$28$node$3a$assert$2c$__cjs$29$__ = __turbopack_context__.i("[externals]/node:assert [external] (node:assert, cjs)");
 var __TURBOPACK__imported__module__$5b$externals$5d2f$node$3a$util__$5b$external$5d$__$28$node$3a$util$2c$__cjs$29$__ = __turbopack_context__.i("[externals]/node:util [external] (node:util, cjs)");
 ;
@@ -62,26 +58,15 @@ class Logger {
         }
     }
 }
+__turbopack_context__.s([
+    "Logger",
+    0,
+    Logger
+]);
 }),
 "[project]/target_node/onelogger_named_reexport/input/node_modules/onelogger/dist/esm/index.js [server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
-__turbopack_context__.s([
-    "Logger",
-    ()=>__TURBOPACK__imported__module__$5b$project$5d2f$target_node$2f$onelogger_named_reexport$2f$input$2f$node_modules$2f$onelogger$2f$dist$2f$esm$2f$Logger$2e$js__$5b$server$5d$__$28$ecmascript$29$__["Logger"],
-    "getCoreLogger",
-    ()=>getCoreLogger,
-    "getCustomLogger",
-    ()=>getCustomLogger,
-    "getLogger",
-    ()=>getLogger,
-    "setCoreLogger",
-    ()=>setCoreLogger,
-    "setCustomLogger",
-    ()=>setCustomLogger,
-    "setLogger",
-    ()=>setLogger
-]);
 var __TURBOPACK__imported__module__$5b$project$5d2f$target_node$2f$onelogger_named_reexport$2f$input$2f$node_modules$2f$onelogger$2f$dist$2f$esm$2f$Logger$2e$js__$5b$server$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/target_node/onelogger_named_reexport/input/node_modules/onelogger/dist/esm/Logger.js [server] (ecmascript)");
 ;
 ;
@@ -113,11 +98,15 @@ function getLogger(prefix) {
 function getCoreLogger(prefix) {
     return getCustomLogger("coreLogger", prefix);
 }
+__turbopack_context__.s([
+    "setCustomLogger",
+    0,
+    setCustomLogger
+]);
 }),
 "[project]/target_node/onelogger_named_reexport/input/index.js [server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
-__turbopack_context__.s([]);
 var __TURBOPACK__imported__module__$5b$project$5d2f$target_node$2f$onelogger_named_reexport$2f$input$2f$node_modules$2f$onelogger$2f$dist$2f$esm$2f$index$2e$js__$5b$server$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/target_node/onelogger_named_reexport/input/node_modules/onelogger/dist/esm/index.js [server] (ecmascript)");
 ;
 (0, __TURBOPACK__imported__module__$5b$project$5d2f$target_node$2f$onelogger_named_reexport$2f$input$2f$node_modules$2f$onelogger$2f$dist$2f$esm$2f$index$2e$js__$5b$server$5d$__$28$ecmascript$29$__["setCustomLogger"])("logger", {
@@ -125,6 +114,7 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$target_node$2f$onelogger_nam
         console.log(`real:${message}`);
     }
 });
+__turbopack_context__.s([]);
 }),
 ];
 
