@@ -1,7 +1,14 @@
 [package]
-name    = "utoo-pm"
-version = "0.0.0"
-edition = "2024"
+name        = "utoo-pm"
+version     = "0.0.0"
+edition     = "2024"
+description = "Unified frontend toolchain — Rust-powered, npm-compatible package manager (utoo / ut)"
+readme      = "../../README.md"
+homepage    = "https://github.com/utooland/utoo"
+repository  = "https://github.com/utooland/utoo"
+license     = "MIT"
+keywords    = ["frontend", "javascript", "npm", "package-manager", "toolchain"]
+categories  = ["command-line-utilities", "development-tools"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -62,7 +69,7 @@ toml               = { workspace = true }
 tracing            = { workspace = true }
 tracing-appender   = "0.2"
 tracing-subscriber = { workspace = true }
-utoo-ruborist      = { path = "../ruborist", features = ["http-tarball", "native-git"] }
+utoo-ruborist      = { path = "../ruborist", version = "0.1.0", features = ["http-tarball", "native-git"] }
 
 [dev-dependencies]
 mockito = "1.7.0"

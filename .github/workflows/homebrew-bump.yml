@@ -1,0 +1,122 @@
+name: homebrew-bump
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to bump (e.g. utoo-v1.0.30)"
+        required: true
+
+jobs:
+  bump:
+    if: github.event_name == 'workflow_dispatch' || (startsWith(github.event.release.tag_name, 'utoo-v') && github.event.release.prerelease == false)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Resolve tag and version
+        id: meta
+        env:
+          TAG_INPUT: ${{ github.event.inputs.tag }}
+          TAG_RELEASE: ${{ github.event.release.tag_name }}
+        run: |
+          TAG="${TAG_INPUT:-$TAG_RELEASE}"
+          VERSION="${TAG#utoo-v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Download release tarballs
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        # Fetch via the public release URL (same path Homebrew clients use)
+        # to ensure the SHA256 we record matches what `brew install` sees.
+        # `gh release download` has been observed to return differing bytes.
+        run: |
+          mkdir -p dist
+          cd dist
+          for f in utoo-darwin-arm64.tar.gz utoo-darwin-x64.tar.gz utoo-linux-arm64.tar.gz utoo-linux-x64.tar.gz; do
+            curl --fail --silent --show-error --location \
+              -o "$f" "https://github.com/${{ github.repository }}/releases/download/${TAG}/$f"
+          done
+
+      - name: Compute SHA256
+        id: sha
+        run: |
+          cd dist
+          echo "darwin_arm64=$(sha256sum utoo-darwin-arm64.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "darwin_x64=$(sha256sum utoo-darwin-x64.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "linux_arm64=$(sha256sum utoo-linux-arm64.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "linux_x64=$(sha256sum utoo-linux-x64.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tap repo
+        uses: actions/checkout@v4
+        with:
+          repository: utooland/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Render formula
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          DARWIN_ARM64: ${{ steps.sha.outputs.darwin_arm64 }}
+          DARWIN_X64: ${{ steps.sha.outputs.darwin_x64 }}
+          LINUX_ARM64: ${{ steps.sha.outputs.linux_arm64 }}
+          LINUX_X64: ${{ steps.sha.outputs.linux_x64 }}
+        run: |
+          mkdir -p homebrew-tap/Formula
+          cat > homebrew-tap/Formula/utoo.rb <<EOF
+          class Utoo < Formula
+            desc "Unified frontend toolchain — Rust-powered package manager (utoo / ut)"
+            homepage "https://github.com/utooland/utoo"
+            version "${VERSION}"
+            license "MIT"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/utooland/utoo/releases/download/utoo-v#{version}/utoo-darwin-arm64.tar.gz"
+                sha256 "${DARWIN_ARM64}"
+              end
+              on_intel do
+                url "https://github.com/utooland/utoo/releases/download/utoo-v#{version}/utoo-darwin-x64.tar.gz"
+                sha256 "${DARWIN_X64}"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                url "https://github.com/utooland/utoo/releases/download/utoo-v#{version}/utoo-linux-arm64.tar.gz"
+                sha256 "${LINUX_ARM64}"
+              end
+              on_intel do
+                url "https://github.com/utooland/utoo/releases/download/utoo-v#{version}/utoo-linux-x64.tar.gz"
+                sha256 "${LINUX_X64}"
+              end
+            end
+
+            def install
+              bin.install "utoo"
+              bin.install_symlink bin/"utoo" => "ut"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/utoo --version")
+            end
+          end
+          EOF
+
+      - name: Commit and push to tap
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          cd homebrew-tap
+          if git diff --quiet Formula/utoo.rb; then
+            echo "Formula already at v${VERSION}, nothing to do."
+            exit 0
+          fi
+          git config user.name  "utoo-release-bot"
+          git config user.email "release-bot@utoo.land"
+          git add Formula/utoo.rb
+          git commit -m "utoo ${VERSION}"
+          git push origin HEAD
