@@ -1072,6 +1072,17 @@ fn configured_tree_shaking_mode(tree_shaking: Option<bool>) -> OptionTreeShaking
     })
 }
 
+fn configured_remove_unused(
+    optimization: Option<&OptimizationConfig>,
+    configured: impl FnOnce(&OptimizationConfig) -> Option<bool>,
+) -> bool {
+    let Some(optimization) = optimization else {
+        return true;
+    };
+
+    configured(optimization).unwrap_or(optimization.tree_shaking != Some(false))
+}
+
 #[turbo_tasks::value_impl]
 impl Config {
     #[turbo_tasks::function]
@@ -1530,11 +1541,9 @@ impl Config {
     pub async fn remove_unused_exports(&self, mode: Vc<Mode>) -> Result<Vc<bool>> {
         Ok(Vc::cell(match *mode.await? {
             Mode::Development => false,
-            Mode::Production => self
-                .optimization
-                .as_ref()
-                .and_then(|op| op.remove_unused_exports)
-                .unwrap_or(true),
+            Mode::Production => {
+                configured_remove_unused(self.optimization.as_ref(), |op| op.remove_unused_exports)
+            }
         }))
     }
 
@@ -1542,11 +1551,9 @@ impl Config {
     pub async fn remove_unused_imports(&self, mode: Vc<Mode>) -> Result<Vc<bool>> {
         Ok(Vc::cell(match *mode.await? {
             Mode::Development => false,
-            Mode::Production => self
-                .optimization
-                .as_ref()
-                .and_then(|op| op.remove_unused_imports)
-                .unwrap_or(true),
+            Mode::Production => {
+                configured_remove_unused(self.optimization.as_ref(), |op| op.remove_unused_imports)
+            }
         }))
     }
 
