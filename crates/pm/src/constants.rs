@@ -16,7 +16,7 @@ pub mod cmd {
     pub const UPDATE_ABOUT: &str = "Remove node_modules and reinstall";
 
     pub const INSTALL_NAME: &str = "install";
-    pub const INSTALL_ALIAS: &str = "i";
+    pub const INSTALL_ALIASES: &str = "i, add";
     pub const INSTALL_ABOUT: &str = "Install project dependencies";
 
     pub const REBUILD_NAME: &str = "rebuild";
