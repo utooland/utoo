@@ -118,9 +118,7 @@ export class HtmlPlugin {
     const finalHtml = doc.outerHTML;
     const filename = this.config.filename || "index.html";
     const finalOutputDir = this.config.output?.path ?? outputDir;
-    if (!fs.existsSync(finalOutputDir)) {
-      fs.mkdirSync(finalOutputDir, { recursive: true });
-    }
+    fs.mkdirSync(finalOutputDir, { recursive: true });
     fs.writeFileSync(path.join(finalOutputDir, filename), finalHtml);
   }
 }
