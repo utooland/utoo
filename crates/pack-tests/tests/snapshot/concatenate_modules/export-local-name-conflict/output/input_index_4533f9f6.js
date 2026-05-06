@@ -10,7 +10,7 @@
 ;
 const appConfig = {
     name: 'from-config',
-    yuyanId: '180020010001289296'
+    appId: '123'
 };
 // MERGED MODULE: [project]/concatenate_modules/export-local-name-conflict/input/sdk.js [client] (ecmascript)
 ;
