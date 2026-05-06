@@ -6,8 +6,13 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to publish (e.g. 1.0.30). Dry-run only via this trigger."
+        description: "Version to publish (e.g. 1.0.30)"
         required: true
+      dry_run:
+        description: "Dry-run only (uncheck to actually publish)"
+        type: boolean
+        required: false
+        default: true
 
 jobs:
   publish:
@@ -114,16 +119,26 @@ jobs:
           head -16 crates/pm/Cargo.toml
           grep '^utoo-ruborist' crates/pm/Cargo.toml
 
+      # release-triggered runs always do a real publish.
+      # workflow_dispatch runs honor the `dry_run` input (default true).
+      - name: Resolve dry-run mode
+        id: mode
+        env:
+          DRY_RUN_INPUT: ${{ github.event.inputs.dry_run }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$DRY_RUN_INPUT" != "false" ]; then
+            echo "flag=--dry-run" >> "$GITHUB_OUTPUT"
+            echo "Mode: DRY-RUN"
+          else
+            echo "flag=" >> "$GITHUB_OUTPUT"
+            echo "Mode: REAL PUBLISH"
+          fi
+
       - name: Publish utoo-ruborist
         if: steps.rub.outputs.publish == 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            cargo publish -p utoo-ruborist --dry-run --allow-dirty
-          else
-            cargo publish -p utoo-ruborist --allow-dirty
-          fi
+        run: cargo publish -p utoo-ruborist --allow-dirty ${{ steps.mode.outputs.flag }}
 
       - name: Skip utoo-ruborist publish
         if: steps.rub.outputs.publish != 'true'
@@ -133,9 +148,4 @@ jobs:
       - name: Publish utoo-pm
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            cargo publish -p utoo-pm --dry-run --allow-dirty
-          else
-            cargo publish -p utoo-pm --allow-dirty
-          fi
+        run: cargo publish -p utoo-pm --allow-dirty ${{ steps.mode.outputs.flag }}
