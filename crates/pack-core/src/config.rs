@@ -1064,6 +1064,14 @@ fn to_identifier(s: &str) -> String {
     IDENTIFIER_INVALID_RE.replace_all(&result, "_").into_owned()
 }
 
+fn configured_tree_shaking_mode(tree_shaking: Option<bool>) -> OptionTreeShaking {
+    OptionTreeShaking(match tree_shaking {
+        Some(false) => None,
+        Some(true) => Some(TreeShakingMode::ModuleFragments),
+        None => Some(TreeShakingMode::ReexportsOnly),
+    })
+}
+
 #[turbo_tasks::value_impl]
 impl Config {
     #[turbo_tasks::function]
@@ -1508,24 +1516,14 @@ impl Config {
     ) -> Vc<OptionTreeShaking> {
         let tree_shaking = self.optimization.as_ref().and_then(|op| op.tree_shaking);
 
-        OptionTreeShaking(match tree_shaking {
-            Some(false) => None,
-            Some(true) => Some(TreeShakingMode::ModuleFragments),
-            None => Some(TreeShakingMode::ReexportsOnly),
-        })
-        .cell()
+        configured_tree_shaking_mode(tree_shaking).cell()
     }
 
     #[turbo_tasks::function]
     pub fn tree_shaking_mode_for_user_code(&self, _is_development: bool) -> Vc<OptionTreeShaking> {
         let tree_shaking = self.optimization.as_ref().and_then(|op| op.tree_shaking);
 
-        OptionTreeShaking(match tree_shaking {
-            Some(false) => None,
-            Some(true) => Some(TreeShakingMode::ModuleFragments),
-            None => Some(TreeShakingMode::ReexportsOnly),
-        })
-        .cell()
+        configured_tree_shaking_mode(tree_shaking).cell()
     }
 
     #[turbo_tasks::function]
