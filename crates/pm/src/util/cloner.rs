@@ -22,7 +22,7 @@ use crate::fs;
 /// `ERROR_SHARING_VIOLATION` (os error 32) on Windows. `PathBuf` from
 /// `Path::components().collect()` parses both separators uniformly and
 /// rebuilds with the OS-preferred one, giving a stable key.
-pub(crate) static CLONE_CACHE: Lazy<OnceMap<PathBuf, ()>> = Lazy::new(OnceMap::new);
+static CLONE_CACHE: Lazy<OnceMap<PathBuf, ()>> = Lazy::new(OnceMap::new);
 
 /// Number of `node_modules/` directories freshly materialized this run.
 /// Mirrors pnpm's "added" semantic.
@@ -35,13 +35,20 @@ pub fn clone_count() -> usize {
 
 /// Normalize a target path into the canonical key used by `CLONE_CACHE`.
 #[cfg(windows)]
-pub(crate) fn cache_key(target_path: &Path) -> PathBuf {
+fn cache_key(target_path: &Path) -> PathBuf {
     target_path.components().collect()
 }
 
 #[cfg(not(windows))]
-pub(crate) fn cache_key(target_path: &Path) -> PathBuf {
+fn cache_key(target_path: &Path) -> PathBuf {
     target_path.to_path_buf()
+}
+
+/// Check whether a target path has already been cloned this run.
+/// Used by the install loop to skip `tokio::spawn` for packages the
+/// pipeline already finished.
+pub fn is_target_cloned(target_path: &Path) -> bool {
+    CLONE_CACHE.is_done(&cache_key(target_path))
 }
 
 /// Wait for a pending clone at the given target path to complete (if any).
@@ -66,10 +73,8 @@ pub async fn clone_package_once(
 ) -> Result<()> {
     let key = cache_key(target_path);
 
-    // Hot fast-path: most install-loop calls hit a target the BFS
-    // pipeline (or a previous depth's spawn) already cloned. Probe
-    // CLONE_CACHE before paying the 5 string allocs + future
-    // construction below.
+    // Skip the param clones + future construction when the pipeline
+    // (or a sibling task) already cloned this target.
     if CLONE_CACHE.is_done(&key) {
         return Ok(());
     }

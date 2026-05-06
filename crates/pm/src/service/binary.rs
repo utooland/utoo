@@ -233,11 +233,7 @@ async fn handle_cypress(
 }
 
 pub async fn update_package_binary(dir: &Path, name: &str) -> Result<()> {
-    // npm.org users have no use for the China binary mirror config;
-    // skipping here avoids the per-process `binary-mirror-config/latest`
-    // fetch + per-package hashmap lookup that fires for every cloned
-    // package in the install loop. Mirrors `get_envs`'s gate so the
-    // two paths agree on when the mirror layer is active.
+    // npm.org has no China mirror layer — skip alongside `get_envs`.
     if should_skip_binary_mirror() {
         return Ok(());
     }

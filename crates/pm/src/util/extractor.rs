@@ -95,22 +95,12 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
     };
     output.truncate(actual_size);
 
-    // Parse tar entries — record offsets into `output` instead of copying
-    // each file's bytes. The buffer outlives the parallel write phase and
-    // is read-only after the parse loop, so concurrent slice reads are
-    // safe.
     let entries = parse_tar_entries(&output, dest)?;
 
-    // Collect every ancestor directory (up to `dest`) by borrowing
-    // straight out of `entries.path` — no per-entry PathBuf allocation.
-    // `entries` outlives the mkdir + parallel-write phases, so the
-    // `&Path` references stay valid.
-    //
-    // Lex sort + dedup is all we need: every dir here is a descendant
-    // of the same `dest` root, so a parent's path is a strict byte
-    // prefix of any descendant's path → it sorts before. The previous
-    // secondary `sort_by_key(len)` is redundant.
-    let mut dirs: Vec<&Path> = Vec::with_capacity(entries.len());
+    // Lex sort suffices for parent-before-child mkdir order: every dir
+    // is a descendant of the same `dest` root, so a parent's path is a
+    // strict byte prefix of any descendant's and sorts before.
+    let mut dirs: Vec<&Path> = Vec::new();
     for entry in &entries {
         let mut p = entry.path.parent();
         while let Some(dir) = p {
@@ -127,8 +117,6 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
         fs::create_dir(dir).ok();
     }
 
-    // Write files in parallel using rayon. Each task slices into the
-    // shared `output` buffer (immutable borrow) — no per-file copy.
     let buf: &[u8] = &output;
     entries.par_iter().try_for_each(|entry| -> Result<()> {
         let mut file = fs::File::create(&entry.path)

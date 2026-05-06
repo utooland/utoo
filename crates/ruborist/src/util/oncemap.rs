@@ -118,32 +118,14 @@ where
         }
     }
 
-    /// Sync, allocation-free check for a completed entry.
-    ///
-    /// Lets hot-path callers short-circuit before paying string clones /
-    /// future construction for a key that's already been resolved by a
-    /// peer (e.g. install loop deduping against pipeline-pre-cloned
-    /// targets, where 95%+ of packages hit a `Done` slot).
-    ///
-    /// Returns `false` for both unknown keys and `Waiting` slots; only
-    /// `Done` is reported. Waiting entries fall through to the normal
-    /// `get_or_init` path which knows how to subscribe and wait.
+    /// Sync presence probe — `Done` only, single `DashMap::get`.
+    /// Returns `false` for unknown / `Waiting` slots.
     pub fn is_done(&self, key: &K) -> bool {
-        self.map
-            .get(key)
-            .is_some_and(|e| matches!(e.value(), Value::Done(_)))
+        self.get(key).is_some()
     }
 
-    /// Sync fetch of a completed value, single map lookup.
-    ///
-    /// Lets value-returning hot-path callers (e.g. `download_to_cache`'s
-    /// `Arc<PathBuf>` slot) skip the `is_done` + `get_or_init(no-op)`
-    /// double-lookup dance — one `DashMap::get` and we return the
-    /// `Arc` if the entry is `Done`, `None` otherwise.
-    ///
-    /// Returns `None` for both unknown keys and `Waiting` slots; only
-    /// `Done` is reported. Use `is_done` instead when `V = ()` and you
-    /// only care about presence.
+    /// Sync fetch of a completed value, single `DashMap::get`.
+    /// Returns `None` for unknown / `Waiting` slots.
     pub fn get(&self, key: &K) -> Option<Arc<V>> {
         self.map.get(key).and_then(|e| match e.value() {
             Value::Done(v) => Some(Arc::clone(v)),

@@ -161,10 +161,8 @@ pub fn log_progress(text: &str) {
     PROGRESS_BAR.set_message(text.to_string());
 }
 
-/// TTY-gated `PROGRESS_BAR.inc(1)`. Non-TTY callers pay no Mutex cost —
-/// indicatif's `inc` always takes the internal `Mutex<ProgressState>`
-/// write-lock even with a hidden draw target, which contends across the
-/// install loop's spawned tasks.
+/// TTY-gated `PROGRESS_BAR.inc`. indicatif's inc takes its internal
+/// state Mutex even with a hidden draw target — see [`IS_TTY`].
 #[inline]
 pub fn progress_inc(n: u64) {
     if !*IS_TTY {
@@ -173,7 +171,6 @@ pub fn progress_inc(n: u64) {
     PROGRESS_BAR.inc(n);
 }
 
-/// TTY-gated `PROGRESS_BAR.set_length`. Same rationale as [`progress_inc`].
 #[inline]
 pub fn progress_set_length(len: u64) {
     if !*IS_TTY {
