@@ -150,18 +150,23 @@ analyze_pcap() {
 
   if [ ! -f "$pcap" ]; then
     echo "  skip analyze: $pcap missing" >&2
-    return
+    return 0
   fi
 
   echo "=== analyzing $name ==="
 
+  # Best-effort analysis: a single tshark hiccup or empty log shouldn't
+  # take down the whole job. The metrics are diagnostic, not load-bearing.
+  set +e
+  set +o pipefail
+
   local pcap_bytes
   pcap_bytes=$(wc -c < "$pcap")
 
-  # /usr/bin/time -v writes "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:19.05"
+  # /usr/bin/time -v writes "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:19.05".
+  # Use awk-only so a no-match never returns non-zero.
   local wall_str
-  wall_str=$(grep -oE 'Elapsed \(wall clock\) time[^:]*: [0-9:.]+' "$log" 2>/dev/null \
-    | awk -F': ' '{print $NF}')
+  wall_str=$(awk -F': ' '/Elapsed \(wall clock\)/ {print $NF}' "$log" 2>/dev/null)
   local wall_s
   wall_s=$(awk -v t="${wall_str:-0}" 'BEGIN{
     n = split(t, p, ":")
@@ -244,6 +249,10 @@ EOF
   rm -f "$stats_tmp" "$gaps_tmp"
 
   echo "  packets=$total_packets streams=$distinct_streams retx=$retransmits zwin=$zero_windows dup_ack=$dup_acks gap_p99=${gap_p99}us gap_max=${gap_max}us"
+
+  # Restore the file-level strict mode now that analysis is done.
+  set -e
+  set -o pipefail
 }
 
 echo "=== analysis pass ==="
