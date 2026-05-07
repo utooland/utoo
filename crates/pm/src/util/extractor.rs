@@ -71,9 +71,10 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
     rx.await.with_context(|| "Extract task panicked")?
 }
 
-/// Synchronous extraction: decompress + parse + parallel write, all on rayon.
+/// Synchronous extraction: decompress + parse + sequential write, all on rayon.
+/// Cross-tarball parallelism comes from `rayon::spawn` in `extract_tarball`;
+/// within a tarball the writes are sequential to avoid disk-queue burst.
 fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -> Result<()> {
-    use rayon::prelude::*;
     use std::collections::HashSet;
     use std::fs;
     use std::io::Write;
@@ -120,10 +121,19 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
         fs::create_dir(dir).ok();
     }
 
-    // Write files in parallel using rayon. Each task slices into the
-    // shared `output` buffer (immutable borrow) — no per-file copy.
+    // Write files sequentially within a tarball. The previous `par_iter`
+    // had two rayon threads racing on a single tarball's file writes,
+    // submitting IO faster than the GHA Azure-disk could drain — utoo's
+    // pcap showed util_max=92% + w_await peaks of 490ms, paired with
+    // TCP-level retx=123 and zwin=9 from blocked write threads stalling
+    // the tokio runtime's socket draining. With a sequential `iter()` the
+    // extract uses one rayon thread per tarball, leaving the other
+    // available to start the next sibling extract via `rayon::spawn` —
+    // cross-tarball parallelism stays, intra-tarball burst is gone.
+    // A/B experiment branch off install-zero-copy-tar; if disk-burst is
+    // the mechanism, retx/zwin/util_max should collapse on this branch.
     let buf: &[u8] = &output;
-    entries.par_iter().try_for_each(|entry| -> Result<()> {
+    entries.iter().try_for_each(|entry| -> Result<()> {
         let mut file = fs::File::create(&entry.path)
             .with_context(|| format!("Failed to create: {}", entry.path.display()))?;
         let data = &buf[entry.data_offset..entry.data_offset + entry.data_len];
