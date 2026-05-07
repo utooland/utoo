@@ -6,13 +6,32 @@ pub fn init() {
         reset_sigpipe();
     }
 
-    // Windows default thread stack is 1MB, insufficient for libdeflater + tar
-    // + rayon work-stealing.
+    init_rayon_pool();
+}
+
+/// Configure the global rayon pool. On 16+ core dev/CI machines a default
+/// pool of `num_cpus` produces a write-storm during tarball extraction
+/// that saturates the underlying disk's IO queue (GHA pcap experiments
+/// showed util_max=92% + w_await peaks of 490ms paired with TCP retx=123
+/// on the install hot path). Capping at 8 threads keeps headroom for the
+/// rest of the runtime — tokio worker, IO completion handlers — and for
+/// the disk's own queue draining without losing meaningful parallelism on
+/// the typical 1-1000 file tarball.
+///
+/// Windows additionally raises the per-thread stack size: the default 1MB
+/// is insufficient for libdeflater + tar parsing + rayon work-stealing.
+fn init_rayon_pool() {
+    let parallelism = std::thread::available_parallelism()
+        .map(std::num::NonZero::get)
+        .unwrap_or(2);
+    let threads = parallelism.min(8);
+
+    let builder = rayon::ThreadPoolBuilder::new().num_threads(threads);
+
     #[cfg(target_os = "windows")]
-    rayon::ThreadPoolBuilder::new()
-        .stack_size(8 * 1024 * 1024)
-        .build_global()
-        .ok();
+    let builder = builder.stack_size(8 * 1024 * 1024);
+
+    builder.build_global().ok();
 }
 
 /// Restore default SIGPIPE handling so broken pipes cause a clean exit
