@@ -200,9 +200,14 @@ fn parse_tar_entries(buf: &[u8], dest: &Path) -> Result<Vec<ExtractedEntry>> {
         }
 
         // tar::Entry exposes the byte offset and size inside the parsed
-        // stream — that's the same `buf` we'll later slice in `par_iter`.
-        let data_offset = entry.raw_file_position() as usize;
-        let data_len = entry.size() as usize;
+        // stream — that's the same `buf` we'll later slice in par_chunks.
+        // Use try_from rather than `as usize` so a malformed tar header
+        // claiming a >usize::MAX size fails loudly instead of silently
+        // truncating into a buffer-overrun bug on 32-bit targets.
+        let data_offset = usize::try_from(entry.raw_file_position())
+            .with_context(|| format!("Tar entry {} offset exceeds usize", path.display()))?;
+        let data_len = usize::try_from(entry.size())
+            .with_context(|| format!("Tar entry {} size exceeds usize", path.display()))?;
         if data_offset
             .checked_add(data_len)
             .is_none_or(|end| end > buf.len())
