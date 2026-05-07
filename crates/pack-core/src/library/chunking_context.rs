@@ -314,8 +314,9 @@ impl LibraryChunkingContext {
         let root = &this.root_path;
         if let Some(filename) = self.await?.filename.as_ref() {
             let mut filename = filename.to_string();
+            let name = escape_file_path(name);
             if match_name_placeholder(&filename) {
-                filename = replace_name_placeholder(&filename, name);
+                filename = replace_name_placeholder(&filename, &name);
             }
             if match_content_hash_placeholder(&filename) {
                 let content_hash = self.ecmascript_chunk_content_hash(ecmascript_chunk).await?;
@@ -445,11 +446,12 @@ impl ChunkingContext for LibraryChunkingContext {
                                 let query = QString::from(ident.await?.query.as_str());
 
                                 let name = query.get("name").unwrap_or(output_name.as_str());
+                                let name = escape_file_path(name);
 
                                 let mut filename = filename_template.to_string();
 
                                 if match_name_placeholder(&filename) {
-                                    filename = replace_name_placeholder(&filename, name);
+                                    filename = replace_name_placeholder(&filename, &name);
                                 }
 
                                 if match_content_hash_placeholder(&filename) {
@@ -550,9 +552,10 @@ impl ChunkingContext for LibraryChunkingContext {
                 let mut filename = filename_template.to_string();
 
                 let (_, name, ext) = source_path.split_file_stem_extension();
+                let name = escape_file_path(name);
 
                 if match_name_placeholder(&filename) {
-                    filename = replace_name_placeholder(&filename, name);
+                    filename = replace_name_placeholder(&filename, &name);
                 }
 
                 if match_content_hash_placeholder(&filename) {
