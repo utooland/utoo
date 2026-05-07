@@ -347,8 +347,17 @@ run_phase() {
 
   echo -e "  ${CYAN}$pm${NC} · $phase"
   export PROJECT_DIR UTOO_CACHE BUN_CACHE
+  # `--warmup 1`: untimed iteration before the timed runs so each PM enters
+  # its measurement window with DNS resolver cached, TLS session ticket
+  # primed, and the CDN edge POP populated. Without this, the first PM in
+  # the per-phase loop pays the cold-network tax (~+1s on p0) which the
+  # 3-run `--runs` mean cannot fully amortize, biasing the first PM
+  # systematically slow vs PMs that follow it. `--prepare` resets the
+  # filesystem state (lockfile / cache / node_modules) on every iteration
+  # — warmup included — so warmup leaves no on-disk artifact behind.
   if ! hyperfine \
     --runs "$RUNS" \
+    --warmup 1 \
     --prepare "bash $prep_script" \
     --export-json "$json" \
     --show-output \
