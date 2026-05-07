@@ -131,7 +131,7 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
     // change collapsed retx 123 → 10, w_await 490ms → 160ms, util_max
     // 92% → 81%, with no observable wall-time loss vs par_iter (20s vs
     // 18s, within run-to-run noise).
-    const WRITE_CHUNK_SIZE: usize = 64;
+    const WRITE_CHUNK_SIZE: usize = 32;
     let buf: &[u8] = &output;
     entries
         .par_chunks(WRITE_CHUNK_SIZE)
