@@ -42,14 +42,14 @@ fn estimate_uncompressed_size(gzip_data: &[u8]) -> usize {
 }
 
 /// Tarball entry recorded during the parse pass, deferred until parallel
-/// write. `data_offset`/`data_len` index into the decompressed buffer
-/// (lifetime-erased from the buffer for reuse during `par_iter`); avoids
-/// the per-file `Vec<u8>` allocation+copy that `read_to_end` previously
-/// did for every file in the archive.
+/// write. `data` is a `bytes::Bytes` slice that shares the underlying
+/// decompressed buffer via Arc, avoiding both the per-file `Vec<u8>`
+/// allocation+copy that `read_to_end` previously did and the
+/// offset/len arithmetic the previous zero-copy form needed at every
+/// write call site.
 struct ExtractedEntry {
     path: PathBuf,
-    data_offset: usize,
-    data_len: usize,
+    data: Bytes,
     mode: u32,
 }
 
@@ -96,11 +96,16 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
     };
     output.truncate(actual_size);
 
-    // Parse tar entries — record offsets into `output` instead of copying
-    // each file's bytes. The buffer outlives the parallel write phase and
-    // is read-only after the parse loop, so concurrent slice reads are
-    // safe.
-    let entries = parse_tar_entries(&output, dest)?;
+    // Move the decompressed buffer into `Bytes` so per-entry slices below
+    // are reference-counted views into the same Arc-backed allocation —
+    // no data copy, no offset arithmetic at the write call site.
+    let buf = Bytes::from(output);
+
+    // Parse tar entries — record `Bytes` slices into `buf` instead of
+    // copying each file's bytes. The buffer outlives the parallel write
+    // phase and is read-only after the parse loop, so concurrent slice
+    // reads are safe.
+    let entries = parse_tar_entries(&buf, dest)?;
 
     // Collect every ancestor directory (up to `dest`), then create them
     // shallowest-first so a single mkdir() per dir is sufficient.
@@ -132,15 +137,13 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
     // 92% → 81%, with no observable wall-time loss vs par_iter (20s vs
     // 18s, within run-to-run noise).
     const WRITE_CHUNK_SIZE: usize = 64;
-    let buf: &[u8] = &output;
     entries
         .par_chunks(WRITE_CHUNK_SIZE)
         .try_for_each(|chunk| -> Result<()> {
             for entry in chunk {
                 let mut file = fs::File::create(&entry.path)
                     .with_context(|| format!("Failed to create: {}", entry.path.display()))?;
-                let data = &buf[entry.data_offset..entry.data_offset + entry.data_len];
-                file.write_all(data)
+                file.write_all(&entry.data)
                     .with_context(|| format!("Failed to write: {}", entry.path.display()))?;
 
                 // Skip chmod for 0o644 (most files) — File::create() already produces
@@ -170,10 +173,10 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
 /// Walk the tar stream and collect file entries as `(path, offset, len, mode)`
 /// tuples into the decompressed `buf`. Skips directories, ignores any
 /// path-traversal entries.
-fn parse_tar_entries(buf: &[u8], dest: &Path) -> Result<Vec<ExtractedEntry>> {
+fn parse_tar_entries(buf: &Bytes, dest: &Path) -> Result<Vec<ExtractedEntry>> {
     use std::io::Cursor;
 
-    let cursor = Cursor::new(buf);
+    let cursor = Cursor::new(buf.as_ref());
     let mut archive = tar::Archive::new(cursor);
     let mut entries = Vec::new();
 
@@ -200,7 +203,7 @@ fn parse_tar_entries(buf: &[u8], dest: &Path) -> Result<Vec<ExtractedEntry>> {
         }
 
         // tar::Entry exposes the byte offset and size inside the parsed
-        // stream — that's the same `buf` we'll later slice in par_chunks.
+        // stream — the same `buf` we now reference-share via `Bytes`.
         // Use try_from rather than `as usize` so a malformed tar header
         // claiming a >usize::MAX size fails loudly instead of silently
         // truncating into a buffer-overrun bug on 32-bit targets.
@@ -229,8 +232,7 @@ fn parse_tar_entries(buf: &[u8], dest: &Path) -> Result<Vec<ExtractedEntry>> {
         let mode = if raw_mode & 0o111 != 0 { 0o755 } else { 0o644 };
         entries.push(ExtractedEntry {
             path: full_path,
-            data_offset,
-            data_len,
+            data: buf.slice(data_offset..data_offset + data_len),
             mode,
         });
     }
