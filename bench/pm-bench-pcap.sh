@@ -62,29 +62,42 @@ echo "=== DNS records for $HOST ==="
 IFACE=$(ip route | awk '/default/ {print $5; exit}')
 echo "capturing on interface: $IFACE"
 
-# Run a single command under tcpdump, write pcap+log to $PCAP_DIR/<name>.*.
+# Run a single command under tcpdump + iostat, write pcap+log+iostat
+# samples to $PCAP_DIR/<name>.*. iostat is sampled at 1Hz with the `-y`
+# flag so we drop the since-boot summary and only record live samples
+# during the capture window. Disk-saturation diagnosis (is install
+# starving download via blocking on writes?) needs %util / w/s / w_await
+# alongside the TCP signals.
 capture_one() {
   local name=$1
   shift
   local pcap="$PCAP_DIR/$name.pcap"
   local log="$PCAP_DIR/$name.log"
+  local iostat_log="$PCAP_DIR/$name.iostat.txt"
 
   echo "=== capturing $name ==="
   # tcpdump as root; ubuntu-latest runners allow sudo without password.
   sudo tcpdump -s 0 -i "$IFACE" -w "$pcap" 'tcp port 443' >/dev/null 2>&1 &
   local tcpdump_pid=$!
-  # Let tcpdump bind before the workload starts.
+  # iostat -x = extended stats, -y = skip the since-boot first sample,
+  # `1` = 1-second interval. Runs unprivileged; sysstat is preinstalled
+  # on ubuntu-latest.
+  iostat -x -y 1 > "$iostat_log" 2>/dev/null &
+  local iostat_pid=$!
+  # Let tcpdump and iostat bind before the workload starts.
   sleep 1
 
   /usr/bin/time -v "$@" >"$log" 2>&1 || echo "  run exited with $?"
 
   sudo kill "$tcpdump_pid" 2>/dev/null || true
+  kill "$iostat_pid" 2>/dev/null || true
   wait "$tcpdump_pid" 2>/dev/null || true
+  wait "$iostat_pid" 2>/dev/null || true
 
   # Make pcap readable by the later upload-artifact step (tcpdump writes
   # as root).
   sudo chmod 644 "$pcap"
-  echo "  → $pcap ($(wc -c <"$pcap") bytes), log: $log"
+  echo "  → $pcap ($(wc -c <"$pcap") bytes), log: $log, iostat: $iostat_log"
 }
 
 # Capture both phases (resolve, install) for a single PM. Wipes lock +
@@ -226,6 +239,47 @@ analyze_pcap() {
     gap_max=$(tail -1 "$gaps_tmp")
   fi
 
+  # iostat parsing — extract %util, w/s, wkB/s, w_await peaks across
+  # all per-second samples. Sysstat 12+ output has a `Device` header row
+  # before each sampling block; the column order is stable:
+  #   Device r/s rkB/s rrqm/s %rrqm r_await rareq-sz w/s wkB/s wrqm/s
+  #   %wrqm w_await wareq-sz d/s dkB/s drqm/s %drqm d_await dareq-sz
+  #   f/s f_await aqu-sz %util
+  # We pin to header positions so a sysstat ABI shift is a clear failure
+  # rather than a silently-wrong number.
+  local iostat_log="$PCAP_DIR/$name.iostat.txt"
+  local io_util_max=0 io_util_avg=0 io_w_iops_max=0 io_w_kbs_max=0 io_w_await_max=0 io_samples=0
+  if [ -s "$iostat_log" ]; then
+    # The awk script below tracks header column positions (in case sysstat
+    # changes ordering between versions) and then walks every device row,
+    # accumulating max/avg of %util plus max of write-side metrics.
+    read -r io_util_max io_util_avg io_w_iops_max io_w_kbs_max io_w_await_max io_samples <<< "$(awk '
+      /^Device/ {
+        # Reset column map per header block (in case columns drift).
+        for (i = 1; i <= NF; i++) col[$i] = i
+        in_dev = 1
+        next
+      }
+      /^$/ { in_dev = 0; next }
+      in_dev && NF >= col["%util"] && col["%util"] > 0 {
+        u = $col["%util"] + 0
+        ws = $col["w/s"] + 0
+        wkbs = $col["wkB/s"] + 0
+        wa = $col["w_await"] + 0
+        if (u > util_max) util_max = u
+        util_sum += u
+        util_n++
+        if (ws > w_iops_max) w_iops_max = ws
+        if (wkbs > w_kbs_max) w_kbs_max = wkbs
+        if (wa > w_await_max) w_await_max = wa
+      }
+      END {
+        util_avg = util_n > 0 ? util_sum / util_n : 0
+        printf "%.2f %.2f %.0f %.0f %.2f %d", util_max+0, util_avg+0, w_iops_max+0, w_kbs_max+0, w_await_max+0, util_n+0
+      }
+    ' "$iostat_log")"
+  fi
+
   cat > "$summary" <<EOF
 {
   "name": "$name",
@@ -242,13 +296,20 @@ analyze_pcap() {
   "stream_gap_count": $gap_count,
   "stream_gap_p50_us": $gap_p50,
   "stream_gap_p99_us": $gap_p99,
-  "stream_gap_max_us": $gap_max
+  "stream_gap_max_us": $gap_max,
+  "io_util_max_pct": $io_util_max,
+  "io_util_avg_pct": $io_util_avg,
+  "io_w_iops_max": $io_w_iops_max,
+  "io_w_kbs_max": $io_w_kbs_max,
+  "io_w_await_max_ms": $io_w_await_max,
+  "io_samples": $io_samples
 }
 EOF
 
   rm -f "$stats_tmp" "$gaps_tmp"
 
   echo "  packets=$total_packets streams=$distinct_streams retx=$retransmits zwin=$zero_windows dup_ack=$dup_acks gap_p99=${gap_p99}us gap_max=${gap_max}us"
+  echo "  io: util_max=${io_util_max}% util_avg=${io_util_avg}% w_iops_max=${io_w_iops_max} w_kbs_max=${io_w_kbs_max} w_await_max=${io_w_await_max}ms (n=${io_samples})"
 
   # Restore the file-level strict mode now that analysis is done.
   set -e
