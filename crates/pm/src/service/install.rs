@@ -1,6 +1,7 @@
 use crate::util::cli_enum::ScriptPolicy;
 use anyhow::Context;
 use anyhow::Result;
+use futures::stream::{FuturesUnordered, StreamExt};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
@@ -83,7 +84,14 @@ pub async fn install_packages(
     depths.sort_unstable();
 
     for depth in depths.iter() {
-        let mut clone_tasks: Vec<tokio::task::JoinHandle<Result<()>>> = Vec::new();
+        // Stream task completion within a layer instead of joining serially.
+        // The previous `for task in clone_tasks { task.await?? }` walks tasks
+        // in spawn order — slow tasks block the pop of already-finished
+        // ones, leaving idle latency between layers on deep trees. With
+        // FuturesUnordered we drain in completion order, propagating the
+        // first error early.
+        let mut clone_tasks: FuturesUnordered<tokio::task::JoinHandle<Result<()>>> =
+            FuturesUnordered::new();
 
         if let Some(packages) = groups.get(depth) {
             for (path, package) in packages.iter() {
@@ -169,8 +177,8 @@ pub async fn install_packages(
             }
         }
 
-        for task in clone_tasks {
-            task.await??;
+        while let Some(joined) = clone_tasks.next().await {
+            joined??;
         }
     }
 
