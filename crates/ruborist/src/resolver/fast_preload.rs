@@ -121,6 +121,8 @@ fn settle_future(
             Err(_) => return FastEvent::Settled { new_deps: vec![] },
         };
         if let Some(cached) = cache.get_version_manifest(&name, &resolved_version) {
+            // Populate the (name, spec) slot too — see comment below.
+            cache.set_version_manifest(name.clone(), spec.clone(), Arc::clone(&cached));
             return FastEvent::Settled {
                 new_deps: extract_transitive_deps(&cached, peer_deps),
             };
@@ -129,6 +131,18 @@ fn settle_future(
             extract_core_version_off_runtime(Arc::clone(&full), resolved_version).await;
         let new_deps = match core {
             Some(core_arc) => {
+                // Populate BOTH cache slots so the subsequent BFS hits the
+                // fast path on its first call:
+                //   * `(name, resolved_version)` — what
+                //     `resolve_via_full_manifest` writes in the cold path,
+                //     and what `extract_core_version_off_runtime`'s callers
+                //     elsewhere expect.
+                //   * `(name, spec)` — what `resolve_version_manifest`'s
+                //     first cache check uses (line 347 in service/registry.rs).
+                //     Without this slot, BFS still pays one OnceMap dispatch
+                //     + `resolve_via_full_manifest` walk per `(name, spec)`,
+                //     even though we've already done that work here.
+                cache.set_version_manifest(name.clone(), spec.clone(), Arc::clone(&core_arc));
                 cache.set_version_manifest(name, resolved_version, Arc::clone(&core_arc));
                 extract_transitive_deps(&core_arc, peer_deps)
             }
