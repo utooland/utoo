@@ -14,29 +14,20 @@ use super::http::get_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 use crate::util::FETCH_TIMINGS;
 
-/// Parse JSON bytes on rayon's CPU thread pool (native) or inline
-/// (wasm32). Keeps the tokio runtime free of `simd_json` work so other
-/// in-flight manifest fetches keep driving network IO while this one
-/// parses.
+/// Parse JSON bytes inline on the calling tokio task. Previously this
+/// dispatched to `rayon::spawn` to "free the runtime", but
+/// fetch-breakdown instrumentation on GHA showed the rayon hop made it
+/// strictly worse: rayon's pool is `num_cpus` (= 2 on ubuntu-latest),
+/// 64 concurrent fetches all dispatching parse queued behind 2 workers
+/// — avg_parse ballooned from ~5ms (CPU only) to 30ms wall (queue +
+/// CPU). Inlining puts parse on the tokio worker that already owns
+/// the buffer; the cooperative-scheduling budget naturally rebalances
+/// CPU between fetches.
 async fn parse_json_off_runtime<T>(mut bytes: Vec<u8>) -> Result<T, anyhow::Error>
 where
     T: serde::de::DeserializeOwned + Send + 'static,
 {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        rayon::spawn(move || {
-            let result = simd_json::serde::from_slice::<T>(&mut bytes)
-                .map_err(|e| anyhow!("JSON parse error: {e}"));
-            let _ = tx.send(result);
-        });
-        rx.await
-            .map_err(|e| anyhow!("rayon parse channel closed: {e}"))?
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        simd_json::serde::from_slice::<T>(&mut bytes).map_err(|e| anyhow!("JSON parse error: {e}"))
-    }
+    simd_json::serde::from_slice::<T>(&mut bytes).map_err(|e| anyhow!("JSON parse error: {e}"))
 }
 
 /// Result of a full manifest fetch with ETag support.
