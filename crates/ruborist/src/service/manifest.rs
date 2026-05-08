@@ -14,20 +14,39 @@ use super::http::get_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 use crate::util::FETCH_TIMINGS;
 
-/// Parse JSON bytes inline on the calling tokio task. Previously this
-/// dispatched to `rayon::spawn` to "free the runtime", but
-/// fetch-breakdown instrumentation on GHA showed the rayon hop made it
-/// strictly worse: rayon's pool is `num_cpus` (= 2 on ubuntu-latest),
-/// 64 concurrent fetches all dispatching parse queued behind 2 workers
-/// — avg_parse ballooned from ~5ms (CPU only) to 30ms wall (queue +
-/// CPU). Inlining puts parse on the tokio worker that already owns
-/// the buffer; the cooperative-scheduling budget naturally rebalances
-/// CPU between fetches.
+/// Parse JSON bytes on tokio's blocking thread pool.
+///
+/// The history of this function captures three different attempts:
+///   - rayon::spawn (original): rayon's pool is `num_cpus` (= 2 on
+///     GHA), 64 concurrent parses queued behind 2 workers → avg_parse
+///     30ms wall vs ~5ms CPU. round-0 baseline.
+///   - inline (round 1, reverted): no rayon hop, but the simd_json
+///     call blocks the tokio runtime worker, so other in-flight
+///     fetches couldn't drive their socket I/O — avg_request grew
+///     35ms → 52ms (+17ms), eff_parallel 42 → 35, net p1 wall +0.37s.
+///   - spawn_blocking (current): tokio's dedicated blocking pool has
+///     a much higher default cap (512), so 64 concurrent parses are
+///     never queued. Unlike rayon there's no contention with the
+///     install path's parallel-write rayon usage, and unlike inline
+///     the tokio runtime workers stay free to drive network I/O on
+///     all in-flight fetches.
 async fn parse_json_off_runtime<T>(mut bytes: Vec<u8>) -> Result<T, anyhow::Error>
 where
     T: serde::de::DeserializeOwned + Send + 'static,
 {
-    simd_json::serde::from_slice::<T>(&mut bytes).map_err(|e| anyhow!("JSON parse error: {e}"))
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        tokio::task::spawn_blocking(move || {
+            simd_json::serde::from_slice::<T>(&mut bytes)
+                .map_err(|e| anyhow!("JSON parse error: {e}"))
+        })
+        .await
+        .map_err(|e| anyhow!("spawn_blocking parse panicked: {e}"))?
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        simd_json::serde::from_slice::<T>(&mut bytes).map_err(|e| anyhow!("JSON parse error: {e}"))
+    }
 }
 
 /// Result of a full manifest fetch with ETag support.
