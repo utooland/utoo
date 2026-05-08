@@ -132,9 +132,15 @@ pub fn get_install_scope() -> InstallScope {
     INSTALL_SCOPE.get().copied().unwrap_or_default()
 }
 
-// Manifest fetch concurrency configuration
+// Manifest fetch concurrency configuration.
+//
+// 256 to match bun's observed ~260 parallel TCP streams against
+// registry.npmjs.org. Local fetch-breakdown instrumentation showed
+// 88% of preload-phase work is in per-request RTT (TCP+TLS+server),
+// only 11% body, 0.16% parse — so the dominant lever for p1 wall is
+// the cap on concurrent in-flight manifest requests.
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 64));
+    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 256));
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
     MANIFESTS_CONCURRENCY_LIMIT.set(value);

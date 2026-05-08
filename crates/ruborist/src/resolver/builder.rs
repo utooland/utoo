@@ -756,6 +756,7 @@ async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
         return;
     }
 
+    crate::util::FETCH_TIMINGS.reset();
     let start = tokio::time::Instant::now();
 
     let initial_deps = gather_preload_deps(graph, config.peer_deps);
@@ -794,7 +795,13 @@ async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
         failed: stats.failed_count,
     });
 
-    tracing::debug!("Preload phase: {:?}", start.elapsed());
+    let preload_elapsed = start.elapsed();
+    tracing::debug!("Preload phase: {:?}", preload_elapsed);
+    tracing::info!(
+        "p1-breakdown preload_wall={}ms | {}",
+        preload_elapsed.as_millis(),
+        crate::util::FETCH_TIMINGS.snapshot().summary_line(),
+    );
 }
 
 /// Run the BFS traversal phase to build the dependency tree.
@@ -896,7 +903,13 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
         current_level = next_level;
     }
 
-    tracing::debug!("Build phase: {:?}", start.elapsed());
+    let bfs_elapsed = start.elapsed();
+    tracing::debug!("Build phase: {:?}", bfs_elapsed);
+    tracing::info!(
+        "p1-breakdown bfs_wall={}ms | {}",
+        bfs_elapsed.as_millis(),
+        crate::util::FETCH_TIMINGS.snapshot().summary_line(),
+    );
     Ok(())
 }
 

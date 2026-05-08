@@ -12,6 +12,7 @@ use super::fetch::{
 };
 use super::http::get_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
+use crate::util::FETCH_TIMINGS;
 
 /// Parse JSON bytes on rayon's CPU thread pool (native) or inline
 /// (wasm32). Keeps the tokio runtime free of `simd_json` work so other
@@ -91,7 +92,9 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                     request = request.header("If-None-Match", etag_value);
                 }
 
+                let t_request_start = std::time::Instant::now();
                 let response = request.send().await.map_err(classify_reqwest_error)?;
+                let request_us = t_request_start.elapsed().as_micros() as u64;
                 let status = response.status();
 
                 if status == reqwest::StatusCode::NOT_MODIFIED {
@@ -109,19 +112,25 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                         .and_then(|v| v.to_str().ok())
                         .map(|s| s.to_string());
 
+                    let t_body_start = std::time::Instant::now();
                     let raw_bytes = response
                         .bytes()
                         .await
                         .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
                         .to_vec();
+                    let body_us = t_body_start.elapsed().as_micros() as u64;
+                    let bytes_len = raw_bytes.len() as u64;
                     // simd_json mutates the parse buffer; clone so the raw
                     // bytes survive for `manifest.raw`.
                     let parse_buf = raw_bytes.clone();
+                    let t_parse_start = std::time::Instant::now();
                     let mut manifest: FullManifest = parse_json_off_runtime(parse_buf)
                         .await
                         .map_err(FetchError::Permanent)?;
+                    let parse_us = t_parse_start.elapsed().as_micros() as u64;
                     manifest.raw = std::sync::Arc::from(raw_bytes);
 
+                    FETCH_TIMINGS.record(request_us, body_us, parse_us, bytes_len);
                     Ok(FetchManifestResult::Ok(manifest, new_etag))
                 } else {
                     Err(classify_status(status, &url))
@@ -190,6 +199,7 @@ pub async fn fetch_version_manifest(
         || {
             let url = url.clone();
             async move {
+                let t_request_start = std::time::Instant::now();
                 let response = get_client()
                     .map_err(FetchError::Permanent)?
                     .get(&url)
@@ -197,16 +207,26 @@ pub async fn fetch_version_manifest(
                     .send()
                     .await
                     .map_err(classify_reqwest_error)?;
+                let request_us = t_request_start.elapsed().as_micros() as u64;
 
                 if response.status().is_success() {
+                    let t_body_start = std::time::Instant::now();
                     let bytes = response
                         .bytes()
                         .await
                         .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
                         .to_vec();
-                    parse_json_off_runtime::<CoreVersionManifest>(bytes)
+                    let body_us = t_body_start.elapsed().as_micros() as u64;
+                    let bytes_len = bytes.len() as u64;
+                    let t_parse_start = std::time::Instant::now();
+                    let parsed = parse_json_off_runtime::<CoreVersionManifest>(bytes)
                         .await
-                        .map_err(FetchError::Permanent)
+                        .map_err(FetchError::Permanent);
+                    let parse_us = t_parse_start.elapsed().as_micros() as u64;
+                    if parsed.is_ok() {
+                        FETCH_TIMINGS.record(request_us, body_us, parse_us, bytes_len);
+                    }
+                    parsed
                 } else {
                     Err(classify_status(response.status(), &url))
                 }
