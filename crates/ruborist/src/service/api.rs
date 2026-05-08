@@ -258,9 +258,12 @@ where
         .await
         .map_err(|e| anyhow::Error::new(e).context("Dependency resolution failed"))?;
 
+    let t_serialize_start = std::time::Instant::now();
     let (packages, _total) = graph.serialize_to_packages(&root_path);
+    let serialize_us = t_serialize_start.elapsed().as_micros() as u64;
 
     // Export project cache from memory cache for the host to persist.
+    let t_cache_export_start = std::time::Instant::now();
     let mut project_cache = ProjectCacheData::default();
     for (key, manifest) in registry.cache().export_version_manifests() {
         // `parse_package_spec` rather than `split_once('@')` so scoped names
@@ -271,6 +274,13 @@ where
         pkg_cache.specs.insert(spec.to_string(), version.clone());
         pkg_cache.manifests.insert(version, (*manifest).clone());
     }
+    let cache_export_us = t_cache_export_start.elapsed().as_micros() as u64;
+
+    tracing::info!(
+        "p1-breakdown serialize_us={} cache_export_us={}",
+        serialize_us,
+        cache_export_us,
+    );
 
     Ok(BuildDepsOutput {
         lock: PackageLock::new(&pkg.name, &pkg.version, packages),
