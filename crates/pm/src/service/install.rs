@@ -83,11 +83,31 @@ pub async fn install_packages(
     let mut depths: Vec<_> = groups.keys().cloned().collect();
     depths.sort_unstable();
 
+    // Cooperative-yield cadence inside the synchronous spawn-loop body
+    // below. Before #2903 (TTY-gate), every iteration called
+    // `PROGRESS_BAR.inc(1)`, whose internal mutex+state update gave the
+    // tokio runtime roughly one micro-pause per package — enough for
+    // the runtime to interleave socket reads on in-flight tarball
+    // downloads. After TTY-gate the inc became a no-op on CI (non-TTY),
+    // and pcap+iostat A/B on the new disk-burst-bounded baseline showed
+    // utoo `tcp.analysis.zero_window` events climb from 2 → 16 vs
+    // baseline (no disk regression — util / w_await flat). Adding an
+    // explicit `yield_now` inside the spawn loop restores the implicit
+    // yield without the indicatif mutex cost. Every-N rather than
+    // per-iteration so the yield itself doesn't dominate cheap omit /
+    // skip iterations.
+    const YIELD_EVERY: usize = 32;
+
     for depth in depths.iter() {
         let mut clone_tasks: Vec<tokio::task::JoinHandle<Result<()>>> = Vec::new();
+        let mut iter_count: usize = 0;
 
         if let Some(packages) = groups.get(depth) {
             for (path, package) in packages.iter() {
+                iter_count += 1;
+                if iter_count.is_multiple_of(YIELD_EVERY) {
+                    tokio::task::yield_now().await;
+                }
                 // Skip packages based on omit config
                 if should_omit_package(package, omit) {
                     progress_inc(1);
