@@ -63,6 +63,7 @@ impl Context {
             receiver,
             supports_semver: get_supports_semver(),
             catalogs,
+            skip_preload: false,
         }
     }
 
@@ -82,8 +83,13 @@ impl Context {
     /// Resolve dependency tree with plain ProgressReceiver. Returns
     /// [`BuildDepsOutput`] (lock + project cache); the project cache is
     /// persisted in the background.
+    ///
+    /// Used by the lockfile-only path (`utoo deps`). No pipeline consumes
+    /// `PackageResolved` events here, so preload is pure overhead — BFS's
+    /// own per-level parallel prefetch warms the manifest cache.
     pub async fn build_deps(cwd: PathBuf) -> anyhow::Result<BuildDepsOutput> {
-        let options = Self::deps_options(cwd.clone(), ProgressReceiver).await;
+        let mut options = Self::deps_options(cwd.clone(), ProgressReceiver).await;
+        options.skip_preload = true;
         let output = utoo_ruborist::service::build_deps(options).await?;
         spawn_save_project_cache(cwd, output.project_cache.clone());
         Ok(output)
