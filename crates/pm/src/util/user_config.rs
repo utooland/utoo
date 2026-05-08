@@ -132,15 +132,20 @@ pub fn get_install_scope() -> InstallScope {
     INSTALL_SCOPE.get().copied().unwrap_or_default()
 }
 
-// Manifest fetch concurrency configuration.
+// Manifest fetch concurrency configuration. Default kept at 64.
 //
-// 256 to match bun's observed ~260 parallel TCP streams against
-// registry.npmjs.org. Local fetch-breakdown instrumentation showed
-// 88% of preload-phase work is in per-request RTT (TCP+TLS+server),
-// only 11% body, 0.16% parse — so the dominant lever for p1 wall is
-// the cap on concurrent in-flight manifest requests.
+// We tried 256 to match bun's observed parallel streams; on GHA the
+// fetch-breakdown instrumentation showed sum_parse exploded from
+// ~10ms (local Mac, network-bound) to 728s on first cold run with
+// 256 concurrency. Mechanism: parse_json_off_runtime dispatches to
+// rayon, which has only num_cpus (=2 on GHA) workers. Bumping
+// concurrency to 256 queued 256 parses behind 2 workers → wall
+// per-parse jumped from 730µs to 266ms. Net p1 wall *increased*
+// 3.10s → 3.33s on phases bench. Keep 64 until we address the
+// parse-side queueing (e.g. inline parse on tokio, or a wider
+// dedicated parse pool).
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 256));
+    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 64));
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
     MANIFESTS_CONCURRENCY_LIMIT.set(value);
