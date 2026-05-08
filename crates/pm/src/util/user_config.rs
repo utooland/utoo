@@ -137,17 +137,18 @@ pub fn get_install_scope() -> InstallScope {
 // We tried 256 to match bun's observed parallel streams; on GHA the
 // fetch-breakdown instrumentation showed sum_parse exploded from
 // ~10ms (local Mac, network-bound) to 728s on first cold run with
-// Once parse work shrank (combined `to_borrowed_value` pass replaces
-// the typed-serde envelope parse + reparse), spawn_blocking pool
-// pressure no longer caps us at 96. manifest-bench's HTTP-only sweep
-// on GHA (npmjs, h1) consistently picks 96 or 128 as best wall —
-// in the most recent good-network run, conc=128 hit 1500ms vs
-// conc=96 at 1566ms. Bumping to 128 narrows the gap between
-// fast_preload's wave-shaped concurrency floor (eff_parallel ~48
-// because pending takes ~2 wave depths to fill) and the cap, so
-// the late-wave saturation has more headroom.
+// manifest-bench's HTTP-only sweep on GHA (npmjs, h1) bottoms out
+// somewhere in the 96-128 band — which one wins varies with npmjs's
+// per-IP latency on each run (good runs picked 128, slow-network
+// runs flattened the curve and even regressed at 128 due to wider
+// p99 from queued requests). 96 is the conservative pick: it's at
+// or near best on every run we've measured, never the worst, and
+// leaves headroom for npmjs to throttle without compounding queue
+// time. Combined-parse fetch (671ac98e) made the spawn_blocking
+// pool no longer a contention bottleneck, but didn't change the
+// network-side variance — that's what caps the useful concurrency.
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 128));
+    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 96));
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
     MANIFESTS_CONCURRENCY_LIMIT.set(value);
