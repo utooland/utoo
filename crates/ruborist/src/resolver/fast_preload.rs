@@ -4,7 +4,7 @@
 //! its `OnceMap` gates, [`crate::service::store::ManifestStore`] writes,
 //! and `EventReceiver` event dispatch — to drive a flat
 //! `FuturesUnordered` over [`crate::service::manifest::fetch_full_manifest`]
-//! plus a rayon-dispatched per-spec settle. The warm
+//! plus a fused-into-fetch primary settle. The warm
 //! [`crate::service::cache::MemoryCache`] it leaves behind makes the
 //! subsequent BFS phase a pure cache-hit walk: no network, no rayon
 //! re-parse hop on `extract_core_version`.
@@ -14,18 +14,30 @@
 //! still go through [`super::preload::preload_manifests`] so the
 //! pipeline keeps its early-start signal.
 //!
-//! ## Why settle is dispatched off-runtime
+//! ## Why settle is fused into the fetch task
 //!
 //! A "settle" turns a freshly-fetched `FullManifest` plus a spec into a
 //! `CoreVersionManifest` for one version, via `simd_json::to_borrowed_value`
 //! over the manifest's raw bytes. That parse is 5–10ms per spec on a
-//! 100KB body. Calling it inline on the tokio runtime (the v1 of this
-//! module) starves the runtime worker — sibling fetches in flight stop
-//! draining their sockets while the worker is parsing, which CI showed
-//! as `avg_request` rising +3ms and `avg_parse` jumping 5→11ms vs the
-//! UnifiedRegistry baseline. Routing settle through `rayon::spawn`
-//! (the same path the `extract_core_version_off_runtime` helper takes)
-//! keeps the runtime free to drive I/O.
+//! 100KB body.
+//!
+//! v1 ran settle inline on the tokio runtime worker — that starved
+//! sibling fetches' I/O drive (CI showed `avg_request` +3ms,
+//! `avg_parse` 5→11ms). v2 dispatched settle to rayon via a separate
+//! `FuturesUnordered` future, which fixed the runtime starvation but
+//! introduced a dispatch RTT: fetch lands → rayon settle queued → settle
+//! pops → `pending` finally gets transitive deps. That round-trip held
+//! the wave-shaped transitive walk back, capping `eff_parallel` at ~44
+//! against a 96 cap.
+//!
+//! v3 (this) folds the primary settle into the fetch task itself via
+//! `tokio::task::spawn_blocking`. The fetch task awaits both the
+//! network round-trip and the version-extract on the same blocking
+//! pool slot, then returns with the resolved `CoreVersionManifest`
+//! attached. The main loop pulls a single `Fetched` event and
+//! immediately extends `pending` — no separate settle pop. Sibling
+//! specs (rare; same package, different range) still go through a
+//! `Settled` future to keep the primary path lean.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::pin::Pin;
@@ -56,21 +68,31 @@ pub struct FastPreloadStats {
     pub total_request_ms: u64,
 }
 
-/// Output of one in-flight future. The main loop merges fetch and settle
-/// completions through a single `FuturesUnordered` so backpressure on
-/// either side throttles the other naturally.
-///
-/// `Fetched` is boxed because `FetchManifestResult::Ok` carries a fully-
-/// parsed `FullManifest` (`raw` bytes + parsed envelope), which makes
-/// the variant large enough that clippy flags the size delta with
-/// `Settled`. The cost is one heap allocation per fetched manifest;
-/// trivial against the network round-trip we already paid.
-#[allow(clippy::large_enum_variant)]
+/// One fetch's primary settle outcome — the resolved version + parsed
+/// `CoreVersionManifest` for the spec the fetch was originally issued
+/// for. `None` means the spec didn't match any version (caller treats
+/// as soft skip).
+type PrimarySettle = Option<(String, Arc<CoreVersionManifest>)>;
+
+/// Outcome of a fetch task. Owning `Arc<FullManifest>` (rather than
+/// `FetchManifestResult` by-value) means the fetch task can `Arc::clone`
+/// once for the primary settle, then pass ownership along — no full
+/// `FullManifest` clone (which would copy the 200-entry `time`
+/// HashMap + the `versions` `Vec<String>` per fetch).
+enum FetchOutcome {
+    Ok(Arc<FullManifest>),
+    NotModified,
+    Err,
+}
+
+/// Output of one in-flight future. The main loop merges fetch and
+/// sibling-settle completions through a single `FuturesUnordered`.
 enum FastEvent {
     Fetched {
         name: String,
         primary_spec: String,
-        result: anyhow::Result<FetchManifestResult>,
+        outcome: FetchOutcome,
+        primary_settle: PrimarySettle,
         elapsed_ms: u64,
     },
     Settled {
@@ -101,13 +123,9 @@ fn extract_transitive_deps(manifest: &CoreVersionManifest, peer_deps: PeerDeps) 
     deps
 }
 
-/// Resolve `(name, spec)` against `full` off the tokio runtime.
-///
-/// Returns the freshly-extracted version manifest's transitive deps so
-/// the caller can extend its pending queue. The heavy
-/// `simd_json::to_borrowed_value` parse runs inside
-/// `extract_core_version_off_runtime`, which dispatches to rayon — same
-/// path the BFS phase uses for cold extracts.
+/// Off-runtime settle for a `(name, spec)` whose `FullManifest` is
+/// already cached. Used for sibling specs — multiple ranges on the
+/// same package — that arrive after the primary fetch has landed.
 fn settle_future(
     name: String,
     spec: String,
@@ -121,7 +139,6 @@ fn settle_future(
             Err(_) => return FastEvent::Settled { new_deps: vec![] },
         };
         if let Some(cached) = cache.get_version_manifest(&name, &resolved_version) {
-            // Populate the (name, spec) slot too — see comment below.
             cache.set_version_manifest(name.clone(), spec.clone(), Arc::clone(&cached));
             return FastEvent::Settled {
                 new_deps: extract_transitive_deps(&cached, peer_deps),
@@ -131,17 +148,6 @@ fn settle_future(
             extract_core_version_off_runtime(Arc::clone(&full), resolved_version).await;
         let new_deps = match core {
             Some(core_arc) => {
-                // Populate BOTH cache slots so the subsequent BFS hits the
-                // fast path on its first call:
-                //   * `(name, resolved_version)` — what
-                //     `resolve_via_full_manifest` writes in the cold path,
-                //     and what `extract_core_version_off_runtime`'s callers
-                //     elsewhere expect.
-                //   * `(name, spec)` — what `resolve_version_manifest`'s
-                //     first cache check uses (line 347 in service/registry.rs).
-                //     Without this slot, BFS still pays one OnceMap dispatch
-                //     + `resolve_via_full_manifest` walk per `(name, spec)`,
-                //     even though we've already done that work here.
                 cache.set_version_manifest(name.clone(), spec.clone(), Arc::clone(&core_arc));
                 cache.set_version_manifest(name, resolved_version, Arc::clone(&core_arc));
                 extract_transitive_deps(&core_arc, peer_deps)
@@ -150,6 +156,35 @@ fn settle_future(
         };
         FastEvent::Settled { new_deps }
     })
+}
+
+/// Resolve `(name, spec)` against `full` on tokio's blocking pool.
+///
+/// Same shape as `extract_core_version_off_runtime` (which uses rayon),
+/// but stays inside the fetch task so the result lands together with
+/// the network round-trip — no separate `FuturesUnordered` pop, so
+/// `pending` gets the transitive deps the moment the fetch event is
+/// drained. Tokio's blocking pool has a 512-thread cap; rayon's is
+/// `max(num_cpus, 8)`. With many primary settles arriving in waves,
+/// the wider blocking pool absorbs the burst better than rayon would.
+async fn resolve_primary_settle(spec: String, full: Arc<FullManifest>) -> PrimarySettle {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        tokio::task::spawn_blocking(move || {
+            let resolved = resolve_target_version((&*full).into(), &spec).ok()?;
+            let core = full.get_core_version(&resolved)?;
+            Some((resolved, Arc::new(core)))
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let resolved = resolve_target_version((&*full).into(), &spec).ok()?;
+        let core = full.get_core_version(&resolved)?;
+        Some((resolved, Arc::new(core)))
+    }
 }
 
 /// Manifest-bench-style flat parallel fetch of all transitively-reachable
@@ -167,14 +202,14 @@ pub async fn fast_preload(
 ) -> FastPreloadStats {
     let mut stats = FastPreloadStats::default();
     let mut pending: VecDeque<Dep> = VecDeque::from(initial_deps);
-    // Specs we've already enqueued (or settled). Prevents duplicate
-    // settles from re-walking the same transitive subtree.
+    // Specs we've already enqueued. Prevents duplicate settles from
+    // re-walking the same transitive subtree.
     let mut seen_specs: HashSet<(String, String)> = HashSet::new();
     // Names whose full manifest is in flight or already cached.
     let mut fetched_names: HashSet<String> = HashSet::new();
     // Sibling specs that arrived while their package's full manifest
-    // was still in flight. The fetch's completion handler drains this
-    // bucket — we stash by name so the lookup is one HashMap probe.
+    // was still in flight. The fetch's completion handler dispatches
+    // settles for them, then drains this bucket.
     let mut deferred_by_name: HashMap<String, Vec<String>> = HashMap::new();
     let mut futs: FuturesUnordered<FastFut> = FuturesUnordered::new();
     let concurrency = config.concurrency;
@@ -189,10 +224,10 @@ pub async fn fast_preload(
                 continue;
             }
 
-            // Hot path: the full manifest is already cached (a sibling
-            // spec for this name has already returned). Dispatch a
-            // settle so the parse work runs on rayon, not on the tokio
-            // worker — keeps the runtime free for ongoing fetches.
+            // Hot path: a sibling spec for this name has already
+            // returned, so the full manifest is cached. Settle on
+            // rayon (off-runtime) — keeps the primary fetch path
+            // (next branch) clean.
             if let Some(full) = cache.get_full_manifest(&name) {
                 futs.push(Box::pin(settle_future(
                     name,
@@ -205,8 +240,8 @@ pub async fn fast_preload(
             }
 
             // A fetch for this name is already in flight: stash this
-            // spec; the fetch's completion handler will dispatch its
-            // settle.
+            // sibling spec; the fetch's completion handler will
+            // dispatch a settle for it.
             if !fetched_names.insert(name.clone()) {
                 deferred_by_name.entry(name).or_default().push(spec);
                 continue;
@@ -225,10 +260,30 @@ pub async fn fast_preload(
                 })
                 .await;
                 let elapsed_ms = start.elapsed().as_millis() as u64;
+                // Fuse the primary settle into the same task so the
+                // main loop sees the resolved version + transitive
+                // deps in the same event — no extra `next().await` to
+                // wait through the FuturesUnordered queue before
+                // `pending` can refill.
+                let (outcome, primary_settle) = match result {
+                    Ok(FetchManifestResult::Ok(manifest, _etag)) => {
+                        let full_arc = Arc::new(manifest);
+                        let settle =
+                            resolve_primary_settle(primary_spec.clone(), Arc::clone(&full_arc))
+                                .await;
+                        (FetchOutcome::Ok(full_arc), settle)
+                    }
+                    Ok(FetchManifestResult::NotModified) => (FetchOutcome::NotModified, None),
+                    Err(e) => {
+                        tracing::debug!("fast_preload failed for {}: {}", n, e);
+                        (FetchOutcome::Err, None)
+                    }
+                };
                 FastEvent::Fetched {
                     name,
                     primary_spec,
-                    result,
+                    outcome,
+                    primary_settle,
                     elapsed_ms,
                 }
             }));
@@ -246,7 +301,8 @@ pub async fn fast_preload(
             FastEvent::Fetched {
                 name,
                 primary_spec,
-                result,
+                outcome,
+                primary_settle,
                 elapsed_ms,
             } => {
                 if stats.success_count == 0 && stats.failed_count == 0 {
@@ -258,24 +314,36 @@ pub async fn fast_preload(
                 }
                 stats.total_request_ms += elapsed_ms;
 
-                match result {
-                    Ok(FetchManifestResult::Ok(manifest, _etag)) => {
+                match outcome {
+                    FetchOutcome::Ok(full_arc) => {
                         stats.success_count += 1;
                         stats.fetched_names += 1;
-                        let full_arc = Arc::new(manifest);
                         cache.set_full_manifest(name.clone(), Arc::clone(&full_arc));
 
-                        // Primary settle.
-                        futs.push(Box::pin(settle_future(
-                            name.clone(),
-                            primary_spec,
-                            Arc::clone(&full_arc),
-                            cache.clone(),
-                            peer_deps,
-                        )));
+                        // Apply the primary settle (already done inside
+                        // the fetch task via spawn_blocking) — populate
+                        // both `(name, primary_spec)` and
+                        // `(name, resolved_version)` cache slots so BFS
+                        // hits the early-return at registry.rs:347 on
+                        // its first probe, then extend `pending` with
+                        // the spec's transitive deps.
+                        if let Some((resolved_version, core_arc)) = primary_settle {
+                            cache.set_version_manifest(
+                                name.clone(),
+                                primary_spec,
+                                Arc::clone(&core_arc),
+                            );
+                            cache.set_version_manifest(
+                                name.clone(),
+                                resolved_version,
+                                Arc::clone(&core_arc),
+                            );
+                            pending.extend(extract_transitive_deps(&core_arc, peer_deps));
+                        }
 
-                        // Sibling settles that were stashed while the
-                        // fetch was in flight.
+                        // Sibling specs that were stashed while the
+                        // fetch was in flight: dispatch each as a
+                        // separate settle future.
                         if let Some(siblings) = deferred_by_name.remove(&name) {
                             for sibling_spec in siblings {
                                 futs.push(Box::pin(settle_future(
@@ -288,14 +356,10 @@ pub async fn fast_preload(
                             }
                         }
                     }
-                    Ok(FetchManifestResult::NotModified) => {
-                        // No ETag was sent on these requests, so 304 is
-                        // unreachable in practice; treat as soft failure.
+                    FetchOutcome::NotModified | FetchOutcome::Err => {
+                        // 304 is unreachable in practice (no ETag sent);
+                        // both branches treated as soft failure.
                         stats.failed_count += 1;
-                    }
-                    Err(e) => {
-                        stats.failed_count += 1;
-                        tracing::debug!("fast_preload failed for {}: {}", name, e);
                     }
                 }
             }
