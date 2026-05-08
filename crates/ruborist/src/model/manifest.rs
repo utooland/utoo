@@ -163,14 +163,20 @@ pub async fn extract_core_version_off_runtime(
     full: Arc<FullManifest>,
     version: String,
 ) -> (String, Option<Arc<CoreVersionManifest>>) {
+    // See `parse_json_off_runtime` for the same rayon-vs-spawn_blocking
+    // history: rayon's `num_cpus` pool oversubscribes when many concurrent
+    // resolves all extract from full manifests at once. spawn_blocking's
+    // larger pool avoids the queue, and the work is genuinely blocking
+    // (lazy JSON re-parse via `get_core_version`) so the blocking pool
+    // is the right home.
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        rayon::spawn(move || {
+        tokio::task::spawn_blocking(move || {
             let core = full.get_core_version(&version).map(Arc::new);
-            let _ = tx.send((version, core));
-        });
-        rx.await.expect("rayon parse worker dropped before sending")
+            (version, core)
+        })
+        .await
+        .expect("spawn_blocking parse worker panicked")
     }
     #[cfg(target_arch = "wasm32")]
     {
