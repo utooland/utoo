@@ -18,7 +18,6 @@ use pack_core::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    fs,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -1375,18 +1374,6 @@ impl Project {
     ) -> Result<()> {
         let span = tracing::trace_span!("emitting");
         async move {
-            // clean dist director if configured
-            if self.config().output().await?.clean.is_some_and(|c| c) {
-                let this = self.await?;
-                let dist_dir = self.dist_dir().await?;
-
-                // Construct the complete absolute path by combining project_path and dist_dir
-                let dist_path = Path::new(&this.project_path).join(&*dist_dir);
-
-                if let Err(e) = clean_directory(&dist_path) {
-                    tracing::debug!("Failed to clean dist directory: {}", e);
-                }
-            }
             let client_root = self.client_root().owned().await?;
             let client_output = self.dist_root().owned().await?;
             let output_root = self.output_fs().root().owned().await?;
@@ -1822,35 +1809,6 @@ async fn all_assets_from_entries_operation(
 ) -> Result<Vc<ExpandedOutputAssets>> {
     let assets = operation.connect();
     Ok(all_assets_from_entries(assets))
-}
-
-fn clean_directory(dist_path: &Path) -> Result<()> {
-    let canonical_path = fs::canonicalize(dist_path)
-        .with_context(|| format!("Failed to canonicalize path: {}", dist_path.display()))?;
-
-    if canonical_path.exists() {
-        tracing::info!("Cleaning dist directory: {}", canonical_path.display());
-
-        // Read directory entries
-        for entry in fs::read_dir(&canonical_path)? {
-            let entry = entry?;
-            let path = entry.path();
-
-            if path.is_dir() {
-                if let Err(e) = fs::remove_dir_all(&path) {
-                    tracing::warn!("Failed to remove directory {}: {}", path.display(), e);
-                }
-            } else if let Err(e) = fs::remove_file(&path) {
-                tracing::warn!("Failed to remove file {}: {}", path.display(), e);
-            }
-        }
-
-        tracing::info!("Dist directory cleaned successfully");
-    } else {
-        tracing::debug!("Dist directory does not exist, skipping clean");
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]

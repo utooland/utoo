@@ -20,7 +20,7 @@ import {
   TurbopackRuleConfigItem,
 } from "../config/types";
 import { getPackPath, rustifyEnv } from "../utils/common";
-import { normalizePath } from "../utils/normalize-path";
+import { normalizePath } from "../utils/normalizePath";
 import { runLoaderWorkerPool } from "./loaderWorkerPool";
 import {
   Endpoint,
