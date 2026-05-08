@@ -24,7 +24,6 @@ use std::sync::Arc;
 
 #[cfg(feature = "http-tarball")]
 use anyhow::Context as _;
-use futures::stream::{self, StreamExt};
 use petgraph::graph::NodeIndex;
 
 use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
@@ -32,7 +31,7 @@ use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
 use crate::resolver::preload::{PreloadConfig, preload_manifests};
-use crate::resolver::registry::{ResolveError, resolve_package, resolve_registry_dep};
+use crate::resolver::registry::{ResolveError, resolve_registry_dep};
 use crate::spec::{Catalogs, PackageSpec, Protocol, SpecStr};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
 use crate::traits::registry::{RegistryClient, ResolvedPackage};
@@ -181,7 +180,10 @@ struct NodeFlags {
 /// Only registry specs (e.g. `^4.17.0`) are collected. `catalog:` specs are
 /// resolved at edge creation time, so by the time this runs they are already
 /// concrete registry specs.
-fn gather_preload_deps(graph: &DependencyGraph, peer_deps: PeerDeps) -> Vec<(String, String)> {
+pub(crate) fn gather_preload_deps(
+    graph: &DependencyGraph,
+    peer_deps: PeerDeps,
+) -> Vec<(String, String)> {
     let mut deps = HashSet::new();
 
     let collect = |node_index: NodeIndex, deps: &mut HashSet<(String, String)>| {
@@ -805,72 +807,29 @@ async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
 /// Run the BFS traversal phase to build the dependency tree.
 ///
 /// Each level does a parallel prefetch of all unresolved registry specs
-/// before the sequential `process_dependency` walk. The prefetch warms
-/// the registry's manifest cache so the per-edge `process_dependency`
-/// calls below hit cache instead of awaiting network.
+/// before the sequential `process_dependency` walk.
 ///
-/// This collapses the previously-separate `run_preload_phase` (which
-/// fetched all transitive manifests up-front) into per-level batches.
-/// Net effect on `utoo deps`: no separate preload wall — fetch happens
-/// inside BFS in waves matching the dep tree's natural levels. For
-/// install paths (p0/p3), `run_preload_phase` may still run via
-/// `skip_preload=false` and feed the `PackageResolved` pipeline event.
+/// When `skip_preload=true` (lockfile-only path), the caller is
+/// expected to have already populated `registry.cache()` via
+/// [`super::fast_preload::fast_preload`], so this BFS sees only
+/// cache hits. When `skip_preload=false` (install paths), the
+/// receiver-driven [`super::preload::preload_manifests`] runs ahead
+/// of this phase and feeds `BuildEvent::PackageResolved` to the
+/// pipeline.
 async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
     graph: &mut DependencyGraph,
     registry: &R,
     config: &BuildDepsConfig,
     receiver: &E,
 ) -> Result<(), ResolveError<R::Error>> {
-    // Reset fetch counters so the breakdown line reports fetches issued
-    // *during* this BFS phase, not preload's. (Preload still runs for
-    // install-path callers and reports its own breakdown.)
-    if config.skip_preload {
-        crate::util::FETCH_TIMINGS.reset();
-    }
-
     let start = tokio::time::Instant::now();
-    let mut total_prefetch_wall_us: u64 = 0;
-    let mut total_merge_wall_us: u64 = 0;
-
     let mut current_level = vec![graph.root_index];
-    let mut prefetched: HashSet<String> = HashSet::new();
 
     while !current_level.is_empty() {
         receiver.on_event(BuildEvent::LevelStart {
             node_count: current_level.len(),
         });
 
-        // Phase A: collect unresolved registry edges across the whole level
-        // (deduplicated against earlier levels — once a (name, spec) is
-        // prefetched, the registry's cache satisfies every subsequent
-        // `process_dependency` call).
-        let mut prefetch_targets: Vec<(String, String)> = Vec::new();
-        for &node_index in &current_level {
-            for edge in collect_unresolved_edges(graph, node_index) {
-                if edge.spec.is_registry_spec() {
-                    let key = format!("{}@{}", edge.name, edge.spec);
-                    if prefetched.insert(key) {
-                        prefetch_targets.push((edge.name, edge.spec));
-                    }
-                }
-            }
-        }
-
-        // Phase B: parallel prefetch — pure cache warming. Errors are
-        // ignored here; the sequential `process_dependency` below will
-        // re-issue (now hitting either cache or the same fresh failure)
-        // and propagate any real error through the existing path.
-        if !prefetch_targets.is_empty() {
-            let prefetch_start = tokio::time::Instant::now();
-            stream::iter(prefetch_targets)
-                .for_each_concurrent(config.concurrency, |(name, spec)| async move {
-                    let _ = resolve_package(registry, &name, &spec).await;
-                })
-                .await;
-            total_prefetch_wall_us += prefetch_start.elapsed().as_micros() as u64;
-        }
-
-        let merge_start = tokio::time::Instant::now();
         let mut next_level = Vec::new();
 
         for node_index in current_level {
@@ -952,17 +911,14 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
         receiver.on_event(BuildEvent::LevelComplete {
             next_level_count: next_level.len(),
         });
-        total_merge_wall_us += merge_start.elapsed().as_micros() as u64;
         current_level = next_level;
     }
 
     let bfs_elapsed = start.elapsed();
     tracing::debug!("Build phase: {:?}", bfs_elapsed);
     tracing::info!(
-        "p1-breakdown bfs_wall={}ms bfs_prefetch_wall_us={} bfs_merge_wall_us={} | {}",
+        "p1-breakdown bfs_wall={}ms | {}",
         bfs_elapsed.as_millis(),
-        total_prefetch_wall_us,
-        total_merge_wall_us,
         crate::util::FETCH_TIMINGS.snapshot().summary_line(),
     );
     Ok(())

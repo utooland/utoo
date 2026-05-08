@@ -36,7 +36,10 @@ use crate::model::package_lock::PackageLock;
 use crate::model::util::parse_package_spec;
 use crate::resolver::builder::{
     BuildDepsConfig, DevDeps, EdgeContext, PeerDeps, add_edges_from, build_deps_with_config,
+    gather_preload_deps,
 };
+use crate::resolver::fast_preload::fast_preload;
+use crate::resolver::preload::PreloadConfig;
 use crate::resolver::runtime::install_runtime_from_map;
 use crate::resolver::workspace::WorkspaceDiscovery;
 use crate::spec::Catalogs;
@@ -267,6 +270,29 @@ where
             "Skipping preload phase (project cache has {} entries)",
             cache_count
         );
+    }
+
+    // Lockfile-only callers (`utoo deps`) skip the receiver-driven
+    // `run_preload_phase` because they have no pipeline consumer for
+    // `BuildEvent::PackageResolved`. Run `fast_preload` instead — a flat
+    // `FuturesUnordered` over `fetch_full_manifest` that warms the
+    // `MemoryCache` so the BFS phase below is pure cache-hit. This is
+    // the manifest-bench-style path; the heavier `preload_manifests`
+    // path (with `OnceMap` gates + `EventReceiver` events) only runs
+    // for install paths that need the pipeline signal.
+    if skip_preload_caller && cache_count == 0 {
+        let initial_deps = gather_preload_deps(&graph, peer_deps);
+        let preload_config = PreloadConfig {
+            peer_deps,
+            concurrency,
+        };
+        fast_preload(
+            initial_deps,
+            registry.registry_url(),
+            registry.cache(),
+            &preload_config,
+        )
+        .await;
     }
 
     // Preserve the typed error via `Error::new` + `.context(...)` so CLI

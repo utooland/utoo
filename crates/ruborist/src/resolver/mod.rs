@@ -3,6 +3,7 @@
 pub mod builder;
 pub mod common;
 pub mod edges;
+pub mod fast_preload;
 #[cfg(feature = "native-git")]
 pub mod git;
 #[cfg(feature = "http-tarball")]
