@@ -10,15 +10,15 @@ import {
 import { IncomingMessage } from "http";
 import { nanoid } from "nanoid";
 import type { Socket } from "net";
-import path from "path";
 import { Duplex } from "stream";
 import { WebSocketServer } from "ws";
 import { BundleOptions } from "../config/types";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
+import { cleanOutput, getOutputPath } from "../utils/cleanOutput";
 import { debounce, getPackPath, processIssues } from "../utils/common";
 import { getInitialAssetsFromStats } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
-import { normalizePath } from "../utils/normalize-path";
+import { normalizePath } from "../utils/normalizePath";
 import { useWorkerThreads } from "../utils/runtimePluginStratety";
 import { validateEntryPaths } from "../utils/validateEntry";
 import { projectFactory } from "./project";
@@ -112,6 +112,7 @@ export async function createHotReloader(
   const resolvedRootPath = rootPath || projectPath || process.cwd();
   processHtmlEntry(bundleOptions.config, resolvedProjectPath);
   validateEntryPaths(bundleOptions.config, resolvedProjectPath);
+  await cleanOutput(bundleOptions.config, resolvedProjectPath);
 
   const createProject = projectFactory();
 
@@ -226,8 +227,7 @@ export async function createHotReloader(
       return;
     }
 
-    const outputDir =
-      bundleOptions.config.output?.path || path.join(process.cwd(), "dist");
+    const outputDir = getOutputPath(bundleOptions.config, resolvedProjectPath);
     const publicPath = bundleOptions.config.output?.publicPath;
     const assets = getInitialAssetsFromStats(outputDir);
 
