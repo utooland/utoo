@@ -1,8 +1,9 @@
 use crate::util::cli_enum::ScriptPolicy;
 use anyhow::Context;
 use anyhow::Result;
+use futures::stream::{self, TryStreamExt};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::cmd::deps::build_deps;
@@ -63,13 +64,28 @@ fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
     false
 }
 
+/// Maximum in-flight package operations per depth layer.
+///
+/// Drives the `try_for_each_concurrent` cap below. Mirrors the
+/// `manifests-concurrency-limit` default and `par_chunks(64)` in the
+/// extractor so the install pipeline has one consistent throttle.
+///
+/// Why bound at all: the previous form pre-spawned every package in a
+/// layer (`Vec<JoinHandle>` then sequential drain). On a deep layer
+/// (~2000 packages on ant-design) that pushed all of them onto the
+/// tokio scheduler queue at once. The runtime then spent ~all of its
+/// per-task budget catching up to spawn / queue / poll overhead and
+/// fell behind on socket reads — pcap (run 25535139270) measured
+/// `tcp.analysis.zero_window` events climb 2 → 16 vs baseline. Stream
+/// scheduling caps in-flight to `SPAWN_BUDGET`, so socket reads are
+/// never starved by a backlog of pending spawns.
+const SPAWN_BUDGET: usize = 64;
+
 pub async fn install_packages(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
     omit: &HashSet<OmitType>,
 ) -> Result<()> {
-    use crate::util::cloner::clone_package_once;
-
     // Surface the clean step in the spinner — it doesn't move `pos`, so
     // without a message the bar looks frozen on large trees.
     log_progress("validating node_modules");
@@ -84,98 +100,115 @@ pub async fn install_packages(
     depths.sort_unstable();
 
     for depth in depths.iter() {
-        let mut clone_tasks: Vec<tokio::task::JoinHandle<Result<()>>> = Vec::new();
+        let Some(packages) = groups.get(depth) else {
+            continue;
+        };
 
-        if let Some(packages) = groups.get(depth) {
-            for (path, package) in packages.iter() {
-                // Skip packages based on omit config
-                if should_omit_package(package, omit) {
-                    progress_inc(1);
-                    continue;
-                }
+        // Stream over packages in this layer with bounded concurrency.
+        // `try_for_each_concurrent` polls up to SPAWN_BUDGET futures at
+        // once and short-circuits on the first error — same semantics as
+        // the old `Vec<JoinHandle>` + sequential drain, but the stream
+        // poll loop is naturally cooperative (yields to the runtime
+        // between iterations) and only starts a new task when an in-flight
+        // one completes, so the runtime never sees more than SPAWN_BUDGET
+        // pending package operations per layer.
+        stream::iter(packages.iter().map(Ok::<_, anyhow::Error>))
+            .try_for_each_concurrent(SPAWN_BUDGET, |(path, package)| {
                 let path = path.clone();
                 let package = package.clone();
-                if let Some(ref resolved) = package.resolved {
-                    // Lockfile stores `file:` URLs root-relative (npm format).
-                    // Cloner only understands absolute URLs — re-absolutize
-                    // here so the cloner/downloader stays unaware of project
-                    // root plumbing.
-                    let resolved = match resolved.strip_prefix("file:") {
-                        Some(rel) if !Path::new(rel).is_absolute() => {
-                            format!("file:{}", cwd.join(rel).display())
-                        }
-                        _ => resolved.clone(),
-                    };
-                    if package.link.is_some() {
-                        let link_name = extract_package_name(&path);
-                        if link_name.is_empty() {
-                            progress_inc(1);
-                            continue;
-                        }
-                        link(Path::new(&resolved), Path::new(&path))
-                            .await
-                            .with_context(|| format!("Link failed: {resolved} -> {path}"))?;
-                        progress_inc(1);
-                        continue;
-                    }
-
-                    // skip when cpu or os is not compatible
-                    if let Some(ref cpu) = package.cpu
-                        && !is_cpu_compatible(cpu)
-                    {
-                        progress_inc(1);
-                        continue;
-                    }
-
-                    if let Some(ref os) = package.os
-                        && !is_os_compatible(os)
-                    {
-                        progress_inc(1);
-                        continue;
-                    }
-
-                    let name = package.get_name(&path);
-                    let version = package
-                        .version
-                        .clone()
-                        .ok_or_else(|| anyhow::anyhow!("package {name} missing version"))?;
-                    let cwd_clone = cwd.to_path_buf();
-                    let target_path = cwd_clone.join(&path);
-
-                    // Check if this is an optional dependency
-                    let is_optional =
-                        package.optional == Some(true) || package.dev_optional == Some(true);
-
-                    let task = tokio::spawn(async move {
-                        if let Err(e) =
-                            clone_package_once(&name, &version, &resolved, &target_path).await
-                        {
-                            if is_optional {
-                                tracing::warn!(
-                                    "Optional dependency {name} failed (ignored): {e:#}"
-                                );
-                                progress_inc(1);
-                                return Ok(());
-                            }
-                            return Err(e);
-                        }
-                        progress_inc(1);
-                        log_progress(&format!("{name} resolved"));
-                        update_package_binary(&target_path, &name).await
-                    });
-                    clone_tasks.push(task);
-                } else {
-                    progress_inc(1);
-                }
-            }
-        }
-
-        for task in clone_tasks {
-            task.await??;
-        }
+                let cwd = cwd.to_path_buf();
+                async move { process_package(path, package, cwd, omit).await }
+            })
+            .await?;
     }
 
     Ok(())
+}
+
+/// Per-package install path: skip checks, link / cpu / os fast paths,
+/// otherwise spawn the actual clone work onto the runtime so it can be
+/// distributed across worker threads. Extracted from the inner loop of
+/// `install_packages` so the stream-driven entry point stays compact.
+async fn process_package(
+    path: String,
+    package: Package,
+    cwd: PathBuf,
+    omit: &HashSet<OmitType>,
+) -> Result<()> {
+    use crate::util::cloner::clone_package_once;
+
+    if should_omit_package(&package, omit) {
+        progress_inc(1);
+        return Ok(());
+    }
+
+    let Some(ref resolved) = package.resolved else {
+        progress_inc(1);
+        return Ok(());
+    };
+
+    // Lockfile stores `file:` URLs root-relative (npm format). Cloner only
+    // understands absolute URLs — re-absolutize here so the cloner /
+    // downloader stays unaware of project root plumbing.
+    let resolved = match resolved.strip_prefix("file:") {
+        Some(rel) if !Path::new(rel).is_absolute() => {
+            format!("file:{}", cwd.join(rel).display())
+        }
+        _ => resolved.clone(),
+    };
+
+    if package.link.is_some() {
+        let link_name = extract_package_name(&path);
+        if link_name.is_empty() {
+            progress_inc(1);
+            return Ok(());
+        }
+        link(Path::new(&resolved), Path::new(&path))
+            .await
+            .with_context(|| format!("Link failed: {resolved} -> {path}"))?;
+        progress_inc(1);
+        return Ok(());
+    }
+
+    // skip when cpu or os is not compatible
+    if let Some(ref cpu) = package.cpu
+        && !is_cpu_compatible(cpu)
+    {
+        progress_inc(1);
+        return Ok(());
+    }
+    if let Some(ref os) = package.os
+        && !is_os_compatible(os)
+    {
+        progress_inc(1);
+        return Ok(());
+    }
+
+    let name = package.get_name(&path);
+    let version = package
+        .version
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("package {name} missing version"))?;
+    let target_path = cwd.join(&path);
+    let is_optional = package.optional == Some(true) || package.dev_optional == Some(true);
+
+    // Spawn the clone so the multi-thread runtime can move this work to a
+    // free worker; the surrounding stream limits the number of concurrent
+    // spawns to SPAWN_BUDGET.
+    tokio::spawn(async move {
+        if let Err(e) = clone_package_once(&name, &version, &resolved, &target_path).await {
+            if is_optional {
+                tracing::warn!("Optional dependency {name} failed (ignored): {e:#}");
+                progress_inc(1);
+                return Ok(());
+            }
+            return Err(e);
+        }
+        progress_inc(1);
+        log_progress(&format!("{name} resolved"));
+        update_package_binary(&target_path, &name).await
+    })
+    .await?
 }
 
 pub struct InstallService;
