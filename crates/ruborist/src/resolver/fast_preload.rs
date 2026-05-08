@@ -51,7 +51,8 @@ use crate::model::node::PeerDeps;
 use crate::resolver::preload::{Dep, PreloadConfig};
 use crate::resolver::version::resolve_target_version;
 use crate::service::{
-    FetchManifestOptions, FetchManifestResult, MemoryCache, MetadataFormat, fetch_full_manifest,
+    FetchManifestOptions, FetchWithSettleResult, MemoryCache, MetadataFormat,
+    fetch_full_manifest_with_settle,
 };
 use crate::spec::SpecStr;
 use crate::util::FETCH_TIMINGS;
@@ -158,35 +159,6 @@ fn settle_future(
     })
 }
 
-/// Resolve `(name, spec)` against `full` on tokio's blocking pool.
-///
-/// Same shape as `extract_core_version_off_runtime` (which uses rayon),
-/// but stays inside the fetch task so the result lands together with
-/// the network round-trip — no separate `FuturesUnordered` pop, so
-/// `pending` gets the transitive deps the moment the fetch event is
-/// drained. Tokio's blocking pool has a 512-thread cap; rayon's is
-/// `max(num_cpus, 8)`. With many primary settles arriving in waves,
-/// the wider blocking pool absorbs the burst better than rayon would.
-async fn resolve_primary_settle(spec: String, full: Arc<FullManifest>) -> PrimarySettle {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        tokio::task::spawn_blocking(move || {
-            let resolved = resolve_target_version((&*full).into(), &spec).ok()?;
-            let core = full.get_core_version(&resolved)?;
-            Some((resolved, Arc::new(core)))
-        })
-        .await
-        .ok()
-        .flatten()
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let resolved = resolve_target_version((&*full).into(), &spec).ok()?;
-        let core = full.get_core_version(&resolved)?;
-        Some((resolved, Arc::new(core)))
-    }
-}
-
 /// Manifest-bench-style flat parallel fetch of all transitively-reachable
 /// registry manifests. Populates `cache` with both `full_manifests` and
 /// `version_manifests` slots so the subsequent BFS does no network and no
@@ -252,28 +224,28 @@ pub async fn fast_preload(
             let n = name.clone();
             futs.push(Box::pin(async move {
                 let start = tokio::time::Instant::now();
-                let result = fetch_full_manifest(FetchManifestOptions {
-                    registry_url: &registry_url,
-                    name: &n,
-                    format: MetadataFormat::Abbreviated,
-                    etag: None,
-                })
+                // Combined fetch + envelope parse + primary settle in
+                // a single `to_borrowed_value` pass — replaces the old
+                // pattern of typed-serde envelope parse followed by a
+                // separate `to_borrowed_value` reparse for version
+                // extraction. Halves simd_json work per fetch.
+                let result = fetch_full_manifest_with_settle(
+                    FetchManifestOptions {
+                        registry_url: &registry_url,
+                        name: &n,
+                        format: MetadataFormat::Abbreviated,
+                        etag: None,
+                    },
+                    &primary_spec,
+                )
                 .await;
                 let elapsed_ms = start.elapsed().as_millis() as u64;
-                // Fuse the primary settle into the same task so the
-                // main loop sees the resolved version + transitive
-                // deps in the same event — no extra `next().await` to
-                // wait through the FuturesUnordered queue before
-                // `pending` can refill.
                 let (outcome, primary_settle) = match result {
-                    Ok(FetchManifestResult::Ok(manifest, _etag)) => {
-                        let full_arc = Arc::new(manifest);
-                        let settle =
-                            resolve_primary_settle(primary_spec.clone(), Arc::clone(&full_arc))
-                                .await;
-                        (FetchOutcome::Ok(full_arc), settle)
+                    Ok(FetchWithSettleResult::Ok(payload)) => {
+                        let full_arc = Arc::new(payload.manifest);
+                        (FetchOutcome::Ok(full_arc), payload.primary_settle)
                     }
-                    Ok(FetchManifestResult::NotModified) => (FetchOutcome::NotModified, None),
+                    Ok(FetchWithSettleResult::NotModified) => (FetchOutcome::NotModified, None),
                     Err(e) => {
                         tracing::debug!("fast_preload failed for {}: {}", n, e);
                         (FetchOutcome::Err, None)
