@@ -149,8 +149,19 @@ pub async fn install_packages(
         // work. Every future awaits at least one network/disk syscall,
         // so the runtime's natural yield points handle socket draining.
         // `try_for_each_concurrent` short-circuits on the first error.
+        //
+        // The leading `yield_now` is load-bearing: pcap on the partition
+        // design without it (run 25551591284) measured `zwin=14` vs
+        // baseline `0`. The pattern `tokio::spawn(...).await` does not
+        // give the runtime a yield window between consecutive spawns
+        // when JoinHandle's await resolves immediately (cache hit, fast
+        // tarball). Yielding once per item in the stream poll loop lets
+        // the runtime service in-flight socket reads on the global
+        // download semaphore's tarball connections; otherwise the kernel
+        // recv buffer fills before tokio gets back to drain it.
         stream::iter(clones.into_iter().map(Ok::<_, anyhow::Error>))
             .try_for_each_concurrent(SPAWN_BUDGET, |work| async move {
+                tokio::task::yield_now().await;
                 tokio::spawn(execute_clone(work)).await?
             })
             .await?;
