@@ -143,6 +143,24 @@ jobs:
           name: utoo-linux-x64
           path: target/x86_64-unknown-linux-gnu/release/utoo
           retention-days: 1
+      # manifest-bench is a standalone HTTP-only fetch sweeper used as
+      # the network-only baseline for p1_resolve perf work. Built only
+      # when phases bench is going to run (label or dispatch), so plain
+      # PR builds aren't slowed by the extra crate.
+      - name: Build manifest-bench (p1 baseline)
+        if: >
+          (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
+          (github.event_name == 'workflow_dispatch' && (inputs.target == 'pm-bench-phases' || inputs.target == 'pm-bench-pcap'))
+        run: cargo build --release --target x86_64-unknown-linux-gnu -p manifest-bench
+      - name: Upload manifest-bench binary
+        if: >
+          (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
+          (github.event_name == 'workflow_dispatch' && (inputs.target == 'pm-bench-phases' || inputs.target == 'pm-bench-pcap'))
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-bench-linux-x64
+          path: target/x86_64-unknown-linux-gnu/release/manifest-bench
+          retention-days: 1
       # Piggyback on the already-built target/ from the step above: when the
       # PR is labeled `benchmark`, overlay origin/next's tree onto the current
       # workdir and re-run cargo build. cargo's incremental compile only
@@ -516,6 +534,19 @@ jobs:
           mv /tmp/utoo-next-dist/utoo /tmp/utoo-next
           echo "Baseline utoo (next) version: $(/tmp/utoo-next --version)"
           echo "UTOO_NEXT_BIN=/tmp/utoo-next" >> $GITHUB_ENV
+      # Download the manifest-bench binary built by build-linux. Used as
+      # the network-only baseline for p1_resolve work — strips out parse,
+      # BFS, dedup, lockfile write so the wall is pure HTTP fetch.
+      - name: Download manifest-bench binary
+        uses: actions/download-artifact@v4
+        with:
+          name: manifest-bench-linux-x64
+          path: /tmp/manifest-bench-dist
+      - name: Install manifest-bench
+        run: |
+          chmod +x /tmp/manifest-bench-dist/manifest-bench
+          mv /tmp/manifest-bench-dist/manifest-bench /tmp/manifest-bench
+          echo "MANIFEST_BENCH_BIN=/tmp/manifest-bench" >> $GITHUB_ENV
       - name: Verify tools
         run: |
           hyperfine --version
@@ -565,6 +596,55 @@ jobs:
         run: |
           mkdir -p /tmp/pm-bench-output
           bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmmirror.log
+      # Standalone HTTP-only sweep — sweeps the network-only ceiling
+      # against the same lockfile-derived workload phase-bench just used.
+      # Output goes into the bench logs artifact; no PR comment surface.
+      - name: Standalone manifest-bench (HTTP-only sweep)
+        env:
+          PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
+          REGISTRY: 'https://registry.npmjs.org'
+        run: |
+          set -eu
+          mkdir -p /tmp/pm-bench-output
+          PROJECT_DIR="/tmp/pm-bench/$PROJECT"
+          if [ ! -d "$PROJECT_DIR" ]; then
+            mkdir -p /tmp/pm-bench
+            git clone --depth 1 "https://github.com/ant-design/$PROJECT" "$PROJECT_DIR"
+          fi
+          cd "$PROJECT_DIR"
+          if [ ! -f package-lock.json ]; then
+            echo "==> generating lockfile via utoo (one-shot, untimed)"
+            utoo deps --registry "$REGISTRY" || true
+          fi
+          ls -la package-lock.json || { echo "no lockfile; skipping manifest-bench"; exit 0; }
+
+          MB_LOG=/tmp/pm-bench-output/manifest-bench-npmjs.log
+          {
+            echo "============================================================"
+            echo "manifest-bench: HTTP-only fetch (no parse, no resolver)"
+            echo "  Goal: isolate reqwest/rustls/tokio behaviour from"
+            echo "  ruborist's resolver pipeline. Same metric shape as"
+            echo "  ruborist's p1-breakdown line."
+            echo "============================================================"
+            for CAP in 32 64 96 128 192 256; do
+              echo
+              echo "--- concurrency=$CAP, h1, full manifest, default UA ---"
+              "$MANIFEST_BENCH_BIN" --lockfile package-lock.json --registry "$REGISTRY" \
+                --concurrency "$CAP" --reps 2 --http1-only || true
+            done
+            echo
+            echo "--- concurrency=128, h2 negotiate, full manifest, default UA ---"
+            "$MANIFEST_BENCH_BIN" --lockfile package-lock.json --registry "$REGISTRY" \
+              --concurrency 128 --reps 2 || true
+            echo
+            echo "--- concurrency=128, h1, single-version endpoint ---"
+            "$MANIFEST_BENCH_BIN" --lockfile package-lock.json --registry "$REGISTRY" \
+              --concurrency 128 --reps 2 --http1-only --single-version || true
+            echo
+            echo "--- concurrency=128, h1, UA=Bun/1.2.21 ---"
+            "$MANIFEST_BENCH_BIN" --lockfile package-lock.json --registry "$REGISTRY" \
+              --concurrency 128 --reps 2 --http1-only --user-agent "Bun/1.2.21" || true
+          } 2>&1 | tee "$MB_LOG"
       - name: Upload bench logs
         if: always()
         uses: actions/upload-artifact@v4
