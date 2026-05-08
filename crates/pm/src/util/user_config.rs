@@ -137,15 +137,18 @@ pub fn get_install_scope() -> InstallScope {
 // We tried 256 to match bun's observed parallel streams; on GHA the
 // fetch-breakdown instrumentation showed sum_parse exploded from
 // ~10ms (local Mac, network-bound) to 728s on first cold run with
-// 256 concurrency. Mechanism: parse_json_off_runtime dispatches to
-// rayon, which has only num_cpus (=2 on GHA) workers. Bumping
-// concurrency to 256 queued 256 parses behind 2 workers → wall
-// per-parse jumped from 730µs to 266ms. Net p1 wall *increased*
-// 3.10s → 3.33s on phases bench. Keep 64 until we address the
-// parse-side queueing (e.g. inline parse on tokio, or a wider
-// dedicated parse pool).
+// Once we moved fetch parse off rayon to tokio's spawn_blocking pool
+// (cap 512) and settle off the runtime via rayon::spawn, the original
+// 256-concurrency regression mechanism (parses queued behind 2 rayon
+// workers) no longer applies. The standalone manifest-bench HTTP-only
+// sweep on GHA (npmjs, conc 32→256) shows wall bottoming out at conc 96
+// (1817ms) and tracking flat-then-rising past that — beyond ~96
+// in-flight, npmjs's per-IP rate degrades and tail latency widens.
+// 96 is the sweet spot: enough headroom for the wave-shaped transitive
+// dep walk in fast_preload to keep the runtime busy, without paying the
+// p99 widening that 128+ shows.
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 64));
+    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 96));
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
     MANIFESTS_CONCURRENCY_LIMIT.set(value);
