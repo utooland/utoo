@@ -88,6 +88,21 @@ pub async fn install_packages(
 
         if let Some(packages) = groups.get(depth) {
             for (path, package) in packages.iter() {
+                // Cooperative scheduling hint: tells the runtime "I did
+                // a tick of work" and yields when the per-task budget
+                // (default 128) exhausts. Before #2903's TTY-gate the
+                // implicit yield came from indicatif's mutex acquire on
+                // every progress_inc call; on non-TTY (CI, piped output)
+                // that's now a no-op and the synchronous loop body runs
+                // ~2000 packages back-to-back without giving the runtime
+                // a window to drain socket reads on in-flight tarball
+                // downloads. Pcap measured `tcp.analysis.zero_window`
+                // events climb 0 → 14-16 without this hint; with it,
+                // back to 0. Cost is ~5ns when budget isn't exhausted
+                // (the common case — JoinHandle.await downstream resets
+                // budget naturally).
+                tokio::task::consume_budget().await;
+
                 // Skip packages based on omit config
                 if should_omit_package(package, omit) {
                     progress_inc(1);
