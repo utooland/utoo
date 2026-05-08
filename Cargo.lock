@@ -5945,6 +5945,7 @@ dependencies = [
  "turbopack-trace-utils",
  "urlencoding",
  "vergen-gitcl",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

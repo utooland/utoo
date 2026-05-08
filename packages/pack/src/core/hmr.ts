@@ -18,6 +18,7 @@ import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import { debounce, getPackPath, processIssues } from "../utils/common";
 import { getInitialAssetsFromStats } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
+import { acquirePersistentCacheLock } from "../utils/lockfile";
 import { normalizePath } from "../utils/normalize-path";
 import { useWorkerThreads } from "../utils/runtimePluginStratety";
 import { validateEntryPaths } from "../utils/validateEntry";
@@ -114,41 +115,53 @@ export async function createHotReloader(
   validateEntryPaths(bundleOptions.config, resolvedProjectPath);
 
   const createProject = projectFactory();
-
-  const project = await createProject(
-    {
-      processEnv: bundleOptions.processEnv ?? {},
-      watch: {
-        enable: true,
-      },
-      dev: true,
-      buildId: bundleOptions.buildId || nanoid(),
-      tracing: bundleOptions.tracing ?? true,
-      config: {
-        ...bundleOptions.config,
-        mode: "development",
-        stats:
-          Boolean(process.env.ANALYZE) ||
-          bundleOptions.config.stats ||
-          bundleOptions.config.entry.some((e: EntryOptions) => !!e.html),
-        optimization: {
-          ...bundleOptions.config.optimization,
-          minify: false,
-          moduleIds: "named",
-        },
-        persistentCaching: bundleOptions?.config?.persistentCaching ?? true,
-        pluginRuntimeStrategy:
-          bundleOptions?.config?.pluginRuntimeStrategy ??
-          (useWorkerThreads() ? "workerThreads" : "childProcesses"),
-      },
-      projectPath: normalizePath(resolvedProjectPath),
-      rootPath: resolvedRootPath,
-      packPath: getPackPath(),
-    },
-    {
-      persistentCaching: bundleOptions.config.persistentCaching ?? false,
-    },
+  const persistentCaching = bundleOptions.config.persistentCaching ?? false;
+  const persistentCacheLock = await acquirePersistentCacheLock(
+    resolvedProjectPath,
+    "utoo pack dev",
+    persistentCaching,
   );
+
+  let project: Project;
+  try {
+    project = await createProject(
+      {
+        processEnv: bundleOptions.processEnv ?? {},
+        watch: {
+          enable: true,
+        },
+        dev: true,
+        buildId: bundleOptions.buildId || nanoid(),
+        tracing: bundleOptions.tracing ?? true,
+        config: {
+          ...bundleOptions.config,
+          mode: "development",
+          stats:
+            Boolean(process.env.ANALYZE) ||
+            bundleOptions.config.stats ||
+            bundleOptions.config.entry.some((e: EntryOptions) => !!e.html),
+          optimization: {
+            ...bundleOptions.config.optimization,
+            minify: false,
+            moduleIds: "named",
+          },
+          persistentCaching: bundleOptions?.config?.persistentCaching ?? true,
+          pluginRuntimeStrategy:
+            bundleOptions?.config?.pluginRuntimeStrategy ??
+            (useWorkerThreads() ? "workerThreads" : "childProcesses"),
+        },
+        projectPath: normalizePath(resolvedProjectPath),
+        rootPath: resolvedRootPath,
+        packPath: getPackPath(),
+      },
+      {
+        persistentCaching,
+      },
+    );
+  } catch (error) {
+    persistentCacheLock?.unlockSync();
+    throw error;
+  }
 
   const entrypointsSubscription = project.entrypointsSubscribe();
 
@@ -181,6 +194,7 @@ export async function createHotReloader(
   let backgroundWatchGeneration = 0;
   const backgroundWriteTasks = new Map<Endpoint, Promise<void>>();
   let closed = false;
+  let closePromise: Promise<void> | undefined;
 
   function sendToClient(client: WSLike, payload: HMR_ACTION_TYPES) {
     client.send(JSON.stringify(payload));
@@ -399,8 +413,8 @@ export async function createHotReloader(
       }
 
       currentWatchedEntrypoints = [
-        ...entrypoints.apps,
-        ...entrypoints.libraries,
+        ...(entrypoints.apps ?? []),
+        ...(entrypoints.libraries ?? []),
       ];
       await writeEntrypointsToDisk(currentWatchedEntrypoints);
 
@@ -621,6 +635,14 @@ export async function createHotReloader(
     close() {
       closed = true;
       void disposeBackgroundWatchSubscriptions();
+      closePromise ??= project
+        .onExit()
+        .catch((err) => {
+          console.error(err);
+        })
+        .finally(() => {
+          persistentCacheLock?.unlockSync();
+        });
 
       for (const wsClient of clients) {
         wsClient.close();
