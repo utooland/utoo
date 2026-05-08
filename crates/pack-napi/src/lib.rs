@@ -39,6 +39,7 @@ use tokio::runtime::Runtime;
 #[macro_use]
 extern crate napi_derive;
 
+pub mod lockfile;
 pub mod pack_api;
 pub mod util;
 
