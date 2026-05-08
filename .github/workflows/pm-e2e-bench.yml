@@ -154,7 +154,7 @@ jobs:
       - name: Build next branch utoo (bench baseline)
         if: >
           (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
-          (github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-phases')
+          (github.event_name == 'workflow_dispatch' && (inputs.target == 'pm-bench-phases' || inputs.target == 'pm-bench-pcap'))
         run: |
           # The previous Upload step has already shipped the PR binary; we
           # can now overwrite target/.../release/utoo safely.
@@ -168,7 +168,7 @@ jobs:
       - name: Upload utoo-next binary
         if: >
           (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
-          (github.event_name == 'workflow_dispatch' && inputs.target == 'pm-bench-phases')
+          (github.event_name == 'workflow_dispatch' && (inputs.target == 'pm-bench-phases' || inputs.target == 'pm-bench-pcap'))
         uses: actions/upload-artifact@v4
         with:
           name: utoo-next-linux-x64
@@ -830,8 +830,27 @@ jobs:
         with:
           bun-version: latest
       - name: Install pcap tools
-        # tcpdump + dnsutils on top of the standard bench tooling.
-        run: sudo apt-get update && sudo apt-get install -y tcpdump dnsutils hyperfine time
+        # tcpdump captures, tshark + jq for post-capture metrics analysis,
+        # sysstat (iostat) for per-capture disk-saturation sampling.
+        # Pre-seed wireshark-common so tshark installs non-interactively
+        # (no need for setuid dumpcap; we only read existing pcaps).
+        run: |
+          echo "wireshark-common wireshark-common/install-setuid boolean false" | sudo debconf-set-selections
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y tcpdump tshark dnsutils hyperfine time jq sysstat
+      # The utoo-next binary is built upstream by build-linux's
+      # "Build next branch utoo (bench baseline)" step.
+      - name: Download utoo-next binary
+        uses: actions/download-artifact@v4
+        with:
+          name: utoo-next-linux-x64
+          path: /tmp/utoo-next-dist
+      - name: Install utoo-next
+        run: |
+          chmod +x /tmp/utoo-next-dist/utoo
+          mv /tmp/utoo-next-dist/utoo /tmp/utoo-next
+          echo "Baseline utoo (next) version: $(/tmp/utoo-next --version)"
+          echo "UTOO_NEXT_BIN=/tmp/utoo-next" >> $GITHUB_ENV
       - name: Capture pcap
         env:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
