@@ -36,9 +36,8 @@ use crate::model::package_lock::PackageLock;
 use crate::model::util::parse_package_spec;
 use crate::resolver::builder::{
     BuildDepsConfig, DevDeps, EdgeContext, PeerDeps, add_edges_from, build_deps_with_config,
-    gather_preload_deps,
 };
-use crate::resolver::mb_resolve::mb_fetch;
+use crate::resolver::mb_resolve::mb_fetch_with_graph;
 use crate::resolver::preload::PreloadConfig;
 use crate::resolver::runtime::install_runtime_from_map;
 use crate::resolver::workspace::WorkspaceDiscovery;
@@ -272,32 +271,39 @@ where
         );
     }
 
-    // Lockfile-only callers (`utoo deps`) skip the receiver-driven
-    // `run_preload_phase` because they have no pipeline consumer for
-    // `BuildEvent::PackageResolved`. Route through `mb_fetch` — a
-    // ruborist-internal standalone preload that bypasses
-    // `service::http`, `service::manifest`, and `service::registry`
-    // to match `manifest-bench`'s loop shape directly. PM is
-    // unaware: this dispatch happens entirely inside ruborist when
-    // `skip_preload=true` and there's no warm project cache.
-    if skip_preload_caller && cache_count == 0 {
-        let initial_deps = gather_preload_deps(&graph, peer_deps);
+    // Lockfile-only callers (`utoo deps`) route through
+    // `mb_fetch_with_graph` — a folded streaming preload + graph
+    // build. The fetch loop drives manifest IO; per-result inline
+    // `process_dependency_with_resolved` mutates the graph. Result:
+    // no separate BFS phase. The follow-up
+    // `build_deps_with_config` call still runs to handle any
+    // non-registry edges (workspace / git / http / file) the fold
+    // path skipped, but on registry-only workloads it's near no-op.
+    let folded = skip_preload_caller && cache_count == 0;
+    if folded {
         let preload_config = PreloadConfig {
             peer_deps,
             concurrency,
         };
-        mb_fetch(
-            initial_deps,
+        mb_fetch_with_graph(
+            &mut graph,
             registry.registry_url(),
             registry.cache(),
             &preload_config,
+            &config,
         )
-        .await;
+        .await
+        .map_err(|e| e.context("mb_fetch_with_graph failed"))?;
     }
 
     // Preserve the typed error via `Error::new` + `.context(...)` so CLI
     // renderers (e.g. pm's format_print) can downcast and pretty-print the
     // dependency chain carried by `ResolveError::WithChain`.
+    //
+    // For the folded path this BFS sweeps remaining unresolved edges
+    // (non-registry: workspace / git / http / file). On
+    // registry-only workloads (the common case) the graph is fully
+    // built already, BFS walks nothing.
     build_deps_with_config(&mut graph, &registry, config, &receiver)
         .await
         .map_err(|e| anyhow::Error::new(e).context("Dependency resolution failed"))?;

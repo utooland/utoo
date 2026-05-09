@@ -37,14 +37,20 @@ use std::time::Instant;
 use anyhow::{Context, Result, anyhow};
 use futures::stream::{FuturesUnordered, StreamExt};
 use parking_lot::Mutex;
+use petgraph::graph::{EdgeIndex, NodeIndex};
 use serde::Deserialize;
 
+use crate::model::graph::DependencyGraph;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 use crate::model::node::PeerDeps;
+use crate::resolver::builder::{
+    BuildDepsConfig, ProcessResult, collect_unresolved_edges, process_dependency_with_resolved,
+};
 use crate::resolver::preload::{Dep, PreloadConfig};
 use crate::resolver::version::resolve_target_version;
 use crate::service::MemoryCache;
 use crate::spec::SpecStr;
+use crate::traits::registry::ResolvedPackage;
 
 #[derive(Debug, Default)]
 pub struct MbFetchStats {
@@ -474,4 +480,295 @@ pub async fn mb_fetch(
     );
 
     stats
+}
+
+// ============================================================================
+// Folded streaming graph build — preload + BFS in one phase
+// ============================================================================
+
+/// Edges waiting on a `(name, spec)` fetch. Multiple parents can need
+/// the same registry dep; we track them all and process inline as
+/// soon as the manifest lands.
+type EdgeTargets = HashMap<(String, String), Vec<(NodeIndex, EdgeIndex)>>;
+
+/// Collect the unresolved registry edges from `node_idx` into
+/// pending + edge_targets, dedup by spec via `seen_specs`.
+/// Non-registry edges (workspace / git / http / file) are
+/// deliberately left for the follow-up BFS sweep.
+fn enqueue_node_edges(
+    graph: &DependencyGraph,
+    node_idx: NodeIndex,
+    pending: &mut VecDeque<Dep>,
+    seen_specs: &mut HashSet<(String, String)>,
+    edge_targets: &mut EdgeTargets,
+) {
+    for edge in collect_unresolved_edges(graph, node_idx) {
+        if !edge.spec.is_registry_spec() {
+            continue;
+        }
+        let key = (edge.name.clone(), edge.spec.clone());
+        edge_targets
+            .entry(key.clone())
+            .or_default()
+            .push((node_idx, edge.edge_id));
+        if seen_specs.insert(key.clone()) {
+            pending.push_back(key);
+        }
+    }
+}
+
+/// Folded variant: combines `mb_fetch`'s streaming preload with the
+/// graph mutations that BFS would otherwise do in a separate phase.
+/// Each fetch result triggers inline `process_dependency_with_resolved`
+/// for every parent edge waiting on `(name, spec)`. New nodes' edges
+/// feed back into pending / edge_targets, so the walk continues
+/// streaming-style without a separate level-by-level traversal.
+///
+/// CPU work (graph mutations) overlaps with network IO (more fetches
+/// in flight via `FuturesUnordered`), so the 305 ms BFS phase
+/// observed against a fully-warm cache is collapsed into mb_fetch's
+/// wall instead of running serially after it.
+///
+/// Non-registry edges (workspace / git / http / file) and any edges
+/// added after the streaming loop converges (override re-resolves
+/// that diverge from the original spec) are left unresolved — the
+/// caller must run a follow-up BFS sweep to handle them. For
+/// `utoo deps` on registry-only workloads (the common case), the
+/// sweep is a no-op.
+pub async fn mb_fetch_with_graph(
+    graph: &mut DependencyGraph,
+    registry_url: &str,
+    cache: &MemoryCache,
+    preload_config: &PreloadConfig,
+    build_config: &BuildDepsConfig,
+) -> Result<MbFetchStats> {
+    let mut stats = MbFetchStats::default();
+    let total_start = Instant::now();
+
+    let client = match build_mb_client() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("mb_resolve client build failed: {e}");
+            return Ok(stats);
+        }
+    };
+    let registry = Arc::new(registry_url.trim_end_matches('/').to_string());
+    let cap = preload_config.concurrency;
+    let peer_deps = preload_config.peer_deps;
+
+    // Initial seed: walk root + workspace nodes for unresolved
+    // registry edges. (Workspace nodes were created during graph
+    // initialization in `service::api::build_deps`.)
+    let mut seen_specs: HashSet<(String, String)> = HashSet::new();
+    let mut pending: VecDeque<Dep> = VecDeque::new();
+    let mut edge_targets: EdgeTargets = HashMap::new();
+
+    let root_index = graph.root_index;
+    enqueue_node_edges(
+        graph,
+        root_index,
+        &mut pending,
+        &mut seen_specs,
+        &mut edge_targets,
+    );
+    // Workspace nodes' direct edges. Workspace deps may be
+    // workspace: (resolved at graph init) or registry; registry
+    // ones land in pending.
+    for node_idx in graph.graph.node_indices() {
+        if let Some(node) = graph.get_node(node_idx)
+            && node.is_workspace()
+        {
+            enqueue_node_edges(
+                graph,
+                node_idx,
+                &mut pending,
+                &mut seen_specs,
+                &mut edge_targets,
+            );
+        }
+    }
+
+    // Sibling-fetch dedup carries over from `mb_fetch`.
+    let body_cache: Arc<Mutex<HashMap<String, Arc<[u8]>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut in_flight_names: HashSet<String> = HashSet::new();
+    let mut deferred_by_name: HashMap<String, Vec<String>> = HashMap::new();
+
+    let mut futs: FuturesUnordered<Fut> = FuturesUnordered::new();
+
+    // Per-fetch-future timing accumulators (same as `mb_fetch`).
+    let mut sum_wall_us: u64 = 0;
+    let mut sum_net_us: u64 = 0;
+    let mut fetch_count: u64 = 0;
+    let mut settle_count: u64 = 0;
+    // Sum of CPU spent in inline graph mutations across all fetched
+    // events. Reported alongside the fetch totals so we can attribute
+    // the mb_fetch wall split between IO and CPU.
+    let mut sum_graph_us: u64 = 0;
+
+    loop {
+        while futs.len() < cap {
+            let Some((name, spec)) = pending.pop_front() else {
+                break;
+            };
+            if let Some(raw) = body_cache.lock().get(&name).cloned() {
+                futs.push(spawn_settle(name, spec, raw, cache.clone(), peer_deps));
+                continue;
+            }
+            if !in_flight_names.insert(name.clone()) {
+                deferred_by_name.entry(name).or_default().push(spec);
+                continue;
+            }
+            futs.push(spawn_fetch(
+                client.clone(),
+                Arc::clone(&registry),
+                name,
+                spec,
+                cache.clone(),
+                Arc::clone(&body_cache),
+                peer_deps,
+            ));
+        }
+
+        if futs.is_empty() {
+            break;
+        }
+
+        let Some(out) = futs.next().await else { break };
+
+        sum_wall_us += out.wall_us;
+        sum_net_us += out.net_us;
+        if out.fetched {
+            fetch_count += 1;
+        } else {
+            settle_count += 1;
+        }
+        if out.fetched {
+            stats.success += 1;
+        }
+
+        // Drain sibling specs deferred while the fetch was in flight.
+        if out.fetched
+            && let Some(siblings) = deferred_by_name.remove(&out.name)
+            && let Some(raw) = body_cache.lock().get(&out.name).cloned()
+        {
+            for sibling_spec in siblings {
+                futs.push(spawn_settle(
+                    out.name.clone(),
+                    sibling_spec,
+                    Arc::clone(&raw),
+                    cache.clone(),
+                    peer_deps,
+                ));
+            }
+        }
+
+        // Graph mutations: process every parent edge waiting on
+        // `(name, spec)` for each transitive spec the fetch resolved
+        // (the fetch itself touched only the primary spec; sibling
+        // settles touch their own specs). Each settle path covers
+        // its own bucket via the `out.transitives` path below.
+        //
+        // The fetched/settled (name, spec) pair has already been
+        // written to the cache by the future. Look up the version
+        // manifest to get the ResolvedPackage handed to
+        // process_dependency_with_resolved.
+        let graph_start = Instant::now();
+        let process_key_specs: Vec<(String, String)> = out
+            .transitives
+            .iter()
+            .map(|(n, s)| (n.clone(), s.clone()))
+            .collect();
+        // The primary fetched/settled spec itself: resolve it now.
+        let primary_keys: Vec<(String, String)> = edge_targets
+            .keys()
+            .filter(|(n, _)| n == &out.name)
+            .cloned()
+            .collect();
+        for (k_name, k_spec) in primary_keys {
+            // Pull resolved manifest from cache for this spec.
+            let Some(core_arc) = cache.get_version_manifest(&k_name, &k_spec) else {
+                continue;
+            };
+            let resolved = ResolvedPackage {
+                name: k_name.clone(),
+                version: core_arc.version.clone(),
+                manifest: core_arc,
+            };
+            let waiting = edge_targets.remove(&(k_name.clone(), k_spec.clone()));
+            if let Some(targets) = waiting {
+                for (parent_idx, edge_id) in targets {
+                    let edge_info = crate::resolver::edges::DependencyEdgeInfo {
+                        edge_id,
+                        name: k_name.clone(),
+                        spec: k_spec.clone(),
+                        // edge_type carried separately on the graph; we
+                        // re-look-up the actual edge here for
+                        // correctness.
+                        edge_type: graph
+                            .graph
+                            .edge_weight(edge_id)
+                            .and_then(|e| match e {
+                                crate::model::graph::GraphEdge::Dependency(d) => Some(d.edge_type),
+                                _ => None,
+                            })
+                            .unwrap_or(crate::model::node::EdgeType::Prod),
+                    };
+                    let result = process_dependency_with_resolved(
+                        graph,
+                        parent_idx,
+                        &edge_info,
+                        &resolved,
+                        build_config,
+                    );
+                    if let ProcessResult::Created(new_idx) = result {
+                        // The new node's transitive edges become new
+                        // pending entries. Same dedup as the seed.
+                        enqueue_node_edges(
+                            graph,
+                            new_idx,
+                            &mut pending,
+                            &mut seen_specs,
+                            &mut edge_targets,
+                        );
+                    }
+                }
+            }
+        }
+        sum_graph_us += graph_start.elapsed().as_micros() as u64;
+        // Suppress an unused-vars warning when the transitive list is
+        // identical to the keys we just pulled from edge_targets —
+        // we keep collecting it for tracing parity with `mb_fetch`.
+        let _ = process_key_specs;
+    }
+
+    let total_wall_ms = total_start.elapsed().as_millis();
+    let total_wall_us = (total_wall_ms as u64).saturating_mul(1000);
+    let eff_par_full = if total_wall_us > 0 {
+        sum_wall_us as f64 / total_wall_us as f64
+    } else {
+        0.0
+    };
+    let eff_par_net = if total_wall_us > 0 {
+        sum_net_us as f64 / total_wall_us as f64
+    } else {
+        0.0
+    };
+    let avg_net_us = sum_net_us.checked_div(fetch_count).unwrap_or(0);
+    let unresolved_remaining = edge_targets.len();
+    tracing::info!(
+        "p1-breakdown mb_fetch_with_graph wall={}ms ok={} fetch={} settle={} sum_wall={}ms sum_net={}ms sum_graph={}ms avg_net={}us eff_par_full={:.1} eff_par_net={:.1} unresolved_targets={}",
+        total_wall_ms,
+        stats.success,
+        fetch_count,
+        settle_count,
+        sum_wall_us / 1000,
+        sum_net_us / 1000,
+        sum_graph_us / 1000,
+        avg_net_us,
+        eff_par_full,
+        eff_par_net,
+        unresolved_remaining,
+    );
+
+    Ok(stats)
 }

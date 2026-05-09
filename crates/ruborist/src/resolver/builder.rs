@@ -651,6 +651,55 @@ pub async fn process_dependency<R: RegistryClient>(
     }
 }
 
+/// Sync variant of [`process_dependency`] for callers that already
+/// have a resolved registry manifest in hand (the
+/// `mb_fetch_with_graph` lockfile-only path populates one
+/// per fetch). Skips:
+///   * spec-routing (`Git` / `Http` / `Local` / `Workspace`) — only
+///     the `Registry` branch is handled. Non-registry edges are
+///     left unresolved for the caller to defer.
+///   * `resolve_registry_dep` (the resolved package is the
+///     parameter).
+///   * Override re-resolve (uses the original resolved package even
+///     if `graph.check_override` would re-route the spec). Override
+///     re-resolve requires another network round-trip; the
+///     lockfile-only fast path skips it intentionally — overridden
+///     specs that diverge from the original resolution will need a
+///     follow-up BFS sweep.
+///
+/// Returns the same [`ProcessResult`] shape as `process_dependency`
+/// so the caller can register newly-created nodes' edges with
+/// `edge_targets` for the streaming graph build.
+pub fn process_dependency_with_resolved(
+    graph: &mut DependencyGraph,
+    parent_idx: NodeIndex,
+    edge_info: &DependencyEdgeInfo,
+    resolved: &ResolvedPackage,
+    config: &BuildDepsConfig,
+) -> ProcessResult {
+    match graph.find_compatible_node(parent_idx, &edge_info.name, &edge_info.spec) {
+        FindResult::Reuse(existing_index) => {
+            graph.mark_dependency_resolved(edge_info.edge_id, existing_index);
+            update_node_type_from_edge(graph, parent_idx, existing_index, &edge_info.edge_type);
+            ProcessResult::Reused(existing_index)
+        }
+        FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
+            let new_node = create_package_node(&edge_info.name, resolved, conflict_parent, graph);
+            let new_index = graph.add_node(new_node);
+            graph.add_physical_edge(conflict_parent, new_index);
+            graph.mark_dependency_resolved(edge_info.edge_id, new_index);
+            update_node_type_from_edge(graph, parent_idx, new_index, &edge_info.edge_type);
+            add_edges_from(
+                graph,
+                new_index,
+                &*resolved.manifest,
+                &EdgeContext::new(config.peer_deps, DevDeps::Exclude),
+            );
+            ProcessResult::Created(new_index)
+        }
+    }
+}
+
 /// Build the complete dependency tree using BFS traversal.
 ///
 /// This is the main entry point for dependency resolution. It starts from
