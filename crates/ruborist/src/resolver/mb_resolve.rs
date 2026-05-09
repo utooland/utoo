@@ -278,10 +278,19 @@ pub async fn mb_fetch(
 ) -> MbFetchStats {
     let mut stats = MbFetchStats::default();
     let mut pending_specs: Vec<Dep> = initial_deps;
+    // (name, spec) pairs we've already processed (settled or queued
+    // to settle). Without this, sibling-settle's transitive deps can
+    // re-introduce already-walked specs and the outer loop never
+    // terminates — peer / optional dep cycles trivially trigger this.
+    let mut seen_specs: HashSet<(String, String)> = HashSet::new();
     let mut done_names: HashSet<String> = HashSet::new();
     let conc = config.concurrency;
     let peer_deps = config.peer_deps;
     let total_start = tokio::time::Instant::now();
+
+    // Filter the initial seed through `seen_specs` too — root + workspace
+    // edges can list the same dep multiple times across workspaces.
+    pending_specs.retain(|(n, s)| seen_specs.insert((n.clone(), s.clone())));
 
     while !pending_specs.is_empty() {
         stats.iterations += 1;
@@ -308,7 +317,8 @@ pub async fn mb_fetch(
         }
 
         // Sibling settles (rare on real workloads — most names appear
-        // exactly once across the whole walk).
+        // exactly once across the whole walk). New transitives go
+        // through `seen_specs` dedup before joining `pending_specs`.
         for (name, specs) in sibling_only {
             let Some(full) = cache.get_full_manifest(&name) else {
                 continue;
@@ -317,17 +327,22 @@ pub async fn mb_fetch(
                 let Ok(resolved) = resolve_target_version((&*full).into(), &spec) else {
                     continue;
                 };
-                if let Some(cached) = cache.get_version_manifest(&name, &resolved) {
+                let new_deps = if let Some(cached) = cache.get_version_manifest(&name, &resolved) {
                     cache.set_version_manifest(name.clone(), spec.clone(), Arc::clone(&cached));
-                    pending_specs.extend(extract_transitive(&cached, peer_deps));
-                    continue;
-                }
-                if let Some(core) = full.get_core_version(&resolved) {
+                    extract_transitive(&cached, peer_deps)
+                } else if let Some(core) = full.get_core_version(&resolved) {
                     let core_arc = Arc::new(core);
                     cache.set_version_manifest(name.clone(), spec.clone(), Arc::clone(&core_arc));
                     cache.set_version_manifest(name.clone(), resolved, Arc::clone(&core_arc));
-                    pending_specs.extend(extract_transitive(&core_arc, peer_deps));
-                }
+                    extract_transitive(&core_arc, peer_deps)
+                } else {
+                    Vec::new()
+                };
+                pending_specs.extend(
+                    new_deps
+                        .into_iter()
+                        .filter(|(n, s)| seen_specs.insert((n.clone(), s.clone()))),
+                );
             }
         }
 
@@ -388,16 +403,21 @@ pub async fn mb_fetch(
         stats.success += settle_count;
         stats.fail += fail_count;
 
+        let new_unique: Vec<Dep> = new_transitives
+            .into_iter()
+            .filter(|(n, s)| seen_specs.insert((n.clone(), s.clone())))
+            .collect();
+
         tracing::info!(
-            "p1-breakdown mb_fetch iter={} phase2_parse_wall={}ms settles={} fail={} new_transitives={}",
+            "p1-breakdown mb_fetch iter={} phase2_parse_wall={}ms settles={} fail={} new_unique={}",
             iter,
             p2_wall,
             settle_count,
             fail_count,
-            new_transitives.len(),
+            new_unique.len(),
         );
 
-        pending_specs.extend(new_transitives);
+        pending_specs.extend(new_unique);
     }
 
     let total_wall = total_start.elapsed().as_millis();
