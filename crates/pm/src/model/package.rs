@@ -89,10 +89,10 @@ impl PublishMeta {
             );
         }
         if self.name.is_empty() {
-            bail!("Cannot publish: package.json is missing a 'name' field");
+            bail!("Cannot publish: package.json requires a non-empty 'name' field");
         }
         if self.version.is_empty() {
-            bail!("Cannot publish: package.json is missing a 'version' field");
+            bail!("Cannot publish: package.json requires a non-empty 'version' field");
         }
         if self
             .publish_config

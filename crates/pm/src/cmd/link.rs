@@ -18,7 +18,7 @@ pub async fn link_current_to_global(cwd: &Path, prefix: Option<&str>) -> Result<
     })?;
     if package_info.name.is_empty() {
         anyhow::bail!(
-            "Cannot link to global: package.json at {} is missing a 'name' field",
+            "Cannot link to global: package.json at {} requires a non-empty 'name' field",
             project_path.display()
         );
     }
