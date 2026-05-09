@@ -84,23 +84,17 @@ impl Context {
     /// [`BuildDepsOutput`] (lock + project cache); the project cache is
     /// persisted in the background.
     ///
-    /// Used by the lockfile-only path (`utoo deps`). No pipeline consumes
-    /// `PackageResolved` events here, so preload is pure overhead — BFS's
-    /// own per-level parallel prefetch warms the manifest cache.
-    ///
-    /// Set `UTOO_RESOLVE=mb` to opt into the experimental
-    /// manifest-bench-style fetch path (`build_deps_mb`) for A/B
-    /// benchmarking against the current `fast_preload`.
+    /// Used by the lockfile-only path (`utoo deps`). With
+    /// `skip_preload=true`, ruborist's `service::api::build_deps`
+    /// internally routes through `mb_resolve::mb_fetch` — a
+    /// standalone manifest-bench-style preload that bypasses
+    /// `service::http` / `service::manifest` / `service::registry`
+    /// for the cold-cache lockfile-only workload. PM doesn't see
+    /// the dispatch.
     pub async fn build_deps(cwd: PathBuf) -> anyhow::Result<BuildDepsOutput> {
         let mut options = Self::deps_options(cwd.clone(), ProgressReceiver).await;
         options.skip_preload = true;
-        let use_mb = std::env::var("UTOO_RESOLVE").as_deref() == Ok("mb");
-        let output = if use_mb {
-            tracing::debug!("UTOO_RESOLVE=mb: routing to build_deps_mb");
-            utoo_ruborist::service::build_deps_mb(options).await?
-        } else {
-            utoo_ruborist::service::build_deps(options).await?
-        };
+        let output = utoo_ruborist::service::build_deps(options).await?;
         spawn_save_project_cache(cwd, output.project_cache.clone());
         Ok(output)
     }

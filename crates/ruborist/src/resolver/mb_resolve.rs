@@ -1,47 +1,42 @@
-//! Two-phase manifest fetcher: phase 1 pure HTTP (mirrors
-//! `manifest-bench` standalone exactly), phase 2 rayon batch parse +
-//! settle.
+//! Standalone manifest preload for the lockfile-only path.
 //!
-//! ## Phase split
+//! Mirrors `crates/preload-bench`'s loop shape verbatim, but lives
+//! inside ruborist so it can populate `MemoryCache` for the BFS phase
+//! to read. Used by `service::api::build_deps` whenever the caller
+//! has `skip_preload=true` and no warm project cache — i.e. the
+//! `utoo deps` (lockfile-only) path.
 //!
-//! Per-fetch parse work was the real bottleneck in v1/v2 — `simd_json`
-//! ran in `spawn_blocking` threads that competed with tokio runtime
-//! workers for CPU on the 2-core GHA box. When 50+ parses ran in
-//! parallel, tokio workers couldn't drive sockets, so `eff_parallel`
-//! capped at ~47 against the 96 cap (vs `manifest-bench` standalone's
-//! 75 on the same box).
+//! Bypasses every other ruborist service layer:
+//!   * `service::http::get_client` — own `reqwest::Client` built per
+//!     call, no global LazyLock, no `dns_resolver(shared_resolver)`,
+//!     no `connect_timeout`, `pool_max_idle_per_host(256)` matching
+//!     `preload-bench` / `manifest-bench`.
+//!   * `service::manifest::fetch_full_manifest_with_settle` — own
+//!     `reqwest::get + body.bytes() + spawn_blocking(simd_json
+//!     to_borrowed_value)`, no `RetryIf`, no `FETCH_TIMINGS`.
+//!   * `service::registry::UnifiedRegistry` — no `OnceMap` inflight
+//!     gates, no `ManifestStore`, no `EventReceiver`.
 //!
-//! v3 separates the work:
+//! The only `service::*` touched is `MemoryCache::set_full_manifest`
+//! and `MemoryCache::set_version_manifest` — thin DashMap wrappers
+//! the BFS phase reads from. Without that, BFS would have nothing to
+//! resolve against.
 //!
-//! - **Phase 1** — `mb_style_pure_fetch` is a structural copy of
-//!   `manifest-bench`'s main loop: `spawn_one` (GET + body recv,
-//!   nothing else) + 1-for-1 refill on completion. The future body
-//!   has zero CPU work, so the tokio runtime workers retain full CPU
-//!   to drive sockets and `eff_parallel` reaches the same level as
-//!   the standalone bench.
-//!
-//! - **Phase 2** — bulk parse on rayon (off the tokio runtime). For
-//!   each fetched body: parse `FullManifest` envelope, resolve every
-//!   spec we need for this name, materialize `CoreVersionManifest`
-//!   subtrees, populate cache slots, collect transitive deps for the
-//!   next iteration.
-//!
-//! Phases alternate until `pending` is empty (typical project: 3-5
-//! iterations as transitive deps fan out wave by wave).
-//!
-//! Phase 1 is the line we measure against `manifest-bench` —
-//! `p1-breakdown mb_fetch_iter=N phase1_http_wall=...` traces let us
-//! check eff_parallel directly.
-//!
-//! Wired in via `UTOO_RESOLVE=mb` env var (see
-//! `pm::helper::ruborist_context::Context::build_deps`).
+//! Why a separate path: same-run CI data shows `preload-bench`
+//! (self-contained, transitive walk, 4153 fetches) lands at ~2.57s
+//! while ruborist's existing `fast_preload` path (combined parse via
+//! service layers, 2733 fetches) lands at ~2.67s on the same network
+//! — so on a per-fetch basis the service-layer path is ~50 % slower.
+//! Removing the layers should close that gap.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Instant;
 
-use bytes::Bytes;
+use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt};
-use rayon::prelude::*;
+use parking_lot::Mutex;
 use serde::Deserialize;
 
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
@@ -49,38 +44,29 @@ use crate::model::node::PeerDeps;
 use crate::resolver::preload::{Dep, PreloadConfig};
 use crate::resolver::version::resolve_target_version;
 use crate::service::MemoryCache;
-use crate::service::http::get_client;
 use crate::spec::SpecStr;
 
 #[derive(Debug, Default)]
 pub struct MbFetchStats {
     pub success: usize,
     pub fail: usize,
-    pub iterations: usize,
 }
 
-/// Phase 1 result: one body per fetched name. `bytes` is `None` on
-/// transport / non-2xx — kept in the result vector so phase 2 can
-/// account for it, but contributes no settle work.
-struct FetchOutcome {
-    name: String,
-    bytes: Option<Bytes>,
+/// Build a fresh `reqwest::Client` matching `preload-bench` /
+/// `manifest-bench` exactly, except for the TLS provider — those
+/// benches use aws-lc-rs but we keep ruborist's existing default
+/// rustls (ring on Linux). If A/B data shows TLS is the remaining
+/// gap, we'll add the aws-lc-rs deps separately.
+fn build_mb_client() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .no_proxy()
+        .pool_max_idle_per_host(256)
+        .http1_only()
+        .build()
+        .context("build reqwest client for mb_resolve")
 }
 
-/// Phase 2 per-name output. `full` is `None` on parse failure.
-struct ParseOutcome {
-    name: String,
-    full: Option<Arc<FullManifest>>,
-    /// Per-spec settled subtrees: `(spec, resolved_version, core)`.
-    /// Empty when the body failed to fetch / parse, or when no spec
-    /// resolves against the manifest.
-    settled: Vec<(String, String, Arc<CoreVersionManifest>)>,
-    /// Transitive deps collected across all settled subtrees for this
-    /// name. Already filtered to registry specs; the main loop dedups
-    /// against `done_names` before queueing.
-    transitives: Vec<Dep>,
-}
-
+/// Collect deps from a deps map, filtering non-registry specs.
 fn collect_deps(map: Option<&HashMap<String, String>>) -> Vec<Dep> {
     map.into_iter()
         .flatten()
@@ -99,177 +85,183 @@ fn extract_transitive(manifest: &CoreVersionManifest, peer_deps: PeerDeps) -> Ve
     out
 }
 
-/// Phase 1 — structural copy of `manifest-bench`'s main loop. Future
-/// body does ONLY GET + body recv; no parse, no cache writes, no
-/// dedup. Returns one `FetchOutcome` per input name in arrival order.
-async fn mb_style_pure_fetch(
-    names: Vec<String>,
-    registry_url: &str,
-    concurrency: usize,
-) -> Vec<FetchOutcome> {
-    let client = match get_client() {
-        Ok(c) => c.clone(),
-        Err(e) => {
-            tracing::warn!("get_client failed: {e}");
-            return Vec::new();
-        }
-    };
-
-    let mut results: Vec<FetchOutcome> = Vec::with_capacity(names.len());
-    let mut futs = FuturesUnordered::new();
-    let mut idx = 0usize;
-
-    let spawn_one = |client: &reqwest::Client,
-                     registry_url: &str,
-                     name: String,
-                     futs: &mut FuturesUnordered<_>| {
-        let url = format!("{}/{}", registry_url, name);
-        let client = client.clone();
-        futs.push(Box::pin(async move {
-            let bytes = match client
-                .get(&url)
-                .header("accept", "application/vnd.npm.install-v1+json")
-                .send()
-                .await
-            {
-                Ok(resp) if resp.status().is_success() => resp.bytes().await.ok(),
-                _ => None,
-            };
-            FetchOutcome { name, bytes }
-        }));
-    };
-
-    while idx < names.len() && futs.len() < concurrency {
-        spawn_one(&client, registry_url, names[idx].clone(), &mut futs);
-        idx += 1;
-    }
-
-    while let Some(outcome) = futs.next().await {
-        results.push(outcome);
-        if idx < names.len() {
-            spawn_one(&client, registry_url, names[idx].clone(), &mut futs);
-            idx += 1;
-        }
-    }
-
-    results
+/// What a future returns when it lands. The main loop uses
+/// `transitives` to extend `pending`, plus the cache writes already
+/// happened inside the future. Only `fetched=true` futures populate
+/// `body_cache` and trigger sibling drain.
+struct FetchOutcome {
+    name: String,
+    transitives: Vec<Dep>,
+    fetched: bool,
 }
 
-/// Sync phase 2 worker: parse one body, settle all specs we need for
-/// this name. Runs on rayon (called from `par_iter` in
-/// `parse_settle_batch`).
-fn parse_one_body(
-    name: String,
-    raw: Bytes,
-    specs: Vec<String>,
-    peer_deps: PeerDeps,
-) -> ParseOutcome {
-    use simd_json::prelude::{ValueAsScalar, ValueObjectAccess};
+type Fut = Pin<Box<dyn std::future::Future<Output = FetchOutcome> + Send>>;
 
-    let raw_arc: Arc<[u8]> = Arc::from(raw.as_ref());
-    let mut buf = raw.to_vec();
-    let parsed = match simd_json::to_borrowed_value(&mut buf) {
-        Ok(v) => v,
-        Err(_) => {
-            return ParseOutcome {
-                name,
-                full: None,
-                settled: Vec::new(),
-                transitives: Vec::new(),
-            };
-        }
-    };
+/// `(name, spec) → (FullManifest, resolved_version, version_subtree, transitive_deps)`.
+type ParseResult = (
+    Arc<FullManifest>,
+    String,
+    Arc<CoreVersionManifest>,
+    Vec<Dep>,
+);
 
-    let envelope_name = parsed
+/// Single combined parse: one `simd_json::to_borrowed_value` over the
+/// raw body extracts the envelope (name, dist-tags, versions keys)
+/// AND deserializes the resolved version's `CoreVersionManifest`
+/// subtree. Same shape as the parse step in `preload-bench`.
+fn parse_combined(raw: Arc<[u8]>, spec: &str, peer_deps: PeerDeps) -> Option<ParseResult> {
+    use simd_json::prelude::{ValueAsObject, ValueAsScalar, ValueObjectAccess};
+
+    let mut buf = (*raw).to_vec();
+    let parsed = simd_json::to_borrowed_value(&mut buf).ok()?;
+
+    let name = parsed
         .get("name")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
-        .unwrap_or_else(|| name.clone());
+        .unwrap_or_default();
     let dist_tags: HashMap<String, String> = parsed
         .get("dist-tags")
         .and_then(|v| HashMap::<String, String>::deserialize(v).ok())
         .unwrap_or_default();
     let versions_keys: Vec<String> = parsed
         .get("versions")
-        .and_then(simd_json::prelude::ValueAsObject::as_object)
+        .and_then(ValueAsObject::as_object)
         .map(|obj| obj.keys().map(|k| k.to_string()).collect())
         .unwrap_or_default();
 
     let full = FullManifest {
-        name: envelope_name,
+        name,
         dist_tags,
         versions: versions_keys,
-        raw: Arc::clone(&raw_arc),
+        raw: Arc::clone(&raw),
         ..Default::default()
     };
-    let full_arc = Arc::new(full);
 
-    // For each requested spec, resolve + extract version subtree.
-    // Cache the per-(name, version) `CoreVersionManifest` so sibling
-    // specs that resolve to the same version reuse the same Arc.
-    let mut version_cache: HashMap<String, Arc<CoreVersionManifest>> = HashMap::new();
-    let mut settled = Vec::with_capacity(specs.len());
-    let mut transitives = Vec::new();
+    let resolved = resolve_target_version((&full).into(), spec).ok()?;
+    let core = parsed
+        .get("versions")
+        .and_then(|v| v.get(resolved.as_str()))
+        .and_then(|version_obj| CoreVersionManifest::deserialize(version_obj).ok())?;
+    let core_arc = Arc::new(core);
+    let transitives = extract_transitive(&core_arc, peer_deps);
 
-    for spec in specs {
-        let Ok(resolved_version) = resolve_target_version((&*full_arc).into(), &spec) else {
-            continue;
-        };
-        let core_arc = if let Some(cached) = version_cache.get(&resolved_version) {
-            Arc::clone(cached)
-        } else {
-            let Some(core) = parsed
-                .get("versions")
-                .and_then(|v| v.get(resolved_version.as_str()))
-                .and_then(|version_obj| CoreVersionManifest::deserialize(version_obj).ok())
-            else {
-                continue;
-            };
-            let arc = Arc::new(core);
-            version_cache.insert(resolved_version.clone(), Arc::clone(&arc));
-            arc
-        };
-        transitives.extend(extract_transitive(&core_arc, peer_deps));
-        settled.push((spec, resolved_version, core_arc));
-    }
-
-    ParseOutcome {
-        name,
-        full: Some(full_arc),
-        settled,
-        transitives,
-    }
+    Some((Arc::new(full), resolved, core_arc, transitives))
 }
 
-/// Phase 2 dispatcher: hands the batch to rayon, awaits the result.
-async fn parse_settle_batch(
-    bodies: Vec<FetchOutcome>,
-    by_name: HashMap<String, Vec<String>>,
+/// Fetch + combined parse + cache write for one `(name, spec)`.
+/// Future body owns all per-fetch work; main loop only extends
+/// `pending` from the returned transitives and refills `futs`.
+fn spawn_fetch(
+    client: reqwest::Client,
+    registry_url: Arc<String>,
+    name: String,
+    spec: String,
+    cache: MemoryCache,
+    body_cache: Arc<Mutex<HashMap<String, Arc<[u8]>>>>,
     peer_deps: PeerDeps,
-) -> Vec<ParseOutcome> {
-    let work: Vec<(String, Bytes, Vec<String>)> = bodies
-        .into_iter()
-        .filter_map(|f| {
-            let bytes = f.bytes?;
-            let specs = by_name.get(&f.name).cloned().unwrap_or_default();
-            Some((f.name, bytes, specs))
-        })
-        .collect();
+) -> Fut {
+    Box::pin(async move {
+        let url = format!("{}/{}", registry_url, name);
+        let resp = match client
+            .get(&url)
+            .header("accept", "application/vnd.npm.install-v1+json")
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() => r,
+            _ => {
+                return FetchOutcome {
+                    name,
+                    transitives: Vec::new(),
+                    fetched: true,
+                };
+            }
+        };
+        let raw_bytes = match resp.bytes().await {
+            Ok(b) => b,
+            Err(_) => {
+                return FetchOutcome {
+                    name,
+                    transitives: Vec::new(),
+                    fetched: true,
+                };
+            }
+        };
+        let raw_arc: Arc<[u8]> = Arc::from(raw_bytes.as_ref());
+        // Stash in body_cache early so concurrent sibling specs
+        // arriving slightly after see it on their pending pop.
+        body_cache.lock().insert(name.clone(), Arc::clone(&raw_arc));
 
-    if work.is_empty() {
-        return Vec::new();
-    }
+        let spec_for_parse = spec.clone();
+        let peer = peer_deps;
+        let parsed =
+            tokio::task::spawn_blocking(move || parse_combined(raw_arc, &spec_for_parse, peer))
+                .await
+                .ok()
+                .flatten();
 
-    tokio::task::spawn_blocking(move || {
-        work.into_par_iter()
-            .map(|(name, raw, specs)| parse_one_body(name, raw, specs, peer_deps))
-            .collect::<Vec<_>>()
+        let transitives = match parsed {
+            Some((full_arc, resolved, core_arc, transitives)) => {
+                cache.set_full_manifest(name.clone(), Arc::clone(&full_arc));
+                cache.set_version_manifest(name.clone(), spec, Arc::clone(&core_arc));
+                cache.set_version_manifest(name.clone(), resolved, core_arc);
+                transitives
+            }
+            None => Vec::new(),
+        };
+
+        FetchOutcome {
+            name,
+            transitives,
+            fetched: true,
+        }
     })
-    .await
-    .unwrap_or_default()
 }
 
-/// Two-phase mb-style fetch with rayon batch parse. See module docs.
+/// Settle-only future for a sibling spec whose `(name)` body already
+/// landed via a sibling fetch. Same combined parse, no network.
+fn spawn_settle(
+    name: String,
+    spec: String,
+    raw: Arc<[u8]>,
+    cache: MemoryCache,
+    peer_deps: PeerDeps,
+) -> Fut {
+    Box::pin(async move {
+        let spec_for_parse = spec.clone();
+        let peer = peer_deps;
+        let parsed = tokio::task::spawn_blocking(move || {
+            parse_combined(Arc::clone(&raw), &spec_for_parse, peer)
+        })
+        .await
+        .ok()
+        .flatten();
+
+        let transitives = match parsed {
+            Some((full_arc, resolved, core_arc, transitives)) => {
+                // Don't overwrite full_manifest — the original fetcher
+                // already set it. Only populate the version-manifest
+                // slots so BFS hits the (name, spec) early-return.
+                cache.set_full_manifest(name.clone(), full_arc);
+                cache.set_version_manifest(name.clone(), spec, Arc::clone(&core_arc));
+                cache.set_version_manifest(name.clone(), resolved, core_arc);
+                transitives
+            }
+            None => Vec::new(),
+        };
+
+        FetchOutcome {
+            name,
+            transitives,
+            fetched: false,
+        }
+    })
+}
+
+/// Streaming preload with transitive walk. Self-contained — no
+/// dependency on `service::http` / `service::manifest` /
+/// `service::registry` beyond `MemoryCache` writes.
 pub async fn mb_fetch(
     initial_deps: Vec<Dep>,
     registry_url: &str,
@@ -277,154 +269,109 @@ pub async fn mb_fetch(
     config: &PreloadConfig,
 ) -> MbFetchStats {
     let mut stats = MbFetchStats::default();
-    let mut pending_specs: Vec<Dep> = initial_deps;
-    // (name, spec) pairs we've already processed (settled or queued
-    // to settle). Without this, sibling-settle's transitive deps can
-    // re-introduce already-walked specs and the outer loop never
-    // terminates — peer / optional dep cycles trivially trigger this.
-    let mut seen_specs: HashSet<(String, String)> = HashSet::new();
-    let mut done_names: HashSet<String> = HashSet::new();
-    let conc = config.concurrency;
+    let total_start = Instant::now();
+
+    let client = match build_mb_client() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("mb_resolve client build failed: {e}");
+            return stats;
+        }
+    };
+    let registry = Arc::new(registry_url.trim_end_matches('/').to_string());
+    let cap = config.concurrency;
     let peer_deps = config.peer_deps;
-    let total_start = tokio::time::Instant::now();
 
-    // Filter the initial seed through `seen_specs` too — root + workspace
-    // edges can list the same dep multiple times across workspaces.
-    pending_specs.retain(|(n, s)| seen_specs.insert((n.clone(), s.clone())));
-
-    while !pending_specs.is_empty() {
-        stats.iterations += 1;
-        let iter = stats.iterations;
-
-        // Group this iteration's pending specs by name.
-        let mut by_name: HashMap<String, Vec<String>> = HashMap::new();
-        for (name, spec) in pending_specs.drain(..) {
-            by_name.entry(name).or_default().push(spec);
+    // Spec-level dedup across the entire run.
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+    let mut pending: VecDeque<Dep> = VecDeque::new();
+    for (name, spec) in initial_deps {
+        if seen.insert((name.clone(), spec.clone())) {
+            pending.push_back((name, spec));
         }
+    }
 
-        // Names whose full manifest is already cached from a prior
-        // iteration: settle their siblings synchronously (cheap
-        // semver match + cache lookup; no parse if version_manifest
-        // already cached, otherwise quick simd_json subtree extract).
-        let mut sibling_only: Vec<(String, Vec<String>)> = Vec::new();
-        let mut to_fetch: Vec<String> = Vec::with_capacity(by_name.len());
-        for (name, specs) in &by_name {
-            if done_names.contains(name) {
-                sibling_only.push((name.clone(), specs.clone()));
-            } else {
-                to_fetch.push(name.clone());
-            }
-        }
+    // Sibling-fetch dedup: when two specs for the same name are both
+    // in flight, only the first fires a fetch; the second arrives at
+    // the cached body and goes through `spawn_settle` instead.
+    let body_cache: Arc<Mutex<HashMap<String, Arc<[u8]>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut in_flight_names: HashSet<String> = HashSet::new();
+    let mut deferred_by_name: HashMap<String, Vec<String>> = HashMap::new();
 
-        // Sibling settles (rare on real workloads — most names appear
-        // exactly once across the whole walk). New transitives go
-        // through `seen_specs` dedup before joining `pending_specs`.
-        for (name, specs) in sibling_only {
-            let Some(full) = cache.get_full_manifest(&name) else {
-                continue;
+    let mut futs: FuturesUnordered<Fut> = FuturesUnordered::new();
+
+    loop {
+        // Refill to cap.
+        while futs.len() < cap {
+            let Some((name, spec)) = pending.pop_front() else {
+                break;
             };
-            for spec in specs {
-                let Ok(resolved) = resolve_target_version((&*full).into(), &spec) else {
-                    continue;
-                };
-                let new_deps = if let Some(cached) = cache.get_version_manifest(&name, &resolved) {
-                    cache.set_version_manifest(name.clone(), spec.clone(), Arc::clone(&cached));
-                    extract_transitive(&cached, peer_deps)
-                } else if let Some(core) = full.get_core_version(&resolved) {
-                    let core_arc = Arc::new(core);
-                    cache.set_version_manifest(name.clone(), spec.clone(), Arc::clone(&core_arc));
-                    cache.set_version_manifest(name.clone(), resolved, Arc::clone(&core_arc));
-                    extract_transitive(&core_arc, peer_deps)
-                } else {
-                    Vec::new()
-                };
-                pending_specs.extend(
-                    new_deps
-                        .into_iter()
-                        .filter(|(n, s)| seen_specs.insert((n.clone(), s.clone()))),
-                );
-            }
-        }
-
-        if to_fetch.is_empty() {
-            // Iteration drained pending entirely via sibling settles.
-            continue;
-        }
-
-        // PHASE 1 — pure HTTP, mb-style.
-        let p1_start = tokio::time::Instant::now();
-        let bodies = mb_style_pure_fetch(to_fetch.clone(), registry_url, conc).await;
-        let p1_wall = p1_start.elapsed().as_millis();
-        let total_bytes: usize = bodies
-            .iter()
-            .map(|b| b.bytes.as_ref().map(|v| v.len()).unwrap_or(0))
-            .sum();
-        tracing::info!(
-            "p1-breakdown mb_fetch iter={} phase1_http_wall={}ms n={} bytes={}",
-            iter,
-            p1_wall,
-            to_fetch.len(),
-            total_bytes,
-        );
-
-        // PHASE 2 — rayon batch parse + settle.
-        let p2_start = tokio::time::Instant::now();
-        let by_name_for_parse = by_name
-            .iter()
-            .filter(|(name, _)| !done_names.contains(*name))
-            .map(|(n, s)| (n.clone(), s.clone()))
-            .collect::<HashMap<_, _>>();
-        let parsed = parse_settle_batch(bodies, by_name_for_parse, peer_deps).await;
-        let p2_wall = p2_start.elapsed().as_millis();
-
-        let mut new_transitives: Vec<Dep> = Vec::new();
-        let mut settle_count = 0usize;
-        let mut fail_count = 0usize;
-        for outcome in parsed {
-            done_names.insert(outcome.name.clone());
-            let Some(full_arc) = outcome.full else {
-                fail_count += 1;
+            // Sibling fast path: body already cached.
+            if let Some(raw) = body_cache.lock().get(&name).cloned() {
+                futs.push(spawn_settle(name, spec, raw, cache.clone(), peer_deps));
                 continue;
-            };
-            cache.set_full_manifest(outcome.name.clone(), Arc::clone(&full_arc));
-            for (spec, resolved, core) in outcome.settled {
-                cache.set_version_manifest(outcome.name.clone(), spec, Arc::clone(&core));
-                cache.set_version_manifest(outcome.name.clone(), resolved, Arc::clone(&core));
-                settle_count += 1;
             }
-            new_transitives.extend(outcome.transitives);
+            // Defer if a fetch for this name is already in flight.
+            if !in_flight_names.insert(name.clone()) {
+                deferred_by_name.entry(name).or_default().push(spec);
+                continue;
+            }
+            futs.push(spawn_fetch(
+                client.clone(),
+                Arc::clone(&registry),
+                name,
+                spec,
+                cache.clone(),
+                Arc::clone(&body_cache),
+                peer_deps,
+            ));
         }
-        // Names that fetched but failed parse — still mark done so we
-        // don't refetch them next iteration.
-        for name in to_fetch {
-            done_names.insert(name);
+
+        if futs.is_empty() {
+            break;
         }
 
-        stats.success += settle_count;
-        stats.fail += fail_count;
+        let Some(out) = futs.next().await else { break };
 
-        let new_unique: Vec<Dep> = new_transitives
-            .into_iter()
-            .filter(|(n, s)| seen_specs.insert((n.clone(), s.clone())))
-            .collect();
+        if out.transitives.is_empty() && out.fetched {
+            // Empty result from a fetch is ambiguous (no transitives
+            // OR a fetch/parse failure). Track conservatively as
+            // success — the FETCH_TIMINGS-equivalent counter is
+            // omitted in this path on purpose to keep the future
+            // body lean.
+            stats.success += 1;
+        } else if out.fetched {
+            stats.success += 1;
+        }
 
-        tracing::info!(
-            "p1-breakdown mb_fetch iter={} phase2_parse_wall={}ms settles={} fail={} new_unique={}",
-            iter,
-            p2_wall,
-            settle_count,
-            fail_count,
-            new_unique.len(),
-        );
+        // Drain sibling specs deferred while the fetch was in flight.
+        if out.fetched
+            && let Some(siblings) = deferred_by_name.remove(&out.name)
+            && let Some(raw) = body_cache.lock().get(&out.name).cloned()
+        {
+            for sibling_spec in siblings {
+                futs.push(spawn_settle(
+                    out.name.clone(),
+                    sibling_spec,
+                    Arc::clone(&raw),
+                    cache.clone(),
+                    peer_deps,
+                ));
+            }
+        }
 
-        pending_specs.extend(new_unique);
+        // Extend pending with new transitive specs, dedup.
+        for (name, spec) in out.transitives {
+            if seen.insert((name.clone(), spec.clone())) {
+                pending.push_back((name, spec));
+            }
+        }
     }
 
     let total_wall = total_start.elapsed().as_millis();
     tracing::info!(
-        "p1-breakdown mb_fetch total_wall={}ms iters={} settled={} fail={}",
+        "p1-breakdown mb_fetch wall={}ms ok={} fail={}",
         total_wall,
-        stats.iterations,
         stats.success,
         stats.fail,
     );
