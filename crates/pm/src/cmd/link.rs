@@ -16,6 +16,12 @@ pub async fn link_current_to_global(cwd: &Path, prefix: Option<&str>) -> Result<
             project_path.display()
         )
     })?;
+    if package_info.name.is_empty() {
+        anyhow::bail!(
+            "Cannot link to global: package.json at {} is missing a 'name' field",
+            project_path.display()
+        );
+    }
 
     // Install dependencies
     install(ScriptPolicy::Run, &project_path)
