@@ -1030,6 +1030,20 @@ jobs:
         run: |
           chmod +x bench/pm-bench-pcap.sh
           bash bench/pm-bench-pcap.sh
+      # Small artifact (KB scale) with just the per-capture +
+      # aggregated metrics — fast to download for diff analysis,
+      # avoids the 2GB pcap-corpus pull when we only need numbers.
+      - name: Upload pcap summaries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pm-bench-pcap-summaries
+          path: |
+            /tmp/pm-bench-pcap/*.json
+            /tmp/pm-bench-pcap/*.log
+            /tmp/pm-bench-pcap/*.iostat.txt
+            /tmp/pm-bench-pcap/dns.txt
+          retention-days: 7
       - name: Upload pcap artifact
         if: always()
         uses: actions/upload-artifact@v4
