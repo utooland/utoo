@@ -67,6 +67,18 @@ externalRequire.resolve = (
 };
 contextPrototype.x = externalRequire;
 
+/**
+ * Exports a URL value. No suffix is added in Node.js runtime.
+ */
+function exportUrl(
+  this: TurbopackBaseContext<Module>,
+  url: string,
+  id: ModuleId | undefined,
+) {
+  exportValue.call(this, url, id);
+}
+contextPrototype.q = exportUrl;
+
 (() => {
   BACKEND = {
     registerChunk(chunk, params) {
