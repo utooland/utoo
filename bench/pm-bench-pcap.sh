@@ -367,3 +367,25 @@ fi
 
 echo "done. files:"
 ls -lh "$PCAP_DIR"
+
+# Print summary table to CI logs so we don't need to download the
+# 2 GB pcap artifact just to read the comparison numbers.
+echo
+echo "=== summary table ==="
+if command -v jq >/dev/null && [ -f "$PCAP_DIR/summary.json" ]; then
+  jq -r '
+    .captures
+    | (["name", "wall_s", "packets", "streams", "zwin", "retx", "dup_ack", "gap_p99_us", "gap_max_us"] | @tsv),
+      (.[] | [
+        .name,
+        (.wall_seconds | tostring),
+        (.packet_count | tostring),
+        (.distinct_streams | tostring),
+        (.zero_windows | tostring),
+        (.retransmits | tostring),
+        (.duplicate_acks | tostring),
+        (.gap_p99_us | tostring),
+        (.gap_max_us | tostring)
+      ] | @tsv)
+  ' "$PCAP_DIR/summary.json" | column -t
+fi

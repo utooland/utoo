@@ -1051,3 +1051,18 @@ jobs:
           name: pm-bench-pcap
           path: /tmp/pm-bench-pcap
           retention-days: 7
+      # Tiny summary-only artifact for quick comparison without
+      # re-downloading the multi-GB pcap blob. Includes the
+      # tshark-extracted JSON metrics + the pcap.log files (text,
+      # tiny) but no .pcap binaries.
+      - name: Upload pcap summaries (small)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pm-bench-pcap-summaries
+          path: |
+            /tmp/pm-bench-pcap/*.json
+            /tmp/pm-bench-pcap/*.log
+            /tmp/pm-bench-pcap/*.iostat.txt
+            /tmp/pm-bench-pcap/dns.txt
+          retention-days: 7
