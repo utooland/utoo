@@ -161,6 +161,25 @@ jobs:
           name: manifest-bench-linux-x64
           path: target/x86_64-unknown-linux-gnu/release/manifest-bench
           retention-days: 1
+      # preload-bench: same HTTP setup as manifest-bench, but discovers
+      # names by walking transitive deps from a package.json root —
+      # tests whether a fully self-contained streaming preload can match
+      # standalone manifest-bench's wall on the same workload that
+      # ruborist's path runs at ~2.18s.
+      - name: Build preload-bench
+        if: >
+          (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
+          (github.event_name == 'workflow_dispatch' && (inputs.target == 'pm-bench-phases' || inputs.target == 'pm-bench-pcap'))
+        run: cargo build --release --target x86_64-unknown-linux-gnu -p preload-bench
+      - name: Upload preload-bench binary
+        if: >
+          (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
+          (github.event_name == 'workflow_dispatch' && (inputs.target == 'pm-bench-phases' || inputs.target == 'pm-bench-pcap'))
+        uses: actions/upload-artifact@v4
+        with:
+          name: preload-bench-linux-x64
+          path: target/x86_64-unknown-linux-gnu/release/preload-bench
+          retention-days: 1
       # Piggyback on the already-built target/ from the step above: when the
       # PR is labeled `benchmark`, overlay origin/next's tree onto the current
       # workdir and re-run cargo build. cargo's incremental compile only
@@ -547,6 +566,20 @@ jobs:
           chmod +x /tmp/manifest-bench-dist/manifest-bench
           mv /tmp/manifest-bench-dist/manifest-bench /tmp/manifest-bench
           echo "MANIFEST_BENCH_BIN=/tmp/manifest-bench" >> $GITHUB_ENV
+      # Self-contained streaming preload bench — same HTTP setup as
+      # manifest-bench but discovers names via transitive walk from a
+      # package.json. Used to test whether a fully-isolated path can
+      # match standalone manifest-bench's wall on the same workload.
+      - name: Download preload-bench binary
+        uses: actions/download-artifact@v4
+        with:
+          name: preload-bench-linux-x64
+          path: /tmp/preload-bench-dist
+      - name: Install preload-bench
+        run: |
+          chmod +x /tmp/preload-bench-dist/preload-bench
+          mv /tmp/preload-bench-dist/preload-bench /tmp/preload-bench
+          echo "PRELOAD_BENCH_BIN=/tmp/preload-bench" >> $GITHUB_ENV
       - name: Verify tools
         run: |
           hyperfine --version
@@ -645,6 +678,42 @@ jobs:
             "$MANIFEST_BENCH_BIN" --lockfile package-lock.json --registry "$REGISTRY" \
               --concurrency 128 --reps 2 --http1-only --user-agent "Bun/1.2.21" || true
           } 2>&1 | tee "$MB_LOG"
+      # Self-contained streaming preload (transitive walk from
+      # package.json) — same HTTP setup as manifest-bench but with a
+      # streaming FuturesUnordered + per-future parse. This tests
+      # whether a fully ruborist-independent path can hit standalone
+      # manifest-bench's wall under the same project workload.
+      - name: Standalone preload-bench (transitive walk sweep)
+        env:
+          PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
+          REGISTRY: 'https://registry.npmjs.org'
+        run: |
+          set -eu
+          mkdir -p /tmp/pm-bench-output
+          PROJECT_DIR="/tmp/pm-bench/$PROJECT"
+          if [ ! -d "$PROJECT_DIR" ]; then
+            echo "no project dir; skipping preload-bench"; exit 0
+          fi
+          PJ="$PROJECT_DIR/package.json"
+          if [ ! -f "$PJ" ]; then
+            echo "no package.json; skipping preload-bench"; exit 0
+          fi
+
+          PB_LOG=/tmp/pm-bench-output/preload-bench-npmjs.log
+          {
+            echo "============================================================"
+            echo "preload-bench: streaming transitive-walk preload"
+            echo "  Self-contained (no ruborist deps). Same HTTP setup as"
+            echo "  manifest-bench, but discovers names by walking transitive"
+            echo "  deps from package.json instead of consuming a flat list."
+            echo "============================================================"
+            for CAP in 64 96 128; do
+              echo
+              echo "--- concurrency=$CAP, h1, transitive walk ---"
+              "$PRELOAD_BENCH_BIN" --package-json "$PJ" --registry "$REGISTRY" \
+                --concurrency "$CAP" --reps 4 || true
+            done
+          } 2>&1 | tee "$PB_LOG"
       - name: Upload bench logs
         if: always()
         uses: actions/upload-artifact@v4

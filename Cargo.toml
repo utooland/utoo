@@ -2,6 +2,7 @@
 resolver = "2"
 members  = [
   "crates/manifest-bench",
+  "crates/preload-bench",
   "crates/pack-api",
   "crates/pack-cli",
   "crates/pack-core",
