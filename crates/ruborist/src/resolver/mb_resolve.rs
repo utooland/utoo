@@ -51,6 +51,7 @@ use crate::resolver::preload::{Dep, PreloadConfig};
 use crate::resolver::version::resolve_target_version;
 use crate::service::MemoryCache;
 use crate::spec::SpecStr;
+use crate::traits::progress::{BuildEvent, EventReceiver};
 use crate::traits::registry::ResolvedPackage;
 
 #[derive(Debug, Default)]
@@ -131,6 +132,11 @@ fn extract_transitive(manifest: &CoreVersionManifest, peer_deps: PeerDeps) -> Ve
 /// `body_cache` and trigger sibling drain.
 struct FetchOutcome {
     name: String,
+    /// The spec that triggered this fetch / settle. Used by the
+    /// main loop to look up the cached `CoreVersionManifest` for
+    /// `PackageResolved` event emission (the future already wrote
+    /// `(name, primary_spec)` to the cache).
+    primary_spec: String,
     transitives: Vec<Dep>,
     fetched: bool,
     /// Per-future wall (network + body recv + spawn_blocking parse).
@@ -211,6 +217,7 @@ fn spawn_fetch(
 ) -> Fut {
     Box::pin(async move {
         let fut_start = Instant::now();
+        let primary_spec = spec.clone();
         let url = format!("{}/{}", registry_url, name);
         let resp = match client
             .get(&url)
@@ -223,6 +230,7 @@ fn spawn_fetch(
                 let wall_us = fut_start.elapsed().as_micros() as u64;
                 return FetchOutcome {
                     name,
+                    primary_spec,
                     transitives: Vec::new(),
                     fetched: true,
                     wall_us,
@@ -236,6 +244,7 @@ fn spawn_fetch(
                 let wall_us = fut_start.elapsed().as_micros() as u64;
                 return FetchOutcome {
                     name,
+                    primary_spec,
                     transitives: Vec::new(),
                     fetched: true,
                     wall_us,
@@ -270,6 +279,7 @@ fn spawn_fetch(
         let wall_us = fut_start.elapsed().as_micros() as u64;
         FetchOutcome {
             name,
+            primary_spec,
             transitives,
             fetched: true,
             wall_us,
@@ -289,6 +299,7 @@ fn spawn_settle(
 ) -> Fut {
     Box::pin(async move {
         let fut_start = Instant::now();
+        let primary_spec = spec.clone();
         let spec_for_parse = spec.clone();
         let peer = peer_deps;
         let parsed = tokio::task::spawn_blocking(move || {
@@ -314,6 +325,7 @@ fn spawn_settle(
         let wall_us = fut_start.elapsed().as_micros() as u64;
         FetchOutcome {
             name,
+            primary_spec,
             transitives,
             fetched: false,
             wall_us,
@@ -593,13 +605,17 @@ struct FetchEventMsg {
     name: String,
 }
 
-pub async fn mb_fetch_with_graph(
+pub async fn mb_fetch_with_graph<R>(
     mut graph: DependencyGraph,
     registry_url: &str,
     cache: &MemoryCache,
     preload_config: &PreloadConfig,
     build_config: &BuildDepsConfig,
-) -> Result<(DependencyGraph, MbFetchStats)> {
+    receiver: Arc<R>,
+) -> Result<(DependencyGraph, MbFetchStats)>
+where
+    R: EventReceiver + 'static,
+{
     let mut stats = MbFetchStats::default();
     let total_start = Instant::now();
 
@@ -663,6 +679,7 @@ pub async fn mb_fetch_with_graph(
     // loop CPU starving the runtime's IO polling.
     let cache_clone = cache.clone();
     let build_config_owned = build_config.clone();
+    let receiver_for_graph = Arc::clone(&receiver);
     let graph_handle = tokio::spawn(graph_worker(
         graph,
         edge_targets,
@@ -671,6 +688,7 @@ pub async fn mb_fetch_with_graph(
         build_config_owned,
         fetch_rx,
         specs_tx,
+        receiver_for_graph,
     ));
 
     // Sibling-fetch dedup stays in main loop (drives FuturesUnordered).
@@ -745,6 +763,21 @@ pub async fn mb_fetch_with_graph(
                         stats.success += 1;
                     } else {
                         settle_count += 1;
+                    }
+
+                    // Pipeline early-start signal: emit
+                    // PackageResolved as soon as the manifest is in
+                    // cache. The install path's PipelineReceiver
+                    // forwards this to the download worker so
+                    // tarball download begins before BFS finishes.
+                    // For lockfile-only callers (NoopReceiver), this
+                    // is a no-op.
+                    if let Some(core_arc) =
+                        cache.get_version_manifest(&out.name, &out.primary_spec)
+                    {
+                        receiver.on_event(BuildEvent::PackageResolved(
+                            (&*core_arc).into(),
+                        ));
                     }
 
                     // Drain sibling specs deferred while the fetch
@@ -828,7 +861,8 @@ struct GraphWorkerStats {
 /// back. Designed to monopolize a tokio runtime worker thread so
 /// the main loop's worker can drive socket polling without
 /// competing for CPU.
-async fn graph_worker(
+#[allow(clippy::too_many_arguments)]
+async fn graph_worker<R>(
     mut graph: DependencyGraph,
     mut edge_targets: EdgeTargets,
     mut seen_specs: HashSet<(String, String)>,
@@ -836,7 +870,12 @@ async fn graph_worker(
     build_config: BuildDepsConfig,
     mut fetch_rx: mpsc::Receiver<FetchEventMsg>,
     specs_tx: mpsc::Sender<Vec<Dep>>,
-) -> Result<(DependencyGraph, GraphWorkerStats)> {
+    receiver: Arc<R>,
+) -> Result<(DependencyGraph, GraphWorkerStats)>
+where
+    R: EventReceiver + 'static,
+{
+    use crate::model::manifest::NodeManifest;
     let mut stats = GraphWorkerStats::default();
 
     while let Some(msg) = fetch_rx.recv().await {
@@ -888,6 +927,22 @@ async fn graph_worker(
                     &build_config,
                 );
                 if let ProcessResult::Created(new_idx) = result {
+                    // Pipeline clone signal: emit PackagePlaced so
+                    // the install path's clone worker can begin
+                    // hardlinking from cache as soon as a node is
+                    // placed in the graph. lockfile-only callers
+                    // (NoopReceiver) drop this on the floor.
+                    if let Some(node) = graph.get_node(new_idx)
+                        && let NodeManifest::Registry(ref manifest) = node.manifest
+                    {
+                        let parent_path = graph.get_node(parent_idx).map(|p| p.path.as_path());
+                        receiver.on_event(BuildEvent::PackagePlaced {
+                            package: manifest.as_ref().into(),
+                            path: &node.path,
+                            parent_path,
+                        });
+                    }
+
                     // Walk the new node's edges. enqueue handles
                     // recursive cache-hit drain so already-cached
                     // specs get processed inline (still on this

@@ -69,6 +69,14 @@ impl Context {
 
     /// Create BuildDepsOptions with PipelineReceiver for concurrent download/clone.
     /// Returns (options, channels) where channels are used to start pipeline workers.
+    ///
+    /// Sets `skip_preload=true` so ruborist's `service::api::build_deps`
+    /// routes through `mb_fetch_with_graph` (folded preload + graph
+    /// build). The pipeline still receives `PackageResolved` /
+    /// `PackagePlaced` events — emitted from inside
+    /// `mb_fetch_with_graph` (main loop and graph worker
+    /// respectively) — so download/clone start as early as the
+    /// classic preload+BFS path.
     pub async fn pipeline_deps_options(
         cwd: PathBuf,
     ) -> (
@@ -76,7 +84,8 @@ impl Context {
         PipelineChannels,
     ) {
         let (receiver, channels) = PipelineReceiver::new(ProgressReceiver);
-        let options = Self::deps_options(cwd, receiver).await;
+        let mut options = Self::deps_options(cwd, receiver).await;
+        options.skip_preload = true;
         (options, channels)
     }
 

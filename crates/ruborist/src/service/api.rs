@@ -131,7 +131,7 @@ pub struct BuildDepsOutput {
 pub async fn build_deps<G, R>(options: BuildDepsOptions<G, R>) -> Result<BuildDepsOutput>
 where
     G: Glob + Clone,
-    R: EventReceiver,
+    R: EventReceiver + 'static,
 {
     let BuildDepsOptions {
         cwd,
@@ -279,6 +279,11 @@ where
     // `build_deps_with_config` call still runs to handle any
     // non-registry edges (workspace / git / http / file) the fold
     // path skipped, but on registry-only workloads it's near no-op.
+    // Wrap receiver in Arc so the folded mb_fetch_with_graph can
+    // share it with its spawned graph_worker task. The follow-up
+    // BFS sweep also holds an &Arc<R> via deref.
+    let receiver = Arc::new(receiver);
+
     let folded = skip_preload_caller && cache_count == 0;
     if folded {
         let preload_config = PreloadConfig {
@@ -291,6 +296,7 @@ where
             registry.cache(),
             &preload_config,
             &config,
+            Arc::clone(&receiver),
         )
         .await
         .map_err(|e| e.context("mb_fetch_with_graph failed"))?;
@@ -305,7 +311,7 @@ where
     // (non-registry: workspace / git / http / file). On
     // registry-only workloads (the common case) the graph is fully
     // built already, BFS walks nothing.
-    build_deps_with_config(&mut graph, &registry, config, &receiver)
+    build_deps_with_config(&mut graph, &registry, config, &*receiver)
         .await
         .map_err(|e| anyhow::Error::new(e).context("Dependency resolution failed"))?;
 
