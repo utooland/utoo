@@ -9,6 +9,9 @@ use utoo_ruborist::service::{
 use crate::service::pipeline::{PipelineChannels, PipelineReceiver};
 use crate::util::cache::get_cache_dir;
 use crate::util::logger::ProgressReceiver;
+// EXPERIMENT: DiskManifestStore swapped for NoopStore (see manifest_store
+// fn below), so the disk-backed store is unused on this branch.
+#[allow(unused_imports)]
 use crate::util::manifest_store::DiskManifestStore;
 use crate::util::project_cache;
 use crate::util::user_config::{
@@ -40,8 +43,25 @@ pub(crate) type Registry = UnifiedRegistry;
 pub(crate) struct Context;
 
 impl Context {
+    /// EXPERIMENT (experiment/no-disk-cache branch): swap
+    /// `DiskManifestStore` for `NoopStore` so every
+    /// `store.load_versions` / `store.load_version_manifest` call in
+    /// `service::registry::UnifiedRegistry` returns `None` without
+    /// touching the filesystem, and every `store.store_*` call is a
+    /// no-op. Used to A/B test how much of utoo's p1/p3 wall comes
+    /// from the per-fetch disk-cache existence-check IO that the
+    /// registry layer issues alongside each manifest fetch.
+    ///
+    /// Affects ALL paths that build `BuildDepsOptions` via this
+    /// helper (`deps_options` → `pipeline_deps_options`,
+    /// `build_deps`). The new `mb_resolve` lockfile-only path
+    /// already bypasses `UnifiedRegistry` entirely, so it sees no
+    /// effect from this swap; the install path (which still goes
+    /// through `UnifiedRegistry` for the pipeline preload) does see
+    /// the difference, and so does any BFS edge that misses
+    /// `MemoryCache` and falls into `resolve_via_full_manifest`.
     fn manifest_store() -> Arc<dyn ManifestStore> {
-        Arc::new(DiskManifestStore::new(get_cache_dir()))
+        Arc::new(utoo_ruborist::service::NoopStore)
     }
 
     /// Create BuildDepsOptions with a custom event receiver.

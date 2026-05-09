@@ -19,10 +19,15 @@ use utoo_ruborist::service::{ManifestStore, VersionsInfo};
 
 use crate::util::json::read_json_file;
 
+// EXPERIMENT: ruborist_context swaps DiskManifestStore for NoopStore on
+// this branch — type stays defined to keep the import path valid, but
+// fields go unread.
+#[allow(dead_code)]
 pub struct DiskManifestStore {
     cache_dir: PathBuf,
 }
 
+#[allow(dead_code)]
 impl DiskManifestStore {
     pub fn new(cache_dir: PathBuf) -> Self {
         Self { cache_dir }
@@ -75,6 +80,7 @@ impl ManifestStore for DiskManifestStore {
 /// Serialize `value` and write to `path`. On `NotFound`, create the parent
 /// directory and retry once — saves the mkdir syscall on every warm-cache
 /// rewrite. Errors are logged at debug; disk cache is opportunistic.
+#[allow(dead_code)]
 async fn write_json<T: Serialize>(path: &Path, value: &T) {
     let bytes = match serde_json::to_vec(value) {
         Ok(b) => b,
