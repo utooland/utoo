@@ -39,6 +39,7 @@ use crate::resolver::builder::{
     gather_preload_deps,
 };
 use crate::resolver::fast_preload::fast_preload;
+use crate::resolver::mb_resolve::mb_fetch;
 use crate::resolver::preload::PreloadConfig;
 use crate::resolver::runtime::install_runtime_from_map;
 use crate::resolver::workspace::WorkspaceDiscovery;
@@ -312,6 +313,166 @@ where
     for (key, manifest) in registry.cache().export_version_manifests() {
         // `parse_package_spec` rather than `split_once('@')` so scoped names
         // (`@babel/core@^7.0.0`) parse to (`@babel/core`, `^7.0.0`).
+        let (name, spec) = parse_package_spec(&key);
+        let version = manifest.version.clone();
+        let pkg_cache = project_cache.cache.entry(name.to_string()).or_default();
+        pkg_cache.specs.insert(spec.to_string(), version.clone());
+        pkg_cache.manifests.insert(version, (*manifest).clone());
+    }
+    let cache_export_us = t_cache_export_start.elapsed().as_micros() as u64;
+
+    tracing::info!(
+        "p1-breakdown serialize_us={} cache_export_us={}",
+        serialize_us,
+        cache_export_us,
+    );
+
+    Ok(BuildDepsOutput {
+        lock: PackageLock::new(&pkg.name, &pkg.version, packages),
+        project_cache,
+    })
+}
+
+/// Experimental parallel-track entry point: structurally identical to
+/// [`build_deps`] but routes the manifest-fetch phase through
+/// [`crate::resolver::mb_resolve::mb_fetch`] instead of
+/// [`crate::resolver::fast_preload::fast_preload`].
+///
+/// Intended for A/B benchmarking: install + lockfile-only callers can
+/// opt in via `UTOO_RESOLVE=mb` (wired in `pm::helper::ruborist_context`).
+/// All other behavior — workspace discovery, runtime injection, BFS,
+/// graph→lock serialization, project cache export — is the same as
+/// `build_deps`. The `EventReceiver` still receives BFS events; it
+/// does NOT receive `PreloadFetching` / `PreloadProgress` events
+/// because mb_fetch is silent (matches `manifest-bench`'s zero-event
+/// loop).
+///
+/// **Install-path note:** `pipeline_deps_options` callers that need
+/// `PackageResolved` events to drive the download/clone pipeline
+/// won't pipeline under this path — mb_fetch finishes all fetches
+/// before BFS starts. Use only for `utoo deps`-style workloads, or
+/// accept that install becomes phase-sequential.
+pub async fn build_deps_mb<G, R>(options: BuildDepsOptions<G, R>) -> Result<BuildDepsOutput>
+where
+    G: Glob + Clone,
+    R: EventReceiver,
+{
+    let BuildDepsOptions {
+        cwd,
+        registry_url,
+        cache_dir,
+        manifest_store,
+        warm_project_cache,
+        concurrency,
+        peer_deps,
+        glob,
+        receiver,
+        supports_semver,
+        catalogs,
+        skip_preload: _,
+    } = options;
+
+    // Steps 1-6: structurally identical to `build_deps` — read
+    // package.json, inject runtime deps, build initial graph, add
+    // root edges, discover and add workspaces.
+    let discovery = WorkspaceDiscovery::new(glob.clone());
+    let root_path = discovery.find_root_path(&cwd).await?;
+    let pkg_path = root_path.join("package.json");
+    let mut pkg: PackageJson = super::fs::read_json(&pkg_path)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to read/parse package.json: {}", e))?;
+
+    if let Some(engines) = &pkg.engines {
+        let runtime_deps = install_runtime_from_map(engines);
+        if !runtime_deps.is_empty() {
+            for (name, version) in runtime_deps {
+                pkg.optional_dependencies
+                    .get_or_insert_with(HashMap::new)
+                    .entry(name)
+                    .or_insert(version);
+            }
+        }
+    }
+
+    let mut graph = DependencyGraph::from_package_json(root_path.clone(), pkg.clone());
+    let root_index = graph.root_index;
+    let edge_ctx = EdgeContext::new(peer_deps, DevDeps::Include).with_catalogs(&catalogs);
+    add_edges_from(&mut graph, root_index, &pkg, &edge_ctx);
+
+    let workspaces = discovery.find_workspaces_from_pkg(&root_path, &pkg).await?;
+    for workspace in workspaces {
+        let ws_pkg = workspace.package_json;
+        let workspace_node =
+            PackageNode::workspace_from_package_json(workspace.path.clone(), ws_pkg.clone());
+        let workspace_index = graph.add_node(workspace_node);
+        let link_node = PackageNode::link_from_package_json(workspace.path.clone(), ws_pkg.clone());
+        let link_index = graph.add_node(link_node);
+        graph.add_physical_edge(root_index, workspace_index);
+        graph.add_physical_edge(root_index, link_index);
+        let dep_edge_id = graph.add_dependency_edge(
+            root_index,
+            workspace.name.clone(),
+            &ws_pkg.version,
+            EdgeType::Prod,
+        );
+        graph.mark_dependency_resolved(dep_edge_id, workspace_index);
+        add_edges_from(&mut graph, workspace_index, &ws_pkg, &edge_ctx);
+    }
+
+    // Step 7-8: cache + registry, same as `build_deps`. Warm project
+    // cache is honored.
+    let package_cache = Arc::new(PackageCache::default());
+    let (cache_count, _) = prepopulate_warm_cache(&package_cache, warm_project_cache.as_ref());
+
+    let mut builder = UnifiedRegistry::builder()
+        .registry(&registry_url)
+        .cache(package_cache)
+        .store(Arc::clone(&manifest_store));
+    if let Some(semver) = supports_semver {
+        builder = builder.supports_semver(semver);
+    }
+    let registry = builder.build();
+
+    // Run mb_fetch instead of fast_preload — pre-warms cache by
+    // walking transitive deps via flat FuturesUnordered. Skipped if
+    // the warm project cache already covers the workload.
+    if cache_count == 0 {
+        let initial_deps = gather_preload_deps(&graph, peer_deps);
+        let preload_config = PreloadConfig {
+            peer_deps,
+            concurrency,
+        };
+        mb_fetch(
+            initial_deps,
+            registry.registry_url(),
+            registry.cache(),
+            &preload_config,
+        )
+        .await;
+    }
+
+    // BFS phase reads the now-warm cache. `skip_preload=true` skips
+    // the receiver-driven preload — mb_fetch already ran.
+    let mut config = BuildDepsConfig::default()
+        .with_peer_deps(peer_deps)
+        .with_concurrency(concurrency)
+        .with_skip_preload(true)
+        .with_catalogs(catalogs);
+    if let Some(dir) = cache_dir {
+        config = config.with_cache_dir(dir);
+    }
+
+    build_deps_with_config(&mut graph, &registry, config, &receiver)
+        .await
+        .map_err(|e| anyhow::Error::new(e).context("Dependency resolution failed"))?;
+
+    let t_serialize_start = std::time::Instant::now();
+    let (packages, _total) = graph.serialize_to_packages(&root_path);
+    let serialize_us = t_serialize_start.elapsed().as_micros() as u64;
+
+    let t_cache_export_start = std::time::Instant::now();
+    let mut project_cache = ProjectCacheData::default();
+    for (key, manifest) in registry.cache().export_version_manifests() {
         let (name, spec) = parse_package_spec(&key);
         let version = manifest.version.clone();
         let pkg_cache = project_cache.cache.entry(name.to_string()).or_default();

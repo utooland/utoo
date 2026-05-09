@@ -22,6 +22,13 @@ UTOO_NEXT_CACHE="${UTOO_NEXT_CACHE:-/tmp/utoo-next-bench-cache}"
 BUN_CACHE="${BUN_CACHE:-/tmp/bun-bench-cache}"
 export BUN_INSTALL_CACHE_DIR="$BUN_CACHE"
 
+# Route the current `utoo` binary's resolve phase through the
+# experimental `mb_resolve` flat-fetch path. Other PMs ignore this
+# env var (utoo-next is built from origin/next which doesn't have
+# the flag; utoo-npm/bun ignore unrecognized env vars). Comment out
+# to A/B against the default `fast_preload` path.
+export UTOO_RESOLVE=mb
+
 # Drop optional baselines from the PM list when their binary is not wired
 # up — UTOO_NPM_BIN is set by CI's "Install utoo@npm" step, UTOO_NEXT_BIN
 # by the optional "Build next branch utoo" step. Local runs without them

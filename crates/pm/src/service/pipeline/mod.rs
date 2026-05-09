@@ -41,7 +41,22 @@ pub async fn resolve_with_pipeline(root_path: &std::path::Path) -> anyhow::Resul
     let (options, channels) = Context::pipeline_deps_options(root_path.to_path_buf()).await;
     let handles = worker::start_workers(channels, root_path.to_path_buf());
 
-    let output = utoo_ruborist::service::build_deps(options).await?;
+    // `UTOO_RESOLVE=mb` reroutes install through the experimental
+    // mb-style fetch path. Pipeline workers are still started, but
+    // because mb_fetch doesn't emit `PackageResolved` events, the
+    // pipeline only fires once BFS completes (graph_to_package_lock
+    // emits `PackagePlaced` from BFS). Install becomes
+    // phase-sequential — fetch all manifests, then download +
+    // clone. Useful for A/B benchmarking the resolve phase in
+    // isolation; the pipelining advantage of the default path is
+    // lost.
+    let use_mb = std::env::var("UTOO_RESOLVE").as_deref() == Ok("mb");
+    let output = if use_mb {
+        tracing::debug!("UTOO_RESOLVE=mb: routing install resolve to build_deps_mb");
+        utoo_ruborist::service::build_deps_mb(options).await?
+    } else {
+        utoo_ruborist::service::build_deps(options).await?
+    };
 
     save_package_lock(root_path, &output.lock).await?;
     spawn_save_project_cache(root_path.to_path_buf(), output.project_cache);

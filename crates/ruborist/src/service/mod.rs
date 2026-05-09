@@ -52,7 +52,7 @@ mod manifest;
 mod registry;
 mod store;
 
-pub use api::{BuildDepsOptions, BuildDepsOutput, build_deps};
+pub use api::{BuildDepsOptions, BuildDepsOutput, build_deps, build_deps_mb};
 pub use cache::{
     CacheStats, MemoryCache, PackageCache, ProjectCacheData, ProjectPackageCache, Versions,
     VersionsInfo,

@@ -8,6 +8,7 @@ pub mod fast_preload;
 pub mod git;
 #[cfg(feature = "http-tarball")]
 pub mod http;
+pub mod mb_resolve;
 pub mod preload;
 pub mod registry;
 pub mod runtime;
