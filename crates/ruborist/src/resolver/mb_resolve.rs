@@ -495,24 +495,73 @@ type EdgeTargets = HashMap<(String, String), Vec<(NodeIndex, EdgeIndex)>>;
 /// pending + edge_targets, dedup by spec via `seen_specs`.
 /// Non-registry edges (workspace / git / http / file) are
 /// deliberately left for the follow-up BFS sweep.
+/// Process this node's unresolved registry edges:
+/// * If the (name, spec) is already cached (a sibling subtree
+///   resolved it earlier), call `process_dependency_with_resolved`
+///   inline now. Newly-created child nodes recurse via this same
+///   function so their edges are also enqueued/processed.
+/// * Otherwise, register the (parent, edge_id) under `edge_targets`
+///   so the eventual fetch result drains it; push to `pending` if
+///   this `(name, spec)` hasn't been seen.
+///
+/// Without the inline-process path, `(name, spec)` keys added
+/// AFTER their fetch already landed would never be drained — they'd
+/// sit in `edge_targets` and the corresponding parent edges would
+/// stay unresolved. CI run c02bb152 showed ~580 such orphans.
 fn enqueue_node_edges(
-    graph: &DependencyGraph,
+    graph: &mut DependencyGraph,
     node_idx: NodeIndex,
     pending: &mut VecDeque<Dep>,
     seen_specs: &mut HashSet<(String, String)>,
     edge_targets: &mut EdgeTargets,
+    cache: &MemoryCache,
+    build_config: &BuildDepsConfig,
 ) {
-    for edge in collect_unresolved_edges(graph, node_idx) {
-        if !edge.spec.is_registry_spec() {
-            continue;
-        }
-        let key = (edge.name.clone(), edge.spec.clone());
-        edge_targets
-            .entry(key.clone())
-            .or_default()
-            .push((node_idx, edge.edge_id));
-        if seen_specs.insert(key.clone()) {
-            pending.push_back(key);
+    let mut work_stack: Vec<NodeIndex> = vec![node_idx];
+    while let Some(idx) = work_stack.pop() {
+        let edges = collect_unresolved_edges(graph, idx);
+        for edge in edges {
+            if !edge.spec.is_registry_spec() {
+                continue;
+            }
+            let key = (edge.name.clone(), edge.spec.clone());
+
+            // Cache-hit fast path: process immediately, no
+            // edge_targets stash. Reuses the same process logic the
+            // main loop uses on fetch result.
+            if let Some(core_arc) = cache.get_version_manifest(&edge.name, &edge.spec) {
+                let resolved = ResolvedPackage {
+                    name: edge.name.clone(),
+                    version: core_arc.version.clone(),
+                    manifest: core_arc,
+                };
+                let edge_info = crate::resolver::edges::DependencyEdgeInfo {
+                    edge_id: edge.edge_id,
+                    name: edge.name.clone(),
+                    spec: edge.spec.clone(),
+                    edge_type: edge.edge_type,
+                };
+                if let ProcessResult::Created(new_idx) = process_dependency_with_resolved(
+                    graph,
+                    idx,
+                    &edge_info,
+                    &resolved,
+                    build_config,
+                ) {
+                    work_stack.push(new_idx);
+                }
+                // Whether Created or Reused, this edge is now
+                // resolved — don't queue.
+                continue;
+            }
+
+            edge_targets
+                .entry(key.clone())
+                .or_default()
+                .push((idx, edge.edge_id));
+            if seen_specs.insert(key.clone()) {
+                pending.push_back(key);
+            }
         }
     }
 }
@@ -570,22 +619,27 @@ pub async fn mb_fetch_with_graph(
         &mut pending,
         &mut seen_specs,
         &mut edge_targets,
+        cache,
+        build_config,
     );
     // Workspace nodes' direct edges. Workspace deps may be
     // workspace: (resolved at graph init) or registry; registry
     // ones land in pending.
-    for node_idx in graph.graph.node_indices() {
-        if let Some(node) = graph.get_node(node_idx)
-            && node.is_workspace()
-        {
-            enqueue_node_edges(
-                graph,
-                node_idx,
-                &mut pending,
-                &mut seen_specs,
-                &mut edge_targets,
-            );
-        }
+    let workspace_indices: Vec<NodeIndex> = graph
+        .graph
+        .node_indices()
+        .filter(|&i| graph.get_node(i).is_some_and(|n| n.is_workspace()))
+        .collect();
+    for node_idx in workspace_indices {
+        enqueue_node_edges(
+            graph,
+            node_idx,
+            &mut pending,
+            &mut seen_specs,
+            &mut edge_targets,
+            cache,
+            build_config,
+        );
     }
 
     // Sibling-fetch dedup carries over from `mb_fetch`.
@@ -722,13 +776,18 @@ pub async fn mb_fetch_with_graph(
                     );
                     if let ProcessResult::Created(new_idx) = result {
                         // The new node's transitive edges become new
-                        // pending entries. Same dedup as the seed.
+                        // pending entries. enqueue handles cache-hit
+                        // inline-process so we don't orphan
+                        // edge_targets entries after their fetch
+                        // already landed.
                         enqueue_node_edges(
                             graph,
                             new_idx,
                             &mut pending,
                             &mut seen_specs,
                             &mut edge_targets,
+                            cache,
+                            build_config,
                         );
                     }
                 }
