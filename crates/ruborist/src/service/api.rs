@@ -285,8 +285,8 @@ where
             peer_deps,
             concurrency,
         };
-        mb_fetch_with_graph(
-            &mut graph,
+        let (returned_graph, _stats) = mb_fetch_with_graph(
+            graph,
             registry.registry_url(),
             registry.cache(),
             &preload_config,
@@ -294,6 +294,7 @@ where
         )
         .await
         .map_err(|e| e.context("mb_fetch_with_graph failed"))?;
+        graph = returned_graph;
     }
 
     // Preserve the typed error via `Error::new` + `.context(...)` so CLI

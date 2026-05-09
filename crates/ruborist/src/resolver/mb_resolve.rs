@@ -39,6 +39,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use parking_lot::Mutex;
 use petgraph::graph::{EdgeIndex, NodeIndex};
 use serde::Deserialize;
+use tokio::sync::mpsc;
 
 use crate::model::graph::DependencyGraph;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
@@ -584,13 +585,21 @@ fn enqueue_node_edges(
 /// caller must run a follow-up BFS sweep to handle them. For
 /// `utoo deps` on registry-only workloads (the common case), the
 /// sweep is a no-op.
+/// One fetched/settled event, sent from main loop to graph worker.
+/// The future already performed cache writes inline (cheap DashMap
+/// inserts). Graph worker uses `cache.get_version_manifest` to
+/// retrieve the manifest for `process_dependency_with_resolved`.
+struct FetchEventMsg {
+    name: String,
+}
+
 pub async fn mb_fetch_with_graph(
-    graph: &mut DependencyGraph,
+    mut graph: DependencyGraph,
     registry_url: &str,
     cache: &MemoryCache,
     preload_config: &PreloadConfig,
     build_config: &BuildDepsConfig,
-) -> Result<MbFetchStats> {
+) -> Result<(DependencyGraph, MbFetchStats)> {
     let mut stats = MbFetchStats::default();
     let total_start = Instant::now();
 
@@ -598,7 +607,7 @@ pub async fn mb_fetch_with_graph(
         Ok(c) => c,
         Err(e) => {
             tracing::warn!("mb_resolve client build failed: {e}");
-            return Ok(stats);
+            return Ok((graph, stats));
         }
     };
     let registry = Arc::new(registry_url.trim_end_matches('/').to_string());
@@ -606,15 +615,15 @@ pub async fn mb_fetch_with_graph(
     let peer_deps = preload_config.peer_deps;
 
     // Initial seed: walk root + workspace nodes for unresolved
-    // registry edges. (Workspace nodes were created during graph
-    // initialization in `service::api::build_deps`.)
+    // registry edges. Done inline before spawning workers (one-time
+    // cost, not on the hot path).
     let mut seen_specs: HashSet<(String, String)> = HashSet::new();
     let mut pending: VecDeque<Dep> = VecDeque::new();
     let mut edge_targets: EdgeTargets = HashMap::new();
 
     let root_index = graph.root_index;
     enqueue_node_edges(
-        graph,
+        &mut graph,
         root_index,
         &mut pending,
         &mut seen_specs,
@@ -622,9 +631,6 @@ pub async fn mb_fetch_with_graph(
         cache,
         build_config,
     );
-    // Workspace nodes' direct edges. Workspace deps may be
-    // workspace: (resolved at graph init) or registry; registry
-    // ones land in pending.
     let workspace_indices: Vec<NodeIndex> = graph
         .graph
         .node_indices()
@@ -632,7 +638,7 @@ pub async fn mb_fetch_with_graph(
         .collect();
     for node_idx in workspace_indices {
         enqueue_node_edges(
-            graph,
+            &mut graph,
             node_idx,
             &mut pending,
             &mut seen_specs,
@@ -642,24 +648,48 @@ pub async fn mb_fetch_with_graph(
         );
     }
 
-    // Sibling-fetch dedup carries over from `mb_fetch`.
+    // Channels: main → graph (fetched events) + graph → main (new
+    // pending specs). Bounded at 2 * cap so neither side stalls
+    // waiting for the other under bursty wave behavior.
+    let (fetch_tx, fetch_rx) = mpsc::channel::<FetchEventMsg>(cap * 2 + 16);
+    let (specs_tx, mut specs_rx) = mpsc::channel::<Vec<Dep>>(cap * 2 + 16);
+
+    // Spawn graph worker: owns the graph + edge_targets + seen_specs.
+    // This task is CPU-only (no awaits except channel IO), so on a
+    // multi-thread tokio runtime it gets its own worker thread,
+    // freeing the main task's worker to drive socket polling. That
+    // separation is the whole point of this rewrite — the inline
+    // version observed zwin events 71 vs mb's 49, evidence of main
+    // loop CPU starving the runtime's IO polling.
+    let cache_clone = cache.clone();
+    let build_config_owned = build_config.clone();
+    let graph_handle = tokio::spawn(graph_worker(
+        graph,
+        edge_targets,
+        seen_specs,
+        cache_clone,
+        build_config_owned,
+        fetch_rx,
+        specs_tx,
+    ));
+
+    // Sibling-fetch dedup stays in main loop (drives FuturesUnordered).
     let body_cache: Arc<Mutex<HashMap<String, Arc<[u8]>>>> = Arc::new(Mutex::new(HashMap::new()));
     let mut in_flight_names: HashSet<String> = HashSet::new();
     let mut deferred_by_name: HashMap<String, Vec<String>> = HashMap::new();
-
     let mut futs: FuturesUnordered<Fut> = FuturesUnordered::new();
 
-    // Per-fetch-future timing accumulators (same as `mb_fetch`).
     let mut sum_wall_us: u64 = 0;
     let mut sum_net_us: u64 = 0;
     let mut fetch_count: u64 = 0;
     let mut settle_count: u64 = 0;
-    // Sum of CPU spent in inline graph mutations across all fetched
-    // events. Reported alongside the fetch totals so we can attribute
-    // the mb_fetch wall split between IO and CPU.
-    let mut sum_graph_us: u64 = 0;
+    // Number of FetchEventMsg sent to graph worker that haven't yet
+    // had a corresponding Vec<Dep> response. Drives termination:
+    // when futs empty + in_flight == 0, no more work pipelined.
+    let mut in_flight_graph: usize = 0;
 
     loop {
+        // Refill futs from pending up to cap.
         while futs.len() < cap {
             let Some((name, spec)) = pending.pop_front() else {
                 break;
@@ -683,122 +713,73 @@ pub async fn mb_fetch_with_graph(
             ));
         }
 
-        if futs.is_empty() {
+        // Termination: nothing in flight at fetch level AND graph
+        // worker has nothing pending.
+        if futs.is_empty() && in_flight_graph == 0 {
             break;
         }
 
-        let Some(out) = futs.next().await else { break };
-
-        sum_wall_us += out.wall_us;
-        sum_net_us += out.net_us;
-        if out.fetched {
-            fetch_count += 1;
-        } else {
-            settle_count += 1;
-        }
-        if out.fetched {
-            stats.success += 1;
-        }
-
-        // Drain sibling specs deferred while the fetch was in flight.
-        if out.fetched
-            && let Some(siblings) = deferred_by_name.remove(&out.name)
-            && let Some(raw) = body_cache.lock().get(&out.name).cloned()
-        {
-            for sibling_spec in siblings {
-                futs.push(spawn_settle(
-                    out.name.clone(),
-                    sibling_spec,
-                    Arc::clone(&raw),
-                    cache.clone(),
-                    peer_deps,
-                ));
+        // Drive both halves: prefer draining specs back from graph
+        // worker (unblocks new fetch dispatch) over starting another
+        // fetch landing.
+        tokio::select! {
+            biased;
+            maybe_specs = specs_rx.recv() => {
+                match maybe_specs {
+                    Some(specs) => {
+                        pending.extend(specs);
+                        in_flight_graph -= 1;
+                    }
+                    None => {
+                        // Graph worker exited unexpectedly. Bail.
+                        break;
+                    }
+                }
             }
-        }
+            maybe_result = futs.next(), if !futs.is_empty() => {
+                if let Some(out) = maybe_result {
+                    sum_wall_us += out.wall_us;
+                    sum_net_us += out.net_us;
+                    if out.fetched {
+                        fetch_count += 1;
+                        stats.success += 1;
+                    } else {
+                        settle_count += 1;
+                    }
 
-        // Graph mutations: process every parent edge waiting on
-        // `(name, spec)` for each transitive spec the fetch resolved
-        // (the fetch itself touched only the primary spec; sibling
-        // settles touch their own specs). Each settle path covers
-        // its own bucket via the `out.transitives` path below.
-        //
-        // The fetched/settled (name, spec) pair has already been
-        // written to the cache by the future. Look up the version
-        // manifest to get the ResolvedPackage handed to
-        // process_dependency_with_resolved.
-        let graph_start = Instant::now();
-        let process_key_specs: Vec<(String, String)> = out
-            .transitives
-            .iter()
-            .map(|(n, s)| (n.clone(), s.clone()))
-            .collect();
-        // The primary fetched/settled spec itself: resolve it now.
-        let primary_keys: Vec<(String, String)> = edge_targets
-            .keys()
-            .filter(|(n, _)| n == &out.name)
-            .cloned()
-            .collect();
-        for (k_name, k_spec) in primary_keys {
-            // Pull resolved manifest from cache for this spec.
-            let Some(core_arc) = cache.get_version_manifest(&k_name, &k_spec) else {
-                continue;
-            };
-            let resolved = ResolvedPackage {
-                name: k_name.clone(),
-                version: core_arc.version.clone(),
-                manifest: core_arc,
-            };
-            let waiting = edge_targets.remove(&(k_name.clone(), k_spec.clone()));
-            if let Some(targets) = waiting {
-                for (parent_idx, edge_id) in targets {
-                    let edge_info = crate::resolver::edges::DependencyEdgeInfo {
-                        edge_id,
-                        name: k_name.clone(),
-                        spec: k_spec.clone(),
-                        // edge_type carried separately on the graph; we
-                        // re-look-up the actual edge here for
-                        // correctness.
-                        edge_type: graph
-                            .graph
-                            .edge_weight(edge_id)
-                            .and_then(|e| match e {
-                                crate::model::graph::GraphEdge::Dependency(d) => Some(d.edge_type),
-                                _ => None,
-                            })
-                            .unwrap_or(crate::model::node::EdgeType::Prod),
-                    };
-                    let result = process_dependency_with_resolved(
-                        graph,
-                        parent_idx,
-                        &edge_info,
-                        &resolved,
-                        build_config,
-                    );
-                    if let ProcessResult::Created(new_idx) = result {
-                        // The new node's transitive edges become new
-                        // pending entries. enqueue handles cache-hit
-                        // inline-process so we don't orphan
-                        // edge_targets entries after their fetch
-                        // already landed.
-                        enqueue_node_edges(
-                            graph,
-                            new_idx,
-                            &mut pending,
-                            &mut seen_specs,
-                            &mut edge_targets,
-                            cache,
-                            build_config,
-                        );
+                    // Drain sibling specs deferred while the fetch
+                    // was in flight. Sibling settles also produce a
+                    // FetchEventMsg downstream.
+                    if out.fetched
+                        && let Some(siblings) = deferred_by_name.remove(&out.name)
+                        && let Some(raw) = body_cache.lock().get(&out.name).cloned()
+                    {
+                        for sibling_spec in siblings {
+                            futs.push(spawn_settle(
+                                out.name.clone(),
+                                sibling_spec,
+                                Arc::clone(&raw),
+                                cache.clone(),
+                                peer_deps,
+                            ));
+                        }
+                    }
+
+                    // Send to graph worker. `send().await` only
+                    // blocks if channel is full (cap * 2 buffer);
+                    // under steady state shouldn't happen.
+                    if fetch_tx.send(FetchEventMsg { name: out.name }).await.is_ok() {
+                        in_flight_graph += 1;
                     }
                 }
             }
         }
-        sum_graph_us += graph_start.elapsed().as_micros() as u64;
-        // Suppress an unused-vars warning when the transitive list is
-        // identical to the keys we just pulled from edge_targets —
-        // we keep collecting it for tracing parity with `mb_fetch`.
-        let _ = process_key_specs;
     }
+
+    // Signal graph worker to exit, then await its finalization to
+    // recover the graph + stats.
+    drop(fetch_tx);
+    let (graph, graph_stats) = graph_handle.await.context("graph worker join")??;
 
     let total_wall_ms = total_start.elapsed().as_millis();
     let total_wall_us = (total_wall_ms as u64).saturating_mul(1000);
@@ -813,21 +794,186 @@ pub async fn mb_fetch_with_graph(
         0.0
     };
     let avg_net_us = sum_net_us.checked_div(fetch_count).unwrap_or(0);
-    let unresolved_remaining = edge_targets.len();
     tracing::info!(
-        "p1-breakdown mb_fetch_with_graph wall={}ms ok={} fetch={} settle={} sum_wall={}ms sum_net={}ms sum_graph={}ms avg_net={}us eff_par_full={:.1} eff_par_net={:.1} unresolved_targets={}",
+        "p1-breakdown mb_fetch_with_graph wall={}ms ok={} fetch={} settle={} sum_wall={}ms sum_net={}ms sum_graph={}ms avg_net={}us eff_par_full={:.1} eff_par_net={:.1} unresolved_targets={} graph_processed={} graph_new_specs={}",
         total_wall_ms,
         stats.success,
         fetch_count,
         settle_count,
         sum_wall_us / 1000,
         sum_net_us / 1000,
-        sum_graph_us / 1000,
+        graph_stats.sum_graph_us / 1000,
         avg_net_us,
         eff_par_full,
         eff_par_net,
-        unresolved_remaining,
+        graph_stats.unresolved_remaining,
+        graph_stats.processed,
+        graph_stats.new_specs_emitted,
     );
 
-    Ok(stats)
+    Ok((graph, stats))
+}
+
+#[derive(Debug, Default)]
+struct GraphWorkerStats {
+    sum_graph_us: u64,
+    processed: usize,
+    new_specs_emitted: usize,
+    unresolved_remaining: usize,
+}
+
+/// CPU-only worker task that owns the graph + edge_targets +
+/// seen_specs. Receives fetch events from main loop, mutates graph
+/// via `process_dependency_with_resolved`, sends new pending specs
+/// back. Designed to monopolize a tokio runtime worker thread so
+/// the main loop's worker can drive socket polling without
+/// competing for CPU.
+async fn graph_worker(
+    mut graph: DependencyGraph,
+    mut edge_targets: EdgeTargets,
+    mut seen_specs: HashSet<(String, String)>,
+    cache: MemoryCache,
+    build_config: BuildDepsConfig,
+    mut fetch_rx: mpsc::Receiver<FetchEventMsg>,
+    specs_tx: mpsc::Sender<Vec<Dep>>,
+) -> Result<(DependencyGraph, GraphWorkerStats)> {
+    let mut stats = GraphWorkerStats::default();
+
+    while let Some(msg) = fetch_rx.recv().await {
+        let graph_start = Instant::now();
+        stats.processed += 1;
+
+        // Drain edge_targets for every spec keyed under this name.
+        // The fetch future already wrote both `(name, primary_spec)`
+        // and `(name, resolved_version)` cache slots, so any
+        // edge_targets entry for this name should hit cache.
+        let primary_keys: Vec<(String, String)> = edge_targets
+            .keys()
+            .filter(|(n, _)| n == &msg.name)
+            .cloned()
+            .collect();
+
+        let mut new_specs: Vec<Dep> = Vec::new();
+        for (k_name, k_spec) in primary_keys {
+            let Some(core_arc) = cache.get_version_manifest(&k_name, &k_spec) else {
+                continue;
+            };
+            let resolved = ResolvedPackage {
+                name: k_name.clone(),
+                version: core_arc.version.clone(),
+                manifest: core_arc,
+            };
+            let Some(targets) = edge_targets.remove(&(k_name.clone(), k_spec.clone())) else {
+                continue;
+            };
+            for (parent_idx, edge_id) in targets {
+                let edge_info = crate::resolver::edges::DependencyEdgeInfo {
+                    edge_id,
+                    name: k_name.clone(),
+                    spec: k_spec.clone(),
+                    edge_type: graph
+                        .graph
+                        .edge_weight(edge_id)
+                        .and_then(|e| match e {
+                            crate::model::graph::GraphEdge::Dependency(d) => Some(d.edge_type),
+                            _ => None,
+                        })
+                        .unwrap_or(crate::model::node::EdgeType::Prod),
+                };
+                let result = process_dependency_with_resolved(
+                    &mut graph,
+                    parent_idx,
+                    &edge_info,
+                    &resolved,
+                    &build_config,
+                );
+                if let ProcessResult::Created(new_idx) = result {
+                    // Walk the new node's edges. enqueue handles
+                    // recursive cache-hit drain so already-cached
+                    // specs get processed inline (still on this
+                    // worker thread — graph mutations can't run on
+                    // multiple threads with `&mut graph`).
+                    enqueue_node_edges_into(
+                        &mut graph,
+                        new_idx,
+                        &mut new_specs,
+                        &mut seen_specs,
+                        &mut edge_targets,
+                        &cache,
+                        &build_config,
+                    );
+                }
+            }
+        }
+
+        stats.sum_graph_us += graph_start.elapsed().as_micros() as u64;
+        stats.new_specs_emitted += new_specs.len();
+
+        // Always reply (even if empty) so main loop's `in_flight`
+        // counter decrements for each FetchEventMsg sent.
+        if specs_tx.send(new_specs).await.is_err() {
+            // Main loop dropped the receiver — bail.
+            break;
+        }
+    }
+
+    stats.unresolved_remaining = edge_targets.len();
+    Ok((graph, stats))
+}
+
+/// Same as `enqueue_node_edges` but pushes new specs into the
+/// caller-provided `out` Vec instead of a VecDeque. Used by the
+/// graph worker to batch "new specs from this fetch" before sending
+/// them back to the main loop in one channel message.
+fn enqueue_node_edges_into(
+    graph: &mut DependencyGraph,
+    node_idx: NodeIndex,
+    out: &mut Vec<Dep>,
+    seen_specs: &mut HashSet<(String, String)>,
+    edge_targets: &mut EdgeTargets,
+    cache: &MemoryCache,
+    build_config: &BuildDepsConfig,
+) {
+    let mut work_stack: Vec<NodeIndex> = vec![node_idx];
+    while let Some(idx) = work_stack.pop() {
+        let edges = collect_unresolved_edges(graph, idx);
+        for edge in edges {
+            if !edge.spec.is_registry_spec() {
+                continue;
+            }
+            let key = (edge.name.clone(), edge.spec.clone());
+
+            if let Some(core_arc) = cache.get_version_manifest(&edge.name, &edge.spec) {
+                let resolved = ResolvedPackage {
+                    name: edge.name.clone(),
+                    version: core_arc.version.clone(),
+                    manifest: core_arc,
+                };
+                let edge_info = crate::resolver::edges::DependencyEdgeInfo {
+                    edge_id: edge.edge_id,
+                    name: edge.name.clone(),
+                    spec: edge.spec.clone(),
+                    edge_type: edge.edge_type,
+                };
+                if let ProcessResult::Created(new_idx) = process_dependency_with_resolved(
+                    graph,
+                    idx,
+                    &edge_info,
+                    &resolved,
+                    build_config,
+                ) {
+                    work_stack.push(new_idx);
+                }
+                continue;
+            }
+
+            edge_targets
+                .entry(key.clone())
+                .or_default()
+                .push((idx, edge.edge_id));
+            if seen_specs.insert(key.clone()) {
+                out.push(key);
+            }
+        }
+    }
 }
