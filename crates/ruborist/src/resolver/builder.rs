@@ -825,7 +825,18 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
     let start = tokio::time::Instant::now();
     let mut current_level = vec![graph.root_index];
 
+    // Per-stage instrumentation. The full BFS wall is `bfs_elapsed`
+    // below; these split it into work types so we can see whether
+    // graph traversal, edge resolution, or post-resolve event
+    // dispatch dominates.
+    let mut total_collect_us: u64 = 0;
+    let mut total_resolve_us: u64 = 0;
+    let mut total_event_us: u64 = 0;
+    let mut total_edges: u64 = 0;
+    let mut total_levels: u64 = 0;
+
     while !current_level.is_empty() {
+        total_levels += 1;
         receiver.on_event(BuildEvent::LevelStart {
             node_count: current_level.len(),
         });
@@ -846,7 +857,10 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
             }
 
             // Process unresolved dependencies
+            let collect_start = std::time::Instant::now();
             let unresolved = collect_unresolved_edges(graph, node_index);
+            total_collect_us += collect_start.elapsed().as_micros() as u64;
+            total_edges += unresolved.len() as u64;
             receiver.on_event(BuildEvent::DependencyCount {
                 count: unresolved.len(),
             });
@@ -855,6 +869,7 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
                 receiver.on_event(BuildEvent::Resolving {
                     name: &edge_info.name,
                 });
+                let resolve_start = std::time::Instant::now();
                 let result = process_dependency(graph, registry, node_index, &edge_info, config)
                     .await
                     .map_err(|inner| {
@@ -865,7 +880,10 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
                             source: Box::new(inner),
                         }
                     });
-                match result? {
+                total_resolve_us += resolve_start.elapsed().as_micros() as u64;
+                let event_start = std::time::Instant::now();
+                let processed = result?;
+                match processed {
                     ProcessResult::Created(idx) => {
                         // Extract node info for events
                         if let Some(node) = graph.get_node(idx) {
@@ -905,6 +923,7 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
                         });
                     }
                 }
+                total_event_us += event_start.elapsed().as_micros() as u64;
             }
         }
 
@@ -917,8 +936,13 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
     let bfs_elapsed = start.elapsed();
     tracing::debug!("Build phase: {:?}", bfs_elapsed);
     tracing::info!(
-        "p1-breakdown bfs_wall={}ms | {}",
+        "p1-breakdown bfs_wall={}ms levels={} edges={} collect={}us resolve={}us event={}us | {}",
         bfs_elapsed.as_millis(),
+        total_levels,
+        total_edges,
+        total_collect_us,
+        total_resolve_us,
+        total_event_us,
         crate::util::FETCH_TIMINGS.snapshot().summary_line(),
     );
     Ok(())

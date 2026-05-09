@@ -34,7 +34,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use futures::stream::{FuturesUnordered, StreamExt};
 use parking_lot::Mutex;
 use serde::Deserialize;
@@ -53,15 +53,48 @@ pub struct MbFetchStats {
 }
 
 /// Build a fresh `reqwest::Client` matching `preload-bench` /
-/// `manifest-bench` exactly, except for the TLS provider — those
-/// benches use aws-lc-rs but we keep ruborist's existing default
-/// rustls (ring on Linux). If A/B data shows TLS is the remaining
-/// gap, we'll add the aws-lc-rs deps separately.
+/// `manifest-bench` exactly: aws-lc-rs TLS provider via
+/// `use_preconfigured_tls`, `pool_max_idle_per_host(256)`, no
+/// proxy, `http1_only`. The reqwest crate's
+/// `rustls-tls-native-roots` feature on Linux still bundles ring
+/// for `service::http`'s global client, but this client overrides
+/// at construction time — both providers coexist in the binary.
+#[cfg(not(target_arch = "wasm32"))]
 fn build_mb_client() -> Result<reqwest::Client> {
+    // Idempotent: first install_default wins; subsequent calls are
+    // no-ops. Sets the process-wide default for any rustls consumer
+    // that builds a `ClientConfig` without explicit provider.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+    let mut roots = rustls::RootCertStore::empty();
+    let native = rustls_native_certs::load_native_certs();
+    for cert in native.certs {
+        // Tolerate individual bad roots — same defensive load pattern
+        // as `service::http::build_rustls_config`.
+        let _ = roots.add(cert);
+    }
+
+    let tls_config = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+        rustls::crypto::aws_lc_rs::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .map_err(|e| anyhow!("rustls protocol versions: {e}"))?
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+
     reqwest::Client::builder()
+        .use_preconfigured_tls(tls_config)
         .no_proxy()
         .pool_max_idle_per_host(256)
         .http1_only()
+        .build()
+        .context("build reqwest client for mb_resolve")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn build_mb_client() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .no_proxy()
         .build()
         .context("build reqwest client for mb_resolve")
 }
@@ -93,6 +126,14 @@ struct FetchOutcome {
     name: String,
     transitives: Vec<Dep>,
     fetched: bool,
+    /// Per-future wall (network + body recv + spawn_blocking parse).
+    /// Summed across all futures, divided by mb_fetch total wall =
+    /// eff_parallel — the same number `manifest-bench` reports as
+    /// `avg_conc`. Used to spot wave-shape underutilization.
+    wall_us: u64,
+    /// Per-future network-only wall (request.send + body.bytes).
+    /// `wall_us - net_us` is the spawn_blocking parse contribution.
+    net_us: u64,
 }
 
 type Fut = Pin<Box<dyn std::future::Future<Output = FetchOutcome> + Send>>;
@@ -162,6 +203,7 @@ fn spawn_fetch(
     peer_deps: PeerDeps,
 ) -> Fut {
     Box::pin(async move {
+        let fut_start = Instant::now();
         let url = format!("{}/{}", registry_url, name);
         let resp = match client
             .get(&url)
@@ -171,23 +213,30 @@ fn spawn_fetch(
         {
             Ok(r) if r.status().is_success() => r,
             _ => {
+                let wall_us = fut_start.elapsed().as_micros() as u64;
                 return FetchOutcome {
                     name,
                     transitives: Vec::new(),
                     fetched: true,
+                    wall_us,
+                    net_us: wall_us,
                 };
             }
         };
         let raw_bytes = match resp.bytes().await {
             Ok(b) => b,
             Err(_) => {
+                let wall_us = fut_start.elapsed().as_micros() as u64;
                 return FetchOutcome {
                     name,
                     transitives: Vec::new(),
                     fetched: true,
+                    wall_us,
+                    net_us: wall_us,
                 };
             }
         };
+        let net_us = fut_start.elapsed().as_micros() as u64;
         let raw_arc: Arc<[u8]> = Arc::from(raw_bytes.as_ref());
         // Stash in body_cache early so concurrent sibling specs
         // arriving slightly after see it on their pending pop.
@@ -211,10 +260,13 @@ fn spawn_fetch(
             None => Vec::new(),
         };
 
+        let wall_us = fut_start.elapsed().as_micros() as u64;
         FetchOutcome {
             name,
             transitives,
             fetched: true,
+            wall_us,
+            net_us,
         }
     })
 }
@@ -229,6 +281,7 @@ fn spawn_settle(
     peer_deps: PeerDeps,
 ) -> Fut {
     Box::pin(async move {
+        let fut_start = Instant::now();
         let spec_for_parse = spec.clone();
         let peer = peer_deps;
         let parsed = tokio::task::spawn_blocking(move || {
@@ -251,10 +304,14 @@ fn spawn_settle(
             None => Vec::new(),
         };
 
+        let wall_us = fut_start.elapsed().as_micros() as u64;
         FetchOutcome {
             name,
             transitives,
             fetched: false,
+            wall_us,
+            // Settle-only futures have no network component.
+            net_us: 0,
         }
     })
 }
@@ -269,6 +326,15 @@ pub async fn mb_fetch(
     config: &PreloadConfig,
 ) -> MbFetchStats {
     let mut stats = MbFetchStats::default();
+    // Per-future wall + net sums for eff_parallel computation.
+    // sum_wall_us / total_wall_ms / 1000 = eff_parallel for the
+    // whole future-body span (network + parse + cache writes).
+    // sum_net_us / total_wall_ms / 1000 = network-only eff_parallel,
+    // directly comparable to manifest-bench's avg_conc.
+    let mut sum_wall_us: u64 = 0;
+    let mut sum_net_us: u64 = 0;
+    let mut fetch_count: u64 = 0;
+    let mut settle_count: u64 = 0;
     let total_start = Instant::now();
 
     let client = match build_mb_client() {
@@ -333,6 +399,14 @@ pub async fn mb_fetch(
 
         let Some(out) = futs.next().await else { break };
 
+        sum_wall_us += out.wall_us;
+        sum_net_us += out.net_us;
+        if out.fetched {
+            fetch_count += 1;
+        } else {
+            settle_count += 1;
+        }
+
         if out.transitives.is_empty() && out.fetched {
             // Empty result from a fetch is ambiguous (no transitives
             // OR a fetch/parse failure). Track conservatively as
@@ -368,12 +442,35 @@ pub async fn mb_fetch(
         }
     }
 
-    let total_wall = total_start.elapsed().as_millis();
+    let total_wall_ms = total_start.elapsed().as_millis();
+    let total_wall_us = (total_wall_ms as u64).saturating_mul(1000);
+    let eff_par_full = if total_wall_us > 0 {
+        sum_wall_us as f64 / total_wall_us as f64
+    } else {
+        0.0
+    };
+    let eff_par_net = if total_wall_us > 0 {
+        sum_net_us as f64 / total_wall_us as f64
+    } else {
+        0.0
+    };
+    let avg_wall_us = sum_wall_us
+        .checked_div(fetch_count + settle_count)
+        .unwrap_or(0);
+    let avg_net_us = sum_net_us.checked_div(fetch_count).unwrap_or(0);
     tracing::info!(
-        "p1-breakdown mb_fetch wall={}ms ok={} fail={}",
-        total_wall,
+        "p1-breakdown mb_fetch wall={}ms ok={} fail={} fetch={} settle={} sum_wall={}ms sum_net={}ms avg_wall={}us avg_net={}us eff_par_full={:.1} eff_par_net={:.1}",
+        total_wall_ms,
         stats.success,
         stats.fail,
+        fetch_count,
+        settle_count,
+        sum_wall_us / 1000,
+        sum_net_us / 1000,
+        avg_wall_us,
+        avg_net_us,
+        eff_par_full,
+        eff_par_net,
     );
 
     stats
