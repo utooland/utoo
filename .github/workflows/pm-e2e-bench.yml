@@ -1000,6 +1000,29 @@ jobs:
           mv /tmp/utoo-next-dist/utoo /tmp/utoo-next
           echo "Baseline utoo (next) version: $(/tmp/utoo-next --version)"
           echo "UTOO_NEXT_BIN=/tmp/utoo-next" >> $GITHUB_ENV
+      # manifest-bench + preload-bench binaries for pcap-comparing
+      # utoo's TCP-level behaviour against pure-HTTP and
+      # transitive-walk baselines.
+      - name: Download manifest-bench binary
+        uses: actions/download-artifact@v4
+        with:
+          name: manifest-bench-linux-x64
+          path: /tmp/manifest-bench-dist
+      - name: Install manifest-bench
+        run: |
+          chmod +x /tmp/manifest-bench-dist/manifest-bench
+          mv /tmp/manifest-bench-dist/manifest-bench /tmp/manifest-bench
+          echo "MANIFEST_BENCH_BIN=/tmp/manifest-bench" >> $GITHUB_ENV
+      - name: Download preload-bench binary
+        uses: actions/download-artifact@v4
+        with:
+          name: preload-bench-linux-x64
+          path: /tmp/preload-bench-dist
+      - name: Install preload-bench
+        run: |
+          chmod +x /tmp/preload-bench-dist/preload-bench
+          mv /tmp/preload-bench-dist/preload-bench /tmp/preload-bench
+          echo "PRELOAD_BENCH_BIN=/tmp/preload-bench" >> $GITHUB_ENV
       - name: Capture pcap
         env:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}

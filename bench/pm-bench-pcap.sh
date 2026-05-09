@@ -139,6 +139,40 @@ fi
 
 run_pm_phases bun "$(command -v bun)" "$BUN_CACHE"
 
+# --- standalone bench captures (resolve-only baselines) ----------------
+# After all PM captures, regenerate a fresh package-lock.json via utoo
+# deps (untimed) so manifest-bench has a stable name list to consume.
+# Then pcap-capture each standalone bench at conc=96 — the same conc
+# utoo's mb_fetch_with_graph ran with — so the TCP signals are
+# directly comparable between the integrated path and the pure-HTTP
+# / pure-streaming-walk ceilings.
+cd "$PROJECT_DIR"
+rm -f package-lock.json bun.lock
+rm -rf "$UTOO_CACHE" node_modules
+echo "=== regenerating package-lock.json for standalone benches ==="
+utoo deps --registry="$REGISTRY" --cache-dir="$UTOO_CACHE" \
+  >/dev/null 2>&1 || echo "lock regen failed"
+
+if [ -f package-lock.json ] && [ -n "${MANIFEST_BENCH_BIN:-}" ] && [ -x "$MANIFEST_BENCH_BIN" ]; then
+  capture_one "manifest-bench-c96" \
+    "$MANIFEST_BENCH_BIN" \
+    --lockfile package-lock.json \
+    --registry "$REGISTRY" \
+    --concurrency 96 --reps 1 --http1-only
+else
+  echo "skip manifest-bench: bin missing or no lockfile"
+fi
+
+if [ -n "${PRELOAD_BENCH_BIN:-}" ] && [ -x "$PRELOAD_BENCH_BIN" ]; then
+  capture_one "preload-bench-c96" \
+    "$PRELOAD_BENCH_BIN" \
+    --package-json package.json \
+    --registry "$REGISTRY" \
+    --concurrency 96 --reps 1
+else
+  echo "skip preload-bench: bin missing"
+fi
+
 # --- post-capture analysis: tshark metrics per pcap ---------------------
 # Extract TCP-level stress signals to validate the "install greediness
 # starves download" hypothesis. All of these are pre-TLS so we don't need
