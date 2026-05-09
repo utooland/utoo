@@ -48,6 +48,7 @@ use crate::resolver::builder::{
     BuildDepsConfig, ProcessResult, collect_unresolved_edges, process_dependency_with_resolved,
 };
 use crate::resolver::preload::{Dep, PreloadConfig};
+use crate::resolver::semver::normalize_spec;
 use crate::resolver::version::resolve_target_version;
 use crate::service::MemoryCache;
 use crate::spec::SpecStr;
@@ -131,7 +132,16 @@ fn extract_transitive(manifest: &CoreVersionManifest, peer_deps: PeerDeps) -> Ve
 /// happened inside the future. Only `fetched=true` futures populate
 /// `body_cache` and trigger sibling drain.
 struct FetchOutcome {
+    /// The dep key (alias name as it appears in the parent's deps map).
+    /// Used by `graph_worker` to filter `edge_targets`, which is keyed
+    /// on the alias.
     name: String,
+    /// The real package name after npm-alias normalization (e.g.
+    /// `name="ms"` + `spec="npm:raw-body@2.1.3"` → `real_name="raw-body"`).
+    /// Used by the main loop for `body_cache` / `deferred_by_name` /
+    /// `in_flight_names` keying, so two distinct aliases pointing at
+    /// the same package share dedup.
+    real_name: String,
     /// The spec that triggered this fetch / settle. Used by the
     /// main loop to look up the cached `CoreVersionManifest` for
     /// `PackageResolved` event emission (the future already wrote
@@ -218,7 +228,13 @@ fn spawn_fetch(
     Box::pin(async move {
         let fut_start = Instant::now();
         let primary_spec = spec.clone();
-        let url = format!("{}/{}", registry_url, name);
+        // Normalize npm-alias / workspace specs so the registry hit
+        // and the manifest parse run against the *real* package, not
+        // the alias name. Cache writes still go under the original
+        // (alias_name, alias_spec) key so `graph_worker` can locate
+        // them via `edge_targets`.
+        let (real_name, real_spec) = normalize_spec(&name, &spec);
+        let url = format!("{}/{}", registry_url, real_name);
         let resp = match client
             .get(&url)
             .header("accept", "application/vnd.npm.install-v1+json")
@@ -230,6 +246,7 @@ fn spawn_fetch(
                 let wall_us = fut_start.elapsed().as_micros() as u64;
                 return FetchOutcome {
                     name,
+                    real_name,
                     primary_spec,
                     transitives: Vec::new(),
                     fetched: true,
@@ -244,6 +261,7 @@ fn spawn_fetch(
                 let wall_us = fut_start.elapsed().as_micros() as u64;
                 return FetchOutcome {
                     name,
+                    real_name,
                     primary_spec,
                     transitives: Vec::new(),
                     fetched: true,
@@ -254,23 +272,31 @@ fn spawn_fetch(
         };
         let net_us = fut_start.elapsed().as_micros() as u64;
         let raw_arc: Arc<[u8]> = Arc::from(raw_bytes.as_ref());
-        // Stash in body_cache early so concurrent sibling specs
-        // arriving slightly after see it on their pending pop.
-        body_cache.lock().insert(name.clone(), Arc::clone(&raw_arc));
+        // Body cache is keyed by real_name so two aliases pointing at
+        // the same registry package share the body and only one fetch
+        // fires. Sibling drains know to use real_name (see
+        // `deferred_by_name` keying in the main loop).
+        body_cache
+            .lock()
+            .insert(real_name.clone(), Arc::clone(&raw_arc));
 
-        let spec_for_parse = spec.clone();
+        let real_spec_for_parse = real_spec.clone();
         let peer = peer_deps;
-        let parsed =
-            tokio::task::spawn_blocking(move || parse_combined(raw_arc, &spec_for_parse, peer))
-                .await
-                .ok()
-                .flatten();
+        let parsed = tokio::task::spawn_blocking(move || {
+            parse_combined(raw_arc, &real_spec_for_parse, peer)
+        })
+        .await
+        .ok()
+        .flatten();
 
         let transitives = match parsed {
             Some((full_arc, resolved, core_arc, transitives)) => {
-                cache.set_full_manifest(name.clone(), Arc::clone(&full_arc));
+                cache.set_full_manifest(real_name.clone(), Arc::clone(&full_arc));
+                // Under the alias key so `graph_worker` finds it.
                 cache.set_version_manifest(name.clone(), spec, Arc::clone(&core_arc));
-                cache.set_version_manifest(name.clone(), resolved, core_arc);
+                // Under the real key so subsequent direct deps on
+                // the same package@version dedupe correctly.
+                cache.set_version_manifest(real_name.clone(), resolved, core_arc);
                 transitives
             }
             None => Vec::new(),
@@ -279,6 +305,7 @@ fn spawn_fetch(
         let wall_us = fut_start.elapsed().as_micros() as u64;
         FetchOutcome {
             name,
+            real_name,
             primary_spec,
             transitives,
             fetched: true,
@@ -300,10 +327,11 @@ fn spawn_settle(
     Box::pin(async move {
         let fut_start = Instant::now();
         let primary_spec = spec.clone();
-        let spec_for_parse = spec.clone();
+        let (real_name, real_spec) = normalize_spec(&name, &spec);
+        let real_spec_for_parse = real_spec.clone();
         let peer = peer_deps;
         let parsed = tokio::task::spawn_blocking(move || {
-            parse_combined(Arc::clone(&raw), &spec_for_parse, peer)
+            parse_combined(Arc::clone(&raw), &real_spec_for_parse, peer)
         })
         .await
         .ok()
@@ -312,11 +340,12 @@ fn spawn_settle(
         let transitives = match parsed {
             Some((full_arc, resolved, core_arc, transitives)) => {
                 // Don't overwrite full_manifest — the original fetcher
-                // already set it. Only populate the version-manifest
-                // slots so BFS hits the (name, spec) early-return.
-                cache.set_full_manifest(name.clone(), full_arc);
+                // already set it under real_name. Populate version
+                // slots so BFS hits the (alias_name, alias_spec)
+                // early-return.
+                cache.set_full_manifest(real_name.clone(), full_arc);
                 cache.set_version_manifest(name.clone(), spec, Arc::clone(&core_arc));
-                cache.set_version_manifest(name.clone(), resolved, core_arc);
+                cache.set_version_manifest(real_name.clone(), resolved, core_arc);
                 transitives
             }
             None => Vec::new(),
@@ -325,6 +354,7 @@ fn spawn_settle(
         let wall_us = fut_start.elapsed().as_micros() as u64;
         FetchOutcome {
             name,
+            real_name,
             primary_spec,
             transitives,
             fetched: false,
@@ -376,12 +406,15 @@ pub async fn mb_fetch(
         }
     }
 
-    // Sibling-fetch dedup: when two specs for the same name are both
-    // in flight, only the first fires a fetch; the second arrives at
-    // the cached body and goes through `spawn_settle` instead.
+    // Sibling-fetch dedup: when two specs for the same package are
+    // both in flight, only the first fires a fetch; the second
+    // arrives at the cached body and goes through `spawn_settle`.
+    // Keyed by *real* package name (post npm-alias normalization)
+    // so two distinct aliases pointing at the same registry package
+    // share dedup.
     let body_cache: Arc<Mutex<HashMap<String, Arc<[u8]>>>> = Arc::new(Mutex::new(HashMap::new()));
-    let mut in_flight_names: HashSet<String> = HashSet::new();
-    let mut deferred_by_name: HashMap<String, Vec<String>> = HashMap::new();
+    let mut in_flight_real_names: HashSet<String> = HashSet::new();
+    let mut deferred_by_real_name: HashMap<String, Vec<(String, String)>> = HashMap::new();
 
     let mut futs: FuturesUnordered<Fut> = FuturesUnordered::new();
 
@@ -391,14 +424,18 @@ pub async fn mb_fetch(
             let Some((name, spec)) = pending.pop_front() else {
                 break;
             };
+            let (real_name, _) = normalize_spec(&name, &spec);
             // Sibling fast path: body already cached.
-            if let Some(raw) = body_cache.lock().get(&name).cloned() {
+            if let Some(raw) = body_cache.lock().get(&real_name).cloned() {
                 futs.push(spawn_settle(name, spec, raw, cache.clone(), peer_deps));
                 continue;
             }
-            // Defer if a fetch for this name is already in flight.
-            if !in_flight_names.insert(name.clone()) {
-                deferred_by_name.entry(name).or_default().push(spec);
+            // Defer if a fetch for this real package is already in flight.
+            if !in_flight_real_names.insert(real_name.clone()) {
+                deferred_by_real_name
+                    .entry(real_name)
+                    .or_default()
+                    .push((name, spec));
                 continue;
             }
             futs.push(spawn_fetch(
@@ -439,12 +476,12 @@ pub async fn mb_fetch(
 
         // Drain sibling specs deferred while the fetch was in flight.
         if out.fetched
-            && let Some(siblings) = deferred_by_name.remove(&out.name)
-            && let Some(raw) = body_cache.lock().get(&out.name).cloned()
+            && let Some(siblings) = deferred_by_real_name.remove(&out.real_name)
+            && let Some(raw) = body_cache.lock().get(&out.real_name).cloned()
         {
-            for sibling_spec in siblings {
+            for (sibling_name, sibling_spec) in siblings {
                 futs.push(spawn_settle(
-                    out.name.clone(),
+                    sibling_name,
                     sibling_spec,
                     Arc::clone(&raw),
                     cache.clone(),
@@ -692,9 +729,13 @@ where
     ));
 
     // Sibling-fetch dedup stays in main loop (drives FuturesUnordered).
+    // Keyed by *real* package name (post npm-alias normalization)
+    // so two distinct aliases pointing at the same registry package
+    // share dedup; siblings store their alias `(name, spec)` so the
+    // drain knows how to spawn `spawn_settle` with the right cache key.
     let body_cache: Arc<Mutex<HashMap<String, Arc<[u8]>>>> = Arc::new(Mutex::new(HashMap::new()));
-    let mut in_flight_names: HashSet<String> = HashSet::new();
-    let mut deferred_by_name: HashMap<String, Vec<String>> = HashMap::new();
+    let mut in_flight_real_names: HashSet<String> = HashSet::new();
+    let mut deferred_by_real_name: HashMap<String, Vec<(String, String)>> = HashMap::new();
     let mut futs: FuturesUnordered<Fut> = FuturesUnordered::new();
 
     let mut sum_wall_us: u64 = 0;
@@ -712,12 +753,16 @@ where
             let Some((name, spec)) = pending.pop_front() else {
                 break;
             };
-            if let Some(raw) = body_cache.lock().get(&name).cloned() {
+            let (real_name, _) = normalize_spec(&name, &spec);
+            if let Some(raw) = body_cache.lock().get(&real_name).cloned() {
                 futs.push(spawn_settle(name, spec, raw, cache.clone(), peer_deps));
                 continue;
             }
-            if !in_flight_names.insert(name.clone()) {
-                deferred_by_name.entry(name).or_default().push(spec);
+            if !in_flight_real_names.insert(real_name.clone()) {
+                deferred_by_real_name
+                    .entry(real_name)
+                    .or_default()
+                    .push((name, spec));
                 continue;
             }
             futs.push(spawn_fetch(
@@ -784,12 +829,12 @@ where
                     // was in flight. Sibling settles also produce a
                     // FetchEventMsg downstream.
                     if out.fetched
-                        && let Some(siblings) = deferred_by_name.remove(&out.name)
-                        && let Some(raw) = body_cache.lock().get(&out.name).cloned()
+                        && let Some(siblings) = deferred_by_real_name.remove(&out.real_name)
+                        && let Some(raw) = body_cache.lock().get(&out.real_name).cloned()
                     {
-                        for sibling_spec in siblings {
+                        for (sibling_name, sibling_spec) in siblings {
                             futs.push(spawn_settle(
-                                out.name.clone(),
+                                sibling_name,
                                 sibling_spec,
                                 Arc::clone(&raw),
                                 cache.clone(),
