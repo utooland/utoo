@@ -41,12 +41,23 @@ where
 {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        tokio::task::spawn_blocking(move || {
-            simd_json::serde::from_slice::<T>(&mut bytes)
-                .map_err(|e| anyhow!("JSON parse error: {e}"))
-        })
-        .await
-        .map_err(|e| anyhow!("spawn_blocking parse panicked: {e}"))?
+        // A/B-reverted to rayon::spawn after PR #2923 bench showed
+        // spawn_blocking (intended to avoid rayon's small-pool queue
+        // wait) routes parse contention through tokio's blocking
+        // pool, which the install path's download / clone workers
+        // also share. With 4647 deps × parse on the legacy
+        // preload+BFS install path, the contention compounded enough
+        // to add ~2s vs utoo-next on p3_cold_install. rayon::spawn
+        // sends parse to its own dedicated pool — small (num_cpus)
+        // but isolated from install IO workers.
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        rayon::spawn(move || {
+            let result = simd_json::serde::from_slice::<T>(&mut bytes)
+                .map_err(|e| anyhow!("JSON parse error: {e}"));
+            let _ = tx.send(result);
+        });
+        rx.await
+            .map_err(|e| anyhow!("rayon parse channel closed: {e}"))?
     }
     #[cfg(target_arch = "wasm32")]
     {
