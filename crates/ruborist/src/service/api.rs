@@ -37,7 +37,11 @@ use crate::model::util::parse_package_spec;
 use crate::resolver::builder::{
     BuildDepsConfig, DevDeps, EdgeContext, PeerDeps, add_edges_from, build_deps_with_config,
 };
+// mb_fetch_with_graph requires multi-thread tokio + Send-safe types
+// (uses tokio::task::spawn_blocking). Not available on wasm32.
+#[cfg(not(target_arch = "wasm32"))]
 use crate::resolver::mb_resolve::mb_fetch_with_graph;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::resolver::preload::PreloadConfig;
 use crate::resolver::runtime::install_runtime_from_map;
 use crate::resolver::workspace::WorkspaceDiscovery;
