@@ -70,13 +70,14 @@ impl Context {
     /// Create BuildDepsOptions with PipelineReceiver for concurrent download/clone.
     /// Returns (options, channels) where channels are used to start pipeline workers.
     ///
-    /// Sets `skip_preload=true` so ruborist's `service::api::build_deps`
-    /// routes through `mb_fetch_with_graph` (folded preload + graph
-    /// build). The pipeline still receives `PackageResolved` /
-    /// `PackagePlaced` events — emitted from inside
-    /// `mb_fetch_with_graph` (main loop and graph worker
-    /// respectively) — so download/clone start as early as the
-    /// classic preload+BFS path.
+    /// Routes through the **legacy preload + BFS** path (`skip_preload=false`).
+    /// The optimal-hypothesis A/B sweep showed channel `mb_fetch_with_graph`'s
+    /// PackageResolved emit fires at full fetch rate, flooding the download
+    /// pipeline with concurrent tarball requests that fight extract workers
+    /// for blocking-pool slots — net p3_cold_install regression of ~0.7s vs
+    /// the legacy install path. Lockfile-only callers (`utoo deps`) still
+    /// get the channel `mb_fetch_with_graph` win because they go through
+    /// `Self::build_deps` which sets `skip_preload=true` independently.
     pub async fn pipeline_deps_options(
         cwd: PathBuf,
     ) -> (
@@ -84,8 +85,7 @@ impl Context {
         PipelineChannels,
     ) {
         let (receiver, channels) = PipelineReceiver::new(ProgressReceiver);
-        let mut options = Self::deps_options(cwd, receiver).await;
-        options.skip_preload = true;
+        let options = Self::deps_options(cwd, receiver).await;
         (options, channels)
     }
 
