@@ -344,9 +344,22 @@ enum Commands {
 fn main() {
     crate::util::sysconf::init();
 
+    // Floor at 4 worker threads even on 1-2 core CI runners. The
+    // install path multiplexes 4+ concurrent task families on the
+    // tokio multi-thread runtime: mb_fetch_with_graph main loop +
+    // graph_worker (`tokio::spawn`, CPU-heavy) + pipeline download
+    // workers + pipeline clone workers. With `num_cpus = 2` (default
+    // on GHA ubuntu-latest) and 2 worker threads, graph_worker can
+    // monopolize a worker for tens of ms at a time, starving the
+    // main loop's socket polling and producing TCP zwin events that
+    // stretch p0/p1 tail wall by 3-5s per affected run. Floor of 4
+    // gives the runtime headroom to keep the resolve hot path on
+    // its own worker even when the install pipeline saturates the
+    // others.
     let worker_threads = std::thread::available_parallelism()
         .map(|n| n.get())
-        .unwrap_or(4);
+        .unwrap_or(4)
+        .max(4);
 
     let result = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
