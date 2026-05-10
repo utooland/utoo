@@ -344,9 +344,19 @@ enum Commands {
 fn main() {
     crate::util::sysconf::init();
 
+    // Floor at 4 worker threads even on 1-2 core CI runners. The
+    // install hot path multiplexes resolve / download / clone /
+    // extract task families on the tokio multi-thread runtime; with
+    // num_cpus = 2 (default on GHA ubuntu-latest) and 2 worker
+    // threads, CPU-heavy tasks can monopolize a worker for tens of
+    // ms at a time, starving the resolve loop's socket polling and
+    // producing TCP zwin events that stretch p0 / p1 tail wall by
+    // 3-5s on the affected run. Floor of 4 gives the runtime
+    // headroom on CI; no-op on 4+ core machines.
     let worker_threads = std::thread::available_parallelism()
         .map(|n| n.get())
-        .unwrap_or(4);
+        .unwrap_or(4)
+        .max(4);
 
     let result = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
