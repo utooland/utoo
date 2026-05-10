@@ -6,46 +6,23 @@ pub fn init() {
         reset_sigpipe();
     }
 
-    init_rayon_pool();
-}
-
-/// Configure the global rayon pool size.
-///
-/// Rayon defaults to `num_cpus` workers, which is 2 on GHA ubuntu-latest.
-/// Two workers are enough for the install-path's `par_chunks(64)` extract
-/// (mostly disk-bound), but the resolve-path's manifest parse + extract
-/// pipeline runs *many* short CPU bursts (parse: ~5ms, get_core_version:
-/// ~1-3ms) dispatched from up to 64 concurrent fetches.
-///
-/// With pool=2, each fetch waits up to ~25ms in queue per dispatch —
-/// fetch-breakdown instrumentation showed avg_parse jumping 5ms (CPU)
-/// → 30ms (CPU + queue) just from the first dispatch. The second hop
-/// (`extract_core_version_off_runtime`) has the same problem. `tokio
-/// spawn_blocking` avoids the queue but its per-dispatch overhead
-/// (round 3 measurement) was higher than rayon's queue wait at 64×.
-///
-/// Sizing the pool above the host CPU count for these short, blocking
-/// JSON-shape operations gives the queue a chance to drain even when
-/// 64 fetches dispatch concurrently. The work itself is bounded — at
-/// most 2 are doing real CPU at once on a 2-core box; the extra pool
-/// slots just hold pending tasks until a CPU is free, replacing FIFO
-/// queueing with parallel dispatch.
-///
-/// Cap of 8 keeps the pool reasonable on bigger machines (where
-/// `num_cpus` is already enough); the floor of 8 oversubscribes
-/// only on the constrained 2-core CI image.
-fn init_rayon_pool() {
-    let parallelism = std::thread::available_parallelism()
-        .map(std::num::NonZero::get)
-        .unwrap_or(2);
-    let threads = parallelism.max(8);
-
-    let builder = rayon::ThreadPoolBuilder::new().num_threads(threads);
-
+    // Windows default thread stack is 1MB, insufficient for libdeflater
+    // + tar + rayon work-stealing. On Unix the default 8MB stack is fine.
+    //
+    // Rayon thread count: prior iteration forced \`max(num_cpus, 8)\` on
+    // the theory that resolve-path manifest parse benefits from extra
+    // pool slots. Bench A/B showed that on 2-core GHA runners, 8 rayon
+    // workers oversubscribe disk during install-path tarball extract
+    // (par_chunks(64) × 8 = 512 in-flight writes) — utoo p3 degrades
+    // sharply under CI contention while utoo-next (default num_cpus)
+    // stays stable. Reverted to default to keep install-path stable;
+    // resolve-path uses tokio's blocking pool (512 default slots),
+    // which doesn't share rayon's contention.
     #[cfg(target_os = "windows")]
-    let builder = builder.stack_size(8 * 1024 * 1024);
-
-    builder.build_global().ok();
+    rayon::ThreadPoolBuilder::new()
+        .stack_size(8 * 1024 * 1024)
+        .build_global()
+        .ok();
 }
 
 /// Restore default SIGPIPE handling so broken pipes cause a clean exit
