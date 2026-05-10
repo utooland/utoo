@@ -234,22 +234,32 @@ where
         registry.supports_semver(),
     );
 
-    let skip_preload = cache_count > 0;
+    // Candidate D: always skip the standalone preload phase. BFS
+    // resolves on demand via UnifiedRegistry — `OnceMap` single-flight
+    // de-dupes concurrent fetches per (name, spec), so the wave-shape
+    // parallelism of preload is approximated by BFS's per-level
+    // concurrency. Saves the redundant per-fetch cost preload paid
+    // when the resolved BFS spec already overlaps the preload set.
+    //
+    // Trade-off: BFS's wave-shape is bounded by graph topology
+    // (parents must finish before children start). Preload had no
+    // such bound — it walked all root + workspace deps in one sweep.
+    // For wide-flat trees BFS catches up; for deep-narrow trees it
+    // may underutilize concurrency. Bench data on ant-design will
+    // tell us which side dominates.
     let mut config = BuildDepsConfig::default()
         .with_peer_deps(peer_deps)
         .with_concurrency(concurrency)
-        .with_skip_preload(skip_preload)
+        .with_skip_preload(true)
         .with_catalogs(catalogs);
     if let Some(dir) = cache_dir {
         config = config.with_cache_dir(dir);
     }
 
-    if skip_preload {
-        tracing::debug!(
-            "Skipping preload phase (project cache has {} entries)",
-            cache_count
-        );
-    }
+    tracing::debug!(
+        "Skipping preload phase (candidate D: BFS-only; project cache has {} entries)",
+        cache_count
+    );
 
     // Preserve the typed error via `Error::new` + `.context(...)` so CLI
     // renderers (e.g. pm's format_print) can downcast and pretty-print the

@@ -344,9 +344,15 @@ enum Commands {
 fn main() {
     crate::util::sysconf::init();
 
+    // Floor at 4 worker threads even on 1-2 core CI runners. Without
+    // this the install pipeline (resolve + download + clone) competes
+    // for too few worker threads on GHA ubuntu-latest (num_cpus = 2),
+    // producing tail-stretching outliers (eff_par_full collapse 73-77
+    // → 40 on outlier runs, p0/p1 wall +3-5s).
     let worker_threads = std::thread::available_parallelism()
         .map(|n| n.get())
-        .unwrap_or(4);
+        .unwrap_or(4)
+        .max(4);
 
     let result = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
