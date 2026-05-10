@@ -52,9 +52,17 @@ workspace = true
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
 
-# Native (non-macOS) targets: reqwest's default rustls + ring.
+# Native (non-macOS) targets: reqwest's default rustls + ring (used by
+# `service::http`'s global client). `mb_resolve` separately brings
+# `rustls` (with aws-lc-rs) and `rustls-native-certs` to build its
+# own client via `use_preconfigured_tls(aws_lc_rs)` — same TLS choice
+# as `manifest-bench` / `preload-bench`. The two providers coexist:
+# reqwest's internal client uses ring; `mb_resolve`'s explicit client
+# uses aws-lc-rs.
 [target.'cfg(not(any(target_arch = "wasm32", target_os = "macos")))'.dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
+reqwest             = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
+rustls              = { version = "0.23", default-features = false, features = ["aws-lc-rs", "logging", "std", "tls12"] }
+rustls-native-certs = "0.8"
 
 # Native-only dependencies (not compiled for WASM)
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

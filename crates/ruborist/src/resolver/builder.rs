@@ -18,13 +18,13 @@
 //! This separation allows for maximum parallelism during network I/O
 //! while keeping the graph building logic simple and deterministic.
 
-use petgraph::graph::NodeIndex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 #[cfg(feature = "http-tarball")]
 use anyhow::Context as _;
+use petgraph::graph::NodeIndex;
 
 use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
 use crate::model::manifest::NodeManifest;
@@ -32,7 +32,7 @@ use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
 use crate::resolver::preload::{PreloadConfig, preload_manifests};
 use crate::resolver::registry::{ResolveError, resolve_registry_dep};
-use crate::spec::{Catalogs, PackageSpec, Protocol};
+use crate::spec::{Catalogs, PackageSpec, Protocol, SpecStr};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
 use crate::traits::registry::{RegistryClient, ResolvedPackage};
 
@@ -180,10 +180,10 @@ struct NodeFlags {
 /// Only registry specs (e.g. `^4.17.0`) are collected. `catalog:` specs are
 /// resolved at edge creation time, so by the time this runs they are already
 /// concrete registry specs.
-fn gather_preload_deps(graph: &DependencyGraph, peer_deps: PeerDeps) -> Vec<(String, String)> {
-    use crate::spec::SpecStr;
-    use std::collections::HashSet;
-
+pub(crate) fn gather_preload_deps(
+    graph: &DependencyGraph,
+    peer_deps: PeerDeps,
+) -> Vec<(String, String)> {
     let mut deps = HashSet::new();
 
     let collect = |node_index: NodeIndex, deps: &mut HashSet<(String, String)>| {
@@ -651,6 +651,55 @@ pub async fn process_dependency<R: RegistryClient>(
     }
 }
 
+/// Sync variant of [`process_dependency`] for callers that already
+/// have a resolved registry manifest in hand (the
+/// `mb_fetch_with_graph` lockfile-only path populates one
+/// per fetch). Skips:
+///   * spec-routing (`Git` / `Http` / `Local` / `Workspace`) — only
+///     the `Registry` branch is handled. Non-registry edges are
+///     left unresolved for the caller to defer.
+///   * `resolve_registry_dep` (the resolved package is the
+///     parameter).
+///   * Override re-resolve (uses the original resolved package even
+///     if `graph.check_override` would re-route the spec). Override
+///     re-resolve requires another network round-trip; the
+///     lockfile-only fast path skips it intentionally — overridden
+///     specs that diverge from the original resolution will need a
+///     follow-up BFS sweep.
+///
+/// Returns the same [`ProcessResult`] shape as `process_dependency`
+/// so the caller can register newly-created nodes' edges with
+/// `edge_targets` for the streaming graph build.
+pub fn process_dependency_with_resolved(
+    graph: &mut DependencyGraph,
+    parent_idx: NodeIndex,
+    edge_info: &DependencyEdgeInfo,
+    resolved: &ResolvedPackage,
+    config: &BuildDepsConfig,
+) -> ProcessResult {
+    match graph.find_compatible_node(parent_idx, &edge_info.name, &edge_info.spec) {
+        FindResult::Reuse(existing_index) => {
+            graph.mark_dependency_resolved(edge_info.edge_id, existing_index);
+            update_node_type_from_edge(graph, parent_idx, existing_index, &edge_info.edge_type);
+            ProcessResult::Reused(existing_index)
+        }
+        FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
+            let new_node = create_package_node(&edge_info.name, resolved, conflict_parent, graph);
+            let new_index = graph.add_node(new_node);
+            graph.add_physical_edge(conflict_parent, new_index);
+            graph.mark_dependency_resolved(edge_info.edge_id, new_index);
+            update_node_type_from_edge(graph, parent_idx, new_index, &edge_info.edge_type);
+            add_edges_from(
+                graph,
+                new_index,
+                &*resolved.manifest,
+                &EdgeContext::new(config.peer_deps, DevDeps::Exclude),
+            );
+            ProcessResult::Created(new_index)
+        }
+    }
+}
+
 /// Build the complete dependency tree using BFS traversal.
 ///
 /// This is the main entry point for dependency resolution. It starts from
@@ -756,6 +805,7 @@ async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
         return;
     }
 
+    crate::util::FETCH_TIMINGS.reset();
     let start = tokio::time::Instant::now();
 
     let initial_deps = gather_preload_deps(graph, config.peer_deps);
@@ -794,10 +844,27 @@ async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
         failed: stats.failed_count,
     });
 
-    tracing::debug!("Preload phase: {:?}", start.elapsed());
+    let preload_elapsed = start.elapsed();
+    tracing::debug!("Preload phase: {:?}", preload_elapsed);
+    tracing::info!(
+        "p1-breakdown preload_wall={}ms | {}",
+        preload_elapsed.as_millis(),
+        crate::util::FETCH_TIMINGS.snapshot().summary_line(),
+    );
 }
 
 /// Run the BFS traversal phase to build the dependency tree.
+///
+/// Each level does a parallel prefetch of all unresolved registry specs
+/// before the sequential `process_dependency` walk.
+///
+/// When `skip_preload=true` (lockfile-only path), the caller is
+/// expected to have already populated `registry.cache()` via
+/// [`super::fast_preload::fast_preload`], so this BFS sees only
+/// cache hits. When `skip_preload=false` (install paths), the
+/// receiver-driven [`super::preload::preload_manifests`] runs ahead
+/// of this phase and feeds `BuildEvent::PackageResolved` to the
+/// pipeline.
 async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
     graph: &mut DependencyGraph,
     registry: &R,
@@ -805,13 +872,24 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
     receiver: &E,
 ) -> Result<(), ResolveError<R::Error>> {
     let start = tokio::time::Instant::now();
-
     let mut current_level = vec![graph.root_index];
 
+    // Per-stage instrumentation. The full BFS wall is `bfs_elapsed`
+    // below; these split it into work types so we can see whether
+    // graph traversal, edge resolution, or post-resolve event
+    // dispatch dominates.
+    let mut total_collect_us: u64 = 0;
+    let mut total_resolve_us: u64 = 0;
+    let mut total_event_us: u64 = 0;
+    let mut total_edges: u64 = 0;
+    let mut total_levels: u64 = 0;
+
     while !current_level.is_empty() {
+        total_levels += 1;
         receiver.on_event(BuildEvent::LevelStart {
             node_count: current_level.len(),
         });
+
         let mut next_level = Vec::new();
 
         for node_index in current_level {
@@ -828,7 +906,10 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
             }
 
             // Process unresolved dependencies
+            let collect_start = std::time::Instant::now();
             let unresolved = collect_unresolved_edges(graph, node_index);
+            total_collect_us += collect_start.elapsed().as_micros() as u64;
+            total_edges += unresolved.len() as u64;
             receiver.on_event(BuildEvent::DependencyCount {
                 count: unresolved.len(),
             });
@@ -837,6 +918,7 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
                 receiver.on_event(BuildEvent::Resolving {
                     name: &edge_info.name,
                 });
+                let resolve_start = std::time::Instant::now();
                 let result = process_dependency(graph, registry, node_index, &edge_info, config)
                     .await
                     .map_err(|inner| {
@@ -847,7 +929,10 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
                             source: Box::new(inner),
                         }
                     });
-                match result? {
+                total_resolve_us += resolve_start.elapsed().as_micros() as u64;
+                let event_start = std::time::Instant::now();
+                let processed = result?;
+                match processed {
                     ProcessResult::Created(idx) => {
                         // Extract node info for events
                         if let Some(node) = graph.get_node(idx) {
@@ -887,6 +972,7 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
                         });
                     }
                 }
+                total_event_us += event_start.elapsed().as_micros() as u64;
             }
         }
 
@@ -896,7 +982,18 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
         current_level = next_level;
     }
 
-    tracing::debug!("Build phase: {:?}", start.elapsed());
+    let bfs_elapsed = start.elapsed();
+    tracing::debug!("Build phase: {:?}", bfs_elapsed);
+    tracing::info!(
+        "p1-breakdown bfs_wall={}ms levels={} edges={} collect={}us resolve={}us event={}us | {}",
+        bfs_elapsed.as_millis(),
+        total_levels,
+        total_edges,
+        total_collect_us,
+        total_resolve_us,
+        total_event_us,
+        crate::util::FETCH_TIMINGS.snapshot().summary_line(),
+    );
     Ok(())
 }
 

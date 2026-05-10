@@ -99,8 +99,17 @@ where
     let mut in_flight = 0usize;
     let mut started = false;
 
+    // Main-loop overhead instrumentation. Atomic accumulators so we
+    // can attribute the gap between manifest-bench's pure-HTTP wall
+    // and ruborist's preload wall: how much of the gap is bookkeeping
+    // (dedup hash, extract_transitive_deps, queue push, events) vs
+    // actual fetch wait?
+    let mut total_dispatch_us: u64 = 0;
+    let mut total_result_us: u64 = 0;
+
     loop {
         // Fill up to concurrency limit
+        let dispatch_start = tokio::time::Instant::now();
         while in_flight < concurrency {
             let item = loop {
                 let Some((name, spec)) = pending.pop_front() else {
@@ -134,6 +143,7 @@ where
             });
             in_flight += 1;
         }
+        total_dispatch_us += dispatch_start.elapsed().as_micros() as u64;
 
         if in_flight == 0 {
             break;
@@ -142,6 +152,7 @@ where
         let Some((name, result, elapsed_ms)) = futures.next().await else {
             break;
         };
+        let result_start = tokio::time::Instant::now();
         in_flight -= 1;
 
         if stats.success_count == 0 && stats.failed_count == 0 {
@@ -174,7 +185,14 @@ where
                 tracing::debug!("Failed to preload {}: {}", name, e);
             }
         }
+        total_result_us += result_start.elapsed().as_micros() as u64;
     }
+
+    tracing::info!(
+        "p1-breakdown preload_loop_dispatch_us={} preload_loop_result_us={}",
+        total_dispatch_us,
+        total_result_us,
+    );
 
     stats.total_processed = processed.len();
 

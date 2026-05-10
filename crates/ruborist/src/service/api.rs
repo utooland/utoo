@@ -37,6 +37,8 @@ use crate::model::util::parse_package_spec;
 use crate::resolver::builder::{
     BuildDepsConfig, DevDeps, EdgeContext, PeerDeps, add_edges_from, build_deps_with_config,
 };
+use crate::resolver::mb_resolve::mb_fetch_with_graph;
+use crate::resolver::preload::PreloadConfig;
 use crate::resolver::runtime::install_runtime_from_map;
 use crate::resolver::workspace::WorkspaceDiscovery;
 use crate::spec::Catalogs;
@@ -70,6 +72,16 @@ pub struct BuildDepsOptions<G, R> {
     /// Catalog definitions for the `catalog:` dependency protocol.
     /// Key `""` = default catalog, other keys = named catalogs.
     pub catalogs: Catalogs,
+    /// When true, skip the up-front `run_preload_phase`. Set by callers
+    /// that don't consume the `BuildEvent::PackageResolved` pipeline
+    /// stream — e.g. `utoo deps` (lockfile-only). The BFS phase has its
+    /// own per-level prefetch that warms the manifest cache, so dropping
+    /// preload doesn't change correctness, only avoids the redundant
+    /// up-front fetch + dedicated wall.
+    /// Install paths (which feed `PipelineReceiver` to start tarball
+    /// downloads as resolves complete) leave this false so preload still
+    /// emits PackageResolved events to the pipeline.
+    pub skip_preload: bool,
 }
 
 impl<G, R> BuildDepsOptions<G, R> {
@@ -91,6 +103,7 @@ impl<G, R> BuildDepsOptions<G, R> {
             receiver,
             supports_semver: None,
             catalogs: HashMap::new(),
+            skip_preload: false,
         }
     }
 }
@@ -118,7 +131,7 @@ pub struct BuildDepsOutput {
 pub async fn build_deps<G, R>(options: BuildDepsOptions<G, R>) -> Result<BuildDepsOutput>
 where
     G: Glob + Clone,
-    R: EventReceiver,
+    R: EventReceiver + 'static,
 {
     let BuildDepsOptions {
         cwd,
@@ -132,6 +145,7 @@ where
         receiver,
         supports_semver,
         catalogs,
+        skip_preload: skip_preload_caller,
     } = options;
 
     // 1. Find root path (workspace root if applicable)
@@ -234,7 +248,13 @@ where
         registry.supports_semver(),
     );
 
-    let skip_preload = cache_count > 0;
+    // Skip preload when:
+    //   - the caller asked us to (e.g. `utoo deps`, no pipeline consumer
+    //     for PackageResolved events — BFS does its own per-level
+    //     prefetch, preload is redundant), OR
+    //   - the project's warm cache already has manifests covering most
+    //     of the workload (existing skip-on-warm behavior).
+    let skip_preload = skip_preload_caller || cache_count > 0;
     let mut config = BuildDepsConfig::default()
         .with_peer_deps(peer_deps)
         .with_concurrency(concurrency)
@@ -251,16 +271,56 @@ where
         );
     }
 
+    // Lockfile-only callers (`utoo deps`) route through
+    // `mb_fetch_with_graph` — a folded streaming preload + graph
+    // build. The fetch loop drives manifest IO; per-result inline
+    // `process_dependency_with_resolved` mutates the graph. Result:
+    // no separate BFS phase. The follow-up
+    // `build_deps_with_config` call still runs to handle any
+    // non-registry edges (workspace / git / http / file) the fold
+    // path skipped, but on registry-only workloads it's near no-op.
+    // Wrap receiver in Arc so the folded mb_fetch_with_graph can
+    // share it with its spawned graph_worker task. The follow-up
+    // BFS sweep also holds an &Arc<R> via deref.
+    let receiver = Arc::new(receiver);
+
+    let folded = skip_preload_caller && cache_count == 0;
+    if folded {
+        let preload_config = PreloadConfig {
+            peer_deps,
+            concurrency,
+        };
+        let (returned_graph, _stats) = mb_fetch_with_graph(
+            graph,
+            registry.registry_url(),
+            registry.cache(),
+            &preload_config,
+            &config,
+            Arc::clone(&receiver),
+        )
+        .await
+        .map_err(|e| e.context("mb_fetch_with_graph failed"))?;
+        graph = returned_graph;
+    }
+
     // Preserve the typed error via `Error::new` + `.context(...)` so CLI
     // renderers (e.g. pm's format_print) can downcast and pretty-print the
     // dependency chain carried by `ResolveError::WithChain`.
-    build_deps_with_config(&mut graph, &registry, config, &receiver)
+    //
+    // For the folded path this BFS sweeps remaining unresolved edges
+    // (non-registry: workspace / git / http / file). On
+    // registry-only workloads (the common case) the graph is fully
+    // built already, BFS walks nothing.
+    build_deps_with_config(&mut graph, &registry, config, &*receiver)
         .await
         .map_err(|e| anyhow::Error::new(e).context("Dependency resolution failed"))?;
 
+    let t_serialize_start = std::time::Instant::now();
     let (packages, _total) = graph.serialize_to_packages(&root_path);
+    let serialize_us = t_serialize_start.elapsed().as_micros() as u64;
 
     // Export project cache from memory cache for the host to persist.
+    let t_cache_export_start = std::time::Instant::now();
     let mut project_cache = ProjectCacheData::default();
     for (key, manifest) in registry.cache().export_version_manifests() {
         // `parse_package_spec` rather than `split_once('@')` so scoped names
@@ -271,6 +331,13 @@ where
         pkg_cache.specs.insert(spec.to_string(), version.clone());
         pkg_cache.manifests.insert(version, (*manifest).clone());
     }
+    let cache_export_us = t_cache_export_start.elapsed().as_micros() as u64;
+
+    tracing::info!(
+        "p1-breakdown serialize_us={} cache_export_us={}",
+        serialize_us,
+        cache_export_us,
+    );
 
     Ok(BuildDepsOutput {
         lock: PackageLock::new(&pkg.name, &pkg.version, packages),
@@ -324,6 +391,7 @@ mod tests {
             receiver: NoopReceiver,
             supports_semver: None,
             catalogs: HashMap::new(),
+            skip_preload: false,
         };
 
         assert_eq!(options.concurrency, 20);

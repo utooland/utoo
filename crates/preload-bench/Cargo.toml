@@ -1,0 +1,38 @@
+[package]
+name        = "preload-bench"
+version     = "0.0.0"
+edition     = "2024"
+license     = "MIT"
+publish     = false
+description = "Self-contained streaming-with-transitive-walk manifest preload bench. Reproduces manifest-bench's standalone fetch loop but discovers transitive deps from package.json instead of consuming a flat name list. No dependency on ruborist or any utoo internals."
+
+[[bin]]
+name = "preload-bench"
+path = "src/main.rs"
+
+# tombi: format.rules.table-keys-order.disabled = true
+[dependencies]
+anyhow      = { workspace = true }
+clap        = { workspace = true }
+futures     = "0.3"
+serde       = { version = "1", features = ["derive"] }
+serde_json  = { workspace = true }
+simd-json   = "0.17"
+tokio       = { workspace = true, features = ["macros", "rt-multi-thread", "fs", "time"] }
+
+# Same TLS/DNS choices as manifest-bench so the only delta vs that bench
+# is the transitive-walk loop.
+reqwest             = { version = "0.12", default-features = false, features = [
+  "brotli",
+  "gzip",
+  "http2",
+  "rustls-tls-native-roots-no-provider",
+  "socks"
+] }
+rustls              = { version = "0.23", default-features = false, features = [
+  "aws-lc-rs",
+  "logging",
+  "std",
+  "tls12"
+] }
+rustls-native-certs = "0.8"

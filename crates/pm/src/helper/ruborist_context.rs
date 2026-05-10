@@ -63,11 +63,20 @@ impl Context {
             receiver,
             supports_semver: get_supports_semver(),
             catalogs,
+            skip_preload: false,
         }
     }
 
     /// Create BuildDepsOptions with PipelineReceiver for concurrent download/clone.
     /// Returns (options, channels) where channels are used to start pipeline workers.
+    ///
+    /// Sets `skip_preload=true` so ruborist's `service::api::build_deps`
+    /// routes through `mb_fetch_with_graph` (folded preload + graph
+    /// build). The pipeline still receives `PackageResolved` /
+    /// `PackagePlaced` events — emitted from inside
+    /// `mb_fetch_with_graph` (main loop and graph worker
+    /// respectively) — so download/clone start as early as the
+    /// classic preload+BFS path.
     pub async fn pipeline_deps_options(
         cwd: PathBuf,
     ) -> (
@@ -75,15 +84,25 @@ impl Context {
         PipelineChannels,
     ) {
         let (receiver, channels) = PipelineReceiver::new(ProgressReceiver);
-        let options = Self::deps_options(cwd, receiver).await;
+        let mut options = Self::deps_options(cwd, receiver).await;
+        options.skip_preload = true;
         (options, channels)
     }
 
     /// Resolve dependency tree with plain ProgressReceiver. Returns
     /// [`BuildDepsOutput`] (lock + project cache); the project cache is
     /// persisted in the background.
+    ///
+    /// Used by the lockfile-only path (`utoo deps`). With
+    /// `skip_preload=true`, ruborist's `service::api::build_deps`
+    /// internally routes through `mb_resolve::mb_fetch` — a
+    /// standalone manifest-bench-style preload that bypasses
+    /// `service::http` / `service::manifest` / `service::registry`
+    /// for the cold-cache lockfile-only workload. PM doesn't see
+    /// the dispatch.
     pub async fn build_deps(cwd: PathBuf) -> anyhow::Result<BuildDepsOutput> {
-        let options = Self::deps_options(cwd.clone(), ProgressReceiver).await;
+        let mut options = Self::deps_options(cwd.clone(), ProgressReceiver).await;
+        options.skip_preload = true;
         let output = utoo_ruborist::service::build_deps(options).await?;
         spawn_save_project_cache(cwd, output.project_cache.clone());
         Ok(output)
