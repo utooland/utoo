@@ -707,26 +707,31 @@ where
     let (fetch_tx, fetch_rx) = mpsc::channel::<FetchEventMsg>(cap * 2 + 16);
     let (specs_tx, mut specs_rx) = mpsc::channel::<Vec<Dep>>(cap * 2 + 16);
 
-    // Spawn graph worker: owns the graph + edge_targets + seen_specs.
-    // This task is CPU-only (no awaits except channel IO), so on a
-    // multi-thread tokio runtime it gets its own worker thread,
-    // freeing the main task's worker to drive socket polling. That
-    // separation is the whole point of this rewrite — the inline
-    // version observed zwin events 71 vs mb's 49, evidence of main
-    // loop CPU starving the runtime's IO polling.
+    // Spawn graph worker on the *blocking* thread pool, not the
+    // worker scheduler. graph_worker is CPU-only and can run for
+    // tens of ms uninterrupted; on a multi-thread runtime it would
+    // otherwise compete with the install pipeline's download/clone
+    // workers for the small set of worker threads (just 2 on GHA
+    // ubuntu-latest), starving the main loop's socket polling and
+    // producing the eff_par_full collapse (73-77 → 40) that drives
+    // the p0/p1 outlier tail. The blocking pool has 512 slots by
+    // default, so reserving one slot for graph_worker has zero
+    // contention effect on tokio scheduling.
     let cache_clone = cache.clone();
     let build_config_owned = build_config.clone();
     let receiver_for_graph = Arc::clone(&receiver);
-    let graph_handle = tokio::spawn(graph_worker(
-        graph,
-        edge_targets,
-        seen_specs,
-        cache_clone,
-        build_config_owned,
-        fetch_rx,
-        specs_tx,
-        receiver_for_graph,
-    ));
+    let graph_handle = tokio::task::spawn_blocking(move || {
+        graph_worker(
+            graph,
+            edge_targets,
+            seen_specs,
+            cache_clone,
+            build_config_owned,
+            fetch_rx,
+            specs_tx,
+            receiver_for_graph,
+        )
+    });
 
     // Sibling-fetch dedup stays in main loop (drives FuturesUnordered).
     // Keyed by *real* package name (post npm-alias normalization)
@@ -900,14 +905,21 @@ struct GraphWorkerStats {
     unresolved_remaining: usize,
 }
 
-/// CPU-only worker task that owns the graph + edge_targets +
-/// seen_specs. Receives fetch events from main loop, mutates graph
-/// via `process_dependency_with_resolved`, sends new pending specs
-/// back. Designed to monopolize a tokio runtime worker thread so
-/// the main loop's worker can drive socket polling without
-/// competing for CPU.
+/// CPU-only worker that owns the graph + edge_targets + seen_specs.
+/// Receives fetch events from main loop, mutates graph via
+/// `process_dependency_with_resolved`, sends new pending specs back.
+///
+/// Runs as a sync function on tokio's blocking thread pool (via
+/// `spawn_blocking` at the call site), not as a regular task on the
+/// worker scheduler. Rationale: graph mutation is pure CPU and can
+/// run for tens of ms uninterrupted; if it sat on a worker thread
+/// alongside the install pipeline (download / clone / extract
+/// workers), it would starve the main loop's socket polling worker
+/// during burst processing. The blocking pool has 512 slots by
+/// default, so reserving one for graph_worker has no contention
+/// effect on other tokio scheduling.
 #[allow(clippy::too_many_arguments)]
-async fn graph_worker<R>(
+fn graph_worker<R>(
     mut graph: DependencyGraph,
     mut edge_targets: EdgeTargets,
     mut seen_specs: HashSet<(String, String)>,
@@ -923,7 +935,7 @@ where
     use crate::model::manifest::NodeManifest;
     let mut stats = GraphWorkerStats::default();
 
-    while let Some(msg) = fetch_rx.recv().await {
+    while let Some(msg) = fetch_rx.blocking_recv() {
         let graph_start = Instant::now();
         stats.processed += 1;
 
@@ -1011,7 +1023,7 @@ where
 
         // Always reply (even if empty) so main loop's `in_flight`
         // counter decrements for each FetchEventMsg sent.
-        if specs_tx.send(new_specs).await.is_err() {
+        if specs_tx.blocking_send(new_specs).is_err() {
             // Main loop dropped the receiver — bail.
             break;
         }
