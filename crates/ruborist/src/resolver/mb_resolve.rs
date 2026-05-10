@@ -102,8 +102,9 @@ fn build_mb_client() -> Result<reqwest::Client> {
 
 #[cfg(target_arch = "wasm32")]
 fn build_mb_client() -> Result<reqwest::Client> {
+    // wasm reqwest builder has no `.no_proxy()` / TLS knobs — those
+    // settings live in the browser's fetch config. Just build default.
     reqwest::Client::builder()
-        .no_proxy()
         .build()
         .context("build reqwest client for mb_resolve")
 }
@@ -642,6 +643,13 @@ struct FetchEventMsg {
     name: String,
 }
 
+/// Channel-based folded preload + graph build. Uses
+/// `tokio::task::spawn_blocking` for the graph_worker, which requires
+/// a multi-thread tokio runtime — not available on wasm32 (single
+/// threaded, browser/worker context). Native callers route through
+/// here; wasm callers must keep the legacy preload + BFS path in
+/// `service::api::build_deps`.
+#[cfg(not(target_arch = "wasm32"))]
 pub async fn mb_fetch_with_graph<R>(
     mut graph: DependencyGraph,
     registry_url: &str,

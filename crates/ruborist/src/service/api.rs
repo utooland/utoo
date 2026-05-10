@@ -284,23 +284,29 @@ where
     // BFS sweep also holds an &Arc<R> via deref.
     let receiver = Arc::new(receiver);
 
-    let folded = skip_preload_caller && cache_count == 0;
-    if folded {
-        let preload_config = PreloadConfig {
-            peer_deps,
-            concurrency,
-        };
-        let (returned_graph, _stats) = mb_fetch_with_graph(
-            graph,
-            registry.registry_url(),
-            registry.cache(),
-            &preload_config,
-            &config,
-            Arc::clone(&receiver),
-        )
-        .await
-        .map_err(|e| e.context("mb_fetch_with_graph failed"))?;
-        graph = returned_graph;
+    // mb_fetch_with_graph uses tokio::task::spawn_blocking which only
+    // compiles on multi-thread tokio (native). wasm32 falls back to
+    // the legacy preload + BFS path below.
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let folded = skip_preload_caller && cache_count == 0;
+        if folded {
+            let preload_config = PreloadConfig {
+                peer_deps,
+                concurrency,
+            };
+            let (returned_graph, _stats) = mb_fetch_with_graph(
+                graph,
+                registry.registry_url(),
+                registry.cache(),
+                &preload_config,
+                &config,
+                Arc::clone(&receiver),
+            )
+            .await
+            .map_err(|e| e.context("mb_fetch_with_graph failed"))?;
+            graph = returned_graph;
+        }
     }
 
     // Preserve the typed error via `Error::new` + `.context(...)` so CLI
