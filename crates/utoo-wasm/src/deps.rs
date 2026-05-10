@@ -46,6 +46,10 @@ pub async fn build_deps_from_file(
         receiver: NoopReceiver,
         supports_semver: None,
         catalogs: std::collections::HashMap::new(),
+        // wasm32 stays on the legacy preload + BFS path (channel
+        // mb_fetch_with_graph requires multi-thread tokio + Send,
+        // both unavailable on wasm).
+        skip_preload: false,
     };
 
     build_deps(options).await.map(|output| output.lock)
