@@ -132,12 +132,9 @@ pub fn get_install_scope() -> InstallScope {
     INSTALL_SCOPE.get().copied().unwrap_or_default()
 }
 
-// Manifest fetch concurrency. 96 sits at the empirical sweet spot
-// on the npmjs HTTP/1.1 endpoint from GHA: 64 leaves throughput on
-// the table, 128+ widens p99 once npmjs's per-IP latency variance
-// kicks in. Override via `--manifests-concurrency-limit`.
+// Manifest fetch concurrency configuration
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 96));
+    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 64));
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
     MANIFESTS_CONCURRENCY_LIMIT.set(value);
