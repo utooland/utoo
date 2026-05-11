@@ -979,6 +979,7 @@ where
         // O(1) name_index lookup vs O(N) edge_targets.keys() filter
         // (4645 names × 4645 keys = 21M iter on ant-design).
         let specs_for_name = name_index.remove(&msg.name).unwrap_or_default();
+        let mut retry_specs: Vec<String> = Vec::new();
         let primary_keys: Vec<(String, String)> = specs_for_name
             .into_iter()
             .map(|s| (msg.name.clone(), s))
@@ -986,7 +987,14 @@ where
 
         let mut new_specs: Vec<Dep> = Vec::new();
         for (k_name, k_spec) in primary_keys {
+            // Cache miss: spec is registered in edge_targets but the
+            // matching fetch hasn't landed yet (e.g. msg fired by
+            // fetcher; this spec is a sibling waiting on settle).
+            // Push spec back into name_index so the next msg for this
+            // name retries it. Without this, the spec orphans in
+            // edge_targets → unresolved_targets > 0 → tree incomplete.
             let Some(core_arc) = cache.get_version_manifest(&k_name, &k_spec) else {
+                retry_specs.push(k_spec);
                 continue;
             };
             let resolved = ResolvedPackage {
@@ -1052,6 +1060,17 @@ where
                     );
                 }
             }
+        }
+
+        // Re-insert specs that missed cache so the next msg for this
+        // name retries them. Keeps name_index consistent with
+        // edge_targets (any remaining edge_targets entry must have a
+        // matching name_index spec for graph_worker to find it).
+        if !retry_specs.is_empty() {
+            name_index
+                .entry(msg.name.clone())
+                .or_default()
+                .extend(retry_specs);
         }
 
         stats.sum_graph_us += graph_start.elapsed().as_micros() as u64;
