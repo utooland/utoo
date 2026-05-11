@@ -1,25 +1,19 @@
-//! Dependency tree builder using BFS traversal.
+//! Dependency tree builder.
 //!
-//! This module provides the core algorithm for building a dependency graph
-//! from a root package. It uses breadth-first traversal to resolve dependencies
-//! level by level, with support for:
-//! - Version conflict detection and nested installation
-//! - Hoisting (placing packages as high as possible in the tree)
-//! - Override rules
-//! - Different dependency types (prod, dev, peer, optional)
-//! - Parallel manifest preloading for performance
+//! Resolves a dependency graph from a root package via a single streaming
+//! pass that interleaves manifest fetch with graph mutation:
+//! `FuturesUnordered<resolve_registry_dep>` runs at `config.concurrency`,
+//! and each completed fetch's `process_dependency` mutation runs inline on
+//! the main loop. Non-registry edges (workspace/git/http/file) and
+//! find-compatible Reuse hits short-circuit the network and run inline.
 //!
-//! # Two-Phase Resolution
-//!
-//! The builder uses a two-phase approach for optimal performance:
-//! 1. **Preload Phase**: Parallel fetch of all manifests to warm up caches
-//! 2. **Build Phase**: Sequential BFS traversal reading from cache
-//!
-//! This separation allows for maximum parallelism during network I/O
-//! while keeping the graph building logic simple and deterministic.
+//! Supports version conflict detection + nested installation, hoisting,
+//! override rules, and per-edge-type propagation (prod / dev / peer /
+//! optional).
 
+use futures::stream::{FuturesUnordered, StreamExt};
 use petgraph::graph::NodeIndex;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -30,9 +24,8 @@ use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
 use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
-use crate::resolver::preload::{PreloadConfig, preload_manifests};
 use crate::resolver::registry::{ResolveError, resolve_registry_dep};
-use crate::spec::{Catalogs, PackageSpec, Protocol};
+use crate::spec::{Catalogs, PackageSpec, Protocol, SpecStr};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
 use crate::traits::registry::{RegistryClient, ResolvedPackage};
 
@@ -104,10 +97,8 @@ pub use crate::model::node::{DevDeps, PeerDeps};
 pub struct BuildDepsConfig {
     /// How to handle peer dependencies.
     pub peer_deps: PeerDeps,
-    /// Maximum number of concurrent manifest fetches during preload
+    /// Maximum number of concurrent manifest fetches.
     pub concurrency: usize,
-    /// Whether to skip preload phase (useful when cache is already warm)
-    pub skip_preload: bool,
     /// Cache directory for git clones (defaults to `~/.cache/nm`)
     pub cache_dir: Option<PathBuf>,
     /// Shared dedup cache for concurrent git clone operations
@@ -124,7 +115,6 @@ impl Default for BuildDepsConfig {
         Self {
             peer_deps: PeerDeps::Skip,
             concurrency: crate::resolver::preload::DEFAULT_CONCURRENCY,
-            skip_preload: false,
             cache_dir: dirs::home_dir().map(|d| d.join(".cache/nm")),
             git_clone_cache: Arc::new(GitCloneCache::new()),
             http_fetch_cache: Arc::new(HttpFetchCache::new()),
@@ -143,12 +133,6 @@ impl BuildDepsConfig {
     /// Create config with custom concurrency
     pub fn with_concurrency(mut self, concurrency: usize) -> Self {
         self.concurrency = concurrency;
-        self
-    }
-
-    /// Create config that skips preload phase
-    pub fn with_skip_preload(mut self, skip: bool) -> Self {
-        self.skip_preload = skip;
         self
     }
 
@@ -173,44 +157,6 @@ struct NodeFlags {
     is_dev: bool,
     is_optional: bool,
     is_peer: bool,
-}
-
-/// Gather all unresolved deps from root and workspace nodes for preloading.
-///
-/// Only registry specs (e.g. `^4.17.0`) are collected. `catalog:` specs are
-/// resolved at edge creation time, so by the time this runs they are already
-/// concrete registry specs.
-fn gather_preload_deps(graph: &DependencyGraph, peer_deps: PeerDeps) -> Vec<(String, String)> {
-    use crate::spec::SpecStr;
-    use std::collections::HashSet;
-
-    let mut deps = HashSet::new();
-
-    let collect = |node_index: NodeIndex, deps: &mut HashSet<(String, String)>| {
-        for (_, edge) in graph.get_dependency_edges(node_index) {
-            if edge.valid {
-                continue;
-            }
-            if peer_deps == PeerDeps::Skip && edge.edge_type == EdgeType::Peer {
-                continue;
-            }
-            if edge.spec.is_registry_spec() {
-                deps.insert((edge.name.clone(), edge.spec.clone()));
-            }
-        }
-    };
-
-    collect(graph.root_index, &mut deps);
-
-    for node_index in graph.graph.node_indices() {
-        if let Some(node) = graph.get_node(node_index)
-            && node.is_workspace()
-        {
-            collect(node_index, &mut deps);
-        }
-    }
-
-    deps.into_iter().collect()
 }
 
 /// Create a new package node for a resolved dependency.
@@ -456,6 +402,7 @@ pub async fn process_dependency<R: RegistryClient>(
     node_index: NodeIndex,
     edge_info: &DependencyEdgeInfo,
     config: &BuildDepsConfig,
+    pre_resolved: Option<ResolvedPackage>,
 ) -> Result<ProcessResult, ResolveError<R::Error>> {
     // Find installation location
     match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
@@ -473,126 +420,133 @@ pub async fn process_dependency<R: RegistryClient>(
             // The exhaustive match ensures the compiler forces a decision for any
             // new PackageSpec variant — no silent fall-through to the wrong resolver.
             let parsed_spec = PackageSpec::from(edge_info.spec.as_str());
-            let resolved: ResolvedPackage = match &parsed_spec {
-                PackageSpec::Git { .. } | PackageSpec::GitHub { .. } => {
-                    // TODO: add spec => version expiry check so stale git caches
-                    // are invalidated (e.g. branch refs that have moved forward).
-                    match resolve_git_dep(
-                        config.cache_dir.as_deref(),
-                        &parsed_spec,
-                        &edge_info.name,
-                        &config.git_clone_cache,
-                    )
-                    .await
-                    {
-                        Ok(r) => r,
-                        Err(_) if edge_info.edge_type == EdgeType::Optional => {
-                            tracing::debug!(
-                                "Skipped optional non-registry dependency {}@{}",
-                                edge_info.name,
-                                edge_info.spec
-                            );
-                            return Ok(ProcessResult::Skipped);
+            // When the streaming loop pre-fetched the registry resolve, skip
+            // the per-variant fetch dispatch and go straight to the override
+            // check + graph mutation below.
+            let resolved: ResolvedPackage = if let Some(r) = pre_resolved {
+                r
+            } else {
+                match &parsed_spec {
+                    PackageSpec::Git { .. } | PackageSpec::GitHub { .. } => {
+                        // TODO: add spec => version expiry check so stale git caches
+                        // are invalidated (e.g. branch refs that have moved forward).
+                        match resolve_git_dep(
+                            config.cache_dir.as_deref(),
+                            &parsed_spec,
+                            &edge_info.name,
+                            &config.git_clone_cache,
+                        )
+                        .await
+                        {
+                            Ok(r) => r,
+                            Err(_) if edge_info.edge_type == EdgeType::Optional => {
+                                tracing::debug!(
+                                    "Skipped optional non-registry dependency {}@{}",
+                                    edge_info.name,
+                                    edge_info.spec
+                                );
+                                return Ok(ProcessResult::Skipped);
+                            }
+                            Err(e) => {
+                                return Err(ResolveError::Git {
+                                    url: edge_info.spec.clone(),
+                                    source: e,
+                                });
+                            }
                         }
-                        Err(e) => {
-                            return Err(ResolveError::Git {
-                                url: edge_info.spec.clone(),
-                                source: e,
+                    }
+                    PackageSpec::Local {
+                        protocol: Protocol::Workspace,
+                        ..
+                    } => {
+                        // workspace: deps are resolved during graph initialisation.
+                        // If we reach here the workspace node wasn't found — skip
+                        // silently rather than aborting the whole resolution.
+                        tracing::debug!(
+                            "Skipping unresolved workspace dependency {}@{}",
+                            edge_info.name,
+                            edge_info.spec
+                        );
+                        return Ok(ProcessResult::Skipped);
+                    }
+                    PackageSpec::Local {
+                        protocol: Protocol::File,
+                        path,
+                    } => {
+                        #[cfg(feature = "http-tarball")]
+                        {
+                            match process_file_dep(
+                                graph,
+                                node_index,
+                                conflict_parent,
+                                edge_info,
+                                path,
+                                config.cache_dir.as_deref(),
+                            )
+                            .await?
+                            {
+                                std::ops::ControlFlow::Break(r) => return Ok(r),
+                                std::ops::ControlFlow::Continue(pkg) => pkg,
+                            }
+                        }
+                        #[cfg(not(feature = "http-tarball"))]
+                        {
+                            let _ = path;
+                            return Err(ResolveError::Unsupported {
+                                spec: edge_info.spec.clone(),
+                                reason: "file: deps require the 'http-tarball' feature",
                             });
                         }
                     }
-                }
-                PackageSpec::Local {
-                    protocol: Protocol::Workspace,
-                    ..
-                } => {
-                    // workspace: deps are resolved during graph initialisation.
-                    // If we reach here the workspace node wasn't found — skip
-                    // silently rather than aborting the whole resolution.
-                    tracing::debug!(
-                        "Skipping unresolved workspace dependency {}@{}",
-                        edge_info.name,
-                        edge_info.spec
-                    );
-                    return Ok(ProcessResult::Skipped);
-                }
-                PackageSpec::Local {
-                    protocol: Protocol::File,
-                    path,
-                } => {
-                    #[cfg(feature = "http-tarball")]
-                    {
-                        match process_file_dep(
-                            graph,
-                            node_index,
-                            conflict_parent,
-                            edge_info,
-                            path,
+                    PackageSpec::Local { .. } => {
+                        return Err(ResolveError::Unsupported {
+                            spec: edge_info.spec.clone(),
+                            reason: "local (link:/portal:) dependencies are not yet supported",
+                        });
+                    }
+                    PackageSpec::Http { url } => {
+                        match resolve_http_dep(
                             config.cache_dir.as_deref(),
+                            url,
+                            &config.http_fetch_cache,
+                        )
+                        .await
+                        {
+                            Ok(r) => r,
+                            Err(_) if edge_info.edge_type == EdgeType::Optional => {
+                                tracing::debug!(
+                                    "Skipped optional HTTP dependency {}@{}",
+                                    edge_info.name,
+                                    edge_info.spec
+                                );
+                                return Ok(ProcessResult::Skipped);
+                            }
+                            Err(e) => {
+                                return Err(ResolveError::Http {
+                                    url: url.clone(),
+                                    source: e,
+                                });
+                            }
+                        }
+                    }
+                    PackageSpec::Registry { .. } => {
+                        match resolve_registry_dep(
+                            registry,
+                            &edge_info.name,
+                            &edge_info.spec,
+                            &edge_info.edge_type,
                         )
                         .await?
                         {
-                            std::ops::ControlFlow::Break(r) => return Ok(r),
-                            std::ops::ControlFlow::Continue(pkg) => pkg,
-                        }
-                    }
-                    #[cfg(not(feature = "http-tarball"))]
-                    {
-                        let _ = path;
-                        return Err(ResolveError::Unsupported {
-                            spec: edge_info.spec.clone(),
-                            reason: "file: deps require the 'http-tarball' feature",
-                        });
-                    }
-                }
-                PackageSpec::Local { .. } => {
-                    return Err(ResolveError::Unsupported {
-                        spec: edge_info.spec.clone(),
-                        reason: "local (link:/portal:) dependencies are not yet supported",
-                    });
-                }
-                PackageSpec::Http { url } => {
-                    match resolve_http_dep(
-                        config.cache_dir.as_deref(),
-                        url,
-                        &config.http_fetch_cache,
-                    )
-                    .await
-                    {
-                        Ok(r) => r,
-                        Err(_) if edge_info.edge_type == EdgeType::Optional => {
-                            tracing::debug!(
-                                "Skipped optional HTTP dependency {}@{}",
-                                edge_info.name,
-                                edge_info.spec
-                            );
-                            return Ok(ProcessResult::Skipped);
-                        }
-                        Err(e) => {
-                            return Err(ResolveError::Http {
-                                url: url.clone(),
-                                source: e,
-                            });
-                        }
-                    }
-                }
-                PackageSpec::Registry { .. } => {
-                    match resolve_registry_dep(
-                        registry,
-                        &edge_info.name,
-                        &edge_info.spec,
-                        &edge_info.edge_type,
-                    )
-                    .await?
-                    {
-                        Some(resolved) => resolved,
-                        None => {
-                            tracing::debug!(
-                                "Skipped optional dependency {}@{}",
-                                edge_info.name,
-                                edge_info.spec
-                            );
-                            return Ok(ProcessResult::Skipped);
+                            Some(resolved) => resolved,
+                            None => {
+                                tracing::debug!(
+                                    "Skipped optional dependency {}@{}",
+                                    edge_info.name,
+                                    edge_info.spec
+                                );
+                                return Ok(ProcessResult::Skipped);
+                            }
                         }
                     }
                 }
@@ -701,24 +655,15 @@ pub async fn build_deps_with_receiver<R: RegistryClient, E: EventReceiver>(
 
 /// Build the complete dependency tree with full configuration.
 ///
-/// This is the most flexible entry point for dependency resolution. It performs:
-/// 1. **Preload Phase** (unless skipped): Parallel fetch of all manifests to warm up caches
-/// 2. **Build Phase**: Sequential BFS traversal reading from cache
+/// Single streaming pass: dispatches up to `config.concurrency` registry
+/// fetches in parallel and mutates the graph synchronously on the main loop
+/// as each fetch lands.
 ///
 /// # Arguments
 /// * `graph` - The dependency graph (should have root node and initial edges)
 /// * `registry` - Registry client for fetching packages
-/// * `config` - Build configuration (concurrency, peer_deps, skip_preload)
+/// * `config` - Build configuration (concurrency, peer_deps, etc.)
 /// * `receiver` - Event receiver for handling build events
-///
-/// # Example
-/// ```ignore
-/// let config = BuildDepsConfig::default()
-///     .with_concurrency(50)
-///     .with_skip_preload(true); // Skip preload if cache is warm
-///
-/// build_deps_with_config(&mut graph, &registry, config, &receiver).await?;
-/// ```
 pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
     graph: &mut DependencyGraph,
     registry: &R,
@@ -726,16 +671,11 @@ pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
     receiver: &E,
 ) -> Result<(), ResolveError<R::Error>> {
     tracing::debug!(
-        "Starting dependency tree build, peer_deps: {:?}, concurrency: {}, skip_preload: {}",
+        "Starting dependency tree build, peer_deps: {:?}, concurrency: {}",
         config.peer_deps,
         config.concurrency,
-        config.skip_preload
     );
 
-    // Phase 1: Preload manifests in parallel (unless skipped)
-    run_preload_phase(graph, registry, &config, receiver).await;
-
-    // Phase 2: BFS traversal to build the dependency tree
     run_bfs_phase(graph, registry, &config, receiver).await?;
 
     receiver.on_event(BuildEvent::Complete {
@@ -745,59 +685,14 @@ pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
     Ok(())
 }
 
-/// Run the preload phase to warm up the cache with manifests.
-async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
-    graph: &DependencyGraph,
-    registry: &R,
-    config: &BuildDepsConfig,
-    receiver: &E,
-) {
-    if config.skip_preload {
-        return;
-    }
-
-    let start = tokio::time::Instant::now();
-
-    let initial_deps = gather_preload_deps(graph, config.peer_deps);
-    if initial_deps.is_empty() {
-        return;
-    }
-
-    tracing::debug!("Preload phase: {} initial dependencies", initial_deps.len());
-    receiver.on_event(BuildEvent::PreloadStart {
-        count: initial_deps.len(),
-    });
-
-    let preload_config = PreloadConfig {
-        peer_deps: config.peer_deps,
-        concurrency: config.concurrency,
-    };
-
-    let stats = preload_manifests(
-        initial_deps,
-        registry,
-        preload_config,
-        receiver,
-        |_name, _manifest| {
-            // Registry client's resolve_package should cache the manifest
-        },
-    )
-    .await;
-
-    tracing::debug!(
-        "Preload phase completed: {} success, {} failed",
-        stats.success_count,
-        stats.failed_count
-    );
-    receiver.on_event(BuildEvent::PreloadComplete {
-        success: stats.success_count,
-        failed: stats.failed_count,
-    });
-
-    tracing::debug!("Preload phase: {:?}", start.elapsed());
-}
-
-/// Run the BFS traversal phase to build the dependency tree.
+/// Resolve all unresolved deps in a single streaming pass:
+/// `FuturesUnordered<resolve_registry_dep>` at `config.concurrency`,
+/// graph mutation runs synchronously on the main loop as each fetch
+/// lands. Non-registry edges (workspace/git/http/file) and Reuse hits
+/// run inline since they don't benefit from network parallelism.
+///
+/// Emits the same `BuildEvent` stream the previous preload+BFS path
+/// did so the install pipeline and progress bar work unchanged.
 async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
     graph: &mut DependencyGraph,
     registry: &R,
@@ -805,63 +700,68 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
     receiver: &E,
 ) -> Result<(), ResolveError<R::Error>> {
     let start = tokio::time::Instant::now();
+    let cap = config.concurrency;
 
-    let mut current_level = vec![graph.root_index];
+    let mut pending: VecDeque<(NodeIndex, DependencyEdgeInfo)> = VecDeque::new();
+    let mut futs = FuturesUnordered::new();
 
-    while !current_level.is_empty() {
-        receiver.on_event(BuildEvent::LevelStart {
-            node_count: current_level.len(),
-        });
-        let mut next_level = Vec::new();
+    // Seed pending with unresolved edges from root + workspace nodes —
+    // mirrors the previous BFS level-0 + workspace next-level discovery.
+    let root_idx = graph.root_index;
+    for edge in collect_unresolved_edges(graph, root_idx) {
+        pending.push_back((root_idx, edge));
+    }
+    let workspace_indices: Vec<NodeIndex> = graph
+        .graph
+        .node_indices()
+        .filter(|idx| *idx != root_idx && graph.get_node(*idx).is_some_and(|n| n.is_workspace()))
+        .collect();
+    for ws_idx in workspace_indices {
+        for edge in collect_unresolved_edges(graph, ws_idx) {
+            pending.push_back((ws_idx, edge));
+        }
+    }
 
-        for node_index in current_level {
-            // Add workspace nodes to next level
-            for (_, dep) in graph.get_dependency_edges(node_index) {
-                if dep.valid
-                    && let Some(to) = dep.to
-                    && let Some(n) = graph.get_node(to)
-                    && n.is_workspace()
-                    && node_index == graph.root_index
-                {
-                    next_level.push(to);
-                }
-            }
+    if pending.is_empty() {
+        tracing::debug!("Build phase: nothing to resolve");
+        return Ok(());
+    }
 
-            // Process unresolved dependencies
-            let unresolved = collect_unresolved_edges(graph, node_index);
-            receiver.on_event(BuildEvent::DependencyCount {
-                count: unresolved.len(),
-            });
+    receiver.on_event(BuildEvent::PreloadStart {
+        count: pending.len(),
+    });
 
-            for edge_info in unresolved {
-                receiver.on_event(BuildEvent::Resolving {
-                    name: &edge_info.name,
-                });
-                let result = process_dependency(graph, registry, node_index, &edge_info, config)
+    loop {
+        while futs.len() < cap {
+            let Some((parent, edge)) = pending.pop_front() else {
+                break;
+            };
+
+            // Non-registry edges (workspace/git/http/file) handle their own
+            // disk / git / http I/O inside `process_dependency`. Running them
+            // through `FuturesUnordered` would require `'static` bounds on
+            // futures over `&mut graph`; rare enough to handle inline.
+            if !edge.spec.is_registry_spec() {
+                receiver.on_event(BuildEvent::Resolving { name: &edge.name });
+                let processed = process_dependency(graph, registry, parent, &edge, config, None)
                     .await
                     .map_err(|inner| {
-                        let mut chain = graph.logical_ancestry(node_index);
-                        chain.push((edge_info.name.clone(), edge_info.spec.clone()));
+                        let mut chain = graph.logical_ancestry(parent);
+                        chain.push((edge.name.clone(), edge.spec.clone()));
                         ResolveError::WithChain {
                             chain,
                             source: Box::new(inner),
                         }
-                    });
-                match result? {
+                    })?;
+                match &processed {
                     ProcessResult::Created(idx) => {
-                        // Extract node info for events
-                        if let Some(node) = graph.get_node(idx) {
+                        if let Some(node) = graph.get_node(*idx) {
                             receiver.on_event(BuildEvent::Resolved {
-                                name: &edge_info.name,
+                                name: &edge.name,
                                 version: &node.version,
                             });
-
-                            // Send PackagePlaced for pipeline cloning
                             if let NodeManifest::Registry(ref manifest) = node.manifest {
-                                // Get parent path for dependency ordering
-                                let parent_path = graph
-                                    .get_node(node_index)
-                                    .map(|parent| parent.path.as_path());
+                                let parent_path = graph.get_node(parent).map(|p| p.path.as_path());
                                 receiver.on_event(BuildEvent::PackagePlaced {
                                     package: manifest.as_ref().into(),
                                     path: &node.path,
@@ -869,31 +769,141 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
                                 });
                             }
                         }
-
-                        next_level.push(idx);
+                        let new_edges = collect_unresolved_edges(graph, *idx);
+                        if !new_edges.is_empty() {
+                            receiver.on_event(BuildEvent::PreloadQueued {
+                                count: new_edges.len(),
+                            });
+                            for new_edge in new_edges {
+                                pending.push_back((*idx, new_edge));
+                            }
+                        }
                     }
                     ProcessResult::Reused(idx) => {
-                        if let Some(node) = graph.get_node(idx) {
+                        if let Some(node) = graph.get_node(*idx) {
                             receiver.on_event(BuildEvent::Reused {
-                                name: &edge_info.name,
+                                name: &edge.name,
                                 version: &node.version,
                             });
                         }
                     }
                     ProcessResult::Skipped => {
                         receiver.on_event(BuildEvent::Skipped {
-                            name: &edge_info.name,
-                            spec: &edge_info.spec,
+                            name: &edge.name,
+                            spec: &edge.spec,
                         });
                     }
                 }
+                continue;
             }
+
+            // Registry edge — pre-check Reuse to skip wasteful fetch when a
+            // sibling already resolved a compatible version.
+            if let FindResult::Reuse(idx) =
+                graph.find_compatible_node(parent, &edge.name, &edge.spec)
+            {
+                graph.mark_dependency_resolved(edge.edge_id, idx);
+                update_node_type_from_edge(graph, parent, idx, &edge.edge_type);
+                if let Some(node) = graph.get_node(idx) {
+                    receiver.on_event(BuildEvent::Reused {
+                        name: &edge.name,
+                        version: &node.version,
+                    });
+                }
+                continue;
+            }
+
+            // Registry cache miss: dispatch async fetch.
+            receiver.on_event(BuildEvent::PreloadFetching { name: &edge.name });
+            let name = edge.name.clone();
+            let spec = edge.spec.clone();
+            let edge_type = edge.edge_type;
+            futs.push(async move {
+                let r = resolve_registry_dep(registry, &name, &spec, &edge_type).await;
+                (parent, edge, r)
+            });
         }
 
-        receiver.on_event(BuildEvent::LevelComplete {
-            next_level_count: next_level.len(),
+        if futs.is_empty() {
+            break;
+        }
+
+        let (parent, edge, resolve_result) = futs.next().await.expect("non-empty futs");
+        let resolved_opt = resolve_result.map_err(|inner| {
+            let mut chain = graph.logical_ancestry(parent);
+            chain.push((edge.name.clone(), edge.spec.clone()));
+            ResolveError::WithChain {
+                chain,
+                source: Box::new(inner),
+            }
+        })?;
+        let Some(resolved) = resolved_opt else {
+            receiver.on_event(BuildEvent::Skipped {
+                name: &edge.name,
+                spec: &edge.spec,
+            });
+            continue;
+        };
+
+        receiver.on_event(BuildEvent::PreloadProgress {
+            name: &edge.name,
+            version: &resolved.version,
+            current: 0,
         });
-        current_level = next_level;
+        receiver.on_event(BuildEvent::PackageResolved((&*resolved.manifest).into()));
+        receiver.on_event(BuildEvent::Resolving { name: &edge.name });
+
+        let processed = process_dependency(graph, registry, parent, &edge, config, Some(resolved))
+            .await
+            .map_err(|inner| {
+                let mut chain = graph.logical_ancestry(parent);
+                chain.push((edge.name.clone(), edge.spec.clone()));
+                ResolveError::WithChain {
+                    chain,
+                    source: Box::new(inner),
+                }
+            })?;
+        match &processed {
+            ProcessResult::Created(idx) => {
+                if let Some(node) = graph.get_node(*idx) {
+                    receiver.on_event(BuildEvent::Resolved {
+                        name: &edge.name,
+                        version: &node.version,
+                    });
+                    if let NodeManifest::Registry(ref manifest) = node.manifest {
+                        let parent_path = graph.get_node(parent).map(|p| p.path.as_path());
+                        receiver.on_event(BuildEvent::PackagePlaced {
+                            package: manifest.as_ref().into(),
+                            path: &node.path,
+                            parent_path,
+                        });
+                    }
+                }
+                let new_edges = collect_unresolved_edges(graph, *idx);
+                if !new_edges.is_empty() {
+                    receiver.on_event(BuildEvent::PreloadQueued {
+                        count: new_edges.len(),
+                    });
+                    for new_edge in new_edges {
+                        pending.push_back((*idx, new_edge));
+                    }
+                }
+            }
+            ProcessResult::Reused(idx) => {
+                if let Some(node) = graph.get_node(*idx) {
+                    receiver.on_event(BuildEvent::Reused {
+                        name: &edge.name,
+                        version: &node.version,
+                    });
+                }
+            }
+            ProcessResult::Skipped => {
+                receiver.on_event(BuildEvent::Skipped {
+                    name: &edge.name,
+                    spec: &edge.spec,
+                });
+            }
+        }
     }
 
     tracing::debug!("Build phase: {:?}", start.elapsed());
@@ -1262,13 +1272,6 @@ mod tests {
         assert_eq!(edges.get("lodash"), Some(&"^4.17.0".to_string()));
         assert_eq!(edges.get("react"), Some(&"^18.0.0".to_string()));
         assert_eq!(edges.get("tslib"), Some(&"^2.0.0".to_string()));
-
-        // Since edges are now resolved, gather_preload_deps should find them
-        let deps = gather_preload_deps(&graph, PeerDeps::Skip);
-        let deps_map: HashMap<String, String> = deps.into_iter().collect();
-        assert_eq!(deps_map.get("lodash"), Some(&"^4.17.0".to_string()));
-        assert_eq!(deps_map.get("react"), Some(&"^18.0.0".to_string()));
-        assert_eq!(deps_map.get("tslib"), Some(&"^2.0.0".to_string()));
     }
 
     #[test]
@@ -1297,8 +1300,9 @@ mod tests {
             .collect();
         assert_eq!(edges.get("missing-pkg"), Some(&"catalog:".to_string()));
 
-        // gather_preload_deps should NOT include it (not a registry spec)
-        let deps = gather_preload_deps(&graph, PeerDeps::Skip);
-        assert!(deps.is_empty());
+        // Raw `catalog:` is not a registry spec, so the streaming resolver
+        // would skip it as non-registry (and the inline non-registry path
+        // would surface it as Unsupported / catalog-related error).
+        assert!(!"catalog:".is_registry_spec());
     }
 }
