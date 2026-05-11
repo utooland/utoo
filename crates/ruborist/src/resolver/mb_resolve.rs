@@ -329,48 +329,19 @@ fn spawn_settle(
         let fut_start = Instant::now();
         let primary_spec = spec.clone();
         let (real_name, real_spec) = normalize_spec(&name, &spec);
-
-        // Two-phase parse: if the original fetcher already cached the
-        // FullManifest envelope (the common case — settle is dispatched
-        // AFTER fetcher's FetchOutcome lands and writes the cache),
-        // skip the envelope re-parse and only deserialize the requested
-        // version subtree via `extract_core_version_off_runtime`.
-        // Saves the to_borrowed_value + dist_tags + versions_keys
-        // + FullManifest construction cost per sibling. With 1843
-        // siblings on ant-design × ~1ms saved CPU, ~25ms wall on a
-        // 75-worker eff_par_net. Falls back to combined parse on the
-        // race window where settle dispatches before fetcher's cache
-        // write commits (rare).
-        let two_phase = cache.get_full_manifest(&real_name).and_then(|full| {
-            resolve_target_version((&*full).into(), &real_spec)
-                .ok()
-                .map(|resolved| (full, resolved))
-        });
-
-        let parsed = match two_phase {
-            Some((full, resolved)) => {
-                let (resolved, core_opt) =
-                    crate::model::manifest::extract_core_version_off_runtime(
-                        Arc::clone(&full),
-                        resolved,
-                    )
-                    .await;
-                core_opt.map(|core_arc| {
-                    let transitives = extract_transitive(&core_arc, peer_deps);
-                    (full, resolved, core_arc, transitives)
-                })
-            }
-            None => {
-                let real_spec_for_parse = real_spec.clone();
-                let peer = peer_deps;
-                tokio::task::spawn_blocking(move || {
-                    parse_combined(Arc::clone(&raw), &real_spec_for_parse, peer)
-                })
-                .await
-                .ok()
-                .flatten()
-            }
-        };
+        let real_spec_for_parse = real_spec.clone();
+        let peer = peer_deps;
+        // Two-phase parse experiment was reverted: extract_core_version_off_runtime
+        // uses rayon::spawn whose dispatch latency dropped eff_par_full from ~97
+        // to ~76 — wall stayed flat (~2.5s) but parallelism collapsed. Stick
+        // with combined parse via spawn_blocking; the overhead is bounded by
+        // tokio's blocking pool (512 slots).
+        let parsed = tokio::task::spawn_blocking(move || {
+            parse_combined(Arc::clone(&raw), &real_spec_for_parse, peer)
+        })
+        .await
+        .ok()
+        .flatten();
 
         let transitives = match parsed {
             Some((full_arc, resolved, core_arc, transitives)) => {
@@ -593,12 +564,14 @@ type EdgeTargets = HashMap<(String, String), Vec<(NodeIndex, EdgeIndex)>>;
 /// AFTER their fetch already landed would never be drained — they'd
 /// sit in `edge_targets` and the corresponding parent edges would
 /// stay unresolved. CI run c02bb152 showed ~580 such orphans.
+#[allow(clippy::too_many_arguments)]
 fn enqueue_node_edges(
     graph: &mut DependencyGraph,
     node_idx: NodeIndex,
     pending: &mut VecDeque<Dep>,
     seen_specs: &mut HashSet<(String, String)>,
     edge_targets: &mut EdgeTargets,
+    name_index: &mut HashMap<String, Vec<String>>,
     cache: &MemoryCache,
     build_config: &BuildDepsConfig,
 ) {
@@ -645,6 +618,10 @@ fn enqueue_node_edges(
                 .or_default()
                 .push((idx, edge.edge_id));
             if seen_specs.insert(key.clone()) {
+                name_index
+                    .entry(key.0.clone())
+                    .or_default()
+                    .push(key.1.clone());
                 pending.push_back(key);
             }
         }
@@ -715,6 +692,12 @@ where
     let mut seen_specs: HashSet<(String, String)> = HashSet::new();
     let mut pending: VecDeque<Dep> = VecDeque::new();
     let mut edge_targets: EdgeTargets = HashMap::new();
+    // Side index: name → list of specs registered under that name.
+    // Lets `graph_worker` find all primary keys for a fetched name in
+    // O(1) instead of scanning every key in `edge_targets` per msg.
+    // O(N²) → O(N) on the graph_worker hot loop; ant-design's 4645
+    // msgs × 4645 keys → 21M iter dropped to 4645.
+    let mut name_index: HashMap<String, Vec<String>> = HashMap::new();
 
     let root_index = graph.root_index;
     enqueue_node_edges(
@@ -723,6 +706,7 @@ where
         &mut pending,
         &mut seen_specs,
         &mut edge_targets,
+        &mut name_index,
         cache,
         build_config,
     );
@@ -738,6 +722,7 @@ where
             &mut pending,
             &mut seen_specs,
             &mut edge_targets,
+            &mut name_index,
             cache,
             build_config,
         );
@@ -773,6 +758,7 @@ where
         graph_worker(
             graph,
             edge_targets,
+            name_index,
             seen_specs,
             cache_clone,
             build_config_owned,
@@ -971,6 +957,7 @@ struct GraphWorkerStats {
 fn graph_worker<R>(
     mut graph: DependencyGraph,
     mut edge_targets: EdgeTargets,
+    mut name_index: HashMap<String, Vec<String>>,
     mut seen_specs: HashSet<(String, String)>,
     cache: MemoryCache,
     build_config: BuildDepsConfig,
@@ -989,13 +976,12 @@ where
         stats.processed += 1;
 
         // Drain edge_targets for every spec keyed under this name.
-        // The fetch future already wrote both `(name, primary_spec)`
-        // and `(name, resolved_version)` cache slots, so any
-        // edge_targets entry for this name should hit cache.
-        let primary_keys: Vec<(String, String)> = edge_targets
-            .keys()
-            .filter(|(n, _)| n == &msg.name)
-            .cloned()
+        // O(1) name_index lookup vs O(N) edge_targets.keys() filter
+        // (4645 names × 4645 keys = 21M iter on ant-design).
+        let specs_for_name = name_index.remove(&msg.name).unwrap_or_default();
+        let primary_keys: Vec<(String, String)> = specs_for_name
+            .into_iter()
+            .map(|s| (msg.name.clone(), s))
             .collect();
 
         let mut new_specs: Vec<Dep> = Vec::new();
@@ -1060,6 +1046,7 @@ where
                         &mut new_specs,
                         &mut seen_specs,
                         &mut edge_targets,
+                        &mut name_index,
                         &cache,
                         &build_config,
                     );
@@ -1086,12 +1073,14 @@ where
 /// caller-provided `out` Vec instead of a VecDeque. Used by the
 /// graph worker to batch "new specs from this fetch" before sending
 /// them back to the main loop in one channel message.
+#[allow(clippy::too_many_arguments)]
 fn enqueue_node_edges_into(
     graph: &mut DependencyGraph,
     node_idx: NodeIndex,
     out: &mut Vec<Dep>,
     seen_specs: &mut HashSet<(String, String)>,
     edge_targets: &mut EdgeTargets,
+    name_index: &mut HashMap<String, Vec<String>>,
     cache: &MemoryCache,
     build_config: &BuildDepsConfig,
 ) {
@@ -1133,6 +1122,10 @@ fn enqueue_node_edges_into(
                 .or_default()
                 .push((idx, edge.edge_id));
             if seen_specs.insert(key.clone()) {
+                name_index
+                    .entry(key.0.clone())
+                    .or_default()
+                    .push(key.1.clone());
                 out.push(key);
             }
         }
