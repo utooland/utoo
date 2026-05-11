@@ -1,0 +1,28 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "sourceMaps": false,
+    "styles": {
+      "inlineCss": {},
+      "postcss": {
+        "plugins": [
+          [
+            "postcss-plugin-px2rem",
+            {
+              "rootValue": 16,
+              "unitPrecision": 5,
+              "replace": true,
+              "mediaQuery": false,
+              "minPixelValue": 0
+            }
+          ]
+        ]
+      }
+    }
+  }
+}

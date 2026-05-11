@@ -1,6 +1,7 @@
 use anyhow::Result;
-use turbo_tasks::Vc;
+use turbo_tasks::{ResolvedVc, Vc};
 use turbopack::module_options::ModuleRule;
+use turbopack_core::source_transform::SourceTransform;
 
 use crate::{
     config::Config,
@@ -15,6 +16,7 @@ pub async fn get_client_transforms_rules(
     config: Vc<Config>,
     mode: Vc<Mode>,
     foreign_code: bool,
+    postcss_transform: Option<ResolvedVc<Box<dyn SourceTransform>>>,
 ) -> Result<Vec<ModuleRule>> {
     let mut rules = vec![];
 
@@ -50,7 +52,9 @@ pub async fn get_client_transforms_rules(
             .unwrap_or(InjectType::Style);
 
         let minify = *config.minify(mode).await?;
-        rules.push(get_inline_css_rule(insert.into(), inject_type, minify).await?);
+        rules.push(
+            get_inline_css_rule(insert.into(), inject_type, minify, postcss_transform).await?,
+        );
     }
 
     Ok(rules)
