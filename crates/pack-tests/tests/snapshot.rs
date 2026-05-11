@@ -19,7 +19,7 @@ use std::{
     fs, io,
     path::{Path, PathBuf},
 };
-use turbo_rcstr::{RcStr, rcstr};
+use turbo_rcstr::rcstr;
 use turbo_tasks::{Effects, OperationVc, ResolvedVc, TurboTasks, ValueToString, Vc, take_effects};
 use turbo_tasks_backend::{BackendOptions, TurboTasksBackend, noop_backing_storage};
 use turbo_tasks_fs::{DirectoryContent, DirectoryEntry, FileSystemPath};
@@ -120,6 +120,10 @@ async fn run(resource: PathBuf) -> Result<()> {
         noop_backing_storage(),
     ));
     tt.run_once(async move {
+        let project_options = project_options_from_resource(&resource)?;
+        let container_op = ProjectContainer::new_operation(rcstr!("project"), project_options.dev);
+        ProjectContainer::initialize(container_op, project_options).await?;
+
         #[turbo_tasks::function(operation)]
         async fn snapshot_issues_operation(out_op: OperationVc<FileSystemPath>) -> Result<Vc<()>> {
             let out_path = out_op
@@ -155,7 +159,7 @@ async fn run(resource: PathBuf) -> Result<()> {
             Ok(take_effects(out_op).await?.cell())
         }
 
-        let out_op = run_test_operation(resource.to_str().unwrap().into());
+        let out_op = run_test_operation(container_op);
         let snapshot_effects = snapshot_effects_operation(out_op)
             .read_strongly_consistent()
             .await?;
@@ -172,10 +176,9 @@ async fn run(resource: PathBuf) -> Result<()> {
     Ok(())
 }
 
-#[turbo_tasks::function(operation)]
-async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
-    let test_path = canonicalize(&resource)?;
-    assert!(test_path.exists(), "{resource} does not exist");
+fn project_options_from_resource(resource: &Path) -> Result<ProjectOptions> {
+    let test_path = canonicalize(resource)?;
+    assert!(test_path.exists(), "{} does not exist", resource.display());
     assert!(
         test_path.is_dir(),
         "{} is not a directory. Snapshot tests only support directories",
@@ -260,7 +263,7 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
     // Convert the merged inner bundler config back to string for ProjectOptions
     let final_config_content = serde_json::to_string_pretty(&user_config)?;
 
-    let project_options = ProjectOptions {
+    Ok(ProjectOptions {
         root_path: Path::new(&*REPO_ROOT)
             .join("crates/pack-tests/tests/snapshot")
             .to_string_lossy()
@@ -288,11 +291,13 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
             .to_string_lossy()
             .to_string()
             .into(),
-    };
+    })
+}
 
-    // Initialize project container
-    let container_op = ProjectContainer::new_operation(rcstr!("project"), project_options.dev);
-    ProjectContainer::initialize(container_op, project_options).await?;
+#[turbo_tasks::function(operation)]
+async fn run_test_operation(
+    container_op: OperationVc<ProjectContainer>,
+) -> Result<Vc<FileSystemPath>> {
     let project_container = container_op.resolve().strongly_consistent().await?;
 
     // Run bundling operation using the same pattern as build.rs

@@ -6,6 +6,7 @@ use turbopack::module_options::{ModuleRule, ModuleRuleEffect, ModuleType, RuleCo
 use turbopack_core::reference_type::{
     CssReferenceSubType, ReferenceTypeCondition, UrlReferenceSubType,
 };
+use turbopack_core::source_transform::SourceTransform;
 use turbopack_ecmascript::{CustomTransformer, EcmascriptInputTransform};
 
 use image::{StructuredImageModuleType, module::BlurPlaceholderMode};
@@ -77,7 +78,24 @@ pub async fn get_inline_css_rule(
     insert: RcStr,
     inject_type: InjectType,
     minify: bool,
+    postcss_transform: Option<ResolvedVc<Box<dyn SourceTransform>>>,
 ) -> Result<ModuleRule> {
+    let mut effects = vec![];
+
+    if let Some(postcss_transform) = postcss_transform {
+        effects.push(ModuleRuleEffect::SourceTransforms(ResolvedVc::cell(vec![
+            postcss_transform,
+        ])));
+    }
+
+    effects.push(ModuleRuleEffect::ModuleType(ModuleType::Custom(
+        ResolvedVc::upcast(
+            InlineCssModuleType::new(insert, inject_type, minify)
+                .to_resolved()
+                .await?,
+        ),
+    )));
+
     Ok(ModuleRule::new(
         RuleCondition::All(vec![
             RuleCondition::not(RuleCondition::ReferenceType(ReferenceTypeCondition::Url(
@@ -91,13 +109,7 @@ pub async fn get_inline_css_rule(
             ))),
             RuleCondition::ResourcePathEndsWith(".css".to_string()),
         ]),
-        vec![ModuleRuleEffect::ModuleType(ModuleType::Custom(
-            ResolvedVc::upcast(
-                InlineCssModuleType::new(insert, inject_type, minify)
-                    .to_resolved()
-                    .await?,
-            ),
-        ))],
+        effects,
     ))
 }
 
