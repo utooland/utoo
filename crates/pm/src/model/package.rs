@@ -64,6 +64,8 @@ impl LifecycleScripts {
 pub struct PublishMeta {
     pub private: bool,
     #[serde(default)]
+    pub name: String,
+    #[serde(default)]
     pub version: String,
     #[serde(rename = "publishConfig")]
     pub publish_config: PublishConfig,
@@ -73,6 +75,7 @@ impl PublishMeta {
     pub fn from_package_json(pkg: &PackageJson) -> Self {
         Self {
             private: pkg.private.unwrap_or(false),
+            name: pkg.name.clone(),
             version: pkg.version.clone(),
             publish_config: pkg.publish_config.clone().unwrap_or_default(),
         }
@@ -84,6 +87,12 @@ impl PublishMeta {
                 "This package has been marked as private.\n\
                  Remove the 'private' field from package.json to publish it."
             );
+        }
+        if self.name.is_empty() {
+            bail!("Cannot publish: package.json requires a non-empty 'name' field");
+        }
+        if self.version.is_empty() {
+            bail!("Cannot publish: package.json requires a non-empty 'version' field");
         }
         if self
             .publish_config
@@ -162,10 +171,11 @@ impl PackageInfo {
     }
 
     /// Build from the full PackageJson (cached path, project/workspace packages).
+    ///
+    /// Project root and workspaces may legitimately omit `name` — npm allows
+    /// running `install`/lifecycle scripts on `{}` package.json. Callers that
+    /// actually require a name (publish, link-to-global) validate explicitly.
     pub fn from_package_json(path: &Path, pkg: &PackageJson) -> Result<Self> {
-        if pkg.name.is_empty() {
-            anyhow::bail!("Failed to get package name from package.json");
-        }
         Ok(PackageInfo {
             path: path.to_path_buf(),
             bin_files: pkg.bin_entries(),
@@ -311,6 +321,18 @@ mod tests {
         let package_info = PackageInfo::from_path(&package_dir).await.unwrap();
 
         assert_eq!(package_info.name, "@scope/test-package");
+    }
+
+    #[tokio::test]
+    async fn test_package_info_from_package_json_allows_missing_name() {
+        // `utoo install <pkg>` against a `{}` package.json must succeed —
+        // npm allows installing into an unnamed project, and the project
+        // root never needs a name to run lifecycle hooks. Callers that do
+        // need a name (publish, link-to-global) check explicitly.
+        let pkg = PackageJson::default();
+        let info = PackageInfo::from_package_json(Path::new("/tmp"), &pkg)
+            .expect("project root without name must load");
+        assert_eq!(info.name, "");
     }
 
     #[tokio::test]
