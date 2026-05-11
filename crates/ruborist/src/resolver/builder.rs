@@ -883,23 +883,12 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
                 continue;
             }
 
-            // Registry edge — pre-check Reuse to skip wasteful fetch when a
-            // sibling already resolved a compatible version.
-            if let FindResult::Reuse(idx) =
-                graph.find_compatible_node(parent, &edge.name, &edge.spec)
-            {
-                graph.mark_dependency_resolved(edge.edge_id, idx);
-                update_node_type_from_edge(graph, parent, idx, &edge.edge_type);
-                if let Some(node) = graph.get_node(idx) {
-                    receiver.on_event(BuildEvent::Reused {
-                        name: &edge.name,
-                        version: &node.version,
-                    });
-                }
-                continue;
-            }
-
-            // Registry cache miss: dispatch async fetch.
+            // Registry edge: dispatch fetch. We do NOT pre-check Reuse here —
+            // `process_dependency` already calls `find_compatible_node` once
+            // after the fetch lands, so a pre-check would be a second walk of
+            // the parent chain per edge (5000+ extra calls on ant-design).
+            // `UnifiedRegistry`'s OnceMap dedups any actual network work for
+            // duplicate (name, spec) pairs, so the wasted fetches are cheap.
             receiver.on_event(BuildEvent::PreloadFetching { name: &edge.name });
             let name = edge.name.clone();
             let spec = edge.spec.clone();
