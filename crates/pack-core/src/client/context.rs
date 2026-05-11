@@ -6,9 +6,12 @@ use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{ResolvedVc, TaskInput, TryJoinIterExt, ValueToString, Vc, trace::TraceRawVcs};
 use turbo_tasks_env::EnvMap;
 use turbo_tasks_fs::FileSystemPath;
-use turbopack::module_options::{
-    CssOptionsContext, EcmascriptOptionsContext, JsxTransformOptions, ModuleOptionsContext,
-    ModuleRule, TypescriptTransformOptions, side_effect_free_packages_glob,
+use turbopack::{
+    evaluate_context::{config_tracing_module_context, node_evaluate_asset_context},
+    module_options::{
+        CssOptionsContext, EcmascriptOptionsContext, JsxTransformOptions, ModuleOptionsContext,
+        ModuleRule, TypescriptTransformOptions, side_effect_free_packages_glob,
+    },
 };
 use turbopack_browser::{BrowserChunkingContext, CurrentChunkMethod};
 use turbopack_core::{
@@ -19,13 +22,15 @@ use turbopack_core::{
     compile_time_info::CompileTimeInfo,
     environment::{BrowserEnvironment, Environment, ExecutionEnvironment},
     file_source::FileSource,
+    ident::Layer,
     module_graph::binding_usage_info::OptionBindingUsageInfo,
+    resolve::options::{ImportMap, ImportMapping},
 };
 use turbopack_css::chunk::CssChunkType;
 use turbopack_ecmascript::{TypeofWindow, chunk::EcmascriptChunkType};
 use turbopack_node::{
     execution_context::ExecutionContext,
-    transforms::postcss::{PostCssConfigLocation, PostCssTransformOptions},
+    transforms::postcss::{PostCssConfigLocation, PostCssTransform, PostCssTransformOptions},
 };
 use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 
@@ -69,6 +74,13 @@ use super::{
     react_refresh::assert_can_resolve_react_refresh, runtime_entry::RuntimeEntry,
     transforms::get_client_transforms_rules,
 };
+
+#[turbo_tasks::function]
+fn postcss_import_map(package_mapping: ResolvedVc<ImportMapping>) -> Vc<ImportMap> {
+    let mut import_map = ImportMap::default();
+    import_map.insert_exact_alias(RcStr::from("@vercel/turbopack/postcss"), package_mapping);
+    import_map.cell()
+}
 
 #[turbo_tasks::function]
 pub async fn get_client_compile_time_info(
@@ -227,8 +239,81 @@ pub async fn get_client_module_options_context(
         .await?;
     let target_browsers = env.runtime_versions();
 
-    let mut client_rules = get_client_transforms_rules(config, mode, false).await?;
-    let mut foreign_client_rules = get_client_transforms_rules(config, mode, true).await?;
+    let source_maps = if *config.source_maps().await? {
+        SourceMapsType::Full
+    } else {
+        SourceMapsType::None
+    };
+    let postcss_config_content = (*config.postcss_config_content().await?).clone();
+    let postcss_transform_options = Some(PostCssTransformOptions {
+        postcss_package: Some(get_postcss_package_mapping().to_resolved().await?),
+        config_location: PostCssConfigLocation::ProjectPathOrLocalPath,
+        config_content: postcss_config_content,
+        ..Default::default()
+    });
+
+    let postcss_foreign_transform_options =
+        postcss_transform_options
+            .as_ref()
+            .map(|postcss_transform_options| PostCssTransformOptions {
+                // For node_modules we don't want to resolve postcss config relative to the file being
+                // compiled, instead it only uses the project root postcss config.
+                config_location: PostCssConfigLocation::ProjectPath,
+                ..postcss_transform_options.clone()
+            });
+
+    let postcss_import_map =
+        postcss_import_map(*get_postcss_package_mapping().to_resolved().await?);
+    let inline_postcss_transform = if let Some(options) = postcss_transform_options.as_ref() {
+        Some(ResolvedVc::upcast(
+            PostCssTransform::new(
+                node_evaluate_asset_context(
+                    *execution_context,
+                    Some(postcss_import_map),
+                    None,
+                    Layer::new(rcstr!("webpack_loaders")),
+                    cfg!(all(target_family = "wasm", target_os = "unknown")),
+                ),
+                config_tracing_module_context(*execution_context),
+                *execution_context,
+                options.config_location,
+                options.config_content.clone(),
+                matches!(source_maps, SourceMapsType::Full),
+            )
+            .to_resolved()
+            .await?,
+        ))
+    } else {
+        None
+    };
+    let inline_foreign_postcss_transform =
+        if let Some(options) = postcss_foreign_transform_options.as_ref() {
+            Some(ResolvedVc::upcast(
+                PostCssTransform::new(
+                    node_evaluate_asset_context(
+                        *execution_context,
+                        Some(postcss_import_map),
+                        None,
+                        Layer::new(rcstr!("webpack_loaders")),
+                        cfg!(all(target_family = "wasm", target_os = "unknown")),
+                    ),
+                    config_tracing_module_context(*execution_context),
+                    *execution_context,
+                    options.config_location,
+                    options.config_content.clone(),
+                    matches!(source_maps, SourceMapsType::Full),
+                )
+                .to_resolved()
+                .await?,
+            ))
+        } else {
+            None
+        };
+
+    let mut client_rules =
+        get_client_transforms_rules(config, mode, false, inline_postcss_transform).await?;
+    let mut foreign_client_rules =
+        get_client_transforms_rules(config, mode, true, inline_foreign_postcss_transform).await?;
 
     // Ignore .d.ts files - they are TypeScript declaration files and should not be bundled
     let ignore_dts_rule = ModuleRule::new(
@@ -285,37 +370,10 @@ pub async fn get_client_module_options_context(
         ));
     }
 
-    let postcss_config_content = (*config.postcss_config_content().await?).clone();
-
-    let postcss_transform_options = Some(PostCssTransformOptions {
-        postcss_package: Some(get_postcss_package_mapping().to_resolved().await?),
-        config_location: PostCssConfigLocation::ProjectPathOrLocalPath,
-        config_content: postcss_config_content,
-        ..Default::default()
-    });
-
-    let postcss_foreign_transform_options =
-        postcss_transform_options
-            .as_ref()
-            .map(|postcss_transform_options| {
-                PostCssTransformOptions {
-                    // For node_modules we don't want to resolve postcss config relative to the file being
-                    // compiled, instead it only uses the project root postcss config.
-                    config_location: PostCssConfigLocation::ProjectPath,
-                    ..postcss_transform_options.clone()
-                }
-            });
-
     let enable_postcss_transform = postcss_transform_options
         .map(|postcss_transform_options| postcss_transform_options.resolved_cell());
     let enable_foreign_postcss_transform = postcss_foreign_transform_options
         .map(|postcss_foreign_transform_options| postcss_foreign_transform_options.resolved_cell());
-
-    let source_maps = if *config.source_maps().await? {
-        SourceMapsType::Full
-    } else {
-        SourceMapsType::None
-    };
     let module_options_context = ModuleOptionsContext {
         ecmascript: EcmascriptOptionsContext {
             enable_typeof_window_inlining: Some(TypeofWindow::Object),
