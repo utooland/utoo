@@ -675,6 +675,30 @@ where
     let cap = preload_config.concurrency;
     let peer_deps = preload_config.peer_deps;
 
+    // TCP/TLS warmup: pre-issue 16 parallel HEAD requests against the
+    // registry root so the connection pool has warm sockets ready
+    // before the first wave of manifest fetches. Without warmup the
+    // first ~16 fetches each pay a fresh TCP handshake + TLS roundtrip
+    // (50-100ms each on linux GHA), forming a 50-100ms wave-start
+    // ramp visible in eff_par_full breakdown. The HEAD request is
+    // cheap (no body), but the side effect — a populated reqwest
+    // pool_max_idle_per_host(256) — is what we want.
+    //
+    // Fire-and-forget: we don't await the HEADs to complete, just
+    // dispatch them. By the time the first fetch wave starts (after
+    // initial seed + edge_targets walk, ~5-15ms of CPU), most HEADs
+    // have hit network and the first 16 connections are ready.
+    {
+        let warm_url = format!("{}/", &*registry);
+        for _ in 0..16 {
+            let client = client.clone();
+            let url = warm_url.clone();
+            tokio::spawn(async move {
+                let _ = client.head(&url).send().await;
+            });
+        }
+    }
+
     // Initial seed: walk root + workspace nodes for unresolved
     // registry edges. Done inline before spawning workers (one-time
     // cost, not on the hot path).

@@ -132,23 +132,26 @@ pub fn get_install_scope() -> InstallScope {
     INSTALL_SCOPE.get().copied().unwrap_or_default()
 }
 
-// Manifest fetch concurrency configuration. Default kept at 64.
+// Manifest fetch concurrency configuration.
 //
-// We tried 256 to match bun's observed parallel streams; on GHA the
-// fetch-breakdown instrumentation showed sum_parse exploded from
-// ~10ms (local Mac, network-bound) to 728s on first cold run with
-// manifest-bench's HTTP-only sweep on GHA (npmjs, h1) bottoms out
-// somewhere in the 96-128 band — which one wins varies with npmjs's
-// per-IP latency on each run (good runs picked 128, slow-network
-// runs flattened the curve and even regressed at 128 due to wider
-// p99 from queued requests). 96 is the conservative pick: it's at
-// or near best on every run we've measured, never the worst, and
-// leaves headroom for npmjs to throttle without compounding queue
-// time. Combined-parse fetch (671ac98e) made the spawn_blocking
-// pool no longer a contention bottleneck, but didn't change the
-// network-side variance — that's what caps the useful concurrency.
+// History:
+//   - 64 (origin/next default): too conservative on linux GHA, eff_par
+//     capped at 56 with steady ramp-down tail.
+//   - 256 (initial bump): sum_parse exploded from ~10ms to 728s on
+//     cold runs — too many concurrent parses queued on the small
+//     spawn_blocking pool before the channel-arch refactor.
+//   - 96 (post combined-parse): manifest-bench h1 sweep on GHA showed
+//     96-128 band was sweet spot; 96 chosen as conservative.
+//   - 128 (current, A/B in PR perf/p1-concurrency-warmup): channel
+//     architecture moved graph_worker off the worker scheduler and
+//     freed the blocking pool. The contention concern that capped 96
+//     is resolved; revisit the 96-128 band with a clean A/B. Expected
+//     win: 0.1-0.2s on p1 by lifting eff_par_full from ~75 toward 80+.
+//
+// Falsification: if 128 regresses p1 vs PR #2920's ~2.80s baseline,
+// revert to 96.
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 96));
+    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 128));
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
     MANIFESTS_CONCURRENCY_LIMIT.set(value);
