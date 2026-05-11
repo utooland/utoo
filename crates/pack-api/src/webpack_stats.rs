@@ -15,6 +15,7 @@ use turbopack_core::{
     output::{OutputAsset, OutputAssets, OutputAssetsReference},
 };
 use turbopack_css::chunk::CssChunk;
+use turbopack_nodejs::{EcmascriptBuildNodeChunk, EcmascriptBuildNodeEntryChunk};
 
 #[turbo_tasks::value]
 #[derive(Serialize, Deserialize, Debug)]
@@ -134,6 +135,94 @@ pub async fn get_asset_intermediate_info(
         for item in chunk_items.iter() {
             local_chunk_items.push((*item, chunk_ident.clone()));
         }
+    }
+
+    if let Some(chunk) = ResolvedVc::try_downcast_type::<EcmascriptBuildNodeChunk>(asset) {
+        let chunk_path_full = chunk.path().await?;
+        let chunk_ident = dist_root
+            .await?
+            .get_relative_path_to(&chunk_path_full)
+            .unwrap_or_else(|| chunk_path_full.path.clone());
+
+        local_chunks.push(WebpackStatsChunk {
+            size: asset_len,
+            files: vec![chunk_ident.clone()],
+            id: chunk_ident.clone(),
+            ..Default::default()
+        });
+
+        let chunk_items = chunk.chunk().chunk_items().await?;
+        for item in chunk_items.iter() {
+            local_chunk_items.push((*item, chunk_ident.clone()));
+        }
+    }
+
+    if let Some(chunk) = ResolvedVc::try_downcast_type::<EcmascriptBuildNodeEntryChunk>(asset) {
+        let entry_path_full = chunk.path().await?;
+        let entry_path = dist_root
+            .await?
+            .get_relative_path_to(&entry_path_full)
+            .unwrap_or_else(|| entry_path_full.path.clone());
+
+        local_chunks.push(WebpackStatsChunk {
+            size: asset_len,
+            files: vec![entry_path.clone()],
+            id: entry_path.clone(),
+            ..Default::default()
+        });
+
+        let evaluatable_assets = chunk.evaluatable_assets().await?;
+        let items: Vec<_> = evaluatable_assets
+            .iter()
+            .map(|&evaluatable_asset| {
+                let entry_path = entry_path.clone();
+                async move {
+                    let item = evaluatable_asset
+                        .as_chunk_item(chunk.module_graph(), chunk.chunking_context());
+                    Ok::<_, anyhow::Error>((item.to_resolved().await?, entry_path))
+                }
+            })
+            .try_join()
+            .await?;
+        local_chunk_items.extend(items);
+
+        let entry_referenced_assets = chunk.chunks_data().await?;
+        let futures: Vec<_> = entry_referenced_assets
+            .iter()
+            .map(|asset| {
+                let asset = *asset;
+                async move {
+                    let chunk_data = asset.await?;
+                    let name: RcStr = chunk_data.path.as_str().into();
+                    Ok::<_, anyhow::Error>((name.clone(), WebpackStatsEntrypointAssets { name }))
+                }
+            })
+            .collect();
+
+        let results = futures::future::try_join_all(futures).await?;
+        let mut entry_chunks = Vec::with_capacity(results.len() + 1);
+        let mut entry_assets_list = Vec::with_capacity(results.len() + 1);
+
+        for (chunk_name, asset_info) in results {
+            entry_chunks.push(chunk_name);
+            entry_assets_list.push(asset_info);
+        }
+
+        entry_chunks.push(entry_path.clone());
+        entry_assets_list.push(WebpackStatsEntrypointAssets {
+            name: entry_path.clone(),
+        });
+
+        let entry_name: RcStr = remove_extension_from_str(entry_path.as_str()).into();
+
+        local_entrypoints.push((
+            entry_name.clone(),
+            WebpackStatsEntrypoint {
+                name: entry_name,
+                chunks: entry_chunks,
+                assets: entry_assets_list,
+            },
+        ));
     }
 
     if let Some(chunk_list) = ResolvedVc::try_downcast_type::<EcmascriptDevChunkList>(asset) {
