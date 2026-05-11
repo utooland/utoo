@@ -329,14 +329,48 @@ fn spawn_settle(
         let fut_start = Instant::now();
         let primary_spec = spec.clone();
         let (real_name, real_spec) = normalize_spec(&name, &spec);
-        let real_spec_for_parse = real_spec.clone();
-        let peer = peer_deps;
-        let parsed = tokio::task::spawn_blocking(move || {
-            parse_combined(Arc::clone(&raw), &real_spec_for_parse, peer)
-        })
-        .await
-        .ok()
-        .flatten();
+
+        // Two-phase parse: if the original fetcher already cached the
+        // FullManifest envelope (the common case — settle is dispatched
+        // AFTER fetcher's FetchOutcome lands and writes the cache),
+        // skip the envelope re-parse and only deserialize the requested
+        // version subtree via `extract_core_version_off_runtime`.
+        // Saves the to_borrowed_value + dist_tags + versions_keys
+        // + FullManifest construction cost per sibling. With 1843
+        // siblings on ant-design × ~1ms saved CPU, ~25ms wall on a
+        // 75-worker eff_par_net. Falls back to combined parse on the
+        // race window where settle dispatches before fetcher's cache
+        // write commits (rare).
+        let two_phase = cache.get_full_manifest(&real_name).and_then(|full| {
+            resolve_target_version((&*full).into(), &real_spec)
+                .ok()
+                .map(|resolved| (full, resolved))
+        });
+
+        let parsed = match two_phase {
+            Some((full, resolved)) => {
+                let (resolved, core_opt) =
+                    crate::model::manifest::extract_core_version_off_runtime(
+                        Arc::clone(&full),
+                        resolved,
+                    )
+                    .await;
+                core_opt.map(|core_arc| {
+                    let transitives = extract_transitive(&core_arc, peer_deps);
+                    (full, resolved, core_arc, transitives)
+                })
+            }
+            None => {
+                let real_spec_for_parse = real_spec.clone();
+                let peer = peer_deps;
+                tokio::task::spawn_blocking(move || {
+                    parse_combined(Arc::clone(&raw), &real_spec_for_parse, peer)
+                })
+                .await
+                .ok()
+                .flatten()
+            }
+        };
 
         let transitives = match parsed {
             Some((full_arc, resolved, core_arc, transitives)) => {
@@ -712,8 +746,15 @@ where
     // Channels: main → graph (fetched events) + graph → main (new
     // pending specs). Bounded at 2 * cap so neither side stalls
     // waiting for the other under bursty wave behavior.
-    let (fetch_tx, fetch_rx) = mpsc::channel::<FetchEventMsg>(cap * 2 + 16);
-    let (specs_tx, mut specs_rx) = mpsc::channel::<Vec<Dep>>(cap * 2 + 16);
+    // Buffer = cap * 4 (was cap * 2). With cap=128 this is 528 vs
+    // 272 slots. Rationale: when graph_worker briefly bursts CPU on
+    // a wave-end batch, main loop's `fetch_tx.send().await` can fill
+    // the channel and block. A blocked main loop stops dispatching
+    // new fetches → eff_par_net dips. 4× buffer absorbs ~2 full caps
+    // worth of pending events without backpressuring the fetch loop.
+    // Memory cost is trivial (FetchEventMsg = 1 String, ~24 bytes).
+    let (fetch_tx, fetch_rx) = mpsc::channel::<FetchEventMsg>(cap * 4 + 16);
+    let (specs_tx, mut specs_rx) = mpsc::channel::<Vec<Dep>>(cap * 4 + 16);
 
     // Spawn graph worker on the *blocking* thread pool, not the
     // worker scheduler. graph_worker is CPU-only and can run for
