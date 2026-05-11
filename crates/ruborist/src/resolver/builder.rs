@@ -602,6 +602,92 @@ pub async fn process_dependency<R: RegistryClient>(
 
             Ok(ProcessResult::Created(new_index))
         }
+        FindResult::Replace(slot_idx) => {
+            // Replace fires only for `npm:` alias edges, which are always
+            // Registry — the underlying-name check in `find_in_parent_chain`
+            // can only diverge from the slot name when the spec is `npm:`.
+            let resolved: ResolvedPackage = if let Some(r) = pre_resolved {
+                r
+            } else {
+                match resolve_registry_dep(
+                    registry,
+                    &edge_info.name,
+                    &edge_info.spec,
+                    &edge_info.edge_type,
+                )
+                .await?
+                {
+                    Some(r) => r,
+                    None => {
+                        tracing::debug!(
+                            "Skipped optional alias dependency {}@{}",
+                            edge_info.name,
+                            edge_info.spec
+                        );
+                        return Ok(ProcessResult::Skipped);
+                    }
+                }
+            };
+
+            let resolved = if let Some(override_spec) =
+                graph.check_override(node_index, &edge_info.name, Some(&resolved.version))
+            {
+                match resolve_registry_dep(
+                    registry,
+                    &edge_info.name,
+                    &override_spec,
+                    &edge_info.edge_type,
+                )
+                .await?
+                {
+                    Some(r) => r,
+                    None => resolved,
+                }
+            } else {
+                resolved
+            };
+
+            // Wipe the slot's existing dependency self-loops (deps of the
+            // evicted occupant). New deps come from `resolved.manifest`.
+            let old_dep_edges: Vec<petgraph::graph::EdgeIndex> = graph
+                .get_dependency_edges(slot_idx)
+                .iter()
+                .map(|(eid, _)| *eid)
+                .collect();
+            for eid in old_dep_edges {
+                graph.graph.remove_edge(eid);
+            }
+
+            // Mutate node payload in place — preserves the NodeIndex so
+            // any in-edges from other nodes that already resolved here
+            // stay structurally pointed at this slot.
+            if let Some(node) = graph.get_node_mut(slot_idx) {
+                node.version = resolved.version.clone();
+                node.manifest = NodeManifest::Registry(Arc::clone(&resolved.manifest));
+            }
+
+            add_edges_from(
+                graph,
+                slot_idx,
+                &*resolved.manifest,
+                &EdgeContext::new(config.peer_deps, DevDeps::Exclude),
+            );
+
+            graph.mark_dependency_resolved(edge_info.edge_id, slot_idx);
+            update_node_type_from_edge(graph, node_index, slot_idx, &edge_info.edge_type);
+
+            // NOTE: in-edges from other nodes (consumers of the evicted
+            // occupant) are not re-validated. For the common alias case
+            // — alias and previous occupant share a version (`raw-body@2.1.3`
+            // displacing `ms@2.1.3` when debug already resolved its
+            // `ms@^2.1.3` edge) — consumers stay satisfied. When versions
+            // diverge, consumer edges may carry stale `valid=true` despite
+            // the new manifest no longer satisfying their spec.
+            // TODO: walk consumer edges and re-queue any whose spec is no
+            // longer satisfied by the new version.
+
+            Ok(ProcessResult::Created(slot_idx))
+        }
     }
 }
 

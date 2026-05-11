@@ -12,7 +12,7 @@ use super::manifest::{CoreVersionManifest, NodeManifest};
 use super::node::{EdgeType, NodeType};
 use super::override_rule::{OverrideRule, Overrides};
 use super::package_json::PackageJson;
-use crate::resolver::semver::matches;
+use crate::resolver::semver::{matches, normalize_spec};
 
 /// Package node in the dependency graph.
 #[derive(Debug, Clone)]
@@ -447,6 +447,18 @@ impl DependencyGraph {
     }
 
     /// Recursively search for compatible node in parent chain.
+    ///
+    /// Identity check mirrors npm's `Node.matches`: an existing slot can
+    /// satisfy the requesting edge only when both the slot name and the
+    /// underlying package identity match. Differences:
+    /// - Regular range edges only constrain version: any package in the
+    ///   slot whose version satisfies the range is a Reuse (matches
+    ///   `dep-valid.js`'s 'range' case — `semver.satisfies(child.version)`
+    ///   with no packageName check).
+    /// - `npm:` alias edges additionally require the slot's manifest
+    ///   `packageName` to equal the alias target (`subSpec` in npm parlance).
+    ///   When the slot is occupied by a different underlying package the
+    ///   alias is explicit and gets the slot via `Replace`.
     fn find_in_parent_chain(
         &self,
         current: NodeIndex,
@@ -454,23 +466,42 @@ impl DependencyGraph {
         spec: &str,
         requester: NodeIndex,
     ) -> FindResult {
-        // Check all physical children of current node
+        let (real_name, real_spec) = normalize_spec(name, spec);
+        let is_alias = real_name != name;
+
         for child_idx in self.get_physical_children(current) {
             let child = &self.graph[child_idx];
-            if child.name == name {
-                if matches(spec, &child.version) {
-                    return FindResult::Reuse(child_idx);
-                } else {
-                    tracing::debug!(
-                        "found conflict deps {}@{} got {}, conflict at {:?}",
-                        name,
-                        spec,
-                        child.version,
-                        child_idx
-                    );
-                    return FindResult::Conflict(requester);
-                }
+            if child.name != name {
+                continue;
             }
+
+            let version_ok = matches(&real_spec, &child.version);
+            let underlying_ok = !is_alias || child.manifest.name() == real_name;
+
+            if version_ok && underlying_ok {
+                return FindResult::Reuse(child_idx);
+            }
+
+            if is_alias {
+                tracing::debug!(
+                    "alias replaces slot {}: want {}@{}, slot has {}@{}",
+                    name,
+                    real_name,
+                    real_spec,
+                    child.manifest.name(),
+                    child.version
+                );
+                return FindResult::Replace(child_idx);
+            }
+
+            tracing::debug!(
+                "found conflict deps {}@{} got {}, conflict at {:?}",
+                name,
+                spec,
+                child.version,
+                child_idx
+            );
+            return FindResult::Conflict(requester);
         }
 
         // Recurse to parent
@@ -635,6 +666,11 @@ impl DependencyGraph {
 pub enum FindResult {
     /// Can reuse existing node
     Reuse(NodeIndex),
+    /// Slot already occupied by an incompatible installation but the
+    /// requesting edge is an explicit `npm:` alias — evict the occupant
+    /// and replace it in place. Matches npm's `canReplaceWith` semantic
+    /// where alias edges are stricter about underlying identity.
+    Replace(NodeIndex),
     /// Conflict found, install under this parent
     Conflict(NodeIndex),
     /// Need to install under this parent (usually root)
