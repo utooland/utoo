@@ -344,9 +344,15 @@ enum Commands {
 fn main() {
     crate::util::sysconf::init();
 
+    // Floor worker_threads at 4 on small CI runners (GHA ubuntu-latest
+    // reports 2). Install multiplexes resolve fetch + download + clone
+    // tasks; with 2 workers a CPU-bound segment monopolizes a thread
+    // and stalls socket polling on the others, producing TCP zwin
+    // events that stretch the tail wall.
     let worker_threads = std::thread::available_parallelism()
         .map(|n| n.get())
-        .unwrap_or(4);
+        .unwrap_or(4)
+        .max(4);
 
     let result = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

@@ -6,13 +6,31 @@ pub fn init() {
         reset_sigpipe();
     }
 
-    // Windows default thread stack is 1MB, insufficient for libdeflater + tar
-    // + rayon work-stealing.
+    init_rayon_pool();
+}
+
+/// Configure the global rayon pool with a floor of 8 worker threads.
+///
+/// Rayon defaults to `num_cpus`, which is 2 on GHA ubuntu-latest.
+/// Manifest parse and extract dispatch dozens of short blocking JSON
+/// ops per fetch wave; with pool=2 these queue serially and a 5ms
+/// parse stretches to ~30ms wall as it waits for a worker. Floor of
+/// 8 oversubscribes the 2-core image but the work is still bounded
+/// by host CPU — the extra slots replace FIFO queueing with parallel
+/// dispatch. On bigger hosts `num_cpus` already exceeds 8 so this
+/// is a no-op there.
+fn init_rayon_pool() {
+    let parallelism = std::thread::available_parallelism()
+        .map(std::num::NonZero::get)
+        .unwrap_or(2);
+    let threads = parallelism.max(8);
+
+    let builder = rayon::ThreadPoolBuilder::new().num_threads(threads);
+
     #[cfg(target_os = "windows")]
-    rayon::ThreadPoolBuilder::new()
-        .stack_size(8 * 1024 * 1024)
-        .build_global()
-        .ok();
+    let builder = builder.stack_size(8 * 1024 * 1024);
+
+    builder.build_global().ok();
 }
 
 /// Restore default SIGPIPE handling so broken pipes cause a clean exit
