@@ -245,8 +245,9 @@ pub async fn get_client_module_options_context(
         SourceMapsType::None
     };
     let postcss_config_content = (*config.postcss_config_content().await?).clone();
+    let postcss_package_mapping = get_postcss_package_mapping().to_resolved().await?;
     let postcss_transform_options = Some(PostCssTransformOptions {
-        postcss_package: Some(get_postcss_package_mapping().to_resolved().await?),
+        postcss_package: Some(postcss_package_mapping),
         config_location: PostCssConfigLocation::ProjectPathOrLocalPath,
         config_content: postcss_config_content,
         ..Default::default()
@@ -262,26 +263,29 @@ pub async fn get_client_module_options_context(
                 ..postcss_transform_options.clone()
             });
 
-    let postcss_import_map =
-        postcss_import_map(*get_postcss_package_mapping().to_resolved().await?);
+    let postcss_import_map = postcss_import_map(*postcss_package_mapping);
+    let create_inline_postcss_transform = |options: &PostCssTransformOptions| {
+        PostCssTransform::new(
+            node_evaluate_asset_context(
+                *execution_context,
+                Some(postcss_import_map),
+                None,
+                Layer::new(rcstr!("webpack_loaders")),
+                cfg!(all(target_family = "wasm", target_os = "unknown")),
+            ),
+            config_tracing_module_context(*execution_context),
+            *execution_context,
+            options.config_location,
+            options.config_content.clone(),
+            matches!(source_maps, SourceMapsType::Full),
+        )
+    };
+
     let inline_postcss_transform = if let Some(options) = postcss_transform_options.as_ref() {
         Some(ResolvedVc::upcast(
-            PostCssTransform::new(
-                node_evaluate_asset_context(
-                    *execution_context,
-                    Some(postcss_import_map),
-                    None,
-                    Layer::new(rcstr!("webpack_loaders")),
-                    cfg!(all(target_family = "wasm", target_os = "unknown")),
-                ),
-                config_tracing_module_context(*execution_context),
-                *execution_context,
-                options.config_location,
-                options.config_content.clone(),
-                matches!(source_maps, SourceMapsType::Full),
-            )
-            .to_resolved()
-            .await?,
+            create_inline_postcss_transform(options)
+                .to_resolved()
+                .await?,
         ))
     } else {
         None
@@ -289,22 +293,9 @@ pub async fn get_client_module_options_context(
     let inline_foreign_postcss_transform =
         if let Some(options) = postcss_foreign_transform_options.as_ref() {
             Some(ResolvedVc::upcast(
-                PostCssTransform::new(
-                    node_evaluate_asset_context(
-                        *execution_context,
-                        Some(postcss_import_map),
-                        None,
-                        Layer::new(rcstr!("webpack_loaders")),
-                        cfg!(all(target_family = "wasm", target_os = "unknown")),
-                    ),
-                    config_tracing_module_context(*execution_context),
-                    *execution_context,
-                    options.config_location,
-                    options.config_content.clone(),
-                    matches!(source_maps, SourceMapsType::Full),
-                )
-                .to_resolved()
-                .await?,
+                create_inline_postcss_transform(options)
+                    .to_resolved()
+                    .await?,
             ))
         } else {
             None
