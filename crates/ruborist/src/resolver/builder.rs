@@ -19,9 +19,23 @@
 //! while keeping the graph building logic simple and deterministic.
 
 use petgraph::graph::NodeIndex;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
+
+#[cfg(not(target_arch = "wasm32"))]
+use futures::stream::{FuturesUnordered, StreamExt};
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::HashSet;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::sync::mpsc;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::manifest::FullManifest;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::resolver::version::resolve_target_version;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::spec::SpecStr;
 
 #[cfg(feature = "http-tarball")]
 use anyhow::Context as _;
@@ -30,6 +44,7 @@ use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
 use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
+#[cfg(target_arch = "wasm32")]
 use crate::resolver::preload::{PreloadConfig, preload_manifests};
 use crate::resolver::registry::{ResolveError, resolve_registry_dep};
 use crate::spec::{Catalogs, PackageSpec, Protocol};
@@ -450,6 +465,168 @@ async fn process_file_dep<E>(
 ///
 /// # Returns
 /// The result of processing (reused, created, or skipped)
+/// Sync graph mutation for a registry edge whose `ResolvedPackage` has
+/// already been fetched. Mirrors the post-fetch path of
+/// [`process_dependency`] without the per-variant fetch dispatch — used
+/// by the channel-based main loop after pulling a manifest from the
+/// preload mpsc.
+///
+/// Override re-resolution is intentionally NOT done here: it would
+/// require an additional async fetch that the sync caller cannot
+/// dispatch. Callers using overrides should fall through to
+/// `process_dependency` (which handles overrides via async) for any
+/// edge whose `name` matches an override rule.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn process_dependency_with_resolved(
+    graph: &mut DependencyGraph,
+    node_index: NodeIndex,
+    edge_info: &DependencyEdgeInfo,
+    resolved: &ResolvedPackage,
+    config: &BuildDepsConfig,
+) -> ProcessResult {
+    match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
+        FindResult::Reuse(existing_index) => {
+            graph.mark_dependency_resolved(edge_info.edge_id, existing_index);
+            update_node_type_from_edge(graph, node_index, existing_index, &edge_info.edge_type);
+            ProcessResult::Reused(existing_index)
+        }
+        FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
+            let new_node = create_package_node(&edge_info.name, resolved, conflict_parent, graph);
+            let new_index = graph.add_node(new_node);
+            graph.add_physical_edge(conflict_parent, new_index);
+            graph.mark_dependency_resolved(edge_info.edge_id, new_index);
+            update_node_type_from_edge(graph, node_index, new_index, &edge_info.edge_type);
+            add_edges_from(
+                graph,
+                new_index,
+                &*resolved.manifest,
+                &EdgeContext::new(config.peer_deps, DevDeps::Exclude),
+            );
+            ProcessResult::Created(new_index)
+        }
+    }
+}
+
+/// Channel item: `(underlying_name, fetched FullManifest or error)`.
+#[cfg(not(target_arch = "wasm32"))]
+type PreloadResult<E> = (String, Result<Arc<FullManifest>, E>);
+
+/// Spawned preload task: fetches FullManifests in parallel, walks
+/// transitive dependencies by manifest content, sends each fetched
+/// FullManifest to main via mpsc keyed by **underlying** package name
+/// (after `normalize_spec` strips any `npm:` alias prefix).
+///
+/// Does NOT touch any shared cache — main is the sole writer. Dedup is
+/// local: one fetch per underlying name regardless of how many specs
+/// reference it.
+#[cfg(not(target_arch = "wasm32"))]
+async fn preload_to_channel<R>(
+    initial_deps: Vec<(String, String)>,
+    registry: R,
+    config: BuildDepsConfig,
+    manifest_tx: mpsc::Sender<PreloadResult<R::Error>>,
+) where
+    R: RegistryClient + Clone + Send + Sync + 'static,
+    R::Error: Send + Sync + 'static,
+{
+    use crate::resolver::preload::{PreloadConfig, extract_transitive_deps};
+    use crate::resolver::semver::normalize_spec;
+
+    let cap = config.concurrency.max(1);
+    let preload_config = PreloadConfig {
+        peer_deps: config.peer_deps,
+        concurrency: cap,
+    };
+
+    // Pending entries are (slot_name, spec); we normalize per pop to get
+    // the underlying name to fetch. Dedup at the underlying-name layer
+    // (one network fetch per package) and at the (underlying, version)
+    // layer (one transitive walk per resolved version).
+    let mut pending: VecDeque<(String, String)> = initial_deps.into();
+    let mut seen_specs: HashSet<(String, String)> = HashSet::new();
+    let mut seen_walks: HashSet<(String, String)> = HashSet::new();
+    let mut name_full: HashMap<String, Arc<FullManifest>> = HashMap::new();
+    let mut in_flight_names: HashSet<String> = HashSet::new();
+    let mut deferred: HashMap<String, Vec<String>> = HashMap::new();
+    let mut futs = FuturesUnordered::new();
+
+    let walk_for_spec = |full: &FullManifest,
+                         real_spec: &str,
+                         pending: &mut VecDeque<(String, String)>,
+                         seen_walks: &mut HashSet<(String, String)>| {
+        let Ok(version) = resolve_target_version(full.into(), real_spec) else {
+            return;
+        };
+        let walk_key = (full.name.clone(), version.clone());
+        if !seen_walks.insert(walk_key) {
+            return;
+        }
+        let Some(core) = full.get_core_version(&version) else {
+            return;
+        };
+        for (n, s) in extract_transitive_deps(&core, &preload_config) {
+            pending.push_back((n, s));
+        }
+    };
+
+    loop {
+        while futs.len() < cap {
+            let Some((slot_name, spec)) = pending.pop_front() else {
+                break;
+            };
+            let key = (slot_name.clone(), spec.clone());
+            if !seen_specs.insert(key) {
+                continue;
+            }
+
+            let (real_name, real_spec) = normalize_spec(&slot_name, &spec);
+
+            // Already have FullManifest: walk transitives synchronously.
+            if let Some(full) = name_full.get(&real_name).cloned() {
+                walk_for_spec(&full, &real_spec, &mut pending, &mut seen_walks);
+                continue;
+            }
+
+            // In-flight: defer this spec's transitive walk until fetch lands.
+            if !in_flight_names.insert(real_name.clone()) {
+                deferred.entry(real_name).or_default().push(real_spec);
+                continue;
+            }
+
+            let registry_clone = registry.clone();
+            let n = real_name.clone();
+            let s = real_spec;
+            futs.push(async move {
+                let r = registry_clone.fetch_full_manifest(&n).await;
+                (n, s, r)
+            });
+        }
+
+        if futs.is_empty() {
+            break;
+        }
+
+        let (real_name, fetch_spec, result) = futs.next().await.expect("non-empty futs");
+        in_flight_names.remove(&real_name);
+        match result {
+            Ok(full) => {
+                name_full.insert(real_name.clone(), Arc::clone(&full));
+                walk_for_spec(&full, &fetch_spec, &mut pending, &mut seen_walks);
+                for s in deferred.remove(&real_name).unwrap_or_default() {
+                    walk_for_spec(&full, &s, &mut pending, &mut seen_walks);
+                }
+                if manifest_tx.send((real_name, Ok(full))).await.is_err() {
+                    break; // main dropped receiver
+                }
+            }
+            Err(e) => {
+                // Send error so main can decide (optional vs hard fail).
+                let _ = manifest_tx.send((real_name, Err(e))).await;
+            }
+        }
+    }
+}
+
 pub async fn process_dependency<R: RegistryClient>(
     graph: &mut DependencyGraph,
     registry: &R,
@@ -667,11 +844,15 @@ pub async fn process_dependency<R: RegistryClient>(
 /// // Add initial dependency edges to root...
 /// build_deps(&mut graph, &registry, PeerDeps::Include).await?;
 /// ```
-pub async fn build_deps<R: RegistryClient>(
+pub async fn build_deps<R>(
     graph: &mut DependencyGraph,
     registry: &R,
     peer_deps: PeerDeps,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: RegistryClient + Clone + Send + Sync + 'static,
+    R::Error: Send + Sync + 'static,
+{
     let config = BuildDepsConfig::default().with_peer_deps(peer_deps);
     build_deps_with_config(graph, registry, config, &NoopReceiver).await
 }
@@ -689,12 +870,17 @@ pub async fn build_deps<R: RegistryClient>(
 /// * `registry` - Registry client for fetching packages
 /// * `peer_deps` - How to handle peer dependencies
 /// * `receiver` - Event receiver for handling build events
-pub async fn build_deps_with_receiver<R: RegistryClient, E: EventReceiver>(
+pub async fn build_deps_with_receiver<R, E>(
     graph: &mut DependencyGraph,
     registry: &R,
     peer_deps: PeerDeps,
     receiver: &E,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: RegistryClient + Clone + Send + Sync + 'static,
+    R::Error: Send + Sync + 'static,
+    E: EventReceiver,
+{
     let config = BuildDepsConfig::default().with_peer_deps(peer_deps);
     build_deps_with_config(graph, registry, config, receiver).await
 }
@@ -719,12 +905,17 @@ pub async fn build_deps_with_receiver<R: RegistryClient, E: EventReceiver>(
 ///
 /// build_deps_with_config(&mut graph, &registry, config, &receiver).await?;
 /// ```
-pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
+pub async fn build_deps_with_config<R, E>(
     graph: &mut DependencyGraph,
     registry: &R,
     config: BuildDepsConfig,
     receiver: &E,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: RegistryClient + Clone + Send + Sync + 'static,
+    R::Error: Send + Sync + 'static,
+    E: EventReceiver,
+{
     tracing::debug!(
         "Starting dependency tree build, peer_deps: {:?}, concurrency: {}, skip_preload: {}",
         config.peer_deps,
@@ -732,11 +923,19 @@ pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
         config.skip_preload
     );
 
-    // Phase 1: Preload manifests in parallel (unless skipped)
-    run_preload_phase(graph, registry, &config, receiver).await;
-
-    // Phase 2: BFS traversal to build the dependency tree
-    run_bfs_phase(graph, registry, &config, receiver).await?;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // Native: spawn preload as concurrent task; main loop owns graph
+        // and runs BFS by level, draining preload's mpsc on cache miss.
+        // Single-writer pattern eliminates DashMap contention.
+        mb_fetch_with_graph(graph, registry, &config, receiver).await?;
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // WASM: no spawn — fall back to sequential two-phase preload + BFS.
+        run_preload_phase(graph, registry, &config, receiver).await;
+        run_bfs_phase(graph, registry, &config, receiver).await?;
+    }
 
     receiver.on_event(BuildEvent::Complete {
         total_nodes: graph.graph.node_count(),
@@ -745,7 +944,356 @@ pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
     Ok(())
 }
 
+/// Native channel-based resolve: spawned preload feeds FullManifests to
+/// the main loop via mpsc; main loop owns the graph + cache writes and
+/// runs BFS level-by-level. Cache is keyed by **underlying** package
+/// name (alias slot vs underlying package distinct), so `npm:` aliases
+/// and same-named real packages don't collide on the cache.
+///
+/// Level barrier guarantees correctness for `npm:` alias semantics:
+/// any alias edge declared at level N is fully processed (slot
+/// occupied) before any level-N+1 transitive edge attempts
+/// `find_compatible_node`.
+#[cfg(not(target_arch = "wasm32"))]
+async fn mb_fetch_with_graph<R, E>(
+    graph: &mut DependencyGraph,
+    registry: &R,
+    config: &BuildDepsConfig,
+    receiver: &E,
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: RegistryClient + Clone + Send + Sync + 'static,
+    R::Error: Send + Sync + 'static,
+    E: EventReceiver,
+{
+    use crate::resolver::semver::normalize_spec;
+
+    let cap = config.concurrency.max(1);
+
+    // Initial deps for preload: root + workspace registry edges.
+    let initial_deps = gather_preload_deps(graph, config.peer_deps);
+    if initial_deps.is_empty() && !graph_has_unresolved_edges(graph) {
+        return Ok(());
+    }
+
+    if !initial_deps.is_empty() {
+        receiver.on_event(BuildEvent::PreloadStart {
+            count: initial_deps.len(),
+        });
+    }
+
+    let (manifest_tx, mut manifest_rx) =
+        mpsc::channel::<PreloadResult<R::Error>>(cap * 2 + 16);
+
+    // Spawn preload concurrent with main BFS. Preload writes nothing
+    // shared — sends manifests through the channel.
+    let registry_for_preload = registry.clone();
+    let config_for_preload = config.clone();
+    let preload_initial = initial_deps;
+    let preload_handle = tokio::spawn(async move {
+        preload_to_channel(
+            preload_initial,
+            registry_for_preload,
+            config_for_preload,
+            manifest_tx,
+        )
+        .await
+    });
+
+    // Main loop's local FullManifest cache (keyed by underlying name).
+    // Single-writer (this main task), so plain HashMap — no DashMap.
+    let mut full_cache: HashMap<String, Arc<FullManifest>> = HashMap::new();
+    // BFS edges blocked on a fetch keyed by underlying name.
+    let mut waiters: HashMap<String, Vec<(NodeIndex, DependencyEdgeInfo)>> = HashMap::new();
+    let mut preload_failed: HashSet<String> = HashSet::new();
+
+    // BFS state — level-by-level expansion.
+    let root_idx = graph.root_index;
+    let mut current_level_nodes = vec![root_idx];
+
+    while !current_level_nodes.is_empty() {
+        let mut next_level_nodes: Vec<NodeIndex> = Vec::new();
+
+        // Add workspace nodes to next level (mirrors old BFS).
+        for node_index in &current_level_nodes {
+            for (_, dep) in graph.get_dependency_edges(*node_index) {
+                if dep.valid
+                    && let Some(to) = dep.to
+                    && let Some(n) = graph.get_node(to)
+                    && n.is_workspace()
+                    && *node_index == root_idx
+                {
+                    next_level_nodes.push(to);
+                }
+            }
+        }
+
+        // Collect all unresolved edges in this level into a flat queue.
+        let mut level_pending: VecDeque<(NodeIndex, DependencyEdgeInfo)> = VecDeque::new();
+        for node_idx in &current_level_nodes {
+            let unresolved = collect_unresolved_edges(graph, *node_idx);
+            if !unresolved.is_empty() {
+                receiver.on_event(BuildEvent::DependencyCount {
+                    count: unresolved.len(),
+                });
+            }
+            for edge in unresolved {
+                level_pending.push_back((*node_idx, edge));
+            }
+        }
+
+        // Drain level: process inline if cache hit / non-registry,
+        // otherwise defer until preload sends the FullManifest.
+        loop {
+            // Phase 1: try to drain level_pending without blocking on mpsc.
+            while let Some((parent, edge)) = level_pending.pop_front() {
+                receiver.on_event(BuildEvent::Resolving { name: &edge.name });
+
+                // Non-registry edges (workspace / git / http / file): old async path.
+                if !edge.spec.is_registry_spec() {
+                    let processed = process_dependency(graph, registry, parent, &edge, config)
+                        .await
+                        .map_err(|inner| chain_err(graph, parent, &edge, inner))?;
+                    handle_processed(
+                        graph,
+                        receiver,
+                        parent,
+                        &edge,
+                        &processed,
+                        &mut next_level_nodes,
+                    );
+                    continue;
+                }
+
+                // Registry edge: look up by underlying name.
+                let (real_name, real_spec) = normalize_spec(&edge.name, &edge.spec);
+
+                if preload_failed.contains(real_name.as_str()) {
+                    if edge.edge_type == EdgeType::Optional {
+                        receiver.on_event(BuildEvent::Skipped {
+                            name: &edge.name,
+                            spec: &edge.spec,
+                        });
+                        continue;
+                    }
+                    // Hard fail: surface the error via fallback async fetch.
+                    let processed = process_dependency(graph, registry, parent, &edge, config)
+                        .await
+                        .map_err(|inner| chain_err(graph, parent, &edge, inner))?;
+                    handle_processed(
+                        graph,
+                        receiver,
+                        parent,
+                        &edge,
+                        &processed,
+                        &mut next_level_nodes,
+                    );
+                    continue;
+                }
+
+                if let Some(full) = full_cache.get(real_name.as_str()).cloned() {
+                    process_registry_edge(
+                        graph,
+                        receiver,
+                        parent,
+                        &edge,
+                        &full,
+                        &real_spec,
+                        config,
+                        &mut next_level_nodes,
+                    );
+                    continue;
+                }
+
+                // Cache miss: defer until preload sends this name.
+                waiters.entry(real_name).or_default().push((parent, edge));
+            }
+
+            if waiters.is_empty() {
+                break;
+            }
+
+            // Phase 2: drain mpsc until at least one waiter is satisfied.
+            let resolved_one = drain_until_progress(
+                &mut manifest_rx,
+                &mut full_cache,
+                &mut waiters,
+                &mut preload_failed,
+                &mut level_pending,
+            )
+            .await;
+            if !resolved_one {
+                // Preload exited unexpectedly with no remaining manifests
+                // — fall back to async path for any waiting edges.
+                for (_, ws) in waiters.drain() {
+                    for (parent, edge) in ws {
+                        let processed = process_dependency(graph, registry, parent, &edge, config)
+                            .await
+                            .map_err(|inner| chain_err(graph, parent, &edge, inner))?;
+                        handle_processed(
+                            graph,
+                            receiver,
+                            parent,
+                            &edge,
+                            &processed,
+                            &mut next_level_nodes,
+                        );
+                    }
+                }
+                break;
+            }
+        }
+
+        receiver.on_event(BuildEvent::LevelComplete {
+            next_level_count: next_level_nodes.len(),
+        });
+        current_level_nodes = next_level_nodes;
+    }
+
+    drop(manifest_rx);
+    let _ = preload_handle.await;
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn graph_has_unresolved_edges(graph: &DependencyGraph) -> bool {
+    for idx in graph.graph.node_indices() {
+        if !collect_unresolved_edges(graph, idx).is_empty() {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn chain_err<E>(
+    graph: &DependencyGraph,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    inner: ResolveError<E>,
+) -> ResolveError<E> {
+    let mut chain = graph.logical_ancestry(parent);
+    chain.push((edge.name.clone(), edge.spec.clone()));
+    ResolveError::WithChain {
+        chain,
+        source: Box::new(inner),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
+fn process_registry_edge<E: EventReceiver>(
+    graph: &mut DependencyGraph,
+    receiver: &E,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    full: &FullManifest,
+    real_spec: &str,
+    config: &BuildDepsConfig,
+    next_level: &mut Vec<NodeIndex>,
+) {
+    let Ok(version) = resolve_target_version(full.into(), real_spec) else {
+        if edge.edge_type == EdgeType::Optional {
+            receiver.on_event(BuildEvent::Skipped {
+                name: &edge.name,
+                spec: &edge.spec,
+            });
+        }
+        return;
+    };
+    let Some(core) = full.get_core_version(&version) else {
+        return;
+    };
+    let core_arc = Arc::new(core);
+    let resolved = ResolvedPackage {
+        name: edge.name.clone(),
+        version: core_arc.version.clone(),
+        manifest: core_arc,
+    };
+    receiver.on_event(BuildEvent::PackageResolved((&*resolved.manifest).into()));
+    let processed = process_dependency_with_resolved(graph, parent, edge, &resolved, config);
+    handle_processed(graph, receiver, parent, edge, &processed, next_level);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn handle_processed<E: EventReceiver>(
+    graph: &DependencyGraph,
+    receiver: &E,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    processed: &ProcessResult,
+    next_level: &mut Vec<NodeIndex>,
+) {
+    match processed {
+        ProcessResult::Created(idx) => {
+            if let Some(node) = graph.get_node(*idx) {
+                receiver.on_event(BuildEvent::Resolved {
+                    name: &edge.name,
+                    version: &node.version,
+                });
+                if let NodeManifest::Registry(ref manifest) = node.manifest {
+                    let parent_path = graph.get_node(parent).map(|p| p.path.as_path());
+                    receiver.on_event(BuildEvent::PackagePlaced {
+                        package: manifest.as_ref().into(),
+                        path: &node.path,
+                        parent_path,
+                    });
+                }
+            }
+            next_level.push(*idx);
+        }
+        ProcessResult::Reused(idx) => {
+            if let Some(node) = graph.get_node(*idx) {
+                receiver.on_event(BuildEvent::Reused {
+                    name: &edge.name,
+                    version: &node.version,
+                });
+            }
+        }
+        ProcessResult::Skipped => {
+            receiver.on_event(BuildEvent::Skipped {
+                name: &edge.name,
+                spec: &edge.spec,
+            });
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn drain_until_progress<E>(
+    manifest_rx: &mut mpsc::Receiver<(String, Result<Arc<FullManifest>, E>)>,
+    full_cache: &mut HashMap<String, Arc<FullManifest>>,
+    waiters: &mut HashMap<String, Vec<(NodeIndex, DependencyEdgeInfo)>>,
+    preload_failed: &mut HashSet<String>,
+    level_pending: &mut VecDeque<(NodeIndex, DependencyEdgeInfo)>,
+) -> bool {
+    while let Some((real_name, result)) = manifest_rx.recv().await {
+        match result {
+            Ok(full) => {
+                full_cache.insert(real_name.clone(), Arc::clone(&full));
+                if let Some(ws) = waiters.remove(&real_name) {
+                    for entry in ws {
+                        level_pending.push_back(entry);
+                    }
+                    return true;
+                }
+            }
+            Err(_e) => {
+                preload_failed.insert(real_name.clone());
+                if let Some(ws) = waiters.remove(&real_name) {
+                    for entry in ws {
+                        level_pending.push_back(entry);
+                    }
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Run the preload phase to warm up the cache with manifests.
+#[cfg(target_arch = "wasm32")]
 async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
     graph: &DependencyGraph,
     registry: &R,
@@ -798,6 +1346,7 @@ async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
 }
 
 /// Run the BFS traversal phase to build the dependency tree.
+#[cfg(target_arch = "wasm32")]
 async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
     graph: &mut DependencyGraph,
     registry: &R,
@@ -921,10 +1470,14 @@ use std::path::Path;
 /// let pkg: PackageJson = serde_json::from_str(&pkg_content)?;
 /// let lock = resolve(&pkg, &registry).await?;
 /// ```
-pub async fn resolve<R: RegistryClient>(
+pub async fn resolve<R>(
     pkg: &PackageJson,
     registry: &R,
-) -> Result<PackageLock, ResolveError<R::Error>> {
+) -> Result<PackageLock, ResolveError<R::Error>>
+where
+    R: RegistryClient + Clone + Send + Sync + 'static,
+    R::Error: Send + Sync + 'static,
+{
     resolve_with_options(pkg, registry, PeerDeps::Include, &NoopReceiver).await
 }
 
@@ -935,12 +1488,17 @@ pub async fn resolve<R: RegistryClient>(
 /// * `registry` - Registry client for fetching packages
 /// * `peer_deps` - How to handle peer dependencies
 /// * `receiver` - Event receiver for progress tracking
-pub async fn resolve_with_options<R: RegistryClient, E: EventReceiver>(
+pub async fn resolve_with_options<R, E>(
     pkg: &PackageJson,
     registry: &R,
     peer_deps: PeerDeps,
     receiver: &E,
-) -> Result<PackageLock, ResolveError<R::Error>> {
+) -> Result<PackageLock, ResolveError<R::Error>>
+where
+    R: RegistryClient + Clone + Send + Sync + 'static,
+    R::Error: Send + Sync + 'static,
+    E: EventReceiver,
+{
     // Create graph with root node
     let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg.clone());
 
