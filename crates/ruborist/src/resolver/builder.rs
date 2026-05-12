@@ -1097,7 +1097,7 @@ where
                 }
 
                 if let Some(full) = full_cache.get(real_name.as_str()).cloned() {
-                    process_registry_edge(
+                    process_registry_edge::<_, R::Error>(
                         graph,
                         receiver,
                         parent,
@@ -1106,7 +1106,8 @@ where
                         &real_spec,
                         config,
                         &mut next_level_nodes,
-                    );
+                    )
+                    .map_err(|e| chain_err(graph, parent, &edge, e))?;
                     continue;
                 }
 
@@ -1187,7 +1188,7 @@ fn chain_err<E>(
 
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
-fn process_registry_edge<E: EventReceiver>(
+fn process_registry_edge<E: EventReceiver, RE>(
     graph: &mut DependencyGraph,
     receiver: &E,
     parent: NodeIndex,
@@ -1196,18 +1197,35 @@ fn process_registry_edge<E: EventReceiver>(
     real_spec: &str,
     config: &BuildDepsConfig,
     next_level: &mut Vec<NodeIndex>,
-) {
-    let Ok(version) = resolve_target_version(full.into(), real_spec) else {
+) -> Result<(), ResolveError<RE>> {
+    let version = match resolve_target_version(full.into(), real_spec) {
+        Ok(v) => v,
+        Err(e) => {
+            if edge.edge_type == EdgeType::Optional {
+                receiver.on_event(BuildEvent::Skipped {
+                    name: &edge.name,
+                    spec: &edge.spec,
+                });
+                return Ok(());
+            }
+            return Err(ResolveError::Version(format!(
+                "{}@{}: {}",
+                edge.name, real_spec, e
+            )));
+        }
+    };
+    let Some(core) = full.get_core_version(&version) else {
         if edge.edge_type == EdgeType::Optional {
             receiver.on_event(BuildEvent::Skipped {
                 name: &edge.name,
                 spec: &edge.spec,
             });
+            return Ok(());
         }
-        return;
-    };
-    let Some(core) = full.get_core_version(&version) else {
-        return;
+        return Err(ResolveError::ManifestNotFound {
+            name: edge.name.clone(),
+            version,
+        });
     };
     let core_arc = Arc::new(core);
     let resolved = ResolvedPackage {
@@ -1218,6 +1236,7 @@ fn process_registry_edge<E: EventReceiver>(
     receiver.on_event(BuildEvent::PackageResolved((&*resolved.manifest).into()));
     let processed = process_dependency_with_resolved(graph, parent, edge, &resolved, config);
     handle_processed(graph, receiver, parent, edge, &processed, next_level);
+    Ok(())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
