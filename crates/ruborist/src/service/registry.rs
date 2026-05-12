@@ -509,10 +509,6 @@ impl RegistryClient for UnifiedRegistry {
         self.supports_semver
     }
 
-    fn registry_url(&self) -> &str {
-        &self.registry_url
-    }
-
     fn cache_version_manifest(&self, name: &str, spec: &str, manifest: Arc<CoreVersionManifest>) {
         self.cache
             .set_version_manifest(name.to_string(), spec.to_string(), manifest);
