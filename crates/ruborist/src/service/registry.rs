@@ -510,8 +510,59 @@ impl RegistryClient for UnifiedRegistry {
     }
 
     fn cache_version_manifest(&self, name: &str, spec: &str, manifest: Arc<CoreVersionManifest>) {
+        let resolved_version = manifest.version.clone();
         self.cache
-            .set_version_manifest(name.to_string(), spec.to_string(), manifest);
+            .set_version_manifest(name.to_string(), spec.to_string(), Arc::clone(&manifest));
+        if resolved_version != spec {
+            self.cache.set_version_manifest(
+                name.to_string(),
+                resolved_version.clone(),
+                Arc::clone(&manifest),
+            );
+        }
+        if self
+            .stored_version
+            .insert((name.to_string(), resolved_version.clone()))
+        {
+            self.store
+                .store_version_manifest(name, &resolved_version, manifest);
+        }
+    }
+
+    fn cached_full_manifest(&self, name: &str) -> Option<Arc<FullManifest>> {
+        self.cache.get_full_manifest(name)
+    }
+
+    fn cache_full_manifest(&self, name: &str, manifest: Arc<FullManifest>) {
+        let versions_info = Arc::new(VersionsInfo {
+            versions: Versions {
+                version_list: manifest.versions.clone(),
+                dist_tags: manifest.dist_tags.clone(),
+            },
+            etag: None,
+            last_updated: current_timestamp_secs(),
+        });
+        self.cache
+            .set_full_manifest(name.to_string(), Arc::clone(&manifest));
+        self.store.store_versions(name, versions_info);
+    }
+
+    fn cached_version_manifest(&self, name: &str, spec: &str) -> Option<Arc<CoreVersionManifest>> {
+        self.cache.get_version_manifest(name, spec)
+    }
+
+    async fn fetch_full_manifest_uncached(
+        &self,
+        name: &str,
+    ) -> Result<Arc<FullManifest>, Self::Error> {
+        let (manifest, _etag) = manifest::fetch_full_manifest_fresh(
+            &self.registry_url,
+            name,
+            manifest::MetadataFormat::Abbreviated,
+        )
+        .await
+        .map_err(RegistryError)?;
+        Ok(Arc::new(manifest))
     }
 
     async fn fetch_full_manifest(&self, name: &str) -> Result<Arc<FullManifest>, Self::Error> {

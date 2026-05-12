@@ -143,6 +143,38 @@ pub trait RegistryClient {
         name: &str,
     ) -> impl Future<Output = Result<Arc<FullManifest>, Self::Error>>;
 
+    /// Fetch a full manifest without using implementation-level single-flight
+    /// gates or mutating shared caches.
+    ///
+    /// The level-dispatch resolver uses this to keep cache writes centralized
+    /// in the graph owner. Implementations that cannot separate fetching from
+    /// caching may fall back to [`RegistryClient::fetch_full_manifest`].
+    fn fetch_full_manifest_uncached(
+        &self,
+        name: &str,
+    ) -> impl Future<Output = Result<Arc<FullManifest>, Self::Error>> {
+        self.fetch_full_manifest(name)
+    }
+
+    /// Return a cached full manifest if the implementation exposes one.
+    fn cached_full_manifest(&self, _name: &str) -> Option<Arc<FullManifest>> {
+        None
+    }
+
+    /// Cache a full manifest for later use.
+    fn cache_full_manifest(&self, _name: &str, _manifest: Arc<FullManifest>) {
+        // Default: no-op
+    }
+
+    /// Return a cached version manifest if the implementation exposes one.
+    fn cached_version_manifest(
+        &self,
+        _name: &str,
+        _spec: &str,
+    ) -> Option<Arc<CoreVersionManifest>> {
+        None
+    }
+
     /// Fetch specific version manifest from registry.
     ///
     /// For semver-supporting registries, this can directly query `registry/name/spec`.

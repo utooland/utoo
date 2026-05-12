@@ -25,13 +25,24 @@ use std::sync::Arc;
 
 #[cfg(feature = "http-tarball")]
 use anyhow::Context as _;
+#[cfg(not(target_arch = "wasm32"))]
+use futures::stream::{FuturesUnordered, StreamExt};
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::{HashSet, VecDeque};
 
 use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::manifest::FullManifest;
 use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
+#[cfg(target_arch = "wasm32")]
 use crate::resolver::preload::{PreloadConfig, preload_manifests};
 use crate::resolver::registry::{ResolveError, resolve_registry_dep};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::resolver::semver::normalize_spec;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::resolver::version::resolve_target_version;
 use crate::spec::{Catalogs, PackageSpec, Protocol};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
 use crate::traits::registry::{RegistryClient, ResolvedPackage};
@@ -180,6 +191,7 @@ struct NodeFlags {
 /// Only registry specs (e.g. `^4.17.0`) are collected. `catalog:` specs are
 /// resolved at edge creation time, so by the time this runs they are already
 /// concrete registry specs.
+#[cfg(any(target_arch = "wasm32", test))]
 fn gather_preload_deps(graph: &DependencyGraph, peer_deps: PeerDeps) -> Vec<(String, String)> {
     use crate::spec::SpecStr;
     use std::collections::HashSet;
@@ -334,6 +346,39 @@ pub enum ProcessResult {
     Created(NodeIndex),
     /// Skipped (optional dependency that failed to resolve)
     Skipped,
+}
+
+/// Sync graph mutation for a registry edge whose manifest has already been
+/// resolved by the level dispatcher.
+#[cfg(not(target_arch = "wasm32"))]
+fn process_dependency_with_resolved(
+    graph: &mut DependencyGraph,
+    node_index: NodeIndex,
+    edge_info: &DependencyEdgeInfo,
+    resolved: &ResolvedPackage,
+    config: &BuildDepsConfig,
+) -> ProcessResult {
+    match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
+        FindResult::Reuse(existing_index) => {
+            graph.mark_dependency_resolved(edge_info.edge_id, existing_index);
+            update_node_type_from_edge(graph, node_index, existing_index, &edge_info.edge_type);
+            ProcessResult::Reused(existing_index)
+        }
+        FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
+            let new_node = create_package_node(&edge_info.name, resolved, conflict_parent, graph);
+            let new_index = graph.add_node(new_node);
+            graph.add_physical_edge(conflict_parent, new_index);
+            graph.mark_dependency_resolved(edge_info.edge_id, new_index);
+            update_node_type_from_edge(graph, node_index, new_index, &edge_info.edge_type);
+            add_edges_from(
+                graph,
+                new_index,
+                &*resolved.manifest,
+                &EdgeContext::new(config.peer_deps, DevDeps::Exclude),
+            );
+            ProcessResult::Created(new_index)
+        }
+    }
 }
 
 /// Handle a `file:` dep: dir → Link node inline (returns
@@ -732,11 +777,18 @@ pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
         config.skip_preload
     );
 
-    // Phase 1: Preload manifests in parallel (unless skipped)
-    run_preload_phase(graph, registry, &config, receiver).await;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        run_level_dispatch_phase(graph, registry, &config, receiver).await?;
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // Phase 1: Preload manifests in parallel (unless skipped)
+        run_preload_phase(graph, registry, &config, receiver).await;
 
-    // Phase 2: BFS traversal to build the dependency tree
-    run_bfs_phase(graph, registry, &config, receiver).await?;
+        // Phase 2: BFS traversal to build the dependency tree
+        run_bfs_phase(graph, registry, &config, receiver).await?;
+    }
 
     receiver.on_event(BuildEvent::Complete {
         total_nodes: graph.graph.node_count(),
@@ -745,7 +797,382 @@ pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn chain_err<E>(
+    graph: &DependencyGraph,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    inner: ResolveError<E>,
+) -> ResolveError<E> {
+    let mut chain = graph.logical_ancestry(parent);
+    chain.push((edge.name.clone(), edge.spec.clone()));
+    ResolveError::WithChain {
+        chain,
+        source: Box::new(inner),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn emit_process_result<E: EventReceiver>(
+    graph: &DependencyGraph,
+    receiver: &E,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    result: ProcessResult,
+    next_level: &mut Vec<NodeIndex>,
+) {
+    match result {
+        ProcessResult::Created(idx) => {
+            if let Some(node) = graph.get_node(idx) {
+                receiver.on_event(BuildEvent::Resolved {
+                    name: &edge.name,
+                    version: &node.version,
+                });
+
+                if let NodeManifest::Registry(ref manifest) = node.manifest {
+                    let parent_path = graph.get_node(parent).map(|parent| parent.path.as_path());
+                    receiver.on_event(BuildEvent::PackagePlaced {
+                        package: manifest.as_ref().into(),
+                        path: &node.path,
+                        parent_path,
+                    });
+                }
+            }
+            next_level.push(idx);
+        }
+        ProcessResult::Reused(idx) => {
+            if let Some(node) = graph.get_node(idx) {
+                receiver.on_event(BuildEvent::Reused {
+                    name: &edge.name,
+                    version: &node.version,
+                });
+            }
+        }
+        ProcessResult::Skipped => {
+            receiver.on_event(BuildEvent::Skipped {
+                name: &edge.name,
+                spec: &edge.spec,
+            });
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn resolve_core_from_full<R: RegistryClient>(
+    registry: &R,
+    name: &str,
+    spec: &str,
+    full: &FullManifest,
+) -> Result<ResolvedPackage, ResolveError<R::Error>> {
+    if full.versions.is_empty() {
+        return Err(ResolveError::NoVersions(name.to_string()));
+    }
+
+    let resolved_version = resolve_target_version(full.into(), spec)
+        .map_err(|e| ResolveError::Version(format!("{name}@{spec}: {e}")))?;
+    let core = full
+        .get_core_version(&resolved_version)
+        .map(Arc::new)
+        .ok_or_else(|| ResolveError::ManifestNotFound {
+            name: name.to_string(),
+            version: resolved_version.clone(),
+        })?;
+
+    registry.cache_version_manifest(name, spec, Arc::clone(&core));
+    if resolved_version != spec {
+        registry.cache_version_manifest(name, &resolved_version, Arc::clone(&core));
+    }
+
+    Ok(ResolvedPackage {
+        name: name.to_string(),
+        version: resolved_version,
+        manifest: core,
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
+async fn process_cached_registry_edge<R, E>(
+    graph: &mut DependencyGraph,
+    registry: &R,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    resolved: ResolvedPackage,
+    config: &BuildDepsConfig,
+    receiver: &E,
+    next_level: &mut Vec<NodeIndex>,
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: RegistryClient,
+    E: EventReceiver,
+{
+    if graph
+        .check_override(parent, &edge.name, Some(&resolved.version))
+        .is_some()
+    {
+        let result = process_dependency(graph, registry, parent, edge, config)
+            .await
+            .map_err(|inner| chain_err(graph, parent, edge, inner))?;
+        emit_process_result(graph, receiver, parent, edge, result, next_level);
+        return Ok(());
+    }
+
+    receiver.on_event(BuildEvent::PackageResolved((&*resolved.manifest).into()));
+    let result = process_dependency_with_resolved(graph, parent, edge, &resolved, config);
+    emit_process_result(graph, receiver, parent, edge, result, next_level);
+    Ok(())
+}
+
+/// Native level-dispatch resolver.
+///
+/// The graph owner drives each BFS level, fetches missing full manifests
+/// concurrently, and is the only task that writes registry caches or mutates
+/// the graph. Fetch futures call `fetch_full_manifest_uncached`, so they do not
+/// pass through the registry's `OnceMap` gates.
+#[cfg(not(target_arch = "wasm32"))]
+async fn run_level_dispatch_phase<R, E>(
+    graph: &mut DependencyGraph,
+    registry: &R,
+    config: &BuildDepsConfig,
+    receiver: &E,
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: RegistryClient,
+    E: EventReceiver,
+{
+    use crate::spec::SpecStr;
+
+    let start = tokio::time::Instant::now();
+    let fetch_limit = config.concurrency.max(1);
+    let mut local_full_cache: HashMap<String, Arc<FullManifest>> = HashMap::new();
+    let mut current_level = vec![graph.root_index];
+
+    while !current_level.is_empty() {
+        receiver.on_event(BuildEvent::LevelStart {
+            node_count: current_level.len(),
+        });
+
+        let mut next_level = Vec::new();
+        for node_index in &current_level {
+            for (_, dep) in graph.get_dependency_edges(*node_index) {
+                if dep.valid
+                    && let Some(to) = dep.to
+                    && let Some(n) = graph.get_node(to)
+                    && n.is_workspace()
+                    && *node_index == graph.root_index
+                {
+                    next_level.push(to);
+                }
+            }
+        }
+
+        let mut pending = VecDeque::new();
+        for node_index in current_level {
+            let unresolved = collect_unresolved_edges(graph, node_index);
+            receiver.on_event(BuildEvent::DependencyCount {
+                count: unresolved.len(),
+            });
+            pending.extend(unresolved.into_iter().map(|edge| (node_index, edge)));
+        }
+
+        let mut waiters: HashMap<String, Vec<(NodeIndex, DependencyEdgeInfo)>> = HashMap::new();
+        let mut in_flight_names: HashSet<String> = HashSet::new();
+        let mut fetches = FuturesUnordered::new();
+
+        loop {
+            while let Some((parent, edge)) = pending.pop_front() {
+                receiver.on_event(BuildEvent::Resolving { name: &edge.name });
+
+                if !edge.spec.is_registry_spec() {
+                    let result = process_dependency(graph, registry, parent, &edge, config)
+                        .await
+                        .map_err(|inner| chain_err(graph, parent, &edge, inner))?;
+                    emit_process_result(graph, receiver, parent, &edge, result, &mut next_level);
+                    continue;
+                }
+
+                let (real_name, real_spec) = normalize_spec(&edge.name, &edge.spec);
+                if let Some(core) = registry.cached_version_manifest(&real_name, &real_spec) {
+                    let resolved = ResolvedPackage {
+                        name: edge.name.clone(),
+                        version: core.version.clone(),
+                        manifest: core,
+                    };
+                    process_cached_registry_edge(
+                        graph,
+                        registry,
+                        parent,
+                        &edge,
+                        resolved,
+                        config,
+                        receiver,
+                        &mut next_level,
+                    )
+                    .await?;
+                    continue;
+                }
+
+                let full = local_full_cache
+                    .get(&real_name)
+                    .cloned()
+                    .or_else(|| registry.cached_full_manifest(&real_name));
+                if let Some(full) = full {
+                    local_full_cache.insert(real_name.clone(), Arc::clone(&full));
+                    let resolved =
+                        match resolve_core_from_full(registry, &real_name, &real_spec, &full) {
+                            Ok(resolved) => ResolvedPackage {
+                                name: edge.name.clone(),
+                                ..resolved
+                            },
+                            Err(err) if edge.edge_type == EdgeType::Optional => {
+                                emit_process_result(
+                                    graph,
+                                    receiver,
+                                    parent,
+                                    &edge,
+                                    ProcessResult::Skipped,
+                                    &mut next_level,
+                                );
+                                tracing::debug!(
+                                    "Skipping optional dependency {}@{}: {}",
+                                    edge.name,
+                                    edge.spec,
+                                    err
+                                );
+                                continue;
+                            }
+                            Err(err) => return Err(chain_err(graph, parent, &edge, err)),
+                        };
+                    process_cached_registry_edge(
+                        graph,
+                        registry,
+                        parent,
+                        &edge,
+                        resolved,
+                        config,
+                        receiver,
+                        &mut next_level,
+                    )
+                    .await?;
+                    continue;
+                }
+
+                waiters
+                    .entry(real_name.clone())
+                    .or_default()
+                    .push((parent, edge));
+                if in_flight_names.insert(real_name.clone()) {
+                    fetches.push(async move {
+                        let result = registry.fetch_full_manifest_uncached(&real_name).await;
+                        (real_name, result)
+                    });
+                }
+
+                while fetches.len() >= fetch_limit {
+                    let Some((name, result)) = fetches.next().await else {
+                        break;
+                    };
+                    in_flight_names.remove(&name);
+                    handle_fetch_result(
+                        graph,
+                        registry,
+                        receiver,
+                        &mut local_full_cache,
+                        &mut waiters,
+                        &mut pending,
+                        &mut next_level,
+                        name,
+                        result,
+                    )
+                    .await?;
+                }
+            }
+
+            if waiters.is_empty() {
+                break;
+            }
+
+            let Some((name, result)) = fetches.next().await else {
+                break;
+            };
+            in_flight_names.remove(&name);
+            handle_fetch_result(
+                graph,
+                registry,
+                receiver,
+                &mut local_full_cache,
+                &mut waiters,
+                &mut pending,
+                &mut next_level,
+                name,
+                result,
+            )
+            .await?;
+        }
+
+        receiver.on_event(BuildEvent::LevelComplete {
+            next_level_count: next_level.len(),
+        });
+        current_level = next_level;
+    }
+
+    tracing::debug!("Level dispatch build phase: {:?}", start.elapsed());
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
+async fn handle_fetch_result<R, E>(
+    graph: &mut DependencyGraph,
+    registry: &R,
+    receiver: &E,
+    local_full_cache: &mut HashMap<String, Arc<FullManifest>>,
+    waiters: &mut HashMap<String, Vec<(NodeIndex, DependencyEdgeInfo)>>,
+    pending: &mut VecDeque<(NodeIndex, DependencyEdgeInfo)>,
+    next_level: &mut Vec<NodeIndex>,
+    name: String,
+    result: Result<Arc<FullManifest>, R::Error>,
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: RegistryClient,
+    E: EventReceiver,
+{
+    let Some(waiting_edges) = waiters.remove(&name) else {
+        return Ok(());
+    };
+
+    match result {
+        Ok(full) => {
+            registry.cache_full_manifest(&name, Arc::clone(&full));
+            local_full_cache.insert(name, full);
+            pending.extend(waiting_edges);
+            Ok(())
+        }
+        Err(err) => {
+            if let Some((parent, edge)) = waiting_edges
+                .iter()
+                .find(|(_, edge)| edge.edge_type != EdgeType::Optional)
+            {
+                return Err(chain_err(graph, *parent, edge, ResolveError::Registry(err)));
+            }
+
+            for (parent, edge) in waiting_edges {
+                emit_process_result(
+                    graph,
+                    receiver,
+                    parent,
+                    &edge,
+                    ProcessResult::Skipped,
+                    next_level,
+                );
+            }
+            Ok(())
+        }
+    }
+}
+
 /// Run the preload phase to warm up the cache with manifests.
+#[cfg(target_arch = "wasm32")]
 async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
     graph: &DependencyGraph,
     registry: &R,
@@ -798,6 +1225,7 @@ async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
 }
 
 /// Run the BFS traversal phase to build the dependency tree.
+#[cfg(target_arch = "wasm32")]
 async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
     graph: &mut DependencyGraph,
     registry: &R,
