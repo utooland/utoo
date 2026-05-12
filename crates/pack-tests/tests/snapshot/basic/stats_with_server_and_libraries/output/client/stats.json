@@ -1,0 +1,232 @@
+{
+  "entrypoints": {
+    "./a": {
+      "name": "./a",
+      "chunks": [
+        "./a.js"
+      ],
+      "assets": [
+        {
+          "name": "./a.js"
+        }
+      ]
+    },
+    "./b": {
+      "name": "./b",
+      "chunks": [
+        "./b.js"
+      ],
+      "assets": [
+        {
+          "name": "./b.js"
+        }
+      ]
+    },
+    "app": {
+      "name": "app",
+      "chunks": [
+        "app.js",
+        "input_0d05fffe.js"
+      ],
+      "assets": [
+        {
+          "name": "app.js"
+        },
+        {
+          "name": "input_0d05fffe.js"
+        }
+      ]
+    }
+  },
+  "chunks": [
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "./a.js",
+      "size": 447,
+      "hash": "",
+      "files": [
+        "./a.js"
+      ]
+    },
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "./b.js",
+      "size": 447,
+      "hash": "",
+      "files": [
+        "./b.js"
+      ]
+    },
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "app.js",
+      "size": 307,
+      "hash": "",
+      "files": [
+        "app.js"
+      ]
+    },
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "input_0d05fffe.js",
+      "size": 1616,
+      "hash": "",
+      "files": [
+        "input_0d05fffe.js"
+      ]
+    }
+  ],
+  "assets": [
+    {
+      "type": "asset",
+      "name": "a.js",
+      "info": {},
+      "size": 447,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "a.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "a.js.map",
+      "info": {},
+      "size": 280,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "a.js.map"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "app.js",
+      "info": {},
+      "size": 307,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "app.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "app.js.map",
+      "info": {},
+      "size": 53,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "app.js.map"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "b.js",
+      "info": {},
+      "size": 447,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "b.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "b.js.map",
+      "info": {},
+      "size": 280,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "b.js.map"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "input_0d05fffe.js",
+      "info": {},
+      "size": 1616,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "input_0d05fffe.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "input_0d05fffe.js.map",
+      "info": {},
+      "size": 908,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "input_0d05fffe.js.map"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "name": "basic/stats_with_server_and_libraries/input/a.ts",
+      "id": "basic/stats_with_server_and_libraries/input/a.ts",
+      "chunks": [
+        "input_0d05fffe.js"
+      ],
+      "size": 28
+    },
+    {
+      "name": "basic/stats_with_server_and_libraries/input/a.ts",
+      "id": "basic/stats_with_server_and_libraries/input/a.ts",
+      "chunks": [
+        "./a.js"
+      ],
+      "size": 28
+    },
+    {
+      "name": "basic/stats_with_server_and_libraries/input/app.ts",
+      "id": "basic/stats_with_server_and_libraries/input/app.ts",
+      "chunks": [
+        "input_0d05fffe.js",
+        "app.js"
+      ],
+      "size": 83
+    },
+    {
+      "name": "basic/stats_with_server_and_libraries/input/b.ts",
+      "id": "basic/stats_with_server_and_libraries/input/b.ts",
+      "chunks": [
+        "input_0d05fffe.js"
+      ],
+      "size": 28
+    },
+    {
+      "name": "basic/stats_with_server_and_libraries/input/b.ts",
+      "id": "basic/stats_with_server_and_libraries/input/b.ts",
+      "chunks": [
+        "./b.js"
+      ],
+      "size": 28
+    }
+  ]
+}

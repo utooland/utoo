@@ -1,0 +1,65 @@
+{
+  "entrypoints": {
+    "./index": {
+      "name": "./index",
+      "chunks": [
+        "./index.js"
+      ],
+      "assets": [
+        {
+          "name": "./index.js"
+        }
+      ]
+    }
+  },
+  "chunks": [
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "./index.js",
+      "size": 412,
+      "hash": "",
+      "files": [
+        "./index.js"
+      ]
+    }
+  ],
+  "assets": [
+    {
+      "type": "asset",
+      "name": "index.js",
+      "info": {},
+      "size": 412,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "index.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "index.js.map",
+      "info": {},
+      "size": 322,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "index.js.map"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "name": "basic/stats_with_server_and_libraries/input/server.ts",
+      "id": "basic/stats_with_server_and_libraries/input/server.ts",
+      "chunks": [
+        "./index.js"
+      ],
+      "size": 29
+    }
+  ]
+}

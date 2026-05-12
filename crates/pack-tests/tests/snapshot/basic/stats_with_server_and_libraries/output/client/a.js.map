@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 8, "column": 0}, "map": {"version":3,"sources":["./../basic/stats_with_server_and_libraries/input/a.ts"],"sourcesContent":["export const a = \"value-a\";\n"],"names":["a"],"mappings":"AAAO,MAAMA,IAAI"}}]
+}
