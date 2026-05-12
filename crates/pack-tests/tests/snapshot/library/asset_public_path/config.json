@@ -1,0 +1,22 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main",
+        "library": {
+          "name": "NodeAssetPublicPathLibrary"
+        }
+      }
+    ],
+    "target": "node",
+    "output": {
+      "assetModuleFilename": "static/[name].[contenthash:8]",
+      "publicPath": "/"
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    }
+  }
+}
