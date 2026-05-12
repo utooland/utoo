@@ -837,19 +837,20 @@ where
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn parse_full_manifest_inline(raw_bytes: Vec<u8>) -> anyhow::Result<Arc<FullManifest>> {
-    let mut parse_buf = raw_bytes.clone();
-    let mut manifest: FullManifest = simd_json::serde::from_slice(&mut parse_buf)
-        .map_err(|e| anyhow::anyhow!("JSON parse error: {e}"))?;
+async fn parse_full_manifest_off_runtime(raw_bytes: Vec<u8>) -> anyhow::Result<Arc<FullManifest>> {
+    let parse_buf = raw_bytes.clone();
+    let mut manifest: FullManifest = crate::service::parse_json_off_runtime(parse_buf).await?;
     manifest.raw = Arc::from(raw_bytes);
     Ok(Arc::new(manifest))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn parse_core_manifest_inline(mut bytes: Vec<u8>) -> anyhow::Result<Arc<CoreVersionManifest>> {
-    simd_json::serde::from_slice::<CoreVersionManifest>(&mut bytes)
+async fn parse_core_manifest_off_runtime(
+    bytes: Vec<u8>,
+) -> anyhow::Result<Arc<CoreVersionManifest>> {
+    crate::service::parse_json_off_runtime::<CoreVersionManifest>(bytes)
+        .await
         .map(Arc::new)
-        .map_err(|e| anyhow::anyhow!("JSON parse error: {e}"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1205,7 +1206,7 @@ fn resolve_from_full_manifest<RE>(
 
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
-fn apply_fetch_result(
+async fn apply_fetch_result(
     done: FetchDone,
     full_cache: &mut HashMap<String, Arc<FullManifest>>,
     version_cache: &mut HashMap<(String, String), Arc<CoreVersionManifest>>,
@@ -1223,7 +1224,11 @@ fn apply_fetch_result(
 
     match done {
         FetchDone::Full { name, result } => {
-            match result.and_then(|(bytes, _etag)| parse_full_manifest_inline(bytes)) {
+            let parsed: anyhow::Result<Arc<FullManifest>> = match result {
+                Ok((bytes, _etag)) => parse_full_manifest_off_runtime(bytes).await,
+                Err(e) => Err(e),
+            };
+            match parsed {
                 Ok(full) => {
                     full_cache.insert(name.clone(), full);
                 }
@@ -1237,7 +1242,11 @@ fn apply_fetch_result(
         }
         FetchDone::Version { name, spec, result } => {
             let key = (name, spec);
-            match result.and_then(parse_core_manifest_inline) {
+            let parsed: anyhow::Result<Arc<CoreVersionManifest>> = match result {
+                Ok(bytes) => parse_core_manifest_off_runtime(bytes).await,
+                Err(e) => Err(e),
+            };
+            match parsed {
                 Ok(manifest) => {
                     version_cache.insert(key.clone(), Arc::clone(&manifest));
                     schedule_transitive_prefetches(
@@ -1541,7 +1550,8 @@ where
                 &preload_config,
                 supports_semver,
                 &mut level_pending,
-            );
+            )
+            .await;
         }
 
         receiver.on_event(BuildEvent::LevelComplete {
