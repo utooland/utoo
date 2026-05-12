@@ -26,7 +26,7 @@ use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use futures::stream::{FuturesUnordered, StreamExt};
 #[cfg(not(target_arch = "wasm32"))]
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 
 #[cfg(feature = "http-tarball")]
 use anyhow::Context as _;
@@ -772,9 +772,34 @@ pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
 type WaitingEdge = (NodeIndex, DependencyEdgeInfo);
 
 #[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FetchPriority {
+    Demand,
+    Prefetch,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+enum FetchKey {
+    Full(String),
+    Version(String, String),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone)]
 enum FetchRequest {
     Full { name: String },
     Version { name: String, spec: String },
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl FetchRequest {
+    fn key(&self) -> FetchKey {
+        match self {
+            Self::Full { name } => FetchKey::Full(name.clone()),
+            Self::Version { name, spec } => FetchKey::Version(name.clone(), spec.clone()),
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -788,6 +813,16 @@ enum FetchDone {
         spec: String,
         result: anyhow::Result<Vec<u8>>,
     },
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl FetchDone {
+    fn key(&self) -> FetchKey {
+        match self {
+            Self::Full { name, .. } => FetchKey::Full(name.clone()),
+            Self::Version { name, spec, .. } => FetchKey::Version(name.clone(), spec.clone()),
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -815,6 +850,88 @@ fn parse_core_manifest_inline(mut bytes: Vec<u8>) -> anyhow::Result<Arc<CoreVers
     simd_json::serde::from_slice::<CoreVersionManifest>(&mut bytes)
         .map(Arc::new)
         .map_err(|e| anyhow::anyhow!("JSON parse error: {e}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+struct FetchQueues {
+    demand: VecDeque<FetchRequest>,
+    prefetch: VecDeque<FetchRequest>,
+    queued: HashMap<FetchKey, FetchPriority>,
+    active: HashMap<FetchKey, FetchPriority>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl FetchQueues {
+    fn enqueue(&mut self, request: FetchRequest, priority: FetchPriority) {
+        let key = request.key();
+        if self.active.contains_key(&key) {
+            return;
+        }
+
+        if let Some(queued_priority) = self.queued.get_mut(&key) {
+            if priority == FetchPriority::Demand && *queued_priority == FetchPriority::Prefetch {
+                *queued_priority = FetchPriority::Demand;
+                self.demand.push_back(request);
+            }
+            return;
+        }
+
+        self.queued.insert(key, priority);
+        match priority {
+            FetchPriority::Demand => self.demand.push_back(request),
+            FetchPriority::Prefetch => self.prefetch.push_back(request),
+        }
+    }
+
+    fn complete(&mut self, key: &FetchKey) {
+        self.active.remove(key);
+    }
+
+    fn active_prefetches(&self) -> usize {
+        self.active
+            .values()
+            .filter(|priority| **priority == FetchPriority::Prefetch)
+            .count()
+    }
+
+    fn pop_next(&mut self, prefetch_concurrency: usize) -> Option<FetchRequest> {
+        if let Some(request) = self.pop_priority(FetchPriority::Demand) {
+            return Some(request);
+        }
+
+        if self.active_prefetches() >= prefetch_concurrency {
+            return None;
+        }
+
+        self.pop_priority(FetchPriority::Prefetch)
+    }
+
+    fn pop_priority(&mut self, priority: FetchPriority) -> Option<FetchRequest> {
+        let queue = match priority {
+            FetchPriority::Demand => &mut self.demand,
+            FetchPriority::Prefetch => &mut self.prefetch,
+        };
+
+        while let Some(request) = queue.pop_front() {
+            let key = request.key();
+            match self.queued.get(&key).copied() {
+                Some(queued_priority) if queued_priority == priority => {
+                    self.queued.remove(&key);
+                    self.active.insert(key, priority);
+                    return Some(request);
+                }
+                Some(_) | None => {}
+            }
+        }
+
+        None
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn prefetch_concurrency_limit(concurrency: usize) -> usize {
+    (concurrency / 4).max(1)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -859,12 +976,13 @@ fn fetch_registry_manifest(registry_url: String, request: FetchRequest) -> Fetch
 #[cfg(not(target_arch = "wasm32"))]
 fn pump_fetches(
     fetches: &mut FuturesUnordered<FetchFuture>,
-    queue: &mut VecDeque<FetchRequest>,
+    fetch_queues: &mut FetchQueues,
     registry_url: &str,
     concurrency: usize,
 ) {
+    let prefetch_concurrency = prefetch_concurrency_limit(concurrency);
     while fetches.len() < concurrency {
-        let Some(request) = queue.pop_front() else {
+        let Some(request) = fetch_queues.pop_next(prefetch_concurrency) else {
             break;
         };
         fetches.push(fetch_registry_manifest(registry_url.to_string(), request));
@@ -876,33 +994,29 @@ fn pump_fetches(
 fn schedule_registry_fetch(
     name: String,
     spec: String,
+    priority: FetchPriority,
     supports_semver: bool,
     full_cache: &HashMap<String, Arc<FullManifest>>,
     version_cache: &HashMap<(String, String), Arc<CoreVersionManifest>>,
     full_failures: &HashMap<String, String>,
     version_failures: &HashMap<(String, String), String>,
-    inflight_full: &mut HashSet<String>,
-    inflight_version: &mut HashSet<(String, String)>,
-    fetch_queue: &mut VecDeque<FetchRequest>,
+    fetch_queues: &mut FetchQueues,
 ) {
     let (real_name, real_spec) = normalize_spec(&name, &spec);
     if supports_semver {
         let key = (real_name, real_spec);
-        if version_cache.contains_key(&key)
-            || version_failures.contains_key(&key)
-            || !inflight_version.insert(key.clone())
-        {
+        if version_cache.contains_key(&key) || version_failures.contains_key(&key) {
             return;
         }
-        fetch_queue.push_back(FetchRequest::Version {
-            name: key.0,
-            spec: key.1,
-        });
-    } else if !full_cache.contains_key(&real_name)
-        && !full_failures.contains_key(&real_name)
-        && inflight_full.insert(real_name.clone())
-    {
-        fetch_queue.push_back(FetchRequest::Full { name: real_name });
+        fetch_queues.enqueue(
+            FetchRequest::Version {
+                name: key.0,
+                spec: key.1,
+            },
+            priority,
+        );
+    } else if !full_cache.contains_key(&real_name) && !full_failures.contains_key(&real_name) {
+        fetch_queues.enqueue(FetchRequest::Full { name: real_name }, priority);
     }
 }
 
@@ -916,22 +1030,19 @@ fn schedule_transitive_prefetches(
     version_cache: &HashMap<(String, String), Arc<CoreVersionManifest>>,
     full_failures: &HashMap<String, String>,
     version_failures: &HashMap<(String, String), String>,
-    inflight_full: &mut HashSet<String>,
-    inflight_version: &mut HashSet<(String, String)>,
-    fetch_queue: &mut VecDeque<FetchRequest>,
+    fetch_queues: &mut FetchQueues,
 ) {
     for (name, spec) in extract_transitive_deps(manifest, preload_config) {
         schedule_registry_fetch(
             name,
             spec,
+            FetchPriority::Prefetch,
             supports_semver,
             full_cache,
             version_cache,
             full_failures,
             version_failures,
-            inflight_full,
-            inflight_version,
-            fetch_queue,
+            fetch_queues,
         );
     }
 }
@@ -1102,16 +1213,16 @@ fn apply_fetch_result(
     version_waiters: &mut HashMap<(String, String), Vec<WaitingEdge>>,
     full_failures: &mut HashMap<String, String>,
     version_failures: &mut HashMap<(String, String), String>,
-    inflight_full: &mut HashSet<String>,
-    inflight_version: &mut HashSet<(String, String)>,
-    fetch_queue: &mut VecDeque<FetchRequest>,
+    fetch_queues: &mut FetchQueues,
     preload_config: &PreloadConfig,
     supports_semver: bool,
     level_pending: &mut VecDeque<WaitingEdge>,
 ) {
+    let done_key = done.key();
+    fetch_queues.complete(&done_key);
+
     match done {
         FetchDone::Full { name, result } => {
-            inflight_full.remove(&name);
             match result.and_then(|(bytes, _etag)| parse_full_manifest_inline(bytes)) {
                 Ok(full) => {
                     full_cache.insert(name.clone(), full);
@@ -1126,7 +1237,6 @@ fn apply_fetch_result(
         }
         FetchDone::Version { name, spec, result } => {
             let key = (name, spec);
-            inflight_version.remove(&key);
             match result.and_then(parse_core_manifest_inline) {
                 Ok(manifest) => {
                     version_cache.insert(key.clone(), Arc::clone(&manifest));
@@ -1138,9 +1248,7 @@ fn apply_fetch_result(
                         version_cache,
                         full_failures,
                         version_failures,
-                        inflight_full,
-                        inflight_version,
-                        fetch_queue,
+                        fetch_queues,
                     );
                 }
                 Err(e) => {
@@ -1182,9 +1290,7 @@ where
     let mut version_waiters: HashMap<(String, String), Vec<WaitingEdge>> = HashMap::new();
     let mut full_failures: HashMap<String, String> = HashMap::new();
     let mut version_failures: HashMap<(String, String), String> = HashMap::new();
-    let mut inflight_full: HashSet<String> = HashSet::new();
-    let mut inflight_version: HashSet<(String, String)> = HashSet::new();
-    let mut fetch_queue: VecDeque<FetchRequest> = VecDeque::new();
+    let mut fetch_queues = FetchQueues::default();
     let mut fetches: FuturesUnordered<FetchFuture> = FuturesUnordered::new();
 
     let root_idx = graph.root_index;
@@ -1220,7 +1326,7 @@ where
         }
 
         loop {
-            pump_fetches(&mut fetches, &mut fetch_queue, &registry_url, concurrency);
+            pump_fetches(&mut fetches, &mut fetch_queues, &registry_url, concurrency);
 
             while let Some((parent, edge)) = level_pending.pop_front() {
                 receiver.on_event(BuildEvent::Resolving { name: &edge.name });
@@ -1282,9 +1388,7 @@ where
                                 &version_cache,
                                 &full_failures,
                                 &version_failures,
-                                &mut inflight_full,
-                                &mut inflight_version,
-                                &mut fetch_queue,
+                                &mut fetch_queues,
                             );
                             process_dependency_with_resolved(
                                 graph, parent, &edge, &resolved, config,
@@ -1303,12 +1407,17 @@ where
 
                     let waiters = version_waiters.entry(key.clone()).or_default();
                     waiters.push((parent, edge));
-                    if inflight_version.insert(key.clone()) {
-                        fetch_queue.push_back(FetchRequest::Version {
-                            name: key.0,
-                            spec: key.1,
-                        });
-                    }
+                    schedule_registry_fetch(
+                        key.0,
+                        key.1,
+                        FetchPriority::Demand,
+                        supports_semver,
+                        &full_cache,
+                        &version_cache,
+                        &full_failures,
+                        &version_failures,
+                        &mut fetch_queues,
+                    );
                 } else {
                     if let Some(error) = full_failures.get(&real_name) {
                         if edge.edge_type == EdgeType::Optional {
@@ -1361,9 +1470,7 @@ where
                                 &version_cache,
                                 &full_failures,
                                 &version_failures,
-                                &mut inflight_full,
-                                &mut inflight_version,
-                                &mut fetch_queue,
+                                &mut fetch_queues,
                             );
                             process_dependency_with_resolved(
                                 graph, parent, &edge, &resolved, config,
@@ -1382,12 +1489,20 @@ where
 
                     let waiters = full_waiters.entry(real_name.clone()).or_default();
                     waiters.push((parent, edge));
-                    if inflight_full.insert(real_name.clone()) {
-                        fetch_queue.push_back(FetchRequest::Full { name: real_name });
-                    }
+                    schedule_registry_fetch(
+                        real_name,
+                        real_spec,
+                        FetchPriority::Demand,
+                        supports_semver,
+                        &full_cache,
+                        &version_cache,
+                        &full_failures,
+                        &version_failures,
+                        &mut fetch_queues,
+                    );
                 }
 
-                pump_fetches(&mut fetches, &mut fetch_queue, &registry_url, concurrency);
+                pump_fetches(&mut fetches, &mut fetch_queues, &registry_url, concurrency);
             }
 
             if full_waiters.is_empty() && version_waiters.is_empty() {
@@ -1422,9 +1537,7 @@ where
                 &mut version_waiters,
                 &mut full_failures,
                 &mut version_failures,
-                &mut inflight_full,
-                &mut inflight_version,
-                &mut fetch_queue,
+                &mut fetch_queues,
                 &preload_config,
                 supports_semver,
                 &mut level_pending,
