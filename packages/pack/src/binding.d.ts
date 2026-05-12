@@ -9,6 +9,11 @@ export declare class ExternalObject<T> {
     [K: symbol]: T
   }
 }
+export type Lockfile = { __napiType: "Lockfile" }
+export declare function lockfileTryAcquireSync(path: string, content?: string | undefined | null): Lockfile | null
+export declare function lockfileTryAcquire(path: string, content?: string | undefined | null): Promise<Lockfile | null>
+export declare function lockfileUnlockSync(lockfile: Lockfile): void
+export declare function lockfileUnlock(lockfile: Lockfile): Promise<void>
 export declare function registerWorkerScheduler(creator: (arg: NapiWorkerCreation) => any, terminator: (arg: NapiWorkerTermination) => any): void
 export declare function workerCreated(workerId: number): void
 export interface NapiWorkerCreation {

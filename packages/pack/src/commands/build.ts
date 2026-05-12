@@ -12,6 +12,7 @@ import { blockStdout, getPackPath } from "../utils/common";
 import { findRootDir } from "../utils/findRoot";
 import { getInitialAssetsFromStats } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
+import { acquirePersistentCacheLock } from "../utils/lockfile";
 import { normalizePath } from "../utils/normalizePath";
 import { useWorkerThreads } from "../utils/runtimePluginStratety";
 import { validateEntryPaths } from "../utils/validateEntry";
@@ -50,78 +51,92 @@ async function buildInternal(
   await cleanOutput(bundleOptions.config, resolvedProjectPath);
 
   const createProject = projectFactory();
-  const project = await createProject(
-    {
-      processEnv: bundleOptions.processEnv ?? {},
-      watch: {
-        enable: false,
-      },
-      dev: bundleOptions.dev ?? false,
-      buildId: bundleOptions.buildId || nanoid(),
-      tracing: bundleOptions.tracing ?? true,
-      config: {
-        ...bundleOptions.config,
-        stats:
-          Boolean(process.env.ANALYZE) ||
-          bundleOptions.config.stats ||
-          bundleOptions.config.entry.some((e: EntryOptions) => !!e.html),
-        pluginRuntimeStrategy:
-          bundleOptions?.config?.pluginRuntimeStrategy ??
-          (useWorkerThreads() ? "workerThreads" : "childProcesses"),
-      },
-      projectPath: normalizePath(resolvedProjectPath),
-      rootPath: resolvedRootPath,
-      packPath: getPackPath(),
-    },
-    {
-      persistentCaching,
-      // Build mode is a short-lived, one-shot compilation, so avoid paying
-      // dependency graph bookkeeping cost unless the persistent cache needs it.
-      dependencyTracking: persistentCaching,
-      isShortSession: true,
-    },
+  const persistentCacheLock = await acquirePersistentCacheLock(
+    resolvedProjectPath,
+    "utoo pack build",
+    persistentCaching,
   );
 
-  const entrypoints = await project.writeAllEntrypointsToDisk();
-
-  handleIssues(entrypoints.issues);
-
-  const htmlConfigs = [
-    ...(Array.isArray((bundleOptions.config as any).html)
-      ? (bundleOptions.config as any).html
-      : (bundleOptions.config as any).html
-        ? [(bundleOptions.config as any).html]
-        : []),
-    ...bundleOptions.config.entry
-      .filter((e: EntryOptions) => !!e.html)
-      .map((e: EntryOptions) => e.html!),
-  ];
-
-  if (htmlConfigs.length > 0) {
-    const assets = { js: [] as string[], css: [] as string[] };
-
-    const outputDir = getOutputPath(bundleOptions.config, resolvedProjectPath);
-
-    if (assets.js.length === 0 && assets.css.length === 0) {
-      const discovered = getInitialAssetsFromStats(outputDir);
-      assets.js.push(...discovered.js);
-      assets.css.push(...discovered.css);
-    }
-
-    const publicPath = bundleOptions.config.output?.publicPath;
-
-    for (const config of htmlConfigs) {
-      const plugin = new HtmlPlugin(config);
-      await plugin.generate(outputDir, assets, publicPath);
-    }
-  }
-
-  if (process.env.ANALYZE) {
-    await analyzeBundle(
-      getOutputPath(bundleOptions.config, resolvedProjectPath),
+  let project:
+    | Awaited<ReturnType<ReturnType<typeof projectFactory>>>
+    | undefined;
+  try {
+    project = await createProject(
+      {
+        processEnv: bundleOptions.processEnv ?? {},
+        watch: {
+          enable: false,
+        },
+        dev: bundleOptions.dev ?? false,
+        buildId: bundleOptions.buildId || nanoid(),
+        tracing: bundleOptions.tracing ?? true,
+        config: {
+          ...bundleOptions.config,
+          stats:
+            Boolean(process.env.ANALYZE) ||
+            bundleOptions.config.stats ||
+            bundleOptions.config.entry.some((e: EntryOptions) => !!e.html),
+          pluginRuntimeStrategy:
+            bundleOptions?.config?.pluginRuntimeStrategy ??
+            (useWorkerThreads() ? "workerThreads" : "childProcesses"),
+        },
+        projectPath: normalizePath(resolvedProjectPath),
+        rootPath: resolvedRootPath,
+        packPath: getPackPath(),
+      },
+      {
+        persistentCaching,
+        // Build mode is a short-lived, one-shot compilation, so avoid paying
+        // dependency graph bookkeeping cost unless the persistent cache needs it.
+        dependencyTracking: persistentCaching,
+        isShortSession: true,
+      },
     );
+
+    const entrypoints = await project.writeAllEntrypointsToDisk();
+
+    handleIssues(entrypoints.issues);
+
+    const htmlConfigs = [
+      ...(Array.isArray((bundleOptions.config as any).html)
+        ? (bundleOptions.config as any).html
+        : (bundleOptions.config as any).html
+          ? [(bundleOptions.config as any).html]
+          : []),
+      ...bundleOptions.config.entry
+        .filter((e: EntryOptions) => !!e.html)
+        .map((e: EntryOptions) => e.html!),
+    ];
+
+    if (htmlConfigs.length > 0) {
+      const assets = { js: [] as string[], css: [] as string[] };
+
+      const outputDir = getOutputPath(
+        bundleOptions.config,
+        resolvedProjectPath,
+      );
+
+      if (assets.js.length === 0 && assets.css.length === 0) {
+        const discovered = getInitialAssetsFromStats(outputDir);
+        assets.js.push(...discovered.js);
+        assets.css.push(...discovered.css);
+      }
+
+      const publicPath = bundleOptions.config.output?.publicPath;
+
+      for (const config of htmlConfigs) {
+        const plugin = new HtmlPlugin(config);
+        await plugin.generate(outputDir, assets, publicPath);
+      }
+    }
+
+    if (process.env.ANALYZE) {
+      await analyzeBundle(bundleOptions.config.output?.path || "dist");
+    }
+  } finally {
+    await project?.shutdown();
+    persistentCacheLock?.unlockSync();
   }
-  await project.shutdown();
 
   // TODO: Maybe run tasks in worker is a better way, see
   // https://github.com/vercel/next.js/blob/512d8283054407ab92b2583ecce3b253c3be7b85/packages/next/src/lib/worker.ts

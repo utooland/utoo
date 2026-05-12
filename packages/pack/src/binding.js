@@ -310,8 +310,12 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { registerWorkerScheduler, workerCreated, recvTaskMessageInWorker, sendTaskMessage, endpointWriteToDisk, endpointServerChangedSubscribe, endpointClientChangedSubscribe, projectNew, projectUpdate, projectOnExit, projectShutdown, projectWriteAllEntrypointsToDisk, projectEntrypointsSubscribe, projectHmrEvents, projectHmrIdentifiersSubscribe, projectUpdateInfoSubscribe, projectTraceSource, projectGetSourceForAsset, projectGetSourceMap, projectGetSourceMapSync, rootTaskDispose, initCustomTraceSubscriber, teardownTraceSubscriber } = nativeBinding
+const { lockfileTryAcquireSync, lockfileTryAcquire, lockfileUnlockSync, lockfileUnlock, registerWorkerScheduler, workerCreated, recvTaskMessageInWorker, sendTaskMessage, endpointWriteToDisk, endpointServerChangedSubscribe, endpointClientChangedSubscribe, projectNew, projectUpdate, projectOnExit, projectShutdown, projectWriteAllEntrypointsToDisk, projectEntrypointsSubscribe, projectHmrEvents, projectHmrIdentifiersSubscribe, projectUpdateInfoSubscribe, projectTraceSource, projectGetSourceForAsset, projectGetSourceMap, projectGetSourceMapSync, rootTaskDispose, initCustomTraceSubscriber, teardownTraceSubscriber } = nativeBinding
 
+module.exports.lockfileTryAcquireSync = lockfileTryAcquireSync
+module.exports.lockfileTryAcquire = lockfileTryAcquire
+module.exports.lockfileUnlockSync = lockfileUnlockSync
+module.exports.lockfileUnlock = lockfileUnlock
 module.exports.registerWorkerScheduler = registerWorkerScheduler
 module.exports.workerCreated = workerCreated
 module.exports.recvTaskMessageInWorker = recvTaskMessageInWorker

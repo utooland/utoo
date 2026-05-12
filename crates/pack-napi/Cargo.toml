@@ -74,6 +74,9 @@ turbopack-node                    = { workspace = true, default-features = false
 turbopack-trace-server            = { workspace = true }
 turbopack-trace-utils             = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = "0.60"
+
 [features]
 # Enable dhat profiling allocator for ad hoc profiling.
 # [Note]: we do not have any ad hoc event in the codebase yet, so enabling this
