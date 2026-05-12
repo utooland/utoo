@@ -141,7 +141,18 @@ pub trait RegistryClient {
     fn fetch_full_manifest(
         &self,
         name: &str,
-    ) -> impl Future<Output = Result<Arc<FullManifest>, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Arc<FullManifest>, Self::Error>>;
+
+    /// The base registry URL used for direct HTTP fetches. The
+    /// channel-based main loop uses this to call
+    /// `service::manifest::fetch_full_manifest` directly without going
+    /// through this trait's `fetch_full_manifest` (which on
+    /// `UnifiedRegistry` couples with OnceMap dedup + cache writes).
+    /// Default returns empty; implementations that don't surface a
+    /// concrete URL should override.
+    fn registry_url(&self) -> &str {
+        ""
+    }
 
     /// Fetch specific version manifest from registry.
     ///

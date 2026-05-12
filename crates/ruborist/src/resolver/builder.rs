@@ -509,28 +509,29 @@ pub fn process_dependency_with_resolved(
 
 /// Channel item: `(underlying_name, fetched FullManifest or error)`.
 #[cfg(not(target_arch = "wasm32"))]
-type PreloadResult<E> = (String, Result<Arc<FullManifest>, E>);
+type PreloadResult = (String, anyhow::Result<Arc<FullManifest>>);
 
-/// Spawned preload task: fetches FullManifests in parallel, walks
-/// transitive dependencies by manifest content, sends each fetched
-/// FullManifest to main via mpsc keyed by **underlying** package name
-/// (after `normalize_spec` strips any `npm:` alias prefix).
+/// Spawned preload task: fetches FullManifests in parallel via
+/// `service::manifest::fetch_full_manifest` (pure HTTP, no OnceMap
+/// or cache coupling), walks transitive dependencies by manifest
+/// content, sends each fetched manifest to main via mpsc keyed by
+/// underlying package name (after `normalize_spec`).
 ///
-/// Does NOT touch any shared cache — main is the sole writer. Dedup is
-/// local: one fetch per underlying name regardless of how many specs
-/// reference it.
+/// Stateless w.r.t. shared caches — main is the sole writer. Dedup
+/// is local to this task: one network fetch per underlying name
+/// regardless of how many specs reference it.
 #[cfg(not(target_arch = "wasm32"))]
-async fn preload_to_channel<R>(
+async fn preload_to_channel(
     initial_deps: Vec<(String, String)>,
-    registry: R,
+    registry_url: String,
     config: BuildDepsConfig,
-    manifest_tx: mpsc::Sender<PreloadResult<R::Error>>,
-) where
-    R: RegistryClient + Clone + Send + Sync + 'static,
-    R::Error: Send + Sync + 'static,
-{
+    manifest_tx: mpsc::Sender<PreloadResult>,
+) {
     use crate::resolver::preload::{PreloadConfig, extract_transitive_deps};
     use crate::resolver::semver::normalize_spec;
+    use crate::service::{
+        FetchManifestOptions, FetchManifestResult, MetadataFormat, fetch_full_manifest,
+    };
 
     let cap = config.concurrency.max(1);
     let preload_config = PreloadConfig {
@@ -593,11 +594,23 @@ async fn preload_to_channel<R>(
                 continue;
             }
 
-            let registry_clone = registry.clone();
+            let url = registry_url.clone();
             let n = real_name.clone();
             let s = real_spec;
             futs.push(async move {
-                let r = registry_clone.fetch_full_manifest(&n).await;
+                let opts = FetchManifestOptions {
+                    registry_url: &url,
+                    name: &n,
+                    format: MetadataFormat::Abbreviated,
+                    etag: None,
+                };
+                let r = match fetch_full_manifest(opts).await {
+                    Ok(FetchManifestResult::Ok(full, _etag)) => Ok(Arc::new(full)),
+                    Ok(FetchManifestResult::NotModified) => {
+                        Err(anyhow::anyhow!("304 Not Modified without etag context"))
+                    }
+                    Err(e) => Err(e),
+                };
                 (n, s, r)
             });
         }
@@ -844,15 +857,11 @@ pub async fn process_dependency<R: RegistryClient>(
 /// // Add initial dependency edges to root...
 /// build_deps(&mut graph, &registry, PeerDeps::Include).await?;
 /// ```
-pub async fn build_deps<R>(
+pub async fn build_deps<R: RegistryClient>(
     graph: &mut DependencyGraph,
     registry: &R,
     peer_deps: PeerDeps,
-) -> Result<(), ResolveError<R::Error>>
-where
-    R: RegistryClient + Clone + Send + Sync + 'static,
-    R::Error: Send + Sync + 'static,
-{
+) -> Result<(), ResolveError<R::Error>> {
     let config = BuildDepsConfig::default().with_peer_deps(peer_deps);
     build_deps_with_config(graph, registry, config, &NoopReceiver).await
 }
@@ -877,8 +886,7 @@ pub async fn build_deps_with_receiver<R, E>(
     receiver: &E,
 ) -> Result<(), ResolveError<R::Error>>
 where
-    R: RegistryClient + Clone + Send + Sync + 'static,
-    R::Error: Send + Sync + 'static,
+    R: RegistryClient,
     E: EventReceiver,
 {
     let config = BuildDepsConfig::default().with_peer_deps(peer_deps);
@@ -912,8 +920,7 @@ pub async fn build_deps_with_config<R, E>(
     receiver: &E,
 ) -> Result<(), ResolveError<R::Error>>
 where
-    R: RegistryClient + Clone + Send + Sync + 'static,
-    R::Error: Send + Sync + 'static,
+    R: RegistryClient,
     E: EventReceiver,
 {
     tracing::debug!(
@@ -962,8 +969,7 @@ async fn mb_fetch_with_graph<R, E>(
     receiver: &E,
 ) -> Result<(), ResolveError<R::Error>>
 where
-    R: RegistryClient + Clone + Send + Sync + 'static,
-    R::Error: Send + Sync + 'static,
+    R: RegistryClient,
     E: EventReceiver,
 {
     use crate::resolver::semver::normalize_spec;
@@ -982,18 +988,17 @@ where
         });
     }
 
-    let (manifest_tx, mut manifest_rx) =
-        mpsc::channel::<PreloadResult<R::Error>>(cap * 2 + 16);
+    let (manifest_tx, mut manifest_rx) = mpsc::channel::<PreloadResult>(cap * 2 + 16);
 
     // Spawn preload concurrent with main BFS. Preload writes nothing
     // shared — sends manifests through the channel.
-    let registry_for_preload = registry.clone();
+    let registry_url = registry.registry_url().to_string();
     let config_for_preload = config.clone();
     let preload_initial = initial_deps;
     let preload_handle = tokio::spawn(async move {
         preload_to_channel(
             preload_initial,
-            registry_for_preload,
+            registry_url,
             config_for_preload,
             manifest_tx,
         )
@@ -1260,8 +1265,8 @@ fn handle_processed<E: EventReceiver>(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn drain_until_progress<E>(
-    manifest_rx: &mut mpsc::Receiver<(String, Result<Arc<FullManifest>, E>)>,
+async fn drain_until_progress(
+    manifest_rx: &mut mpsc::Receiver<PreloadResult>,
     full_cache: &mut HashMap<String, Arc<FullManifest>>,
     waiters: &mut HashMap<String, Vec<(NodeIndex, DependencyEdgeInfo)>>,
     preload_failed: &mut HashSet<String>,
@@ -1470,14 +1475,10 @@ use std::path::Path;
 /// let pkg: PackageJson = serde_json::from_str(&pkg_content)?;
 /// let lock = resolve(&pkg, &registry).await?;
 /// ```
-pub async fn resolve<R>(
+pub async fn resolve<R: RegistryClient>(
     pkg: &PackageJson,
     registry: &R,
-) -> Result<PackageLock, ResolveError<R::Error>>
-where
-    R: RegistryClient + Clone + Send + Sync + 'static,
-    R::Error: Send + Sync + 'static,
-{
+) -> Result<PackageLock, ResolveError<R::Error>> {
     resolve_with_options(pkg, registry, PeerDeps::Include, &NoopReceiver).await
 }
 
@@ -1495,8 +1496,7 @@ pub async fn resolve_with_options<R, E>(
     receiver: &E,
 ) -> Result<PackageLock, ResolveError<R::Error>>
 where
-    R: RegistryClient + Clone + Send + Sync + 'static,
-    R::Error: Send + Sync + 'static,
+    R: RegistryClient,
     E: EventReceiver,
 {
     // Create graph with root node
