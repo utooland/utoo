@@ -540,7 +540,7 @@ jobs:
         env:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmjs.org'
-          BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
+          BENCH_RUNS: ${{ github.event.inputs.bench_runs || '2' }}
           PM_LIST: 'utoo,utoo-next,utoo-npm,bun'
         run: |
           chmod +x bench/pm-bench-phases.sh
@@ -560,7 +560,7 @@ jobs:
         env:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmmirror.com'
-          BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
+          BENCH_RUNS: ${{ github.event.inputs.bench_runs || '2' }}
           PM_LIST: 'utoo,utoo-next,utoo-npm,bun'
         run: |
           mkdir -p /tmp/pm-bench-output
@@ -629,7 +629,7 @@ jobs:
         env:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmjs.org'
-          BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
+          BENCH_RUNS: ${{ github.event.inputs.bench_runs || '2' }}
           PM_LIST: 'utoo,utoo-npm,bun'
         run: |
           chmod +x bench/pm-bench-phases.sh
@@ -645,7 +645,7 @@ jobs:
         env:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmmirror.com'
-          BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
+          BENCH_RUNS: ${{ github.event.inputs.bench_runs || '2' }}
           PM_LIST: 'utoo,utoo-npm,bun'
         run: |
           mkdir -p /tmp/pm-bench-output
