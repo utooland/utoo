@@ -60,8 +60,9 @@ pub use cache::{
 pub use fs::{Glob, NoopGlob, exists, read_to_string};
 pub use http::client_builder;
 pub use manifest::{
-    FetchManifestOptions, FetchManifestResult, FetchVersionManifestOptions, MetadataFormat,
-    fetch_full_manifest, fetch_full_manifest_fresh, fetch_version_manifest,
+    FetchManifestBytesResult, FetchManifestOptions, FetchManifestResult,
+    FetchVersionManifestOptions, MetadataFormat, fetch_full_manifest, fetch_full_manifest_bytes,
+    fetch_full_manifest_fresh, fetch_version_manifest, fetch_version_manifest_bytes,
 };
 pub use registry::UnifiedRegistry;
 pub use store::{ManifestStore, NoopStore};

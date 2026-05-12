@@ -23,17 +23,30 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[cfg(not(target_arch = "wasm32"))]
+use futures::stream::{FuturesUnordered, StreamExt};
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::{HashSet, VecDeque};
+
 #[cfg(feature = "http-tarball")]
 use anyhow::Context as _;
 
 use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
 use crate::model::manifest::NodeManifest;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::manifest::{CoreVersionManifest, FullManifest};
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
-use crate::resolver::preload::{PreloadConfig, preload_manifests};
+use crate::resolver::preload::{PreloadConfig, extract_transitive_deps, preload_manifests};
 use crate::resolver::registry::{ResolveError, resolve_registry_dep};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::resolver::semver::normalize_spec;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::resolver::version::resolve_target_version;
 use crate::spec::{Catalogs, PackageSpec, Protocol};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::traits::registry::RegistryError;
 use crate::traits::registry::{RegistryClient, ResolvedPackage};
 
 /// Dispatch a git/github spec to the real `gix`-backed resolver when the
@@ -732,15 +745,697 @@ pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
         config.skip_preload
     );
 
-    // Phase 1: Preload manifests in parallel (unless skipped)
-    run_preload_phase(graph, registry, &config, receiver).await;
+    #[cfg(not(target_arch = "wasm32"))]
+    if !config.skip_preload && !registry.registry_url().is_empty() {
+        run_main_loop_bfs(graph, registry, &config, receiver).await?;
+    } else {
+        // Keep the existing path for warm project-cache runs and generic
+        // RegistryClient implementations that do not expose a raw registry URL.
+        run_preload_phase(graph, registry, &config, receiver).await;
+        run_bfs_phase(graph, registry, &config, receiver).await?;
+    }
 
-    // Phase 2: BFS traversal to build the dependency tree
-    run_bfs_phase(graph, registry, &config, receiver).await?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        run_preload_phase(graph, registry, &config, receiver).await;
+        run_bfs_phase(graph, registry, &config, receiver).await?;
+    }
 
     receiver.on_event(BuildEvent::Complete {
         total_nodes: graph.graph.node_count(),
     });
+
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+type WaitingEdge = (NodeIndex, DependencyEdgeInfo);
+
+#[cfg(not(target_arch = "wasm32"))]
+enum FetchRequest {
+    Full { name: String },
+    Version { name: String, spec: String },
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+enum FetchDone {
+    Full {
+        name: String,
+        result: anyhow::Result<(Vec<u8>, Option<String>)>,
+    },
+    Version {
+        name: String,
+        spec: String,
+        result: anyhow::Result<Vec<u8>>,
+    },
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+type FetchFuture = tokio::task::JoinHandle<FetchDone>;
+
+#[cfg(not(target_arch = "wasm32"))]
+fn registry_error<E>(message: impl Into<String>) -> ResolveError<E>
+where
+    E: From<RegistryError>,
+{
+    ResolveError::Registry(RegistryError(anyhow::anyhow!(message.into())).into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn parse_full_manifest_inline(raw_bytes: Vec<u8>) -> anyhow::Result<Arc<FullManifest>> {
+    let mut parse_buf = raw_bytes.clone();
+    let mut manifest: FullManifest = simd_json::serde::from_slice(&mut parse_buf)
+        .map_err(|e| anyhow::anyhow!("JSON parse error: {e}"))?;
+    manifest.raw = Arc::from(raw_bytes);
+    Ok(Arc::new(manifest))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn parse_core_manifest_inline(mut bytes: Vec<u8>) -> anyhow::Result<Arc<CoreVersionManifest>> {
+    simd_json::serde::from_slice::<CoreVersionManifest>(&mut bytes)
+        .map(Arc::new)
+        .map_err(|e| anyhow::anyhow!("JSON parse error: {e}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn fetch_registry_manifest(registry_url: String, request: FetchRequest) -> FetchFuture {
+    use crate::service::{
+        FetchManifestBytesResult, FetchManifestOptions, FetchVersionManifestOptions,
+        MetadataFormat, fetch_full_manifest_bytes, fetch_version_manifest_bytes,
+    };
+
+    tokio::spawn(async move {
+        match request {
+            FetchRequest::Full { name } => {
+                let result = fetch_full_manifest_bytes(FetchManifestOptions {
+                    registry_url: &registry_url,
+                    name: &name,
+                    format: MetadataFormat::Abbreviated,
+                    etag: None,
+                })
+                .await
+                .and_then(|result| match result {
+                    FetchManifestBytesResult::Ok(bytes, etag) => Ok((bytes, etag)),
+                    FetchManifestBytesResult::NotModified => {
+                        Err(anyhow::anyhow!("304 Not Modified without etag context"))
+                    }
+                });
+                FetchDone::Full { name, result }
+            }
+            FetchRequest::Version { name, spec } => {
+                let result = fetch_version_manifest_bytes(FetchVersionManifestOptions {
+                    registry_url: &registry_url,
+                    name: &name,
+                    spec: &spec,
+                    format: MetadataFormat::Abbreviated,
+                })
+                .await;
+                FetchDone::Version { name, spec, result }
+            }
+        }
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn pump_fetches(
+    fetches: &mut FuturesUnordered<FetchFuture>,
+    queue: &mut VecDeque<FetchRequest>,
+    registry_url: &str,
+    concurrency: usize,
+) {
+    while fetches.len() < concurrency {
+        let Some(request) = queue.pop_front() else {
+            break;
+        };
+        fetches.push(fetch_registry_manifest(registry_url.to_string(), request));
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
+fn schedule_registry_fetch(
+    name: String,
+    spec: String,
+    supports_semver: bool,
+    full_cache: &HashMap<String, Arc<FullManifest>>,
+    version_cache: &HashMap<(String, String), Arc<CoreVersionManifest>>,
+    full_failures: &HashMap<String, String>,
+    version_failures: &HashMap<(String, String), String>,
+    inflight_full: &mut HashSet<String>,
+    inflight_version: &mut HashSet<(String, String)>,
+    fetch_queue: &mut VecDeque<FetchRequest>,
+) {
+    let (real_name, real_spec) = normalize_spec(&name, &spec);
+    if supports_semver {
+        let key = (real_name, real_spec);
+        if version_cache.contains_key(&key)
+            || version_failures.contains_key(&key)
+            || !inflight_version.insert(key.clone())
+        {
+            return;
+        }
+        fetch_queue.push_back(FetchRequest::Version {
+            name: key.0,
+            spec: key.1,
+        });
+    } else if !full_cache.contains_key(&real_name)
+        && !full_failures.contains_key(&real_name)
+        && inflight_full.insert(real_name.clone())
+    {
+        fetch_queue.push_back(FetchRequest::Full { name: real_name });
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
+fn schedule_transitive_prefetches(
+    manifest: &CoreVersionManifest,
+    preload_config: &PreloadConfig,
+    supports_semver: bool,
+    full_cache: &HashMap<String, Arc<FullManifest>>,
+    version_cache: &HashMap<(String, String), Arc<CoreVersionManifest>>,
+    full_failures: &HashMap<String, String>,
+    version_failures: &HashMap<(String, String), String>,
+    inflight_full: &mut HashSet<String>,
+    inflight_version: &mut HashSet<(String, String)>,
+    fetch_queue: &mut VecDeque<FetchRequest>,
+) {
+    for (name, spec) in extract_transitive_deps(manifest, preload_config) {
+        schedule_registry_fetch(
+            name,
+            spec,
+            supports_semver,
+            full_cache,
+            version_cache,
+            full_failures,
+            version_failures,
+            inflight_full,
+            inflight_version,
+            fetch_queue,
+        );
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn try_reuse_dependency(
+    graph: &mut DependencyGraph,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+) -> Option<ProcessResult> {
+    match graph.find_compatible_node(parent, &edge.name, &edge.spec) {
+        FindResult::Reuse(existing_index) => {
+            graph.mark_dependency_resolved(edge.edge_id, existing_index);
+            update_node_type_from_edge(graph, parent, existing_index, &edge.edge_type);
+            Some(ProcessResult::Reused(existing_index))
+        }
+        FindResult::Conflict(_) | FindResult::New(_) => None,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn process_dependency_with_resolved(
+    graph: &mut DependencyGraph,
+    node_index: NodeIndex,
+    edge_info: &DependencyEdgeInfo,
+    resolved: &ResolvedPackage,
+    config: &BuildDepsConfig,
+) -> ProcessResult {
+    match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
+        FindResult::Reuse(existing_index) => {
+            graph.mark_dependency_resolved(edge_info.edge_id, existing_index);
+            update_node_type_from_edge(graph, node_index, existing_index, &edge_info.edge_type);
+            ProcessResult::Reused(existing_index)
+        }
+        FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
+            let new_node = create_package_node(&edge_info.name, resolved, conflict_parent, graph);
+            let new_index = graph.add_node(new_node);
+            graph.add_physical_edge(conflict_parent, new_index);
+            graph.mark_dependency_resolved(edge_info.edge_id, new_index);
+            update_node_type_from_edge(graph, node_index, new_index, &edge_info.edge_type);
+            add_edges_from(
+                graph,
+                new_index,
+                &*resolved.manifest,
+                &EdgeContext::new(config.peer_deps, DevDeps::Exclude),
+            );
+            ProcessResult::Created(new_index)
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn chain_err<E>(
+    graph: &DependencyGraph,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    inner: ResolveError<E>,
+) -> ResolveError<E> {
+    let mut chain = graph.logical_ancestry(parent);
+    chain.push((edge.name.clone(), edge.spec.clone()));
+    ResolveError::WithChain {
+        chain,
+        source: Box::new(inner),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn handle_processed<E: EventReceiver>(
+    graph: &DependencyGraph,
+    receiver: &E,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    processed: &ProcessResult,
+    next_level: &mut Vec<NodeIndex>,
+) {
+    match processed {
+        ProcessResult::Created(idx) => {
+            if let Some(node) = graph.get_node(*idx) {
+                receiver.on_event(BuildEvent::Resolved {
+                    name: &edge.name,
+                    version: &node.version,
+                });
+                if let NodeManifest::Registry(ref manifest) = node.manifest {
+                    let parent_path = graph.get_node(parent).map(|p| p.path.as_path());
+                    receiver.on_event(BuildEvent::PackagePlaced {
+                        package: manifest.as_ref().into(),
+                        path: &node.path,
+                        parent_path,
+                    });
+                }
+            }
+            next_level.push(*idx);
+        }
+        ProcessResult::Reused(idx) => {
+            if let Some(node) = graph.get_node(*idx) {
+                receiver.on_event(BuildEvent::Reused {
+                    name: &edge.name,
+                    version: &node.version,
+                });
+            }
+        }
+        ProcessResult::Skipped => {
+            receiver.on_event(BuildEvent::Skipped {
+                name: &edge.name,
+                spec: &edge.spec,
+            });
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn resolve_from_full_manifest<RE>(
+    edge: &DependencyEdgeInfo,
+    full: &FullManifest,
+    real_spec: &str,
+    core_cache: &mut HashMap<(String, String), Arc<CoreVersionManifest>>,
+) -> Result<Option<ResolvedPackage>, ResolveError<RE>> {
+    if full.versions.is_empty() {
+        if edge.edge_type == EdgeType::Optional {
+            return Ok(None);
+        }
+        return Err(ResolveError::NoVersions(full.name.clone()));
+    }
+
+    let version = match resolve_target_version(full.into(), real_spec) {
+        Ok(version) => version,
+        Err(_) if edge.edge_type == EdgeType::Optional => return Ok(None),
+        Err(e) => {
+            return Err(ResolveError::Version(format!(
+                "{}@{}: {}",
+                edge.name, real_spec, e
+            )));
+        }
+    };
+
+    let cache_key = (full.name.clone(), version.clone());
+    let manifest = match core_cache.get(&cache_key).cloned() {
+        Some(manifest) => manifest,
+        None => {
+            let Some(manifest) = full.get_core_version(&version).map(Arc::new) else {
+                if edge.edge_type == EdgeType::Optional {
+                    return Ok(None);
+                }
+                return Err(ResolveError::ManifestNotFound {
+                    name: edge.name.clone(),
+                    version,
+                });
+            };
+            core_cache.insert(cache_key, Arc::clone(&manifest));
+            manifest
+        }
+    };
+
+    Ok(Some(ResolvedPackage {
+        name: edge.name.clone(),
+        version: manifest.version.clone(),
+        manifest,
+    }))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
+fn apply_fetch_result(
+    done: FetchDone,
+    full_cache: &mut HashMap<String, Arc<FullManifest>>,
+    version_cache: &mut HashMap<(String, String), Arc<CoreVersionManifest>>,
+    full_waiters: &mut HashMap<String, Vec<WaitingEdge>>,
+    version_waiters: &mut HashMap<(String, String), Vec<WaitingEdge>>,
+    full_failures: &mut HashMap<String, String>,
+    version_failures: &mut HashMap<(String, String), String>,
+    inflight_full: &mut HashSet<String>,
+    inflight_version: &mut HashSet<(String, String)>,
+    fetch_queue: &mut VecDeque<FetchRequest>,
+    preload_config: &PreloadConfig,
+    supports_semver: bool,
+    level_pending: &mut VecDeque<WaitingEdge>,
+) {
+    match done {
+        FetchDone::Full { name, result } => {
+            inflight_full.remove(&name);
+            match result.and_then(|(bytes, _etag)| parse_full_manifest_inline(bytes)) {
+                Ok(full) => {
+                    full_cache.insert(name.clone(), full);
+                }
+                Err(e) => {
+                    full_failures.insert(name.clone(), format!("{e:#}"));
+                }
+            }
+            if let Some(waiters) = full_waiters.remove(&name) {
+                level_pending.extend(waiters);
+            }
+        }
+        FetchDone::Version { name, spec, result } => {
+            let key = (name, spec);
+            inflight_version.remove(&key);
+            match result.and_then(parse_core_manifest_inline) {
+                Ok(manifest) => {
+                    version_cache.insert(key.clone(), Arc::clone(&manifest));
+                    schedule_transitive_prefetches(
+                        &manifest,
+                        preload_config,
+                        supports_semver,
+                        full_cache,
+                        version_cache,
+                        full_failures,
+                        version_failures,
+                        inflight_full,
+                        inflight_version,
+                        fetch_queue,
+                    );
+                }
+                Err(e) => {
+                    version_failures.insert(key.clone(), format!("{e:#}"));
+                }
+            }
+            if let Some(waiters) = version_waiters.remove(&key) {
+                level_pending.extend(waiters);
+            }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn run_main_loop_bfs<R, E>(
+    graph: &mut DependencyGraph,
+    registry: &R,
+    config: &BuildDepsConfig,
+    receiver: &E,
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: RegistryClient,
+    E: EventReceiver,
+{
+    use crate::spec::SpecStr;
+
+    let registry_url = registry.registry_url().trim_end_matches('/').to_string();
+    let supports_semver = registry.supports_semver_resolution();
+    let concurrency = config.concurrency.max(1);
+    let preload_config = PreloadConfig {
+        peer_deps: config.peer_deps,
+        concurrency,
+    };
+
+    let mut full_cache: HashMap<String, Arc<FullManifest>> = HashMap::new();
+    let mut version_cache: HashMap<(String, String), Arc<CoreVersionManifest>> = HashMap::new();
+    let mut core_cache: HashMap<(String, String), Arc<CoreVersionManifest>> = HashMap::new();
+    let mut full_waiters: HashMap<String, Vec<WaitingEdge>> = HashMap::new();
+    let mut version_waiters: HashMap<(String, String), Vec<WaitingEdge>> = HashMap::new();
+    let mut full_failures: HashMap<String, String> = HashMap::new();
+    let mut version_failures: HashMap<(String, String), String> = HashMap::new();
+    let mut inflight_full: HashSet<String> = HashSet::new();
+    let mut inflight_version: HashSet<(String, String)> = HashSet::new();
+    let mut fetch_queue: VecDeque<FetchRequest> = VecDeque::new();
+    let mut fetches: FuturesUnordered<FetchFuture> = FuturesUnordered::new();
+
+    let root_idx = graph.root_index;
+    let mut current_level = vec![root_idx];
+
+    while !current_level.is_empty() {
+        receiver.on_event(BuildEvent::LevelStart {
+            node_count: current_level.len(),
+        });
+
+        let mut next_level = Vec::new();
+        let mut level_pending = VecDeque::new();
+
+        for node_index in &current_level {
+            for (_, dep) in graph.get_dependency_edges(*node_index) {
+                if dep.valid
+                    && let Some(to) = dep.to
+                    && let Some(n) = graph.get_node(to)
+                    && n.is_workspace()
+                    && *node_index == root_idx
+                {
+                    next_level.push(to);
+                }
+            }
+
+            let unresolved = collect_unresolved_edges(graph, *node_index);
+            receiver.on_event(BuildEvent::DependencyCount {
+                count: unresolved.len(),
+            });
+            for edge in unresolved {
+                level_pending.push_back((*node_index, edge));
+            }
+        }
+
+        loop {
+            pump_fetches(&mut fetches, &mut fetch_queue, &registry_url, concurrency);
+
+            while let Some((parent, edge)) = level_pending.pop_front() {
+                receiver.on_event(BuildEvent::Resolving { name: &edge.name });
+
+                if !edge.spec.is_registry_spec() {
+                    let processed = process_dependency(graph, registry, parent, &edge, config)
+                        .await
+                        .map_err(|inner| chain_err(graph, parent, &edge, inner))?;
+                    handle_processed(graph, receiver, parent, &edge, &processed, &mut next_level);
+                    continue;
+                }
+
+                if let Some(processed) = try_reuse_dependency(graph, parent, &edge) {
+                    handle_processed(graph, receiver, parent, &edge, &processed, &mut next_level);
+                    continue;
+                }
+
+                let (real_name, real_spec) = normalize_spec(&edge.name, &edge.spec);
+                if supports_semver {
+                    let key = (real_name.clone(), real_spec.clone());
+                    if let Some(error) = version_failures.get(&key) {
+                        if edge.edge_type == EdgeType::Optional {
+                            receiver.on_event(BuildEvent::Skipped {
+                                name: &edge.name,
+                                spec: &edge.spec,
+                            });
+                            continue;
+                        }
+                        return Err(chain_err(
+                            graph,
+                            parent,
+                            &edge,
+                            registry_error(format!("{}@{}: {error}", real_name, real_spec)),
+                        ));
+                    }
+
+                    if let Some(manifest) = version_cache.get(&key).cloned() {
+                        let resolved = ResolvedPackage {
+                            name: edge.name.clone(),
+                            version: manifest.version.clone(),
+                            manifest,
+                        };
+                        let processed = if graph
+                            .check_override(parent, &edge.name, Some(&resolved.version))
+                            .is_some()
+                        {
+                            process_dependency(graph, registry, parent, &edge, config)
+                                .await
+                                .map_err(|inner| chain_err(graph, parent, &edge, inner))?
+                        } else {
+                            receiver.on_event(BuildEvent::PackageResolved(
+                                (&*resolved.manifest).into(),
+                            ));
+                            schedule_transitive_prefetches(
+                                &resolved.manifest,
+                                &preload_config,
+                                supports_semver,
+                                &full_cache,
+                                &version_cache,
+                                &full_failures,
+                                &version_failures,
+                                &mut inflight_full,
+                                &mut inflight_version,
+                                &mut fetch_queue,
+                            );
+                            process_dependency_with_resolved(
+                                graph, parent, &edge, &resolved, config,
+                            )
+                        };
+                        handle_processed(
+                            graph,
+                            receiver,
+                            parent,
+                            &edge,
+                            &processed,
+                            &mut next_level,
+                        );
+                        continue;
+                    }
+
+                    let waiters = version_waiters.entry(key.clone()).or_default();
+                    waiters.push((parent, edge));
+                    if inflight_version.insert(key.clone()) {
+                        fetch_queue.push_back(FetchRequest::Version {
+                            name: key.0,
+                            spec: key.1,
+                        });
+                    }
+                } else {
+                    if let Some(error) = full_failures.get(&real_name) {
+                        if edge.edge_type == EdgeType::Optional {
+                            receiver.on_event(BuildEvent::Skipped {
+                                name: &edge.name,
+                                spec: &edge.spec,
+                            });
+                            continue;
+                        }
+                        return Err(chain_err(
+                            graph,
+                            parent,
+                            &edge,
+                            registry_error(format!("{}: {error}", real_name)),
+                        ));
+                    }
+
+                    if let Some(full) = full_cache.get(&real_name).cloned() {
+                        let Some(resolved) = resolve_from_full_manifest::<R::Error>(
+                            &edge,
+                            &full,
+                            &real_spec,
+                            &mut core_cache,
+                        )
+                        .map_err(|inner| chain_err(graph, parent, &edge, inner))?
+                        else {
+                            receiver.on_event(BuildEvent::Skipped {
+                                name: &edge.name,
+                                spec: &edge.spec,
+                            });
+                            continue;
+                        };
+
+                        let processed = if graph
+                            .check_override(parent, &edge.name, Some(&resolved.version))
+                            .is_some()
+                        {
+                            process_dependency(graph, registry, parent, &edge, config)
+                                .await
+                                .map_err(|inner| chain_err(graph, parent, &edge, inner))?
+                        } else {
+                            receiver.on_event(BuildEvent::PackageResolved(
+                                (&*resolved.manifest).into(),
+                            ));
+                            schedule_transitive_prefetches(
+                                &resolved.manifest,
+                                &preload_config,
+                                supports_semver,
+                                &full_cache,
+                                &version_cache,
+                                &full_failures,
+                                &version_failures,
+                                &mut inflight_full,
+                                &mut inflight_version,
+                                &mut fetch_queue,
+                            );
+                            process_dependency_with_resolved(
+                                graph, parent, &edge, &resolved, config,
+                            )
+                        };
+                        handle_processed(
+                            graph,
+                            receiver,
+                            parent,
+                            &edge,
+                            &processed,
+                            &mut next_level,
+                        );
+                        continue;
+                    }
+
+                    let waiters = full_waiters.entry(real_name.clone()).or_default();
+                    waiters.push((parent, edge));
+                    if inflight_full.insert(real_name.clone()) {
+                        fetch_queue.push_back(FetchRequest::Full { name: real_name });
+                    }
+                }
+
+                pump_fetches(&mut fetches, &mut fetch_queue, &registry_url, concurrency);
+            }
+
+            if full_waiters.is_empty() && version_waiters.is_empty() {
+                break;
+            }
+
+            let Some(done) = fetches.next().await else {
+                let mut fallback = Vec::new();
+                for (_, waiters) in full_waiters.drain() {
+                    fallback.extend(waiters);
+                }
+                for (_, waiters) in version_waiters.drain() {
+                    fallback.extend(waiters);
+                }
+                for (parent, edge) in fallback {
+                    let processed = process_dependency(graph, registry, parent, &edge, config)
+                        .await
+                        .map_err(|inner| chain_err(graph, parent, &edge, inner))?;
+                    handle_processed(graph, receiver, parent, &edge, &processed, &mut next_level);
+                }
+                break;
+            };
+            let done = done.map_err(|e| {
+                registry_error::<R::Error>(format!("manifest fetch task failed: {e}"))
+            })?;
+
+            apply_fetch_result(
+                done,
+                &mut full_cache,
+                &mut version_cache,
+                &mut full_waiters,
+                &mut version_waiters,
+                &mut full_failures,
+                &mut version_failures,
+                &mut inflight_full,
+                &mut inflight_version,
+                &mut fetch_queue,
+                &preload_config,
+                supports_semver,
+                &mut level_pending,
+            );
+        }
+
+        receiver.on_event(BuildEvent::LevelComplete {
+            next_level_count: next_level.len(),
+        });
+        current_level = next_level;
+    }
 
     Ok(())
 }

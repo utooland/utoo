@@ -133,6 +133,14 @@ pub trait RegistryClient {
         false
     }
 
+    /// The base registry URL used by raw-fetch dependency builders.
+    ///
+    /// Implementations that cannot expose a concrete URL can keep the default;
+    /// callers should fall back to the regular trait methods when this is empty.
+    fn registry_url(&self) -> &str {
+        ""
+    }
+
     /// Fetch full package manifest from registry.
     ///
     /// Returns the complete package manifest with all versions, wrapped in
