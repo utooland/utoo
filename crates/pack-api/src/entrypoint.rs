@@ -1,10 +1,13 @@
 use anyhow::Result;
 use std::sync::Arc;
 use turbo_tasks::{Effects, FxIndexSet, ReadRef, ResolvedVc, TryJoinIterExt, Vc, take_effects};
+use turbo_tasks_fs::{File, FileContent, FileSystemPath};
 use turbopack_core::{
+    asset::AssetContent,
     diagnostics::PlainDiagnostic,
     issue::PlainIssue,
     output::{OutputAsset, OutputAssets},
+    virtual_output::VirtualOutputAsset,
 };
 
 use crate::{
@@ -12,6 +15,7 @@ use crate::{
     operation::EntrypointsOperation,
     project::ProjectContainer,
     utils::{get_diagnostics, get_issues},
+    webpack_stats::generate_webpack_stats,
 };
 
 #[turbo_tasks::value(shared)]
@@ -58,7 +62,6 @@ pub async fn all_output_assets_operation(
 ) -> Result<Vc<OutputAssets>> {
     let project = container.project();
 
-    // Get assets from all endpoints
     let endpoint_assets = project
         .get_all_endpoints()
         .await?
@@ -72,7 +75,55 @@ pub async fn all_output_assets_operation(
         .flat_map(|assets| assets.iter().copied())
         .collect();
 
-    Ok(Vc::cell(output_assets.into_iter().collect()))
+    let output_assets: Vc<OutputAssets> = Vc::cell(output_assets.into_iter().collect());
+
+    if !*container.project().should_create_webpack_stats().await? {
+        return Ok(output_assets);
+    }
+
+    let dist_root = container.project().dist_root();
+    let server_config = container.project().config().server().await?;
+    let has_server = server_config.entry.is_some() || server_config.function.is_some();
+
+    let mut stats_outputs: Vec<ResolvedVc<Box<dyn OutputAsset>>> = Vec::new();
+
+    if !has_server {
+        stats_outputs.push(make_stats_output(output_assets, dist_root).await?);
+    } else {
+        let server_dist_root_vc = container.project().server_dist_root();
+        let server_dist_root_read = server_dist_root_vc.await?;
+        let mut client: Vec<ResolvedVc<Box<dyn OutputAsset>>> = Vec::new();
+        let mut server: Vec<ResolvedVc<Box<dyn OutputAsset>>> = Vec::new();
+        for asset in output_assets.await?.iter().copied() {
+            if asset.path().await?.is_inside_ref(&server_dist_root_read) {
+                server.push(asset);
+            } else {
+                client.push(asset);
+            }
+        }
+        stats_outputs.push(make_stats_output(Vc::cell(client), dist_root).await?);
+        if !server.is_empty() {
+            stats_outputs.push(make_stats_output(Vc::cell(server), server_dist_root_vc).await?);
+        }
+    }
+
+    Ok(output_assets.concatenate(*ResolvedVc::cell(stats_outputs)))
+}
+
+async fn make_stats_output(
+    assets: Vc<OutputAssets>,
+    dist_root: Vc<FileSystemPath>,
+) -> Result<ResolvedVc<Box<dyn OutputAsset>>> {
+    let webpack_stats = generate_webpack_stats(assets, dist_root).await?;
+    let stats_json = serde_json::to_string_pretty(&*webpack_stats)?;
+    let dist_root_owned = dist_root.owned().await?;
+    let stats_output = VirtualOutputAsset::new(
+        dist_root_owned.join("stats.json")?,
+        AssetContent::file(FileContent::from(File::from(stats_json)).cell()),
+    )
+    .to_resolved()
+    .await?;
+    Ok(ResolvedVc::upcast(stats_output))
 }
 
 #[turbo_tasks::value(shared, serialization = "skip")]

@@ -15,7 +15,6 @@ use pack_core::util::convert_to_project_relative;
 use tracing::Instrument;
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{Completion, JoinIterExt, ResolvedVc, TryJoinIterExt, ValueToString, Vc};
-use turbo_tasks_fs::{File, FileContent};
 use turbopack::{
     ModuleAssetContext, module_options::ModuleOptionsContext, transition::TransitionOptions,
 };
@@ -23,7 +22,6 @@ use turbopack_core::chunk::ChunkingContextExt;
 use turbopack_core::output::OutputAssetsWithReferenced;
 use turbopack_core::resolve::origin::ResolveOrigin;
 use turbopack_core::{
-    asset::AssetContent,
     chunk::{
         ChunkingContext, EvaluatableAsset, EvaluatableAssets, availability_info::AvailabilityInfo,
     },
@@ -40,13 +38,11 @@ use turbopack_core::{
         origin::{PlainResolveOrigin, ResolveOriginExt},
         parse::Request,
     },
-    virtual_output::VirtualOutputAsset,
 };
 
 use crate::{
     endpoint::{Endpoint, EndpointOutput, EndpointOutputPaths},
     project::Project,
-    webpack_stats::generate_webpack_stats,
 };
 use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 
@@ -507,46 +503,10 @@ impl Endpoint for AppEndpoint {
                 client_paths: vec![],
             };
 
-            let should_create_webpack_stats = *this.project.should_create_webpack_stats().await?;
-
-            let mut output_assets = if !should_create_webpack_stats {
-                output_assets
-            } else {
-                let webpack_stats = generate_webpack_stats(output_assets, this.project.dist_root());
-                let webpack_stats_read = webpack_stats.await?;
-                let dist_root_owned = this.project.dist_root().owned().await?;
-                let stats_json = serde_json::to_string_pretty(&*webpack_stats_read)?;
-                let stats_output = VirtualOutputAsset::new(
-                    dist_root_owned.join("stats.json")?,
-                    AssetContent::file(FileContent::from(File::from(stats_json)).cell()),
-                )
-                .to_resolved()
-                .await?;
-                output_assets.concatenate(*ResolvedVc::cell(vec![ResolvedVc::upcast(stats_output)]))
-            };
+            let mut output_assets = output_assets;
 
             if let Some(server_output) = server_output {
-                if should_create_webpack_stats {
-                    let server_stats =
-                        generate_webpack_stats(server_output, this.project.server_dist_root());
-                    let server_stats_read = server_stats.await?;
-                    let server_dist_root_owned = this.project.server_dist_root().owned().await?;
-                    let server_stats_json = serde_json::to_string_pretty(&*server_stats_read)?;
-                    let server_stats_output = VirtualOutputAsset::new(
-                        server_dist_root_owned.join("stats.json")?,
-                        AssetContent::file(FileContent::from(File::from(server_stats_json)).cell()),
-                    )
-                    .to_resolved()
-                    .await?;
-                    output_assets =
-                        output_assets
-                            .concatenate(server_output)
-                            .concatenate(*ResolvedVc::cell(vec![ResolvedVc::upcast(
-                                server_stats_output,
-                            )]));
-                } else {
-                    output_assets = output_assets.concatenate(server_output);
-                }
+                output_assets = output_assets.concatenate(server_output);
             }
 
             Ok(EndpointOutput {

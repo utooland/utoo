@@ -1,0 +1,8 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/stats_with_server_and_libraries/input/a.ts"],"sourcesContent":["export const a = \"value-a\";\n"],"names":["a"],"mappings":"AAAO,MAAMA,IAAI"}},
+    {"offset": {"line": 14, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/stats_with_server_and_libraries/input/b.ts"],"sourcesContent":["export const b = \"value-b\";\n"],"names":["b"],"mappings":"AAAO,MAAMA,IAAI"}},
+    {"offset": {"line": 24, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/stats_with_server_and_libraries/input/app.ts"],"sourcesContent":["import { a } from \"./a\";\nimport { b } from \"./b\";\n\nconsole.log(\"app entry\", a, b);\n"],"names":["console","log"],"mappings":"AAAA;AACA;;;AAEAA,QAAQC,GAAG,CAAC,aAAa,uJAAC,EAAE,uJAAC"}}]
+}

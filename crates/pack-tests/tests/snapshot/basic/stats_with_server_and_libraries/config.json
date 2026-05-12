@@ -1,0 +1,39 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/app.ts",
+        "name": "app"
+      },
+      {
+        "import": "input/a.ts",
+        "name": "a",
+        "library": { "name": "a" }
+      },
+      {
+        "import": "input/b.ts",
+        "name": "b",
+        "library": { "name": "b" }
+      }
+    ],
+    "output": {
+      "path": "output/client"
+    },
+    "server": {
+      "entry": "input/server.ts",
+      "output": {
+        "path": "output/server",
+        "filename": "main.js"
+      },
+      "function": {
+        "clientProxy": "./input/transport.ts",
+        "serverRegister": "./input/register.ts"
+      }
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    },
+    "stats": true
+  }
+}
