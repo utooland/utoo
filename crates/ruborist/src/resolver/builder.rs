@@ -732,11 +732,46 @@ pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
         config.skip_preload
     );
 
-    // Phase 1: Preload manifests in parallel (unless skipped)
-    run_preload_phase(graph, registry, &config, receiver).await;
+    // On native targets, run preload and BFS concurrently via futures::join!.
+    //
+    // Both futures share `registry`'s inflight_full/inflight_version OnceMaps:
+    // the first caller per package triggers a fetch; subsequent callers await
+    // the Notify and share the result. No duplicate requests, no channel
+    // serialization. When preload is still fetching, BFS edges hit the OnceMap
+    // Waiting state and resume as soon as the fetch completes.
+    //
+    // On wasm32 (single-threaded, no `join!` benefit), keep sequential order.
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if !config.skip_preload {
+            let initial_deps = gather_preload_deps(graph, config.peer_deps);
+            if !initial_deps.is_empty() {
+                let preload_cfg = PreloadConfig {
+                    peer_deps: config.peer_deps,
+                    concurrency: config.concurrency,
+                };
+                let (preload_stats, bfs_result) = futures::join!(
+                    preload_manifests(initial_deps, registry, preload_cfg, receiver, |_, _| {}),
+                    run_bfs_phase(graph, registry, &config, receiver)
+                );
+                receiver.on_event(BuildEvent::PreloadComplete {
+                    success: preload_stats.success_count,
+                    failed: preload_stats.failed_count,
+                });
+                bfs_result?;
+            } else {
+                run_bfs_phase(graph, registry, &config, receiver).await?;
+            }
+        } else {
+            run_bfs_phase(graph, registry, &config, receiver).await?;
+        }
+    }
 
-    // Phase 2: BFS traversal to build the dependency tree
-    run_bfs_phase(graph, registry, &config, receiver).await?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        run_preload_phase(graph, registry, &config, receiver).await;
+        run_bfs_phase(graph, registry, &config, receiver).await?;
+    }
 
     receiver.on_event(BuildEvent::Complete {
         total_nodes: graph.graph.node_count(),
@@ -745,7 +780,8 @@ pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
     Ok(())
 }
 
-/// Run the preload phase to warm up the cache with manifests.
+/// Run the preload phase to warm up the cache with manifests (wasm32 only).
+#[cfg(target_arch = "wasm32")]
 async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
     graph: &DependencyGraph,
     registry: &R,

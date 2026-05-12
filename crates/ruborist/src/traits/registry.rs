@@ -298,6 +298,7 @@ pub mod mock {
     use super::*;
 
     /// Internal package data for mock registry.
+    #[derive(Clone)]
     struct MockPackage {
         name: String,
         dist_tags: HashMap<String, String>,
@@ -305,6 +306,7 @@ pub mod mock {
     }
 
     /// Mock registry client that returns predefined packages.
+    #[derive(Clone)]
     pub struct MockRegistryClient {
         packages: HashMap<String, MockPackage>,
     }

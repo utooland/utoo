@@ -99,6 +99,7 @@ pub trait EventReceiver: Send + Sync {
 }
 
 /// A no-op event receiver for when event tracking is not needed.
+#[derive(Clone, Copy, Default)]
 pub struct NoopReceiver;
 
 impl EventReceiver for NoopReceiver {
