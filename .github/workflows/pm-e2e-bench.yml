@@ -73,7 +73,7 @@ on:
       bench_runs:
         description: '[phases] Runs per phase'
         required: false
-        default: '3'
+        default: '2'
         type: string
 
 concurrency:
