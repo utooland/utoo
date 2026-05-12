@@ -61,7 +61,10 @@ fn collect_deps(map: Option<&std::collections::HashMap<String, String>>) -> Vec<
 
 /// Extract transitive dependencies from a resolved manifest.
 /// Note: devDependencies are NOT included (only root packages install devDeps).
-fn extract_transitive_deps(manifest: &CoreVersionManifest, config: &PreloadConfig) -> Vec<Dep> {
+pub(crate) fn extract_transitive_deps(
+    manifest: &CoreVersionManifest,
+    config: &PreloadConfig,
+) -> Vec<Dep> {
     let mut deps = Vec::new();
     deps.extend(collect_deps(manifest.dependencies.as_ref()));
     if config.peer_deps == PeerDeps::Include {
