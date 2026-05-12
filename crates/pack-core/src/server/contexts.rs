@@ -40,6 +40,7 @@ use crate::{
         contexts::{defines, free_vars},
         resolve::externals_plugin::ExternalsPlugin,
         transforms::{
+            css_modules::get_auto_css_modules_rule,
             remove_console::get_remove_console_transform_rule,
             styled_components::get_styled_components_transform_rule,
             styled_jsx::get_styled_jsx_transform_rule,
@@ -156,6 +157,11 @@ pub async fn get_server_module_options_context(
     );
     server_rules.push(ignore_dts_rule.clone());
     foreign_server_rules.push(ignore_dts_rule);
+
+    let styles = config.styles().await?;
+    if styles.auto_css_modules.unwrap_or(true) {
+        server_rules.push(get_auto_css_modules_rule());
+    }
 
     let additional_rules: Vec<ModuleRule> = vec![
         get_swc_ecma_transform_plugin_rule(config, project_path.clone()).await?,
