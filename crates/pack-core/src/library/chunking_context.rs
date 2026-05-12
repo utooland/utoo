@@ -501,11 +501,14 @@ impl ChunkingContext for LibraryChunkingContext {
     #[turbo_tasks::function]
     async fn asset_url(&self, ident: FileSystemPath, _tag: Option<RcStr>) -> Result<Vc<RcStr>> {
         let asset_path = ident.to_string();
+        let asset_path = asset_path
+            .strip_prefix(&format!("{}/", self.output_root.path))
+            .unwrap_or(&asset_path);
 
         Ok(Vc::cell(
             format!(
                 "{}{}",
-                self.asset_base_path.as_deref().unwrap_or(""),
+                self.asset_base_path.as_deref().unwrap_or("/"),
                 asset_path
             )
             .into(),

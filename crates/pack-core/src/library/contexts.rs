@@ -71,6 +71,7 @@ pub async fn get_library_chunking_context(
     let minify = config.minify(mode);
     let concatenate_modules = config.concatenate_modules(mode);
     let nested_async_chunking = config.nested_async_chunking(mode);
+    let public_path = config.computed_public_path().owned().await?;
     let platform = platform.await?;
     let mode = mode.await?;
 
@@ -125,6 +126,7 @@ pub async fn get_library_chunking_context(
     } else {
         SourceMapsType::None
     })
+    .asset_base_path(Some(public_path))
     .module_id_strategy(module_id_strategy.to_resolved().await?)
     .export_usage(*export_usage.await?)
     .unused_references(unused_references.to_resolved().await?)
