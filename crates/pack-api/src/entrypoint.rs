@@ -82,16 +82,16 @@ pub async fn all_output_assets_operation(
     }
 
     let dist_root = container.project().dist_root();
-    let server_dist_root_vc = container.project().server_dist_root();
-    let dist_root_read = dist_root.await?;
-    let server_dist_root_read = server_dist_root_vc.await?;
-    let same_root = dist_root_read.path == server_dist_root_read.path;
+    let server_config = container.project().config().server().await?;
+    let has_server = server_config.entry.is_some() || server_config.function.is_some();
 
     let mut stats_outputs: Vec<ResolvedVc<Box<dyn OutputAsset>>> = Vec::new();
 
-    if same_root {
+    if !has_server {
         stats_outputs.push(make_stats_output(output_assets, dist_root).await?);
     } else {
+        let server_dist_root_vc = container.project().server_dist_root();
+        let server_dist_root_read = server_dist_root_vc.await?;
         let mut client: Vec<ResolvedVc<Box<dyn OutputAsset>>> = Vec::new();
         let mut server: Vec<ResolvedVc<Box<dyn OutputAsset>>> = Vec::new();
         for asset in output_assets.await?.iter().copied() {
