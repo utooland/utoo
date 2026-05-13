@@ -90,7 +90,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// to the registry CDN. This spreads requests across more CDN edge servers
 /// via DNS round-robin and avoids the "pool reuse is too efficient" problem
 /// where a single pool recycles connections faster than new requests arrive.
-const CLIENT_POOL_SIZE: usize = 4;
+const CLIENT_POOL_SIZE: usize = 32;
 
 static HTTP_CLIENTS: LazyLock<Result<Vec<reqwest::Client>, String>> = LazyLock::new(|| {
     (0..CLIENT_POOL_SIZE)
