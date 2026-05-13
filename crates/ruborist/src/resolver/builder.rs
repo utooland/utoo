@@ -846,12 +846,49 @@ where
     ResolveError::Registry(RegistryError(anyhow::anyhow!(message.into())).into())
 }
 
+/// Parse a FullManifest on the rayon pool. When `spec` is provided,
+/// also resolve the version and extract the CoreVersionManifest in
+/// the same rayon task — one roundtrip instead of two.
 #[cfg(not(target_arch = "wasm32"))]
-async fn parse_full_manifest_off_runtime(raw_bytes: Vec<u8>) -> anyhow::Result<Arc<FullManifest>> {
-    let parse_buf = raw_bytes.clone();
-    let mut manifest: FullManifest = crate::service::parse_json_off_runtime(parse_buf).await?;
-    manifest.raw = Arc::from(raw_bytes);
-    Ok(Arc::new(manifest))
+type FullParseResult = (
+    Arc<FullManifest>,
+    Option<(String, Arc<CoreVersionManifest>)>,
+);
+
+async fn parse_full_manifest_off_runtime(
+    raw_bytes: Vec<u8>,
+    spec: Option<&str>,
+) -> anyhow::Result<FullParseResult> {
+    use crate::resolver::version::resolve_target_version;
+
+    let spec_owned = spec.map(|s| s.to_string());
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    rayon::spawn(move || {
+        let result = (|| -> anyhow::Result<FullParseResult> {
+            let parse_buf = raw_bytes.clone();
+            let mut manifest: FullManifest =
+                simd_json::serde::from_slice::<FullManifest>(&mut parse_buf.into_boxed_slice())
+                    .map_err(|e| anyhow::anyhow!("JSON parse error: {e}"))?;
+            manifest.raw = Arc::from(raw_bytes);
+            let full = Arc::new(manifest);
+
+            let speculative = if let Some(spec) = &spec_owned {
+                resolve_target_version((&*full).into(), spec)
+                    .ok()
+                    .and_then(|version| {
+                        full.get_core_version(&version)
+                            .map(|core| (spec.clone(), Arc::new(core)))
+                    })
+            } else {
+                None
+            };
+
+            Ok((full, speculative))
+        })();
+        let _ = tx.send(result);
+    });
+    rx.await
+        .map_err(|_| anyhow::anyhow!("rayon parse worker dropped"))?
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1250,39 +1287,24 @@ async fn apply_fetch_result(
 
     match done {
         FetchDone::Full { name, spec, result } => {
-            let parsed: anyhow::Result<Arc<FullManifest>> = match result {
-                Ok((bytes, _etag)) => parse_full_manifest_off_runtime(bytes).await,
+            let parsed = match result {
+                Ok((bytes, _etag)) => parse_full_manifest_off_runtime(bytes, spec.as_deref()).await,
                 Err(e) => Err(e),
             };
             match parsed {
-                Ok(full) => {
-                    // When the fetch carried a spec (from prefetch), resolve
-                    // the version now and cache the CoreVersionManifest so BFS
-                    // can skip the re-parse. This also triggers recursive
-                    // transitive prefetch — the key to deep speculative
-                    // discovery without BFS level gating.
-                    if let Some(spec) = &spec
-                        && let Ok(version) = resolve_target_version((&*full).into(), spec)
-                    {
-                        let (_, core) = crate::model::manifest::extract_core_version_off_runtime(
-                            Arc::clone(&full),
-                            version,
-                        )
-                        .await;
-                        if let Some(core) = core {
-                            let key = (name.clone(), spec.clone());
-                            version_cache.insert(key, Arc::clone(&core));
-                            schedule_transitive_prefetches(
-                                &core,
-                                preload_config,
-                                supports_semver,
-                                full_cache,
-                                version_cache,
-                                full_failures,
-                                version_failures,
-                                fetch_queues,
-                            );
-                        }
+                Ok((full, speculative)) => {
+                    if let Some((resolved_spec, core)) = speculative {
+                        version_cache.insert((name.clone(), resolved_spec), Arc::clone(&core));
+                        schedule_transitive_prefetches(
+                            &core,
+                            preload_config,
+                            supports_semver,
+                            full_cache,
+                            version_cache,
+                            full_failures,
+                            version_failures,
+                            fetch_queues,
+                        );
                     }
                     full_cache.insert(name.clone(), full);
                 }
