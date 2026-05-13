@@ -78,13 +78,13 @@ pub async fn select_fastest_registry() -> String {
         }
     };
 
-    println!(
+    eprintln!(
         "{} {} ({})",
         "Registry:".dimmed(),
         registry.cyan(),
         latency_info
     );
-    println!(
+    eprintln!(
         "{} {}",
         "Tip:".dimmed(),
         format!("ut config set registry {} --global", registry).yellow()
