@@ -899,7 +899,19 @@ impl FetchQueues {
             return Some(request);
         }
 
-        if self.active_prefetches() >= prefetch_concurrency {
+        // Only cap prefetch when the demand queue still has pending items — those
+        // items need slots reserved so they aren't held behind a wall of prefetch.
+        // When the demand queue is empty (all known-needed fetches are already
+        // in-flight), allow prefetch to fill every remaining slot: there is nothing
+        // to reserve capacity for, and more speculative coverage means the BFS is
+        // more likely to find manifests already in cache when it needs them.
+        let cap = if self.demand.is_empty() {
+            usize::MAX
+        } else {
+            prefetch_concurrency
+        };
+
+        if self.active_prefetches() >= cap {
             return None;
         }
 
