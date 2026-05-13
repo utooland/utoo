@@ -788,15 +788,24 @@ enum FetchKey {
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone)]
 enum FetchRequest {
-    Full { name: String },
-    Version { name: String, spec: String },
+    Full {
+        name: String,
+        /// Semver spec from the dependency edge, carried so prefetch can
+        /// speculatively resolve the version when the manifest arrives and
+        /// trigger deep transitive prefetch without waiting for BFS.
+        spec: Option<String>,
+    },
+    Version {
+        name: String,
+        spec: String,
+    },
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl FetchRequest {
     fn key(&self) -> FetchKey {
         match self {
-            Self::Full { name } => FetchKey::Full(name.clone()),
+            Self::Full { name, .. } => FetchKey::Full(name.clone()),
             Self::Version { name, spec } => FetchKey::Version(name.clone(), spec.clone()),
         }
     }
@@ -806,6 +815,7 @@ impl FetchRequest {
 enum FetchDone {
     Full {
         name: String,
+        spec: Option<String>,
         result: anyhow::Result<(Vec<u8>, Option<String>)>,
     },
     Version {
@@ -954,7 +964,7 @@ fn fetch_registry_manifest(registry_url: String, request: FetchRequest) -> Fetch
 
     tokio::spawn(async move {
         match request {
-            FetchRequest::Full { name } => {
+            FetchRequest::Full { name, spec } => {
                 let result = fetch_full_manifest_bytes(FetchManifestOptions {
                     registry_url: &registry_url,
                     name: &name,
@@ -968,7 +978,7 @@ fn fetch_registry_manifest(registry_url: String, request: FetchRequest) -> Fetch
                         Err(anyhow::anyhow!("304 Not Modified without etag context"))
                     }
                 });
-                FetchDone::Full { name, result }
+                FetchDone::Full { name, spec, result }
             }
             FetchRequest::Version { name, spec } => {
                 let result = fetch_version_manifest_bytes(FetchVersionManifestOptions {
@@ -1027,7 +1037,13 @@ fn schedule_registry_fetch(
             priority,
         );
     } else if !full_cache.contains_key(&real_name) && !full_failures.contains_key(&real_name) {
-        fetch_queues.enqueue(FetchRequest::Full { name: real_name }, priority);
+        fetch_queues.enqueue(
+            FetchRequest::Full {
+                name: real_name,
+                spec: Some(real_spec),
+            },
+            priority,
+        );
     }
 }
 
@@ -1233,13 +1249,35 @@ async fn apply_fetch_result(
     fetch_queues.complete(&done_key);
 
     match done {
-        FetchDone::Full { name, result } => {
+        FetchDone::Full { name, spec, result } => {
             let parsed: anyhow::Result<Arc<FullManifest>> = match result {
                 Ok((bytes, _etag)) => parse_full_manifest_off_runtime(bytes).await,
                 Err(e) => Err(e),
             };
             match parsed {
                 Ok(full) => {
+                    // When the fetch carried a spec (from prefetch), resolve
+                    // the version now and cache the CoreVersionManifest so BFS
+                    // can skip the re-parse. This also triggers recursive
+                    // transitive prefetch — the key to deep speculative
+                    // discovery without BFS level gating.
+                    if let Some(spec) = &spec
+                        && let Ok(version) = resolve_target_version((&*full).into(), spec)
+                        && let Some(core) = full.get_core_version(&version).map(Arc::new)
+                    {
+                        let key = (name.clone(), spec.clone());
+                        version_cache.insert(key, Arc::clone(&core));
+                        schedule_transitive_prefetches(
+                            &core,
+                            preload_config,
+                            supports_semver,
+                            full_cache,
+                            version_cache,
+                            full_failures,
+                            version_failures,
+                            fetch_queues,
+                        );
+                    }
                     full_cache.insert(name.clone(), full);
                 }
                 Err(e) => {
@@ -1452,6 +1490,52 @@ where
                             &edge,
                             registry_error(format!("{}: {error}", real_name)),
                         ));
+                    }
+
+                    // Check version_cache first — deep prefetch may have
+                    // already resolved the version from the FullManifest,
+                    // avoiding a redundant get_core_version re-parse.
+                    let vkey = (real_name.clone(), real_spec.clone());
+                    if let Some(manifest) = version_cache.get(&vkey).cloned() {
+                        let resolved = ResolvedPackage {
+                            name: edge.name.clone(),
+                            version: manifest.version.clone(),
+                            manifest,
+                        };
+                        let processed = if graph
+                            .check_override(parent, &edge.name, Some(&resolved.version))
+                            .is_some()
+                        {
+                            process_dependency(graph, registry, parent, &edge, config)
+                                .await
+                                .map_err(|inner| chain_err(graph, parent, &edge, inner))?
+                        } else {
+                            receiver.on_event(BuildEvent::PackageResolved(
+                                (&*resolved.manifest).into(),
+                            ));
+                            schedule_transitive_prefetches(
+                                &resolved.manifest,
+                                &preload_config,
+                                supports_semver,
+                                &full_cache,
+                                &version_cache,
+                                &full_failures,
+                                &version_failures,
+                                &mut fetch_queues,
+                            );
+                            process_dependency_with_resolved(
+                                graph, parent, &edge, &resolved, config,
+                            )
+                        };
+                        handle_processed(
+                            graph,
+                            receiver,
+                            parent,
+                            &edge,
+                            &processed,
+                            &mut next_level,
+                        );
+                        continue;
                     }
 
                     if let Some(full) = full_cache.get(&real_name).cloned() {
