@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 9, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/target_node/stats_node/input/utils.js"],"sourcesContent":["const path = require(\"path\");\n\nfunction getBaseName(filePath) {\n  return path.basename(filePath);\n}\n\nmodule.exports = { getBaseName };\n"],"names":["path","getBaseName","filePath","basename","module","exports"],"mappings":"AAAA,MAAMA;AAEN,SAASC,YAAYC,QAAQ;IAC3B,OAAOF,KAAKG,QAAQ,CAACD;AACvB;AAEAE,OAAOC,OAAO,GAAG;IAAEJ;AAAY"}},
+    {"offset": {"line": 19, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/target_node/stats_node/input/index.js"],"sourcesContent":["const { getBaseName } = require(\"./utils\");\n\nfunction processPath(filePath) {\n  return getBaseName(filePath);\n}\n\nmodule.exports = { processPath };\n"],"names":["getBaseName","processPath","filePath","module","exports"],"mappings":"AAAA,MAAM,EAAEA,WAAW,EAAE;AAErB,SAASC,YAAYC,QAAQ;IAC3B,OAAOF,YAAYE;AACrB;AAEAC,OAAOC,OAAO,GAAG;IAAEH;AAAY"}}]
+}

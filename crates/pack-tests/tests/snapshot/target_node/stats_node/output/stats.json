@@ -1,0 +1,146 @@
+{
+  "entrypoints": {
+    "./main": {
+      "name": "./main",
+      "chunks": [
+        "./main.js",
+        "_root-of-the-server___7e972a20.js"
+      ],
+      "assets": [
+        {
+          "name": "./main.js"
+        },
+        {
+          "name": "_root-of-the-server___7e972a20.js"
+        }
+      ]
+    }
+  },
+  "chunks": [
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "./_root-of-the-server___7e972a20.js",
+      "size": 934,
+      "hash": "",
+      "files": [
+        "./_root-of-the-server___7e972a20.js"
+      ]
+    },
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "./main.js",
+      "size": 271,
+      "hash": "",
+      "files": [
+        "./main.js"
+      ]
+    }
+  ],
+  "assets": [
+    {
+      "type": "asset",
+      "name": "_root-of-the-server___7e972a20.js",
+      "info": {},
+      "size": 934,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "_root-of-the-server___7e972a20.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "_root-of-the-server___7e972a20.js.map",
+      "info": {},
+      "size": 1048,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "_root-of-the-server___7e972a20.js.map"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "_turbopack__runtime.js",
+      "info": {},
+      "size": 162,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "_turbopack__runtime.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "_turbopack__runtime.js.map",
+      "info": {},
+      "size": 53,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "_turbopack__runtime.js.map"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "main.js",
+      "info": {},
+      "size": 271,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "main.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "main.js.map",
+      "info": {},
+      "size": 53,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "main.js.map"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "name": "path",
+      "id": "path",
+      "chunks": [
+        "./_root-of-the-server___7e972a20.js"
+      ],
+      "size": null
+    },
+    {
+      "name": "target_node/stats_node/input/index.js",
+      "id": "target_node/stats_node/input/index.js",
+      "chunks": [
+        "./main.js",
+        "./_root-of-the-server___7e972a20.js"
+      ],
+      "size": 147
+    },
+    {
+      "name": "target_node/stats_node/input/utils.js",
+      "id": "target_node/stats_node/input/utils.js",
+      "chunks": [
+        "./_root-of-the-server___7e972a20.js"
+      ],
+      "size": 135
+    }
+  ]
+}
