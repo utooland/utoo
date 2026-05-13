@@ -53,8 +53,12 @@ workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 # Native (non-macOS) targets: reqwest's default rustls + ring.
+# rustls + rustls-native-certs are direct deps so the multi-pool client
+# can share a TLS session cache across pools (see service/http.rs).
 [target.'cfg(not(any(target_arch = "wasm32", target_os = "macos")))'.dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
+reqwest             = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
+rustls              = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+rustls-native-certs = "0.8"
 
 # Native-only dependencies (not compiled for WASM)
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

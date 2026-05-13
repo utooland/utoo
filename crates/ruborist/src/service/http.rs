@@ -97,16 +97,14 @@ static HTTP_CLIENTS: LazyLock<Result<Vec<reqwest::Client>, String>> =
 
 #[cfg(not(target_arch = "wasm32"))]
 fn build_client_pool() -> Result<Vec<reqwest::Client>> {
-    // Build a single rustls config so all pools share the TLS session cache.
-    // When pool 1 establishes a TLS session to IP X, pool 2 reuses the
-    // cached session ticket for a 1-RTT resumption instead of a 2-RTT
-    // full handshake. This makes the "new connection per pool" cost
-    // much lower.
-    let tls_config = build_shared_rustls_config()?;
+    // Share a single rustls config across all pools so TLS session
+    // tickets are reused: pool 2 connecting to an IP that pool 1
+    // already negotiated gets 1-RTT resumption instead of 2-RTT.
+    let shared_tls = build_shared_rustls_config()?;
     (0..CLIENT_POOL_SIZE)
         .map(|_| {
             client_builder()?
-                .use_preconfigured_tls(tls_config.clone())
+                .use_preconfigured_tls(shared_tls.clone())
                 .build()
                 .context("Failed to build reqwest client")
         })
@@ -124,9 +122,6 @@ fn build_client_pool() -> Result<Vec<reqwest::Client>> {
         .collect()
 }
 
-/// Shared rustls config for all client pools. Cloning a ClientConfig
-/// shares the Arc<dyn StoresClientSessions> session cache, so TLS
-/// session tickets are reused across pools.
 #[cfg(not(target_arch = "wasm32"))]
 fn build_shared_rustls_config() -> Result<rustls::ClientConfig> {
     #[cfg(target_os = "macos")]
