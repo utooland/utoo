@@ -13,18 +13,31 @@ use super::fetch::{
 use super::http::get_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 
+#[cfg(not(target_arch = "wasm32"))]
+static MANIFEST_PARSE_POOL: std::sync::LazyLock<rayon::ThreadPool> =
+    std::sync::LazyLock::new(|| {
+        let threads = std::thread::available_parallelism()
+            .map(|n| n.get().clamp(1, 4))
+            .unwrap_or(2);
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .thread_name(|idx| format!("utoo-manifest-parse-{idx}"))
+            .build()
+            .expect("failed to build manifest parse pool")
+    });
+
 /// Parse JSON bytes on rayon's CPU thread pool (native) or inline
 /// (wasm32). Keeps the tokio runtime free of `simd_json` work so other
 /// in-flight manifest fetches keep driving network IO while this one
 /// parses.
-async fn parse_json_off_runtime<T>(mut bytes: Vec<u8>) -> Result<T, anyhow::Error>
+pub(crate) async fn parse_json_off_runtime<T>(mut bytes: Vec<u8>) -> Result<T, anyhow::Error>
 where
     T: serde::de::DeserializeOwned + Send + 'static,
 {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        rayon::spawn(move || {
+        MANIFEST_PARSE_POOL.spawn(move || {
             let result = simd_json::serde::from_slice::<T>(&mut bytes)
                 .map_err(|e| anyhow!("JSON parse error: {e}"));
             let _ = tx.send(result);

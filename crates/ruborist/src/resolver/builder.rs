@@ -806,12 +806,12 @@ impl FetchRequest {
 enum FetchDone {
     Full {
         name: String,
-        result: anyhow::Result<(Vec<u8>, Option<String>)>,
+        result: anyhow::Result<Arc<FullManifest>>,
     },
     Version {
         name: String,
         spec: String,
-        result: anyhow::Result<Vec<u8>>,
+        result: anyhow::Result<Arc<CoreVersionManifest>>,
     },
 }
 
@@ -837,19 +837,20 @@ where
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn parse_full_manifest_inline(raw_bytes: Vec<u8>) -> anyhow::Result<Arc<FullManifest>> {
-    let mut parse_buf = raw_bytes.clone();
-    let mut manifest: FullManifest = simd_json::serde::from_slice(&mut parse_buf)
-        .map_err(|e| anyhow::anyhow!("JSON parse error: {e}"))?;
+async fn parse_full_manifest_off_runtime(raw_bytes: Vec<u8>) -> anyhow::Result<Arc<FullManifest>> {
+    let parse_buf = raw_bytes.clone();
+    let mut manifest: FullManifest = crate::service::parse_json_off_runtime(parse_buf).await?;
     manifest.raw = Arc::from(raw_bytes);
     Ok(Arc::new(manifest))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn parse_core_manifest_inline(mut bytes: Vec<u8>) -> anyhow::Result<Arc<CoreVersionManifest>> {
-    simd_json::serde::from_slice::<CoreVersionManifest>(&mut bytes)
+async fn parse_core_manifest_off_runtime(
+    bytes: Vec<u8>,
+) -> anyhow::Result<Arc<CoreVersionManifest>> {
+    crate::service::parse_json_off_runtime::<CoreVersionManifest>(bytes)
+        .await
         .map(Arc::new)
-        .map_err(|e| anyhow::anyhow!("JSON parse error: {e}"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -944,28 +945,37 @@ fn fetch_registry_manifest(registry_url: String, request: FetchRequest) -> Fetch
     tokio::spawn(async move {
         match request {
             FetchRequest::Full { name } => {
-                let result = fetch_full_manifest_bytes(FetchManifestOptions {
-                    registry_url: &registry_url,
-                    name: &name,
-                    format: MetadataFormat::Abbreviated,
-                    etag: None,
-                })
-                .await
-                .and_then(|result| match result {
-                    FetchManifestBytesResult::Ok(bytes, etag) => Ok((bytes, etag)),
-                    FetchManifestBytesResult::NotModified => {
-                        Err(anyhow::anyhow!("304 Not Modified without etag context"))
+                let result = async {
+                    match fetch_full_manifest_bytes(FetchManifestOptions {
+                        registry_url: &registry_url,
+                        name: &name,
+                        format: MetadataFormat::Abbreviated,
+                        etag: None,
+                    })
+                    .await?
+                    {
+                        FetchManifestBytesResult::Ok(bytes, _etag) => {
+                            parse_full_manifest_off_runtime(bytes).await
+                        }
+                        FetchManifestBytesResult::NotModified => {
+                            Err(anyhow::anyhow!("304 Not Modified without etag context"))
+                        }
                     }
-                });
+                }
+                .await;
                 FetchDone::Full { name, result }
             }
             FetchRequest::Version { name, spec } => {
-                let result = fetch_version_manifest_bytes(FetchVersionManifestOptions {
-                    registry_url: &registry_url,
-                    name: &name,
-                    spec: &spec,
-                    format: MetadataFormat::Abbreviated,
-                })
+                let result = async {
+                    let bytes = fetch_version_manifest_bytes(FetchVersionManifestOptions {
+                        registry_url: &registry_url,
+                        name: &name,
+                        spec: &spec,
+                        format: MetadataFormat::Abbreviated,
+                    })
+                    .await?;
+                    parse_core_manifest_off_runtime(bytes).await
+                }
                 .await;
                 FetchDone::Version { name, spec, result }
             }
@@ -1223,7 +1233,7 @@ fn apply_fetch_result(
 
     match done {
         FetchDone::Full { name, result } => {
-            match result.and_then(|(bytes, _etag)| parse_full_manifest_inline(bytes)) {
+            match result {
                 Ok(full) => {
                     full_cache.insert(name.clone(), full);
                 }
@@ -1237,7 +1247,7 @@ fn apply_fetch_result(
         }
         FetchDone::Version { name, spec, result } => {
             let key = (name, spec);
-            match result.and_then(parse_core_manifest_inline) {
+            match result {
                 Ok(manifest) => {
                     version_cache.insert(key.clone(), Arc::clone(&manifest));
                     schedule_transitive_prefetches(
