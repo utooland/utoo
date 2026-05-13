@@ -123,6 +123,27 @@ pub async fn http_tarball_cache_lookup(name: &str, tarball_url: &str) -> Option<
     slot_cache_lookup(name, http_cache_slot(tarball_url)).await
 }
 
+/// Resolve cache slots that may have been seeded during dependency resolution
+/// without falling through to registry download. `Ok(None)` means this is a
+/// registry-style HTTP tarball that should be downloaded into `<name>/<version>`.
+pub async fn resolve_seeded_cache_path(
+    name: &str,
+    version: &str,
+    tarball_url: &str,
+) -> Result<Option<PathBuf>> {
+    match tarball_url.parse::<Protocol>() {
+        Ok(Protocol::Git) => git_cache_lookup(name, version, tarball_url)
+            .await
+            .map(Some)
+            .ok_or_else(|| anyhow::anyhow!("git cache not found for {name}@{version}")),
+        Ok(Protocol::File) => file_cache_lookup(name, tarball_url)
+            .await
+            .map(Some)
+            .ok_or_else(|| anyhow::anyhow!("file tarball cache not found for {name}@{version}")),
+        _ => Ok(http_tarball_cache_lookup(name, tarball_url).await),
+    }
+}
+
 /// Resolve the local cache path for a package, downloading if necessary.
 ///
 /// The cloner calls this with a fully-qualified URL (never a relative
@@ -132,13 +153,41 @@ pub async fn resolve_cache_path(name: &str, version: &str, tarball_url: &str) ->
     match tarball_url.parse::<Protocol>() {
         Ok(Protocol::Git) => git_cache_lookup(name, version, tarball_url).await,
         Ok(Protocol::File) => file_cache_lookup(name, tarball_url).await,
-        // Otherwise try the URL-hashed http slot BFS may have seeded,
-        // then fall through to the registry `<name>/<version>/` path.
         _ => match http_tarball_cache_lookup(name, tarball_url).await {
             Some(p) => Some(p),
             None => download_to_cache(name, version, tarball_url).await,
         },
     }
+}
+
+/// Download and extract a registry tarball without global single-flight or
+/// semaphore state. Callers that already own scheduling/deduplication should use
+/// this primitive directly.
+pub async fn download_and_extract_to_cache(
+    name: &str,
+    version: &str,
+    tarball_url: &str,
+) -> Result<PathBuf> {
+    let cache_path = get_cache_dir().join(name).join(version);
+
+    if crate::fs::try_exists(&cache_path.join("_resolved"))
+        .await
+        .unwrap_or(false)
+    {
+        REUSE_COUNT.fetch_add(1, Ordering::Relaxed);
+        return Ok(cache_path);
+    }
+
+    let bytes = download_bytes(tarball_url)
+        .await
+        .with_context(|| format!("Download {name}@{version} from {tarball_url}"))?;
+
+    extract_and_write(bytes, &cache_path)
+        .await
+        .with_context(|| format!("Extract {name}@{version} into {}", cache_path.display()))?;
+
+    DOWNLOAD_COUNT.fetch_add(1, Ordering::Relaxed);
+    Ok(cache_path)
 }
 
 /// Download a registry tarball to the global cache directory, returning the cache path.
@@ -155,59 +204,30 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
         return Some((*cache_path).clone());
     }
 
-    let cache_dir = get_cache_dir();
     let name = name.to_string();
     let version = version.to_string();
     let tarball_url = tarball_url.to_string();
 
     DOWNLOAD_CACHE
         .get_or_init(key, || async move {
-            let cache_path = cache_dir.join(&name).join(&version);
-
-            // Fast path: already extracted in cache
-            if crate::fs::try_exists(&cache_path.join("_resolved"))
-                .await
-                .unwrap_or(false)
-            {
-                REUSE_COUNT.fetch_add(1, Ordering::Relaxed);
-                return Some(cache_path);
-            }
-
             // Download (semaphore controlled). Permit held through extract
             // — A/B-revert experiment to test if early permit release is
             // the source of utoo p0 σ being ~2× baseline.
             let semaphore = DOWNLOAD_SEMAPHORE
                 .get_or_init(|| Semaphore::new(get_manifests_concurrency_limit_sync()));
             let _permit = semaphore.acquire().await.ok()?;
-            let bytes = download_bytes(&tarball_url)
+            download_and_extract_to_cache(&name, &version, &tarball_url)
                 .await
                 .inspect_err(|e| {
                     tracing::warn!(
-                        "Download {}@{} from {}: {:#}",
+                        "Download/extract {}@{} from {}: {:#}",
                         name,
                         version,
                         tarball_url,
                         e
                     )
                 })
-                .ok()?;
-
-            // Extract
-            extract_and_write(bytes, &cache_path)
-                .await
-                .inspect_err(|e| {
-                    tracing::warn!(
-                        "Extract {}@{} into {}: {:#}",
-                        name,
-                        version,
-                        cache_path.display(),
-                        e
-                    )
-                })
-                .ok()?;
-
-            DOWNLOAD_COUNT.fetch_add(1, Ordering::Relaxed);
-            Some(cache_path)
+                .ok()
         })
         .await
         .as_deref()

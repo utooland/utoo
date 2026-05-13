@@ -66,9 +66,8 @@ pub async fn install_packages(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
     omit: &HashSet<OmitType>,
+    scheduler: &super::install_scheduler::InstallScheduler,
 ) -> Result<()> {
-    use crate::util::cloner::clone_package_once;
-
     // Surface the clean step in the spinner — it doesn't move `pos`, so
     // without a message the bar looks frozen on large trees.
     log_progress("validating node_modules");
@@ -76,9 +75,9 @@ pub async fn install_packages(
     log_progress("linking packages");
 
     // Always process level-by-level to ensure parent directories exist before
-    // children. Within each level, tasks run concurrently. The pipeline's
-    // clone_worker may have already cloned some packages — clone_package_once
-    // deduplicates via CLONE_CACHE so no double work occurs.
+    // children. Within each level, tasks run concurrently. The install
+    // scheduler owns clone/download dedupe, so package tasks only request the
+    // concrete target they need.
     let mut depths: Vec<_> = groups.keys().cloned().collect();
     depths.sort_unstable();
 
@@ -140,14 +139,16 @@ pub async fn install_packages(
                         .ok_or_else(|| anyhow::anyhow!("package {name} missing version"))?;
                     let cwd_clone = cwd.to_path_buf();
                     let target_path = cwd_clone.join(&path);
+                    let scheduler = scheduler.clone();
 
                     // Check if this is an optional dependency
                     let is_optional =
                         package.optional == Some(true) || package.dev_optional == Some(true);
 
                     let task = tokio::spawn(async move {
-                        if let Err(e) =
-                            clone_package_once(&name, &version, &resolved, &target_path).await
+                        if let Err(e) = scheduler
+                            .ensure_clone(name.clone(), version, resolved, target_path.clone())
+                            .await
                         {
                             if is_optional {
                                 tracing::warn!(
@@ -244,16 +245,31 @@ impl InstallService {
         // itself emits a `tracing::warn` with the specific mismatch reason.
         let use_fresh_lock = fs::try_exists(&lock_path).await.unwrap_or(false)
             && !is_pkg_lock_outdated(root_path).await.unwrap_or(true);
+        let scheduler_handle = super::install_scheduler::InstallSchedulerHandle::start();
+        let scheduler = scheduler_handle.scheduler();
 
-        let (package_lock, pipeline_handles) = if use_fresh_lock {
-            let lock = load_package_lock_json_from_path(root_path).await?;
-            (lock, None)
+        let (package_lock, used_pipeline) = if use_fresh_lock {
+            let lock = match load_package_lock_json_from_path(root_path).await {
+                Ok(lock) => lock,
+                Err(e) => {
+                    scheduler_handle.shutdown().await;
+                    return Err(e);
+                }
+            };
+            (lock, false)
         } else {
             start_progress_bar();
             let resolve_start = Instant::now();
-            let result = super::pipeline::resolve_with_pipeline(root_path).await?;
+            let result =
+                match super::pipeline::resolve_with_pipeline(root_path, scheduler.clone()).await {
+                    Ok(result) => result,
+                    Err(e) => {
+                        scheduler_handle.shutdown().await;
+                        return Err(e);
+                    }
+                };
             finish_progress_bar("package-lock.json resolved", Some(resolve_start.elapsed()));
-            (result.package_lock, Some(result.handles))
+            (result.package_lock, true)
         };
 
         let groups = group_by_depth(&package_lock.packages);
@@ -264,15 +280,15 @@ impl InstallService {
         }
 
         let link_start = Instant::now();
-        install_packages(&groups, root_path, omit)
+        let install_result = install_packages(&groups, root_path, omit, &scheduler)
             .await
-            .context("Failed to install packages")?;
+            .context("Failed to install packages");
 
-        // Wait for pipeline workers to complete (if any)
-        if let Some(handles) = pipeline_handles {
-            handles.await_completion().await;
+        scheduler_handle.shutdown().await;
+        if used_pipeline {
             super::pipeline::print_pipeline_summary();
         }
+        install_result?;
         finish_progress_bar("node_modules cloned", Some(link_start.elapsed()));
 
         RebuildService::rebuild(&package_lock, root_path, scripts).await?;

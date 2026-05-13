@@ -788,8 +788,19 @@ enum FetchKey {
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone)]
 enum FetchRequest {
-    Full { name: String },
-    Version { name: String, spec: String },
+    Full {
+        name: String,
+    },
+    Version {
+        name: String,
+        spec: String,
+    },
+    ExtractVersion {
+        name: String,
+        spec: String,
+        version: String,
+        full: Arc<FullManifest>,
+    },
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -797,7 +808,9 @@ impl FetchRequest {
     fn key(&self) -> FetchKey {
         match self {
             Self::Full { name } => FetchKey::Full(name.clone()),
-            Self::Version { name, spec } => FetchKey::Version(name.clone(), spec.clone()),
+            Self::Version { name, spec } | Self::ExtractVersion { name, spec, .. } => {
+                FetchKey::Version(name.clone(), spec.clone())
+            }
         }
     }
 }
@@ -851,6 +864,16 @@ async fn parse_core_manifest_off_runtime(
     crate::service::parse_json_off_runtime::<CoreVersionManifest>(bytes)
         .await
         .map(Arc::new)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn extract_core_manifest_off_runtime(
+    full: Arc<FullManifest>,
+    version: String,
+) -> anyhow::Result<Arc<CoreVersionManifest>> {
+    let (version, manifest) =
+        crate::model::manifest::extract_core_version_off_runtime(full, version).await;
+    manifest.ok_or_else(|| anyhow::anyhow!("Version {version} not found in manifest"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -977,6 +1000,15 @@ fn fetch_registry_manifest(registry_url: String, request: FetchRequest) -> Fetch
                     parse_core_manifest_off_runtime(bytes).await
                 }
                 .await;
+                FetchDone::Version { name, spec, result }
+            }
+            FetchRequest::ExtractVersion {
+                name,
+                spec,
+                version,
+                full,
+            } => {
+                let result = extract_core_manifest_off_runtime(full, version).await;
                 FetchDone::Version { name, spec, result }
             }
         }
@@ -1164,12 +1196,11 @@ fn handle_processed<E: EventReceiver>(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn resolve_from_full_manifest<RE>(
+fn resolve_version_from_full_manifest<RE>(
     edge: &DependencyEdgeInfo,
     full: &FullManifest,
     real_spec: &str,
-    core_cache: &mut HashMap<(String, String), Arc<CoreVersionManifest>>,
-) -> Result<Option<ResolvedPackage>, ResolveError<RE>> {
+) -> Result<Option<String>, ResolveError<RE>> {
     if full.versions.is_empty() {
         if edge.edge_type == EdgeType::Optional {
             return Ok(None);
@@ -1187,30 +1218,7 @@ fn resolve_from_full_manifest<RE>(
             )));
         }
     };
-
-    let cache_key = (full.name.clone(), version.clone());
-    let manifest = match core_cache.get(&cache_key).cloned() {
-        Some(manifest) => manifest,
-        None => {
-            let Some(manifest) = full.get_core_version(&version).map(Arc::new) else {
-                if edge.edge_type == EdgeType::Optional {
-                    return Ok(None);
-                }
-                return Err(ResolveError::ManifestNotFound {
-                    name: edge.name.clone(),
-                    version,
-                });
-            };
-            core_cache.insert(cache_key, Arc::clone(&manifest));
-            manifest
-        }
-    };
-
-    Ok(Some(ResolvedPackage {
-        name: edge.name.clone(),
-        version: manifest.version.clone(),
-        manifest,
-    }))
+    Ok(Some(version))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1250,6 +1258,9 @@ fn apply_fetch_result(
             match result {
                 Ok(manifest) => {
                     version_cache.insert(key.clone(), Arc::clone(&manifest));
+                    version_cache
+                        .entry((key.0.clone(), manifest.version.clone()))
+                        .or_insert_with(|| Arc::clone(&manifest));
                     schedule_transitive_prefetches(
                         &manifest,
                         preload_config,
@@ -1295,7 +1306,6 @@ where
 
     let mut full_cache: HashMap<String, Arc<FullManifest>> = HashMap::new();
     let mut version_cache: HashMap<(String, String), Arc<CoreVersionManifest>> = HashMap::new();
-    let mut core_cache: HashMap<(String, String), Arc<CoreVersionManifest>> = HashMap::new();
     let mut full_waiters: HashMap<String, Vec<WaitingEdge>> = HashMap::new();
     let mut version_waiters: HashMap<(String, String), Vec<WaitingEdge>> = HashMap::new();
     let mut full_failures: HashMap<String, String> = HashMap::new();
@@ -1445,22 +1455,29 @@ where
                         ));
                     }
 
-                    if let Some(full) = full_cache.get(&real_name).cloned() {
-                        let Some(resolved) = resolve_from_full_manifest::<R::Error>(
-                            &edge,
-                            &full,
-                            &real_spec,
-                            &mut core_cache,
-                        )
-                        .map_err(|inner| chain_err(graph, parent, &edge, inner))?
-                        else {
+                    let version_key = (real_name.clone(), real_spec.clone());
+                    if let Some(error) = version_failures.get(&version_key) {
+                        if edge.edge_type == EdgeType::Optional {
                             receiver.on_event(BuildEvent::Skipped {
                                 name: &edge.name,
                                 spec: &edge.spec,
                             });
                             continue;
-                        };
+                        }
+                        return Err(chain_err(
+                            graph,
+                            parent,
+                            &edge,
+                            registry_error(format!("{}@{}: {error}", real_name, real_spec)),
+                        ));
+                    }
 
+                    if let Some(manifest) = version_cache.get(&version_key).cloned() {
+                        let resolved = ResolvedPackage {
+                            name: edge.name.clone(),
+                            version: manifest.version.clone(),
+                            manifest,
+                        };
                         let processed = if graph
                             .check_override(parent, &edge.name, Some(&resolved.version))
                             .is_some()
@@ -1493,6 +1510,78 @@ where
                             &edge,
                             &processed,
                             &mut next_level,
+                        );
+                        continue;
+                    }
+
+                    if let Some(full) = full_cache.get(&real_name).cloned() {
+                        let Some(resolved_version) =
+                            resolve_version_from_full_manifest::<R::Error>(
+                                &edge, &full, &real_spec,
+                            )
+                            .map_err(|inner| chain_err(graph, parent, &edge, inner))?
+                        else {
+                            receiver.on_event(BuildEvent::Skipped {
+                                name: &edge.name,
+                                spec: &edge.spec,
+                            });
+                            continue;
+                        };
+
+                        let exact_key = (real_name.clone(), resolved_version.clone());
+                        if let Some(manifest) = version_cache.get(&exact_key).cloned() {
+                            version_cache.insert(version_key, Arc::clone(&manifest));
+                            let resolved = ResolvedPackage {
+                                name: edge.name.clone(),
+                                version: manifest.version.clone(),
+                                manifest,
+                            };
+                            let processed = if graph
+                                .check_override(parent, &edge.name, Some(&resolved.version))
+                                .is_some()
+                            {
+                                process_dependency(graph, registry, parent, &edge, config)
+                                    .await
+                                    .map_err(|inner| chain_err(graph, parent, &edge, inner))?
+                            } else {
+                                receiver.on_event(BuildEvent::PackageResolved(
+                                    (&*resolved.manifest).into(),
+                                ));
+                                schedule_transitive_prefetches(
+                                    &resolved.manifest,
+                                    &preload_config,
+                                    supports_semver,
+                                    &full_cache,
+                                    &version_cache,
+                                    &full_failures,
+                                    &version_failures,
+                                    &mut fetch_queues,
+                                );
+                                process_dependency_with_resolved(
+                                    graph, parent, &edge, &resolved, config,
+                                )
+                            };
+                            handle_processed(
+                                graph,
+                                receiver,
+                                parent,
+                                &edge,
+                                &processed,
+                                &mut next_level,
+                            );
+                            continue;
+                        }
+
+                        let waiters = version_waiters.entry(version_key.clone()).or_default();
+                        waiters.push((parent, edge));
+                        fetch_queues.enqueue(
+                            FetchRequest::ExtractVersion {
+                                name: version_key.0,
+                                spec: version_key.1,
+                                version: resolved_version,
+                                full,
+                            },
+                            FetchPriority::Demand,
                         );
                         continue;
                     }

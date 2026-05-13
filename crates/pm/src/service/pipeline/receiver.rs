@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
-use tokio::sync::mpsc;
 use utoo_ruborist::progress::{BuildEvent, EventReceiver, PackageTarballInfo};
+
+use crate::service::install_scheduler::InstallScheduler;
 
 /// Owned version of PackageTarballInfo for channel transmission.
 #[derive(Debug, Clone)]
@@ -21,48 +22,25 @@ impl From<&PackageTarballInfo<'_>> for OwnedPackageInfo {
     }
 }
 
-/// Message for clone worker.
-#[derive(Debug)]
-pub struct CloneMessage {
-    pub info: OwnedPackageInfo,
-    pub path: PathBuf,
-    /// Parent package path (None for root-level dependencies)
-    pub parent_path: Option<PathBuf>,
-}
-
 /// Pipeline receiver that wraps an inner receiver and forwards events to channels.
 ///
-/// On `PackageResolved` → sends to download channel.
-/// On `PackagePlaced` → sends to clone channel.
+/// On `PackageResolved` → asks the install scheduler to prefetch the tarball.
+/// On `PackagePlaced` → asks the install scheduler to pre-clone into node_modules.
 /// All events are also forwarded to the inner receiver (e.g. progress bar).
 pub struct PipelineReceiver<R: EventReceiver> {
-    download_tx: mpsc::UnboundedSender<OwnedPackageInfo>,
-    clone_tx: mpsc::UnboundedSender<CloneMessage>,
+    scheduler: InstallScheduler,
+    cwd: PathBuf,
     inner: R,
-}
-
-/// Channels returned when creating a PipelineReceiver.
-pub struct PipelineChannels {
-    pub download_rx: mpsc::UnboundedReceiver<OwnedPackageInfo>,
-    pub clone_rx: mpsc::UnboundedReceiver<CloneMessage>,
 }
 
 impl<R: EventReceiver> PipelineReceiver<R> {
     /// Create a new pipeline receiver wrapping an inner receiver.
-    pub fn new(inner: R) -> (Self, PipelineChannels) {
-        let (download_tx, download_rx) = mpsc::unbounded_channel();
-        let (clone_tx, clone_rx) = mpsc::unbounded_channel();
-        (
-            Self {
-                download_tx,
-                clone_tx,
-                inner,
-            },
-            PipelineChannels {
-                download_rx,
-                clone_rx,
-            },
-        )
+    pub fn new(inner: R, scheduler: InstallScheduler, cwd: PathBuf) -> Self {
+        Self {
+            scheduler,
+            cwd,
+            inner,
+        }
     }
 }
 
@@ -75,18 +53,29 @@ impl<R: EventReceiver> EventReceiver for PipelineReceiver<R> {
             BuildEvent::PackageResolved(info)
                 if info.tarball_url.is_some() && info.is_platform_compatible() =>
             {
-                let _ = self.download_tx.send(OwnedPackageInfo::from(&info));
+                let info = OwnedPackageInfo::from(&info);
+                let Some(tarball_url) = info.tarball_url else {
+                    return;
+                };
+                self.scheduler
+                    .prefetch_download(info.name, info.version, tarball_url);
             }
             BuildEvent::PackagePlaced {
                 package,
                 path,
                 parent_path,
             } if package.tarball_url.is_some() && package.is_platform_compatible() => {
-                let _ = self.clone_tx.send(CloneMessage {
-                    info: OwnedPackageInfo::from(&package),
-                    path: path.to_path_buf(),
-                    parent_path: parent_path.map(|p| p.to_path_buf()),
-                });
+                let info = OwnedPackageInfo::from(&package);
+                let Some(tarball_url) = info.tarball_url else {
+                    return;
+                };
+                self.scheduler.prefetch_clone(
+                    info.name,
+                    info.version,
+                    tarball_url,
+                    self.cwd.join(path),
+                    parent_path.map(|p| self.cwd.join(p)),
+                );
             }
             _ => {}
         }
@@ -100,7 +89,11 @@ mod tests {
 
     #[test]
     fn test_pipeline_receiver_filters_events() {
-        let (receiver, mut channels) = PipelineReceiver::new(NoopReceiver);
+        let receiver = PipelineReceiver::new(
+            NoopReceiver,
+            crate::service::install_scheduler::InstallScheduler::closed_for_test(),
+            std::env::current_dir().unwrap(),
+        );
 
         // Should forward PackageResolved with tarball_url
         receiver.on_event(BuildEvent::PackageResolved(PackageTarballInfo {
@@ -124,9 +117,5 @@ mod tests {
 
         // Should not forward other events
         receiver.on_event(BuildEvent::PreloadStart { count: 10 });
-
-        // Only one message should be in the download channel
-        assert!(channels.download_rx.try_recv().is_ok());
-        assert!(channels.download_rx.try_recv().is_err());
     }
 }
