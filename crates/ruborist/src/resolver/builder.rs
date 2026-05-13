@@ -1263,20 +1263,26 @@ async fn apply_fetch_result(
                     // discovery without BFS level gating.
                     if let Some(spec) = &spec
                         && let Ok(version) = resolve_target_version((&*full).into(), spec)
-                        && let Some(core) = full.get_core_version(&version).map(Arc::new)
                     {
-                        let key = (name.clone(), spec.clone());
-                        version_cache.insert(key, Arc::clone(&core));
-                        schedule_transitive_prefetches(
-                            &core,
-                            preload_config,
-                            supports_semver,
-                            full_cache,
-                            version_cache,
-                            full_failures,
-                            version_failures,
-                            fetch_queues,
-                        );
+                        let (_, core) = crate::model::manifest::extract_core_version_off_runtime(
+                            Arc::clone(&full),
+                            version,
+                        )
+                        .await;
+                        if let Some(core) = core {
+                            let key = (name.clone(), spec.clone());
+                            version_cache.insert(key, Arc::clone(&core));
+                            schedule_transitive_prefetches(
+                                &core,
+                                preload_config,
+                                supports_semver,
+                                full_cache,
+                                version_cache,
+                                full_failures,
+                                version_failures,
+                                fetch_queues,
+                            );
+                        }
                     }
                     full_cache.insert(name.clone(), full);
                 }
