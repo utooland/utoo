@@ -92,12 +92,59 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// where a single pool recycles connections faster than new requests arrive.
 const CLIENT_POOL_SIZE: usize = 4;
 
-static HTTP_CLIENTS: LazyLock<Result<Vec<reqwest::Client>, String>> = LazyLock::new(|| {
+static HTTP_CLIENTS: LazyLock<Result<Vec<reqwest::Client>, String>> =
+    LazyLock::new(|| build_client_pool().map_err(|e| e.to_string()));
+
+#[cfg(not(target_arch = "wasm32"))]
+fn build_client_pool() -> Result<Vec<reqwest::Client>> {
+    // Build a single rustls config so all pools share the TLS session cache.
+    // When pool 1 establishes a TLS session to IP X, pool 2 reuses the
+    // cached session ticket for a 1-RTT resumption instead of a 2-RTT
+    // full handshake. This makes the "new connection per pool" cost
+    // much lower.
+    let tls_config = build_shared_rustls_config()?;
     (0..CLIENT_POOL_SIZE)
-        .map(|_| client_builder().and_then(|b| b.build().context("Failed to build reqwest client")))
-        .collect::<Result<Vec<_>>>()
-        .map_err(|e| e.to_string())
-});
+        .map(|_| {
+            client_builder()?
+                .use_preconfigured_tls(tls_config.clone())
+                .build()
+                .context("Failed to build reqwest client")
+        })
+        .collect()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn build_client_pool() -> Result<Vec<reqwest::Client>> {
+    (0..CLIENT_POOL_SIZE)
+        .map(|_| {
+            client_builder()?
+                .build()
+                .context("Failed to build reqwest client")
+        })
+        .collect()
+}
+
+/// Shared rustls config for all client pools. Cloning a ClientConfig
+/// shares the Arc<dyn StoresClientSessions> session cache, so TLS
+/// session tickets are reused across pools.
+#[cfg(not(target_arch = "wasm32"))]
+fn build_shared_rustls_config() -> Result<rustls::ClientConfig> {
+    #[cfg(target_os = "macos")]
+    {
+        build_rustls_config()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let roots = rustls_native_certs::load_native_certs();
+        let mut root_store = rustls::RootCertStore::empty();
+        for cert in roots.certs {
+            let _ = root_store.add(cert);
+        }
+        Ok(rustls::ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth())
+    }
+}
 
 static CLIENT_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -175,10 +222,8 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
             // manifest requests open independent TCP streams instead.
             .http1_only();
 
-        #[cfg(target_os = "macos")]
-        {
-            builder = builder.use_preconfigured_tls(build_rustls_config()?);
-        }
+        // TLS config is set by build_client_pool via use_preconfigured_tls,
+        // not here — this keeps the session cache shared across all pools.
 
         match env_var("ALL_PROXY") {
             Some(url) => {
