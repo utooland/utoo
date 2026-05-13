@@ -59,6 +59,8 @@ pub use cache::{
 };
 pub use fs::{Glob, NoopGlob, exists, read_to_string};
 pub use http::client_builder;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use manifest::parse_full_manifest_with_core_off_runtime;
 pub(crate) use manifest::parse_json_off_runtime;
 pub use manifest::{
     FetchManifestBytesResult, FetchManifestOptions, FetchManifestResult,

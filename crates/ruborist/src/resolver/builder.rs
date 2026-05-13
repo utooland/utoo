@@ -790,6 +790,7 @@ enum FetchKey {
 enum FetchRequest {
     Full {
         name: String,
+        spec: Option<String>,
     },
     Version {
         name: String,
@@ -807,7 +808,7 @@ enum FetchRequest {
 impl FetchRequest {
     fn key(&self) -> FetchKey {
         match self {
-            Self::Full { name } => FetchKey::Full(name.clone()),
+            Self::Full { name, .. } => FetchKey::Full(name.clone()),
             Self::Version { name, spec } | Self::ExtractVersion { name, spec, .. } => {
                 FetchKey::Version(name.clone(), spec.clone())
             }
@@ -819,7 +820,7 @@ impl FetchRequest {
 enum FetchDone {
     Full {
         name: String,
-        result: anyhow::Result<Arc<FullManifest>>,
+        result: anyhow::Result<ParsedFullManifest>,
     },
     Version {
         name: String,
@@ -842,6 +843,12 @@ impl FetchDone {
 type FetchFuture = tokio::task::JoinHandle<FetchDone>;
 
 #[cfg(not(target_arch = "wasm32"))]
+type ParsedFullManifest = (
+    Arc<FullManifest>,
+    Option<(String, Arc<CoreVersionManifest>)>,
+);
+
+#[cfg(not(target_arch = "wasm32"))]
 fn registry_error<E>(message: impl Into<String>) -> ResolveError<E>
 where
     E: From<RegistryError>,
@@ -850,11 +857,16 @@ where
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn parse_full_manifest_off_runtime(raw_bytes: Vec<u8>) -> anyhow::Result<Arc<FullManifest>> {
-    let parse_buf = raw_bytes.clone();
-    let mut manifest: FullManifest = crate::service::parse_json_off_runtime(parse_buf).await?;
-    manifest.raw = Arc::from(raw_bytes);
-    Ok(Arc::new(manifest))
+async fn parse_full_manifest_off_runtime(
+    raw_bytes: Vec<u8>,
+    spec: Option<String>,
+) -> anyhow::Result<ParsedFullManifest> {
+    let (manifest, speculative) =
+        crate::service::parse_full_manifest_with_core_off_runtime(raw_bytes, spec).await?;
+    Ok((
+        Arc::new(manifest),
+        speculative.map(|(spec, core)| (spec, Arc::new(core))),
+    ))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -924,7 +936,13 @@ impl FetchQueues {
             return Some(request);
         }
 
-        if self.active_prefetches() >= prefetch_concurrency {
+        let cap = if self.demand.is_empty() {
+            usize::MAX
+        } else {
+            prefetch_concurrency
+        };
+
+        if self.active_prefetches() >= cap {
             return None;
         }
 
@@ -967,7 +985,7 @@ fn fetch_registry_manifest(registry_url: String, request: FetchRequest) -> Fetch
 
     tokio::spawn(async move {
         match request {
-            FetchRequest::Full { name } => {
+            FetchRequest::Full { name, spec } => {
                 let result = async {
                     match fetch_full_manifest_bytes(FetchManifestOptions {
                         registry_url: &registry_url,
@@ -978,7 +996,7 @@ fn fetch_registry_manifest(registry_url: String, request: FetchRequest) -> Fetch
                     .await?
                     {
                         FetchManifestBytesResult::Ok(bytes, _etag) => {
-                            parse_full_manifest_off_runtime(bytes).await
+                            parse_full_manifest_off_runtime(bytes, spec.clone()).await
                         }
                         FetchManifestBytesResult::NotModified => {
                             Err(anyhow::anyhow!("304 Not Modified without etag context"))
@@ -1058,7 +1076,13 @@ fn schedule_registry_fetch(
             priority,
         );
     } else if !full_cache.contains_key(&real_name) && !full_failures.contains_key(&real_name) {
-        fetch_queues.enqueue(FetchRequest::Full { name: real_name }, priority);
+        fetch_queues.enqueue(
+            FetchRequest::Full {
+                name: real_name,
+                spec: Some(real_spec),
+            },
+            priority,
+        );
     }
 }
 
@@ -1240,9 +1264,25 @@ fn apply_fetch_result(
     fetch_queues.complete(&done_key);
 
     match done {
-        FetchDone::Full { name, result } => {
+        FetchDone::Full { name, result, .. } => {
             match result {
-                Ok(full) => {
+                Ok((full, speculative)) => {
+                    if let Some((resolved_spec, manifest)) = speculative {
+                        version_cache.insert((name.clone(), resolved_spec), Arc::clone(&manifest));
+                        version_cache
+                            .entry((name.clone(), manifest.version.clone()))
+                            .or_insert_with(|| Arc::clone(&manifest));
+                        schedule_transitive_prefetches(
+                            &manifest,
+                            preload_config,
+                            supports_semver,
+                            full_cache,
+                            version_cache,
+                            full_failures,
+                            version_failures,
+                            fetch_queues,
+                        );
+                    }
                     full_cache.insert(name.clone(), full);
                 }
                 Err(e) => {
@@ -1641,6 +1681,34 @@ where
                 supports_semver,
                 &mut level_pending,
             );
+
+            loop {
+                let next = std::future::poll_fn(|cx| {
+                    use std::task::Poll;
+                    match fetches.poll_next_unpin(cx) {
+                        Poll::Ready(item) => Poll::Ready(item),
+                        Poll::Pending => Poll::Ready(None),
+                    }
+                })
+                .await;
+                let Some(result) = next else { break };
+                let done = result.map_err(|e| {
+                    registry_error::<R::Error>(format!("manifest fetch task failed: {e}"))
+                })?;
+                apply_fetch_result(
+                    done,
+                    &mut full_cache,
+                    &mut version_cache,
+                    &mut full_waiters,
+                    &mut version_waiters,
+                    &mut full_failures,
+                    &mut version_failures,
+                    &mut fetch_queues,
+                    &preload_config,
+                    supports_semver,
+                    &mut level_pending,
+                );
+            }
         }
 
         receiver.on_event(BuildEvent::LevelComplete {

@@ -12,6 +12,8 @@ use super::fetch::{
 };
 use super::http::get_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::resolver::version::resolve_target_version;
 
 #[cfg(not(target_arch = "wasm32"))]
 static MANIFEST_PARSE_POOL: std::sync::LazyLock<rayon::ThreadPool> =
@@ -49,6 +51,41 @@ where
     {
         simd_json::serde::from_slice::<T>(&mut bytes).map_err(|e| anyhow!("JSON parse error: {e}"))
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) type FullManifestParseResult = (FullManifest, Option<(String, CoreVersionManifest)>);
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn parse_full_manifest_with_core_off_runtime(
+    raw_bytes: Vec<u8>,
+    spec: Option<String>,
+) -> Result<FullManifestParseResult, anyhow::Error> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    MANIFEST_PARSE_POOL.spawn(move || {
+        let result = (|| -> Result<FullManifestParseResult, anyhow::Error> {
+            // simd_json mutates the parse buffer; clone so the raw bytes
+            // survive for `manifest.raw` and later on-demand version extraction.
+            let mut parse_buf = raw_bytes.clone();
+            let mut manifest: FullManifest =
+                simd_json::serde::from_slice::<FullManifest>(&mut parse_buf)
+                    .map_err(|e| anyhow!("JSON parse error: {e}"))?;
+            manifest.raw = std::sync::Arc::from(raw_bytes);
+
+            let speculative = spec.and_then(|spec| {
+                resolve_target_version((&manifest).into(), &spec)
+                    .ok()
+                    .and_then(|version| {
+                        manifest.get_core_version(&version).map(|core| (spec, core))
+                    })
+            });
+
+            Ok((manifest, speculative))
+        })();
+        let _ = tx.send(result);
+    });
+    rx.await
+        .map_err(|e| anyhow!("rayon parse channel closed: {e}"))?
 }
 
 /// Result of a full manifest fetch with ETag support.
