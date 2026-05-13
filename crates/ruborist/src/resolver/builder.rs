@@ -845,11 +845,9 @@ async fn parse_full_manifest_off_runtime(raw_bytes: Vec<u8>) -> anyhow::Result<A
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn parse_core_manifest_off_runtime(
-    bytes: Vec<u8>,
-) -> anyhow::Result<Arc<CoreVersionManifest>> {
-    crate::service::parse_json_off_runtime::<CoreVersionManifest>(bytes)
-        .await
+fn parse_core_manifest_inline(mut bytes: Vec<u8>) -> anyhow::Result<Arc<CoreVersionManifest>> {
+    simd_json::serde::from_slice::<CoreVersionManifest>(&mut bytes)
+        .map_err(|e| anyhow::anyhow!("JSON parse error: {e}"))
         .map(Arc::new)
 }
 
@@ -1243,7 +1241,7 @@ async fn apply_fetch_result(
         FetchDone::Version { name, spec, result } => {
             let key = (name, spec);
             let parsed: anyhow::Result<Arc<CoreVersionManifest>> = match result {
-                Ok(bytes) => parse_core_manifest_off_runtime(bytes).await,
+                Ok(bytes) => parse_core_manifest_inline(bytes),
                 Err(e) => Err(e),
             };
             match parsed {

@@ -85,7 +85,7 @@ impl<G, R> BuildDepsOptions<G, R> {
             cache_dir: None,
             manifest_store: Arc::new(NoopStore),
             warm_project_cache: None,
-            concurrency: 20,
+            concurrency: 64,
             peer_deps: PeerDeps::Skip,
             glob,
             receiver,
@@ -318,7 +318,7 @@ mod tests {
             cache_dir: None,
             manifest_store: Arc::new(NoopStore),
             warm_project_cache: None,
-            concurrency: 20,
+            concurrency: 64,
             peer_deps: PeerDeps::Skip,
             glob: NoopGlob,
             receiver: NoopReceiver,
@@ -326,7 +326,7 @@ mod tests {
             catalogs: HashMap::new(),
         };
 
-        assert_eq!(options.concurrency, 20);
+        assert_eq!(options.concurrency, 64);
         assert_eq!(options.peer_deps, PeerDeps::Skip);
         assert!(options.supports_semver.is_none());
     }
