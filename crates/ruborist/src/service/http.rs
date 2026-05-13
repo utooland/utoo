@@ -85,18 +85,26 @@ use anyhow::{Context, Result, anyhow};
 /// error, which silently-stalled sockets never raise.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Global HTTP client with connection pooling and DNS caching.
-///
-/// Stores `Result<Client, String>` so that proxy-configuration errors are
-/// surfaced to callers instead of panicking or calling `process::exit`.
-static HTTP_CLIENT: LazyLock<Result<reqwest::Client, String>> = LazyLock::new(|| {
-    client_builder()
-        .and_then(|b| b.build().context("Failed to build reqwest client"))
+/// Number of independent HTTP client pools. Each pool maintains its own
+/// set of keep-alive connections, so N pools ≈ N× the total TCP connections
+/// to the registry CDN. This spreads requests across more CDN edge servers
+/// via DNS round-robin and avoids the "pool reuse is too efficient" problem
+/// where a single pool recycles connections faster than new requests arrive.
+const CLIENT_POOL_SIZE: usize = 4;
+
+static HTTP_CLIENTS: LazyLock<Result<Vec<reqwest::Client>, String>> = LazyLock::new(|| {
+    (0..CLIENT_POOL_SIZE)
+        .map(|_| client_builder().and_then(|b| b.build().context("Failed to build reqwest client")))
+        .collect::<Result<Vec<_>>>()
         .map_err(|e| e.to_string())
 });
 
+static CLIENT_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 pub(crate) fn get_client() -> Result<&'static reqwest::Client> {
-    HTTP_CLIENT.as_ref().map_err(|e| anyhow!("{e}"))
+    let clients = HTTP_CLIENTS.as_ref().map_err(|e| anyhow!("{e}"))?;
+    let idx = CLIENT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % clients.len();
+    Ok(&clients[idx])
 }
 
 /// Override reqwest's default `ring` with `aws-lc-rs` on macOS. Local
