@@ -123,6 +123,21 @@ export async function createHotReloader(
     persistentCaching,
   );
 
+  const htmlConfigs = [
+    ...(Array.isArray((bundleOptions.config as any).html)
+      ? (bundleOptions.config as any).html
+      : (bundleOptions.config as any).html
+        ? [(bundleOptions.config as any).html]
+        : []),
+    ...bundleOptions.config.entry
+      .filter((e: EntryOptions) => !!e.html)
+      .map((e: EntryOptions) => e.html!),
+  ];
+  const shouldCreateWebpackStats =
+    Boolean(process.env.ANALYZE) ||
+    bundleOptions.config.stats ||
+    htmlConfigs.length > 0;
+
   let project: Project;
   try {
     project = await createProject(
@@ -137,10 +152,7 @@ export async function createHotReloader(
         config: {
           ...bundleOptions.config,
           mode: "development",
-          stats:
-            Boolean(process.env.ANALYZE) ||
-            bundleOptions.config.stats ||
-            bundleOptions.config.entry.some((e: EntryOptions) => !!e.html),
+          stats: shouldCreateWebpackStats,
           optimization: {
             ...bundleOptions.config.optimization,
             minify: false,
@@ -179,20 +191,6 @@ export async function createHotReloader(
   const backgroundWatchSubscriptions = new Set<
     AsyncIterableIterator<TurbopackResult>
   >();
-  const htmlConfigs = [
-    ...(Array.isArray((bundleOptions.config as any).html)
-      ? (bundleOptions.config as any).html
-      : (bundleOptions.config as any).html
-        ? [(bundleOptions.config as any).html]
-        : []),
-    ...bundleOptions.config.entry
-      .filter((e: EntryOptions) => !!e.html)
-      .map((e: EntryOptions) => e.html!),
-  ];
-  const shouldWriteProjectOutputs =
-    Boolean(process.env.ANALYZE) ||
-    bundleOptions.config.stats ||
-    htmlConfigs.length > 0;
 
   let currentWatchedEntrypoints: Endpoint[] = [];
   let backgroundWatchersStarted = false;
@@ -269,7 +267,7 @@ export async function createHotReloader(
   }
 
   async function writeOutputToDisk(entrypoint: Endpoint) {
-    if (shouldWriteProjectOutputs) {
+    if (shouldCreateWebpackStats) {
       await writeAllEntrypointsToDisk();
     } else {
       await writeEntrypointToDisk(entrypoint);
@@ -295,7 +293,7 @@ export async function createHotReloader(
       return;
     }
 
-    const previousTask = shouldWriteProjectOutputs
+    const previousTask = shouldCreateWebpackStats
       ? (backgroundProjectWriteTask ?? Promise.resolve())
       : (backgroundEndpointWriteTasks.get(entrypoint) ?? Promise.resolve());
     const task = previousTask
@@ -310,7 +308,7 @@ export async function createHotReloader(
         hmrEventHappened = true;
       })
       .finally(() => {
-        if (shouldWriteProjectOutputs) {
+        if (shouldCreateWebpackStats) {
           if (backgroundProjectWriteTask === task) {
             backgroundProjectWriteTask = undefined;
           }
@@ -319,7 +317,7 @@ export async function createHotReloader(
         }
       });
 
-    if (shouldWriteProjectOutputs) {
+    if (shouldCreateWebpackStats) {
       backgroundProjectWriteTask = task;
     } else {
       backgroundEndpointWriteTasks.set(entrypoint, task);
@@ -439,7 +437,7 @@ export async function createHotReloader(
         ...(entrypoints.apps ?? []),
         ...(entrypoints.libraries ?? []),
       ];
-      if (shouldWriteProjectOutputs) {
+      if (shouldCreateWebpackStats) {
         await writeAllEntrypointsToDisk();
       } else {
         await Promise.all(
