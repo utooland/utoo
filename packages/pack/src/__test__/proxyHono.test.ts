@@ -11,7 +11,7 @@ import {
   doesContextMatchUrl,
   prepareProxyRequest,
   ruleMatchesUrl,
-} from "../core/proxy-hono";
+} from "../core/proxyHono";
 
 describe("doesContextMatchUrl", () => {
   it("matches path prefix", () => {
