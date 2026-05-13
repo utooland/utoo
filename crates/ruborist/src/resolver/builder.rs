@@ -1550,6 +1550,38 @@ where
                 &mut level_pending,
             )
             .await;
+
+            // At high concurrency many JoinHandles complete at once. Drain all
+            // already-ready results in one pass so we avoid redundant
+            // pump_fetches + level_pending iterations for each one.
+            loop {
+                let next = std::future::poll_fn(|cx| {
+                    use std::task::Poll;
+                    match fetches.poll_next_unpin(cx) {
+                        Poll::Ready(item) => Poll::Ready(item),
+                        Poll::Pending => Poll::Ready(None),
+                    }
+                })
+                .await;
+                let Some(result) = next else { break };
+                let done = result.map_err(|e| {
+                    registry_error::<R::Error>(format!("manifest fetch task failed: {e}"))
+                })?;
+                apply_fetch_result(
+                    done,
+                    &mut full_cache,
+                    &mut version_cache,
+                    &mut full_waiters,
+                    &mut version_waiters,
+                    &mut full_failures,
+                    &mut version_failures,
+                    &mut fetch_queues,
+                    &preload_config,
+                    supports_semver,
+                    &mut level_pending,
+                )
+                .await;
+            }
         }
 
         receiver.on_event(BuildEvent::LevelComplete {
