@@ -9,7 +9,7 @@
 //!       |          |                                            |
 //!       |        true (npmmirror)                     false (npmjs.org)
 //!       |          |                                            |
-//!       |   fetch_version_manifest          resolve_full_manifest
+//!       |   fetch version job              fetch full manifest job
 //!       |   GET /{name}/{spec}              GET /{name}
 //!       |   Accept: abbreviated             Accept: abbreviated
 //!       |          |                        + If-None-Match: {etag}

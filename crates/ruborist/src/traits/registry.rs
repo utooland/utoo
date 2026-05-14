@@ -133,6 +133,14 @@ pub trait RegistryClient {
         false
     }
 
+    /// The base registry URL used by raw-fetch dependency builders.
+    ///
+    /// Implementations that cannot expose a concrete URL can keep the default;
+    /// callers should fall back to the regular trait methods when this is empty.
+    fn registry_url(&self) -> &str {
+        ""
+    }
+
     /// Fetch full package manifest from registry.
     ///
     /// Returns the complete package manifest with all versions, wrapped in
@@ -275,21 +283,6 @@ pub trait RegistryClient {
             })
         }
     }
-
-    /// Cache a resolved version manifest for later use.
-    ///
-    /// This method is called by preload to cache (name, spec) -> version_manifest mappings,
-    /// allowing build phase to directly hit memory cache without traversing full_manifest.
-    ///
-    /// Default implementation is no-op (no caching).
-    fn cache_version_manifest(
-        &self,
-        _name: &str,
-        _spec: &str,
-        _manifest: Arc<CoreVersionManifest>,
-    ) {
-        // Default: no-op
-    }
 }
 
 /// A simple in-memory registry client for testing.
@@ -298,6 +291,7 @@ pub mod mock {
     use super::*;
 
     /// Internal package data for mock registry.
+    #[derive(Clone)]
     struct MockPackage {
         name: String,
         dist_tags: HashMap<String, String>,
@@ -305,6 +299,7 @@ pub mod mock {
     }
 
     /// Mock registry client that returns predefined packages.
+    #[derive(Clone)]
     pub struct MockRegistryClient {
         packages: HashMap<String, MockPackage>,
     }
@@ -391,6 +386,60 @@ pub mod mock {
                 raw: bytes::Bytes::from(raw),
                 ..Default::default()
             }))
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    impl crate::service::ManifestProvider for MockRegistryClient {
+        async fn execute_manifest_job(
+            &self,
+            job: crate::service::ManifestJob,
+        ) -> Result<crate::service::ManifestJobDone, Self::Error> {
+            use crate::service::{ManifestFullData, ManifestJob, ManifestJobDone};
+
+            match job {
+                ManifestJob::Full { name } => {
+                    let full = self.fetch_full_manifest(&name).await?;
+                    Ok(ManifestJobDone::Full {
+                        name,
+                        data: ManifestFullData::Full(full),
+                    })
+                }
+                ManifestJob::Version {
+                    name,
+                    spec,
+                    fetch_spec,
+                    format: _,
+                } => {
+                    let manifest = self.fetch_version_manifest(&name, &fetch_spec).await?;
+                    Ok(ManifestJobDone::Version {
+                        name,
+                        spec,
+                        manifest,
+                    })
+                }
+                ManifestJob::ExtractVersion {
+                    name,
+                    spec,
+                    version,
+                    full,
+                } => {
+                    let manifest =
+                        full.get_core_version(&version)
+                            .map(Arc::new)
+                            .ok_or_else(|| {
+                                MockError(format!(
+                                    "Version {version} not found in manifest for {name}"
+                                ))
+                            })?;
+                    Ok(ManifestJobDone::Version {
+                        name,
+                        spec,
+                        manifest,
+                    })
+                }
+            }
         }
     }
 }

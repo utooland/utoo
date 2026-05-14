@@ -17,7 +17,9 @@ use super::extractor::extract_and_write;
 use super::retry::{RetryableError, build_dns_cached_client, create_retry_strategy};
 use super::user_config::get_manifests_concurrency_limit_sync;
 
-// Global downloader client - no pool limit, concurrency controlled by OnceMap
+// Global downloader client: reqwest has no per-host pool cap here; tarball
+// concurrency is controlled by DOWNLOAD_SEMAPHORE and duplicate work by
+// DOWNLOAD_CACHE.
 static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
 
 /// Global download cache shared between pipeline and install phases.

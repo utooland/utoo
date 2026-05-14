@@ -7,19 +7,17 @@
 //! - Hoisting (placing packages as high as possible in the tree)
 //! - Override rules
 //! - Different dependency types (prod, dev, peer, optional)
-//! - Parallel manifest preloading for performance
+//! - Demand-driven parallel manifest jobs for performance
 //!
-//! # Two-Phase Resolution
+//! # Demand BFS Resolution
 //!
-//! The builder uses a two-phase approach for optimal performance:
-//! 1. **Preload Phase**: Parallel fetch of all manifests to warm up caches
-//! 2. **Build Phase**: Sequential BFS traversal reading from cache
-//!
-//! This separation allows for maximum parallelism during network I/O
-//! while keeping the graph building logic simple and deterministic.
+//! The builder owns breadth-first traversal, per-run manifest cache, waiters,
+//! and inflight de-duplication. Provider tasks only execute concrete manifest
+//! jobs such as fetch, parse, extract, and persistence.
 
+use futures::stream::{FuturesUnordered, StreamExt};
 use petgraph::graph::NodeIndex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -28,12 +26,18 @@ use anyhow::Context as _;
 
 use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
 use crate::model::manifest::NodeManifest;
+use crate::model::manifest::{CoreVersionManifest, FullManifest, VersionsRef};
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
-use crate::resolver::preload::{PreloadConfig, preload_manifests};
 use crate::resolver::registry::{ResolveError, resolve_registry_dep};
+use crate::resolver::semver::normalize_spec;
+use crate::resolver::version::resolve_target_version;
+use crate::service::{
+    ManifestFullData, ManifestJob, ManifestJobDone, ManifestProvider, MetadataFormat,
+};
 use crate::spec::{Catalogs, PackageSpec, Protocol};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
+use crate::traits::registry::RegistryError;
 use crate::traits::registry::{RegistryClient, ResolvedPackage};
 
 /// Dispatch a git/github spec to the real `gix`-backed resolver when the
@@ -99,15 +103,15 @@ pub use super::edges::{
 };
 pub use crate::model::node::{DevDeps, PeerDeps};
 
+const DEFAULT_CONCURRENCY: usize = 128;
+
 /// Configuration for dependency resolution.
 #[derive(Debug, Clone)]
 pub struct BuildDepsConfig {
     /// How to handle peer dependencies.
     pub peer_deps: PeerDeps,
-    /// Maximum number of concurrent manifest fetches during preload
+    /// Maximum number of concurrent manifest jobs.
     pub concurrency: usize,
-    /// Whether to skip preload phase (useful when cache is already warm)
-    pub skip_preload: bool,
     /// Cache directory for git clones (defaults to `~/.cache/nm`)
     pub cache_dir: Option<PathBuf>,
     /// Shared dedup cache for concurrent git clone operations
@@ -123,8 +127,7 @@ impl Default for BuildDepsConfig {
     fn default() -> Self {
         Self {
             peer_deps: PeerDeps::Skip,
-            concurrency: crate::resolver::preload::DEFAULT_CONCURRENCY,
-            skip_preload: false,
+            concurrency: DEFAULT_CONCURRENCY,
             cache_dir: dirs::home_dir().map(|d| d.join(".cache/nm")),
             git_clone_cache: Arc::new(GitCloneCache::new()),
             http_fetch_cache: Arc::new(HttpFetchCache::new()),
@@ -143,12 +146,6 @@ impl BuildDepsConfig {
     /// Create config with custom concurrency
     pub fn with_concurrency(mut self, concurrency: usize) -> Self {
         self.concurrency = concurrency;
-        self
-    }
-
-    /// Create config that skips preload phase
-    pub fn with_skip_preload(mut self, skip: bool) -> Self {
-        self.skip_preload = skip;
         self
     }
 
@@ -173,44 +170,6 @@ struct NodeFlags {
     is_dev: bool,
     is_optional: bool,
     is_peer: bool,
-}
-
-/// Gather all unresolved deps from root and workspace nodes for preloading.
-///
-/// Only registry specs (e.g. `^4.17.0`) are collected. `catalog:` specs are
-/// resolved at edge creation time, so by the time this runs they are already
-/// concrete registry specs.
-fn gather_preload_deps(graph: &DependencyGraph, peer_deps: PeerDeps) -> Vec<(String, String)> {
-    use crate::spec::SpecStr;
-    use std::collections::HashSet;
-
-    let mut deps = HashSet::new();
-
-    let collect = |node_index: NodeIndex, deps: &mut HashSet<(String, String)>| {
-        for (_, edge) in graph.get_dependency_edges(node_index) {
-            if edge.valid {
-                continue;
-            }
-            if peer_deps == PeerDeps::Skip && edge.edge_type == EdgeType::Peer {
-                continue;
-            }
-            if edge.spec.is_registry_spec() {
-                deps.insert((edge.name.clone(), edge.spec.clone()));
-            }
-        }
-    };
-
-    collect(graph.root_index, &mut deps);
-
-    for node_index in graph.graph.node_indices() {
-        if let Some(node) = graph.get_node(node_index)
-            && node.is_workspace()
-        {
-            collect(node_index, &mut deps);
-        }
-    }
-
-    deps.into_iter().collect()
 }
 
 /// Create a new package node for a resolved dependency.
@@ -667,11 +626,15 @@ pub async fn process_dependency<R: RegistryClient>(
 /// // Add initial dependency edges to root...
 /// build_deps(&mut graph, &registry, PeerDeps::Include).await?;
 /// ```
-pub async fn build_deps<R: RegistryClient>(
+pub async fn build_deps<R>(
     graph: &mut DependencyGraph,
     registry: &R,
     peer_deps: PeerDeps,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+{
     let config = BuildDepsConfig::default().with_peer_deps(peer_deps);
     build_deps_with_config(graph, registry, config, &NoopReceiver).await
 }
@@ -689,54 +652,58 @@ pub async fn build_deps<R: RegistryClient>(
 /// * `registry` - Registry client for fetching packages
 /// * `peer_deps` - How to handle peer dependencies
 /// * `receiver` - Event receiver for handling build events
-pub async fn build_deps_with_receiver<R: RegistryClient, E: EventReceiver>(
+pub async fn build_deps_with_receiver<R, E>(
     graph: &mut DependencyGraph,
     registry: &R,
     peer_deps: PeerDeps,
     receiver: &E,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+    E: EventReceiver,
+{
     let config = BuildDepsConfig::default().with_peer_deps(peer_deps);
     build_deps_with_config(graph, registry, config, receiver).await
 }
 
 /// Build the complete dependency tree with full configuration.
 ///
-/// This is the most flexible entry point for dependency resolution. It performs:
-/// 1. **Preload Phase** (unless skipped): Parallel fetch of all manifests to warm up caches
-/// 2. **Build Phase**: Sequential BFS traversal reading from cache
+/// This is the most flexible entry point for dependency resolution. It runs
+/// demand BFS and schedules manifest jobs only when the current frontier needs
+/// them.
 ///
 /// # Arguments
 /// * `graph` - The dependency graph (should have root node and initial edges)
 /// * `registry` - Registry client for fetching packages
-/// * `config` - Build configuration (concurrency, peer_deps, skip_preload)
+/// * `config` - Build configuration (concurrency, peer_deps, cache_dir, etc.)
 /// * `receiver` - Event receiver for handling build events
 ///
 /// # Example
 /// ```ignore
 /// let config = BuildDepsConfig::default()
-///     .with_concurrency(50)
-///     .with_skip_preload(true); // Skip preload if cache is warm
+///     .with_concurrency(50);
 ///
 /// build_deps_with_config(&mut graph, &registry, config, &receiver).await?;
 /// ```
-pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
+pub async fn build_deps_with_config<R, E>(
     graph: &mut DependencyGraph,
     registry: &R,
     config: BuildDepsConfig,
     receiver: &E,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+    E: EventReceiver,
+{
     tracing::debug!(
-        "Starting dependency tree build, peer_deps: {:?}, concurrency: {}, skip_preload: {}",
+        "Starting dependency tree build, peer_deps: {:?}, concurrency: {}",
         config.peer_deps,
-        config.concurrency,
-        config.skip_preload
+        config.concurrency
     );
 
-    // Phase 1: Preload manifests in parallel (unless skipped)
-    run_preload_phase(graph, registry, &config, receiver).await;
-
-    // Phase 2: BFS traversal to build the dependency tree
-    run_bfs_phase(graph, registry, &config, receiver).await?;
+    run_main_loop_bfs(graph, registry, &config, receiver).await?;
 
     receiver.on_event(BuildEvent::Complete {
         total_nodes: graph.graph.node_count(),
@@ -745,149 +712,798 @@ pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
     Ok(())
 }
 
-/// Run the preload phase to warm up the cache with manifests.
-async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
-    graph: &DependencyGraph,
-    registry: &R,
-    config: &BuildDepsConfig,
-    receiver: &E,
-) {
-    if config.skip_preload {
-        return;
-    }
+type WaitingEdge = (NodeIndex, DependencyEdgeInfo);
 
-    let start = tokio::time::Instant::now();
+type VersionKey = (String, String);
 
-    let initial_deps = gather_preload_deps(graph, config.peer_deps);
-    if initial_deps.is_empty() {
-        return;
-    }
-
-    tracing::debug!("Preload phase: {} initial dependencies", initial_deps.len());
-    receiver.on_event(BuildEvent::PreloadStart {
-        count: initial_deps.len(),
-    });
-
-    let preload_config = PreloadConfig {
-        peer_deps: config.peer_deps,
-        concurrency: config.concurrency,
-    };
-
-    let stats = preload_manifests(
-        initial_deps,
-        registry,
-        preload_config,
-        receiver,
-        |_name, _manifest| {
-            // Registry client's resolve_package should cache the manifest
-        },
-    )
-    .await;
-
-    tracing::debug!(
-        "Preload phase completed: {} success, {} failed",
-        stats.success_count,
-        stats.failed_count
-    );
-    receiver.on_event(BuildEvent::PreloadComplete {
-        success: stats.success_count,
-        failed: stats.failed_count,
-    });
-
-    tracing::debug!("Preload phase: {:?}", start.elapsed());
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+enum FetchKey {
+    Full(String),
+    Version(String, String),
 }
 
-/// Run the BFS traversal phase to build the dependency tree.
-async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
+impl ManifestJob {
+    fn key(&self) -> FetchKey {
+        match self {
+            Self::Full { name } => FetchKey::Full(name.clone()),
+            Self::Version { name, spec, .. } | Self::ExtractVersion { name, spec, .. } => {
+                FetchKey::Version(name.clone(), spec.clone())
+            }
+        }
+    }
+}
+
+enum FetchDone {
+    Full {
+        name: String,
+        result: Result<ManifestFullData, String>,
+    },
+    Version {
+        name: String,
+        spec: String,
+        result: Result<Arc<CoreVersionManifest>, String>,
+    },
+}
+
+impl FetchDone {
+    fn key(&self) -> FetchKey {
+        match self {
+            Self::Full { name, .. } => FetchKey::Full(name.clone()),
+            Self::Version { name, spec, .. } => FetchKey::Version(name.clone(), spec.clone()),
+        }
+    }
+}
+
+type FetchFuture = tokio::task::JoinHandle<FetchDone>;
+
+fn version_metadata_format(supports_semver: bool) -> MetadataFormat {
+    if supports_semver {
+        MetadataFormat::Abbreviated
+    } else {
+        MetadataFormat::Complete
+    }
+}
+
+fn registry_error<E>(message: impl Into<String>) -> ResolveError<E>
+where
+    E: From<RegistryError>,
+{
+    ResolveError::Registry(RegistryError(anyhow::anyhow!(message.into())).into())
+}
+
+async fn fetch_registry_manifest_inner<R>(registry: R, request: ManifestJob) -> FetchDone
+where
+    R: ManifestProvider,
+{
+    let key = request.key();
+    match registry.execute_manifest_job(request).await {
+        Ok(done) => match done {
+            ManifestJobDone::Full { name, data } => FetchDone::Full {
+                name,
+                result: Ok(data),
+            },
+            ManifestJobDone::Version {
+                name,
+                spec,
+                manifest,
+            } => FetchDone::Version {
+                name,
+                spec,
+                result: Ok(manifest),
+            },
+        },
+        Err(error) => match key {
+            FetchKey::Full(name) => FetchDone::Full {
+                name,
+                result: Err(format!("{error:#}")),
+            },
+            FetchKey::Version(name, spec) => FetchDone::Version {
+                name,
+                spec,
+                result: Err(format!("{error:#}")),
+            },
+        },
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn fetch_registry_manifest<R>(registry: R, request: ManifestJob) -> FetchFuture
+where
+    R: ManifestProvider,
+    R::Error: Send,
+{
+    tokio::spawn(fetch_registry_manifest_inner(registry, request))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn fetch_registry_manifest<R>(registry: R, request: ManifestJob) -> FetchFuture
+where
+    R: ManifestProvider,
+{
+    tokio::task::spawn_local(fetch_registry_manifest_inner(registry, request))
+}
+
+fn pump_fetches<R>(
+    fetches: &mut FuturesUnordered<FetchFuture>,
+    fetch_queue: &mut VecDeque<ManifestJob>,
+    inflight_fetches: &mut HashSet<FetchKey>,
+    registry: &R,
+    concurrency: usize,
+) where
+    R: ManifestProvider,
+    R::Error: Send,
+{
+    while fetches.len() < concurrency {
+        let Some(request) = fetch_queue.pop_front() else {
+            break;
+        };
+        inflight_fetches.insert(request.key());
+        fetches.push(fetch_registry_manifest(registry.clone(), request));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn schedule_registry_fetch(
+    name: String,
+    spec: String,
+    supports_semver: bool,
+    full_cache: &HashMap<String, Arc<FullManifest>>,
+    version_cache: &HashMap<VersionKey, Arc<CoreVersionManifest>>,
+    full_failures: &HashMap<String, String>,
+    version_failures: &HashMap<VersionKey, String>,
+    queued_fetches: &mut HashSet<FetchKey>,
+    inflight_fetches: &HashSet<FetchKey>,
+    versions_cache: &HashMap<String, Arc<crate::service::VersionsInfo>>,
+    fetch_queue: &mut VecDeque<ManifestJob>,
+) {
+    let (real_name, real_spec) = normalize_spec(&name, &spec);
+    if supports_semver {
+        let key = (real_name, real_spec);
+        let fetch_key = FetchKey::Version(key.0.clone(), key.1.clone());
+        if version_cache.contains_key(&key)
+            || version_failures.contains_key(&key)
+            || inflight_fetches.contains(&fetch_key)
+            || !queued_fetches.insert(fetch_key)
+        {
+            return;
+        }
+        fetch_queue.push_back(ManifestJob::Version {
+            name: key.0.clone(),
+            spec: key.1.clone(),
+            fetch_spec: key.1,
+            format: version_metadata_format(supports_semver),
+        });
+    } else {
+        let fetch_key = FetchKey::Full(real_name.clone());
+        if full_cache.contains_key(&real_name)
+            || versions_cache.contains_key(&real_name)
+            || full_failures.contains_key(&real_name)
+            || inflight_fetches.contains(&fetch_key)
+            || !queued_fetches.insert(fetch_key)
+        {
+            return;
+        }
+        fetch_queue.push_back(ManifestJob::Full { name: real_name });
+    }
+}
+
+fn enqueue_version_extract(
+    name: String,
+    spec: String,
+    version: String,
+    full: Arc<FullManifest>,
+    queued_fetches: &mut HashSet<FetchKey>,
+    inflight_fetches: &HashSet<FetchKey>,
+    fetch_queue: &mut VecDeque<ManifestJob>,
+) {
+    let fetch_key = FetchKey::Version(name.clone(), spec.clone());
+    if inflight_fetches.contains(&fetch_key) || !queued_fetches.insert(fetch_key) {
+        return;
+    }
+    fetch_queue.push_back(ManifestJob::ExtractVersion {
+        name,
+        spec,
+        version,
+        full,
+    });
+}
+
+fn enqueue_version_fetch(
+    name: String,
+    spec: String,
+    fetch_spec: String,
+    supports_semver: bool,
+    queued_fetches: &mut HashSet<FetchKey>,
+    inflight_fetches: &HashSet<FetchKey>,
+    fetch_queue: &mut VecDeque<ManifestJob>,
+) {
+    let fetch_key = FetchKey::Version(name.clone(), spec.clone());
+    if inflight_fetches.contains(&fetch_key) || !queued_fetches.insert(fetch_key) {
+        return;
+    }
+    fetch_queue.push_back(ManifestJob::Version {
+        name,
+        spec,
+        fetch_spec,
+        format: version_metadata_format(supports_semver),
+    });
+}
+
+fn try_reuse_dependency(
+    graph: &mut DependencyGraph,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+) -> Option<ProcessResult> {
+    match graph.find_compatible_node(parent, &edge.name, &edge.spec) {
+        FindResult::Reuse(existing_index) => {
+            graph.mark_dependency_resolved(edge.edge_id, existing_index);
+            update_node_type_from_edge(graph, parent, existing_index, &edge.edge_type);
+            Some(ProcessResult::Reused(existing_index))
+        }
+        FindResult::Conflict(_) | FindResult::New(_) => None,
+    }
+}
+
+pub fn process_dependency_with_resolved(
+    graph: &mut DependencyGraph,
+    node_index: NodeIndex,
+    edge_info: &DependencyEdgeInfo,
+    resolved: &ResolvedPackage,
+    config: &BuildDepsConfig,
+) -> ProcessResult {
+    match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
+        FindResult::Reuse(existing_index) => {
+            graph.mark_dependency_resolved(edge_info.edge_id, existing_index);
+            update_node_type_from_edge(graph, node_index, existing_index, &edge_info.edge_type);
+            ProcessResult::Reused(existing_index)
+        }
+        FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
+            let new_node = create_package_node(&edge_info.name, resolved, conflict_parent, graph);
+            let new_index = graph.add_node(new_node);
+            graph.add_physical_edge(conflict_parent, new_index);
+            graph.mark_dependency_resolved(edge_info.edge_id, new_index);
+            update_node_type_from_edge(graph, node_index, new_index, &edge_info.edge_type);
+            add_edges_from(
+                graph,
+                new_index,
+                &*resolved.manifest,
+                &EdgeContext::new(config.peer_deps, DevDeps::Exclude),
+            );
+            ProcessResult::Created(new_index)
+        }
+    }
+}
+
+fn chain_err<E>(
+    graph: &DependencyGraph,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    inner: ResolveError<E>,
+) -> ResolveError<E> {
+    let mut chain = graph.logical_ancestry(parent);
+    chain.push((edge.name.clone(), edge.spec.clone()));
+    ResolveError::WithChain {
+        chain,
+        source: Box::new(inner),
+    }
+}
+
+fn handle_processed<E: EventReceiver>(
+    graph: &DependencyGraph,
+    receiver: &E,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    processed: &ProcessResult,
+    next_level: &mut Vec<NodeIndex>,
+) {
+    match processed {
+        ProcessResult::Created(idx) => {
+            if let Some(node) = graph.get_node(*idx) {
+                receiver.on_event(BuildEvent::Resolved {
+                    name: &edge.name,
+                    version: &node.version,
+                });
+                if let NodeManifest::Registry(ref manifest) = node.manifest {
+                    let parent_path = graph.get_node(parent).map(|p| p.path.as_path());
+                    receiver.on_event(BuildEvent::PackagePlaced {
+                        package: manifest.as_ref().into(),
+                        path: &node.path,
+                        parent_path,
+                    });
+                }
+            }
+            next_level.push(*idx);
+        }
+        ProcessResult::Reused(idx) => {
+            if let Some(node) = graph.get_node(*idx) {
+                receiver.on_event(BuildEvent::Reused {
+                    name: &edge.name,
+                    version: &node.version,
+                });
+            }
+        }
+        ProcessResult::Skipped => {
+            receiver.on_event(BuildEvent::Skipped {
+                name: &edge.name,
+                spec: &edge.spec,
+            });
+        }
+    }
+}
+
+async fn handle_resolved_registry_manifest<R, E>(
+    graph: &mut DependencyGraph,
+    registry: &R,
+    receiver: &E,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    manifest: Arc<CoreVersionManifest>,
+    config: &BuildDepsConfig,
+) -> Result<ProcessResult, ResolveError<R::Error>>
+where
+    R: RegistryClient,
+    E: EventReceiver,
+{
+    let resolved = ResolvedPackage {
+        name: edge.name.clone(),
+        version: manifest.version.clone(),
+        manifest,
+    };
+
+    let processed = if graph
+        .check_override(parent, &edge.name, Some(&resolved.version))
+        .is_some()
+    {
+        process_dependency(graph, registry, parent, edge, config)
+            .await
+            .map_err(|inner| chain_err(graph, parent, edge, inner))?
+    } else {
+        receiver.on_event(BuildEvent::PackageResolved((&*resolved.manifest).into()));
+        process_dependency_with_resolved(graph, parent, edge, &resolved, config)
+    };
+
+    Ok(processed)
+}
+
+fn resolve_version_from_versions<RE>(
+    edge: &DependencyEdgeInfo,
+    package_name: &str,
+    versions: VersionsRef<'_>,
+    real_spec: &str,
+) -> Result<Option<String>, ResolveError<RE>> {
+    if versions.versions.is_empty() {
+        if edge.edge_type == EdgeType::Optional {
+            return Ok(None);
+        }
+        return Err(ResolveError::NoVersions(package_name.to_string()));
+    }
+
+    let version = match resolve_target_version(versions, real_spec) {
+        Ok(version) => version,
+        Err(_) if edge.edge_type == EdgeType::Optional => return Ok(None),
+        Err(e) => {
+            return Err(ResolveError::Version(format!(
+                "{}@{}: {}",
+                edge.name, real_spec, e
+            )));
+        }
+    };
+    Ok(Some(version))
+}
+
+fn resolve_version_from_full_manifest<RE>(
+    edge: &DependencyEdgeInfo,
+    full: &FullManifest,
+    real_spec: &str,
+) -> Result<Option<String>, ResolveError<RE>> {
+    resolve_version_from_versions(edge, &full.name, full.into(), real_spec)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_fetch_result(
+    done: FetchDone,
+    full_cache: &mut HashMap<String, Arc<FullManifest>>,
+    versions_cache: &mut HashMap<String, Arc<crate::service::VersionsInfo>>,
+    version_cache: &mut HashMap<VersionKey, Arc<CoreVersionManifest>>,
+    full_waiters: &mut HashMap<String, Vec<WaitingEdge>>,
+    version_waiters: &mut HashMap<VersionKey, Vec<WaitingEdge>>,
+    full_failures: &mut HashMap<String, String>,
+    version_failures: &mut HashMap<VersionKey, String>,
+    queued_fetches: &mut HashSet<FetchKey>,
+    inflight_fetches: &mut HashSet<FetchKey>,
+    level_pending: &mut VecDeque<WaitingEdge>,
+) {
+    let done_key = done.key();
+    queued_fetches.remove(&done_key);
+    inflight_fetches.remove(&done_key);
+
+    match done {
+        FetchDone::Full { name, result } => {
+            match result {
+                Ok(ManifestFullData::Full(full)) => {
+                    full_cache.insert(name.clone(), full);
+                }
+                Ok(ManifestFullData::Versions(versions)) => {
+                    versions_cache.insert(name.clone(), versions);
+                }
+                Err(e) => {
+                    full_failures.insert(name.clone(), e);
+                }
+            }
+            if let Some(waiters) = full_waiters.remove(&name) {
+                level_pending.extend(waiters);
+            }
+        }
+        FetchDone::Version { name, spec, result } => {
+            let key = (name, spec);
+            match result {
+                Ok(manifest) => {
+                    version_cache.insert(key.clone(), Arc::clone(&manifest));
+                    version_cache
+                        .entry((key.0.clone(), manifest.version.clone()))
+                        .or_insert_with(|| Arc::clone(&manifest));
+                }
+                Err(e) => {
+                    version_failures.insert(key.clone(), e);
+                }
+            }
+            if let Some(waiters) = version_waiters.remove(&key) {
+                level_pending.extend(waiters);
+            }
+        }
+    }
+}
+
+async fn run_main_loop_bfs<R, E>(
     graph: &mut DependencyGraph,
     registry: &R,
     config: &BuildDepsConfig,
     receiver: &E,
-) -> Result<(), ResolveError<R::Error>> {
-    let start = tokio::time::Instant::now();
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+    E: EventReceiver,
+{
+    use crate::spec::SpecStr;
 
-    let mut current_level = vec![graph.root_index];
+    let supports_semver = registry.supports_semver_resolution();
+    let concurrency = config.concurrency.max(1);
+
+    let mut full_cache: HashMap<String, Arc<FullManifest>> = HashMap::new();
+    let mut versions_cache: HashMap<String, Arc<crate::service::VersionsInfo>> = HashMap::new();
+    let mut version_cache: HashMap<VersionKey, Arc<CoreVersionManifest>> = HashMap::new();
+    let mut full_waiters: HashMap<String, Vec<WaitingEdge>> = HashMap::new();
+    let mut version_waiters: HashMap<VersionKey, Vec<WaitingEdge>> = HashMap::new();
+    let mut full_failures: HashMap<String, String> = HashMap::new();
+    let mut version_failures: HashMap<VersionKey, String> = HashMap::new();
+    let mut queued_fetches: HashSet<FetchKey> = HashSet::new();
+    let mut inflight_fetches: HashSet<FetchKey> = HashSet::new();
+    let mut fetch_queue: VecDeque<ManifestJob> = VecDeque::new();
+    let mut fetches: FuturesUnordered<FetchFuture> = FuturesUnordered::new();
+
+    let root_idx = graph.root_index;
+    let mut current_level = vec![root_idx];
 
     while !current_level.is_empty() {
         receiver.on_event(BuildEvent::LevelStart {
             node_count: current_level.len(),
         });
-        let mut next_level = Vec::new();
 
-        for node_index in current_level {
-            // Add workspace nodes to next level
-            for (_, dep) in graph.get_dependency_edges(node_index) {
+        let mut next_level = Vec::new();
+        let mut level_pending = VecDeque::new();
+
+        for node_index in &current_level {
+            for (_, dep) in graph.get_dependency_edges(*node_index) {
                 if dep.valid
                     && let Some(to) = dep.to
                     && let Some(n) = graph.get_node(to)
                     && n.is_workspace()
-                    && node_index == graph.root_index
+                    && *node_index == root_idx
                 {
                     next_level.push(to);
                 }
             }
 
-            // Process unresolved dependencies
-            let unresolved = collect_unresolved_edges(graph, node_index);
+            let unresolved = collect_unresolved_edges(graph, *node_index);
             receiver.on_event(BuildEvent::DependencyCount {
                 count: unresolved.len(),
             });
-
-            for edge_info in unresolved {
-                receiver.on_event(BuildEvent::Resolving {
-                    name: &edge_info.name,
-                });
-                let result = process_dependency(graph, registry, node_index, &edge_info, config)
-                    .await
-                    .map_err(|inner| {
-                        let mut chain = graph.logical_ancestry(node_index);
-                        chain.push((edge_info.name.clone(), edge_info.spec.clone()));
-                        ResolveError::WithChain {
-                            chain,
-                            source: Box::new(inner),
-                        }
-                    });
-                match result? {
-                    ProcessResult::Created(idx) => {
-                        // Extract node info for events
-                        if let Some(node) = graph.get_node(idx) {
-                            receiver.on_event(BuildEvent::Resolved {
-                                name: &edge_info.name,
-                                version: &node.version,
-                            });
-
-                            // Send PackagePlaced for pipeline cloning
-                            if let NodeManifest::Registry(ref manifest) = node.manifest {
-                                // Get parent path for dependency ordering
-                                let parent_path = graph
-                                    .get_node(node_index)
-                                    .map(|parent| parent.path.as_path());
-                                receiver.on_event(BuildEvent::PackagePlaced {
-                                    package: manifest.as_ref().into(),
-                                    path: &node.path,
-                                    parent_path,
-                                });
-                            }
-                        }
-
-                        next_level.push(idx);
-                    }
-                    ProcessResult::Reused(idx) => {
-                        if let Some(node) = graph.get_node(idx) {
-                            receiver.on_event(BuildEvent::Reused {
-                                name: &edge_info.name,
-                                version: &node.version,
-                            });
-                        }
-                    }
-                    ProcessResult::Skipped => {
-                        receiver.on_event(BuildEvent::Skipped {
-                            name: &edge_info.name,
-                            spec: &edge_info.spec,
-                        });
-                    }
-                }
+            for edge in unresolved {
+                level_pending.push_back((*node_index, edge));
             }
+        }
+
+        loop {
+            pump_fetches(
+                &mut fetches,
+                &mut fetch_queue,
+                &mut inflight_fetches,
+                registry,
+                concurrency,
+            );
+
+            while let Some((parent, edge)) = level_pending.pop_front() {
+                receiver.on_event(BuildEvent::Resolving { name: &edge.name });
+
+                if !edge.spec.is_registry_spec() {
+                    let processed = process_dependency(graph, registry, parent, &edge, config)
+                        .await
+                        .map_err(|inner| chain_err(graph, parent, &edge, inner))?;
+                    handle_processed(graph, receiver, parent, &edge, &processed, &mut next_level);
+                    continue;
+                }
+
+                if let Some(processed) = try_reuse_dependency(graph, parent, &edge) {
+                    handle_processed(graph, receiver, parent, &edge, &processed, &mut next_level);
+                    continue;
+                }
+
+                let (real_name, real_spec) = normalize_spec(&edge.name, &edge.spec);
+                if supports_semver {
+                    let key = (real_name.clone(), real_spec.clone());
+                    if let Some(error) = version_failures.get(&key) {
+                        if edge.edge_type == EdgeType::Optional {
+                            receiver.on_event(BuildEvent::Skipped {
+                                name: &edge.name,
+                                spec: &edge.spec,
+                            });
+                            continue;
+                        }
+                        return Err(chain_err(
+                            graph,
+                            parent,
+                            &edge,
+                            registry_error(format!("{}@{}: {error}", real_name, real_spec)),
+                        ));
+                    }
+
+                    if let Some(manifest) = version_cache.get(&key).cloned() {
+                        let processed = handle_resolved_registry_manifest(
+                            graph, registry, receiver, parent, &edge, manifest, config,
+                        )
+                        .await?;
+                        handle_processed(
+                            graph,
+                            receiver,
+                            parent,
+                            &edge,
+                            &processed,
+                            &mut next_level,
+                        );
+                        continue;
+                    }
+
+                    version_waiters
+                        .entry(key.clone())
+                        .or_default()
+                        .push((parent, edge));
+                    schedule_registry_fetch(
+                        key.0,
+                        key.1,
+                        supports_semver,
+                        &full_cache,
+                        &version_cache,
+                        &full_failures,
+                        &version_failures,
+                        &mut queued_fetches,
+                        &inflight_fetches,
+                        &versions_cache,
+                        &mut fetch_queue,
+                    );
+                } else {
+                    if let Some(error) = full_failures.get(&real_name) {
+                        if edge.edge_type == EdgeType::Optional {
+                            receiver.on_event(BuildEvent::Skipped {
+                                name: &edge.name,
+                                spec: &edge.spec,
+                            });
+                            continue;
+                        }
+                        return Err(chain_err(
+                            graph,
+                            parent,
+                            &edge,
+                            registry_error(format!("{}: {error}", real_name)),
+                        ));
+                    }
+
+                    let version_key = (real_name.clone(), real_spec.clone());
+                    if let Some(error) = version_failures.get(&version_key) {
+                        if edge.edge_type == EdgeType::Optional {
+                            receiver.on_event(BuildEvent::Skipped {
+                                name: &edge.name,
+                                spec: &edge.spec,
+                            });
+                            continue;
+                        }
+                        return Err(chain_err(
+                            graph,
+                            parent,
+                            &edge,
+                            registry_error(format!("{}@{}: {error}", real_name, real_spec)),
+                        ));
+                    }
+
+                    if let Some(manifest) = version_cache.get(&version_key).cloned() {
+                        let processed = handle_resolved_registry_manifest(
+                            graph, registry, receiver, parent, &edge, manifest, config,
+                        )
+                        .await?;
+                        handle_processed(
+                            graph,
+                            receiver,
+                            parent,
+                            &edge,
+                            &processed,
+                            &mut next_level,
+                        );
+                        continue;
+                    }
+
+                    if let Some(full) = full_cache.get(&real_name).cloned() {
+                        let Some(resolved_version) =
+                            resolve_version_from_full_manifest::<R::Error>(
+                                &edge, &full, &real_spec,
+                            )
+                            .map_err(|inner| chain_err(graph, parent, &edge, inner))?
+                        else {
+                            receiver.on_event(BuildEvent::Skipped {
+                                name: &edge.name,
+                                spec: &edge.spec,
+                            });
+                            continue;
+                        };
+
+                        let exact_key = (real_name.clone(), resolved_version.clone());
+                        if let Some(manifest) = version_cache.get(&exact_key).cloned() {
+                            version_cache.insert(version_key, Arc::clone(&manifest));
+                            let processed = handle_resolved_registry_manifest(
+                                graph, registry, receiver, parent, &edge, manifest, config,
+                            )
+                            .await?;
+                            handle_processed(
+                                graph,
+                                receiver,
+                                parent,
+                                &edge,
+                                &processed,
+                                &mut next_level,
+                            );
+                            continue;
+                        }
+
+                        version_waiters
+                            .entry(version_key.clone())
+                            .or_default()
+                            .push((parent, edge));
+                        enqueue_version_extract(
+                            version_key.0,
+                            version_key.1,
+                            resolved_version,
+                            full,
+                            &mut queued_fetches,
+                            &inflight_fetches,
+                            &mut fetch_queue,
+                        );
+                        continue;
+                    }
+
+                    if let Some(versions) = versions_cache.get(&real_name).cloned() {
+                        let Some(resolved_version) = resolve_version_from_versions::<R::Error>(
+                            &edge,
+                            &real_name,
+                            (&*versions).into(),
+                            &real_spec,
+                        )
+                        .map_err(|inner| chain_err(graph, parent, &edge, inner))?
+                        else {
+                            receiver.on_event(BuildEvent::Skipped {
+                                name: &edge.name,
+                                spec: &edge.spec,
+                            });
+                            continue;
+                        };
+
+                        let exact_key = (real_name.clone(), resolved_version.clone());
+                        if let Some(manifest) = version_cache.get(&exact_key).cloned() {
+                            version_cache.insert(version_key, Arc::clone(&manifest));
+                            let processed = handle_resolved_registry_manifest(
+                                graph, registry, receiver, parent, &edge, manifest, config,
+                            )
+                            .await?;
+                            handle_processed(
+                                graph,
+                                receiver,
+                                parent,
+                                &edge,
+                                &processed,
+                                &mut next_level,
+                            );
+                            continue;
+                        }
+
+                        version_waiters
+                            .entry(version_key.clone())
+                            .or_default()
+                            .push((parent, edge));
+                        enqueue_version_fetch(
+                            version_key.0,
+                            version_key.1,
+                            resolved_version,
+                            supports_semver,
+                            &mut queued_fetches,
+                            &inflight_fetches,
+                            &mut fetch_queue,
+                        );
+                        continue;
+                    }
+
+                    full_waiters
+                        .entry(real_name.clone())
+                        .or_default()
+                        .push((parent, edge));
+                    schedule_registry_fetch(
+                        real_name,
+                        real_spec,
+                        supports_semver,
+                        &full_cache,
+                        &version_cache,
+                        &full_failures,
+                        &version_failures,
+                        &mut queued_fetches,
+                        &inflight_fetches,
+                        &versions_cache,
+                        &mut fetch_queue,
+                    );
+                }
+
+                pump_fetches(
+                    &mut fetches,
+                    &mut fetch_queue,
+                    &mut inflight_fetches,
+                    registry,
+                    concurrency,
+                );
+            }
+
+            if full_waiters.is_empty() && version_waiters.is_empty() {
+                break;
+            }
+
+            let Some(done) = fetches.next().await else {
+                let mut fallback = Vec::new();
+                for (_, waiters) in full_waiters.drain() {
+                    fallback.extend(waiters);
+                }
+                for (_, waiters) in version_waiters.drain() {
+                    fallback.extend(waiters);
+                }
+                for (parent, edge) in fallback {
+                    let processed = process_dependency(graph, registry, parent, &edge, config)
+                        .await
+                        .map_err(|inner| chain_err(graph, parent, &edge, inner))?;
+                    handle_processed(graph, receiver, parent, &edge, &processed, &mut next_level);
+                }
+                break;
+            };
+            let done = done.map_err(|e| {
+                registry_error::<R::Error>(format!("manifest fetch task failed: {e}"))
+            })?;
+
+            apply_fetch_result(
+                done,
+                &mut full_cache,
+                &mut versions_cache,
+                &mut version_cache,
+                &mut full_waiters,
+                &mut version_waiters,
+                &mut full_failures,
+                &mut version_failures,
+                &mut queued_fetches,
+                &mut inflight_fetches,
+                &mut level_pending,
+            );
         }
 
         receiver.on_event(BuildEvent::LevelComplete {
@@ -896,7 +1512,6 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
         current_level = next_level;
     }
 
-    tracing::debug!("Build phase: {:?}", start.elapsed());
     Ok(())
 }
 
@@ -921,10 +1536,14 @@ use std::path::Path;
 /// let pkg: PackageJson = serde_json::from_str(&pkg_content)?;
 /// let lock = resolve(&pkg, &registry).await?;
 /// ```
-pub async fn resolve<R: RegistryClient>(
+pub async fn resolve<R>(
     pkg: &PackageJson,
     registry: &R,
-) -> Result<PackageLock, ResolveError<R::Error>> {
+) -> Result<PackageLock, ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+{
     resolve_with_options(pkg, registry, PeerDeps::Include, &NoopReceiver).await
 }
 
@@ -935,12 +1554,17 @@ pub async fn resolve<R: RegistryClient>(
 /// * `registry` - Registry client for fetching packages
 /// * `peer_deps` - How to handle peer dependencies
 /// * `receiver` - Event receiver for progress tracking
-pub async fn resolve_with_options<R: RegistryClient, E: EventReceiver>(
+pub async fn resolve_with_options<R, E>(
     pkg: &PackageJson,
     registry: &R,
     peer_deps: PeerDeps,
     receiver: &E,
-) -> Result<PackageLock, ResolveError<R::Error>> {
+) -> Result<PackageLock, ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+    E: EventReceiver,
+{
     // Create graph with root node
     let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg.clone());
 
@@ -1113,6 +1737,211 @@ mod tests {
         assert_eq!(lodash.version, Some("4.17.21".to_string()));
     }
 
+    #[test]
+    fn test_schedule_registry_fetch_dedupes_semver_request() {
+        let full_cache = HashMap::new();
+        let versions_cache = HashMap::new();
+        let version_cache = HashMap::new();
+        let full_failures = HashMap::new();
+        let version_failures = HashMap::new();
+        let mut queued_fetches = std::collections::HashSet::new();
+        let inflight_fetches = std::collections::HashSet::new();
+        let mut fetch_queue = std::collections::VecDeque::new();
+
+        schedule_registry_fetch(
+            "pkg".to_string(),
+            "^1.0.0".to_string(),
+            true,
+            &full_cache,
+            &version_cache,
+            &full_failures,
+            &version_failures,
+            &mut queued_fetches,
+            &inflight_fetches,
+            &versions_cache,
+            &mut fetch_queue,
+        );
+        schedule_registry_fetch(
+            "pkg".to_string(),
+            "^1.0.0".to_string(),
+            true,
+            &full_cache,
+            &version_cache,
+            &full_failures,
+            &version_failures,
+            &mut queued_fetches,
+            &inflight_fetches,
+            &versions_cache,
+            &mut fetch_queue,
+        );
+
+        assert_eq!(fetch_queue.len(), 1);
+        assert!(
+            queued_fetches.contains(&FetchKey::Version("pkg".to_string(), "^1.0.0".to_string()))
+        );
+        match fetch_queue.pop_front().unwrap() {
+            ManifestJob::Version {
+                name,
+                spec,
+                fetch_spec,
+                format,
+            } => {
+                assert_eq!(name, "pkg");
+                assert_eq!(spec, "^1.0.0");
+                assert_eq!(fetch_spec, "^1.0.0");
+                assert!(matches!(format, MetadataFormat::Abbreviated));
+            }
+            _ => panic!("expected version fetch request"),
+        }
+    }
+
+    #[test]
+    fn test_apply_fetch_result_caches_exact_version_and_wakes_waiters() {
+        let mut full_cache = HashMap::new();
+        let mut versions_cache = HashMap::new();
+        let mut version_cache = HashMap::new();
+        let mut full_waiters = HashMap::new();
+        let mut version_waiters = HashMap::from([(
+            ("pkg".to_string(), "^1.0.0".to_string()),
+            vec![(
+                NodeIndex::new(0),
+                DependencyEdgeInfo {
+                    edge_id: petgraph::graph::EdgeIndex::new(0),
+                    name: "pkg".to_string(),
+                    spec: "^1.0.0".to_string(),
+                    edge_type: EdgeType::Prod,
+                },
+            )],
+        )]);
+        let mut full_failures = HashMap::new();
+        let mut version_failures = HashMap::new();
+        let mut queued_fetches = std::collections::HashSet::from([FetchKey::Version(
+            "pkg".to_string(),
+            "^1.0.0".to_string(),
+        )]);
+        let mut inflight_fetches = queued_fetches.clone();
+        let mut level_pending = std::collections::VecDeque::new();
+        let manifest = Arc::new(create_version_manifest("pkg", "1.2.3"));
+
+        apply_fetch_result(
+            FetchDone::Version {
+                name: "pkg".to_string(),
+                spec: "^1.0.0".to_string(),
+                result: Ok(manifest),
+            },
+            &mut full_cache,
+            &mut versions_cache,
+            &mut version_cache,
+            &mut full_waiters,
+            &mut version_waiters,
+            &mut full_failures,
+            &mut version_failures,
+            &mut queued_fetches,
+            &mut inflight_fetches,
+            &mut level_pending,
+        );
+
+        assert!(version_cache.contains_key(&("pkg".to_string(), "^1.0.0".to_string())));
+        assert!(version_cache.contains_key(&("pkg".to_string(), "1.2.3".to_string())));
+        assert!(version_waiters.is_empty());
+        assert!(queued_fetches.is_empty());
+        assert!(inflight_fetches.is_empty());
+        assert_eq!(level_pending.len(), 1);
+    }
+
+    #[test]
+    fn test_apply_fetch_result_caches_versions_and_wakes_waiters() {
+        let mut full_cache = HashMap::new();
+        let mut versions_cache = HashMap::new();
+        let mut version_cache = HashMap::new();
+        let mut full_waiters = HashMap::from([(
+            "pkg".to_string(),
+            vec![(
+                NodeIndex::new(0),
+                DependencyEdgeInfo {
+                    edge_id: petgraph::graph::EdgeIndex::new(0),
+                    name: "pkg".to_string(),
+                    spec: "^1.0.0".to_string(),
+                    edge_type: EdgeType::Prod,
+                },
+            )],
+        )]);
+        let mut version_waiters = HashMap::new();
+        let mut full_failures = HashMap::new();
+        let mut version_failures = HashMap::new();
+        let mut queued_fetches =
+            std::collections::HashSet::from([FetchKey::Full("pkg".to_string())]);
+        let mut inflight_fetches = queued_fetches.clone();
+        let mut level_pending = std::collections::VecDeque::new();
+        let versions = Arc::new(crate::service::VersionsInfo {
+            versions: crate::service::Versions {
+                version_list: vec!["1.2.3".to_string()],
+                dist_tags: HashMap::from([("latest".to_string(), "1.2.3".to_string())]),
+            },
+            etag: Some("etag".to_string()),
+            last_updated: 1,
+        });
+
+        apply_fetch_result(
+            FetchDone::Full {
+                name: "pkg".to_string(),
+                result: Ok(ManifestFullData::Versions(versions)),
+            },
+            &mut full_cache,
+            &mut versions_cache,
+            &mut version_cache,
+            &mut full_waiters,
+            &mut version_waiters,
+            &mut full_failures,
+            &mut version_failures,
+            &mut queued_fetches,
+            &mut inflight_fetches,
+            &mut level_pending,
+        );
+
+        assert!(full_cache.is_empty());
+        assert!(versions_cache.contains_key("pkg"));
+        assert!(full_waiters.is_empty());
+        assert!(queued_fetches.is_empty());
+        assert!(inflight_fetches.is_empty());
+        assert_eq!(level_pending.len(), 1);
+    }
+
+    #[test]
+    fn test_enqueue_version_fetch_preserves_waiter_key() {
+        let mut queued_fetches = std::collections::HashSet::new();
+        let inflight_fetches = std::collections::HashSet::new();
+        let mut fetch_queue = std::collections::VecDeque::new();
+
+        enqueue_version_fetch(
+            "pkg".to_string(),
+            "^1.0.0".to_string(),
+            "1.2.3".to_string(),
+            false,
+            &mut queued_fetches,
+            &inflight_fetches,
+            &mut fetch_queue,
+        );
+
+        assert!(
+            queued_fetches.contains(&FetchKey::Version("pkg".to_string(), "^1.0.0".to_string()))
+        );
+        match fetch_queue.pop_front().unwrap() {
+            ManifestJob::Version {
+                name,
+                spec,
+                fetch_spec,
+                format,
+            } => {
+                assert_eq!(name, "pkg");
+                assert_eq!(spec, "^1.0.0");
+                assert_eq!(fetch_spec, "1.2.3");
+                assert!(matches!(format, MetadataFormat::Complete));
+            }
+            _ => panic!("expected version fetch request"),
+        }
+    }
+
     // Helper to create a graph with source -> target for testing update_node_type_from_edge
     // Returns (graph, source_index, target_index) where source is NOT root
     fn create_source_target_graph() -> (DependencyGraph, NodeIndex, NodeIndex) {
@@ -1262,13 +2091,6 @@ mod tests {
         assert_eq!(edges.get("lodash"), Some(&"^4.17.0".to_string()));
         assert_eq!(edges.get("react"), Some(&"^18.0.0".to_string()));
         assert_eq!(edges.get("tslib"), Some(&"^2.0.0".to_string()));
-
-        // Since edges are now resolved, gather_preload_deps should find them
-        let deps = gather_preload_deps(&graph, PeerDeps::Skip);
-        let deps_map: HashMap<String, String> = deps.into_iter().collect();
-        assert_eq!(deps_map.get("lodash"), Some(&"^4.17.0".to_string()));
-        assert_eq!(deps_map.get("react"), Some(&"^18.0.0".to_string()));
-        assert_eq!(deps_map.get("tslib"), Some(&"^2.0.0".to_string()));
     }
 
     #[test]
@@ -1296,9 +2118,5 @@ mod tests {
             .map(|(_, e)| (e.name.clone(), e.spec.clone()))
             .collect();
         assert_eq!(edges.get("missing-pkg"), Some(&"catalog:".to_string()));
-
-        // gather_preload_deps should NOT include it (not a registry spec)
-        let deps = gather_preload_deps(&graph, PeerDeps::Skip);
-        assert!(deps.is_empty());
     }
 }
