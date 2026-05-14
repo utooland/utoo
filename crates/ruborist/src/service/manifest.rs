@@ -15,19 +15,6 @@ use crate::model::manifest::{CoreVersionManifest, FullManifest};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::resolver::version::resolve_target_version;
 
-#[cfg(not(target_arch = "wasm32"))]
-static MANIFEST_PARSE_POOL: std::sync::LazyLock<rayon::ThreadPool> =
-    std::sync::LazyLock::new(|| {
-        let threads = std::thread::available_parallelism()
-            .map(|n| n.get().clamp(1, 4))
-            .unwrap_or(2);
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .thread_name(|idx| format!("utoo-manifest-parse-{idx}"))
-            .build()
-            .expect("failed to build manifest parse pool")
-    });
-
 /// Parse JSON bytes on rayon's CPU thread pool (native) or inline
 /// (wasm32). Keeps the tokio runtime free of `simd_json` work so other
 /// in-flight manifest fetches keep driving network IO while this one
@@ -39,7 +26,7 @@ where
     #[cfg(not(target_arch = "wasm32"))]
     {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        MANIFEST_PARSE_POOL.spawn(move || {
+        rayon::spawn(move || {
             let result = simd_json::serde::from_slice::<T>(&mut bytes)
                 .map_err(|e| anyhow!("JSON parse error: {e}"));
             let _ = tx.send(result);
@@ -62,7 +49,7 @@ pub(crate) async fn parse_full_manifest_with_core_off_runtime(
     spec: Option<String>,
 ) -> Result<FullManifestParseResult, anyhow::Error> {
     let (tx, rx) = tokio::sync::oneshot::channel();
-    MANIFEST_PARSE_POOL.spawn(move || {
+    rayon::spawn(move || {
         let result = (|| -> Result<FullManifestParseResult, anyhow::Error> {
             // simd_json mutates the parse buffer; clone so the raw bytes
             // survive for `manifest.raw` and later on-demand version extraction.
