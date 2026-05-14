@@ -13,18 +13,31 @@ use super::fetch::{
 use super::http::get_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 
+#[cfg(not(target_arch = "wasm32"))]
+static MANIFEST_PARSE_POOL: std::sync::LazyLock<rayon::ThreadPool> =
+    std::sync::LazyLock::new(|| {
+        let threads = std::thread::available_parallelism()
+            .map(|n| n.get().clamp(1, 4))
+            .unwrap_or(2);
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .thread_name(|idx| format!("utoo-manifest-parse-{idx}"))
+            .build()
+            .expect("failed to build manifest parse pool")
+    });
+
 /// Parse JSON bytes on rayon's CPU thread pool (native) or inline
 /// (wasm32). Keeps the tokio runtime free of `simd_json` work so other
 /// in-flight manifest fetches keep driving network IO while this one
 /// parses.
-async fn parse_json_off_runtime<T>(mut bytes: Vec<u8>) -> Result<T, anyhow::Error>
+pub(crate) async fn parse_json_off_runtime<T>(mut bytes: Vec<u8>) -> Result<T, anyhow::Error>
 where
     T: serde::de::DeserializeOwned + Send + 'static,
 {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        rayon::spawn(move || {
+        MANIFEST_PARSE_POOL.spawn(move || {
             let result = simd_json::serde::from_slice::<T>(&mut bytes)
                 .map_err(|e| anyhow!("JSON parse error: {e}"));
             let _ = tx.send(result);
@@ -38,12 +51,47 @@ where
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn parse_full_manifest_off_runtime(
+    raw_bytes: Vec<u8>,
+) -> Result<FullManifest, anyhow::Error> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    MANIFEST_PARSE_POOL.spawn(move || {
+        let result = (|| -> Result<FullManifest, anyhow::Error> {
+            // simd_json mutates the parse buffer; clone so the raw bytes
+            // survive for `manifest.raw` and later on-demand version extraction.
+            let mut parse_buf = raw_bytes.clone();
+            let mut manifest: FullManifest =
+                simd_json::serde::from_slice::<FullManifest>(&mut parse_buf)
+                    .map_err(|e| anyhow!("JSON parse error: {e}"))?;
+            manifest.raw = std::sync::Arc::from(raw_bytes);
+
+            Ok(manifest)
+        })();
+        let _ = tx.send(result);
+    });
+    rx.await
+        .map_err(|e| anyhow!("rayon parse channel closed: {e}"))?
+}
+
 /// Result of a full manifest fetch with ETag support.
 /// Transient return value, immediately destructured — Box not needed.
 #[allow(clippy::large_enum_variant)]
 pub enum FetchManifestResult {
     /// 200 OK — fresh manifest with optional new ETag.
     Ok(FullManifest, Option<String>),
+    /// 304 Not Modified — ETag matched, use cached data.
+    NotModified,
+}
+
+/// Raw full-manifest HTTP result.
+///
+/// This variant intentionally stops before JSON parsing so dependency
+/// resolution loops can keep global inflight/cache ownership in one task and
+/// reserve spawned work for request I/O.
+pub enum FetchManifestBytesResult {
+    /// 200 OK — response bytes with optional new ETag.
+    Ok(Vec<u8>, Option<String>),
     /// 304 Not Modified — ETag matched, use cached data.
     NotModified,
 }
@@ -68,8 +116,10 @@ pub struct FetchManifestOptions<'a> {
     pub etag: Option<&'a str>,
 }
 
-/// Fetch full manifest with retry and ETag support.
-pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<FetchManifestResult> {
+/// Fetch full manifest bytes with retry and ETag support, without parsing.
+pub async fn fetch_full_manifest_bytes(
+    opts: FetchManifestOptions<'_>,
+) -> Result<FetchManifestBytesResult> {
     let url = format!("{}/{}", opts.registry_url, opts.name);
     let etag_owned = opts.etag.map(|s| s.to_string());
     let accept = match opts.format {
@@ -96,9 +146,8 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
 
                 if status == reqwest::StatusCode::NOT_MODIFIED {
                     if etag.is_some() {
-                        return Ok(FetchManifestResult::NotModified);
+                        return Ok(FetchManifestBytesResult::NotModified);
                     }
-                    // Server bug: 304 without If-None-Match. Treat as error.
                     return Err(classify_status(status, &url));
                 }
 
@@ -112,17 +161,10 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
                     let raw_bytes = response
                         .bytes()
                         .await
-                        .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
+                        .map_err(classify_reqwest_error)?
                         .to_vec();
-                    // simd_json mutates the parse buffer; clone so the raw
-                    // bytes survive for `manifest.raw`.
-                    let parse_buf = raw_bytes.clone();
-                    let mut manifest: FullManifest = parse_json_off_runtime(parse_buf)
-                        .await
-                        .map_err(FetchError::Permanent)?;
-                    manifest.raw = std::sync::Arc::from(raw_bytes);
 
-                    Ok(FetchManifestResult::Ok(manifest, new_etag))
+                    Ok(FetchManifestBytesResult::Ok(raw_bytes, new_etag))
                 } else {
                     Err(classify_status(status, &url))
                 }
@@ -136,6 +178,29 @@ pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<Fetch
             anyhow!("Failed to fetch {}: {:#}", opts.name, e)
         }
     })
+}
+
+/// Fetch full manifest with retry and ETag support.
+pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<FetchManifestResult> {
+    match fetch_full_manifest_bytes(opts).await? {
+        FetchManifestBytesResult::Ok(raw_bytes, etag) => {
+            #[cfg(not(target_arch = "wasm32"))]
+            let manifest = parse_full_manifest_off_runtime(raw_bytes).await?;
+
+            #[cfg(target_arch = "wasm32")]
+            let manifest = {
+                // simd_json mutates the parse buffer; clone so the raw bytes
+                // survive for `manifest.raw`.
+                let parse_buf = raw_bytes.clone();
+                let mut manifest: FullManifest = parse_json_off_runtime(parse_buf).await?;
+                manifest.raw = std::sync::Arc::from(raw_bytes);
+                manifest
+            };
+
+            Ok(FetchManifestResult::Ok(manifest, etag))
+        }
+        FetchManifestBytesResult::NotModified => Ok(FetchManifestResult::NotModified),
+    }
 }
 
 /// Fetch full manifest without ETag / 304 support.
@@ -174,10 +239,10 @@ pub struct FetchVersionManifestOptions<'a> {
     pub format: MetadataFormat,
 }
 
-/// Fetch version manifest with retry.
-pub async fn fetch_version_manifest(
+/// Fetch version manifest bytes with retry, without parsing.
+pub async fn fetch_version_manifest_bytes(
     opts: FetchVersionManifestOptions<'_>,
-) -> Result<CoreVersionManifest> {
+) -> Result<Vec<u8>> {
     let url = format!("{}/{}/{}", opts.registry_url, opts.name, opts.spec);
 
     let accept = match opts.format {
@@ -199,14 +264,11 @@ pub async fn fetch_version_manifest(
                     .map_err(classify_reqwest_error)?;
 
                 if response.status().is_success() {
-                    let bytes = response
+                    response
                         .bytes()
                         .await
-                        .map_err(|e| FetchError::Permanent(anyhow!("Response read error: {e}")))?
-                        .to_vec();
-                    parse_json_off_runtime::<CoreVersionManifest>(bytes)
-                        .await
-                        .map_err(FetchError::Permanent)
+                        .map(|b| b.to_vec())
+                        .map_err(classify_reqwest_error)
                 } else {
                     Err(classify_status(response.status(), &url))
                 }
@@ -220,4 +282,12 @@ pub async fn fetch_version_manifest(
             anyhow!("Failed to fetch {}@{}: {:#}", opts.name, opts.spec, e)
         }
     })
+}
+
+/// Fetch version manifest with retry.
+pub async fn fetch_version_manifest(
+    opts: FetchVersionManifestOptions<'_>,
+) -> Result<CoreVersionManifest> {
+    let bytes = fetch_version_manifest_bytes(opts).await?;
+    parse_json_off_runtime::<CoreVersionManifest>(bytes).await
 }
