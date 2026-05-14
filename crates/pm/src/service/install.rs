@@ -23,6 +23,7 @@ use crate::util::linker::link;
 use crate::util::logger::{
     PROGRESS_BAR, finish_progress_bar, log_progress, print_install_counts, start_progress_bar,
 };
+use tokio::task::JoinSet;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 
 use super::binary::update_package_binary;
@@ -62,6 +63,32 @@ fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
     false
 }
 
+const DEFAULT_INSTALL_CLONE_CONCURRENCY_LIMIT: usize = 64;
+
+fn parse_install_clone_concurrency_limit(value: Option<&str>) -> usize {
+    match value.and_then(|value| value.parse::<usize>().ok()) {
+        // Keep an escape hatch for A/B runs and unusual filesystems.
+        Some(0) => usize::MAX,
+        Some(limit) => limit,
+        None => DEFAULT_INSTALL_CLONE_CONCURRENCY_LIMIT,
+    }
+}
+
+fn install_clone_concurrency_limit() -> usize {
+    parse_install_clone_concurrency_limit(
+        std::env::var("UTOO_INSTALL_CLONE_CONCURRENCY")
+            .ok()
+            .as_deref(),
+    )
+}
+
+async fn join_next_clone_task(tasks: &mut JoinSet<Result<()>>) -> Result<()> {
+    if let Some(result) = tasks.join_next().await {
+        result??;
+    }
+    Ok(())
+}
+
 pub async fn install_packages(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
@@ -81,9 +108,10 @@ pub async fn install_packages(
     // deduplicates via CLONE_CACHE so no double work occurs.
     let mut depths: Vec<_> = groups.keys().cloned().collect();
     depths.sort_unstable();
+    let clone_concurrency_limit = install_clone_concurrency_limit();
 
     for depth in depths.iter() {
-        let mut clone_tasks: Vec<tokio::task::JoinHandle<Result<()>>> = Vec::new();
+        let mut clone_tasks: JoinSet<Result<()>> = JoinSet::new();
 
         if let Some(packages) = groups.get(depth) {
             for (path, package) in packages.iter() {
@@ -145,7 +173,11 @@ pub async fn install_packages(
                     let is_optional =
                         package.optional == Some(true) || package.dev_optional == Some(true);
 
-                    let task = tokio::spawn(async move {
+                    while clone_tasks.len() >= clone_concurrency_limit {
+                        join_next_clone_task(&mut clone_tasks).await?;
+                    }
+
+                    clone_tasks.spawn(async move {
                         if let Err(e) =
                             clone_package_once(&name, &version, &resolved, &target_path).await
                         {
@@ -162,15 +194,14 @@ pub async fn install_packages(
                         log_progress(&format!("{name} resolved"));
                         update_package_binary(&target_path, &name).await
                     });
-                    clone_tasks.push(task);
                 } else {
                     PROGRESS_BAR.inc(1);
                 }
             }
         }
 
-        for task in clone_tasks {
-            task.await??;
+        while !clone_tasks.is_empty() {
+            join_next_clone_task(&mut clone_tasks).await?;
         }
     }
 
@@ -403,6 +434,20 @@ mod tests {
         omit_dev_optional.insert(OmitType::Dev);
         omit_dev_optional.insert(OmitType::Optional);
         assert!(should_omit_package(&dev_optional_pkg, &omit_dev_optional));
+    }
+
+    #[test]
+    fn test_parse_install_clone_concurrency_limit() {
+        assert_eq!(parse_install_clone_concurrency_limit(Some("64")), 64);
+        assert_eq!(
+            parse_install_clone_concurrency_limit(None),
+            DEFAULT_INSTALL_CLONE_CONCURRENCY_LIMIT
+        );
+        assert_eq!(parse_install_clone_concurrency_limit(Some("0")), usize::MAX);
+        assert_eq!(
+            parse_install_clone_concurrency_limit(Some("not-a-number")),
+            DEFAULT_INSTALL_CLONE_CONCURRENCY_LIMIT
+        );
     }
 
     #[test]
