@@ -388,7 +388,7 @@ pub mod mock {
                 name: pkg.name.clone(),
                 dist_tags: pkg.dist_tags.clone(),
                 versions: pkg.versions.keys().cloned().collect(),
-                raw: Arc::from(raw),
+                raw: bytes::Bytes::from(raw),
                 ..Default::default()
             }))
         }

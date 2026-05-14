@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
@@ -84,7 +85,7 @@ pub struct FullManifest {
     /// `FullManifest` compact — npm `versions` subtrees parsed to a typed
     /// tree expand to ~1.5–2.5x the raw size on real-world packages.
     #[serde(skip)]
-    pub raw: Arc<[u8]>,
+    pub raw: Bytes,
 
     pub time: HashMap<String, String>,
 
