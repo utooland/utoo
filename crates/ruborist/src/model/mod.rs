@@ -9,7 +9,7 @@
 //! │   FullManifest                 1 package, all versions          │
 //! │   ├── name, dist_tags, time                                    │
 //! │   ├── versions: Vec<String>          (version keys only)       │
-//! │   └── raw: Arc<[u8]>                 (HTTP response bytes)     │
+//! │   └── raw: Bytes                     (HTTP response bytes)     │
 //! │              │                                                 │
 //! │              └──► extract_version(ver) ──on demand──►          │
 //! │                                                                │

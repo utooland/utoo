@@ -60,7 +60,7 @@ pub(crate) async fn parse_full_manifest_off_runtime(
                 let mut manifest: FullManifest =
                     simd_json::serde::from_slice::<FullManifest>(&mut parse_buf)
                         .map_err(|e| anyhow!("JSON parse error: {e}"))?;
-                manifest.raw = std::sync::Arc::from(raw_bytes.as_ref());
+                manifest.raw = raw_bytes;
 
                 Ok(manifest)
             })();
@@ -72,7 +72,7 @@ pub(crate) async fn parse_full_manifest_off_runtime(
     #[cfg(target_arch = "wasm32")]
     {
         let mut manifest: FullManifest = parse_json_off_runtime(raw_bytes.clone()).await?;
-        manifest.raw = std::sync::Arc::from(raw_bytes.as_ref());
+        manifest.raw = raw_bytes;
         Ok(manifest)
     }
 }
