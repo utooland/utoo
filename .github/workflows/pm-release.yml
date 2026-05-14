@@ -111,10 +111,19 @@ jobs:
           fi
 
       - name: Update Cargo.toml version
+        env:
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
         run: |
-          VERSION=${{ steps.get_version.outputs.VERSION }}
-          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" crates/pm/Cargo.toml
+          set -euo pipefail
+          sed -E -i.bak "s|^version[[:space:]]*=.*|version     = \"${VERSION}\"|" crates/pm/Cargo.toml
           rm crates/pm/Cargo.toml.bak
+
+          ACTUAL=$(awk -F\" '/^version[[:space:]]*=/ { print $2; exit }' crates/pm/Cargo.toml)
+          if [ "$ACTUAL" != "$VERSION" ]; then
+            echo "Failed to update crates/pm/Cargo.toml to version $VERSION; found $ACTUAL" >&2
+            head -12 crates/pm/Cargo.toml >&2
+            exit 1
+          fi
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
