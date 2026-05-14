@@ -22,10 +22,17 @@ pub async fn get_node_polyfill_import_map() -> Result<Vc<ImportMap>> {
     Ok(import_map.cell())
 }
 
+const EMPTY_POLYFILL_PATH: &str = "@utoo/pack-runtime/node-polyfills/empty/empty.js";
+
+fn add_node_alias(aliases: &mut Vec<(RcStr, RcStr)>, original: &str, alias: &str) {
+    aliases.push((RcStr::from(original), RcStr::from(alias)));
+    aliases.push((RcStr::from(format!("node:{original}")), RcStr::from(alias)));
+}
+
 /// Node.js module to polyfill mapping
-/// These polyfills are located in pack-core/js/src/@utoo/pack-runtime/node-polyfills/
-static NODE_POLYFILL_ALIASES: LazyLock<[(RcStr, RcStr); 23]> = LazyLock::new(|| {
-    [
+/// These polyfills are located in pack-core/js/src/node-polyfills/
+static NODE_POLYFILL_ALIASES: LazyLock<Vec<(RcStr, RcStr)>> = LazyLock::new(|| {
+    let mut aliases = vec![
         (
             rcstr!("assert"),
             rcstr!("@utoo/pack-runtime/node-polyfills/assert/assert.js"),
@@ -114,9 +121,67 @@ static NODE_POLYFILL_ALIASES: LazyLock<[(RcStr, RcStr); 23]> = LazyLock::new(|| 
             rcstr!("setimmediate"),
             rcstr!("@utoo/pack-runtime/node-polyfills/setimmediate/setImmediate.js"),
         ),
-        (
-            rcstr!("fs"),
-            rcstr!("@utoo/pack-runtime/node-polyfills/empty/empty.js"),
-        ),
-    ]
+    ];
+
+    let empty_modules = [
+        "async_hooks",
+        "child_process",
+        "cluster",
+        "dgram",
+        "diagnostics_channel",
+        "dns",
+        "fs",
+        "fs/promises",
+        "http2",
+        "inspector",
+        "module",
+        "net",
+        "perf_hooks",
+        "readline",
+        "repl",
+        "tls",
+        "trace_events",
+        "v8",
+        "wasi",
+        "worker_threads",
+    ];
+
+    for name in empty_modules {
+        add_node_alias(&mut aliases, name, EMPTY_POLYFILL_PATH);
+    }
+
+    aliases
 });
+
+#[cfg(test)]
+mod tests {
+    use super::{EMPTY_POLYFILL_PATH, NODE_POLYFILL_ALIASES};
+
+    fn alias_target(module: &str) -> Option<&str> {
+        NODE_POLYFILL_ALIASES
+            .iter()
+            .find(|(original, _)| original.as_str() == module)
+            .map(|(_, alias)| alias.as_str())
+    }
+
+    #[test]
+    fn includes_empty_polyfills_for_unsupported_node_builtins() {
+        for module in ["child_process", "fs", "fs/promises", "module", "net", "tls"] {
+            assert_eq!(alias_target(module), Some(EMPTY_POLYFILL_PATH), "{module}");
+        }
+    }
+
+    #[test]
+    fn includes_node_protocol_empty_polyfills() {
+        for module in [
+            "node:child_process",
+            "node:fs",
+            "node:fs/promises",
+            "node:module",
+            "node:net",
+            "node:tls",
+        ] {
+            assert_eq!(alias_target(module), Some(EMPTY_POLYFILL_PATH), "{module}");
+        }
+    }
+}
