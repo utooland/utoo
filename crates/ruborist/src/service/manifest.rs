@@ -14,11 +14,19 @@ use super::http::get_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 
 #[cfg(not(target_arch = "wasm32"))]
+const MAX_MANIFEST_PARSE_THREADS: usize = 4;
+#[cfg(not(target_arch = "wasm32"))]
+const FALLBACK_MANIFEST_PARSE_THREADS: usize = 2;
+
+// Dedicated to wire-fetched manifest JSON parsing. On-demand per-version
+// extraction from cached `FullManifest::raw` still lives with the model helper;
+// the resolver scheduling PR will decide whether that path needs the same pool.
+#[cfg(not(target_arch = "wasm32"))]
 static MANIFEST_PARSE_POOL: std::sync::LazyLock<rayon::ThreadPool> =
     std::sync::LazyLock::new(|| {
         let threads = std::thread::available_parallelism()
-            .map(|n| n.get().clamp(1, 4))
-            .unwrap_or(2);
+            .map(|n| n.get().min(MAX_MANIFEST_PARSE_THREADS))
+            .unwrap_or(FALLBACK_MANIFEST_PARSE_THREADS);
         rayon::ThreadPoolBuilder::new()
             .num_threads(threads)
             .thread_name(|idx| format!("utoo-manifest-parse-{idx}"))
@@ -51,27 +59,42 @@ where
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+/// Parse a full wire-fetched manifest and restore its raw byte payload.
+///
+/// Intended for the BFS resolver loop follow-up: fetch tasks can return bytes
+/// while the loop owns cache/waiter/inflight state and chooses when to parse.
 pub(crate) async fn parse_full_manifest_off_runtime(
     raw_bytes: Vec<u8>,
 ) -> Result<FullManifest, anyhow::Error> {
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    MANIFEST_PARSE_POOL.spawn(move || {
-        let result = (|| -> Result<FullManifest, anyhow::Error> {
-            // simd_json mutates the parse buffer; clone so the raw bytes
-            // survive for `manifest.raw` and later on-demand version extraction.
-            let mut parse_buf = raw_bytes.clone();
-            let mut manifest: FullManifest =
-                simd_json::serde::from_slice::<FullManifest>(&mut parse_buf)
-                    .map_err(|e| anyhow!("JSON parse error: {e}"))?;
-            manifest.raw = std::sync::Arc::from(raw_bytes);
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        MANIFEST_PARSE_POOL.spawn(move || {
+            let result = (|| -> Result<FullManifest, anyhow::Error> {
+                // simd_json mutates the parse buffer; clone so the raw bytes
+                // survive for `manifest.raw` and later on-demand version extraction.
+                let mut parse_buf = raw_bytes.clone();
+                let mut manifest: FullManifest =
+                    simd_json::serde::from_slice::<FullManifest>(&mut parse_buf)
+                        .map_err(|e| anyhow!("JSON parse error: {e}"))?;
+                manifest.raw = std::sync::Arc::from(raw_bytes);
 
-            Ok(manifest)
-        })();
-        let _ = tx.send(result);
-    });
-    rx.await
-        .map_err(|e| anyhow!("rayon parse channel closed: {e}"))?
+                Ok(manifest)
+            })();
+            let _ = tx.send(result);
+        });
+        rx.await
+            .map_err(|e| anyhow!("rayon parse channel closed: {e}"))?
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // simd_json mutates the parse buffer; clone so the raw bytes
+        // survive for `manifest.raw` and later on-demand version extraction.
+        let parse_buf = raw_bytes.clone();
+        let mut manifest: FullManifest = parse_json_off_runtime(parse_buf).await?;
+        manifest.raw = std::sync::Arc::from(raw_bytes);
+        Ok(manifest)
+    }
 }
 
 /// Result of a full manifest fetch with ETag support.
@@ -148,6 +171,7 @@ pub async fn fetch_full_manifest_bytes(
                     if etag.is_some() {
                         return Ok(FetchManifestBytesResult::NotModified);
                     }
+                    // Server bug: 304 without If-None-Match. Treat as error.
                     return Err(classify_status(status, &url));
                 }
 
@@ -184,18 +208,7 @@ pub async fn fetch_full_manifest_bytes(
 pub async fn fetch_full_manifest(opts: FetchManifestOptions<'_>) -> Result<FetchManifestResult> {
     match fetch_full_manifest_bytes(opts).await? {
         FetchManifestBytesResult::Ok(raw_bytes, etag) => {
-            #[cfg(not(target_arch = "wasm32"))]
             let manifest = parse_full_manifest_off_runtime(raw_bytes).await?;
-
-            #[cfg(target_arch = "wasm32")]
-            let manifest = {
-                // simd_json mutates the parse buffer; clone so the raw bytes
-                // survive for `manifest.raw`.
-                let parse_buf = raw_bytes.clone();
-                let mut manifest: FullManifest = parse_json_off_runtime(parse_buf).await?;
-                manifest.raw = std::sync::Arc::from(raw_bytes);
-                manifest
-            };
 
             Ok(FetchManifestResult::Ok(manifest, etag))
         }
