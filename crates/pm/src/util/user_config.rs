@@ -132,16 +132,44 @@ pub fn get_install_scope() -> InstallScope {
     INSTALL_SCOPE.get().copied().unwrap_or_default()
 }
 
-// Manifest fetch concurrency configuration
-static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 64));
+// Manifest fetch concurrency configuration.
+//
+// Keep the user-visible/default tarball download limit at 64. Registry
+// resolution can opt into a higher default for non-semver registries via
+// `get_resolver_manifests_concurrency_limit`; tarball download/extract still
+// uses `get_manifests_concurrency_limit_sync` so install IO is not inflated.
+const DEFAULT_MANIFESTS_CONCURRENCY_LIMIT: usize = 64;
+const NON_SEMVER_RESOLVER_CONCURRENCY_LIMIT: usize = 256;
+
+static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> = LazyLock::new(|| {
+    ConfigValue::new(
+        "manifests-concurrency-limit",
+        DEFAULT_MANIFESTS_CONCURRENCY_LIMIT,
+    )
+});
+static MANIFESTS_CONCURRENCY_CLI_SET: OnceLock<()> = OnceLock::new();
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
+    if value.is_some() {
+        let _ = MANIFESTS_CONCURRENCY_CLI_SET.set(());
+    }
     MANIFESTS_CONCURRENCY_LIMIT.set(value);
 }
 
 pub async fn get_manifests_concurrency_limit() -> usize {
     MANIFESTS_CONCURRENCY_LIMIT.get().await
+}
+
+pub async fn get_resolver_manifests_concurrency_limit() -> usize {
+    let limit = get_manifests_concurrency_limit().await;
+    if MANIFESTS_CONCURRENCY_CLI_SET.get().is_none()
+        && limit == DEFAULT_MANIFESTS_CONCURRENCY_LIMIT
+        && get_supports_semver() == Some(false)
+    {
+        NON_SEMVER_RESOLVER_CONCURRENCY_LIMIT
+    } else {
+        limit
+    }
 }
 
 pub fn get_manifests_concurrency_limit_sync() -> usize {

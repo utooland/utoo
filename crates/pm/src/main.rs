@@ -92,7 +92,7 @@ struct Cli {
     #[arg(long, global = true, action = clap::ArgAction::SetTrue)]
     legacy_peer_deps: Option<bool>,
 
-    /// Maximum concurrent manifest fetches (default: 64)
+    /// Maximum concurrent manifest fetches (default: 64; npmjs/non-semver resolver: 256)
     #[arg(long, global = true)]
     manifests_concurrency_limit: Option<usize>,
 
