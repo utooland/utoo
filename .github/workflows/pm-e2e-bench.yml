@@ -135,6 +135,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: pm-build-linux
+          cache-bin: false
       - name: Build utoo-pm
         run: cargo build --release --target x86_64-unknown-linux-gnu --bin utoo -p utoo-pm
       - name: Upload utoo binary
@@ -201,6 +202,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: pm-build-mac-arm64
+          cache-bin: false
       - name: Build utoo-pm
         run: cargo build --release --target aarch64-apple-darwin --bin utoo -p utoo-pm
       - name: Upload utoo binary
@@ -232,6 +234,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: pm-build-mac-x64
+          cache-bin: false
       - name: Build utoo-pm
         run: cargo build --release --target x86_64-apple-darwin --bin utoo -p utoo-pm
       - name: Upload utoo binary
@@ -263,6 +266,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: pm-build-windows
+          cache-bin: false
       - name: Build utoo-pm
         run: cargo build --release --target x86_64-pc-windows-msvc --bin utoo -p utoo-pm
       - name: Upload utoo binary
