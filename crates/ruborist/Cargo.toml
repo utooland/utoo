@@ -6,7 +6,7 @@ description = "Rust arborist - dependency resolution core for utoo package manag
 homepage    = "https://github.com/utooland/utoo"
 repository  = "https://github.com/utooland/utoo"
 license     = "MIT"
-keywords    = ["arborist", "dependency-resolution", "npm", "package-manager"]
+keywords    = ["arborist", "npm", "package-manager", "resolver"]
 categories  = ["development-tools"]
 
 # tombi: format.rules.table-keys-order.disabled = true
