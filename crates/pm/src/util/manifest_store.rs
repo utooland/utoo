@@ -8,6 +8,8 @@
 //! returns immediately, so the resolver hot path never waits on the disk.
 //! Errors are logged at debug level — disk cache is opportunistic; a failed
 //! write only costs a future cache miss.
+//! Serialization and file writes run on Tokio's blocking pool so manifest
+//! persistence does not occupy async runtime workers that are driving network IO.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -58,7 +60,7 @@ impl ManifestStore for DiskManifestStore {
 
     fn store_versions(&self, name: &str, info: Arc<VersionsInfo>) {
         let path = self.versions_path(name);
-        tokio::spawn(async move { write_json(&path, &*info).await });
+        tokio::task::spawn_blocking(move || write_json_sync(&path, &*info));
     }
 
     fn store_version_manifest(
@@ -68,14 +70,14 @@ impl ManifestStore for DiskManifestStore {
         manifest: Arc<CoreVersionManifest>,
     ) {
         let path = self.manifest_path(name, version);
-        tokio::spawn(async move { write_json(&path, &*manifest).await });
+        tokio::task::spawn_blocking(move || write_json_sync(&path, &*manifest));
     }
 }
 
 /// Serialize `value` and write to `path`. On `NotFound`, create the parent
 /// directory and retry once — saves the mkdir syscall on every warm-cache
 /// rewrite. Errors are logged at debug; disk cache is opportunistic.
-async fn write_json<T: Serialize>(path: &Path, value: &T) {
+fn write_json_sync<T: Serialize>(path: &Path, value: &T) {
     let bytes = match serde_json::to_vec(value) {
         Ok(b) => b,
         Err(e) => {
@@ -83,16 +85,16 @@ async fn write_json<T: Serialize>(path: &Path, value: &T) {
             return;
         }
     };
-    match crate::fs::write(path, &bytes).await {
+    match std::fs::write(path, &bytes) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             if let Some(parent) = path.parent()
-                && let Err(e) = crate::fs::create_dir_all(parent).await
+                && let Err(e) = std::fs::create_dir_all(parent)
             {
                 tracing::debug!("Failed to create {parent:?}: {e}");
                 return;
             }
-            if let Err(e) = crate::fs::write(path, &bytes).await {
+            if let Err(e) = std::fs::write(path, &bytes) {
                 tracing::debug!("Failed to write {path:?}: {e}");
             }
         }
