@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 3, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/target_node/node_env/input/index.ts"],"sourcesContent":["console.log(process.env.NODE_ENV);\n"],"names":["console","log"],"mappings":"AAAAA,QAAQC,GAAG"}}]
+}

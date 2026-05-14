@@ -1162,6 +1162,7 @@ impl Project {
         Ok(get_server_compile_time_info(
             (*self.config.target().await?).clone(),
             Vc::cell(define_env),
+            self.config.mode(),
             self.config.provider_config(),
         ))
     }
@@ -1182,6 +1183,7 @@ impl Project {
                 Ok(get_server_compile_time_info(
                     target,
                     Vc::cell(define_env),
+                    self.config.mode(),
                     self.config.provider_config(),
                 ))
             }
