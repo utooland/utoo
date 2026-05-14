@@ -13,27 +13,6 @@ use super::fetch::{
 use super::http::get_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 
-#[cfg(not(target_arch = "wasm32"))]
-const MAX_MANIFEST_PARSE_THREADS: usize = 4;
-#[cfg(not(target_arch = "wasm32"))]
-const FALLBACK_MANIFEST_PARSE_THREADS: usize = 2;
-
-// Dedicated to wire-fetched manifest JSON parsing. On-demand per-version
-// extraction from cached `FullManifest::raw` still lives with the model helper;
-// the resolver scheduling PR will decide whether that path needs the same pool.
-#[cfg(not(target_arch = "wasm32"))]
-static MANIFEST_PARSE_POOL: std::sync::LazyLock<rayon::ThreadPool> =
-    std::sync::LazyLock::new(|| {
-        let threads = std::thread::available_parallelism()
-            .map(|n| n.get().min(MAX_MANIFEST_PARSE_THREADS))
-            .unwrap_or(FALLBACK_MANIFEST_PARSE_THREADS);
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .thread_name(|idx| format!("utoo-manifest-parse-{idx}"))
-            .build()
-            .expect("failed to build manifest parse pool")
-    });
-
 /// Parse JSON bytes on rayon's CPU thread pool (native) or inline
 /// (wasm32). Keeps the tokio runtime free of `simd_json` work so other
 /// in-flight manifest fetches keep driving network IO while this one
@@ -45,7 +24,7 @@ where
     #[cfg(not(target_arch = "wasm32"))]
     {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        MANIFEST_PARSE_POOL.spawn(move || {
+        rayon::spawn(move || {
             let result = simd_json::serde::from_slice::<T>(&mut bytes)
                 .map_err(|e| anyhow!("JSON parse error: {e}"));
             let _ = tx.send(result);
@@ -69,7 +48,7 @@ pub(crate) async fn parse_full_manifest_off_runtime(
     #[cfg(not(target_arch = "wasm32"))]
     {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        MANIFEST_PARSE_POOL.spawn(move || {
+        rayon::spawn(move || {
             let result = (|| -> Result<FullManifest, anyhow::Error> {
                 // simd_json mutates the parse buffer; clone so the raw bytes
                 // survive for `manifest.raw` and later on-demand version extraction.
