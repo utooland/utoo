@@ -622,13 +622,34 @@ pub async fn get_client_chunking_context(
         builder = builder.entry_root_export(Some(entry_root_export.clone()));
     }
 
+    let output = config.output().await?;
+
+    if let Some(filename) = &output.filename {
+        builder = builder.filename(filename.clone());
+    }
+
+    if let Some(chunk_filename) = &output.chunk_filename {
+        builder = builder.chunk_filename(chunk_filename.clone());
+    }
+
+    if let Some(css_filename) = &output.css_filename {
+        builder = builder.css_filename(css_filename.clone());
+    }
+
+    if let Some(css_chunk_filename) = &output.css_chunk_filename {
+        builder = builder.css_chunk_filename(css_chunk_filename.clone());
+    }
+
+    if let Some(asset_module_filename) = &output.asset_module_filename {
+        builder = builder.asset_module_filename(asset_module_filename.clone());
+    }
+
     if mode.is_development() {
         builder = builder
             .hot_module_replacement()
             .source_map_source_type(SourceMapSourceType::AbsoluteFileUri)
             .dynamic_chunk_content_loading(true);
     } else {
-        let output = config.output().await?;
         let split_chunks = &config.optimization().await?.split_chunks;
 
         let (ecmascript_chunking_config, css_chunking_config) = (
@@ -649,26 +670,6 @@ pub async fn get_client_chunking_context(
                 Into::into,
             ),
         );
-
-        if let Some(filename) = &output.filename {
-            builder = builder.filename(filename.clone());
-        }
-
-        if let Some(chunk_filename) = &output.chunk_filename {
-            builder = builder.chunk_filename(chunk_filename.clone());
-        }
-
-        if let Some(css_filename) = &output.css_filename {
-            builder = builder.css_filename(css_filename.clone());
-        }
-
-        if let Some(css_chunk_filename) = &output.css_chunk_filename {
-            builder = builder.css_chunk_filename(css_chunk_filename.clone());
-        }
-
-        if let Some(asset_module_filename) = &output.asset_module_filename {
-            builder = builder.asset_module_filename(asset_module_filename.clone());
-        }
 
         builder = builder
             .chunking_config(
