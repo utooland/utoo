@@ -1,8 +1,10 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
+use tokio::sync::Semaphore;
 use tokio_retry::Retry;
 use utoo_ruborist::manifest::IdentityView;
 use utoo_ruborist::util::OnceMap;
@@ -63,6 +65,7 @@ pub async fn clone_package_once(
     version: &str,
     tarball_url: &str,
     target_path: &Path,
+    clone_limiter: Option<Arc<Semaphore>>,
 ) -> Result<()> {
     let key = cache_key(target_path);
 
@@ -85,6 +88,10 @@ pub async fn clone_package_once(
     CLONE_CACHE
         .get_or_init(key, || async move {
             let cache_path = resolve_cache_path(&name, &version, &tarball_url).await?;
+            let _clone_permit = match clone_limiter {
+                Some(limiter) => Some(limiter.acquire_owned().await.ok()?),
+                None => None,
+            };
             let fresh = clone_package(&cache_path, &target_path, &name, &version, !is_git)
                 .await
                 .inspect_err(|e| {

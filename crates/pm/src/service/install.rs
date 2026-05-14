@@ -3,6 +3,7 @@ use anyhow::Context;
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::cmd::deps::build_deps;
@@ -28,6 +29,7 @@ use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 
 use super::binary::update_package_binary;
 use super::clean::clean_deps;
+use tokio::sync::Semaphore;
 
 /// Check if a package should be omitted based on omit config
 fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
@@ -64,6 +66,7 @@ fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
 }
 
 const DEFAULT_INSTALL_CLONE_CONCURRENCY_LIMIT: usize = 64;
+const DEFAULT_INSTALL_CLONE_IO_CONCURRENCY_LIMIT: usize = 24;
 
 fn parse_install_clone_concurrency_limit(value: Option<&str>) -> usize {
     match value.and_then(|value| value.parse::<usize>().ok()) {
@@ -77,6 +80,23 @@ fn parse_install_clone_concurrency_limit(value: Option<&str>) -> usize {
 fn install_clone_concurrency_limit() -> usize {
     parse_install_clone_concurrency_limit(
         std::env::var("UTOO_INSTALL_CLONE_CONCURRENCY")
+            .ok()
+            .as_deref(),
+    )
+}
+
+fn parse_install_clone_io_concurrency_limit(value: Option<&str>) -> usize {
+    match value.and_then(|value| value.parse::<usize>().ok()) {
+        // Escape hatch for A/B runs and unusual filesystems.
+        Some(0) => usize::MAX,
+        Some(limit) => limit,
+        None => DEFAULT_INSTALL_CLONE_IO_CONCURRENCY_LIMIT,
+    }
+}
+
+fn install_clone_io_concurrency_limit() -> usize {
+    parse_install_clone_io_concurrency_limit(
+        std::env::var("UTOO_INSTALL_CLONE_IO_CONCURRENCY")
             .ok()
             .as_deref(),
     )
@@ -109,6 +129,9 @@ pub async fn install_packages(
     let mut depths: Vec<_> = groups.keys().cloned().collect();
     depths.sort_unstable();
     let clone_concurrency_limit = install_clone_concurrency_limit();
+    let clone_io_concurrency_limit = install_clone_io_concurrency_limit();
+    let clone_limiter = (clone_io_concurrency_limit != usize::MAX)
+        .then(|| Arc::new(Semaphore::new(clone_io_concurrency_limit)));
 
     for depth in depths.iter() {
         let mut clone_tasks: JoinSet<Result<()>> = JoinSet::new();
@@ -168,6 +191,7 @@ pub async fn install_packages(
                         .ok_or_else(|| anyhow::anyhow!("package {name} missing version"))?;
                     let cwd_clone = cwd.to_path_buf();
                     let target_path = cwd_clone.join(&path);
+                    let clone_limiter = clone_limiter.clone();
 
                     // Check if this is an optional dependency
                     let is_optional =
@@ -178,8 +202,14 @@ pub async fn install_packages(
                     }
 
                     clone_tasks.spawn(async move {
-                        if let Err(e) =
-                            clone_package_once(&name, &version, &resolved, &target_path).await
+                        if let Err(e) = clone_package_once(
+                            &name,
+                            &version,
+                            &resolved,
+                            &target_path,
+                            clone_limiter,
+                        )
+                        .await
                         {
                             if is_optional {
                                 tracing::warn!(
@@ -447,6 +477,23 @@ mod tests {
         assert_eq!(
             parse_install_clone_concurrency_limit(Some("not-a-number")),
             DEFAULT_INSTALL_CLONE_CONCURRENCY_LIMIT
+        );
+    }
+
+    #[test]
+    fn test_parse_install_clone_io_concurrency_limit() {
+        assert_eq!(parse_install_clone_io_concurrency_limit(Some("16")), 16);
+        assert_eq!(
+            parse_install_clone_io_concurrency_limit(None),
+            DEFAULT_INSTALL_CLONE_IO_CONCURRENCY_LIMIT
+        );
+        assert_eq!(
+            parse_install_clone_io_concurrency_limit(Some("0")),
+            usize::MAX
+        );
+        assert_eq!(
+            parse_install_clone_io_concurrency_limit(Some("not-a-number")),
+            DEFAULT_INSTALL_CLONE_IO_CONCURRENCY_LIMIT
         );
     }
 
