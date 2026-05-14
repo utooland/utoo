@@ -93,9 +93,8 @@ pub async fn install_packages(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
     omit: &HashSet<OmitType>,
-    use_global_clone_cache: bool,
 ) -> Result<()> {
-    use crate::util::cloner::{clone_package_direct, clone_package_once};
+    use crate::util::cloner::clone_package_once;
 
     // Surface the clean step in the spinner — it doesn't move `pos`, so
     // without a message the bar looks frozen on large trees.
@@ -105,14 +104,11 @@ pub async fn install_packages(
 
     // Always process level-by-level to ensure parent directories exist before
     // children. Within each level, tasks run concurrently. The pipeline's
-    // If pipeline pre-clone is active, clone_package_once coordinates with
-    // the pipeline worker through CLONE_CACHE. With a fresh lockfile there is
-    // no pipeline worker, so the install loop owns target-path dedupe locally
-    // and clone tasks can avoid the global OnceMap hot path.
+    // clone_worker may have already cloned some packages — clone_package_once
+    // deduplicates via CLONE_CACHE so no double work occurs.
     let mut depths: Vec<_> = groups.keys().cloned().collect();
     depths.sort_unstable();
     let clone_concurrency_limit = install_clone_concurrency_limit();
-    let mut seen_targets = HashSet::new();
 
     for depth in depths.iter() {
         let mut clone_tasks: JoinSet<Result<()>> = JoinSet::new();
@@ -172,10 +168,6 @@ pub async fn install_packages(
                         .ok_or_else(|| anyhow::anyhow!("package {name} missing version"))?;
                     let cwd_clone = cwd.to_path_buf();
                     let target_path = cwd_clone.join(&path);
-                    if !seen_targets.insert(target_path.clone()) {
-                        PROGRESS_BAR.inc(1);
-                        continue;
-                    }
 
                     // Check if this is an optional dependency
                     let is_optional =
@@ -186,12 +178,9 @@ pub async fn install_packages(
                     }
 
                     clone_tasks.spawn(async move {
-                        let clone_result = if use_global_clone_cache {
+                        if let Err(e) =
                             clone_package_once(&name, &version, &resolved, &target_path).await
-                        } else {
-                            clone_package_direct(&name, &version, &resolved, &target_path).await
-                        };
-                        if let Err(e) = clone_result {
+                        {
                             if is_optional {
                                 tracing::warn!(
                                     "Optional dependency {name} failed (ignored): {e:#}"
@@ -306,8 +295,7 @@ impl InstallService {
         }
 
         let link_start = Instant::now();
-        let use_global_clone_cache = pipeline_handles.is_some();
-        install_packages(&groups, root_path, omit, use_global_clone_cache)
+        install_packages(&groups, root_path, omit)
             .await
             .context("Failed to install packages")?;
 

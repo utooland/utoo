@@ -78,50 +78,34 @@ pub async fn clone_package_once(
     let tarball_url = tarball_url.to_string();
     let target_path = target_path.to_path_buf();
 
+    // Git packages are extracted flat (no `package/` wrapper directory),
+    // so skip `find_real_src` which would incorrectly pick a subdirectory.
+    let is_git = is_git_url(&tarball_url);
+
     CLONE_CACHE
         .get_or_init(key, || async move {
-            clone_package_direct(&name, &version, &tarball_url, &target_path)
+            let cache_path = resolve_cache_path(&name, &version, &tarball_url).await?;
+            let fresh = clone_package(&cache_path, &target_path, &name, &version, !is_git)
                 .await
-                .ok()
+                .inspect_err(|e| {
+                    tracing::warn!(
+                        "Clone failed: {}@{} to {}: {:#}",
+                        name,
+                        version,
+                        target_path.display(),
+                        e
+                    )
+                })
+                .ok()?;
+
+            if fresh {
+                CLONE_COUNT.fetch_add(1, Ordering::Relaxed);
+            }
+            Some(())
         })
         .await
         .map(|_| ())
         .ok_or_else(|| anyhow::anyhow!("clone {err_label} failed (see warning log for details)"))
-}
-
-/// Clone a package without registering the target path in [`CLONE_CACHE`].
-///
-/// Use this only when the caller owns scheduling/deduplication for the install
-/// run. Pipeline pre-clone still needs [`clone_package_once`] so children can
-/// wait on parent package materialization across worker tasks.
-pub async fn clone_package_direct(
-    name: &str,
-    version: &str,
-    tarball_url: &str,
-    target_path: &Path,
-) -> Result<()> {
-    // Git packages are extracted flat (no `package/` wrapper directory),
-    // so skip `find_real_src` which would incorrectly pick a subdirectory.
-    let is_git = is_git_url(tarball_url);
-    let cache_path = resolve_cache_path(name, version, tarball_url)
-        .await
-        .ok_or_else(|| anyhow::anyhow!("resolve cache path for {name}@{version} failed"))?;
-    let fresh = clone_package(&cache_path, target_path, name, version, !is_git)
-        .await
-        .inspect_err(|e| {
-            tracing::warn!(
-                "Clone failed: {}@{} to {}: {:#}",
-                name,
-                version,
-                target_path.display(),
-                e
-            )
-        })?;
-
-    if fresh {
-        CLONE_COUNT.fetch_add(1, Ordering::Relaxed);
-    }
-    Ok(())
 }
 
 #[cfg(target_os = "macos")]
