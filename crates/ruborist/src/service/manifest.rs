@@ -5,6 +5,7 @@
 //! manifest fetches and non-registry resolvers (git, http tarball).
 
 use anyhow::{Result, anyhow};
+use bytes::Bytes;
 use tokio_retry::RetryIf;
 
 use super::fetch::{
@@ -17,7 +18,7 @@ use crate::model::manifest::{CoreVersionManifest, FullManifest};
 /// (wasm32). Keeps the tokio runtime free of `simd_json` work so other
 /// in-flight manifest fetches keep driving network IO while this one
 /// parses.
-pub(crate) async fn parse_json_off_runtime<T>(mut bytes: Vec<u8>) -> Result<T, anyhow::Error>
+pub(crate) async fn parse_json_off_runtime<T>(bytes: Bytes) -> Result<T, anyhow::Error>
 where
     T: serde::de::DeserializeOwned + Send + 'static,
 {
@@ -25,7 +26,8 @@ where
     {
         let (tx, rx) = tokio::sync::oneshot::channel();
         rayon::spawn(move || {
-            let result = simd_json::serde::from_slice::<T>(&mut bytes)
+            let mut parse_buf = bytes.to_vec();
+            let result = simd_json::serde::from_slice::<T>(&mut parse_buf)
                 .map_err(|e| anyhow!("JSON parse error: {e}"));
             let _ = tx.send(result);
         });
@@ -34,7 +36,9 @@ where
     }
     #[cfg(target_arch = "wasm32")]
     {
-        simd_json::serde::from_slice::<T>(&mut bytes).map_err(|e| anyhow!("JSON parse error: {e}"))
+        let mut parse_buf = bytes.to_vec();
+        simd_json::serde::from_slice::<T>(&mut parse_buf)
+            .map_err(|e| anyhow!("JSON parse error: {e}"))
     }
 }
 
@@ -43,20 +47,20 @@ where
 /// Intended for the BFS resolver loop follow-up: fetch tasks can return bytes
 /// while the loop owns cache/waiter/inflight state and chooses when to parse.
 pub(crate) async fn parse_full_manifest_off_runtime(
-    raw_bytes: Vec<u8>,
+    raw_bytes: Bytes,
 ) -> Result<FullManifest, anyhow::Error> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let (tx, rx) = tokio::sync::oneshot::channel();
         rayon::spawn(move || {
             let result = (|| -> Result<FullManifest, anyhow::Error> {
-                // simd_json mutates the parse buffer; clone so the raw bytes
-                // survive for `manifest.raw` and later on-demand version extraction.
-                let mut parse_buf = raw_bytes.clone();
+                // simd_json mutates the parse buffer; copy inside the worker so
+                // response-body bytes can stay immutable until parsing starts.
+                let mut parse_buf = raw_bytes.to_vec();
                 let mut manifest: FullManifest =
                     simd_json::serde::from_slice::<FullManifest>(&mut parse_buf)
                         .map_err(|e| anyhow!("JSON parse error: {e}"))?;
-                manifest.raw = std::sync::Arc::from(raw_bytes);
+                manifest.raw = std::sync::Arc::from(raw_bytes.as_ref());
 
                 Ok(manifest)
             })();
@@ -67,11 +71,8 @@ pub(crate) async fn parse_full_manifest_off_runtime(
     }
     #[cfg(target_arch = "wasm32")]
     {
-        // simd_json mutates the parse buffer; clone so the raw bytes
-        // survive for `manifest.raw` and later on-demand version extraction.
-        let parse_buf = raw_bytes.clone();
-        let mut manifest: FullManifest = parse_json_off_runtime(parse_buf).await?;
-        manifest.raw = std::sync::Arc::from(raw_bytes);
+        let mut manifest: FullManifest = parse_json_off_runtime(raw_bytes.clone()).await?;
+        manifest.raw = std::sync::Arc::from(raw_bytes.as_ref());
         Ok(manifest)
     }
 }
@@ -93,7 +94,7 @@ pub enum FetchManifestResult {
 /// reserve spawned work for request I/O.
 pub enum FetchManifestBytesResult {
     /// 200 OK — response bytes with optional new ETag.
-    Ok(Vec<u8>, Option<String>),
+    Ok(Bytes, Option<String>),
     /// 304 Not Modified — ETag matched, use cached data.
     NotModified,
 }
@@ -161,11 +162,7 @@ pub async fn fetch_full_manifest_bytes(
                         .and_then(|v| v.to_str().ok())
                         .map(|s| s.to_string());
 
-                    let raw_bytes = response
-                        .bytes()
-                        .await
-                        .map_err(classify_reqwest_error)?
-                        .to_vec();
+                    let raw_bytes = response.bytes().await.map_err(classify_reqwest_error)?;
 
                     Ok(FetchManifestBytesResult::Ok(raw_bytes, new_etag))
                 } else {
@@ -232,9 +229,7 @@ pub struct FetchVersionManifestOptions<'a> {
 }
 
 /// Fetch version manifest bytes with retry, without parsing.
-pub async fn fetch_version_manifest_bytes(
-    opts: FetchVersionManifestOptions<'_>,
-) -> Result<Vec<u8>> {
+pub async fn fetch_version_manifest_bytes(opts: FetchVersionManifestOptions<'_>) -> Result<Bytes> {
     let url = format!("{}/{}/{}", opts.registry_url, opts.name, opts.spec);
 
     let accept = match opts.format {
@@ -256,11 +251,7 @@ pub async fn fetch_version_manifest_bytes(
                     .map_err(classify_reqwest_error)?;
 
                 if response.status().is_success() {
-                    response
-                        .bytes()
-                        .await
-                        .map(|b| b.to_vec())
-                        .map_err(classify_reqwest_error)
+                    response.bytes().await.map_err(classify_reqwest_error)
                 } else {
                     Err(classify_status(response.status(), &url))
                 }
