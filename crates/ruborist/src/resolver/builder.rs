@@ -34,6 +34,7 @@ use crate::resolver::semver::normalize_spec;
 use crate::resolver::version::resolve_target_version;
 use crate::service::{
     ManifestFullData, ManifestJob, ManifestJobDone, ManifestProvider, MetadataFormat,
+    ProjectCacheData,
 };
 use crate::spec::{Catalogs, PackageSpec, Protocol, SpecStr};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
@@ -121,6 +122,8 @@ pub struct BuildDepsConfig {
     /// Catalog definitions for the `catalog:` dependency protocol.
     /// Key `""` = default catalog, other keys = named catalogs.
     pub catalogs: Catalogs,
+    /// Host-provided project cache used to seed the resolver-owned manifest cache.
+    pub warm_project_cache: Option<ProjectCacheData>,
 }
 
 impl Default for BuildDepsConfig {
@@ -132,6 +135,7 @@ impl Default for BuildDepsConfig {
             git_clone_cache: Arc::new(GitCloneCache::new()),
             http_fetch_cache: Arc::new(HttpFetchCache::new()),
             catalogs: HashMap::new(),
+            warm_project_cache: None,
         }
     }
 }
@@ -158,6 +162,11 @@ impl BuildDepsConfig {
     /// Set catalog definitions for `catalog:` protocol resolution.
     pub fn with_catalogs(mut self, catalogs: Catalogs) -> Self {
         self.catalogs = catalogs;
+        self
+    }
+
+    pub fn with_warm_project_cache(mut self, warm_project_cache: Option<ProjectCacheData>) -> Self {
+        self.warm_project_cache = warm_project_cache;
         self
     }
 }
@@ -697,24 +706,61 @@ where
     R::Error: Send,
     E: EventReceiver,
 {
+    build_deps_with_config_output(graph, registry, config, receiver)
+        .await
+        .map(|_| ())
+}
+
+pub(crate) async fn build_deps_with_config_output<R, E>(
+    graph: &mut DependencyGraph,
+    registry: &R,
+    config: BuildDepsConfig,
+    receiver: &E,
+) -> Result<ResolverManifestCache, ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+    E: EventReceiver,
+{
     tracing::debug!(
         "Starting dependency tree build, peer_deps: {:?}, concurrency: {}",
         config.peer_deps,
         config.concurrency
     );
 
-    run_main_loop_bfs(graph, registry, &config, receiver).await?;
+    let manifest_cache = run_main_loop_bfs(graph, registry, &config, receiver).await?;
 
     receiver.on_event(BuildEvent::Complete {
         total_nodes: graph.graph.node_count(),
     });
 
-    Ok(())
+    Ok(manifest_cache)
 }
 
 type WaitingEdge = (NodeIndex, DependencyEdgeInfo);
 
 type VersionKey = (String, String);
+
+#[derive(Default)]
+pub(crate) struct ResolverManifestCache {
+    entries: Vec<(String, String, Arc<CoreVersionManifest>)>,
+}
+
+impl ResolverManifestCache {
+    pub(crate) fn into_project_cache(self) -> ProjectCacheData {
+        let mut project_cache = ProjectCacheData::default();
+        for (name, spec, manifest) in self.entries {
+            let version = manifest.version.clone();
+            let pkg_cache = project_cache.cache.entry(name).or_default();
+            pkg_cache.specs.insert(spec, version.clone());
+            pkg_cache
+                .manifests
+                .entry(version)
+                .or_insert_with(|| (*manifest).clone());
+        }
+        project_cache
+    }
+}
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum FetchKey {
@@ -863,6 +909,39 @@ struct ManifestState {
 }
 
 impl ManifestState {
+    fn with_warm_project_cache(warm: Option<&ProjectCacheData>) -> Self {
+        let mut state = Self::default();
+        let Some(warm) = warm else {
+            return state;
+        };
+        for (name, pkg_cache) in &warm.cache {
+            for (spec, version) in &pkg_cache.specs {
+                let Some(manifest) = pkg_cache.manifests.get(version) else {
+                    continue;
+                };
+                let manifest = Arc::new(manifest.clone());
+                state
+                    .version_cache
+                    .insert((name.clone(), spec.clone()), Arc::clone(&manifest));
+                state
+                    .version_cache
+                    .entry((name.clone(), version.clone()))
+                    .or_insert(manifest);
+            }
+        }
+        state
+    }
+
+    fn into_resolver_cache(self) -> ResolverManifestCache {
+        ResolverManifestCache {
+            entries: self
+                .version_cache
+                .into_iter()
+                .map(|((name, spec), manifest)| (name, spec, manifest))
+                .collect(),
+        }
+    }
+
     fn schedule_registry_fetch(
         &mut self,
         name: String,
@@ -897,17 +976,11 @@ impl ManifestState {
         }
     }
 
-    fn enqueue_version_extract(
-        &mut self,
-        name: String,
-        spec: String,
-        version: String,
-        full: Arc<FullManifest>,
-    ) {
+    fn enqueue_version_extract(&mut self, name: String, version: String, full: Arc<FullManifest>) {
         self.fetch_queues.enqueue(
             ManifestJob::ExtractVersion {
                 name,
-                spec,
+                spec: version.clone(),
                 version,
                 full,
             },
@@ -915,17 +988,11 @@ impl ManifestState {
         );
     }
 
-    fn enqueue_version_fetch(
-        &mut self,
-        name: String,
-        spec: String,
-        fetch_spec: String,
-        supports_semver: bool,
-    ) {
+    fn enqueue_version_fetch(&mut self, name: String, fetch_spec: String, supports_semver: bool) {
         self.fetch_queues.enqueue(
             ManifestJob::Version {
                 name,
-                spec,
+                spec: fetch_spec.clone(),
                 fetch_spec,
                 format: version_metadata_format(supports_semver),
             },
@@ -1267,7 +1334,7 @@ async fn run_main_loop_bfs<R, E>(
     registry: &R,
     config: &BuildDepsConfig,
     receiver: &E,
-) -> Result<(), ResolveError<R::Error>>
+) -> Result<ResolverManifestCache, ResolveError<R::Error>>
 where
     R: ManifestProvider,
     R::Error: Send,
@@ -1276,7 +1343,7 @@ where
     let supports_semver = registry.supports_semver_resolution();
     let concurrency = config.concurrency.max(1);
 
-    let mut state = ManifestState::default();
+    let mut state = ManifestState::with_warm_project_cache(config.warm_project_cache.as_ref());
     let mut fetches: FuturesUnordered<FetchFuture> = FuturesUnordered::new();
 
     let root_idx = graph.root_index;
@@ -1441,6 +1508,22 @@ where
                         };
 
                         let exact_key = (real_name.clone(), resolved_version.clone());
+                        if let Some(error) = state.version_failures.get(&exact_key) {
+                            if edge.edge_type == EdgeType::Optional {
+                                receiver.on_event(BuildEvent::Skipped {
+                                    name: &edge.name,
+                                    spec: &edge.spec,
+                                });
+                                continue;
+                            }
+                            return Err(chain_err(
+                                graph,
+                                parent,
+                                &edge,
+                                registry_error(format!("{}@{}: {error}", real_name, real_spec)),
+                            ));
+                        }
+
                         if let Some(manifest) = state.version_cache.get(&exact_key).cloned() {
                             state
                                 .version_cache
@@ -1462,15 +1545,10 @@ where
 
                         state
                             .version_waiters
-                            .entry(version_key.clone())
+                            .entry(exact_key)
                             .or_default()
                             .push((parent, edge));
-                        state.enqueue_version_extract(
-                            version_key.0,
-                            version_key.1,
-                            resolved_version,
-                            full,
-                        );
+                        state.enqueue_version_extract(real_name, resolved_version, full);
                         continue;
                     }
 
@@ -1491,6 +1569,22 @@ where
                         };
 
                         let exact_key = (real_name.clone(), resolved_version.clone());
+                        if let Some(error) = state.version_failures.get(&exact_key) {
+                            if edge.edge_type == EdgeType::Optional {
+                                receiver.on_event(BuildEvent::Skipped {
+                                    name: &edge.name,
+                                    spec: &edge.spec,
+                                });
+                                continue;
+                            }
+                            return Err(chain_err(
+                                graph,
+                                parent,
+                                &edge,
+                                registry_error(format!("{}@{}: {error}", real_name, real_spec)),
+                            ));
+                        }
+
                         if let Some(manifest) = state.version_cache.get(&exact_key).cloned() {
                             state
                                 .version_cache
@@ -1512,15 +1606,10 @@ where
 
                         state
                             .version_waiters
-                            .entry(version_key.clone())
+                            .entry(exact_key)
                             .or_default()
                             .push((parent, edge));
-                        state.enqueue_version_fetch(
-                            version_key.0,
-                            version_key.1,
-                            resolved_version,
-                            supports_semver,
-                        );
+                        state.enqueue_version_fetch(real_name, resolved_version, supports_semver);
                         continue;
                     }
 
@@ -1565,6 +1654,10 @@ where
                 continue;
             }
 
+            if !state.full_waiters.is_empty() || !state.version_waiters.is_empty() {
+                pump_fetches(&mut fetches, &mut state.fetch_queues, registry, concurrency);
+            }
+
             if state.full_waiters.is_empty() && state.version_waiters.is_empty() {
                 break;
             }
@@ -1598,7 +1691,7 @@ where
         current_level = next_level;
     }
 
-    Ok(())
+    Ok(state.into_resolver_cache())
 }
 
 // ============================================================================
@@ -1684,10 +1777,11 @@ fn graph_to_package_lock(
 mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
     use crate::model::manifest::CoreVersionManifest;
-    use crate::traits::registry::mock::MockRegistryClient;
+    use crate::traits::registry::mock::{MockError, MockRegistryClient};
 
     fn create_version_manifest(name: &str, version: &str) -> CoreVersionManifest {
         CoreVersionManifest {
@@ -1821,6 +1915,75 @@ mod tests {
         // Check lodash is in packages
         let lodash = lock.packages.get("node_modules/lodash").unwrap();
         assert_eq!(lodash.version, Some("4.17.21".to_string()));
+    }
+
+    #[derive(Clone)]
+    struct CountingRegistry {
+        inner: MockRegistryClient,
+        shared_version_jobs: Arc<AtomicUsize>,
+    }
+
+    impl crate::traits::registry::RegistryClient for CountingRegistry {
+        type Error = MockError;
+
+        async fn fetch_full_manifest(&self, name: &str) -> Result<Arc<FullManifest>, Self::Error> {
+            self.inner.fetch_full_manifest(name).await
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ManifestProvider for CountingRegistry {
+        async fn execute_manifest_job(
+            &self,
+            job: ManifestJob,
+        ) -> Result<ManifestJobDone, Self::Error> {
+            if matches!(
+                &job,
+                ManifestJob::Version { name, .. } | ManifestJob::ExtractVersion { name, .. }
+                    if name == "shared"
+            ) {
+                self.shared_version_jobs.fetch_add(1, Ordering::Relaxed);
+            }
+            self.inner.execute_manifest_job(job).await
+        }
+    }
+
+    #[tokio::test]
+    async fn test_non_semver_exact_version_extract_single_flight() {
+        let mut inner = MockRegistryClient::new();
+        inner.add_package(
+            "a",
+            "1.0.0",
+            create_version_manifest_with_deps("a", "1.0.0", vec![("shared", "^1.0.0")]),
+        );
+        inner.add_package(
+            "b",
+            "1.0.0",
+            create_version_manifest_with_deps("b", "1.0.0", vec![("shared", "~1.2.0")]),
+        );
+        inner.add_package(
+            "shared",
+            "1.2.3",
+            create_version_manifest("shared", "1.2.3"),
+        );
+
+        let shared_version_jobs = Arc::new(AtomicUsize::new(0));
+        let registry = CountingRegistry {
+            inner,
+            shared_version_jobs: Arc::clone(&shared_version_jobs),
+        };
+        let pkg = PackageJson {
+            dependencies: Some(HashMap::from([
+                ("a".to_string(), "1.0.0".to_string()),
+                ("b".to_string(), "1.0.0".to_string()),
+            ])),
+            ..PackageJson::new("test-project", "1.0.0")
+        };
+
+        let lock = resolve(&pkg, &registry).await.unwrap();
+
+        assert!(lock.packages.contains_key("node_modules/shared"));
+        assert_eq!(shared_version_jobs.load(Ordering::Relaxed), 1);
     }
 
     #[test]
@@ -2100,21 +2263,17 @@ mod tests {
     }
 
     #[test]
-    fn test_enqueue_version_fetch_preserves_waiter_key() {
+    fn test_enqueue_version_fetch_uses_exact_key() {
         let mut state = ManifestState::default();
 
-        state.enqueue_version_fetch(
-            "pkg".to_string(),
-            "^1.0.0".to_string(),
-            "1.2.3".to_string(),
-            false,
-        );
+        state.enqueue_version_fetch("pkg".to_string(), "1.2.3".to_string(), false);
+        state.enqueue_version_fetch("pkg".to_string(), "1.2.3".to_string(), false);
 
         assert!(
             state
                 .fetch_queues
                 .queued
-                .contains_key(&FetchKey::Version("pkg".to_string(), "^1.0.0".to_string()))
+                .contains_key(&FetchKey::Version("pkg".to_string(), "1.2.3".to_string()))
         );
         match state
             .fetch_queues
@@ -2128,11 +2287,44 @@ mod tests {
                 format,
             } => {
                 assert_eq!(name, "pkg");
-                assert_eq!(spec, "^1.0.0");
+                assert_eq!(spec, "1.2.3");
                 assert_eq!(fetch_spec, "1.2.3");
                 assert!(matches!(format, MetadataFormat::Complete));
             }
             _ => panic!("expected version fetch request"),
+        }
+    }
+
+    #[test]
+    fn test_enqueue_version_extract_uses_exact_key() {
+        let mut state = ManifestState::default();
+        let full = Arc::new(FullManifest::default());
+
+        state.enqueue_version_extract("pkg".to_string(), "1.2.3".to_string(), Arc::clone(&full));
+        state.enqueue_version_extract("pkg".to_string(), "1.2.3".to_string(), full);
+
+        assert!(
+            state
+                .fetch_queues
+                .queued
+                .contains_key(&FetchKey::Version("pkg".to_string(), "1.2.3".to_string()))
+        );
+        match state
+            .fetch_queues
+            .pop_next(prefetch_concurrency_limit(64))
+            .unwrap()
+        {
+            ManifestJob::ExtractVersion {
+                name,
+                spec,
+                version,
+                ..
+            } => {
+                assert_eq!(name, "pkg");
+                assert_eq!(spec, "1.2.3");
+                assert_eq!(version, "1.2.3");
+            }
+            _ => panic!("expected version extract request"),
         }
     }
 
