@@ -175,24 +175,24 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
                 return Some(cache_path);
             }
 
-            // Download (semaphore controlled).
+            // Download (semaphore controlled). Permit held through extract
+            // — A/B-revert experiment to test if early permit release is
+            // the source of utoo p0 σ being ~2× baseline.
             let semaphore = DOWNLOAD_SEMAPHORE
                 .get_or_init(|| Semaphore::new(get_manifests_concurrency_limit_sync()));
-            let bytes = {
-                let _permit = semaphore.acquire().await.ok()?;
-                download_bytes(&tarball_url)
-                    .await
-                    .inspect_err(|e| {
-                        tracing::warn!(
-                            "Download {}@{} from {}: {:#}",
-                            name,
-                            version,
-                            tarball_url,
-                            e
-                        )
-                    })
-                    .ok()?
-            };
+            let _permit = semaphore.acquire().await.ok()?;
+            let bytes = download_bytes(&tarball_url)
+                .await
+                .inspect_err(|e| {
+                    tracing::warn!(
+                        "Download {}@{} from {}: {:#}",
+                        name,
+                        version,
+                        tarball_url,
+                        e
+                    )
+                })
+                .ok()?;
 
             // Extract
             extract_and_write(bytes, &cache_path)

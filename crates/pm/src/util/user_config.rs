@@ -136,9 +136,8 @@ pub fn get_install_scope() -> InstallScope {
 //
 // Keep the user-visible/default tarball download limit at 64. Registry
 // resolution can opt into a higher default for non-semver registries via
-// `get_resolver_manifests_concurrency_limit`; tarball download still uses
-// `get_manifests_concurrency_limit_sync` so install network fan-out is not
-// inflated.
+// `get_resolver_manifests_concurrency_limit`; tarball download/extract still
+// uses `get_manifests_concurrency_limit_sync` so install IO is not inflated.
 const DEFAULT_MANIFESTS_CONCURRENCY_LIMIT: usize = 64;
 const NON_SEMVER_RESOLVER_CONCURRENCY_LIMIT: usize = 256;
 
