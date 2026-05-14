@@ -204,7 +204,7 @@ impl ManifestProvider for UnifiedRegistry {
                 }
 
                 let bytes =
-                    manifest::fetch_version_manifest_bytes(manifest::FetchVersionManifestOptions {
+                    manifest::fetch_version_manifest_vec(manifest::FetchVersionManifestOptions {
                         registry_url: &self.registry_url,
                         name: &name,
                         spec: &fetch_spec,
@@ -212,8 +212,9 @@ impl ManifestProvider for UnifiedRegistry {
                     })
                     .await
                     .map_err(RegistryError)?;
-                let manifest =
-                    Arc::new(manifest::parse_json_off_runtime::<CoreVersionManifest>(bytes).await?);
+                let manifest = Arc::new(
+                    manifest::parse_json_vec_off_runtime::<CoreVersionManifest>(bytes).await?,
+                );
                 self.store_version_manifest_once(&name, Arc::clone(&manifest));
                 Ok(ManifestJobDone::Version {
                     name,
