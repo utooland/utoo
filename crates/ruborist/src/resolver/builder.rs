@@ -1362,7 +1362,14 @@ where
 
     let registry_url = registry.registry_url().trim_end_matches('/').to_string();
     let supports_semver = registry.supports_semver_resolution();
-    let concurrency = config.concurrency.max(1);
+    // Non-semver registries (npmjs.org) return large all-versions manifests
+    // that benefit from higher connection fan-out. Auto-raise to 256 unless
+    // the caller explicitly set a lower limit via CLI flag.
+    let concurrency = if !supports_semver {
+        config.concurrency.max(256)
+    } else {
+        config.concurrency.max(1)
+    };
     let preload_config = PreloadConfig {
         peer_deps: config.peer_deps,
         concurrency,
